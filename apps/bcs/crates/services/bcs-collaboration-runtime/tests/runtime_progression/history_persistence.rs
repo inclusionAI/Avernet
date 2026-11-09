@@ -475,9 +475,7 @@ async fn enabling_does_not_overwrite_legacy_accepted_input_without_timestamp() {
     );
 }
 
-#[path = "../../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[tokio::test]
 async fn sqlite_reopen_recovers_accepted_output_after_message_transaction_failure() {

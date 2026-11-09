@@ -1,3 +1,4 @@
+import { withStepReportDelivery } from "./step-report-delivery.js";
 import { createReferenceMaterialsRouter } from "./reference-materials.js";
 import { ReferenceMaterials, signedMaterials, referenceMaterialsCommand } from "../services/evolve/reference-materials.js";
 import { createEvolveTaskAccess, isSkillTask } from "./evolve-task-access.js";
@@ -4316,6 +4317,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const newStepId = id("STEP");
     const failedExt = parseJson(failedStep.ext_json);
     const retryExt: Record<string, unknown> = isRecord(failedExt) ? { ...failedExt } : {};
+    delete retryExt.report_delivery; // Delivery receipts belong to the original Step.
     if (stageSkillRepo && coreStageBinding(task, failedStep.step_type)) {
       const answeredStepIds = new Set((await stageSkillRepo.listInteractions(taskId))
         .filter((interaction) => {
@@ -5302,7 +5304,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     res.json({ ok: true });
   }));
 
-  router.post("/internal/tasks/:taskId/steps/:stepId/report", asyncHandler(async (req, res) => {
+  router.post("/internal/tasks/:taskId/steps/:stepId/report", asyncHandler(withStepReportDelivery(repo, async (req, res) => {
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const stepId = String(req.params.stepId);
     const step = await repo.findStep(stepId);
@@ -6309,7 +6311,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return;
     }
     res.json({ ok: true, duplicate: false, stepId: stepId, status, nextStep: null });
-  }));
+  })));
 
   // Workflow-evolution knowledge endpoints. Mounted AFTER the legacy task-creating
   // POST /diagnoses so that legacy callers keep their route unchanged while new

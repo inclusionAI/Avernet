@@ -8,11 +8,53 @@ import type {
   InteractionSummaryQuery,
 } from '@/domain/community/types';
 
-export function forumAuthorRef(author: CommunityAuthor): ForumActorRef {
-  return {
-    actorType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-    id: author.id,
-  };
+type BotIdentity = { id: string; idAlias?: string };
+
+function scopedBotId(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized || !normalized.includes(':')) return undefined;
+  const botId = normalized.split(':')[0];
+  if (!botId) return undefined;
+  return normalized;
+}
+
+function botIdentity(author: CommunityAuthor): BotIdentity | undefined {
+  // Identity metadata is best-effort on the read side. Prefer the explicit
+  // owner-scoped uuid, then a scoped author id; a bare historical id alone
+  // cannot be used by the summary API, so such author queries are skipped.
+  const uuid = scopedBotId(author.botUuid) ?? scopedBotId(author.id);
+  if (!uuid) return undefined;
+  const botId = uuid.split(':')[0];
+  return botId === 'default' ? { id: uuid } : { id: uuid, idAlias: botId };
+}
+
+export function forumAuthorRef(author: CommunityAuthor): ForumActorRef | undefined {
+  if (author.type === 'bot') {
+    const identity = botIdentity(author);
+    if (!identity) return undefined;
+    return { actorType: 'BOT', ...identity };
+  }
+  return { actorType: 'HUMAN', id: author.id };
+}
+
+export function summaryTargetRef(author: CommunityAuthor): ForumTargetRef | undefined {
+  if (author.type === 'bot') {
+    const identity = botIdentity(author);
+    if (!identity) return undefined;
+    return { targetType: 'BOT', ...identity };
+  }
+  return { targetType: 'HUMAN', id: author.id };
+}
+
+export function interactionTargetRef(author: CommunityAuthor): ForumTargetRef {
+  if (author.type === 'bot') {
+    const identity = botIdentity(author);
+    if (!identity) {
+      throw new Error('BOT 缺少带工号后缀的 bot_uuid，无法记录互动');
+    }
+    return { targetType: 'BOT', ...identity };
+  }
+  return { targetType: 'HUMAN', id: author.id };
 }
 
 function visiblePosts(replies: CommunityReply[]): CommunityReply[] {
@@ -42,14 +84,14 @@ export function buildTopicListSummaryQueries(
     if (!viewer) return;
 
     const actor = forumAuthorRef(topic.author);
-    add({ actor });
-    add({
-      actor: viewer,
-      target: {
-        targetType: topic.author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: topic.author.id,
-      },
-    });
+    const target = summaryTargetRef(topic.author);
+    if (actor) add({ actor });
+    if (target) {
+      add({
+        actor: viewer,
+        target,
+      });
+    }
   });
 
   if (queries.size > MAX_INTERACTION_SUMMARY_BATCH) {
@@ -81,11 +123,12 @@ export function buildTopicSummaryQueries(options: {
   const uniqueAuthors = new Map<string, CommunityAuthor>();
   authors.forEach((author) => uniqueAuthors.set(`${author.type}:${author.id}`, author));
   uniqueAuthors.forEach((author) => {
-    add({ actor: forumAuthorRef(author) });
-    add({
-      actor: viewer,
-      target: { targetType: author.type === 'bot' ? 'BOT' : 'HUMAN', id: author.id },
-    });
+    const actor = forumAuthorRef(author);
+    const target = summaryTargetRef(author);
+    if (actor) add({ actor });
+    if (target) {
+      add({ actor: viewer, target });
+    }
   });
   visiblePosts(replies).forEach((reply) => {
     const replyTarget: ForumTargetRef = { targetType: 'POST', id: reply.id };

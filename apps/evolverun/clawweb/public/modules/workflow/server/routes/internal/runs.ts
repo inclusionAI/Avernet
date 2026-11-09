@@ -1,3 +1,4 @@
+import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
 import { RepairBatchError } from '../../contracts/repair-batch.js';
 /**
  * Internal API routes for flow_runs — write and read operations for ClawMind.
@@ -11,6 +12,19 @@ import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
+
+// Only the durable fanout child slot is reserved. Items, params, and other
+// workflow state are user data and may legitimately use the same field name.
+function hasInitialDispatchClaim(state: Record<string, unknown>): boolean {
+  const groups = state.subworkflowFanouts;
+  if (!groups || typeof groups !== "object" || Array.isArray(groups)) return false;
+  return Object.values(groups).some(group => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+    const children = (group as Record<string, unknown>).children;
+    return Array.isArray(children) && children.some(child => child !== null && typeof child === "object"
+      && !Array.isArray(child) && Object.hasOwn(child, "dispatchClaimToken"));
+  });
+}
 
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
@@ -31,14 +45,64 @@ export function createInternalRunsRouter(
   nodeExecRepo?: NodeExecutionRepository | null,
   flowControlConfig?: FanoutAdmissionConfig,
   observers: { onTerminal?: RunTerminalObserver } = {},
+  ordinaryAuth?: OrdinaryRequestAuth,
 ): Router {
   const router = Router();
   router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null));
 
-  /** POST / — insert a flow run */
-  router.post("/", asyncHandler(async (req: Request, res: Response) => {
-    // State snapshots can be large and may contain workflow inputs; keep them out of request logs.
-    apiLog("WRITE", "/runs", { flowId: req.body?.flow_id, workflowId: req.body?.workflow_id, runStatus: req.body?.status,
+  const ready = () => !!flowRunRepo && !!ordinaryAuth && typeof ordinaryAuth.authenticate === "function"
+    && typeof ordinaryAuth.authorize === "function";
+  const authenticate = async (req: Request): Promise<OrdinaryPrincipal | null> => {
+    const principal = await ordinaryAuth!.authenticate(req);
+    return principal && typeof principal.botId === "string" && principal.botId.trim()
+      && typeof principal.ownerId === "string" && principal.ownerId.trim() ? principal : null;
+  };
+  const respondError = (res: Response, error: unknown) => {
+    const status = error instanceof OrdinaryRequestError ? error.status : 503;
+    res.status(status).json({ success: false, error: status === 400 ? "Bad Request" : status === 404 ? "Not Found"
+      : status === 409 ? "Conflict" : "Service Unavailable" });
+  };
+
+  router.post("/request-association/lookup", asyncHandler(async (req: Request, res: Response) => {
+    res.set("Cache-Control", "no-store");
+    if (!ready()) { respondError(res, new Error("Unavailable")); return; }
+    try {
+      const principal = await authenticate(req);
+      if (!principal) { res.status(401).json({ success: false, error: "Unauthorized" }); return; }
+      const body = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 2 || Object.keys(req.query).length !== 0
+        || body.type !== "ordinary-run-request.lookup.v1" || !Object.hasOwn(body, "ordinary_request_key")) {
+        throw new OrdinaryRequestError(400, "Invalid lookup");
+      }
+      const data = await flowRunRepo!.ordinaryRequests.lookup(body.ordinary_request_key, principal, ordinaryAuth!);
+      res.json({ success: true, data });
+    } catch (error) { respondError(res, error); }
+  }));
+
+  /** Dedicated ordinary registration is never routed through legacy POST /. */
+  const postRun = (ordinary: boolean) => asyncHandler(async (req: Request, res: Response) => {
+    const envelope = req.body;
+    const nestedRun = envelope && typeof envelope === "object" && envelope.run
+      && typeof envelope.run === "object" && !Array.isArray(envelope.run) ? envelope.run : null;
+    const hasOrdinaryFields = (body: Record<string, unknown>) => Object.hasOwn(body, "ordinary_request_key")
+      || Object.hasOwn(body, "ordinary_parent_flow_id") || body.type === "ordinary-run-request.register.v1";
+    const ordinaryFields = !!envelope && typeof envelope === "object" && (hasOrdinaryFields(envelope)
+      || !!nestedRun && hasOrdinaryFields(nestedRun));
+    if (ordinary || ordinaryFields) {
+      res.set("Cache-Control", "no-store");
+      if (!ordinary) {
+        if (envelope && typeof envelope === "object" && (hasTrialFields(envelope)
+          || nestedRun && hasTrialFields(nestedRun))) {
+          respondError(res, new OrdinaryRequestError(409, "Conflicting request identities")); return;
+        }
+        respondError(res, new Error("Unavailable")); return;
+      }
+      if (!ready()) { respondError(res, new Error("Unavailable")); return; }
+    }
+    // Ordinary requests may contain attacker-controlled objects; never put their
+    // fields into logs before or after validation. Legacy logging is unchanged.
+    if (ordinary) apiLog("WRITE", "/runs/request-association/register", {});
+    else apiLog("WRITE", "/runs", { flowId: req.body?.flow_id, workflowId: req.body?.workflow_id, runStatus: req.body?.status,
       stateJsonBytes: typeof req.body?.state_json === 'string' ? Buffer.byteLength(req.body.state_json) : 0 });
     if (!flowRunRepo) {
       apiLog("WRITE", "/runs", { status: 503, error: "Database not configured" });
@@ -46,7 +110,26 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
+      let principal: OrdinaryPrincipal | null = null;
+      if (ordinary) {
+        principal = await authenticate(req);
+        if (!principal) { res.status(401).json({ success: false, error: "Unauthorized" }); return; }
+        if (envelope && typeof envelope === "object" && (hasTrialFields(envelope)
+          || envelope.run && typeof envelope.run === "object" && hasTrialFields(envelope.run))) {
+          throw new OrdinaryRequestError(409, "Conflicting request identities");
+        }
+        if (!envelope || typeof envelope !== "object" || Array.isArray(envelope) || Object.keys(req.query).length !== 0
+          || envelope.type !== "ordinary-run-request.register.v1" || Object.keys(envelope).length !== 4
+          || !["type", "ordinary_request_key", "ordinary_parent_flow_id", "run"].every(key => Object.hasOwn(envelope, key))
+          || !envelope.run || typeof envelope.run !== "object" || Array.isArray(envelope.run)
+          || ["type", "ordinary_request_key", "ordinary_parent_flow_id"].some(key => Object.hasOwn(envelope.run, key))) {
+          throw new OrdinaryRequestError(400, "Invalid registration");
+        }
+      }
+      const requestBody = ordinary ? envelope.run : envelope;
+      const normalizedBody = ordinary ? { ...requestBody, type: envelope.type, ordinary_request_key: envelope.ordinary_request_key,
+        ordinary_parent_flow_id: envelope.ordinary_parent_flow_id } : requestBody;
+      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = requestBody as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
@@ -57,6 +140,7 @@ export function createInternalRunsRouter(
         input_json?: string;
         node_count?: number;
         identity_key?: string;
+        current_phase?: string | null;
         started_at?: number;
         credentials_json?: string;
         origin_session_key?: string;
@@ -70,8 +154,13 @@ export function createInternalRunsRouter(
       };
 
       if (!flow_id || !workflow_id || !status) {
-        apiLog("WRITE", "/runs", { httpStatus: 400, error: "Missing required fields", flow_id, workflow_id, runStatus: status });
+        if (!ordinary) apiLog("WRITE", "/runs", { httpStatus: 400, error: "Missing required fields", flow_id, workflow_id, runStatus: status });
         res.status(400).json({ success: false, error: "Bad Request", message: "Missing required fields: flow_id, workflow_id, status" });
+        return;
+      }
+
+      if (current_phase != null && typeof current_phase !== "string") {
+        res.status(400).json({ success: false, error: "Bad Request", message: "current_phase must be a string or null" });
         return;
       }
 
@@ -83,6 +172,10 @@ export function createInternalRunsRouter(
         try {
           const state = JSON.parse(state_json);
           if (state === null || typeof state !== "object" || Array.isArray(state)) throw new Error("not an object");
+          if (hasInitialDispatchClaim(state)) {
+            res.status(400).json({ success: false, error: "Bad Request", message: "Initial fanout children cannot contain dispatch claims" });
+            return;
+          }
         } catch {
           res.status(400).json({ success: false, error: "Bad Request", message: "state_json must be a JSON object string" });
           return;
@@ -110,6 +203,7 @@ export function createInternalRunsRouter(
         inputJson: input_json ?? null,
         nodeCount: node_count ?? 0,
         identityKey: identity_key ?? null,
+        currentPhase: current_phase ?? null,
         startedAt: started_at ?? Math.floor(Date.now() / 1000),
         credentialsJson: credentials_json ?? null,
         originSessionKey: origin_session_key ?? null,
@@ -121,6 +215,11 @@ export function createInternalRunsRouter(
         workflowVersion: workflow_version ?? null,
         workflowDeployNumber: workflow_deploy_number ?? null,
       };
+      if (ordinary) {
+        const data = await flowRunRepo.ordinaryRequests.create(normalizedBody, run, principal!, ordinaryAuth!);
+        res.status(data.created ? 201 : 200).json({ success: true, data });
+        return;
+      }
       const registered = await flowRunRepo.insertForRequest(req.body, run);
       const ok = registered !== null || await flowRunRepo.insert(run);
       if (!ok) {
@@ -132,12 +231,15 @@ export function createInternalRunsRouter(
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
       res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
+      if (ordinary) { respondError(res, error); return; }
       if (error instanceof RepairBatchError) { res.status(409).json({ success: false, error: error.message, code: error.code }); return; }
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("WRITE", "/runs", { status: 500, error: "Run insert rejected" });
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
-  }));
+  });
+  router.post("/request-association/register", postRun(true));
+  router.post("/", postRun(false));
 
   /** PUT /:flowId/completion — update completion fields */
   router.put("/:flowId/completion", asyncHandler(async (req: Request, res: Response) => {

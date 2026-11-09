@@ -59,8 +59,15 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   const [loadedListIdentity, setLoadedListIdentity] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
-  // 成员补拉缓存 / 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
-  const { seedFromCache, enrichParticipants, reloadSelectedGroup, dissolveGroup } = useGroupWorkspaceMutations({
+  // 成员补拉（含请求代次）/ 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
+  const {
+    beginListLoad,
+    isCurrentRequest,
+    seedFromCache,
+    enrichParticipants,
+    reloadSelectedGroup,
+    dissolveGroup,
+  } = useGroupWorkspaceMutations({
     sessionGroups,
     setSessionGroups,
     activeIdentityId,
@@ -82,9 +89,8 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [identities],
   );
 
-  // 群行头像堆成员补拉（fire-and-forget）：对列表未回传 participants 的群按详情逐个拉取，
-  // 逐群合并进 sessionGroups（不整替整行，避免覆盖列表的 membership 等视图字段）。
-  // 失败也写入缓存占位（空名单），防止逐字防抖搜索对同一失败群反复请求；页面重挂载即重置。
+  // 群列表加载：新响应自带摘要时直接展示（头像零补拉）；旧响应缺摘要字段才按群详情补拉。
+  // 请求代次在首个 await 前生成，身份/搜索/成员视角或新列次都会让旧请求结果失效。
   const loadGroups = useCallback(
     async (identityId: string | null, q?: string, requestedMembership = membership) => {
       const identity = resolveIdentity(identityId);
@@ -92,12 +98,13 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
         setGroupsError(null);
         return;
       }
+      const request = beginListLoad(identityId);
       useWorkspaceStore.getState().setIsGroupsLoading(true);
       setGroupsError(null);
       const isCurrentList = () => {
         const current = useWorkspaceStore.getState();
-        return current.activeIdentityId === identityId && current.membership === requestedMembership
-          && lastSearchRef.current === (q || '');
+        return isCurrentRequest(request) && current.activeIdentityId === identityId
+          && current.membership === requestedMembership && lastSearchRef.current === (q || '');
       };
       try {
         const detail = pinnedGroup ? await loadScopedGroup(pinnedGroup.groupId, identity.id) : null;
@@ -108,16 +115,15 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
           : await groupService.loadGroups(identity, { q, membership: requestedMembership });
         if (!isCurrentList()) return;
         if (res.ok) {
-          // 先用缓存过的成员名单给新列表播种（列表接口不回传 participants），再对仍未有
-          // 成员的群异步补拉详情——防抖搜索/身份切换的列次同一群不再重复请求。
-          const seeded = seedFromCache(res.data);
+          // 旧响应才用同身份缓存播种并按群补拉详情；新响应带摘要（含显式空摘要）时不触碰缓存。
+          const seeded = seedFromCache(res.data, request);
           setSessionGroups(seeded);
           // 仅当这次列表仍属于当前活动身份时才记成“已为该身份加载完成”,
           // 避免身份切换后旧身份的残留响应把 loadedListIdentity 写成旧值。
           if (useWorkspaceStore.getState().activeIdentityId === identityId) {
             setLoadedListIdentity(identityId);
           }
-          void enrichParticipants(seeded, identity.kind === 'bot' ? identity.id : undefined);
+          void enrichParticipants(seeded, request, identity.kind === 'bot' ? identity.id : undefined);
         } else {
           if (pinnedGroup) setSessionGroups([]);
           setGroupsError(res.error.friendlyMessage);
@@ -129,7 +135,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
         if (isCurrentList()) useWorkspaceStore.getState().setIsGroupsLoading(false);
       }
     },
-    [resolveIdentity, membership, pinnedGroup, seedFromCache, enrichParticipants],
+    [resolveIdentity, membership, pinnedGroup, beginListLoad, isCurrentRequest, seedFromCache, enrichParticipants],
   );
 
   // 身份变化或成员视角切换 → 重载列表并清空上轮搜索基线，避免防抖 effect 误判为新搜索。

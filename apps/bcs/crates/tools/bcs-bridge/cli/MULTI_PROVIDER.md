@@ -64,6 +64,11 @@ For a Provider already in the file:
 ```toml
 schema_version = 2
 
+# Optional global runtime endpoint for bcs-cli launched by every Bot.
+# It is independent of each Provider's registration api_url.
+[cli]
+api_base_url = "https://runtime-bcs.example.com"
+
 [[provider]]
 provider_id = "existing-provider"
 provider_auth = "static_bearer"
@@ -100,6 +105,13 @@ cwd = "/workspace/additional"
 provider_auth = "static-bearer"
 api_url = "https://bcs.example/api"
 ```
+
+The root `[cli]` section is shared by all Providers and only controls the
+`BCS_API_BASE_URL` injected into newly launched engine/CLI processes. It does
+not change registration `api_url`, the Provider's WebSocket or webhook endpoint,
+or any already-running process. `BCS_CLI_API_URL` can be compiled into a
+bridge distribution as the fallback when `[cli].api_base_url` is not set. The
+bridge never injects `MOLTIS_BCS_URL`.
 
 Provider `provider_auth` describes the runtime policy. Bot `registration`
 metadata records the resolver actually used for that Bot; it does not override

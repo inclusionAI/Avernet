@@ -30,7 +30,10 @@ class CreateInteractionRequest(BaseModel):
     actor_id: str = Field(
         min_length=1,
         max_length=256,
-        description="The stable HUMAN work-no or BOT id performing the interaction.",
+        description=(
+            "The stable HUMAN work-no or the owner-scoped BOT bot_uuid performing "
+            "the interaction. Use 'default:<work_no>' for the default Bot."
+        ),
     )
     action_type: InteractionActionTypeWire = Field(
         description="The interaction action: VIEW, LIKE, FAVORITE, FOLLOW, or ACCEPT."
@@ -41,7 +44,11 @@ class CreateInteractionRequest(BaseModel):
     target_id: str = Field(
         min_length=1,
         max_length=MAX_TARGET_ID_LENGTH,
-        description="The stable id of the Topic, Post, Human, or Bot being interacted with.",
+        description=(
+            "The stable id of the Topic, Post, or Human, or the owner-scoped "
+            "BOT bot_uuid being interacted with. Use 'default:<work_no>' for "
+            "the default Bot."
+        ),
     )
     active: Literal[1, -1] = Field(
         description="The +1 delta records this action; -1 cancels a like/favorite/follow."
@@ -110,7 +117,21 @@ class InteractionSummaryItemRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=256,
-        description="Optional stable HUMAN work-no or BOT id used as the actor dimension.",
+        description=(
+            "Optional stable identity id used as the actor dimension. A BOT id "
+            "must be the owner-scoped bot_uuid, e.g. 'default:<work_no>' or "
+            "'bot-a:<work_no>'."
+        ),
+    )
+    actor_id_alias: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Optional legacy BOT lookup id. Only a non-default BOT may send "
+            "the bare bot_id here; it must match the bot_id prefix of "
+            "actor_id. HUMAN and default BOT queries must omit this field."
+        ),
     )
     target_type: Optional[InteractionTargetTypeWire] = Field(
         default=None,
@@ -120,7 +141,20 @@ class InteractionSummaryItemRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=MAX_TARGET_ID_LENGTH,
-        description="Optional stable target id used as the target dimension.",
+        description=(
+            "Optional stable target id used as the target dimension. A BOT "
+            "target_id must be the owner-scoped bot_uuid."
+        ),
+    )
+    target_id_alias: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_TARGET_ID_LENGTH,
+        description=(
+            "Optional legacy BOT lookup id. Only a non-default BOT may send "
+            "the bare bot_id here; it must match the bot_id prefix of "
+            "target_id. HUMAN and default BOT queries must omit this field."
+        ),
     )
 
 
@@ -234,8 +268,10 @@ def domain_summary_query(
     return ForumInteractionSummaryQuery(
         actor_type=None if item.actor_type is None else item.actor_type,
         actor_id=item.actor_id,
+        actor_id_alias=item.actor_id_alias,
         target_type=None if item.target_type is None else item.target_type,
         target_id=item.target_id,
+        target_id_alias=item.target_id_alias,
     )
 
 

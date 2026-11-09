@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import mimetypes
-import uuid
+import time
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,11 +20,16 @@ from engine.community.core.resource_materialization.models import (
 )
 from engine.community.core.resource_materialization.service import ManifestStore
 from engine.community.core.session_files.models import (
+    MAX_DIRECT_CONTENT_BYTES,
     SessionFileError,
     SessionFileExportSource,
     SessionFileView,
 )
+from engine.community.core.session_files.registration import (
+    observe_workspace_file, register_workspace_file,
+)
 from engine.community.plugin_api.workspace_root import workspace_root_strict
+from engine.community.plugin_api.runtime_identity import runtime_bot_name
 
 log = logging.getLogger("engine.session_files")
 
@@ -35,9 +42,65 @@ class SessionFileService:
         *,
         workspace_root_provider: Callable[[], Path | None] = workspace_root_strict,
         default_baas_tenant: str | None = None,
+        bot_name: str | None = None,
+        bot_name_provider: Callable[[], str | None] = runtime_bot_name,
     ) -> None:
         self._workspace_root_provider = workspace_root_provider
         self._default_baas_tenant = default_baas_tenant
+        configured_name = bot_name if bot_name is not None else bot_name_provider()
+        self._bot_name = (configured_name.strip() or None) if configured_name is not None else None
+
+    def register_file(
+        self, *, session_key: str, workspace_relative_path: str
+    ) -> SessionFileView:
+        """Register a live workspace association; keep the original source intact."""
+        started = time.monotonic()
+        fields = {
+            "system": "engine", "operation": "session_files.register",
+            "sessionKey": session_key, "workspace_relative_path": workspace_relative_path,
+        }
+        log.info(
+            "engine.session_files.register.request system=engine sessionKey=%r workspace_relative_path=%r status=request",
+            session_key, workspace_relative_path, extra={**fields, "status": "request"},
+        )
+        try:
+            entry = register_workspace_file(
+                self._workspace_root(), session_key=session_key,
+                workspace_relative_path=workspace_relative_path,
+                creator_name=self._bot_name,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            code = "registration_failed"
+            if isinstance(exc, OSError) and exc.errno in {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}:
+                code = "invalid_workspace_path"
+            error = exc if isinstance(exc, SessionFileError) else SessionFileError(code)
+            elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+            log.warning(
+                "engine.session_files.register.failure system=engine sessionKey=%r workspace_relative_path=%r status=failed error_code=%s elapsed_ms=%s",
+                session_key, workspace_relative_path, str(error), elapsed_ms,
+                extra={**fields, "status": "failed", "error_code": str(error), "elapsed_ms": elapsed_ms},
+            )
+            if error is exc:
+                raise
+            raise error from exc
+        elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+        log.info(
+            "engine.session_files.register.success system=engine sessionKey=%r workspace_relative_path=%r resource_id=%s status=ready size_bytes=%s elapsed_ms=%s",
+            session_key, workspace_relative_path, entry.resource_id, entry.size_bytes, elapsed_ms,
+            extra={**fields, "status": "ready", "resource_id": entry.resource_id,
+                   "creator_type": entry.creator_type,
+                   "creator_name_present": entry.creator_name is not None,
+                   "created_at": self._format_uploaded_at(entry.created_at or entry.uploaded_at),
+                   "size_bytes": entry.size_bytes, "elapsed_ms": elapsed_ms},
+        )
+        return SessionFileView(
+            resource_id=entry.resource_id, display_name=entry.filename,
+            size_bytes=entry.size_bytes, availability="ready",
+            uploaded_at=self._format_uploaded_at(entry.uploaded_at),
+            creator_type=entry.creator_type,
+            creator_name=entry.creator_name,
+            created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
+        )
 
     def list_files(self, *, session_key: str) -> list[SessionFileView]:
         root = self._workspace_root()
@@ -46,17 +109,25 @@ class SessionFileService:
             entries = ManifestStore(root).list_entries()
         except RuntimeError as exc:
             raise SessionFileError("manifest_unavailable") from exc
-        files = [
-            SessionFileView(
+        files = []
+        for entry in entries:
+            if entry.status != "ready" or entry.session_key_hash != session_hash:
+                continue
+            if entry.source_kind == "workspace_live":
+                availability, _, size_bytes, _ = self._current_file(root, entry)
+            else:
+                availability, _ = self._inspect(root, entry, force_hash=False)
+                size_bytes = entry.size_bytes
+            files.append(SessionFileView(
                 resource_id=entry.resource_id,
                 display_name=entry.filename,
-                size_bytes=entry.size_bytes,
-                availability=self._inspect(root, entry, force_hash=False)[0],
+                size_bytes=size_bytes,
+                availability=availability,
                 uploaded_at=self._format_uploaded_at(entry.uploaded_at),
-            )
-            for entry in entries
-            if entry.status == "ready" and entry.session_key_hash == session_hash
-        ]
+                creator_type=entry.creator_type,
+                creator_name=entry.creator_name,
+                created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
+            ))
         log.info(
             "engine.session_files.list session_key_hash=%s file_count=%s upload_time_count=%s",
             session_hash[:16],
@@ -83,9 +154,28 @@ class SessionFileService:
         if disposition not in {"inline", "attachment"}:
             raise SessionFileError("invalid_disposition")
         root, entry = self._entry_for_session(session_key, resource_id)
-        availability, canonical = self._inspect(root, entry, force_hash=True)
-        if availability != "ready" or canonical is None:
-            raise SessionFileError(f"resource_{availability}")
+        stream = None
+        size_bytes = entry.size_bytes
+        if entry.source_kind == "workspace_live":
+            # COSEC: anonymous operation-local storage pins response bytes through
+            # actual consumption; the HTTP adapter must never reopen the source.
+            stream = tempfile.TemporaryFile(mode="w+b")
+            try:
+                observed, _ = observe_workspace_file(
+                    root, Path(entry.relative_path), stream, max_bytes=MAX_DIRECT_CONTENT_BYTES
+                )
+                size_bytes = observed.st_size
+                canonical = root / entry.relative_path
+                stream.seek(0)
+            except (OSError, SessionFileError) as exc:
+                stream.close()
+                code = str(exc) if str(exc) in {"resource_changed", "resource_preview_too_large"} else "resource_missing"
+                log.info("engine.session_files.live.unavailable resource_id=%s error_code=%s", resource_id, code)
+                raise SessionFileError(code) from None
+        else:
+            availability, canonical = self._inspect(root, entry, force_hash=True)
+            if availability != "ready" or canonical is None:
+                raise SessionFileError(f"resource_{availability}")
         media_type = (
             mimetypes.guess_type(entry.filename)[0] or "application/octet-stream"
         )
@@ -97,14 +187,15 @@ class SessionFileService:
             "engine.session_files.content.open resource_id=%s disposition=%s size_bytes=%s",
             resource_id,
             disposition,
-            entry.size_bytes,
+            size_bytes,
         )
         return MaterializedContent(
             path=canonical,
             filename=entry.filename,
             media_type=media_type,
             content_disposition=content_disposition,
-            size_bytes=entry.size_bytes,
+            size_bytes=size_bytes,
+            stream=stream,
         )
 
     def delete_file(self, *, session_key: str, resource_id: str) -> None:
@@ -112,12 +203,25 @@ class SessionFileService:
         removed = ManifestStore(root).remove(resource_id)
         if removed is None:
             raise SessionFileError("resource_not_found")
-        self._remove_local_file(root, entry)
+        if entry.source_kind != "workspace_live":
+            self._remove_local_file(root, entry)
         log.info(
             "engine.session_files.delete resource_id=%s session_key_hash=%s",
             resource_id,
             hash_identifier(session_key)[:16],
         )
+
+    def get_file_size(self, *, session_key: str, resource_id: str) -> int:
+        """Inspect delivery size independently of any external BaaS capability."""
+        root, entry = self._entry_for_session(session_key, resource_id)
+        availability, _, size_bytes, _ = self._current_file(root, entry)
+        if availability != "ready":
+            raise SessionFileError(f"resource_{availability}")
+        log.info(
+            "engine.session_files.delivery.size sessionKey=%r resource_id=%s size_bytes=%s",
+            session_key, resource_id, size_bytes,
+        )
+        return size_bytes
 
     def prepare_export_source(
         self,
@@ -133,7 +237,7 @@ class SessionFileService:
         if availability != "ready" or canonical is None:
             raise SessionFileError(f"resource_{availability}")
         requires_upload = (
-            entry.source_kind != "baas_session_file"
+            (entry.source_kind != "baas_session_file" and not (entry.source_kind == "workspace_live" and entry.transfer_id))
             or size_bytes != entry.size_bytes
             or content_hash != entry.content_hash
         )
@@ -181,31 +285,44 @@ class SessionFileService:
             or size_bytes != source.size_bytes
             or content_hash != source.content_hash
         ):
-            raise SessionFileError(f"resource_{availability}")
+            raise SessionFileError(
+                f"resource_{availability}" if availability != "ready" else "resource_changed"
+            )
 
     def create_export_snapshot(self, source: SessionFileExportSource) -> Path:
         """Copy a verified current file before an Engine-originated upload."""
         self.revalidate_export_source(source)
-        root = self._workspace_root()
-        directory = root / ".teamclaw/session-files/.exports"
-        directory.mkdir(parents=True, exist_ok=True)
-        snapshot = directory / f".export-{uuid.uuid4().hex}.part"
+        root, entry = self._entry_for_session_hash(source.resource_id, source.session_key_hash)
+        # COSEC: use a private operation-local transfer file, never a workspace
+        # directory whose components can be replaced with symlinks by the Bot.
+        descriptor, name = tempfile.mkstemp(prefix="session-file-export-", suffix=".part")
+        snapshot = Path(name)
         digest = hashlib.sha256()
         total = 0
         try:
-            with (
-                source.canonical_path.open("rb") as source_stream,
-                snapshot.open("xb") as target,
-            ):
-                for chunk in iter(lambda: source_stream.read(1024 * 1024), b""):
-                    total += len(chunk)
-                    digest.update(chunk)
-                    target.write(chunk)
-            if total != source.size_bytes or digest.hexdigest() != source.content_hash:
+            with open(descriptor, "wb") as target:
+                if entry.source_kind == "workspace_live":
+                    try:
+                        observed, content_hash = observe_workspace_file(
+                            root, Path(entry.relative_path), target
+                        )
+                    except (OSError, SessionFileError) as exc:
+                        if str(exc) == "resource_changed":
+                            raise
+                        raise SessionFileError("resource_missing") from None
+                    total = observed.st_size
+                else:
+                    with source.canonical_path.open("rb") as source_stream:
+                        for chunk in iter(lambda: source_stream.read(1024 * 1024), b""):
+                            total += len(chunk)
+                            digest.update(chunk)
+                            target.write(chunk)
+                    content_hash = digest.hexdigest()
+            if total != source.size_bytes or content_hash != source.content_hash:
                 raise SessionFileError("resource_changed")
             self.revalidate_export_source(source)
             return snapshot
-        except (OSError, SessionFileError):
+        except BaseException:
             snapshot.unlink(missing_ok=True)
             raise
 
@@ -220,7 +337,15 @@ class SessionFileService:
         root, entry = self._entry_for_session_hash(
             source.resource_id, source.session_key_hash
         )
-        observed = source.canonical_path.stat()
+        if entry.source_kind == "workspace_live":
+            try:
+                observed, content_hash = observe_workspace_file(root, Path(entry.relative_path))
+            except OSError:
+                raise SessionFileError("resource_missing") from None
+            if observed.st_size != source.size_bytes or content_hash != source.content_hash:
+                raise SessionFileError("resource_changed")
+        else:
+            observed = source.canonical_path.stat()
         updated = ManifestStore(root).replace_export_source(
             resource_id=source.resource_id,
             scope_key_hash=entry.scope_key_hash,
@@ -317,6 +442,14 @@ class SessionFileService:
         root: Path,
         entry: ManifestEntry,
     ) -> tuple[str, Path | None, int, str]:
+        if entry.source_kind == "workspace_live":
+            try:
+                observed, digest = observe_workspace_file(root, Path(entry.relative_path))
+                return "ready", root / entry.relative_path, observed.st_size, digest
+            except (OSError, SessionFileError) as exc:
+                state = "changed" if str(exc) == "resource_changed" else "missing"
+                log.info("engine.session_files.live.unavailable resource_id=%s status=%s", entry.resource_id, state)
+                return state, None, 0, ""
         try:
             target = self._target(root, entry)
             canonical = target.resolve(strict=True)

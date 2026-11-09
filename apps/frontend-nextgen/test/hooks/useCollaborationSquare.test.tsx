@@ -1252,9 +1252,10 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
-  test('画像详情拉取失败不判定目标失效：卡片保留、画像置空、不弹失效提示', async () => {
+  test('画像详情拉取失败不判定目标失效：卡片保留、画像置空、改弹窗内提示', async () => {
     // 画像走 bot-catalog profile 真实端点；目录外的 bot_uuid 会 404 → target_invalid。
-    // 申请弹窗必须保持打开（无已公开能力版式），不能删卡片。
+    // 申请弹窗必须保持打开（无已公开能力版式），不能删卡片；失败原因进入 botProfileError
+    // 由弹窗内展示（不弹 sonner toast，mapProfileError 已 cancel httpClient 默认投递）。
     const bot = resultBot('20260413_uhup5rb8:246864');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
     jest
@@ -1273,6 +1274,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(useCollaborationSquareStore.getState().bots).toEqual([bot]);
     expect(useCollaborationSquareStore.getState().botProfile).toBeNull();
+    expect(useCollaborationSquareStore.getState().botProfileError).toBe('内容已取消公开或不可访问');
     expect(useCollaborationSquareStore.getState().detailLoading).toBe(false);
     // 选中位保留（申请弹窗据此归口画像数据）；关闭路径由面板 closeProfile 收口。
     expect(useCollaborationSquareStore.getState().selectedBotId).toBe(bot.id);
@@ -1291,6 +1293,7 @@ describe('useCollaborationSquare Bot Search', () => {
         ownerName: bot.ownerName,
         description: bot.description,
         capabilities: [],
+        skills: [],
       });
     const legacyProfile = jest.spyOn(collaborationSquareService, 'getBotProfile');
     const realFriendship = jest

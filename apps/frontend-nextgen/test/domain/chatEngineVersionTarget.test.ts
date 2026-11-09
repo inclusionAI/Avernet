@@ -21,7 +21,7 @@ const input = {
   userId: 'caller-1',
 };
 
-test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限依据', () => {
+test('只为在线的本人或团队空间 Bot 单聊建立版本目标并保留权限依据', () => {
   expect(buildChatEngineVersionTarget(input)).toEqual({
     permissionSource: 'backend',
     key: 'chat:caller-1:managed:bot-1:owner-1:session-1',

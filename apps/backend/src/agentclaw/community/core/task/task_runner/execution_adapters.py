@@ -53,7 +53,6 @@ class CentralizedExecutionAdapter:
         discover=None,
         bcn: BcnService | None = None,
         bcs_identity=None,
-        auth_gate=None,
         task_search_skill_enabled: bool = False,
         task_settings=None,
         api_base_url: str = "",
@@ -82,7 +81,6 @@ class CentralizedExecutionAdapter:
         self._discover = discover
         self._bcn = bcn
         self._bcs_identity = bcs_identity
-        self._auth_gate = auth_gate
         self._task_search_skill_enabled = task_search_skill_enabled
         self._task_settings = task_settings
         self._api_base_url = api_base_url

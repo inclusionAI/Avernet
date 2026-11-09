@@ -1,14 +1,15 @@
 # Pack version Git reads
 
-Explicit GET pack-version reads discover only the workflow's `wf` and `saved`
-refs and fetch existing refs with `--depth=1` and without tags. The Git remote
-must support shallow fetch over a compatible smart transport (for example,
-smart HTTP, SSH, or a compatible local/file transport) for this read path. The reader
-verifies both refs again before returning a snapshot and fails closed if they
-change.
+`draft` reads only `wf/<workflowId>`. `current` reads the tag named by the
+unique active deployment-history row, never the latest wf commit or greatest
+tag number. No wf means no saved draft; it does not prevent reading an
+existing active production tag. The response reports `origin/wf/<id>` or
+`refs/tags/deploy/<id>/#N`. For a draft, `baseCommit === draftHead`; for
+production, `draftHead` independently reports the observed wf write lease.
 
-Dumb HTTP and any other transport or server that cannot serve shallow fetches
-are not supported by this read path: the request fails closed rather than
-retrying without a depth limit or cloning full history. Other fetch errors are
-also not retried. Save and deploy continue to use their existing full-clone
-path; this compatibility boundary applies only to explicit pack-version reads.
+Only wf and the explicitly bound production tag are fetched, shallowly.
+There is no saved/ lookup, comparison, fallback, synchronization or migration.
+Changes to any unrelated branch do not invalidate the read. The selected refs
+and active DB identity are rechecked before return.
+
+See [the save and deployment contract](workflow-wf-save-tag-deploy.md).

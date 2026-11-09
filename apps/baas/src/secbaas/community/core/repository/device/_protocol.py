@@ -160,8 +160,15 @@ class DeviceRepository(Protocol):
         env: str,
         status: str,
         modifier: str | None = None,
+        provider_device_id: str | None = None,
     ) -> int:
-        """Update device status by device_uuid with tenant+env isolation. Returns affected row count."""
+        """Update device status by device_uuid with tenant+env isolation.
+
+        ``provider_device_id`` is written in the same UPDATE when not ``None``;
+        ``None`` leaves the stored provider binding unchanged. ``modifier``
+        and the last-modified timestamp are written in the same UPDATE when
+        ``modifier`` is not ``None``. Returns the affected row count.
+        """
         ...
 
     def prepare_device_for_reprovision(

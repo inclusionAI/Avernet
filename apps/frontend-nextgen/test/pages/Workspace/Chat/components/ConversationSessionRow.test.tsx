@@ -189,6 +189,20 @@ describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () 
     );
   });
 
+  it('Browse-only 行无操作入口时，hover 不改标题右界且时间常驻原位显示', () => {
+    const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    render(<ConversationSessionRow session={{ ...session, gmtModified }} selected={false} onSelect={jest.fn()} />);
+    const button = screen.getByRole('button', { name: '对话会话' });
+    // 无 actions / 收藏回调 => hover 没有右侧图标区，不应触发标题右内边距让位。
+    expect(button).toHaveClass('pr-2');
+    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+    expect(button).not.toHaveClass('group-hover/row:pr-[88px]');
+    // 时间没有 hover 退场档，位置和可见性保持不变。
+    const time = screen.getByText('3 小时前');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
+    expect(time).not.toHaveClass('group-focus-within/row:opacity-0');
+  });
+
   it('gmtModified 缺失不渲染时间节点；只读行时间常驻不参与让位', () => {
     render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
     expect(screen.queryByText('刚刚')).not.toBeInTheDocument();

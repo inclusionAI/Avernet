@@ -236,7 +236,7 @@ def test_dispatch_single_bot_uses_explicit_owner_for_composite_assignee():
 
 
 def test_dispatch_single_bot_sends_assignee_verbatim():
-    """single_bot 直接按 assignee 原样派发(claim_on JOIN 在派发策略层完成,执行器不做表级授权 JOIN)。"""
+    """single_bot 直接按 assignee 原样派发。"""
     bot = _Bot()
     poller = _Poller()
     exe = TaskExecutor(

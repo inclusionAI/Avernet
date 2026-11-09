@@ -9,9 +9,7 @@
 //! top of this contract (whole participant pages, dedupe, one query per
 //! store batch) is covered by `services/bcs-bot/tests/bot_profile.rs`.
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

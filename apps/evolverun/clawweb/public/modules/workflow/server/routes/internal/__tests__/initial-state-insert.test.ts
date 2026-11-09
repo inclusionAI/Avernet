@@ -49,3 +49,17 @@ it("rejects double-encoded state before inserting", async () => {
   expect(response.status).toBe(400);
   expect(inserted).toBeUndefined();
 });
+
+it('persists the initial current_phase on the legacy registration route', async () => {
+  inserted = undefined;
+  const response = await fetch(`${baseUrl}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flow_id: 'flow', workflow_id: 'demo', status: 'running', current_phase: 'preparing' }) });
+  expect(response.status).toBe(201);
+  expect(inserted?.params[10]).toBe('preparing');
+});
+
+it('rejects a non-string current_phase without inserting', async () => {
+  inserted = undefined;
+  const response = await fetch(`${baseUrl}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flow_id: 'flow', workflow_id: 'demo', status: 'running', current_phase: { bad: true } }) });
+  expect(response.status).toBe(400);
+  expect(inserted).toBeUndefined();
+});

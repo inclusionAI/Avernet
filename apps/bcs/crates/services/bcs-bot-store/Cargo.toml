@@ -23,6 +23,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-chat-run-store = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }

@@ -3,30 +3,6 @@
 version = 4
 
 [[package]]
-name = "a2a-client-lf"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd39a97ef9acc3fe4fa34169992117237046104ae479d0898d248ef70fcaa4fc"
-dependencies = [
- "a2a-lf",
- "a2a-pb",
- "async-trait",
- "auto_impl",
- "bytes",
- "futures",
- "pin-project-lite",
- "reqwest 0.13.5",
- "rustls",
- "semver",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "a2a-lf"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -228,17 +204,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "auto_impl"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683bf733a032aec4f8954e5c0ec9d5c2183c341c49d0939ad77acc0a19fa338a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,6 +371,7 @@ dependencies = [
  "bcs-coordination-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-edge-permission",
@@ -470,21 +436,17 @@ dependencies = [
  "ding-logger",
  "dirs",
  "fastrand",
- "form_urlencoded",
  "futures",
  "futures-util",
  "hex",
- "if-addrs",
  "inventory",
  "jsonwebtoken",
  "metrics",
  "metrics-exporter-prometheus",
- "native-tls",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "rand 0.8.7",
- "regex",
  "reqwest 0.12.28",
  "reqwest 0.13.5",
  "rsa",
@@ -497,7 +459,6 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "tokio",
- "tokio-native-tls",
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "toml",
@@ -527,7 +488,6 @@ dependencies = [
 name = "bcs-a2a-http"
 version = "0.1.4-beta.3"
 dependencies = [
- "a2a-client-lf",
  "a2a-lf",
  "a2a-pb",
  "async-trait",
@@ -574,6 +534,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-group-store",
@@ -719,6 +680,7 @@ dependencies = [
  "bcs-bot-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -766,7 +728,6 @@ dependencies = [
  "bcs-session",
  "bcs-session-store",
  "bcs-test-support",
- "serde_json",
  "tokio",
 ]
 
@@ -817,6 +778,7 @@ dependencies = [
  "bcs-bot-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
@@ -882,16 +844,13 @@ name = "bcs-auth-github"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
- "axum",
  "bcs-auth-api",
  "bcs-auth-oauth",
- "bcs-jwt",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-identity",
  "reqwest 0.12.28",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "urlencoding",
@@ -905,13 +864,11 @@ dependencies = [
  "axum",
  "bcs-auth-api",
  "bcs-auth-oauth",
- "bcs-jwt",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-identity",
  "reqwest 0.12.28",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "urlencoding",
@@ -939,7 +896,6 @@ dependencies = [
  "bcs-test-support",
  "subtle",
  "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -951,7 +907,6 @@ dependencies = [
  "axum",
  "bcs-auth-api",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -980,6 +935,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-group-store",
  "bcs-observability",
@@ -1011,6 +967,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-edge-permission-store",
@@ -1159,14 +1116,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bcs-callback"
-version = "0.1.4-beta.3"
-dependencies = [
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "bcs-caller-identity-api"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1265,7 +1214,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1275,15 +1223,11 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "async-trait",
- "base64 0.22.1",
  "bcs-config",
- "bcs-config-api",
  "bcs-protocol",
  "chardetng",
  "chrono",
  "clap",
- "dirs",
- "encoding_rs",
  "futures",
  "hex",
  "inventory",
@@ -1342,6 +1286,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-event-store",
  "bcs-group",
@@ -1371,6 +1316,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
@@ -1461,6 +1407,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-db-migrations"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-db-api",
+ "bcs-db-local",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-db-mysql"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1541,6 +1499,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-service-api",
  "bcs-test-support",
@@ -1659,6 +1618,7 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-event-store",
  "bcs-friend",
@@ -1673,7 +1633,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror 2.0.20",
  "tokio",
  "tokio-test",
  "tracing",
@@ -1706,6 +1665,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
@@ -1720,7 +1680,6 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1863,7 +1822,6 @@ dependencies = [
  "bcs-service-api",
  "hex",
  "hmac",
- "serde",
  "serde_json",
  "sha2",
  "tokio",
@@ -1881,7 +1839,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1993,6 +1950,7 @@ dependencies = [
  "bcs-coordination-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-edge-permission",
  "bcs-edge-permission-store",
@@ -2037,6 +1995,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-event-store",
  "bcs-message-flow",
@@ -2047,7 +2006,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "thiserror 2.0.20",
  "tokio",
  "tracing",
  "uuid",
@@ -2102,6 +2060,7 @@ dependencies = [
  "async-trait",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
  "bcs-service-api",
  "bcs-test-support",
@@ -2195,8 +2154,6 @@ dependencies = [
  "bcs-service-api",
  "bcs-test-support",
  "regex",
- "serde",
- "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tokio-test",
@@ -2344,7 +2301,6 @@ dependencies = [
  "bcs-test-support",
  "bytes",
  "futures",
- "serde",
  "serde_json",
  "tokio",
  "tracing",
@@ -2365,7 +2321,6 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-test",
- "tracing",
 ]
 
 [[package]]
@@ -2377,13 +2332,13 @@ dependencies = [
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
  "bcs-event-store",
  "bcs-group-store",
  "bcs-service-api",
  "bcs-test-support",
- "fastrand",
  "hex",
  "mysql_async",
  "serde_json",
@@ -2425,9 +2380,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
  "tokio",
- "tracing",
  "wiremock",
 ]
 
@@ -2435,7 +2388,6 @@ dependencies = [
 name = "bcs-storage-local"
 version = "0.1.4-beta.3"
 dependencies = [
- "anyhow",
  "async-trait",
  "bcs-storage-api",
  "bytes",
@@ -2582,7 +2534,6 @@ dependencies = [
  "bcs-observability",
  "bcs-protocol",
  "bcs-relation",
- "bcs-route-security",
  "bcs-service-api",
  "bcs-services-container",
  "bcs-session",
@@ -5741,7 +5692,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
  "aws-lc-rs",
- "log",
  "once_cell",
  "ring",
  "rustls-pki-types",

@@ -73,6 +73,20 @@ for p in $plugin_crates; do
   done
 done
 
+# ─── 迁移库存在性与依赖限制（code-build-footprint 任务 3）───
+count=$(echo "$metadata" | jq '[.packages[] | select(.name == "bcs-db-migrations")] | length')
+if [[ "$count" != 1 ]]; then
+  log FAIL migration "bcs-db-migrations must exist exactly once"
+  fail=1
+fi
+while IFS= read -r dep; do
+  if [[ "$dep" != bcs-db-api ]]; then
+    log FAIL migration "bcs-db-migrations has forbidden runtime/build path dependency: $dep"
+    fail=1
+  fi
+done < <(echo "$metadata" | jq -r '.packages[] | select(.name == "bcs-db-migrations") |
+  .dependencies[] | select(.kind != "dev" and .path != null) | .name')
+
 # ─── DEP-8: 声明但未使用 ───
 if command -v cargo-machete >/dev/null; then
   if ! cargo machete crates/service-api crates/adapters crates/services crates/external-clients 2>&1 | tee /tmp/machete.log; then

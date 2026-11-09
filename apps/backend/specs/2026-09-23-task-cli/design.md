@@ -821,6 +821,8 @@ Task Intake Skill 只生成或修订当前 target 对应的 `TaskSpec` 和追问
 
 ### 9.1 TaskInfoRequest 转换
 
+身份语义：`owner_bot_id` 规范化为 Bot UUID（`bot_id:bot_owner_id`），`owner_user_id` 是任务发起人/访问者；下游执行身份一律拆分为节点 `assignee=bot_id` 与 `extend_props["assignee_owner_id"]=bot_owner_id`。历史裸 Bot id（含 `default` 与非 `default`）统一按 `owner_user_id` 承载的 Bot owner 语义处理；不做 BotService 反查补全。
+
 ```python
 def build_task_info_request(
     result: TaskIntakeResult,

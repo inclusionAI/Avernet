@@ -83,7 +83,7 @@ describe('useTaskExecution relay bootstrap', () => {
     expect(mockedHasTaskIntent).not.toHaveBeenCalled();
   });
 
-  it('安装 task-intent-recognition 后动态任务可选', async () => {
+  it('安装 task-intake 后动态任务可选', async () => {
     mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
     const { result } = renderHook(() =>
       useTaskExecution({
@@ -183,7 +183,7 @@ describe('useTaskExecution relay bootstrap', () => {
     expect(mockedHasTaskIntent).toHaveBeenCalledTimes(2);
   });
 
-  it('未安装 task-intent-recognition 时动态任务不可选', async () => {
+  it('未安装 task-intake 时动态任务不可选', async () => {
     const { result } = renderHook(() =>
       useTaskExecution({
         panelRef: { current: null } as never,

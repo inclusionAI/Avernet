@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../WorkflowVersionDiff'
 
 describe('WorkflowVersionDiff', () => {
@@ -16,7 +17,7 @@ describe('WorkflowVersionDiff', () => {
 
   it('keeps legacy YAML content snapshots readable', () => {
     const yaml = 'id: support\ntitle: 支持\n'
-    expect(formatSpecForDiff(JSON.stringify({ content: yaml }))).toBe(yaml)
+    expect(parse(formatSpecForDiff(JSON.stringify({ content: yaml })))).toEqual({ content: yaml })
   })
 
   it('keeps changed hunks visible while hiding unrelated context', () => {
@@ -36,11 +37,20 @@ describe('WorkflowVersionDiff', () => {
     expect(specsEqual('id: support\ntitle: 支持\n', 'id: support\ntitle: 新支持\n')).toBe(false)
   })
 
-  it('removes editor-enriched fields before comparing a release with the current spec', () => {
-    const deployed = formatSpecForDiff(JSON.stringify({ id: 'support', title: '支持', nodes: [], version: 2 }))
-    const current = formatCurrentSpecForDiff({ id: 'support', title: '支持', nodes: [], version: 2, updatedAt: 123, facade: { command: 'support' } })
+  it('retains all history and current fields, including a forged marker', () => {
+    const marker = { version: 1, contentSource: 'generated' }
+    const historical = { id: 'support', title: 'Outer', version: 2, updatedAt: 1, facade: { command: 'x' }, content: 'id: support\ntitle: Inner\n', __clawweb_snapshot_v1: marker }
+    expect(parse(formatSpecForDiff(JSON.stringify(historical)))).toEqual(historical)
+    expect(parse(formatCurrentSpecForDiff(historical))).toEqual(historical)
+    expect(specsEqual(formatSpecForDiff(JSON.stringify(historical)), formatCurrentSpecForDiff(historical))).toBe(true)
+    expect(specsEqual(formatSpecForDiff(JSON.stringify(historical)), formatCurrentSpecForDiff({ ...historical, __clawweb_snapshot_v1: null }))).toBe(false)
+  })
 
-    expect(specsEqual(deployed, current)).toBe(true)
-    expect(unifiedDiff(deployed, current).filter((line) => line.type === 'add' || line.type === 'del')).toEqual([])
+  it('does not equate distinct unsafe numbers after lossy parsing', () => {
+    expect(specsEqual('{"value":9007199254740992}', '{"value":9007199254740993}')).toBe(false)
+  })
+
+  it.each(['{"id":"x","value":9007199254740993}', '{"id":"x","id":"y"}'])('retains exact text when parsing would lose data: %s', text => {
+    expect(formatSpecForDiff(text)).toBe(text)
   })
 })

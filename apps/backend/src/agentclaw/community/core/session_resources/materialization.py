@@ -101,6 +101,7 @@ class SessionResourceMaterializeHandler:
                 "session_key_hash": record.session_key_hash,
                 "workspace_relative_path": record.workspace_relative_path,
                 "filename": record.filename,
+                "creator_name": record.creator_name,
                 "size_bytes": record.size_bytes,
                 "content_hash": record.client_content_hash,
                 "uploaded_at": self._format_uploaded_at(record.gmt_create),

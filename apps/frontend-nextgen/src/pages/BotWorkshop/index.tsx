@@ -19,10 +19,22 @@ import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
-import React, { useState } from 'react';
+import { history } from '@umijs/max';
+import React, { useEffect, useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
+  // 对话菜单落地参数(2026-11-05):?create=cloud 默认唤起云端创建;?keyword=Bot 名称按名称
+  // 过滤定位该 Bot(Bot 行「跳转至 Bot 管理」前置入口传入)。挂载一次性消费并清参,避免刷新/回退重复触发。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const keyword = params.get('keyword');
+    const createCloud = params.get('create') === 'cloud';
+    if (keyword) workshop.setKeyword(keyword);
+    if (createCloud) workshop.openCreateCloud();
+    if (keyword || createCloud) history.replace('/bot-workshop');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次性消费,workshop 方法每渲染重建不进依赖。
+  }, []);
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
@@ -142,7 +154,7 @@ const BotWorkshopPage: React.FC = () => {
                       onAuthorize={workshop.openAuthorize}
                       getCollaborationMode={workshop.collaborationModeFor}
                       getGeneralConfigAvailability={(bot) =>
-                        getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
+                        getGeneralConfigAvailability(bot, workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
                       onManagePublication={setPublicationBot}

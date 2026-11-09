@@ -17,6 +17,8 @@ def patch_builder(di):
         from agentclaw.community.di.profile import DeployProfile
         from tests.community.acceptance.bot_ownership_sync.fixture_module import OwnerHandoffFixtureModule
 
+        from tests.community.acceptance.collaboration_repair.fixture_module import CollaborationRepairFixtureModule
+
         original = di.build_injector
         if getattr(original, "_owner_acceptance_installed", False) is True:
             return
@@ -24,7 +26,7 @@ def patch_builder(di):
         def build_injector(*, profile, extra_modules=None):
             modules = extra_modules
             if profile is DeployProfile.SINGLEBOX:
-                modules = [*(extra_modules or ()), OwnerHandoffFixtureModule()]
+                modules = [*(extra_modules or ()), OwnerHandoffFixtureModule(), CollaborationRepairFixtureModule()]
             return original(profile=profile, extra_modules=modules)
 
         build_injector._owner_acceptance_installed = True

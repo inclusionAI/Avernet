@@ -129,6 +129,8 @@ def test_scoped_default_bot_identity_is_resolved_by_owner():
     out = enrich_bot_display_names([record], request=_Request(injector))
 
     assert out[0].display_name == "Owner Default Bot"
+    assert out[0].author_bot_uuid == "default:149844"
+    assert out[0].author_bot_id == "default"
     assert bot_service.calls == ["default:149844"]
 
 
@@ -140,6 +142,8 @@ def test_scoped_non_default_bot_identity_is_resolved_by_owner():
     out = enrich_bot_display_names([record], request=_Request(injector))
 
     assert out[0].display_name == "Owner Bot A"
+    assert out[0].author_bot_uuid == "bot-a:149844"
+    assert out[0].author_bot_id == "bot-a"
     assert bot_service.calls == ["bot-a:149844"]
 
 
@@ -190,7 +194,20 @@ def test_bot_with_stored_snapshot_keeps_it():
     record = _topic(AUTHOR_TYPE_BOT, "bot-a", display_name="Snapshot")
     out = enrich_bot_display_names([record], request=_Request(injector))
     assert out[0].display_name == "Snapshot"
-    assert bot_service.calls == []  # no lookup performed
+    assert out[0].author_bot_id == "bot-a"
+    assert bot_service.calls == ["bot-a"]  # identity metadata still needs lookup
+
+
+def test_bot_author_identity_is_enriched_from_bot_service():
+    bot_service = _BotService(
+        {"bot-a": {"owner_id": "149844", "bot_name": "Bot Alpha"}}
+    )
+    injector = _Injector({BotServiceProtocol: bot_service})
+    out = enrich_bot_display_names(
+        [_topic(AUTHOR_TYPE_BOT, "bot-a")], request=_Request(injector)
+    )
+    assert out[0].author_bot_uuid == "bot-a:149844"
+    assert out[0].author_bot_id == "bot-a"
 
 
 def test_human_record_is_never_enriched():

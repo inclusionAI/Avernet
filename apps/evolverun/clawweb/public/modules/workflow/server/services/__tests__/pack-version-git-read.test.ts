@@ -62,20 +62,18 @@ it('fetches only exact tips with complete blobs, without default branch, other o
   const before = remote('show-ref');
   const verify = await initRead();
   expect(hooks.calls.filter(args => args[0] === 'init')).toEqual([['init', '--quiet']]);
-  const a = await readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true });
-  const b = await readPackScriptSnapshot(repo, 'flow', 'pack', 'draft', { includeVersionFiles: true });
+  const a = await readPackScriptSnapshot(repo, 'flow', 'pack', 'draft', { includeVersionFiles: true });
   await verify();
-  expect(a).toMatchObject({ baseCommit: current, draftHead: draft, baseRef: 'origin/wf/flow' });
-  expect(b).toMatchObject({ baseCommit: draft, draftHead: draft, baseRef: 'origin/saved/flow' });
+  expect(a).toMatchObject({ baseCommit: current, draftHead: current, baseRef: 'origin/wf/flow' });
   expect(a.versionFiles).toContainEqual({ path: 'blob.bin', mode: '100644', contentBase64: 'AP8M' });
-  expect(b.versionFiles).toContainEqual({ path: 'blob.bin', mode: '100644', contentBase64: 'AQID' });
-  expect(runGit(repo, ['for-each-ref', '--format=%(refname)']).split('\n').sort()).toEqual(['refs/remotes/origin/saved/flow', 'refs/remotes/origin/wf/flow']);
+  expect(() => runGit(repo, ['cat-file', '-e', draft])).toThrow();
+  expect(runGit(repo, ['for-each-ref', '--format=%(refname)']).split('\n').sort()).toEqual(['refs/remotes/origin/wf/flow']);
   expect(() => runGit(repo, ['cat-file', '-e', unrelated])).toThrow();
   expect(remote('show-ref')).toBe(before);
   const fetch = hooks.calls.find(args => args[0] === 'fetch')!;
   expect(fetch).toContain('--depth=1'); expect(fetch).toContain('--no-tags');
   expect(fetch.filter(arg => arg.startsWith('+refs/heads/'))).toEqual([
-    '+refs/heads/wf/flow:refs/remotes/origin/wf/flow', '+refs/heads/saved/flow:refs/remotes/origin/saved/flow',
+    '+refs/heads/wf/flow:refs/remotes/origin/wf/flow',
   ]);
 });
 
@@ -83,8 +81,8 @@ it.each(['wf', 'saved', 'both'])('preserves missing %s ref for the existing not-
   if (missing !== 'saved') remote('update-ref', '-d', 'refs/heads/wf/flow');
   if (missing !== 'wf') remote('update-ref', '-d', 'refs/heads/saved/flow');
   const verify = await initRead(); await verify();
-  const version = missing === 'wf' ? 'current' : 'draft';
-  await expect(readPackScriptSnapshot(repo, 'flow', 'pack', version, { includeVersionFiles: true })).rejects.toThrow('Workflow snapshot not found');
+  if (missing !== 'saved') await expect(readPackScriptSnapshot(repo, 'flow', 'pack', 'draft', { includeVersionFiles: true })).rejects.toThrow('Workflow snapshot not found');
+  else expect((await readPackScriptSnapshot(repo, 'flow', 'pack', 'draft', { includeVersionFiles: true })).baseCommit).toBe(current);
 });
 
 it.each(['--upload-pack=evil', 'flow:refs/heads/main', 'flow*', 'a/b', 'flow..x', 'flow.lock', 'flow\nmain', 'flow\n'])('rejects injected id %s before invoking Git', async id => {
@@ -97,13 +95,13 @@ it('fails when a ref changes between discovery and fetch', async () => {
   hooks.after = args => { if (args[0] === 'ls-remote' && first) { first = false; remote('update-ref', 'refs/heads/wf/flow', draft); } };
   await expect(initRead()).rejects.toMatchObject({ code: 'PACK_REFS_CHANGED' });
 });
-it.each(['update', 'delete', 'create'])('detects ref %s after fetching even if the selected tip is unchanged', async action => {
+it.each(['update', 'delete', 'create'])('ignores saved ref %s after fetching the wf tip', async action => {
   if (action === 'create') remote('update-ref', '-d', 'refs/heads/saved/flow');
   const verify = await initRead();
-  await readPackScriptSnapshot(repo, 'flow', 'pack', 'current', { includeVersionFiles: true });
+  await readPackScriptSnapshot(repo, 'flow', 'pack', 'draft', { includeVersionFiles: true });
   if (action === 'delete') remote('update-ref', '-d', 'refs/heads/saved/flow');
   else remote('update-ref', 'refs/heads/saved/flow', action === 'create' ? draft : current);
-  await expect(verify()).rejects.toMatchObject({ code: 'PACK_REFS_CHANGED' });
+  await verify();
 });
 
 it.each(['explicit token', 'embedded password'])('reuses scoped HTTPS credential helpers with %s without exposing credentials', async source => {
@@ -118,7 +116,7 @@ it.each(['explicit token', 'embedded password'])('reuses scoped HTTPS credential
   expect(JSON.stringify(hooks.calls)).not.toContain(hooks.secret);
 });
 
-it('the remote service fails instead of returning a snapshot if saved changes during reading', async () => {
+it('saved changes during a draft read do not invalidate wf', async () => {
   const { readPackVersionFromRemote } = await import('../pack-version-remote.js');
   let changed = false;
   hooks.after = args => {
@@ -128,7 +126,7 @@ it('the remote service fails instead of returning a snapshot if saved changes du
   };
   const db = { query: async () => [] } as never;
   await expect(readPackVersionFromRemote({ db, gitConfig: cfg(), gitAuthor: { name: 'fixture', email: 'fixture@example.invalid' },
-    workflowId: 'flow', packId: 'pack', version: 'current' })).rejects.toMatchObject({ code: 'PACK_REFS_CHANGED' });
+    workflowId: 'flow', packId: 'pack', version: 'draft' })).resolves.toMatchObject({ baseCommit: current, baseRef: 'origin/wf/flow' });
   expect(changed).toBe(true);
 });
 
@@ -141,7 +139,7 @@ it('the remote service verifies a missing snapshot before reporting not found', 
   };
   const db = { query: async () => [] } as never;
   await expect(readPackVersionFromRemote({ db, gitConfig: cfg(), gitAuthor: { name: 'fixture', email: 'fixture@example.invalid' },
-    workflowId: 'flow', packId: 'pack', version: 'current' })).rejects.toMatchObject({ code: 'PACK_REFS_CHANGED' });
+    workflowId: 'flow', packId: 'pack', version: 'draft' })).rejects.toMatchObject({ code: 'PACK_REFS_CHANGED' });
 });
 
 it('GET returns the existing 404 for absent selected refs', async () => {
@@ -181,7 +179,7 @@ it('sanitizes Git failures and removes temporary HTTPS credentials', async () =>
   try {
     await readPackVersionFromRemote({ db: { query: async () => [] } as never,
       gitConfig: { ...cfg(), remoteUrl: 'https://git.example.invalid/team/repo.git', token: hooks.secret },
-      gitAuthor: { name: 'fixture', email: 'fixture@example.invalid' }, workflowId: 'flow', packId: 'pack', version: 'current' });
+      gitAuthor: { name: 'fixture', email: 'fixture@example.invalid' }, workflowId: 'flow', packId: 'pack', version: 'draft' });
   } catch (error) { caught = error; }
   expect(caught).toBeInstanceOf(Error);
   expect(String(caught)).not.toContain(hooks.secret);
@@ -219,7 +217,7 @@ it('reads a SHA-256 remote using a matching object database', async () => {
   await withGitOperation({}, async () => {
     await preparePackVersionRepo(dest, config, 'flow');
     const verify = await fetchPackVersionRefs(dest, config, 'flow');
-    const snapshot = await readPackScriptSnapshot(dest, 'flow', 'pack', 'current', { includeVersionFiles: true });
+    const snapshot = await readPackScriptSnapshot(dest, 'flow', 'pack', 'draft', { includeVersionFiles: true });
     expect(snapshot.baseCommit).toMatch(/^[a-f0-9]{64}$/);
     await verify();
   });
@@ -295,7 +293,7 @@ it('blocks real local-remote discovery when the allowed protocol is HTTPS only',
 it('blocks a real local fetch when discovery succeeds but HTTPS is the only allowed protocol', async () => {
   // Supply a real advertisement obtained before restricting the environment;
   // only discovery is stubbed, so the attempted fetch still runs real Git.
-  hooks.discoveryOverride = runGit(root, ['ls-remote', bare, 'refs/heads/wf/flow', 'refs/heads/saved/flow']);
+  hooks.discoveryOverride = runGit(root, ['ls-remote', bare, 'refs/heads/wf/flow']);
   vi.stubEnv('GIT_ALLOW_PROTOCOL', 'https');
   stubUnsafeGitEnvironment();
   await expect(initRead()).rejects.toMatchObject({ code: 'GIT_COMMAND_FAILED' });
@@ -334,7 +332,7 @@ it('fails closed on dumb HTTP without retrying or fetching unrelated refs', asyn
     expect(fetches).toHaveLength(1);
     expect(fetches[0]).toContain('--depth=1'); expect(fetches[0]).toContain('--no-tags');
     expect(fetches[0].filter(arg => arg.startsWith('+refs/heads/'))).toEqual([
-      '+refs/heads/wf/flow:refs/remotes/origin/wf/flow', '+refs/heads/saved/flow:refs/remotes/origin/saved/flow',
+      '+refs/heads/wf/flow:refs/remotes/origin/wf/flow',
     ]);
   } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });

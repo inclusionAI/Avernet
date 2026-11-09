@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
-use bcs_protocol::{BcsFrame, RequestFrame, BCN_PROTOCOL_VERSION_HEADER, BCN_TIMESTAMP_HEADER};
+use bcs_protocol::{BcsFrame, RequestFrame};
 
-use super::{provider_request_from_frame, HttpProviderTransport};
+use super::{provider_request_from_frame, HttpProviderTransport, with_bcn_headers};
 
 const HISTORY_COMPLETE_TOTAL_TIMEOUT_MS: u64 = 10_000;
 
@@ -106,15 +106,18 @@ impl bcs_service_api::port::HistoryBackfillPort for HttpProviderTransport {
             Ok(client) => client,
             Err(_) => return Err(Error::Unavailable { retryable: false }),
         };
-        let request_fut = request_client
+        let http_request = request_client
             .post(guarded_url.as_str())
             .bearer_auth(service_credential.expose_secret())
             .header("Accept", "application/json")
-            .header("Content-Type", "application/json; charset=utf-8")
-            .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
-            .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
-            .json(&body)
-            .send_traced();
+            .header("Content-Type", "application/json; charset=utf-8");
+        let request_fut = with_bcn_headers(
+            http_request,
+            protocol_version,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .json(&body)
+        .send_traced();
         let deadline = tokio::time::Instant::now() + Duration::from_millis(HISTORY_COMPLETE_TOTAL_TIMEOUT_MS);
         let mut response = tokio::time::timeout_at(deadline, request_fut)
             .await

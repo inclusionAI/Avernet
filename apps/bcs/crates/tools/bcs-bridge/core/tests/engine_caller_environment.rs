@@ -63,3 +63,51 @@ printf '{"type":"result","subtype":"success","result":"%s|%s|%s","is_error":fals
     assert_eq!(outcome.final_text.as_deref(),Some("||retained"));
     assert_eq!(std::env::var("BCN_ACTOR_BOT_ID").unwrap(),"wrong-parent-shell-bot");
 }
+
+#[test]
+fn resolved_cli_endpoint_clears_inherited_endpoint_selectors() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "cli_endpoint_environment_child", "--nocapture"])
+        .env("BRIDGE_URL_CHILD", "resolved")
+        .env("BCS_API_BASE_URL", "inherited-api")
+        .env("MOLTIS_BCS_URL", "inherited-legacy")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+}
+
+#[test]
+fn missing_cli_endpoint_preserves_inherited_endpoint_selectors() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "cli_endpoint_environment_child", "--nocapture"])
+        .env("BRIDGE_URL_CHILD", "inherited")
+        .env("BCS_API_BASE_URL", "inherited-api")
+        .env("MOLTIS_BCS_URL", "inherited-legacy")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+}
+
+#[tokio::test]
+async fn cli_endpoint_environment_child() {
+    let mode = std::env::var("BRIDGE_URL_CHILD").unwrap_or_default();
+    if mode.is_empty() { return; }
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("engine");
+    std::fs::write(&bin, r#"#!/bin/sh
+IFS= read -r request || exit 1
+printf '{"type":"result","subtype":"success","result":"%s|%s","is_error":false,"session_id":"session"}\n' "$BCS_API_BASE_URL" "$MOLTIS_BCS_URL"
+"#).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let options = toml::toml! { completion_mode = "legacy" };
+    let engine = ClaudeCodeFactory::default().build(bin, &options).unwrap();
+    let mut req = TurnRequest::new("endpoint", "hello", dir.path(), Arc::new(Observer));
+    if mode == "resolved" {
+        req.env.push(("BCS_API_BASE_URL".into(), "resolved-api".into()));
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let consumer = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let outcome = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new()).await.unwrap();
+    consumer.await.unwrap();
+    let expected = if mode == "resolved" { "resolved-api|" } else { "inherited-api|inherited-legacy" };
+    assert_eq!(outcome.final_text.as_deref(), Some(expected));
+}

@@ -2278,6 +2278,26 @@ class TestGetCatalogPublicBotProfile:
             },
             {"name": "坏集合", "mcps": "not-a-list"},
         ]
+        # 技能清单与 MCP 同口径：所有能力集并集、按 id 去重、非法条目跳过。
+        skill_set_service.get_all_skill_sets_with_skills.return_value = [
+            {
+                "name": "能力集A",
+                "skills": [
+                    {"id": "s1", "name": "风太周报"},
+                    {"id": "s2", "name": "虾摸鱼总结"},
+                ],
+                "skill_count": 2,
+            },
+            {
+                "name": "能力集B",
+                "skills": [
+                    {"id": "s1", "name": "风太周报"},
+                    {"id": "  ", "name": "   "},
+                ],
+                "skill_count": 1,
+            },
+            {"name": "坏集合", "skills": "not-a-list"},
+        ]
         factory = MagicMock()
         factory.create.return_value = skill_set_service
         svc = _make_service(
@@ -2303,6 +2323,10 @@ class TestGetCatalogPublicBotProfile:
                 {"capability_id": "m1", "display_name": "AntV 可视化图表"},
                 {"capability_id": "m2", "display_name": "Dima MCP"},
             ],
+            "skills": [
+                {"skill_id": "s1", "display_name": "风太周报"},
+                {"skill_id": "s2", "display_name": "虾摸鱼总结"},
+            ],
         }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search=None,
@@ -2315,8 +2339,13 @@ class TestGetCatalogPublicBotProfile:
         repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
             [("bot-1", "owner-1")], page=1, page_size=1
         )
-        factory.create.assert_called_once_with(entity_id="owner-1", bot_id="bot-1")
+        # MCP 与技能两条投影各自独立取数：工厂各 create 一次、入参一致。
+        assert factory.create.call_count == 2
+        factory.create.assert_called_with(entity_id="owner-1", bot_id="bot-1")
         skill_set_service.get_all_skill_sets_with_mcps.assert_called_once_with(
+            user_id="owner-1", bolt_id="bot-1"
+        )
+        skill_set_service.get_all_skill_sets_with_skills.assert_called_once_with(
             user_id="owner-1", bolt_id="bot-1"
         )
 
@@ -2345,6 +2374,7 @@ class TestGetCatalogPublicBotProfile:
             "description": "BCS summary",
             "engine_name": "",
             "capabilities": [],
+            "skills": [],
         }
         factory.create.assert_not_called()
 
@@ -2402,8 +2432,40 @@ class TestGetCatalogPublicBotProfile:
         )
 
         assert result["capabilities"] == []
+        assert result["skills"] == []
         assert result["bot_name"] == "TestBot"
         assert result["engine_name"] == "openclaw"
+
+    def test_profile_skill_failure_degrades_to_empty_list_without_blocking_mcps(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        skill_set_service = MagicMock()
+        skill_set_service.get_all_skill_sets_with_mcps.return_value = [
+            {"mcps": [{"id": "m1", "name": "AntV 可视化图表"}]}
+        ]
+        skill_set_service.get_all_skill_sets_with_skills.side_effect = (
+            RuntimeError("skill views down")
+        )
+        factory = MagicMock()
+        factory.create.return_value = skill_set_service
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        # 技能清单降级为空不阻断画像与 MCP 清单。
+        assert result["skills"] == []
+        assert result["capabilities"] == [
+            {"capability_id": "m1", "display_name": "AntV 可视化图表"}
+        ]
 
 
 # ---------------------------------------------------------------------------

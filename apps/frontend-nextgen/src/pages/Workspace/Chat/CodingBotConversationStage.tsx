@@ -15,29 +15,31 @@ export function CodingBotConversationStage({
   bot,
   session,
   human,
-  emptyPlaceholder,
+  placeholder,
   onOpenSessionList,
 }: {
   bot: ChatBotView;
   session?: BotChatSessionView | null;
   human: HumanIdentity | null;
-  emptyPlaceholder?: ConversationSessionPlaceholderModel | null;
+  placeholder?: ConversationSessionPlaceholderModel | null;
   onOpenSessionList(): void;
 }): JSX.Element {
-  const showEmptyPlaceholder = emptyPlaceholder?.status === 'empty';
+  const showPlaceholder = placeholder !== undefined && placeholder !== null;
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
+      {/* Placeholder 永远覆盖在 Stage 上方，而不是替换 Stage；这样“未选择 Session”
+          仍能 bootstrap 目标 Bot Runtime 并注册 controller。 */}
       <div
-        aria-hidden={showEmptyPlaceholder ? true : undefined}
-        className={`flex min-h-0 min-w-0 flex-1 ${showEmptyPlaceholder ? 'invisible pointer-events-none' : ''}`}
+        aria-hidden={showPlaceholder ? true : undefined}
+        className={`flex min-h-0 min-w-0 flex-1 ${showPlaceholder ? 'invisible pointer-events-none' : ''}`}
       >
         <CodingBotStageBoundary bot={bot} session={session} human={human} />
       </div>
 
-      {showEmptyPlaceholder && (
+      {showPlaceholder && placeholder && (
         <div className="absolute inset-0 z-10 flex bg-background">
-          <ConversationSessionPlaceholder model={emptyPlaceholder} onOpenSessionList={onOpenSessionList} />
+          <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenSessionList} />
         </div>
       )}
     </div>

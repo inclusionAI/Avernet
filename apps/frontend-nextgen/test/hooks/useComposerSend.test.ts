@@ -75,7 +75,7 @@ describe('useComposerSend beforeSend', () => {
     });
 
     expect(beforeSend).toHaveBeenCalledWith('  调研首条消息标题  ');
-    expect(sendMessage).toHaveBeenCalledWith('/task-intent-recognition 调研首条消息标题', undefined);
+    expect(sendMessage).toHaveBeenCalledWith('/skill/task-intake 调研首条消息标题', undefined);
   });
 
   it('多个胶囊时逐胶囊发送指令（各发起一个任务），发完清空选中态', async () => {
@@ -99,7 +99,7 @@ describe('useComposerSend beforeSend', () => {
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage).toHaveBeenNthCalledWith(1, "/task workflow_id='cmd-fa' 调研 A", undefined);
-    expect(sendMessage).toHaveBeenNthCalledWith(2, '/task-intent-recognition 调研 A', undefined);
+    expect(sendMessage).toHaveBeenNthCalledWith(2, '/skill/task-intake 调研 A', undefined);
     expect(clearSelection).toHaveBeenCalledTimes(1);
     expect(clearDraft).toHaveBeenCalledTimes(1);
   });

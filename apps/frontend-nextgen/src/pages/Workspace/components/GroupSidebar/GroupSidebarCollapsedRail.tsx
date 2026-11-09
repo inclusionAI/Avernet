@@ -3,9 +3,11 @@
 // 无贯穿线），但语义取 spec 裁决（collaboration-sidebar）：群头像是「展开+直达」，
 // 不做收起态挂机径，也不设溢出封顶（群列表数量级远小于会话）。
 import { Button, IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
+import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
 import type { GroupView } from '@/domain/collaboration/types';
 import { ChevronRight, Plus, Users } from 'lucide-react';
 import { AvatarTile } from '../AvatarTile';
+import { GroupAvatarStack } from './GroupAvatarStack';
 
 export interface GroupSidebarCollapsedRailProps {
   groups: GroupView[];
@@ -44,21 +46,31 @@ export function GroupSidebarCollapsedRail({
         )}
         {groups.map((group) => {
           const selected = selectedGroupId === group.groupId;
+          const displayParticipants = getDisplayParticipants(group);
+          const totalCount = getParticipantDisplayCount(group.participantCount, displayParticipants);
           return (
             <Tooltip key={group.groupId}>
               <TooltipTrigger asChild>
+                {/* icon 档的 p-0 与 Bot 泊位竖轨同因（2026-11-05）：default 档残留的 px-4
+                    会把内容盒吃到 4px，真实头像 img 会被 preflight img{max-width:100%} 钳成
+                    竖线；当前群 tile 走 span 回退未显症，群头像接 src 前先对齐。 */}
                 <Button
                   variant="ghost"
+                  size="icon"
                   aria-label={`打开协作群 ${group.name}`}
                   aria-current={selected ? 'true' : undefined}
                   className="relative h-9 w-9 rounded-full hover:bg-muted"
                   onClick={() => onOpenGroup(group.groupId)}
                 >
-                  <AvatarTile
-                    label={group.name}
-                    className="h-7 w-7 rounded-full"
-                    fallbackContent={<Users className="h-3.5 w-3.5" aria-hidden="true" />}
-                  />
+                  {displayParticipants.length > 0 ? (
+                    <GroupAvatarStack participants={displayParticipants} totalCount={totalCount} size={16} />
+                  ) : (
+                    <AvatarTile
+                      label={group.name}
+                      className="h-7 w-7 rounded-full"
+                      fallbackContent={<Users className="h-3.5 w-3.5" aria-hidden="true" />}
+                    />
+                  )}
                   {selected && (
                     <span
                       aria-hidden="true"

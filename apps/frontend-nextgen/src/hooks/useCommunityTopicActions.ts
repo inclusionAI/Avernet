@@ -1,7 +1,7 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
-import { forumAuthorRef } from '@/domain/community/interactionQueries';
+import { forumAuthorRef, interactionTargetRef, summaryTargetRef } from '@/domain/community/interactionQueries';
 import type {
   CommunityAuthor,
   CommunityTopic,
@@ -95,20 +95,21 @@ export function useCommunityTopicActions({
   );
 
   const getAuthorSummary = useCallback(
-    (author: CommunityAuthor): InteractionSummary | undefined =>
-      interactions.getSummary({ actor: forumAuthorRef(author) }),
+    (author: CommunityAuthor): InteractionSummary | undefined => {
+      const actor = forumAuthorRef(author);
+      return actor ? interactions.getSummary({ actor }) : undefined;
+    },
     [interactions],
   );
 
   const loadAuthorSummary = useCallback(
     (author: CommunityAuthor) => {
-      const authorTarget: ForumTargetRef = {
-        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: author.id,
-      };
+      const actor = forumAuthorRef(author);
+      const target: ForumTargetRef | undefined = summaryTargetRef(author);
+      if (!actor || !target) return;
       const queries: InteractionSummaryQuery[] = [
-        { actor: forumAuthorRef(author) },
-        { actor: viewer, target: authorTarget },
+        { actor },
+        { actor: viewer, target },
       ];
       void interactions.refreshSummaries(queries);
     },
@@ -116,11 +117,10 @@ export function useCommunityTopicActions({
   );
 
   const authorFollowPending = useCallback(
-    (author: CommunityAuthor): boolean =>
-      interactions.isActionPending('FOLLOW', {
-        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: author.id,
-      }),
+    (author: CommunityAuthor): boolean => {
+      const target = summaryTargetRef(author);
+      return target ? interactions.isActionPending('FOLLOW', target) : false;
+    },
     [interactions],
   );
 
@@ -141,24 +141,29 @@ export function useCommunityTopicActions({
   );
 
   const isAuthorFollowed = useCallback(
-    (author: CommunityAuthor): boolean =>
-      actionActive('FOLLOW', {
-        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: author.id,
-      }),
+    (author: CommunityAuthor): boolean => {
+      const target = summaryTargetRef(author);
+      return target ? actionActive('FOLLOW', target) : false;
+    },
     [actionActive],
   );
 
   const followAuthor = useCallback(
     async (author: CommunityAuthor) => {
-      const success = await toggleInteraction('FOLLOW', {
-        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: author.id,
-      });
-      if (success) {
-        await interactions.refreshSummaries([{ actor: forumAuthorRef(author) }], { force: true });
+      try {
+        const target = interactionTargetRef(author);
+        const success = await toggleInteraction('FOLLOW', target);
+        if (success) {
+          const actor = forumAuthorRef(author);
+          if (actor) {
+            await interactions.refreshSummaries([{ actor }], { force: true });
+          }
+        }
+        return success;
+      } catch (error) {
+        notifyError(error instanceof Error ? error.message : 'BOT 缺少带工号后缀的身份，无法关注');
+        return false;
       }
-      return success;
     },
     [interactions, toggleInteraction],
   );

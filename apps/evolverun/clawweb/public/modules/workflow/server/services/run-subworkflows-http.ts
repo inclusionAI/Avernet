@@ -18,6 +18,23 @@ function scalar(value: unknown, required = false): string | undefined {
 }
 
 export function installFanoutReadHandlers(router: Router, reader: RunSubworkflowsReader | null): void {
+  // Temporary guard for new ordinary fanoutOrigin children; legacy managed children
+  // and ordinary runs keep their existing behavior. This is not general write authorization.
+  const guardWrite = asyncHandler(async (req, res, next) => {
+    // Public bootstrap supplies the reader. Legacy router compositions without it retain their behavior.
+    if (!reader) { next(); return; }
+    try {
+      const child = await reader.isFanoutOriginChild(String(req.params.flowId));
+      if (child === null) { next(); return; }
+      if (child) { res.status(403).json({ error: 'Forbidden', message: 'Public writes to fanout child runs are temporarily unavailable' }); return; }
+      next();
+    } catch {
+      res.status(503).json({ error: 'Service Unavailable', message: 'Run state unavailable' });
+    }
+  });
+  router.patch('/:flowId/session', guardWrite);
+  router.post(['/:flowId/intervene', '/:flowId/rerun', '/:flowId/abort', '/:flowId/chat', '/:flowId/poll-message'], guardWrite);
+  router.delete('/:flowId', guardWrite);
   router.get('/:flowId/nodes/:nodeId/subworkflows', asyncHandler(async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try {
@@ -58,7 +75,7 @@ export function projectRun(run: Record<string, unknown>, inspection?: RunReadIns
 const nodeMetadata = ['id', 'flow_id', 'workflow_id', 'node_id', 'executor_type', 'node_title',
   'status', 'attempt', 'started_at', 'completed_at', 'duration_ms', 'version', 'gmt_create'];
 export function projectNodes<T extends object>(nodes: T[], inspection?: RunReadInspection): T[] {
-  if (!inspection?.managed) return nodes;
-  // A downstream parent node can copy a group result; redacting only the group node is unsafe.
+  if (!inspection?.managed && !inspection?.sensitiveChild) return nodes;
+  // Parent and independent child nodes can contain copied inputs, secrets or fanout results.
   return nodes.map(node => Object.fromEntries(nodeMetadata.filter(key => key in node).map(key => [key, node[key]])) as T);
 }

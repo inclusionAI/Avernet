@@ -257,9 +257,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
     ) -> bool:
         """single_bot 派发。
 
-        授权过滤(claim_on JOIN)已在派发策略层(``SearchBasedDispatchStrategy._apply_claim_join``)
-        完成,执行器不再做表级授权 JOIN:直接按 ``node.run_info.assignee`` 投递。被 JOIN 丢掉的候选
-        已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
+        执行器直接按 ``node.run_info.assignee`` 投递；执行器本身不参与候选搜索或任务认领授权。"""
         assignee = node.run_info.assignee
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         if not is_dispatchable_single_bot_assignee(assignee):

@@ -1284,6 +1284,7 @@ class TestRestartGuardOrchestration:
             owner_workno="user001",
             name="TestBot",
             summary="",
+            avatar_url="",
         )
         baas.upgrade_bot.assert_called_once()
         assert call_order == ["bcn", "upgrade"]

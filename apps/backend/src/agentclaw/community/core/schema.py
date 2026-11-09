@@ -104,6 +104,28 @@ def _metadatas() -> list[MetaData]:
     return [Base.metadata, bot_chat_models.Base.metadata]
 
 
+def schema_signature() -> tuple:
+    """Fingerprint of the table layout :func:`create_all` would emit.
+
+    Lets a store that re-creates the same schema many times in one process
+    (the in-memory SQLite plugin, once per test) reuse an earlier result only
+    while the registered tables are unchanged. It tracks table names and their
+    column / index / constraint counts per registry, so a model module imported
+    later (or a table added to the metadata) yields a different signature.
+    """
+    import_all_models()
+    return tuple(
+        (
+            id(metadata),
+            tuple(
+                (name, len(table.columns), len(table.indexes), len(table.constraints))
+                for name, table in sorted(metadata.tables.items())
+            ),
+        )
+        for metadata in _metadatas()
+    )
+
+
 # InnoDB caps an index key at 3072 bytes (MySQL 8, DYNAMIC row format), and
 # utf8mb4 bills 4 bytes per character — so a single VARCHAR(1024) column blows
 # the budget on its own.

@@ -90,25 +90,14 @@ async def test_update_consumer_uses_publish_snapshot_not_old_bot_image(image):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("image", [None, "new:image"])
-@pytest.mark.parametrize("write_failure", ["exception", "zero-rows"])
-async def test_update_config_write_failure_never_enters_provider_retry(
-    image, write_failure, caplog
-):
+async def test_update_config_write_failure_never_enters_provider_retry(image):
     service, device, publish, batch = _service(
         snapshot={"deploy_config": {"docker_image": image}}
     )
-    if write_failure == "exception":
-        service._device_repo.update_device.side_effect = RuntimeError(
-            "write unavailable"
-        )
-    else:
-        service._device_repo.update_device.return_value = 0
+    service._device_repo.update_device.side_effect = RuntimeError("write unavailable")
 
-    with caplog.at_level(logging.WARNING, logger="core-service"):
-        result = await _execute(service, publish, batch, "update")
+    result = await _execute(service, publish, batch, "update")
 
-    if write_failure == "zero-rows":
-        assert "Device configuration update affected no rows" in caplog.text
     assert not result.success and result.failed_count == 1
     service._device_service.update_device.assert_not_awaited()
     service._device_service.restart_device.assert_not_awaited()
@@ -118,6 +107,52 @@ async def test_update_config_write_failure_never_enters_provider_retry(
         == "FAILED"
     )
     assert device.extra_config["deploy_config"]["docker_image"] == "old:image"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image", [None, "new:image"])
+@pytest.mark.parametrize("status", ["ACTIVE", "PENDING"])
+async def test_update_warns_and_continues_when_config_update_affects_zero_rows(
+    image, status, caplog
+):
+    service, _, publish, batch = _service(
+        snapshot={"deploy_config": {"docker_image": image}}
+    )
+    service._device_repo.update_device.return_value = 0
+    service._device_service.update_device.return_value = SimpleNamespace(status=status)
+
+    with caplog.at_level(logging.WARNING, logger="core-service"):
+        result = await _execute(service, publish, batch, "update")
+
+    assert result.success and result.failed_count == 0
+    assert result.processed_count == (1 if status == "ACTIVE" else 0)
+    assert "Device configuration update affected no rows" in caplog.text
+    assert "device_id=10, publish_id=30, tenant=test, env=" in caplog.text
+    service._drain_device.assert_awaited_once()
+    service._device_service.update_device.assert_awaited_once()
+    service._drive_record_attempt.assert_not_awaited()
+    assert [
+        call.kwargs["result_status"]
+        for call in service._publish_record_repo.update_result.call_args_list
+    ] == (["PROCESSING", "SUCCESS"] if status == "ACTIVE" else ["PROCESSING"])
+
+
+@pytest.mark.asyncio
+async def test_zero_row_config_update_preserves_provider_failure_retry():
+    service, _, publish, batch = _service()
+    service._device_repo.update_device.return_value = 0
+    service._device_service.update_device.side_effect = RuntimeError(
+        "provider unavailable"
+    )
+
+    result = await _execute(service, publish, batch, "update")
+
+    assert result.success  # The provider failure is handled by the retry policy.
+    service._drive_record_attempt.assert_awaited_once()
+    assert (
+        service._drive_record_attempt.call_args.kwargs["failure_reason"]
+        == "provider unavailable"
+    )
 
 
 @pytest.mark.asyncio

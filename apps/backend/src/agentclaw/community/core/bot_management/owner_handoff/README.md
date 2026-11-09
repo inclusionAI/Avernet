@@ -148,3 +148,42 @@ retains its semantics. `bot_manager_sync.ownership_enabled` controls delivery;
 `owner_handoff.enabled` controls initiation and remains unchanged. Delivery can
 be lost after commit, leaving old BCS Owner permissions active until corrected.
 The handoff's durable journal is not an ownership-delivery outbox.
+
+## Expired historical passport compatibility
+
+An authorized service-Bot handoff first uses the existing valid-passport query.
+Only if no credential ID is returned does QUEUED request `query_handoff_passport`.
+This metadata-only Plugin API reads a non-deleted expired passport; it never
+returns a usable token or makes an expired certificate valid. Missing history
+still yields CURRENT_PASSPORT_REQUIRED before recording remote issuance intent.
+
+The corp adapter negotiates protocol v1 plus `expired_passport_handoff: 1` before
+calling `queryOwnerHandoffPassport`. A v1 server without this additive capability
+continues to serve valid-certificate handoffs and is never sent the new RPC.
+The old credential ID is still persisted and supplied as expectedCredentialId.
+The server must reject a newer credential that appeared after the snapshot and
+must preserve historical resource/admin configuration, replacing only the Owner
+admin and execution identity according to the existing handoff rules.
+
+Deploy tcauthmng first, then the corp adapter and community Backend together.
+No schema or frontend changes are required. Existing QUEUED operations resume
+through the normal recovery worker; no new request_key or manual Owner update is
+needed. REISSUING and later phases keep their valid-certificate generation checks.
+The fallback does not support deleted certificates or Bots with no recoverable
+history, and it never revokes the shared Agent through revokeIdentityCredential.
+
+## Direct ARCA runtime acknowledgement
+
+Direct ARCA header updates acknowledge one sandbox with the exact boolean True;
+BaaS/teclaw updates return a physical-device list. BotService preserves this
+provider distinction when producing runtime device_count. An explicit ARCA True
+counts as one acknowledged target without inventing a physical-device list.
+False, empty lists, exceptions, truthy non-booleans and boolean results from
+other providers do not establish an ARCA acknowledgement. The handoff runtime
+fence remains unchanged: every returned binding must confirm at least one target.
+
+A task already at UPDATING_RUNTIME/RUNTIME_ACK_REQUIRED can retry the same
+operation after the Backend fix is deployed. It reuses the selected credential,
+updates runtime targets again, then commits the Owner and releases its maintenance
+lock through the normal finish transaction. No direct lock/journal edits or
+credential reissue are needed for this receipt-format compatibility repair.

@@ -18,7 +18,7 @@ import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { DomainError, DomainResult } from './identityService';
-import { mapBcsSessionItem, mapSessionListItem, type BcsSessionRaw } from './mappers';
+import { mapBcsSessionItem, mapSessionDetail, mapSessionListItem, type BcsSessionRaw } from './mappers';
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
   return { code, friendlyMessage, canRetry: false };
@@ -75,7 +75,7 @@ export const sessionService = {
         ...(contextDelivery ? { context_delivery: contextDelivery } : {}),
         ...(messageViewScope ? { message_view_scope: messageViewScope } : {}),
       });
-      return { ok: true, data: mapSessionListItem(resp.data!) };
+      return { ok: true, data: mapSessionDetail(resp.data!) };
     } catch (err) {
       const status = (err as { status?: number })?.status;
       if (status === 409) {
@@ -151,7 +151,7 @@ export const sessionService = {
   async getSessionDetail(sessionId: string): Promise<DomainResult<SessionView>> {
     try {
       const resp = await getSession(sessionId);
-      return { ok: true, data: mapSessionListItem(resp.data!) };
+      return { ok: true, data: mapSessionDetail(resp.data!) };
     } catch (err) {
       // 详情查询均为读侧静默用途（成员补齐 / 陈旧选中兜底探测 / 邀请与深链反查），调用方自行处理失败；
       // 取消协议层默认全局提示，避免对已退出/已删除会话的「必然失败」反查变成用户可见报错。

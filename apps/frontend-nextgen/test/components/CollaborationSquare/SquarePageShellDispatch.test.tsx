@@ -22,7 +22,7 @@ jest.mock('@/components/CollaborationSquare/PublicBotCatalogPanel', () => ({
 // dmore：bot Tab 的搜索栏 + 身份选择器上移页头；固定 mock 避免真实 hooks 触发请求。
 jest.mock('@/components/CollaborationSquare/SquareSearchBar', () => ({
   __esModule: true,
-  default: () => <div data-testid="square-search" />,
+  default: ({ className }: { className?: string }) => <div data-testid="square-search" className={className} />,
 }));
 jest.mock('@/components/CollaborationSquare/SquareIdentityPicker', () => ({
   SquareIdentityPicker: () => <div data-testid="square-identity-picker" />,
@@ -147,7 +147,7 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.queryByRole('heading', { name: '公开 Bot' })).not.toBeInTheDocument();
     expect(screen.queryByText(/可按 Bot 名称或 Owner 用户名称搜索公开 Bot/)).not.toBeInTheDocument();
     expect(resourceRegion).toContainElement(screen.getByText('bot panel'));
-    const botNav = screen.getByRole('link', { name: '公开Bot' });
+    const botNav = screen.getByRole('link', { name: '公开 Bot' });
     expect(botNav).toHaveClass('bg-primary/10', 'text-primary');
     expect(resourceRegion).toHaveClass('space-y-4');
     // dmore：页头下 16px 起内容，左右 20px 边距，内容列宽 1200。
@@ -172,9 +172,9 @@ describe('SquarePageShell three-way dispatch', () => {
   test('两个资源导航始终以命名导航链接呈现（社区已迁至实验室一级导航）', () => {
     render(<SquarePageShell resource="bot" />);
     const navigation = screen.getByRole('navigation');
-    expect(screen.getByRole('link', { name: '公开Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
     expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
-    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开Bot' }));
+    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开 Bot' }));
   });
 
   test('Bot 工作身份下两 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
@@ -185,7 +185,7 @@ describe('SquarePageShell three-way dispatch', () => {
 
     render(<SquarePageShell resource="bot" />);
 
-    expect(screen.getByRole('link', { name: '公开Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '公开协作群' })).toBeInTheDocument();
   });
 
@@ -212,4 +212,22 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(navigationSource).not.toContain('/collaboration-square/community');
     expect(navigationSource).not.toContain('任务广场');
   });
+});
+
+test('公开 Bot 页头搜索/身份选择器容器允许压缩：长名称与引擎标签截断而不是整行溢出', () => {
+  render(<SquarePageShell resource="bot" />);
+  const search = screen.getByTestId('square-search');
+  const picker = screen.getByTestId('square-identity-picker');
+  // md 以上仍为 348/338 设计宽度，但更窄的窗口允许收缩（内部已有 truncate）。
+  expect(search).toHaveClass('min-w-0', 'md:w-[348px]');
+  expect(search).not.toHaveClass('md:shrink-0');
+  expect(picker.parentElement).toHaveClass('min-w-0', 'md:w-[338px]');
+  expect(picker.parentElement).not.toHaveClass('shrink-0');
+});
+
+test('公开协作群页头固定身份容器同样允许压缩', () => {
+  render(<SquarePageShell resource="group" />);
+  const identity = screen.getByTestId('square-group-identity');
+  expect(identity.parentElement).toHaveClass('min-w-0', 'md:w-[222px]');
+  expect(identity.parentElement).not.toHaveClass('shrink-0');
 });
