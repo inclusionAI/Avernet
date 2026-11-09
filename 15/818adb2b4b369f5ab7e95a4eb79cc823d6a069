@@ -1,0 +1,14 @@
+.aci/metadata/bcn.aci-metadata.yml
+  h_45bbed694cc8b0 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15818adb2b4b369f5ab7e95a4eb79cc823d6a069",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

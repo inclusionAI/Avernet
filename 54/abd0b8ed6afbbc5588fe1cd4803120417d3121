@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/.aci/clawweb-pre-deploy.aci.yml
+  h_5f06d4d8b4bdd5 158-165
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  h_5f06d4d8b4bdd5 142-145,190-309
+apps/evolverun/clawweb/scripts/ci/pack-origin-smoke.sh
+  h_5f06d4d8b4bdd5 1-91
+apps/evolverun/clawweb/scripts/ci/tests/pack-origin-smoke.test.mjs
+  h_5f06d4d8b4bdd5 1-160
+apps/evolverun/clawweb/scripts/ci/tests/pre-smoke.test.mjs
+  h_5f06d4d8b4bdd5 5,8,14-19,22-33,38-42,45-52,60,66-76,78,80-99,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54abd0b8ed6afbbc5588fe1cd4803120417d3121",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
