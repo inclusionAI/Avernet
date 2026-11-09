@@ -1,0 +1,35 @@
+apps/frontend-nextgen/test/services/workspace/channelBindingService.test.ts
+  s_46bcfe8c4c3bdf::t_5e812833ec9cb9 105
+  s_46bcfe8c4c3bdf::t_6232861f87e48f 199
+  s_46bcfe8c4c3bdf::t_e2e36d1e11131f 81
+  s_46bcfe8c4c3bdf::t_fa541a7436dbf5 30
+  s_46bcfe8c4c3bdf::t_a603e2f8c39059 13
+apps/frontend-nextgen/test/internal/currentOpenApiUserId.test.ts
+  s_46bcfe8c4c3bdf::t_710034656cff2b 3-7
+apps/frontend-nextgen/test/internal/brandAndEngineCapabilities.test.ts
+  s_46bcfe8c4c3bdf::t_15bd4db86c87d8 3-7
+apps/frontend-nextgen/test/internal/grayReleaseCapability.test.ts
+  s_46bcfe8c4c3bdf::t_7fb19d33ef1a1c 8-12
+apps/frontend-nextgen/test/components/BotWorkshop/AuthorizationPanel.test.tsx
+  s_46bcfe8c4c3bdf::t_28a6a0fd43b603 11-12
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_46bcfe8c4c3bdf::t_ddf2071aa85d63 35
+apps/frontend-nextgen/scripts/public-tests.list
+  s_46bcfe8c4c3bdf::t_40de85cf426ffa 119-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b15485edada3e0f65d503f5c02c3afe70ce0a91b",
+  "prompts": {},
+  "sessions": {
+    "s_46bcfe8c4c3bdf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5d246eaa-c821-4882-91d4-4aa45f4572de",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
