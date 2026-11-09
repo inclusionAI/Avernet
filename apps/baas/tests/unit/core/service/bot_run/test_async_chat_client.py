@@ -1440,6 +1440,212 @@ class TestInjectMessageSemaphore:
         assert started.is_set()
 
     @pytest.mark.asyncio
+    async def test_same_session_injects_are_serialized(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """同一 session 的 inject 写入串行，避免同时到达引擎。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = []
+
+        async def serialized_inject(*args, **kwargs):
+            calls.append(kwargs["message"])
+            if len(calls) == 1:
+                first_started.set()
+                await release_first.wait()
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_inject.side_effect = serialized_inject
+
+        first = asyncio.create_task(
+            client.inject_message("first", session_key="same-session")
+        )
+        await first_started.wait()
+        second = asyncio.create_task(
+            client.inject_message("second", session_key="same-session")
+        )
+        await asyncio.sleep(0.02)
+        assert calls == ["first"]
+
+        release_first.set()
+        await asyncio.gather(first, second)
+        assert calls == ["first", "second"]
+        assert client._active_inject_sessions == set()
+
+    @pytest.mark.asyncio
+    async def test_inject_does_not_wait_for_active_send(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """observe-only inject 不应等待正在运行的 chat.send。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        send_started = asyncio.Event()
+
+        async def hanging_send(*args, **kwargs):
+            send_started.set()
+            await asyncio.sleep(10)
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_send.side_effect = hanging_send
+        send_task = asyncio.create_task(
+            client.send_message("run", session_key="same-session")
+        )
+        await send_started.wait()
+
+        await client.inject_message("observation", session_key="same-session")
+        mock_bot_ws_instance.chat_inject.assert_awaited_once()
+
+        send_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await send_task
+
+    @pytest.mark.asyncio
+    async def test_same_session_inject_timeout_cleans_up(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """同一 session 的 inject 排队超时后清理并保留前序占位。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            ConcurrentSessionError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        client = AsyncChatClient(
+            uri="ws://host/ws",
+            session_key_timeout=0.05,
+            max_concurrent_sessions=1,
+        )
+        await client.connect()
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def hanging_inject(*args, **kwargs):
+            first_started.set()
+            await release_first.wait()
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_inject.side_effect = hanging_inject
+        first = asyncio.create_task(
+            client.inject_message("first", session_key="same-session")
+        )
+        await first_started.wait()
+
+        with pytest.raises(ConcurrentSessionError, match="Timed out waiting"):
+            await client.inject_message("second", session_key="same-session")
+
+        assert client._active_inject_sessions == {"same-session"}
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert client._active_inject_sessions == set()
+
+    @pytest.mark.asyncio
+    async def test_close_wakes_inject_waiter_with_not_connected_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """close 后被唤醒的 inject waiter 返回连接错误而非断言失败。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            NotConnectedError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def hanging_inject(*args, **kwargs):
+            first_started.set()
+            await release_first.wait()
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_inject.side_effect = hanging_inject
+        first = asyncio.create_task(
+            client.inject_message("first", session_key="same-session")
+        )
+        await first_started.wait()
+        waiter = asyncio.create_task(
+            client.inject_message("second", session_key="same-session")
+        )
+        await asyncio.sleep(0.01)
+
+        await client.close()
+        with pytest.raises(NotConnectedError, match="Connection lost"):
+            await waiter
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    @pytest.mark.asyncio
+    async def test_different_session_injects_remain_concurrent(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """不同 session 的 inject 不因 sessionKey 串行化而互相阻塞。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+        running = 0
+        max_running = 0
+
+        async def concurrent_inject(*args, **kwargs):
+            nonlocal running, max_running
+            running += 1
+            max_running = max(max_running, running)
+            if running == 2:
+                started.set()
+            await release.wait()
+            running -= 1
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_inject.side_effect = concurrent_inject
+        first = asyncio.create_task(client.inject_message("one", session_key="s1"))
+        second = asyncio.create_task(client.inject_message("two", session_key="s2"))
+        await started.wait()
+        release.set()
+        await asyncio.gather(first, second)
+        assert max_running == 2
+
+    @pytest.mark.asyncio
     async def test_inject_no_semaphore_when_zero(
         self, mock_bot_ws, mock_bot_ws_instance
     ):

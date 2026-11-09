@@ -114,14 +114,19 @@ class TestProperties:
 
     def test_has_active_sessions_true_when_active(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
-        client._active_sessions.add("s1")
+        client._active_inject_sessions.add("inject-1")
         assert client.has_active_sessions is True
 
-    def test_active_session_count(self, mock_bot_ws):
+    def test_active_session_count_includes_injects(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
-        client._active_sessions.add("s1")
-        client._active_sessions.add("s2")
+        client._active_sessions.add("send-1")
+        client._active_inject_sessions.add("inject-1")
         assert client.active_session_count == 2
+
+    def test_tracks_active_inject_session(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        client._active_inject_sessions.add("inject-1")
+        assert client.tracks_session("inject-1") is True
 
     @pytest.mark.asyncio
     async def test_connect_registers_mode_transition_resolved_handler(

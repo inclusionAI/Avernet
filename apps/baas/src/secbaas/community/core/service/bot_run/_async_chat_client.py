@@ -295,9 +295,12 @@ class AsyncChatClient:
             self._sessions, ignore_case=ignore_case
         )
 
-        # send_message 的并发保护：同一 sessionKey 同一时刻只能有一个在等回复
-        # dict[str, None] — 仅用于 "是否存在" 判断，值无意义
+        # send_message/send_message_stream 的并发保护：同一 sessionKey 同一时刻
+        # 只能有一个在等回复。
         self._active_sessions: set[str] = set()
+        # inject_message 的并发保护：只串行化 inject 之间的写入，不阻塞
+        # observe-only inject 进入一个正在运行的 chat.send。
+        self._active_inject_sessions: set[str] = set()
 
         # 重连状态标记
         self._reconnecting = False
@@ -329,7 +332,7 @@ class AsyncChatClient:
         R7-F2：v3 fallback 上的附件后台 run 同样占据本连接的服务面
         （归属标记随 run 存活，与 A2A 的 has_running_runs 同口径）。
         """
-        if len(self._active_sessions) > 0:
+        if self._active_sessions or self._active_inject_sessions:
             return True
         if bool(getattr(self._client, "has_running_runs", False)):
             return True
@@ -347,7 +350,10 @@ class AsyncChatClient:
         只看①会把"非等待发送后取消"退回普通负载分配，命中无记录的
         连接 → RUN_NOT_TRACKED 永不发 CancelTask。
         """
-        if session_key in self._sessions:
+        if (
+            session_key in self._sessions
+            or session_key in self._active_inject_sessions
+        ):
             return True
         if session_key in self._v3_routed_sessions:
             return True
@@ -357,7 +363,7 @@ class AsyncChatClient:
     @property
     def active_session_count(self) -> int:
         """当前活跃会话数（供连接池负载均衡使用）。"""
-        return len(self._active_sessions)
+        return len(self._active_sessions | self._active_inject_sessions)
 
     def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
         """转发池层逐消息带来的最新鉴权头（P0：120s JWT 过期正修）。
@@ -765,8 +771,9 @@ class AsyncChatClient:
         与 send_message 不同，inject_message 仅发送消息后立即返回，
         不等待 chat 完成事件，适用于注入系统指令、上下文补充等场景。
 
-        注入消息同样受并发信号量约束（max_concurrent_sessions），
-        但不受同一 sessionKey 排队机制限制（注入不等待响应，无会话状态竞争）。
+        注入消息同样受并发信号量约束；同一 sessionKey 的多个 inject 彼此排队，
+        但 inject 不等待正在运行的 chat.send/stream。这样既保持 observe-only
+        消息的实时性，也避免多个 inject 同时到达引擎造成会话状态竞争。
 
         Args:
             message: 要注入的消息内容
@@ -783,11 +790,40 @@ class AsyncChatClient:
                 "Not connected. Call connect() first or wait for reconnection."
             )
 
-        # 受并发信号量约束，提供背压
-        if self._concurrency_sem is not None:
-            await self._concurrency_sem.acquire()
-
+        session_registered = False
+        semaphore_acquired = False
         try:
+            # 先登记 sessionKey，再等待全局 semaphore。这样同一 session 的
+            # 后续 inject 会按 session_key_timeout 超时，不会因 semaphore 满载
+            # 而无限等待；不同 session 仍受全局背压约束。
+            async with self._condition:
+                while session_key in self._active_inject_sessions:
+                    try:
+                        await asyncio.wait_for(
+                            self._condition.wait(),
+                            timeout=self._session_key_timeout,
+                        )
+                    except TimeoutError:
+                        raise ConcurrentSessionError(
+                            f"Timed out waiting for session_key={session_key} "
+                            f"(timeout={self._session_key_timeout}s)"
+                        )
+                if not self.is_connected:
+                    raise NotConnectedError(
+                        "Connection lost while waiting to inject message."
+                    )
+                self._active_inject_sessions.add(session_key)
+                session_registered = True
+
+            # 受并发信号量约束，提供背压。只在 acquire 成功后释放，避免
+            # 取消排队任务时错误增加 semaphore 计数。
+            if self._concurrency_sem is not None:
+                await self._concurrency_sem.acquire()
+                semaphore_acquired = True
+
+            if not self.is_connected:
+                raise NotConnectedError("Connection lost before injecting message.")
+
             # 发送消息（不等待响应）
             logger.info("[inject] Injecting message: session_key=%s", session_key)
             assert self._client is not None
@@ -827,7 +863,11 @@ class AsyncChatClient:
                 "[inject] injected message not wait, return as soon as possible"
             )
         finally:
-            if self._concurrency_sem is not None:
+            if session_registered:
+                async with self._condition:
+                    self._active_inject_sessions.discard(session_key)
+                    self._condition.notify_all()
+            if semaphore_acquired and self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
     async def _ensure_v3_fallback(self):
@@ -973,6 +1013,7 @@ class AsyncChatClient:
         async with self._condition:
             self._sessions.clear()
             self._active_sessions.clear()
+            self._active_inject_sessions.clear()
             self._condition.notify_all()
 
     @staticmethod
