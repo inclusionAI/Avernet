@@ -1,5 +1,6 @@
 import { HELP_MOCK_BOTS } from '@/domain/communityHelp/mock';
 import { advanceHelpTask, createHelpTask, validateHelpBoard } from '@/domain/communityHelp/model';
+import { normalizeHelpSourceConfig } from '@/domain/communityHelp/sources';
 import type {
   HelpBoard,
   HelpBoardDraft,
@@ -53,7 +54,7 @@ export function useCommunityHelpMock() {
     (draft: HelpBoardDraft, editingId?: string): boolean => {
       try {
         if (editingId && !state.boards.some((item) => item.id === editingId))
-          throw new Error('版面不存在，请重新打开设置');
+          throw new Error('模版不存在，请重新打开设置');
         const error = validateHelpBoard(draft, state.boards, HELP_MOCK_BOTS, editingId);
         if (error) throw new Error(error);
         const saved: HelpBoard = {
@@ -62,15 +63,19 @@ export function useCommunityHelpMock() {
           type: 'AiCoding',
           name: draft.name.trim(),
           description: draft.description.trim(),
-          members: draft.members.map((member) => ({ ...member, roles: [...member.roles] })),
+          members:
+            draft.collaborationMode === 'open'
+              ? []
+              : draft.members.map((member) => ({ ...member, roles: [...member.roles] })),
           sources: [...draft.sources],
+          sourceConfig: normalizeHelpSourceConfig(draft.sourceConfig),
         };
         state.saveBoard(saved);
         clearFilters();
-        toast.success(editingId ? '版面设置已更新（Mock）' : '版面已创建（Mock）');
+        toast.success(editingId ? '模版设置已更新（Mock）' : '模版已创建（Mock）');
         return true;
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '版面保存失败');
+        toast.error(error instanceof Error ? error.message : '模版保存失败');
         return false;
       }
     },

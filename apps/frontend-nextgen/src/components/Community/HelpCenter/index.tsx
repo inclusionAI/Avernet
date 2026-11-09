@@ -6,29 +6,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { HELP_STATUS } from '@/domain/communityHelp/model';
 import { HELP_SOURCES, type HelpBoard, type HelpSource, type HelpTaskStatus } from '@/domain/communityHelp/types';
 import { useCommunityHelpMock } from '@/hooks/useCommunityHelpMock';
-import { Bot, CircleHelp, FlaskConical, Layers3, Plus, Search, Settings2 } from 'lucide-react';
+import { Bot, CircleHelp, Layers3, LayoutGrid, List, Plus, Search, Settings2 } from 'lucide-react';
 import { useState } from 'react';
 import { HelpBoardDialog } from './HelpBoardDialog';
 import { HelpTaskCard } from './HelpTaskCard';
 import { HelpTaskDialog } from './HelpTaskDialog';
+import { HelpTaskList } from './HelpTaskList';
 import { HelpTaskPanel } from './HelpTaskPanel';
 
 export function CommunityHelpCenter() {
   const help = useCommunityHelpMock();
   const [boardDialog, setBoardDialog] = useState<{ board: HelpBoard | null } | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [view, setView] = useState<'card' | 'list'>('card');
   return (
-    <section className="space-y-5" aria-label="求助_new 工作台">
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-5 text-muted-foreground">
-        <FlaskConical className="size-4 shrink-0 text-primary" aria-hidden />
-        <span className="font-medium text-primary">Mock 预览</span>
-      </div>
-      <nav className="flex flex-wrap items-center gap-3" aria-label="求助版面导航">
+    <section className="min-w-0 space-y-5" aria-label="求助_new 工作台">
+      <nav className="flex flex-wrap items-center gap-3" aria-label="求助模版导航">
         <div className="min-w-0 max-w-full overflow-x-auto">
           <Segmented
             value={help.board.id}
             onChange={help.selectBoard}
-            aria-label="求助版面"
+            aria-label="求助模版"
             options={help.boards.map((board) => ({
               value: board.id,
               label: board.name,
@@ -43,7 +41,7 @@ export function CommunityHelpCenter() {
           leftIcon={<Plus className="size-3.5" aria-hidden />}
           onClick={() => setBoardDialog({ board: null })}
         >
-          新增版面
+          新增模版
         </Button>
       </nav>
       <div className="rounded-2xl border border-border bg-card p-5 sm:p-6">
@@ -68,30 +66,34 @@ export function CommunityHelpCenter() {
               leftIcon={<Settings2 className="size-3.5" aria-hidden />}
               onClick={() => setBoardDialog({ board: help.board })}
             >
-              版面设置
+              模版设置
             </Button>
             <Button leftIcon={<Plus className="size-3.5" aria-hidden />} onClick={() => setTaskDialogOpen(true)}>
               新建求助任务
             </Button>
           </div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4" aria-label="版面协作团队">
+        <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4" aria-label="模版协作团队">
           <span className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
             <Bot className="size-3.5" aria-hidden />
             协作团队
           </span>
-          {help.board.members.map((member) => (
-            <span
-              key={member.botId}
-              className="max-w-full break-words rounded-md border border-border bg-background px-2.5 py-1 text-xs"
-            >
-              {help.bots.find((bot) => bot.id === member.botId)?.name}{' '}
-              <span className="text-muted-foreground">· {member.roles.join(' / ')}</span>
-            </span>
-          ))}
+          {help.board.collaborationMode === 'open' ? (
+            <span className="rounded-md bg-primary/10 px-2.5 py-1 text-xs text-primary">开放协作 · 不限定特定 Bot</span>
+          ) : (
+            help.board.members.map((member) => (
+              <span
+                key={member.botId}
+                className="max-w-full break-words rounded-md border border-border bg-background px-2.5 py-1 text-xs"
+              >
+                {help.bots.find((bot) => bot.id === member.botId)?.name}{' '}
+                <span className="text-muted-foreground">· {member.roles.join(' / ')}</span>
+              </span>
+            ))
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="版面任务统计">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="模版任务统计">
         {(Object.keys(HELP_STATUS) as HelpTaskStatus[]).map((status) => (
           <div key={status} className="rounded-xl border border-border bg-card px-4 py-3">
             <span className="text-xs text-muted-foreground">{HELP_STATUS[status].label}</span>
@@ -146,19 +148,34 @@ export function CommunityHelpCenter() {
           </div>
         </div>
       </div>
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>共 {help.tasks.length} 个任务</span>
-        <span>按创建顺序展示 · Mock 数据</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>共 {help.tasks.length} 个任务</span>
+          <span>按创建顺序展示 · Mock 数据</span>
+        </div>
+        <Segmented
+          value={view}
+          onChange={setView}
+          aria-label="任务视图"
+          options={[
+            { value: 'card', label: '卡片视图', icon: <LayoutGrid className="size-3.5" aria-hidden /> },
+            { value: 'list', label: '列表视图', icon: <List className="size-3.5" aria-hidden /> },
+          ]}
+        />
       </div>
       {help.tasks.length ? (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {help.tasks.map((task) => (
-            <HelpTaskCard key={task.id} task={task} onOpen={() => help.selectTask(task.id)} />
-          ))}
-        </div>
+        view === 'card' ? (
+          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {help.tasks.map((task) => (
+              <HelpTaskCard key={task.id} task={task} onOpen={() => help.selectTask(task.id)} />
+            ))}
+          </div>
+        ) : (
+          <HelpTaskList tasks={help.tasks} onOpen={help.selectTask} />
+        )
       ) : (
         <Empty
-          title={help.boardTasks.length ? '没有匹配的求助任务' : '这个版面还没有求助任务'}
+          title={help.boardTasks.length ? '没有匹配的求助任务' : '这个模版还没有求助任务'}
           description="创建一项求助，让配置好的 Bot 团队开始模拟协作。"
           action={
             help.boardTasks.length ? (

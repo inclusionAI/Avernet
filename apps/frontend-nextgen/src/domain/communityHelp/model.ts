@@ -1,3 +1,4 @@
+import { createHelpSourceDetails, validateHelpSourceConfig } from './sources';
 import {
   HELP_ROLES,
   HELP_SOURCES,
@@ -6,6 +7,7 @@ import {
   type HelpBoardDraft,
   type HelpBot,
   type HelpRole,
+  type HelpStage,
   type HelpTask,
   type HelpTaskDraft,
   type HelpTaskStatus,
@@ -56,15 +58,19 @@ export function validateHelpBoard(
   bots: HelpBot[],
   editingId?: string,
 ): string | null {
-  if (!draft.name.trim()) return '请填写版面名称';
+  if (!draft.name.trim()) return '请填写模版名称';
   if (
     boards.some(
       (board) => board.id !== editingId && board.name.trim().toLowerCase() === draft.name.trim().toLowerCase(),
     )
   )
-    return '版面名称已存在';
+    return '模版名称已存在';
   if (!draft.sources.length || draft.sources.some((source) => !HELP_SOURCES.includes(source)))
     return '请至少启用一个有效任务来源';
+  const sourceError = validateHelpSourceConfig(draft.sources, draft.sourceConfig);
+  if (sourceError) return sourceError;
+  if (draft.collaborationMode === 'open') return null;
+  if (draft.collaborationMode !== 'selected') return '请选择协作 Bot 范围';
   if (!draft.members.length) return '请至少选择一个 Bot';
   if (new Set(draft.members.map((member) => member.botId)).size !== draft.members.length) return '请勿重复选择 Bot';
   if (draft.members.some((member) => !bots.some((bot) => bot.id === member.botId))) return '请选择有效的 Mock Bot';
@@ -82,33 +88,49 @@ export function createHelpTask(
 ): HelpTask {
   if (!draft.title.trim()) throw new Error('请填写任务标题');
   if (!draft.description.trim()) throw new Error('请填写任务说明');
-  if (!board.sources.includes(draft.source)) throw new Error('请选择当前版面已启用的任务来源');
-  const stages = HELP_ROLES.filter((role) => board.members.some((member) => member.roles.includes(role))).map(
+  if (!board.sources.includes(draft.source)) throw new Error('请选择当前模版已启用的任务来源');
+  const sourceError = validateHelpSourceConfig([draft.source], board.sourceConfig);
+  if (sourceError) throw new Error(sourceError);
+  if (draft.source !== '手动输入' && draft.syncToDima) throw new Error('仅手动输入任务支持自动同步到 Dima');
+  if (draft.syncToDima && !draft.dimaProjectSpace.trim()) throw new Error('请填写同步目标 Dima 项目空间');
+  const open = board.collaborationMode === 'open';
+  const stages = HELP_ROLES.filter((role) => open || board.members.some((member) => member.roles.includes(role))).map(
     (role, index) => ({
       id: `${id}-stage-${index}`,
       role,
-      botNames: board.members
-        .filter((member) => member.roles.includes(role))
-        .map((member) => bots.find((bot) => bot.id === member.botId)?.name ?? member.botId),
+      botNames: open
+        ? []
+        : board.members
+            .filter((member) => member.roles.includes(role))
+            .map((member) => bots.find((bot) => bot.id === member.botId)?.name ?? member.botId),
       status: 'pending' as const,
       instruction: ROLE_DETAILS[role].instruction,
       output: '',
     }),
   );
-  if (!stages.length) throw new Error('请先为版面配置协作 Bot 和角色');
+  if (!stages.length) throw new Error('请先为模版配置协作 Bot 和角色');
   return {
     ...draft,
     title: draft.title.trim(),
     description: draft.description.trim(),
-    sourceRef: draft.sourceRef.trim(),
+    sourceRef: draft.source === '手动输入' ? '' : draft.sourceRef.trim(),
+    sourceDetails: createHelpSourceDetails(draft.source, board.sourceConfig),
+    syncToDima: draft.syncToDima,
+    dimaProjectSpace: draft.syncToDima ? draft.dimaProjectSpace.trim() : '',
     id,
     boardId: board.id,
+    collaborationMode: board.collaborationMode,
     status: 'pending',
     createdAt: at,
     stages,
     activities: [{ id: `${id}-created`, at, message: `从 ${draft.source} 创建 Mock 求助任务，等待协作。` }],
     artifacts: [],
   };
+}
+
+/** 开放任务不预分配 Bot；不能把空成员误展示为无人可参与。 */
+export function helpStageParticipants(task: HelpTask, stage: HelpStage): string {
+  return task.collaborationMode === 'open' ? '开放协作 · 不限定特定 Bot' : stage.botNames.join('、');
 }
 
 export function helpTaskProgress(task: HelpTask): number {
@@ -167,8 +189,9 @@ export function advanceHelpTask(task: HelpTask, at: string): HelpTask {
         id: `${current.id}-artifact`,
         name: `${current.role} · ${details.kind}`,
         kind: details.kind,
-        content: `【Mock 示例产物】${details.output}\n\n对应任务：${task.title}\n负责 Bot：${current.botNames.join(
-          '、',
+        content: `【Mock 示例产物】${details.output}\n\n对应任务：${task.title}\n负责 Bot：${helpStageParticipants(
+          task,
+          current,
         )}\n\n此内容仅演示交付形态，不代表已执行真实工作。`,
       },
     ],

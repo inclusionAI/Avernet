@@ -96,7 +96,7 @@ describe('CommunityPage 滚动容器结构', () => {
     render(<CommunityPage />);
     fireEvent.click(screen.getByRole('button', { name: '求助_new' }));
     expect(screen.getByRole('region', { name: '求助_new 工作台' })).toBeInTheDocument();
-    expect(screen.getByText('Mock 预览')).toBeInTheDocument();
+    expect(screen.queryByText('Mock 预览')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '发帖' })).not.toBeInTheDocument();
     expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
     expect(mockCommunityState.setScope).not.toHaveBeenCalled();

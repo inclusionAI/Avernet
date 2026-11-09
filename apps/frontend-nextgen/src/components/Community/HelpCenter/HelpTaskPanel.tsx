@@ -2,11 +2,13 @@ import { Button } from '@/components/ui/Button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Segmented } from '@/components/ui/Segmented';
+import { helpStageParticipants } from '@/domain/communityHelp/model';
 import type { HelpTask } from '@/domain/communityHelp/types';
 import { cn } from '@/utils/cn';
 import { Bot, Check, ChevronRight, CircleAlert, Clock3, FileText, FlaskConical, Play } from 'lucide-react';
 import { useState } from 'react';
 import { HelpProgress, HelpStatusBadge } from './HelpTaskCard';
+import { HelpTaskSourceInfo } from './HelpTaskSourceInfo';
 
 type PanelTab = 'progress' | 'activity' | 'artifacts';
 const STAGE_LABELS = { pending: '待开始', running: '执行中', attention: '需确认', done: '已完成' };
@@ -74,6 +76,9 @@ export function HelpTaskPanel({
                 <p className="whitespace-pre-wrap break-words text-xs leading-6 text-muted-foreground">
                   {task.description}
                 </p>
+                <div className="mt-3">
+                  <HelpTaskSourceInfo task={task} />
+                </div>
                 <p className="mt-3 text-xs text-muted-foreground">创建时间 · {formatTime(task.createdAt)}</p>
               </section>
               <section aria-label="协作阶段">
@@ -128,7 +133,7 @@ export function HelpTaskPanel({
                 </div>
                 <p className="mt-3 flex items-center gap-2 text-xs text-primary">
                   <Bot className="size-4 shrink-0" aria-hidden />
-                  {selected.botNames.join('、')}
+                  {helpStageParticipants(task, selected)}
                 </p>
                 <p className="mt-3 text-xs leading-6 text-muted-foreground">{selected.instruction}</p>
                 <div className="mt-3 rounded-lg bg-card p-3 text-xs leading-6">

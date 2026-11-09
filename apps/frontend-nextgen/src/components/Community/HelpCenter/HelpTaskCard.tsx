@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/Button';
-import { HELP_STATUS, helpTaskProgress } from '@/domain/communityHelp/model';
+import { HELP_STATUS, helpStageParticipants, helpTaskProgress } from '@/domain/communityHelp/model';
 import type { HelpTask } from '@/domain/communityHelp/types';
 import { cn } from '@/utils/cn';
 import { ArrowUpRight, Bot, GitBranch } from 'lucide-react';
+import { HelpTaskSourceInfo } from './HelpTaskSourceInfo';
 
 export function HelpStatusBadge({ status }: { status: HelpTask['status'] }) {
   const tone = HELP_STATUS[status];
@@ -69,18 +70,22 @@ export function HelpTaskCard({ task, onOpen }: { task: HelpTask; onOpen: () => v
         {task.title}
       </Button>
       <p className="mb-4 mt-2 line-clamp-2 text-xs leading-6 text-muted-foreground">{task.description}</p>
+      <div className="mb-4">
+        <HelpTaskSourceInfo task={task} />
+      </div>
       <div className="mt-auto">
         <HelpProgress task={task} />
       </div>
       <div className="mt-3 flex min-h-8 items-center gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
         <Bot className="size-3.5 shrink-0 text-primary" aria-hidden />
         <span className="min-w-0 break-words text-muted-foreground">
-          {current ? `${current.role} · ${current.botNames.join('、')}` : '所有协作阶段已完成'}
+          {current ? `${current.role} · ${helpStageParticipants(task, current)}` : '所有协作阶段已完成'}
         </span>
       </div>
       <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
         <span className="text-xs text-muted-foreground">
-          {botNames.length} 个 Bot · {task.artifacts.length} 份示例产物
+          {task.collaborationMode === 'open' ? '开放协作' : `${botNames.length} 个 Bot`} · {task.artifacts.length}{' '}
+          份示例产物
         </span>
         <Button
           variant="ghost"

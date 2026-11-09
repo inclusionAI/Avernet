@@ -22,9 +22,41 @@ beforeEach(() => {
 });
 
 describe('CommunityHelpCenter', () => {
+  test('导航、新增、设置及任务说明统一使用模版文案', () => {
+    render(<CommunityHelpCenter />);
+    expect(screen.getByRole('navigation', { name: '求助模版导航' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '求助模版' })).toBeInTheDocument();
+    expect(screen.getByLabelText('模版协作团队')).toBeInTheDocument();
+    expect(screen.getByLabelText('模版任务统计')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '求助_new 工作台' })).not.toHaveTextContent('版面');
+    fireEvent.click(screen.getByRole('button', { name: '新增模版' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Dima 项目空间/ }), { target: { value: '示例空间' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /Task Discover Bot/ }), {
+      target: { value: '任务发现 Bot' },
+    });
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: '新增模版' })).toBeInTheDocument();
+    expect(dialog.getByRole('textbox', { name: /模版名称/ })).toBeInTheDocument();
+    expect(dialog.getByRole('textbox', { name: '模版类型' })).toHaveValue('AiCoding');
+    expect(dialog.getByRole('textbox', { name: '模版说明' })).toHaveAttribute(
+      'placeholder',
+      '这个模版主要解决什么问题？',
+    );
+    expect(dialog.getByRole('button', { name: '创建模版' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('版面');
+    fireEvent.click(dialog.getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '模版设置' }));
+    expect(screen.getByRole('heading', { name: '模版设置' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('版面');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建求助任务' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('使用本模版的 6 个 Mock Bot');
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('版面');
+  });
+
   test('Mock 初始数据、状态筛选、搜索和清除筛选', () => {
     render(<CommunityHelpCenter />);
-    expect(screen.getByText('Mock 预览')).toBeInTheDocument();
+    expect(screen.queryByText('Mock 预览')).not.toBeInTheDocument();
     expect(screen.queryByText(/全部内容为示例数据，不连接真实 Bot 或任务来源/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('article')).toHaveLength(4);
     fireEvent.click(
@@ -38,38 +70,71 @@ describe('CommunityHelpCenter', () => {
     expect(screen.getAllByRole('article')).toHaveLength(4);
   });
 
-  test('取消版面编辑不写入；多 Bot 多角色配置可以保存', () => {
+  test('默认展示两个模版，TC-AiCoding 可独立创建任务且切换后不串版', () => {
     render(<CommunityHelpCenter />);
-    fireEvent.click(screen.getByRole('button', { name: '版面设置' }));
-    fireEvent.change(screen.getByRole('textbox', { name: /版面名称/ }), { target: { value: '不保存的修改' } });
+    const boards = within(screen.getByRole('group', { name: '求助模版' }));
+    expect(boards.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '全图风控AiCoding',
+      'TC-AiCoding',
+    ]);
+    expect(boards.getByRole('button', { name: '全图风控AiCoding' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(boards.getByRole('button', { name: 'TC-AiCoding' }));
+    expect(screen.getByRole('heading', { name: 'TC-AiCoding' })).toBeInTheDocument();
+    expect(screen.getByText('这个模版还没有求助任务')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '新建求助任务' })[0]);
+    fireEvent.change(screen.getByRole('textbox', { name: /任务标题/ }), { target: { value: 'TC 模版任务' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /任务说明/ }), { target: { value: '仅在 TC 模版协作' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建 Mock 任务' }));
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'TC 模版任务' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+    fireEvent.click(boards.getByRole('button', { name: '全图风控AiCoding' }));
+    expect(screen.getAllByRole('article')).toHaveLength(4);
+    expect(screen.queryByRole('button', { name: 'TC 模版任务' })).not.toBeInTheDocument();
+    fireEvent.click(boards.getByRole('button', { name: 'TC-AiCoding' }));
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'TC 模版任务' })).toBeInTheDocument();
+  });
+
+  test('取消模版编辑不写入；多 Bot 多角色配置可以保存', () => {
+    render(<CommunityHelpCenter />);
+    fireEvent.click(screen.getByRole('button', { name: '模版设置' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /模版名称/ }), { target: { value: '不保存的修改' } });
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
-    expect(useCommunityHelpMockStore.getState().boards[0].name).toBe('AiCoding');
-    fireEvent.click(screen.getByRole('button', { name: '版面设置' }));
+    expect(useCommunityHelpMockStore.getState().boards[0].name).toBe('全图风控AiCoding');
+    fireEvent.click(screen.getByRole('button', { name: '模版设置' }));
     fireEvent.click(screen.getByRole('button', { name: 'Coding Bot · verify' }));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith('模版设置已更新（Mock）');
     const members = useCommunityHelpMockStore.getState().boards[0].members;
     expect(members).toHaveLength(6);
     expect(members.find((member) => member.botId === 'mock-coder')?.roles).toEqual(['代码', 'verify']);
   });
 
-  test('新增版面要求每个选中 Bot 有角色，保存后自动切换到空版面', () => {
+  test('新增模版要求每个选中 Bot 有角色，保存后自动切换到空模版', () => {
     render(<CommunityHelpCenter />);
-    fireEvent.click(screen.getByRole('button', { name: '新增版面' }));
-    fireEvent.change(screen.getByRole('textbox', { name: /版面名称/ }), { target: { value: '前端协作' } });
+    fireEvent.click(screen.getByRole('button', { name: '新增模版' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Dima 项目空间/ }), { target: { value: '示例空间' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /Task Discover Bot/ }), {
+      target: { value: '任务发现 Bot' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: /模版名称/ }), { target: { value: '前端协作' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /Coding Bot/ }));
-    fireEvent.click(screen.getByRole('button', { name: '创建版面' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建模版' }));
     expect(toast.error).toHaveBeenCalledWith('请为每个选中的 Bot 分配至少一个角色');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Coding Bot · 代码' }));
     fireEvent.click(screen.getByRole('button', { name: 'Coding Bot · verify' }));
-    fireEvent.click(screen.getByRole('button', { name: '创建版面' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建模版' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole('group', { name: '求助版面' })).getByRole('button', { name: '前端协作' }),
+      within(screen.getByRole('group', { name: '求助模版' })).getByRole('button', { name: '前端协作' }),
     ).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('这个版面还没有求助任务')).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('group', { name: '求助版面' })).getByRole('button', { name: 'AiCoding' }));
+    expect(screen.getByText('这个模版还没有求助任务')).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole('group', { name: '求助模版' })).getByRole('button', { name: '全图风控AiCoding' }),
+    );
     expect(screen.getAllByRole('article')).toHaveLength(4);
   });
 
@@ -102,11 +167,12 @@ describe('CommunityHelpCenter', () => {
     expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
   });
 
-  test('只允许版面启用的来源，取消创建不增加任务', async () => {
+  test('只允许模版启用的来源，取消创建不增加任务', async () => {
     const user = userEvent.setup();
     render(<CommunityHelpCenter />);
-    fireEvent.click(screen.getByRole('button', { name: '版面设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '模版设置' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Dima' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '手动输入' }));
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     fireEvent.click(screen.getByRole('button', { name: '新建求助任务' }));
     await user.click(screen.getByRole('combobox', { name: /任务来源/ }));
@@ -133,13 +199,15 @@ describe('CommunityHelpCenter', () => {
 
   test('切走再挂载仍保留本次浏览会话内的 Mock 修改', () => {
     const view = render(<CommunityHelpCenter />);
-    fireEvent.click(screen.getByRole('button', { name: '版面设置' }));
-    fireEvent.change(screen.getByRole('textbox', { name: /版面名称/ }), { target: { value: 'AiCoding · 试验' } });
+    fireEvent.click(screen.getByRole('button', { name: '模版设置' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /模版名称/ }), {
+      target: { value: '全图风控AiCoding · 试验' },
+    });
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
     view.unmount();
     render(<CommunityHelpCenter />);
     expect(
-      within(screen.getByRole('group', { name: '求助版面' })).getByRole('button', { name: 'AiCoding · 试验' }),
+      within(screen.getByRole('group', { name: '求助模版' })).getByRole('button', { name: '全图风控AiCoding · 试验' }),
     ).toHaveAttribute('aria-pressed', 'true');
   });
 });

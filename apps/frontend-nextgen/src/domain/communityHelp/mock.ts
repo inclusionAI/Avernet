@@ -14,10 +14,28 @@ export function createHelpMockState(): { boards: HelpBoard[]; tasks: HelpTask[];
   const board: HelpBoard = {
     id: 'mock-aicoding',
     type: 'AiCoding',
-    name: 'AiCoding',
+    collaborationMode: 'selected',
+    name: '全图风控AiCoding',
     description: '让多位 Bot 接力协作，从问题澄清到代码交付，一起解决开发难题。',
     members: HELP_MOCK_BOTS.map((bot, index) => ({ botId: bot.id, roles: [HELP_ROLES[index]] })),
-    sources: ['Dima', 'Task Discover'],
+    sources: ['Dima', 'Task Discover', '手动输入'],
+    sourceConfig: {
+      dima: { projectSpace: '全图风控 · 开发协作示例空间' },
+      taskDiscover: { botName: '风控任务发现 Bot' },
+    },
+  };
+  const tcBoard: HelpBoard = {
+    id: 'mock-tc-aicoding',
+    type: 'AiCoding',
+    collaborationMode: 'selected',
+    name: 'TC-AiCoding',
+    description: '让多位 Bot 接力协作，从问题澄清到代码交付，一起解决开发难题。',
+    members: HELP_MOCK_BOTS.map((bot, index) => ({ botId: bot.id, roles: [HELP_ROLES[index]] })),
+    sources: ['Dima', 'Task Discover', '手动输入'],
+    sourceConfig: {
+      dima: { projectSpace: 'TC · 开发协作示例空间' },
+      taskDiscover: { botName: 'TC 任务发现 Bot' },
+    },
   };
   const seeds = [
     {
@@ -52,7 +70,13 @@ export function createHelpMockState(): { boards: HelpBoard[]; tasks: HelpTask[];
   ];
   const tasks = seeds.map((seed, index) => {
     const at = `2026-11-09T0${index + 1}:00:00.000Z`;
-    let task = createHelpTask(`mock-help-${index + 1}`, board, seed, HELP_MOCK_BOTS, at);
+    let task = createHelpTask(
+      `mock-help-${index + 1}`,
+      board,
+      { ...seed, syncToDima: false, dimaProjectSpace: '' },
+      HELP_MOCK_BOTS,
+      at,
+    );
     for (let step = 0; step < seed.steps; step += 1) {
       task = advanceHelpTask(task, `2026-11-09T0${index + 1}:${String(step + 1).padStart(2, '0')}:00.000Z`);
     }
@@ -77,5 +101,5 @@ export function createHelpMockState(): { boards: HelpBoard[]; tasks: HelpTask[];
     }
     return task;
   });
-  return { boards: [board], tasks, selectedBoardId: board.id };
+  return { boards: [board, tcBoard], tasks, selectedBoardId: board.id };
 }
