@@ -339,6 +339,117 @@ class TestSessionRoutedGet:
 # ==================== total_connections tests ====================
 
 
+class TestInjectRouting:
+
+    @pytest.mark.asyncio
+    async def test_same_session_inject_lock_covers_get_and_rpc(self):
+        """同 session 的 pool inject 必须跨越 get 到 RPC 的完整窗口。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=1.0)
+        first = MagicMock()
+        second = MagicMock()
+        first.inject_message = AsyncMock()
+        second.inject_message = AsyncMock()
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def first_inject(**kwargs):
+            first_started.set()
+            await release_first.wait()
+
+        first.inject_message.side_effect = first_inject
+        pool.get = AsyncMock(side_effect=[first, second])
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+
+        second_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+        )
+        await asyncio.sleep(0)
+        assert pool.get.await_count == 1
+        assert not second_task.done()
+
+        release_first.set()
+        await asyncio.gather(first_task, second_task)
+
+        assert pool.get.await_count == 2
+        first.inject_message.assert_awaited_once_with(
+            message="first",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+        second.inject_message.assert_awaited_once_with(
+            message="second",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+        assert pool._inject_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_same_session_inject_lock_timeout_releases_waiter(self):
+        """池级 session 锁超时后应释放引用，不留下永久占位。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            ConcurrentSessionError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=0.01)
+        client = MagicMock()
+        client.inject_message = AsyncMock()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_inject(**kwargs):
+            started.set()
+            await release.wait()
+
+        client.inject_message.side_effect = blocked_inject
+        pool.get = AsyncMock(return_value=client)
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        with pytest.raises(ConcurrentSessionError, match="same-session"):
+            await pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+
+        assert pool._inject_locks["sandbox-1", "same-session"].users == 1
+        release.set()
+        await first_task
+        assert pool._inject_locks == {}
+
+
 class TestTotalConnections:
     @pytest.mark.asyncio
     async def test_total_connections(self, mock_chat_client_class):

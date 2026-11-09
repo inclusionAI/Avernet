@@ -26,7 +26,7 @@ from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 
 from ..bot_interaction import BotInteractionService
-from ._async_chat_client import AsyncChatClient
+from ._async_chat_client import AsyncChatClient, ConcurrentSessionError
 
 logger = get_logger("core-bot-run")
 
@@ -44,6 +44,14 @@ class _ConnEntry:
     # P1-3：建连时生效的灰度模式快照——复用路径用它校验连接模式与当前
     # 配置一致（AsyncChatClient 的模式随构造钉死，翻转只能靠池层失效）
     a2a_mode: str = "off"
+
+
+@dataclass
+class _InjectLockEntry:
+    """一个 session inject 锁及其调用方引用数。"""
+
+    lock: asyncio.Lock
+    users: int = 0
 
 
 class AsyncChatClientPool:
@@ -99,7 +107,11 @@ class AsyncChatClientPool:
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
         self._key_locks: dict[str, asyncio.Lock] = {}
-        # 全局锁，仅用于 _key_locks 的创建/删除
+        # sandbox_id/session_key -> inject lock，锁必须覆盖 get() 和实际
+        # chat.inject RPC，避免多连接池中两个并发 inject 在首个 client
+        # 登记 _active_inject_sessions 前分别拿到不同连接。
+        self._inject_locks: dict[tuple[str, str], _InjectLockEntry] = {}
+        # 全局锁，仅用于 _key_locks/_inject_locks 的创建/删除
         self._lock = asyncio.Lock()
 
     # ── 公开 API ──────────────────────────────────────────────────────────
@@ -262,6 +274,60 @@ class AsyncChatClientPool:
 
             return new_client
 
+    async def inject_message(
+        self,
+        sandbox_id: str,
+        uri: str,
+        headers: dict[str, str] | None = None,
+        *,
+        session_key: str,
+        message: str,
+        auth_token: str | None = None,
+        attachments: list[object] | None = None,
+        token_minter: Callable[[], Awaitable[str]] | None = None,
+    ) -> None:
+        """通过连接池串行发送同一 session 的 inject。
+
+        锁覆盖 ``get()`` 到 ``client.inject_message()`` 的完整调用期。
+        仅在 client 内做 session 占位存在一个竞态窗口：第一个调用拿到
+        连接后、尚未登记 ``_active_inject_sessions`` 时，第二个调用可能
+        被多连接池分配到另一条连接。池级锁把这段窗口收口，同时不影响
+        不同 sandbox/session 的并发。
+        """
+        lock_key = (sandbox_id, session_key)
+        inject_entry = await self._get_inject_lock(lock_key)
+        inject_lock = inject_entry.lock
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(
+                    inject_lock.acquire(), timeout=self._session_key_timeout
+                )
+            except TimeoutError as exc:
+                raise ConcurrentSessionError(
+                    f"Timed out waiting for session_key={session_key} "
+                    f"(timeout={self._session_key_timeout}s)"
+                ) from exc
+            acquired = True
+
+            client = await self.get(
+                sandbox_id,
+                uri,
+                headers,
+                session_key=session_key,
+                token_minter=token_minter,
+            )
+            await client.inject_message(
+                message=message,
+                session_key=session_key,
+                auth_token=auth_token,
+                attachments=attachments,
+            )
+        finally:
+            if acquired:
+                inject_lock.release()
+            await self._release_inject_lock(lock_key, inject_entry)
+
     async def close_all(self) -> None:
         """关闭池中所有连接"""
         async with self._lock:
@@ -270,6 +336,8 @@ class AsyncChatClientPool:
                 all_entries.extend(entries)
             self._clients.clear()
             self._key_locks.clear()
+            # 保留在途 inject 的锁对象；否则 close_all() 与排队调用并发时，
+            # 新调用会创建第二把同 session 锁，重新打开跨连接竞态。
 
         if all_entries:
             await asyncio.gather(
@@ -557,6 +625,35 @@ class AsyncChatClientPool:
             if sandbox_id not in self._key_locks:
                 self._key_locks[sandbox_id] = asyncio.Lock()
             return self._key_locks[sandbox_id]
+
+    async def _get_inject_lock(
+        self, lock_key: tuple[str, str]
+    ) -> _InjectLockEntry:
+        """获取 sandbox/session 级 inject 锁并登记一个调用方引用。
+
+        引用在等待锁之前登记，避免释放最后一个持有者时把仍有排队
+        调用方的锁从字典删除，导致后来调用方创建第二把锁。
+        """
+        async with self._lock:
+            entry = self._inject_locks.get(lock_key)
+            if entry is None:
+                entry = _InjectLockEntry(lock=asyncio.Lock())
+                self._inject_locks[lock_key] = entry
+            entry.users += 1
+            return entry
+
+    async def _release_inject_lock(
+        self, lock_key: tuple[str, str], entry: _InjectLockEntry
+    ) -> None:
+        """释放调用方引用，并删除没有排队者的空闲锁。"""
+        async with self._lock:
+            entry.users -= 1
+            if (
+                entry.users == 0
+                and self._inject_locks.get(lock_key) is entry
+                and not entry.lock.locked()
+            ):
+                self._inject_locks.pop(lock_key, None)
 
     def _evict_if_needed(self) -> None:
         """淘汰最久未使用且无活跃会话的单条连接（细粒度）"""
