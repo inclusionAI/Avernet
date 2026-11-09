@@ -81,3 +81,21 @@ async fn cumulative_questions_fail_with_saved_result_instead_of_stuck_publicatio
     assert!(active(&view).is_empty());
     assert!(f.repo.load(&task.session_id).await.unwrap().unwrap().pending_events.is_empty());
 }
+#[tokio::test]
+async fn new_reply_waits_for_durable_question_publication_before_acceptance(){
+    use bcn_runtime_api::port::repo::*;
+    let f=Fixture::new();let g=group::gateway(&f,json!({"a":group::human()}));
+    let task=g.submit(caller(),group::group_request("unpublished")).await.unwrap();
+    let fence=f.repo.claim_shard(session_shard(&task.session_id),node("publisher"),None).await.unwrap();
+    let spec=f.repo.load_spec(&task.session_id).await.unwrap().unwrap();let runner=f.runners().remove(1);
+    let cp=f.repo.activate(spec.clone(),runner.initialize(&spec).unwrap(),fence).await.unwrap();
+    let input=f.repo.read_batch(&task.session_id,0,1).await.unwrap().remove(0);
+    let cp=f.repo.commit(SessionCommit{session_id:task.session_id.clone(),fence:cp.fence,expected_revision:cp.revision,consumed_input:input.position,transition:runner.reduce(&cp.state,&input.input).unwrap()}).await.unwrap();
+    assert!(g.get(caller(),task.task_id.clone()).await.unwrap().active_interactions.is_empty());
+    let mut reply=group::group_request("answer-unpublished");reply.message.task_id=Some(task.task_id.clone());
+    assert!(matches!(g.submit(caller(),reply.clone()).await,Err(RuntimeError::Conflict(_))),"checkpoint alone must not admit a reply before its question is published");
+    assert_eq!(f.repo.read_batch(&task.session_id,0,100).await.unwrap().len(),1);
+    for event in &cp.pending_events{f.repo.publish_hard_event(&cp.fence,CommittedEventRef{session_id:task.session_id.clone(),event_id:event.event_id.clone()}).await.unwrap();}
+    let accepted=g.submit_with_receipt(caller(),reply).await.unwrap();
+    assert_eq!(accepted.reply_interaction_id,Some(accepted.task.active_interactions[0].interaction_id.clone()));
+}

@@ -93,3 +93,51 @@ async fn route_bound_list_has_exact_totals_and_order_across_pages(){
  let p=json_response(route,"ListTasks",json!({"pageSize":1,"pageToken":p["result"]["nextPageToken"]})).await;
  assert_eq!(p["result"]["totalSize"],2);assert_eq!(p["result"]["tasks"][0]["id"],first.task_id.value);assert_eq!(p["result"]["nextPageToken"],"");
 }
+#[tokio::test]
+async fn blocking_reply_retry_returns_remaining_questions_after_its_durable_interaction_resolves(){
+ use futures::StreamExt;
+ for explicit in [true,false]{
+  let f=Fixture::new();let g=Arc::new(group::gateway(&f,json!({"a":group::human(),"b":group::human()})));let w=f.worker("w");
+  let task=if explicit{group::start_parallel(&f,&g,&w,group::group_request("parallel")).await}else{let t=g.submit(caller(),group::group_request("entry")).await.unwrap();w.step(&t.session_id).await.unwrap();t};
+  let before=g.get(caller(),task.task_id.clone()).await.unwrap();let chosen=before.active_interactions[0].interaction_id.clone();
+  let route=app(g.clone(),task.target.clone());
+  let mut reply=json!({"message":{"messageId":"blocking-answer","role":"ROLE_USER","taskId":task.task_id.value,"contextId":task.session_id.value,"parts":[{"text":"yes"}]}});
+  if explicit{reply["message"]["metadata"]=json!({mapping::INTERACTION:chosen});}
+  let pending=json_response(route.clone(),"SendMessage",reply.clone());tokio::pin!(pending);
+  assert!(tokio::time::timeout(std::time::Duration::from_millis(20),&mut pending).await.is_err(),"fresh answer must wait for its own interaction to resolve");
+  for _ in 0..4{w.step(&task.session_id).await.unwrap();w.tick().await.unwrap();}
+  let first=tokio::time::timeout(std::time::Duration::from_secs(2),pending).await.unwrap();
+  let remaining=&first["result"]["task"]["status"]["message"]["parts"];
+  assert_eq!(remaining.as_array().unwrap().len(),if explicit{1}else{2});
+  let mut live=g.subscribe(caller(),task.task_id.clone(),None).await.unwrap();assert!(live.next().await.is_some());
+  assert!(tokio::time::timeout(std::time::Duration::from_millis(20),live.next()).await.is_err(),"actual subscription remains open and idle");
+  let retry=tokio::time::timeout(std::time::Duration::from_millis(100),json_response(route,"SendMessage",reply)).await.expect("consumed reply retry must not wait for somebody else's question");
+  assert_eq!(&retry["result"]["task"]["status"]["message"]["parts"],remaining);
+ }
+}
+async fn resume_response(route:Router,id:&str,cursor:&str,negotiated:bool)->axum::response::Response{
+ let mut request=Request::builder().method("POST").uri("/").header("A2A-Version","1.0").header("Last-Event-ID",cursor);
+ if negotiated{request=request.header("A2A-Extensions",format!("urn:other, {}",mapping::STREAM));}
+ route.oneshot(request.body(Body::from(json!({"jsonrpc":"2.0","id":1,"method":"SubscribeToTask","params":{"id":id}}).to_string())).unwrap()).await.unwrap()
+}
+#[tokio::test]
+async fn cursor_replay_requires_negotiation_and_standard_reconnect_starts_current_task(){
+ use bcn_runtime_api::port::repo::*;
+ let f=Fixture::new();let g=Arc::new(f.gateway());let task=g.submit(caller(),runtime::request("cursor")).await.unwrap();let w=f.worker("w");w.step(&task.session_id).await.unwrap();
+ let owner=runtime::node("connector");let command=f.repo.receive(&runtime::scope(),&owner,CommandConsumerKind::Connector,None,10).await.unwrap().items.remove(0);
+ let d=f.repo.claim(&command.command_id,owner).await.unwrap();let d=f.repo.mark_may_have_sent(&d.fence,d.revision).await.unwrap();
+ let current=f.repo.read_snapshot(&task.task_id).await.unwrap().unwrap().cursor;
+ let base=f.repo.publish_reset(&d.fence,ConnectorProjection{task_id:task.task_id.clone(),output:runtime::text("cached"),expected_cursor:current},EventId::new(runtime::scope(),"base")).await.unwrap();
+ f.repo.append(&d.fence,TaskEvent{id:EventId::new(runtime::scope(),"delta"),task_id:task.task_id.clone(),cursor:base.clone(),kind:TaskEventKind::Delta{text:" + new".into()}}).await.unwrap();
+ let route=app(g,task.target);let cursor=format!("{}:{}",base.epoch,base.sequence);
+ let standard=resume_response(route.clone(),&task.task_id.value,&cursor,false).await;assert!(standard.headers().get("a2a-extensions").is_none());
+ let mut body=standard.into_body();let frame=body.frame().await.unwrap().unwrap().into_data().unwrap();
+ let text=std::str::from_utf8(&frame).unwrap();let v:Value=serde_json::from_str(text.lines().find_map(|l|l.strip_prefix("data: ")).unwrap()).unwrap();
+ assert_eq!(v["result"]["task"]["artifacts"][0]["parts"],json!([{"text":"cached + new"}]));
+ assert!(tokio::time::timeout(std::time::Duration::from_millis(20),body.frame()).await.is_err(),"current snapshot must not be followed by duplicate old Delta");
+ let resumed=resume_response(route.clone(),&task.task_id.value,&cursor,true).await;assert_eq!(resumed.headers()["a2a-extensions"],mapping::STREAM);
+ let event=first_event(resumed.into_body()).await;assert!(event["result"].get("task").is_none());assert_eq!(event["result"]["artifactUpdate"]["append"],true);
+ assert_eq!(format!("cached{}",event["result"]["artifactUpdate"]["artifact"]["parts"][0]["text"].as_str().unwrap()),"cached + new");
+ let expired=resume_response(route,&task.task_id.value,"0:0",true).await;assert_eq!(expired.headers()["a2a-extensions"],mapping::STREAM);
+ let event=first_event(expired.into_body()).await;assert_eq!(event["result"]["task"]["artifacts"][0]["parts"],json!([{"text":"cached + new"}]));
+}

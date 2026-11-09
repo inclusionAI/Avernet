@@ -135,3 +135,10 @@ in addition to counting NodeExecution.interaction_prompt in checkpoint budgets.
 This composes with the existing 896 KiB public output limit. Exceeding either
 budget commits TaskFailure and its immutable result intent; pending questions
 are resolved rather than left visible as answerable. No row limit is enlarged.
+
+Reply-aware submission returns the actual durable receipt interaction ID, including
+for originally inferred and already-consumed replies. Fresh reply acceptance also
+requires that the selected checkpoint interaction has reached the public snapshot;
+publication lag returns a retriable Conflict before inbox append. Existing exact
+reply dedup is checked first, so it remains valid after resolution. This establishes
+the published starting question used by blocking ingress completion checks.

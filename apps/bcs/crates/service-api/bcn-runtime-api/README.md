@@ -74,3 +74,11 @@ caller within the target/optional session and their count; policy implementation
 must keep item visibility consistent. The default hook delegates target List
 authorization and rejects targetless queries. Supporting targetless collection
 listing requires an explicit hook implementation, not a first-page inference.
+
+GatewayService.submit_with_receipt adds reply-aware SubmitOutcome while preserving
+submit. Its reply_interaction_id is the actual ID frozen in durable acceptance,
+not inferred again from current questions. The default implementation rejects
+reply requests before submit unless the implementation provides receipt support;
+ordinary submission remains compatible. DefaultGateway uses existing authorization
+and payload/idempotency validation, then one bounded Inbox.find_input point read.
+No new persistence row, historical scan or process-local reply cache is introduced.

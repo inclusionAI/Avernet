@@ -146,6 +146,9 @@ impl DefaultGateway {
                 ));
             }
         };
+        if !task.active_interactions.iter().any(|i|i.interaction_id==interaction_id) {
+            return Err(RuntimeError::Conflict("question publication pending; retry reply".into()));
+        }
         self.ports
             .inbox
             .append_and_wake(
@@ -167,6 +170,23 @@ impl DefaultGateway {
 }
 #[async_trait]
 impl GatewayService for DefaultGateway {
+    async fn submit_with_receipt(&self, ctx: CallerContext, request: SubmitRequest) -> RuntimeResult<SubmitOutcome> {
+        let reply=request.message.task_id.clone();let message_id=request.message.message_id.clone();
+        // submit performs current authorization and exact payload/idempotency validation first.
+        let task=self.submit(ctx.clone(),request).await?;
+        let reply_interaction_id=if let Some(id)=reply {
+            let event=EventId::new(ctx.scope.clone(),hash("reply",&(&ctx.principal,&id,&message_id))?);
+            let input=self.ports.inbox.find_input(&task.session_id,&event).await?
+                .ok_or_else(||RuntimeError::Conflict("accepted reply receipt missing".into()))?;
+            match input.kind {
+                SessionInputKind::HumanReply{task_id,interaction_id,caller,message}
+                    if task_id==id && caller.scope==ctx.scope && caller.principal==ctx.principal && message.message_id==message_id => Some(interaction_id),
+                _=>return Err(RuntimeError::Conflict("accepted reply receipt mismatch".into())),
+            }
+        }else{None};
+        Ok(SubmitOutcome{task,reply_interaction_id})
+    }
+
     async fn submit(&self, ctx: CallerContext, request: SubmitRequest) -> RuntimeResult<TaskView> {
         if request.message.message_id.scope != ctx.scope
             || request

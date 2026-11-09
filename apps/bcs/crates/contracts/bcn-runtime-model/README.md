@@ -82,3 +82,8 @@ next_cursor. Runtime task lists order by updated_at_ms descending; that same tim
 is exposed as A2A status.timestamp. Collection mutations explicitly invalidate
 page cursors rather than retaining unbounded snapshot history. Generic Page<T>
 remains unchanged for other repository traversals.
+
+SubmitOutcome carries the normal TaskView plus optional reply_interaction_id from
+durable acceptance. It is application evidence for the submitted reply, not a new
+wire field or a mutable task attribute; current unresolved questions remain in
+TaskView.active_interactions.

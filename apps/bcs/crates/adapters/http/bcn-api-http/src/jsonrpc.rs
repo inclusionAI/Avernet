@@ -35,8 +35,9 @@ async fn dispatch(state:ApiState,ctx:CallerContext,rpc:JsonRpcRequest,headers:&a
             let request:a2a::SendMessageRequest=params(rpc.params)?;
             let immediate=request.configuration.as_ref().and_then(|v|v.return_immediately).unwrap_or(false);
             let request=mapping::submit(&ctx,state.target.clone(),request)?;
-            let reply=request.message.task_id.is_some();
-            let mut view=state.gateway.submit(ctx.clone(),request).await.map_err(mapping::error)?;
+            let outcome=state.gateway.submit_with_receipt(ctx.clone(),request).await.map_err(mapping::error)?;
+            let reply=outcome.reply_interaction_id;
+            let mut view=outcome.task;
             if rpc.method=="SendStreamingMessage" {
                 let stream=state.gateway.subscribe(ctx.clone(),view.task_id.clone(),None).await;
                 return match stream {Ok(stream)=>Ok(sse::response(state,ctx,id,view,stream)),Err(RuntimeError::Conflict(_))=>{
@@ -44,13 +45,12 @@ async fn dispatch(state:ApiState,ctx:CallerContext,rpc:JsonRpcRequest,headers:&a
                     if view.status.is_terminal(){Ok(sse::terminal(id,view))}else{Err(A2AError::internal("subscription conflict"))}
                 },Err(e)=>Err(mapping::error(e))};
             }
-            if !immediate && (!interrupted(&view) || reply) {
+            if !immediate && !reply_ready(&view,reply.as_ref()) {
                 match state.gateway.subscribe(ctx.clone(),view.task_id.clone(),None).await {
                     Ok(mut events)=>while let Some(event)=events.next().await {
                         let event=event.map_err(mapping::error)?;
                         let next=match event.kind {TaskEventKind::Reset{snapshot}=>snapshot,_=>state.gateway.get(ctx.clone(),view.task_id.clone()).await.map_err(mapping::error)?};
-                        let unchanged_reply=reply && next.active_interactions==view.active_interactions && !next.status.is_terminal();
-                        if interrupted(&next) && !unchanged_reply {view=next;break;} view=next;
+                        if reply_ready(&next,reply.as_ref()) {view=next;break;} view=next;
                     },
                     Err(RuntimeError::Conflict(_))=>view=state.gateway.get(ctx.clone(),view.task_id.clone()).await.map_err(mapping::error)?,
                     Err(e)=>return Err(mapping::error(e)),
@@ -77,9 +77,13 @@ async fn dispatch(state:ApiState,ctx:CallerContext,rpc:JsonRpcRequest,headers:&a
         "SubscribeToTask"=>{
             let r:a2a::SubscribeToTaskRequest=params(rpc.params)?;let task=get(&state,&ctx,&r.id).await?;
             if task.status.is_terminal(){return Err(A2AError::unsupported_operation("terminal task must be queried"))}
-            let cursor=headers.get("last-event-id").map(|v|v.to_str().map_err(|_|A2AError::invalid_params("invalid cursor")).and_then(sse::cursor)).transpose()?;
+            let negotiated=headers.get_all("a2a-extensions").iter().filter_map(|v|v.to_str().ok())
+                .flat_map(|v|v.split(',')).any(|v|v.trim()==mapping::STREAM);
+            let cursor=if negotiated {headers.get("last-event-id").map(|v|v.to_str().map_err(|_|A2AError::invalid_params("invalid cursor")).and_then(sse::cursor)).transpose()?}else{None};
             let stream=state.gateway.subscribe(ctx.clone(),task.task_id.clone(),cursor).await.map_err(mapping::error)?;
-            Ok(sse::response(state,ctx,id,task,stream))
+            let mut response=sse::response(state,ctx,id,task,stream);
+            if negotiated {response.headers_mut().insert("a2a-extensions",axum::http::HeaderValue::from_static(mapping::STREAM));}
+            Ok(response)
         }
         "CreateTaskPushNotificationConfig"|"GetTaskPushNotificationConfig"|"ListTaskPushNotificationConfigs"|"DeleteTaskPushNotificationConfig"=>Err(A2AError::push_notification_not_supported()),
         "GetExtendedAgentCard"=>Err(A2AError::unsupported_operation("extended card unavailable")),
@@ -91,3 +95,7 @@ async fn get(state:&ApiState,ctx:&CallerContext,id:&str)->Result<TaskView,A2AErr
     if task.target!=state.target{return Err(mapping::error(RuntimeError::AccessDenied))}Ok(task)
 }
 fn interrupted(t:&TaskView)->bool{t.status.is_terminal()||!t.active_interactions.is_empty()||t.status==TaskStatus::AuthRequired}
+
+fn reply_ready(t:&TaskView,reply:Option<&InteractionId>)->bool{
+    interrupted(t) && (t.status.is_terminal() || reply.is_none_or(|id|!t.active_interactions.iter().any(|i|&i.interaction_id==id)))
+}

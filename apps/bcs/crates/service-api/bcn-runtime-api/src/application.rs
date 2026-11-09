@@ -20,6 +20,12 @@ pub struct DrainReport { pub completed: u32, pub remaining: u32, pub deadline_re
 #[async_trait]
 pub trait GatewayService: Send + Sync {
     async fn submit(&self, ctx: CallerContext, request: SubmitRequest) -> RuntimeResult<TaskView>;
+    /// Reply-aware submission. The selected ID must come from durable acceptance evidence,
+    /// including when the client omitted it. Unsupported implementations reject before submit.
+    async fn submit_with_receipt(&self, ctx: CallerContext, request: SubmitRequest) -> RuntimeResult<SubmitOutcome> {
+        if request.message.task_id.is_some() {return Err(RuntimeError::Unsupported("reply receipt unavailable".into()))}
+        Ok(SubmitOutcome{task:self.submit(ctx,request).await?,reply_interaction_id:None})
+    }
     async fn get(&self, ctx: CallerContext, task_id: TaskId) -> RuntimeResult<TaskView>;
     async fn list(&self, ctx: CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage>;
     /// Starts with authoritative snapshot/cursor; terminal tasks are queried, not subscribed.

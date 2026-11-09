@@ -31,7 +31,7 @@ pub fn router(mut state: ApiState) -> Router {
     }
     state.card.capabilities.extensions=Some(vec![
         a2a::AgentExtension { uri:mapping::INTERACTION.into(), required:Some(false), description:Some("Message.metadata key carries a full scoped {scope:{environment,tenant,namespace},value} interaction ID. Omission requires exactly one active question; status.message parts carry the same metadata key per question. Artifacts contain output only.".into()), params:None },
-        a2a::AgentExtension { uri:mapping::STREAM.into(), required:Some(false), description:Some("Last-Event-ID is epoch:sequence. No cursor starts with current Task snapshot. Expired epoch returns replacement Task snapshot; Reset replaces artifacts, never appends. Terminal artifact replacement precedes terminal status. Resume only within this authenticated target/task.".into()), params:None },
+        a2a::AgentExtension { uri:mapping::STREAM.into(), required:Some(false), description:Some("Opt in with A2A-Extensions: urn:avernet:bcn:cursor; response acknowledges the same URI. Last-Event-ID is epoch:sequence and requires client state already applied at that cursor. Negotiated valid replay may start with updates and no Task (extension replay mode). Without negotiation, or with a fresh/expired cursor, start from current Task. Later Reset becomes artifact replacement/status updates. Clearing prior text uses one empty Text Part; never emit zero-part artifacts. Resume only within this authenticated target/task.".into()), params:None },
     ]);
     let card=state.card.clone();
     Router::new().route("/",axum::routing::post(jsonrpc::handle))

@@ -63,18 +63,18 @@ async fn parallel_resets_replace_progress_and_terminal_artifacts_reconstruct_get
  let kinds=vec![TaskEventKind::Reset{snapshot:partial},TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"working"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status:TaskStatus::Working}}},TaskEventKind::Delta{text:" tail".into()},TaskEventKind::Reset{snapshot:parallel},TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"terminal"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status:TaskStatus::Completed}}}];
  *g.events.lock().unwrap()=Some(kinds.into_iter().enumerate().map(|(n,kind)|TaskEvent{id:EventId::new(scope(),format!("e{n}")),task_id:terminal.task_id.clone(),cursor:EventCursor{epoch:1,sequence:n as u64},kind}).collect());
  let (_,response)=call(app.clone(),"SubscribeToTask",json!({"id":"task"}),Some("1.0"),true).await;
- let mut output=Vec::<a2a::Part>::new();let mut status=None;
+ let mut output=Vec::<a2a::Part>::new();let mut status=None;let mut task_events=0;let mut undated_domain=false;
  for line in response["raw"].as_str().unwrap().lines().filter_map(|s|s.strip_prefix("data: ")){
   let rpc:a2a::JsonRpcResponse=serde_json::from_str(line).unwrap();
   match serde_json::from_value::<a2a::StreamResponse>(rpc.result.unwrap()).unwrap(){
-   a2a::StreamResponse::Task(task)=>{output=task.artifacts.unwrap_or_default().into_iter().flat_map(|a|a.parts).collect();status=Some(task.status.state)},
+   a2a::StreamResponse::Task(task)=>{task_events+=1;output=task.artifacts.unwrap_or_default().into_iter().flat_map(|a|a.parts).collect();status=Some(task.status.state)},
    a2a::StreamResponse::ArtifactUpdate(event)=>{if event.append==Some(true){output.extend(event.artifact.parts)}else{output=event.artifact.parts}},
-   a2a::StreamResponse::StatusUpdate(event)=>{if event.status.state==a2a::TaskState::Working{assert!(event.status.timestamp.is_none());}else{assert!(event.status.timestamp.is_some());}status=Some(event.status.state)},_=>panic!("unexpected message")
+   a2a::StreamResponse::StatusUpdate(event)=>{undated_domain |= event.status.timestamp.is_none();if event.status.state!=a2a::TaskState::Working{assert!(event.status.timestamp.is_some());}status=Some(event.status.state)},_=>panic!("unexpected message")
   }
  }
  let (_,queried)=call(app,"GetTask",json!({"id":"task"}),Some("1.0"),true).await;
  let task:a2a::Task=serde_json::from_value(queried["result"].clone()).unwrap();
- assert_eq!(output,task.artifacts.unwrap()[0].parts);assert_eq!(status,Some(task.status.state));
+ assert_eq!(output,task.artifacts.unwrap()[0].parts);assert_eq!(status,Some(task.status.state));assert_eq!(task_events,1);assert!(undated_domain);
 }
 #[tokio::test]
 async fn blocking_interruption_waits_for_durable_question_not_status_alone(){
@@ -111,4 +111,34 @@ async fn list_defaults_omit_artifacts_and_expose_matching_status_timestamp() {
  assert_eq!(v["result"]["tasks"][0]["status"]["timestamp"],"1970-01-01T00:00:01.234Z");
  let (_,v)=call(app,"ListTasks",json!({"includeArtifacts":true}),Some("1.0"),true).await;
  assert_eq!(v["result"]["tasks"][0]["artifacts"][0]["parts"][0]["text"],"saved");
+}
+#[tokio::test]
+async fn outputless_terminal_streams_never_emit_empty_artifacts_and_clear_prior_partial(){
+ use bcn_runtime_model::*;
+ for (status,partial,reset) in [(TaskStatus::Cancelled,false,true),(TaskStatus::Failed,false,false),(TaskStatus::Cancelled,true,false),(TaskStatus::Failed,true,true)]{
+  let (app,g)=app();let mut initial=view();initial.status=TaskStatus::Working;if partial{initial.output=vec![MessagePart::Text{text:"partial".into()}];}
+  *g.task.lock().unwrap()=initial.clone();let mut terminal=initial.clone();terminal.status=status;terminal.output.clear();*g.terminal.lock().unwrap()=Some(terminal.clone());
+  let last=if reset{TaskEventKind::Reset{snapshot:terminal.clone()}}else{TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"done"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status}}}};
+  *g.events.lock().unwrap()=Some(vec![TaskEventKind::Reset{snapshot:initial},last].into_iter().enumerate().map(|(i,kind)|TaskEvent{id:EventId::new(scope(),format!("e{i}")),task_id:terminal.task_id.clone(),cursor:EventCursor{epoch:1,sequence:i as u64},kind}).collect());
+  let (_,response)=call(app.clone(),"SubscribeToTask",json!({"id":"task"}),Some("1.0"),true).await;
+  let mut output=vec![];let mut final_status=None;let mut task_events=0;
+  for line in response["raw"].as_str().unwrap().lines().filter_map(|s|s.strip_prefix("data: ")){
+   let value:serde_json::Value=serde_json::from_str(line).unwrap();
+   match serde_json::from_value::<a2a::StreamResponse>(value["result"].clone()).unwrap(){
+    a2a::StreamResponse::Task(task)=>{task_events+=1;output=task.artifacts.unwrap_or_default().into_iter().flat_map(|a|a.parts).collect::<Vec<_>>()},
+    a2a::StreamResponse::ArtifactUpdate(event)=>{assert!(!event.artifact.parts.is_empty(),"A2A Artifact requires at least one part");assert_eq!(event.append,Some(false));assert_eq!(event.last_chunk,Some(true));if event.append==Some(true){output.extend(event.artifact.parts)}else{output=event.artifact.parts}},
+    a2a::StreamResponse::StatusUpdate(event)=>final_status=Some(event.status.state),_=>panic!("unexpected response")
+   }
+  }
+  let (_,get)=call(app,"GetTask",json!({"id":"task"}),Some("1.0"),true).await;
+  let get:a2a::Task=serde_json::from_value(get["result"].clone()).unwrap();
+  let text=|parts:Vec<a2a::Part>|parts.into_iter().map(|p|match p.content{a2a::PartContent::Text(t)=>t,_=>panic!("text only")}).collect::<String>();
+  assert_eq!(text(output),text(get.artifacts.unwrap_or_default().into_iter().flat_map(|a|a.parts).collect()));assert_eq!(final_status,Some(get.status.state));assert_eq!(task_events,1);
+ }
+}
+#[tokio::test]
+async fn gateway_without_durable_reply_receipt_support_rejects_before_submit(){
+ let (app,g)=app();let mut reply=send();reply["message"]["taskId"]=json!("task");
+ let (_,result)=call(app,"SendMessage",reply,Some("1.0"),true).await;
+ assert_eq!(result["error"]["code"],-32004);assert_eq!(g.submits.load(Ordering::SeqCst),0);
 }

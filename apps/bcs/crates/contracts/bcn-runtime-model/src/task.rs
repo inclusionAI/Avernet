@@ -20,6 +20,9 @@ pub struct SubmitRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_id: Option<InteractionId>,
 }
+/// Submission view plus the interaction frozen in the durable reply receipt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubmitOutcome { pub task: TaskView, pub reply_interaction_id: Option<InteractionId> }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus { Submitted, Working, InputRequired, AuthRequired, PendingResult, Completed, Failed, Cancelled }

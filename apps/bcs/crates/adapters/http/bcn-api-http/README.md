@@ -34,11 +34,21 @@ SendMessage waits for terminal/input-required/auth-required observation unless
 returnImmediately is true. Cancellation reports current state after recording
 intent, without claiming unobserved downstream cancellation. Terminal tasks cannot
 be newly subscribed. Fresh subscriptions begin with the current Task snapshot;
-`Last-Event-ID: epoch:sequence` resumes events, and expired epochs return a
-replacement Task snapshot. Resets replace aggregate progress; deltas append.
-Terminal hard events cause a fresh authorized GetTask to materialize saved output,
-then emit replacement artifact (`append=false`, `lastChunk=true`) followed by
-terminal status. A2A 1.0 status has no legacy `final` boolean.
+unnegotiated Last-Event-ID also starts at the current snapshot, without replaying
+old deltas. Only explicit `A2A-Extensions: urn:avernet:bcn:cursor` enables retained
+cached-state replay using `Last-Event-ID: epoch:sequence`; the response acknowledges
+the URI in A2A-Extensions. The client must retain its already-applied state at that
+cursor. A valid negotiated cursor may start with updates and no Task: this is the
+extension's replay mode, not the standard first-Task lifecycle. Fresh/expired
+cursors rebuild from the current Task. Resets replace aggregate progress; deltas append.
+Terminal hard events cause a fresh authorized GetTask to materialize saved output.
+Produced output emits replacement artifact (`append=false`, `lastChunk=true`)
+followed by terminal status. A task that never produced text skips an empty artifact
+update. Clearing previously streamed text uses one empty Text Part with append=false
+and lastChunk=true: its canonical textual content is empty, matching GetTask's
+omitted no-output artifact. This guarantees textual content equivalence, not identical
+artifact inventory. Only the first snapshot is a Task object; later Reset snapshots
+become standard artifact replacement and status updates. A2A 1.0 status has no legacy `final` boolean.
 
 The Card declares two optional extension URNs:
 
@@ -63,3 +73,16 @@ Collection authorization occurs before any index/count read and grants visibilit
 of the full caller/target/optional-context collection, including its count. Current
 per-task authorization remains fail-closed; policies must have consistent visibility
 within an authorized collection. Targetless listing requires an explicit policy hook.
+
+Blocking reply submission obtains SubmitOutcome from Gateway: its interaction ID
+comes from the retained durable reply receipt, including originally inferred IDs.
+A fresh reply waits for that specific question to resolve; an already-consumed
+exact retry returns the current interrupted view without waiting for another
+question. Missing receipt evidence fails explicitly. A new reply whose checkpointed
+question has not yet reached the durable public snapshot receives a retriable
+Conflict before acceptance; retry after question publication. Deduplicated replies
+are checked first and remain valid after their question has disappeared.
+
+Protocol references are pinned to [A2A v1.0.0](https://a2a-protocol.org/v1.0.0/specification/),
+including default blocking SendMessage (§3.1.1), lifecycle event ordering (§3.1.2),
+and the nonempty Artifact.parts requirement (§4.1.7).
