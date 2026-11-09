@@ -244,6 +244,7 @@ def test_modules_for_community_is_isolated():
         "CommunityAppServicesModule",
         "CommunityApprovalWorkflowModule",
         "CommunityBotPublishApprovalModule",
+        "CommunityServiceBotEvalModule",
         "CommunityEvalEnvModule",
         "CommunityNotifyModule",
         "CommunityStaffDeptModule",

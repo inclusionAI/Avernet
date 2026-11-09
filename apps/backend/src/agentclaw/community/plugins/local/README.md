@@ -102,6 +102,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.outbound_rules
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.sandbox_runtime
+  - agentclaw.community.plugin_api.service_bot_eval  # local no-op unified evaluation gate implementation
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.skill_center_gateway
