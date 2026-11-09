@@ -482,7 +482,7 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
             )
             .await
             {
-                tracing::error!(
+                tracing::warn!(
                     bot_id = %request.bot_uuid,
                     "Failed to remove worker recreated by racing visibility sync after retries"
                 );

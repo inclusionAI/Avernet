@@ -13,13 +13,13 @@ use super::fuse_backed::build_participant_id;
 
 /// Maximum number of sync retry attempts.
 ///
-/// With the default `sync_retry_base_ms = 1000` and `MAX_SYNC_BACKOFF = 8s`,
-/// this gives roughly a 60-second retry window, which covers local singlebox
-/// deployments where bcsfuse may still be starting when bots first onboard.
-const MAX_SYNC_RETRIES: u32 = 10;
+/// With the default `sync_retry_base_ms = 1000` and `MAX_SYNC_BACKOFF = 30s`,
+/// this gives roughly a 10-minute retry window, which covers bcsfuse restarts
+/// and transient network partitions.
+const MAX_SYNC_RETRIES: u32 = 15;
 
 /// Maximum backoff between sync retries.
-const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(8);
+const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvailabilitySyncOutcome {
@@ -92,9 +92,8 @@ pub fn build_sync_request(
 /// capped at `MAX_SYNC_BACKOFF`; the last attempt is not followed by a wait,
 /// since there is nothing left to retry.
 ///
-/// With the default config this yields roughly a 60-second retry window,
-/// which covers local singlebox deployments where bcsfuse may still be
-/// starting when bots first onboard.
+/// With the default config this yields roughly a 10-minute retry window,
+/// which covers bcsfuse restarts and transient network partitions.
 ///
 /// Designed to be called inside `tokio::spawn` — never panics, only logs.
 pub async fn sync_worker_with_retry(
@@ -103,6 +102,7 @@ pub async fn sync_worker_with_retry(
     bot_id: &str,
     sync_req: &SyncWorkerRequest,
 ) {
+    let mut last_err = String::new();
     for attempt in 0..MAX_SYNC_RETRIES {
         match client.sync_worker(bot_id, sync_req.clone()).await {
             Ok(resp) => {
@@ -123,6 +123,7 @@ pub async fn sync_worker_with_retry(
                 return;
             }
             Err(e) => {
+                last_err = e.to_string();
                 tracing::warn!(
                     bot_id = %bot_id,
                     attempt = attempt + 1,
@@ -143,6 +144,7 @@ pub async fn sync_worker_with_retry(
     tracing::error!(
         bot_id = %bot_id,
         retries = MAX_SYNC_RETRIES,
+        last_error = %last_err,
         "Worker sync exhausted retries, will retry on next onboard/reconnect"
     );
 }
@@ -154,6 +156,7 @@ pub async fn sync_worker_availability_with_retry(
     bot_id: &str,
     availability: &str,
 ) -> AvailabilitySyncOutcome {
+    let mut last_err = String::new();
     for attempt in 0..MAX_SYNC_RETRIES {
         match client.set_worker_availability(bot_id, availability).await {
             Ok(()) => return AvailabilitySyncOutcome::Updated,
@@ -161,6 +164,7 @@ pub async fn sync_worker_availability_with_retry(
                 return AvailabilitySyncOutcome::WorkerNotFound;
             }
             Err(error) => {
+                last_err = error.to_string();
                 tracing::warn!(
                     bot_id = %bot_id,
                     availability,
@@ -182,6 +186,7 @@ pub async fn sync_worker_availability_with_retry(
         bot_id = %bot_id,
         availability,
         retries = MAX_SYNC_RETRIES,
+        last_error = %last_err,
         "Worker availability sync exhausted retries"
     );
     AvailabilitySyncOutcome::Failed
@@ -193,10 +198,12 @@ pub async fn delete_worker_with_retry(
     client: &FuseClient,
     bot_id: &str,
 ) -> bool {
+    let mut last_err = String::new();
     for attempt in 0..MAX_SYNC_RETRIES {
         match client.delete_worker(bot_id).await {
             Ok(()) => return true,
             Err(error) => {
+                last_err = error.to_string();
                 tracing::warn!(
                     bot_id = %bot_id,
                     attempt = attempt + 1,
@@ -218,6 +225,7 @@ pub async fn delete_worker_with_retry(
     tracing::error!(
         bot_id = %bot_id,
         retries = MAX_SYNC_RETRIES,
+        last_error = %last_err,
         "Worker deletion exhausted retries"
     );
     false
