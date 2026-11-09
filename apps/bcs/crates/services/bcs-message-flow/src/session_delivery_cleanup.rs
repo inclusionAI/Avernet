@@ -9,15 +9,20 @@
 //! later terminal notices find the Session gone and are dropped.
 use crate::BcsMessageFlow;
 use bcs_domain::DeliveryType;
-use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+use bcs_domain::message_delivery::{MessageDeliveryStatus as Status, PersistedMessageDelivery};
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoError};
 use bcs_service_api::{
-    DeliveryTransitionCommand, ManagedDeliveryError, ServiceError, ServiceResult,
+    DeliveryTransitionCommand, ManagedDeliveryError, ManagedMessageDeliveryService, ServiceError,
+    ServiceResult,
 };
 
 /// Same cancel budget the per-message cancellation API grants.
 const CANCEL_DEADLINE_MS: i64 = 30_000;
+
+/// Bounded reload-and-retry per row when a concurrent scheduler commit (e.g.
+/// StartSend / Accepted) wins the version race against the cancel.
+const CANCEL_ATTEMPTS: usize = 3;
 
 pub(crate) async fn cancel(
     flow: &BcsMessageFlow,
@@ -25,9 +30,25 @@ pub(crate) async fn cancel(
     bot_ids: &[String],
     reason: &str,
 ) -> ServiceResult<()> {
-    let Some(service) = flow.managed_deliveries.as_ref() else {
-        return Ok(());
-    };
+    match flow.managed_deliveries.as_ref() {
+        Some(service) => cancel_lanes(service.as_ref(), session_id, bot_ids, reason).await,
+        None => Ok(()),
+    }
+}
+
+/// Active rows this cleanup must still cancel. Anything else is terminal or
+/// already carries a durable cancel intent.
+fn needs_cancel(row: &PersistedMessageDelivery) -> bool {
+    row.state.kind == DeliveryType::Send
+        && matches!(row.state.status, Status::Queued | Status::Dispatching | Status::Running | Status::Unknown)
+}
+
+async fn cancel_lanes(
+    service: &dyn ManagedMessageDeliveryService,
+    session_id: &str,
+    bot_ids: &[String],
+    reason: &str,
+) -> ServiceResult<()> {
     let mut failed = 0usize;
     for bot in bot_ids {
         // Bounded by the per-Bot `max_queued` policy; served by the lane index.
@@ -35,42 +56,10 @@ pub(crate) async fn cancel(
             .lookup(DeliveryLookup::Lane { bot: bot.clone(), session: session_id.to_owned() })
             .await
             .map_err(|error| ServiceError::InternalError(format!("session delivery lookup failed: {error}")))?;
-        for row in rows {
-            if row.session_id != session_id
-                || row.state.kind != DeliveryType::Send
-                || !matches!(row.state.status, Status::Queued | Status::Dispatching | Status::Running | Status::Unknown)
-            {
-                continue;
-            }
-            let now_ms = chrono::Utc::now().timestamp_millis();
-            let command = DeliveryTransitionCommand {
-                caller_dispatch_commit: None,
-                caller_cancel: None,
-                caller_terminal: None,
-                delivery_id: row.delivery_id.clone(),
-                expected_state_version: row.state.state_version,
-                event: Event::CancelRequested,
-                now_ms,
-                request_id: None,
-                actor_id: None,
-                reply: None,
-                transport_context_json: Some(serde_json::json!({
-                    "cancel_reason": reason,
-                    crate::managed_delivery::SESSION_DELETING: true,
-                })),
-                deadline_at_ms: Some(now_ms.saturating_add(CANCEL_DEADLINE_MS)),
-            };
-            match service.transition(command).await {
-                Ok(_) => {}
-                // Another path converged the row first.
-                Err(ManagedDeliveryError::Conflict | ManagedDeliveryError::NotFound)
-                | Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Conflict))
-                | Err(ManagedDeliveryError::Lifecycle(_)) => {}
-                Err(error) => {
-                    failed += 1;
-                    tracing::warn!(%session_id, delivery_id = %row.delivery_id, %error,
-                        "session delete: delivery cancellation failed");
-                }
+        for row in rows.into_iter().filter(|row| row.session_id == session_id) {
+            if let Err(error) = cancel_row(service, row, reason).await {
+                failed += 1;
+                tracing::warn!(%session_id, %error, "session delete: delivery cancellation failed");
             }
         }
     }
@@ -81,3 +70,59 @@ pub(crate) async fn cancel(
     }
     Ok(())
 }
+
+/// A lost version race is only "done" once the reloaded row no longer needs a
+/// cancel; otherwise retry against the fresh version, then fail so the
+/// Session is not deleted with a live, un-aborted delivery.
+async fn cancel_row(
+    service: &dyn ManagedMessageDeliveryService,
+    mut row: PersistedMessageDelivery,
+    reason: &str,
+) -> Result<(), String> {
+    for _ in 0..CANCEL_ATTEMPTS {
+        if !needs_cancel(&row) {
+            return Ok(());
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let command = DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            caller_cancel: None,
+            caller_terminal: None,
+            delivery_id: row.delivery_id.clone(),
+            expected_state_version: row.state.state_version,
+            event: Event::CancelRequested,
+            now_ms,
+            request_id: None,
+            actor_id: None,
+            reply: None,
+            transport_context_json: Some(serde_json::json!({
+                "cancel_reason": reason,
+                crate::managed_delivery::SESSION_DELETING: true,
+            })),
+            deadline_at_ms: Some(now_ms.saturating_add(CANCEL_DEADLINE_MS)),
+        };
+        match service.transition(command).await {
+            Ok(_) => return Ok(()),
+            Err(ManagedDeliveryError::Conflict | ManagedDeliveryError::NotFound)
+            | Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Conflict))
+            | Err(ManagedDeliveryError::Lifecycle(_)) => {
+                match service.lookup(DeliveryLookup::Id(row.delivery_id.clone())).await {
+                    Ok(mut current) => match current.pop() {
+                        Some(current) => row = current,
+                        None => return Ok(()),
+                    },
+                    Err(error) => return Err(format!("{}: reload failed: {error}", row.delivery_id)),
+                }
+            }
+            Err(error) => return Err(format!("{}: {error}", row.delivery_id)),
+        }
+    }
+    if needs_cancel(&row) {
+        return Err(format!("{}: still active after {CANCEL_ATTEMPTS} cancel attempts", row.delivery_id));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "session_delivery_cleanup_tests.rs"]
+mod tests;
