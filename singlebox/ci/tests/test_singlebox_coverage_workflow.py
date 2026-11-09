@@ -1,8 +1,46 @@
+import subprocess
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github/workflows/singlebox-coverage.yml"
+
+
+@pytest.mark.parametrize(
+    ("coverage", "model_mode", "expected"),
+    [("1", "mock", "dev_smoke"), ("1", "manual", "dev"), ("0", "mock", "dev")],
+)
+def test_bcsfuse_selects_offline_providers_for_mock_coverage(
+    tmp_path, coverage, model_mode, expected
+):
+    env_file = tmp_path / "env/.env.local"
+    env_file.parent.mkdir()
+    env_file.write_text("export BCSFUSE_PROVIDER_MODE=dev\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            "bash",
+            "-ec",
+            """
+load_repo_env_file() { if [ -f "$1" ]; then . "$1"; fi; }
+source "$1"
+bcsfuse_load_env
+printenv BCSFUSE_PROVIDER_MODE
+""",
+            "test",
+            str(REPO_ROOT / "singlebox/modules/bcsfuse.sh"),
+        ],
+        env={
+            "PROJECT_ROOT": str(tmp_path),
+            "BCSFUSE_RUNTIME_DIR": str(tmp_path),
+            "SINGLEBOX_COVERAGE": coverage,
+            "SINGLEBOX_MODEL_CONFIG_MODE": model_mode,
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == expected
 
 
 def test_workflow_triggers_bcs_and_runs_canonical_gate():
