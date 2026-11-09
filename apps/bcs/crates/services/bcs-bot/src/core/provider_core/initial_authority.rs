@@ -21,7 +21,11 @@ impl ProviderCore {
         let plugin_mock = record.connection_mode == BotConnectionMode::Plugin
             && auth_mode != ProviderAuthMode::AgentPassSubbots;
         let token = if plugin_mock { mock_token() } else { new_session_token() };
-        let returned_token = (!plugin_mock && auth_mode != ProviderAuthMode::AgentPass).then(|| token.clone());
+        let returned_token = if plugin_mock || auth_mode == ProviderAuthMode::AgentPass {
+            None
+        } else {
+            Some(token.clone())
+        };
         let now = now_ms();
         let owner = initialization.owner_user_id.clone();
         repo.create_provider_admin_bot_with_ownership(record.clone(), capabilities,
