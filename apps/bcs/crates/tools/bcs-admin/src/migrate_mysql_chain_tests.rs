@@ -406,8 +406,10 @@ async fn verify_original_043_history_upgrade(db: &dyn DbPlugin, global: &Migrate
         vec![DbValue::from(sha256_hex(original.as_bytes()))])).await?;
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_existing','Existing','dev','human')")).await?;
     let before = chain_history(db).await?;
+    // Every migration after the original 043 applies on top of it.
+    let expected = load_selected_migrations(&chain_args())?.len() - before.len();
     let report = apply_mysql_migrations(&chain_args(), global).await?;
-    assert!(report.contains("applied_versions=1\npending_versions=0"), "{report}");
+    assert!(report.contains(&format!("applied_versions={expected}\npending_versions=0")), "{report}");
     assert_eq!(chain_history(db).await?.into_iter().filter(|(v,_)| *v <= 43).collect::<Vec<_>>(), before);
     // Existing exact ID remains; a trailing-space-different ID is now independent.
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_existing ','Distinct','dev','human')")).await?;
