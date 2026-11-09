@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import * as ctrl from '@/services/backendApi/bots/botSessionFileController';
+import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { botSessionFileService } from '@/services/workspace/botSessionFileService';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
@@ -224,7 +225,9 @@ describe('botSessionFileService 列表/删除/下载', () => {
     mocked.listReady.mockResolvedValue({ files: [] });
     await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_149608', '146836', 'human_149608');
     expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', {
-      user_id: '149608', owner_id: '146836', f_user_id: '149608',
+      user_id: '149608',
+      owner_id: '146836',
+      f_user_id: '149608',
     });
   });
   it('loadReady 映射 view', async () => {
@@ -244,6 +247,43 @@ describe('botSessionFileService 列表/删除/下载', () => {
     const res = await botSessionFileService.loadReady('bot-1', 'sess-1', 'user-1');
     expect(res.ok).toBe(true);
     expect((res as { data: { items: { displayName: string }[] } }).data.items[0].displayName).toBe('a.pdf');
+  });
+  it('loadReady 透传创建者字段（2026-11-09 契约），旧数据缺字段归一 null', async () => {
+    mocked.listReady.mockResolvedValue({
+      files: [
+        {
+          resource_id: 'sr_1',
+          display_name: 'report.txt',
+          status: 'ready',
+          size_bytes: 128,
+          content_hash: null,
+          task_version: null,
+          error_code: null,
+          creator_type: 'bot',
+          creator_name: '报告助手',
+          created_at: '2026-11-09T02:15:30.123456Z',
+        },
+        {
+          // 旧引擎/旧网关缺创建者字段 → View 归一 null，不猜测。
+          resource_id: 'sr_2',
+          display_name: 'input.csv',
+          status: 'ready',
+          size_bytes: 1024,
+          content_hash: null,
+          task_version: null,
+          error_code: null,
+        },
+      ],
+    });
+    const res = await botSessionFileService.loadReady('bot-1', 'sess-1', 'user-1');
+    expect(res.ok).toBe(true);
+    const items = (res as { data: { items: BotSessionFileView[] } }).data.items;
+    expect(items[0]).toMatchObject({
+      creatorType: 'bot',
+      creatorName: '报告助手',
+      createdAt: '2026-11-09T02:15:30.123456Z',
+    });
+    expect(items[1]).toMatchObject({ creatorType: null, creatorName: null, createdAt: null });
   });
   it('loadReady 将 human_ 前缀的 user_id 归一化为工号', async () => {
     mocked.listReady.mockResolvedValue({ files: [] });
