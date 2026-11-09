@@ -26,11 +26,13 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
+    NodeAction,
     NodeOpResult,
     Status,
     TaskCallbackData,
     TaskExecutionGraph,
     TaskNode,
+    TaskStopResult,
     TaskNodePatch,
     TaskOpResult,
     TaskContext,
