@@ -119,3 +119,20 @@ async fn corrupt_overdue_rows_cannot_hide_healthy_control_work() -> Result<(), B
     assert_eq!(recovery.iter().map(|d| d.delivery_id.as_str()).collect::<Vec<_>>(), vec!["healthy"]);
     Ok(())
 }
+
+#[tokio::test]
+async fn scheduler_isolated_rows_are_excluded_from_ordered_scans() -> Result<(), Box<dyn std::error::Error>> {
+    let (db, repo) = store().await?;
+    // 32 decodable overdue Running rows the scheduler has isolated, sorting
+    // ahead of a healthy overdue one.
+    for n in 0..32 {
+        db.execute(DbStatement::new(format!("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms) VALUES ('stuck-{n:02}','dev','m{n}','bot','doomed','g',{n},'group','send','running',1,1,1,1,1,1,'{{}}',{n})"))).await?;
+    }
+    db.execute(DbStatement::new("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,run_deadline_at_ms) VALUES ('healthy','dev','mh','bot','doomed','g',99,'group','send','running',1,1,1,1,1,1,'{}',99)")).await?;
+    let hidden = repo.work_batch(DeliveryWorkBatch::Control, 1000, "", 32).await?;
+    assert!(!hidden.iter().any(|d| d.delivery_id == "healthy"), "without exclusions the stuck rows fill the page");
+    let excluded: Vec<String> = (0..32).map(|n| format!("stuck-{n:02}")).collect();
+    let page = repo.work_batch_excluding(DeliveryWorkBatch::Control, 1000, "", 32, &excluded).await?;
+    assert_eq!(page.iter().map(|d| d.delivery_id.as_str()).collect::<Vec<_>>(), vec!["healthy"]);
+    Ok(())
+}

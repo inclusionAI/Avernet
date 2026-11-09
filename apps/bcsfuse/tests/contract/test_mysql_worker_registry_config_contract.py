@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mysql.connector import Error
 
-from src.application.ports.worker_registry_store import WorkerRegistryStore
-from src.domain.exceptions import WorkerNotFoundException
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+from app.application.ports.worker_registry_store import WorkerRegistryStore
+from app.domain.exceptions import WorkerNotFoundException
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
 
 
 @pytest.fixture

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.retrieval_input import (
+from app.domain.models.retrieval_input import (
     RetrievalInput,
     RetrievalFilters,
     RetrievalHints,
 )
-from src.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
-from src.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
+from app.domain.models.plan_draft import PlanDraft, PlanStep
 from tests.fixtures.retrieval_data import (
     get_architecture_design_task_spec,
     get_architecture_plan_draft,

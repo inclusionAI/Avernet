@@ -12,11 +12,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_incremental_sync_propagates_remote_upsert_and_soft_delete(tmp_path) -> None:
-    from src.domain.models.vector_point import VectorPoint
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+    from app.domain.models.vector_point import VectorPoint
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
         QdrantMySQLVectorStore,
     )
-    from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+    from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
         TABLE_NAME,
         MySQLVectorPersistenceBackend,
     )
@@ -79,9 +79,9 @@ def test_incremental_sync_propagates_remote_upsert_and_soft_delete(tmp_path) -> 
 
 
 def test_worker_payload_state_persists_and_replays_to_another_index(tmp_path):
-    from src.domain.models.vector_point import VectorPoint
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
-    from src.infra.vectorstore_backends.mysql_vector_persistence_backend import TABLE_NAME, MySQLVectorPersistenceBackend
+    from app.domain.models.vector_point import VectorPoint
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+    from app.infra.vectorstore_backends.mysql_vector_persistence_backend import TABLE_NAME, MySQLVectorPersistenceBackend
 
     dimension = int(os.getenv("EMBEDDING_DIMENSION", "4096"))
     owner = f"runtime-e2e-{uuid4().hex}:owner"

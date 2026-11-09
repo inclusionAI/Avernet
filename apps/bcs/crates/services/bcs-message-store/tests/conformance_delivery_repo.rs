@@ -102,7 +102,7 @@ async fn sqlite_session_unfinished_lookup_is_indexed_and_bounded() -> Result<(),
     let query = recording.queries.lock().unwrap()[0].0.clone();
     let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", query.sql()), query.params().to_vec())).await?;
     let plan = plan.iter().map(|r| bcs_db_api::db_get_column::<String>(r, "detail").unwrap()).collect::<Vec<_>>().join("; ");
-    assert!(plan.contains("idx_delivery_session_unfinished"), "{plan}");
+    assert!(plan.contains("idx_delivery_session_message"), "{plan}");
     Ok(())
 }
 

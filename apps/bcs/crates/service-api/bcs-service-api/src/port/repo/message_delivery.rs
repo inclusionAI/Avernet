@@ -40,7 +40,7 @@ pub enum DeliveryLookup {
     Message(String),
     /// Unfinished Sends (Queued/Dispatching/Running/Unknown) of one Session,
     /// whoever the target Bot is, in no particular order. Bounded by `limit`
-    /// (at most 500) and served by `idx_delivery_session_unfinished`.
+    /// (at most 500) and served by `idx_delivery_session_message`.
     SessionUnfinished { session: String, limit: usize },
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }
@@ -192,6 +192,13 @@ pub trait MessageDeliveryRepoPort: Send + Sync {
     /// lends unused capacity. Total <= min(limit, 200); deadlines sort before IDs
     /// within timeout classes. No global ordering across control classes.
     async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError>;
+    /// `work_batch` that leaves out `exclude` (rows the scheduler has isolated),
+    /// so they cannot keep occupying the slots of an ordered page. At most a
+    /// few hundred ids. Stores without support ignore the exclusions.
+    async fn work_batch_excluding(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+        let _ = exclude;
+        self.work_batch(kind, now_ms, after, limit).await
+    }
     /// Low-frequency SQL aggregation; scrape callers must cache the result.
     async fn queue_statistics(&self) -> Result<Vec<DeliveryQueueStatistic>, MessageDeliveryRepoError>;
     /// Environment-scoped business policy; absence means disabled version zero.

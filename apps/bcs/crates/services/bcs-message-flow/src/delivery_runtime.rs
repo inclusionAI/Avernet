@@ -303,7 +303,7 @@ impl DeliveryRuntime {
             tokio::select! {
                 _ = shutdown.changed() => { break; }
                 _ = expiry_ticker.tick() => {
-                    let expired = storage!(self.service.work_batch(DeliveryWorkBatch::Expired, now_ms(), "", 100));
+                    let expired = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Expired, now_ms(), "", 100, &excluded)) };
                     for row in expired {
                         if isolation.blocked(&row.delivery_id) { continue; }
                         // A maybe-sent caller row never expires into a
@@ -323,7 +323,7 @@ impl DeliveryRuntime {
                 }
                 _ = ticker.tick() => {
                     let tick_started = Instant::now();
-                    let rows = storage!(self.service.work_batch(DeliveryWorkBatch::Control, now_ms(), "", 32));
+                    let rows = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Control, now_ms(), "", 32, &excluded)) };
                     for row in &rows {
                         if isolation.blocked(&row.delivery_id) { continue; }
                         if row.state.status == Status::Cancelling

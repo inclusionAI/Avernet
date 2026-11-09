@@ -341,7 +341,10 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         self.observe_operation("queued_heads", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
     }
     async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.work_batch(kind, now_ms, after, limit).await;
+        self.work_batch_excluding(kind, now_ms, after, limit, &[]).await
+    }
+    async fn work_batch_excluding(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
+        let start = std::time::Instant::now(); let result = self.repo.work_batch_excluding(kind, now_ms, after, limit, exclude).await;
         let operation = match kind { DeliveryWorkBatch::Expired => "expiry_batch", DeliveryWorkBatch::Control => "control_batch", DeliveryWorkBatch::Recovery => "recovery_batch" };
         self.observe_operation(operation, start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
     }

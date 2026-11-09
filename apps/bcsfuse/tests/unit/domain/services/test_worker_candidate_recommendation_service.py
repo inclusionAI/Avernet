@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.services.worker_candidate_recommendation_service import (
+from app.domain.services.worker_candidate_recommendation_service import (
     WorkerCandidateRecommendationService,
 )
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.retrieval_mode import RetrievalMode
 
 
 class TestWorkerCandidateRecommendationServiceInterface:

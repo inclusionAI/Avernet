@@ -31,6 +31,13 @@ impl RowIsolation {
         self.skipped.get(delivery_id).is_some_and(|(until, _)| Instant::now() < *until)
     }
 
+    /// Rows currently skipped, passed to ordered scans as exclusions so they
+    /// cannot keep occupying page slots ahead of healthy rows.
+    pub(super) fn excluded(&self) -> Vec<String> {
+        let now = Instant::now();
+        self.skipped.iter().filter(|(_, (until, _))| now < *until).map(|(id, _)| id.clone()).take(256).collect()
+    }
+
     /// Isolate a row whose shape the scheduler cannot act on.
     pub(super) fn isolate(&mut self, delivery_id: &str) {
         let backoff = self.skip(delivery_id);
@@ -133,5 +140,15 @@ mod tests {
         assert_eq!(isolation.skip("d"), MAX_SKIP);
         isolation.clear("d");
         assert!(!isolation.blocked("d"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn excluded_lists_only_rows_still_skipped() {
+        let mut isolation = RowIsolation::default();
+        isolation.skip("a");
+        isolation.skip("b");
+        isolation.skip("b");
+        tokio::time::advance(FIRST_SKIP + Duration::from_millis(1)).await;
+        assert_eq!(isolation.excluded(), vec!["b".to_string()], "a's backoff expired; b's doubled");
     }
 }

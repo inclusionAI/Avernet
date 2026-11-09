@@ -94,7 +94,7 @@ impl Drop for WriterTimer {
     }
 }
 
-async fn control_page(db: &dyn bcs_db_api::DbPlugin, corrupt: &CorruptRows, env: &str, category: usize, now: i64, limit: usize) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+async fn control_page(db: &dyn bcs_db_api::DbPlugin, corrupt: &CorruptRows, exclude: &[String], env: &str, category: usize, now: i64, limit: usize) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
     let (predicate, order) = match category {
         0 => ("status = 'dispatching' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
         1 => ("status = 'running' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
@@ -108,7 +108,7 @@ async fn control_page(db: &dyn bcs_db_api::DbPlugin, corrupt: &CorruptRows, env:
     let mut params = vec![env.into()];
     if category != 2 { params.push(now.into()); }
     corrupt.scan(db, &format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND {predicate}"), params,
-        &format!("ORDER BY {order} LIMIT ?"), limit).await
+        &format!("ORDER BY {order} LIMIT ?"), limit, exclude).await
 }
 
 const COLS: &[&str] = &[
@@ -654,6 +654,9 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         })).collect()
     }
     async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+        self.work_batch_excluding(kind, now_ms, after, limit, &[]).await
+    }
+    async fn work_batch_excluding(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
         if matches!(kind, DeliveryWorkBatch::Control) {
             let limit = limit.min(200);
             if limit == 0 { return Ok(Vec::new()); }
@@ -665,14 +668,14 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             for category in 0..categories {
                 let quota = (limit / categories + usize::from(category < limit % categories)).max(1).min(limit - result.len());
                 if quota == 0 { continue; }
-                let rows = control_page(self.db.as_ref(), &self.corrupt_rows, &self.env, category, now_ms, quota).await?;
+                let rows = control_page(self.db.as_ref(), &self.corrupt_rows, exclude, &self.env, category, now_ms, quota).await?;
                 if rows.len() == quota { full.push((category, quota)); }
                 for row in rows { if seen.insert(row.delivery_id.clone()) { result.push(row); } }
             }
             for (category, quota) in full {
                 if result.len() == limit { break; }
                 // Re-read only a bounded prefix, not an unbounded OFFSET cursor.
-                let rows = control_page(self.db.as_ref(), &self.corrupt_rows, &self.env, category, now_ms, quota + limit - result.len()).await?;
+                let rows = control_page(self.db.as_ref(), &self.corrupt_rows, exclude, &self.env, category, now_ms, quota + limit - result.len()).await?;
                 for row in rows {
                     if seen.insert(row.delivery_id.clone()) { result.push(row); }
                     if result.len() == limit { break; }
@@ -697,7 +700,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
                 let columns = if matches!(status, "unknown" | "cancel_unknown") { &full_columns } else { &compact_columns };
                 rows.extend(self.corrupt_rows.scan(self.db.as_ref(),
                     &format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND status = ? AND expire_at_ms <= ?"),
-                    vec![self.env.as_str().into(), status.into(), now_ms.into()], "ORDER BY expire_at_ms, delivery_id LIMIT ?", size).await?);
+                    vec![self.env.as_str().into(), status.into(), now_ms.into()], "ORDER BY expire_at_ms, delivery_id LIMIT ?", size, exclude).await?);
             }
             return Ok(rows);
         }
@@ -709,7 +712,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         };
         let columns = COLS.iter().map(|c| match *c { "semantic_projection_json" => "'{}' AS semantic_projection_json", "transport_context_json" => "NULL AS transport_context_json", column => column }).collect::<Vec<_>>().join(",");
         self.corrupt_rows.scan(self.db.as_ref(), &format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND delivery_id > ? AND {predicate}"),
-            params, "ORDER BY delivery_id LIMIT ?", limit.min(200)).await
+            params, "ORDER BY delivery_id LIMIT ?", limit.min(200), exclude).await
     }
     async fn queue_statistics(&self) -> Result<Vec<DeliveryQueueStatistic>, MessageDeliveryRepoError> {
         self.db.query(DbStatement::with_params("SELECT flow_kind, kind, status, COALESCE(wait_reason, 'none') AS wait_reason, COUNT(*) AS n, MIN(created_at_ms) AS oldest FROM bcs_message_deliveries WHERE env = ? AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown','pending_context','bound') GROUP BY flow_kind, kind, status, wait_reason", vec![self.env.as_str().into()])).await.map_err(storage)?.iter().map(|r| Ok(DeliveryQueueStatistic {

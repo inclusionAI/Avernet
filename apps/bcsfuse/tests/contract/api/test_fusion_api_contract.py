@@ -18,7 +18,7 @@ class TestFusionAPIContractModule:
         """测试 fusion_routes 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.interfaces.api.fusion_routes")
+        module = importlib.import_module("app.adapters.http.fusion_routes")
         assert module is not None
 
 
@@ -27,7 +27,7 @@ class TestFuseRequestSchema:
 
     def test_request_valid_json(self):
         """测试有效 JSON 请求"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         data = {
             "question": "这个方案是否可行",
@@ -41,7 +41,7 @@ class TestFuseRequestSchema:
 
     def test_request_with_options(self):
         """测试带 options 的请求"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         data = {
             "question": "test",
@@ -59,7 +59,7 @@ class TestFuseRequestSchema:
 
     def test_request_with_metadata(self):
         """测试带 metadata 的请求"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         data = {
             "question": "test",
@@ -79,7 +79,7 @@ class TestFuseResponseSchema:
 
     def test_response_valid_json(self):
         """测试有效 JSON 响应"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -105,7 +105,7 @@ class TestFuseResponseSchema:
 
     def test_response_with_perspectives(self):
         """测试带 perspectives 的响应"""
-        from src.domain.models.fusion_result import FusionResult, Perspective, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, Perspective, FusionTiming
 
         perspective = Perspective(
             participant_id="dba",
@@ -139,7 +139,7 @@ class TestFuseResponseSchema:
 
     def test_response_with_recommendation(self):
         """测试带 recommendation 的响应"""
-        from src.domain.models.fusion_result import (
+        from app.domain.models.fusion_result import (
             FusionResult,
             Recommendation,
             FusionTiming,
@@ -180,7 +180,7 @@ class TestErrorSchema:
 
     def test_error_response_structure(self):
         """测试错误响应结构"""
-        from src.domain.models.fusion_result import FusionError
+        from app.domain.models.fusion_result import FusionError
 
         error = FusionError(
             code="PARTICIPANT_NOT_FOUND",
@@ -193,7 +193,7 @@ class TestErrorSchema:
 
     def test_error_with_details(self):
         """测试带详情的错误"""
-        from src.domain.models.fusion_result import FusionError
+        from app.domain.models.fusion_result import FusionError
 
         error = FusionError(
             code="VALIDATION_ERROR",
@@ -210,7 +210,7 @@ class TestAPIEndpointContract:
 
     def test_api_endpoint_exists(self):
         """测试 API 端点存在"""
-        from src.interfaces.api.fusion_routes import router
+        from app.adapters.http.fusion_routes import router
 
         # 查找 fuse 端点
         routes = [route.path for route in router.routes]
@@ -218,7 +218,7 @@ class TestAPIEndpointContract:
 
     def test_api_endpoint_methods(self):
         """测试 API 端点方法"""
-        from src.interfaces.api.fusion_routes import router
+        from app.adapters.http.fusion_routes import router
 
         # 查找 fuse 端点的 HTTP 方法
         for route in router.routes:

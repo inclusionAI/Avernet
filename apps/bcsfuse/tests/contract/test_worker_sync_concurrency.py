@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.models.worker import Capability, CapabilityLevel, SkillRef, SkillSource, TrustLevel
-from src.domain.models.worker import Worker
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+from app.domain.models.worker import Capability, CapabilityLevel, SkillRef, SkillSource, TrustLevel
+from app.domain.models.worker import Worker
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
 from tests.contract.adapters.helpers import make_sample_worker
 
 
@@ -175,7 +175,7 @@ def test_mysql_worker_update_uses_version_predicate_and_rejects_conflict():
 
 
 def test_sparse_worker_merge_retries_after_competing_update(tmp_path, monkeypatch):
-    from src.application.services.worker_sync_merge import save_merged_worker
+    from app.application.services.worker_sync_merge import save_merged_worker
 
     path = str(tmp_path / "workers.sqlite")
     first = SQLiteWorkerRegistryStore(db_path=path)

@@ -12,7 +12,7 @@ import pytest
 from typing import Optional
 from unittest.mock import Mock, MagicMock
 
-from src.domain.models.fusion_result import Perspective
+from app.domain.models.fusion_result import Perspective
 
 
 class TestConflictAlignmentServiceModule:
@@ -22,12 +22,12 @@ class TestConflictAlignmentServiceModule:
         """测试 conflict_alignment_service 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.application.services.conflict_alignment_service")
+        module = importlib.import_module("app.application.services.conflict_alignment_service")
         assert module is not None
 
     def test_service_class_exists(self):
         """测试 ConflictAlignmentService 类存在"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         assert ConflictAlignmentService is not None
 
@@ -37,14 +37,14 @@ class TestConflictAlignmentServiceCreation:
 
     def test_service_can_be_created(self):
         """测试服务可以被创建"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
         assert service is not None
 
     def test_service_with_recommendation_service(self):
         """测试服务可以注入 recommendation_service"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         mock_rec_service = Mock()
         service = ConflictAlignmentService(recommendation_service=mock_rec_service)
@@ -56,8 +56,8 @@ class TestConflictAlignmentServiceBasic:
 
     def test_align_returns_result(self):
         """测试 align 方法返回结果"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
-        from src.domain.models.fusion_result import Perspective
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.domain.models.fusion_result import Perspective
 
         service = ConflictAlignmentService()
 
@@ -98,7 +98,7 @@ class TestConflictAlignmentServiceBasic:
 
     def test_align_with_all_perspectives_completed(self):
         """测试所有视角完成时的对齐"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -133,7 +133,7 @@ class TestConflictExtraction:
 
     def test_detects_conflict_between_parties(self):
         """测试能检测到双方冲突"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -164,7 +164,7 @@ class TestConflictExtraction:
 
     def test_no_conflict_when_all_agree(self):
         """测试所有一致时无冲突"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -196,7 +196,7 @@ class TestConflictExtraction:
 
     def test_conflict_has_required_fields(self):
         """测试冲突包含必要字段"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -235,7 +235,7 @@ class TestAlignmentPointExtraction:
 
     def test_extracts_alignment_points(self):
         """测试能提取对齐点"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -267,7 +267,7 @@ class TestAlignmentPointExtraction:
 
     def test_alignment_point_has_summary(self):
         """测试对齐点包含 summary"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -303,7 +303,7 @@ class TestKeyInsightsGeneration:
 
     def test_generates_key_insights(self):
         """测试能生成关键洞察"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -333,7 +333,7 @@ class TestKeyInsightsGeneration:
 
     def test_key_insights_are_high_level(self):
         """测试关键洞察是高层总结"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -362,7 +362,7 @@ class TestPartialSuccessHandling:
 
     def test_partial_success_when_one_perspective_fails(self):
         """测试一个视角失败时标记 partial_success"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -393,7 +393,7 @@ class TestPartialSuccessHandling:
 
     def test_partial_success_when_one_times_out(self):
         """测试一个视角超时时标记 partial_success"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -427,8 +427,8 @@ class TestRecommendationIntegration:
 
     def test_calls_recommendation_service_when_provided(self):
         """测试提供 recommendation_service 时会被调用"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
-        from src.domain.models.fusion_recommendation import FusionRecommendation, Decision
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.domain.models.fusion_recommendation import FusionRecommendation, Decision
 
         mock_rec_service = Mock()
         mock_rec_service.generate.return_value = FusionRecommendation(
@@ -465,7 +465,7 @@ class TestRecommendationIntegration:
 
     def test_fallback_when_recommendation_fails(self):
         """测试 recommendation 失败时有 fallback"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         mock_rec_service = Mock()
         mock_rec_service.generate.side_effect = Exception("LLM error")
@@ -494,7 +494,7 @@ class TestRecommendationIntegration:
 
     def test_no_recommendation_when_disabled(self):
         """测试禁用时不生成 recommendation"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         mock_rec_service = Mock()
 
@@ -526,7 +526,7 @@ class TestEdgeCases:
 
     def test_single_perspective(self):
         """测试单个视角"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -550,7 +550,7 @@ class TestEdgeCases:
 
     def test_all_perspectives_failed(self):
         """测试所有视角失败"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -586,7 +586,7 @@ class TestEdgeCases:
 
     def test_empty_perspectives_list(self):
         """测试空视角列表"""
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -608,7 +608,7 @@ class TestConflictAlignmentConsistency:
         测试：当两个 participant 在同一议题上立场相反时，
         不能生成"双方已达成一致"的 alignment point
         """
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -659,7 +659,7 @@ class TestConflictAlignmentConsistency:
         测试：alignment point 必须来源于真实共识，
         而不是模板化兜底文案
         """
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
@@ -704,7 +704,7 @@ class TestConflictAlignmentConsistency:
         """
         测试：冲突和对齐可以共存，但必须是不同维度
         """
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         service = ConflictAlignmentService()
 
