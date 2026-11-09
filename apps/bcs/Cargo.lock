@@ -334,6 +334,7 @@ dependencies = [
  "bcs-domain",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.20",
 ]
 
@@ -344,6 +345,23 @@ dependencies = [
  "async-trait",
  "bcn-runtime-model",
  "futures",
+]
+
+[[package]]
+name = "bcn-runtime-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

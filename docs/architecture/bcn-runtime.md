@@ -241,3 +241,57 @@ the bounded queue until matching ResultSaved, then publishes Cancelled and is
 removed. Duplicate cancellation is idempotent, and scheduling skips these items.
 Unknown Direct execution freezes Failed/ContextBlocked intents for already
 queued tasks through the same barrier; newly submitted tasks fail immediately.
+
+## Concrete fenced repository boundary
+
+`services/bcn-runtime-store` implements the declared repository ports over
+AtomicStore, wired only in bootstrap/tests. All independent entity/index rows
+share one `bcn-runtime-v1` physical atomic partition per fully isolated Scope.
+The 1024 logical shards distribute work/ownership, not physical storage. There
+is no growing serialized shard value or scope revision. This MVP layout gives
+opaque task/command IDs direct bounded lookup and atomic admission/publication
+without a routing migration. It carries an unmeasured per-scope throughput
+ceiling; physical sharding needs an explicit versioned routing design. Memory
+conformance is not evidence of production capacity, durability or failover.
+
+Admission owns immutable caller/session/target metadata and creates initial task
+snapshot/indexes in the same transaction as receipt/inbox/wake. TaskQueryStore
+therefore includes accepted nonterminal tasks. ResultStore delegates listing;
+result payloads never invent access authority. SessionStore load_spec and active
+wake pages support recovery before first activation. Capacity counts outstanding
+accepted tasks until final ResultSaved is checkpointed, including queued cancels.
+
+Worker publishes only CommittedEffectRef under current ownership. The store loads
+canonical payload and atomically queues/acknowledges the matching outbox item;
+replays cannot erase newer work or recreate already published identities.
+Command receive exposes bounded pagination, including empty eligible pages with
+continuation cursors; consumers advance past leased heads. ACK requires durable
+connector dispatch claim. Active dispatch enumeration remains available after
+ACK and returns immutable DispatchContext (command/session/task/node) along with
+exact Send/Cancel operation. Completed operations are removed from the active
+index but retained for direct idempotent reads and canonical receipt retries.
+
+Per-node ConnectorProjection rows aggregate under a task-wide snapshot CAS.
+Only canonical dispatch correlation selects a node; peers' output survives reset
+and delta. A task-global epoch is allocated on reset, independently of dispatch
+epochs. The node projection, aggregate snapshot, Reset and publication receipt
+are one atomic transaction, so no partially published reset marker is needed.
+Connector inputs never write status or admission metadata. Worker terminal facts
+use authoritative saved result output after the saved receipt barrier, even
+when checkpoint current_task has advanced.
+
+InboxPort is an internal trusted capability. Worker forwards only an actual
+ResultStore SavedResult return; the repository checks exact committed immutable
+intent/session/task/node/attempt and atomically records its receipt/inbox/wake.
+This lets a future production result adapter remain independent of repository
+keys. LocalResultStore is explicit, refuses production profile, preserves
+admission metadata and never provides an automatic fallback. Protocol clients
+and Gateway must not receive an arbitrary SessionInput/ResultSaved capability.
+
+Required DispatchContext, committed-reference publication, paginated command
+receive and ConnectorProjection reset are unreleased v1 corrections with
+serialization/consumer and real repository tests. Missing-context records need
+explicit offline migration/discard; hashed IDs are never reverse-parsed. The
+legacy loop and its in-flight sessions remain unchanged. The runtime-store README
+records per-operation bounded calls, scan costs and remaining infrastructure
+limitations; no production readiness follows from local tests.

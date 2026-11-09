@@ -65,7 +65,7 @@ fn send_and_cancel_operations_keep_distinct_ids_and_payloads_through_recovery() 
             DispatchOperation::Cancel { .. } => DispatchReceipt::Cancellation {
                 outcome: CancelOutcome::Confirmed { affected_remote_task_ids: vec!["remote-task".into()] } },
         };
-        let record = DispatchRecord { fence: DispatchFence { dispatch_id: operation.dispatch_id().clone(),
+        let record = DispatchRecord { context: DispatchContext { command_id: CommandId::new(scope.clone(), "command"), session_id: SessionId::new(scope.clone(), "session"), task_id: TaskId::new(scope.clone(), "task"), node_id: Some("node".into()) }, fence: DispatchFence { dispatch_id: operation.dispatch_id().clone(),
             owner: NodeIdentity { scope: scope.clone(), node_id: "connector".into(), incarnation: "process-1".into() }, epoch: 3 },
             revision: Revision(8), operation, phase: DispatchPhase::MayHaveSent,
             handle: Some(handle.clone()), receipt: Some(receipt), updated_at_ms: 42 };
@@ -93,7 +93,7 @@ fn cancellation_receipts_and_inputs_preserve_unknown_and_confirmation_evidence()
         let operation_id = OperationId::new(scope.clone(), "cancel-operation");
         let handle = ExecutionHandle { target: binding.target.clone(), binding_version: "v7".into(),
             remote_task_id: Some("remote-task".into()), remote_context_id: Some("remote-context".into()) };
-        let record = DispatchRecord {
+        let record = DispatchRecord { context: DispatchContext { command_id: CommandId::new(scope.clone(), "command"), session_id: SessionId::new(scope.clone(), "session"), task_id: TaskId::new(scope.clone(), "task"), node_id: Some("node".into()) },
             fence: DispatchFence { dispatch_id: dispatch_id.clone(), owner: NodeIdentity {
                 scope: scope.clone(), node_id: "connector".into(), incarnation: "process-2".into() }, epoch: 4 },
             revision: Revision(9), operation: DispatchOperation::Cancel { dispatch_id, binding,

@@ -6,9 +6,9 @@ use bcn_runtime_api::port::repo::{DispatchStore, TaskEventStore};
 use bcn_runtime_model::*;
 
 async fn claim_and_recover_cancel(
-    store: Arc<dyn DispatchStore>, operation: DispatchOperation, owner: NodeIdentity, next: NodeIdentity,
+    store: Arc<dyn DispatchStore>, command_id: CommandId, owner: NodeIdentity, next: NodeIdentity,
 ) -> RuntimeResult<DispatchRecord> {
-    let claimed = store.claim(operation, owner).await?;
+    let claimed = store.claim(&command_id, owner).await?;
     store.takeover(&claimed.fence, next).await
 }
 

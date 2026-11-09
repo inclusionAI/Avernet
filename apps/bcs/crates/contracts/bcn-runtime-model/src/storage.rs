@@ -118,7 +118,15 @@ pub enum DispatchReceipt {
     Cancellation { outcome: CancelOutcome },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DispatchContext {
+    pub command_id: CommandId,
+    pub session_id: SessionId,
+    pub task_id: TaskId,
+    pub node_id: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DispatchRecord {
+    pub context: DispatchContext,
     pub fence: DispatchFence,
     pub revision: Revision,
     pub operation: DispatchOperation,
@@ -152,4 +160,37 @@ impl Default for RuntimeDefaults {
             token_batch_ms: 200, session_pending_tasks: 16, graph_nodes: 32,
             graph_agents: 5, poison_takeovers: 3, drain_ms: 30000 }
     }
+}
+
+/// Only the store's immutable committed outbox is publication authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommittedEffectRef { pub session_id: SessionId, pub command_id: CommandId }
+/// Immutable admission authority, retained independently from final result payloads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskMetadata { pub caller: CallerContext, pub task: TaskView }
+/// Stable typed identity shared by reducers' outbox consumers and repositories.
+pub fn effect_command_id(session: &SessionId, effect: &EffectIntent) -> RuntimeResult<CommandId> {
+    use sha2::{Digest, Sha256};
+    let (kind, scope, value) = match effect {
+        EffectIntent::SendAgent { request, .. } => ("send", &request.operation_id.scope, &request.operation_id.value),
+        EffectIntent::CancelAgent { request, .. } => ("cancel", &request.operation_id.scope, &request.operation_id.value),
+        EffectIntent::Judge { request } => ("judge", &request.operation_id.scope, &request.operation_id.value),
+        EffectIntent::SaveResult { intent } => ("result", &intent.result_id.scope, &intent.result_id.value),
+    };
+    if scope != &session.scope { return Err(RuntimeError::InvalidInput("effect scope".into())); }
+    let mut hash = Sha256::new();
+    for part in ["bcn-command-v1", session.value.as_str(), kind, value.as_str()] {
+        hash.update((part.len() as u64).to_be_bytes()); hash.update(part.as_bytes());
+    }
+    Ok(CommandId::new(session.scope.clone(), format!("{:x}", hash.finalize())))
+}
+
+/// Connector owns only this node's output, never the task-wide status/metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectorProjection { pub task_id: TaskId, pub output: Vec<MessagePart>, pub expected_cursor: EventCursor }
+/// Logical work placement, not physical storage partitioning.
+pub fn session_shard(session: &SessionId) -> ShardId {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(session.value.as_bytes());
+    ShardId { scope: session.scope.clone(), number: u16::from_be_bytes([hash[0], hash[1]]) % 1024 }
 }
