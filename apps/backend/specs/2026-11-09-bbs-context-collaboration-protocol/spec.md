@@ -147,8 +147,6 @@ flowchart TB
     end
   end
 
-  snapshot["ContextSnapshot"]
-
   bbsDiscussion --> adapter
   todoScenario --> adapter
   adapter --> event
@@ -166,10 +164,6 @@ flowchart TB
   stateDef -. 冻结 revision .-> stateBinding
   stateBinding --> transition
   event --> transition
-  event --> snapshot
-  root --> snapshot
-  snapshot --> bbsDiscussion
-  snapshot --> todoScenario
 ```
 
 ### 4.2 聚合根：CollaborationContext
