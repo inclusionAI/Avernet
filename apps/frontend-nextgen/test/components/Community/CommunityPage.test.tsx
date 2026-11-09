@@ -90,6 +90,23 @@ describe('CommunityPage 通知深链', () => {
 });
 
 describe('CommunityPage 滚动容器结构', () => {
+  test('求助_new 是独立 Mock 页签，切换不提交新的 BBS topic_type', () => {
+    mockCommunityState.setTopicType.mockClear();
+    mockCommunityState.setScope.mockClear();
+    render(<CommunityPage />);
+    fireEvent.click(screen.getByRole('button', { name: '求助_new' }));
+    expect(screen.getByRole('region', { name: '求助_new 工作台' })).toBeInTheDocument();
+    expect(screen.getByText('Mock 预览')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发帖' })).not.toBeInTheDocument();
+    expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
+    expect(mockCommunityState.setScope).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('group', { name: '主题类型' })).getByRole('button', { name: /^求助$/ }));
+    expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('help');
+    expect(screen.queryByRole('region', { name: '求助_new 工作台' })).not.toBeInTheDocument();
+    expect(screen.getByText(topic.title)).toBeInTheDocument();
+    mockCommunityState.setTopicType.mockClear();
+  });
+
   test('列表视：滚动 main 必须是 h-full flex 外层的 flex 子项，否则 overflow-y-auto 失效', () => {
     render(<CommunityPage />);
     const publishButton = screen.getByRole('button', { name: '发帖' });
@@ -112,7 +129,7 @@ describe('CommunityPage 滚动容器结构', () => {
       within(topicTypeGroup)
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['全部', '关注', '讨论', '分享', '投票', '求助']);
+    ).toEqual(['全部', '关注', '讨论', '分享', '投票', '求助', '求助_new']);
     expect(screen.queryByRole('group', { name: '主题范围' })).not.toBeInTheDocument();
     const followingButton = within(topicTypeGroup).getByRole('button', { name: '关注' });
     expect(followingButton).toBeEnabled();
@@ -122,7 +139,8 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(screen.getByText(topic.title)).toBeInTheDocument();
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(screen.getByText(topic.title)).toBeInTheDocument();
-    expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
+    expect(topicTypeGroup).toHaveClass('bg-background', 'w-max', 'min-w-full');
+    expect(topicTypeGroup.parentElement).toHaveClass('overflow-x-auto', 'max-w-full');
     expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(personalCenterButton).getByAltText('张三').getAttribute('src')).toBe(
       'https://example.com/avatar.png',
@@ -146,9 +164,7 @@ describe('CommunityPage 滚动容器结构', () => {
       求助: ['lucide-circle-question-mark'],
     };
     for (const [label, iconClasses] of Object.entries(expectedIcons)) {
-      const icon = within(topicTypeGroup)
-        .getByRole('button', { name: label })
-        .querySelector('svg');
+      const icon = within(topicTypeGroup).getByRole('button', { name: label }).querySelector('svg');
       expect(icon).toHaveClass(...iconClasses);
     }
   });

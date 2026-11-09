@@ -1,44 +1,22 @@
 import { Button } from '@/components/ui/Button';
-import { IconButton } from '@/components/ui/IconButton';
-import { Input } from '@/components/ui/Input';
-import { Segmented } from '@/components/ui/Segmented';
-import type { CommunityTopicFilter, CommunityTopicOpenTarget } from '@/domain/community/types';
+import type { CommunityTopicOpenTarget } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
-import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
-import { Avatar } from '@/components/ui/Avatar';
-import type { ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
-import { CommunityFollowIcon } from '../CommunityFollowIcon';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
-import { TopicTypeIcon } from '../TopicTypeIcon';
+import { CommunityHelpCenter } from '../HelpCenter';
 import { PublishTopicModal } from '../PublishTopicModal';
+import { CommunityToolbar } from './CommunityToolbar';
 import { useNotificationTopicDeepLink } from './useNotificationTopicDeepLink';
-
-type CommunityTopicView = CommunityTopicFilter | 'following';
-
-const CURRENT_USER_AVATAR_SIZE = 40;
-
-const topicTypeOptions: Array<{
-  value: CommunityTopicView;
-  label: string;
-  disabledReason?: string;
-  icon?: ReactNode;
-}> = [
-  { value: 'all', label: '全部' },
-  { value: 'following', label: '关注', icon: <CommunityFollowIcon className="size-3.5" aria-hidden /> },
-  { value: 'discussion', label: '讨论', icon: <TopicTypeIcon topicType='discussion' className='size-3.5' /> },
-  { value: 'share', label: '分享', icon: <TopicTypeIcon topicType='share' className='size-3.5' /> },
-  { value: 'poll', label: '投票', icon: <TopicTypeIcon topicType='poll' className='size-3.5' /> },
-  { value: 'help', label: '求助', icon: <TopicTypeIcon topicType='help' className='size-3.5' /> },
-];
 
 export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [helpActive, setHelpActive] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showPersonalCenter, setShowPersonalCenter] = useState(false);
   useNotificationTopicDeepLink({
@@ -47,8 +25,6 @@ export function CommunityPage() {
     setEditOpen,
     setShowPersonalCenter,
   });
-  const topicView: CommunityTopicView =
-    community.scope === 'following' ? 'following' : community.topicType;
   const hasFilter =
     !!community.query.trim() ||
     community.scope === 'mine' ||
@@ -74,10 +50,7 @@ export function CommunityPage() {
   // Replacing it with the bare component would remount CommunityPersonalCenter
   // and lose the active tab, page, and followed-author selection state.
   const personalCenterLayer = showPersonalCenter ? (
-    <div
-      aria-hidden={Boolean(selectedTopic)}
-      className={selectedTopic ? 'hidden' : 'contents'}
-    >
+    <div aria-hidden={Boolean(selectedTopic)} className={selectedTopic ? 'hidden' : 'contents'}>
       {personalCenter}
     </div>
   ) : null;
@@ -116,9 +89,7 @@ export function CommunityPage() {
             })
           : undefined
       }
-      replyLikePending={(postId) =>
-        community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
-      }
+      replyLikePending={(postId) => community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })}
       onLikeReply={(postId) => void community.likeReply?.(postId)}
       topic={selectedTopic}
       replies={community.replies}
@@ -199,91 +170,49 @@ export function CommunityPage() {
             <h2 className="m-0 text-lg font-semibold text-foreground">社区</h2>
           </header>
 
-          <section className="mt-4 flex flex-wrap items-center gap-3" aria-label="社区主题筛选">
-            <Segmented<CommunityTopicView>
-              value={topicView}
-              onChange={(value) => {
-                if (value === 'following') {
-                  community.setScope('following');
-                  return;
-                }
-                if (community.scope === 'following') community.setScope('all');
-                community.setTopicType(value);
-              }}
-              aria-label="主题类型"
-              options={topicTypeOptions}
-              activeOptionClassName="bg-primary/10 text-primary hover:bg-primary/10"
-              className="h-9 w-full bg-background sm:w-2/5 sm:min-w-[240px] sm:max-w-[50%]"
-            />
-            <div className="relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                className="h-9 rounded-lg border-border bg-muted/30 pl-10 pr-4 text-sm"
-                value={community.query}
-                onChange={(event) => community.setQuery(event.target.value)}
-                placeholder="搜索主题..."
-                aria-label="搜索社区主题"
-              />
-            </div>
-            <IconButton
-              label="个人中心"
-              icon={
-                community.currentUser ? (
-                  <Avatar
-                    name={community.currentUser.displayName}
-                    src={community.currentUser.avatarUrl}
-                    size={CURRENT_USER_AVATAR_SIZE}
-                  />
-                ) : (
-                  <UserRound className="size-4" aria-hidden />
-                )
-              }
-              className="ml-auto size-10 rounded-full sm:ml-0"
-              onClick={() => setShowPersonalCenter(true)}
-            />
-            <Button
-              className="h-9 px-4 text-xs"
-              leftIcon={<Plus className="size-3.5" aria-hidden />}
-              onClick={() => setPublishOpen(true)}
-            >
-              发帖
-            </Button>
-          </section>
+          <CommunityToolbar
+            community={community}
+            helpActive={helpActive}
+            onHelpActiveChange={setHelpActive}
+            onPersonalCenter={() => setShowPersonalCenter(true)}
+            onPublish={() => setPublishOpen(true)}
+          />
 
           <div className="mt-4">
-            <CommunityTopicList
-              topics={community.topics}
-              loading={community.loading}
-              error={community.error}
-              hasFilter={hasFilter}
-              onOpen={(topic) => void community.openTopic(topic)}
-              onRetry={() => void community.load()}
-              onClearFilter={() => {
-                community.setQuery('');
-                community.setScope('all');
-                community.setTopicType('all');
-              }}
-              onPublish={() => setPublishOpen(true)}
-              hasMore={community.hasMore}
-              loadingMore={community.loadingMore}
-              loadMoreError={community.loadMoreError}
-              loadMore={community.loadMore}
-              getTopicSummary={(topic) =>
-                community.interactions?.getSummary({
-                  target: { targetType: 'TOPIC', id: topic.id },
-                })
-              }
-              currentUserId={community.currentUserId}
-              getAuthorSummary={community.getAuthorSummary}
-              loadAuthorSummary={community.loadAuthorSummary}
-              followAuthor={community.followAuthor}
-              authorFollowLoading={community.authorFollowPending}
-              authorFollowed={community.isAuthorFollowed}
-              scrollRootRef={scrollRootRef}
-            />
+            {helpActive ? (
+              <CommunityHelpCenter />
+            ) : (
+              <CommunityTopicList
+                topics={community.topics}
+                loading={community.loading}
+                error={community.error}
+                hasFilter={hasFilter}
+                onOpen={(topic) => void community.openTopic(topic)}
+                onRetry={() => void community.load()}
+                onClearFilter={() => {
+                  community.setQuery('');
+                  community.setScope('all');
+                  community.setTopicType('all');
+                }}
+                onPublish={() => setPublishOpen(true)}
+                hasMore={community.hasMore}
+                loadingMore={community.loadingMore}
+                loadMoreError={community.loadMoreError}
+                loadMore={community.loadMore}
+                getTopicSummary={(topic) =>
+                  community.interactions?.getSummary({
+                    target: { targetType: 'TOPIC', id: topic.id },
+                  })
+                }
+                currentUserId={community.currentUserId}
+                getAuthorSummary={community.getAuthorSummary}
+                loadAuthorSummary={community.loadAuthorSummary}
+                followAuthor={community.followAuthor}
+                authorFollowLoading={community.authorFollowPending}
+                authorFollowed={community.isAuthorFollowed}
+                scrollRootRef={scrollRootRef}
+              />
+            )}
           </div>
         </div>
       </main>
