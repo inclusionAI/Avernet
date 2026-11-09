@@ -427,6 +427,9 @@ impl DeliveryRuntime {
                         let mut entries = storage!(self.service.queued_heads(&bot, after, 8));
                         if entries.is_empty() && !after.is_empty() { entries = storage!(self.service.queued_heads(&bot, "", 8)); }
                         if let Some(last) = entries.last() { cursors.insert(bot.clone(), last.session_id.clone()); }
+                        // An isolated head must not keep winning selection
+                        // (e.g. as an Expire action) over healthy sessions.
+                        entries.retain(|entry| !isolation.blocked(&entry.delivery_id));
                         if entries.is_empty() { continue; }
                         let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                         let transport_ready = !paused && active < policy.max_running && rate_ready;
