@@ -13,6 +13,8 @@ pub enum RuntimeError {
     #[error("access denied")] AccessDenied,
     #[error("not found")] NotFound,
     #[error("conflict: {0}")] Conflict(String),
+    /// CAS lost: reread durable state; never replay external I/O blindly.
+    #[error("concurrent update; reread durable state")] Contention,
     #[error("capacity exceeded")] CapacityExceeded,
     #[error("execution_unknown")] ExecutionUnknown,
     #[error("cancellation_unknown")] CancellationUnknown,
@@ -43,5 +45,7 @@ pub enum StorageError {
     #[error("duplicate mutation key: {0}")] DuplicateMutation(String),
     #[error("memory storage cannot serve production")] UnsupportedProfile,
     #[error("revision space exhausted")] RevisionExhausted,
+    /// Non-retryable backend response/configuration failure; never blame request input.
+    #[error("backend failure: {0}")] BackendFailure(String),
     #[error("storage unavailable: {0}")] Unavailable(String),
 }

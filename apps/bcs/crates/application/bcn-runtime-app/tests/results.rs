@@ -73,7 +73,6 @@ async fn oversized_unicode_output_becomes_bounded_saved_failure() {
 }
 #[tokio::test]
 async fn pending_result_io_does_not_block_bounded_worker_tick_or_heartbeat() {
-    use futures::FutureExt;
     let f = Fixture::new();
     let g = f.gateway();
     let task = g.submit(caller(), request("pending-io")).await.unwrap();
@@ -89,14 +88,33 @@ async fn pending_result_io_does_not_block_bounded_worker_tick_or_heartbeat() {
     c.tick().await.unwrap();
     w.step(&task.session_id).await.unwrap();
     f.results.hang.store(true, Ordering::SeqCst);
-    assert!(
-        w.tick().now_or_never().is_some(),
-        "tick must poll a pending I/O future and return"
-    );
+    tokio::time::timeout(std::time::Duration::from_millis(100),w.tick()).await.expect("tick must remain bounded during pending I/O").unwrap();
     f.clock.set(2000);
-    assert!(w.tick().now_or_never().is_some());
+    tokio::time::timeout(std::time::Duration::from_millis(100),w.tick()).await.unwrap().unwrap();
     assert_eq!(
         g.get(caller(), task.task_id).await.unwrap().status,
         TaskStatus::PendingResult
     );
+}
+
+struct YieldingResults(Arc<dyn ResultStore>);
+#[async_trait::async_trait]
+impl ResultStore for YieldingResults {
+ async fn put_if_absent(&self,i:ResultIntent)->RuntimeResult<SavedResult>{for _ in 0..20 {tokio::task::yield_now().await;}self.0.put_if_absent(i).await}
+ async fn get(&self,i:&ResultId)->RuntimeResult<Option<SavedResult>>{self.0.get(i).await}
+ async fn list_tasks(&self,c:&CallerContext,q:TaskQuery)->RuntimeResult<TaskPage>{self.0.list_tasks(c,q).await}
+ async fn read_group_records(&self,t:&TaskId,c:Option<String>,l:u32)->RuntimeResult<Page<SavedResult>>{self.0.read_group_records(t,c,l).await}
+}
+#[tokio::test]
+async fn asynchronous_result_and_ack_progress_between_scheduler_ticks() {
+ let mut f=Fixture::new();f.ports.results=Arc::new(YieldingResults(f.ports.results.clone()));
+ let g=f.gateway();let task=g.submit(caller(),request("async-save")).await.unwrap();let w=f.worker("w");w.step(&task.session_id).await.unwrap();
+ let c=f.connector("c",Arc::new(Transport::new(vec![Ok(AgentEvent::Completed{output:text("saved")})])));
+ c.tick().await.unwrap();c.tick().await.unwrap();w.step(&task.session_id).await.unwrap();
+ w.tick().await.unwrap();
+ tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+ let inputs=f.repo.read_batch(&task.session_id,0,100).await.unwrap();
+ assert!(inputs.iter().any(|i|matches!(i.input.kind,SessionInputKind::ResultSaved{..})),"external I/O must keep being polled while the scheduler sleeps or scans shards");
+ f.clock.set(5000);
+ let remaining=f.repo.receive(&scope(),&node("observer"),CommandConsumerKind::Worker,None,100).await.unwrap();assert!(remaining.items.is_empty(),"completed result command must ACK without tick-driven lease mutation");
 }

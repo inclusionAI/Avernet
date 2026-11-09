@@ -72,3 +72,15 @@ pub fn build(config:RuntimeConfig,components:Components,ports:Option<RuntimePort
         connector:Arc::new(DefaultConnector::new(identity("connector"),ports,components.connectors,clock)?),
     })
 }
+
+/// Assemble repositories once over shared external storage. Each PROCESS supplies
+/// its own dedicated liveness pool; ResultStore receives the admission query port.
+pub fn external_ports(
+    atomic:Arc<dyn bcn_runtime_storage_api::AtomicStore>,
+    liveness:Arc<dyn bcn_runtime_storage_api::NodeLivenessPort>,
+    results:impl FnOnce(Arc<dyn repo::TaskQueryStore>)->Arc<dyn repo::ResultStore>,
+)->RuntimePorts {
+    let repo=Arc::new(RuntimeStore::new(atomic));
+    let results=results(repo.clone());
+    RuntimePorts{sessions:repo.clone(),ownership:repo.clone(),admissions:repo.clone(),inbox:repo.clone(),commands:repo.clone(),dispatches:repo.clone(),events:repo.clone(),queries:repo,results,liveness:Arc::new(LivenessAdapter::new(liveness))}
+}

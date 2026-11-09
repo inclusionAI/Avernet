@@ -22,7 +22,7 @@ impl OwnershipPort for RuntimeStore {
         let epoch = actual.map_or(0, |v| v.epoch).checked_add(1).ok_or_else(|| RuntimeError::Storage("epoch exhausted".into()))?;
         let fence = OwnershipFence { shard, owner: candidate, epoch };
         let result = self.write(&fence.shard.scope, vec![condition(key.clone(), &row)], vec![put(key, &fence)?]).await;
-        match result { Err(RuntimeError::Conflict(_)) => Err(RuntimeError::OwnershipLost), Err(e) => Err(e), Ok(_) => Ok(fence) }
+        match result { Err(RuntimeError::Contention) => Err(RuntimeError::OwnershipLost), Err(e) => Err(e), Ok(_) => Ok(fence) }
     }
     async fn transfer_shard(&self, current: OwnershipFence, next: NodeIdentity) -> RuntimeResult<OwnershipFence> {
         self.claim_shard(current.shard.clone(), next, Some(current)).await

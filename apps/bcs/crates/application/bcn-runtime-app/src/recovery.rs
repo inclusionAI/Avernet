@@ -76,3 +76,53 @@ impl Lifecycle {
         self.drain_deadline.is_some_and(|d| now >= d)
     }
 }
+
+/// Only transient infrastructure failures are retried. Configuration/contract failures
+/// remain fatal; no identity reset or alternate transport is introduced.
+pub(crate) fn continue_after<T>(result: RuntimeResult<T>) -> RuntimeResult<()> {
+    match result {
+        Ok(_) | Err(RuntimeError::Unavailable(_) | RuntimeError::OwnershipLost | RuntimeError::Contention) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+/// Heartbeats never wait for the business-state mutex or business connection pool.
+/// The same future is retained while a heartbeat fires, so durable business I/O is
+/// not cancelled/restarted on every renewal. Dropping run cancels both futures.
+pub(crate) async fn with_heartbeat<F: Future<Output=RuntimeResult<()>>>(
+    life: &tokio::sync::Mutex<Lifecycle>, node: &NodeIdentity,
+    port: &dyn RuntimeLiveness, clock: &dyn bcn_runtime_api::port::Clock, business: F,
+) -> RuntimeResult<()> {
+    let heartbeat = async {
+        let mut interval=tokio::time::interval(std::time::Duration::from_millis(RuntimeDefaults::default().heartbeat_ms));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let result=life.lock().await.heartbeat(node,port,clock.now_ms()).await;
+            continue_after(result)?;
+        }
+        #[allow(unreachable_code)] Ok(())
+    };
+    // Both futures must remain polled while either awaits the liveness mutex.
+    // Awaiting renewal inside a selected branch could deadlock a yielded tick
+    // that already holds that mutex during an actual asynchronous backend call.
+    tokio::select! {result=business=>result,result=heartbeat=>result}
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn structural_storage_errors_are_not_retried() {
+        assert!(continue_after::<()>(Err(RuntimeError::Storage("corrupt envelope".into()))).is_err());
+        assert!(continue_after::<()>(Err(RuntimeError::AccessDenied)).is_err());
+        assert!(continue_after::<()>(Err(RuntimeError::Conflict("immutable result".into()))).is_err());
+        assert!(continue_after::<()>(Err(RuntimeError::Contention)).is_ok());
+        assert!(continue_after::<()>(Err(RuntimeError::Unavailable("partial slot".into()))).is_ok());
+    }
+}
+
+/// Tick errors embedded in the report obey the same fail-closed classification.
+pub(crate) fn continue_tick(result:RuntimeResult<crate::TickReport>)->RuntimeResult<()> {
+    match result {Ok(report)=>{for error in report.errors {continue_after::<()>(Err(error))?;}Ok(())},Err(error)=>continue_after::<()>(Err(error))}
+}

@@ -17,7 +17,7 @@ pub(crate) fn condition(key: String, row: &Option<VersionedValue>) -> Condition 
 }
 pub(crate) fn put<T: Serialize>(key: String, value: &T) -> RuntimeResult<Mutation> { Ok(Mutation::Put { key, value: encode(value)? }) }
 pub(crate) fn storage(error: StorageError) -> RuntimeError {
-    match error { StorageError::LimitExceeded(_) => RuntimeError::CapacityExceeded, StorageError::ConditionFailed { .. } => RuntimeError::Conflict("concurrent update; retry from durable state".into()), error => RuntimeError::Storage(error.to_string()) }
+    match error { StorageError::Unavailable(message) => RuntimeError::Unavailable(message), StorageError::LimitExceeded(_) => RuntimeError::CapacityExceeded, StorageError::ConditionFailed { .. } => RuntimeError::Contention, error => RuntimeError::Storage(error.to_string()) }
 }
 impl RuntimeStore {
     pub(crate) async fn rows(&self, scope: &Scope, keys: &[String]) -> RuntimeResult<Vec<Option<VersionedValue>>> {
@@ -38,7 +38,7 @@ impl RuntimeStore {
     pub(crate) async fn fenced_write(&self, fence: &OwnershipFence, mut conditions: Vec<Condition>, mutations: Vec<Mutation>) -> RuntimeResult<TransactionReceipt> {
         conditions.push(self.ownership_condition(fence).await?);
         match self.write(&fence.shard.scope, conditions, mutations).await {
-            Err(RuntimeError::Conflict(message)) => { self.ownership_condition(fence).await?; Err(RuntimeError::Conflict(message)) }
+            Err(RuntimeError::Contention) => { self.ownership_condition(fence).await?; Err(RuntimeError::Contention) }
             result => result,
         }
     }
@@ -48,3 +48,16 @@ pub(crate) fn cursor(value: Option<ScanCursor>) -> RuntimeResult<Option<String>>
 }
 pub(crate) fn invalid(message: &str) -> RuntimeError { RuntimeError::InvalidInput(message.into()) }
 pub(crate) fn conflict(message: &str) -> RuntimeError { RuntimeError::Conflict(message.into()) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn only_condition_failure_is_contention() {
+        assert_eq!(storage(StorageError::ConditionFailed {key:"k".into()}),RuntimeError::Contention);
+        assert!(matches!(storage(StorageError::Unavailable("transport".into())),RuntimeError::Unavailable(_)));
+        assert!(matches!(storage(StorageError::InvalidKey("corrupt".into())),RuntimeError::Storage(_)));
+        assert!(matches!(storage(StorageError::BackendFailure("redacted".into())),RuntimeError::Storage(_)));
+        assert!(matches!(conflict("immutable result"),RuntimeError::Conflict(_)));
+    }
+}

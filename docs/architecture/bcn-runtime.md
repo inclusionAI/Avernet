@@ -346,3 +346,38 @@ same deployment scope. Final-node live-output selection is frozen at new group
 admission; private node projections and SavedResults are retained, while public
 A2A final artifacts represent the summary only. Existing specs without a selector
 retain their all-node projection semantics. No legacy runtime path is changed.
+
+## Retained transport and management composition
+
+Bootstrap exposes `manifest::{TransportManifest,FrozenTransport,TransportRoute}`,
+`management::{ManagementPorts,ManagementCatalog,GrantedAccess,ManagementJudge}`,
+`connectors::from_manifest`, and `external_ports`. Historical transports are an
+explicit retained deployment artifact, validated by a canonical SHA-256 digest
+covering routing, protocol/Card, capabilities and credential references. Recovery
+matches the complete FrozenTargetBinding and never falls back to current routing.
+Operators retain old versions for accepted sessions; credentials remain separately
+resolved secrets. Current management admits a new session only with a unique exact
+manifest match. Missing history or ambiguous versions fail closed.
+
+`bcs::management_resources` provides only existing management repo ports and the
+configured Judge evaluator. It starts no legacy server, migrations or lifecycle.
+Callers enforce a process-environment match for legacy Provider repositories and
+supply explicit scoped authorization; environment-level management lookup is not
+itself tenant isolation. ManagementJudge maps frozen criteria and saved artifacts
+to the existing JudgeEvaluatorPort, and validates its selected outcome.
+
+Worker/Connector run loops renew heartbeat independently of business-state mutexes.
+Partial renewal resets takeover warm-up, requiring a full healthy TTL again.
+Only `Unavailable`, `OwnershipLost`, and typed `Contention` (AtomicStore condition
+failure) permit scheduled retry; immutable business Conflict and malformed state
+remain fatal. Worker effects are bounded, continuously polled and abort on dropped
+pending slot/run scope. A CAS retry rereads durable state; it does not repeat an
+uncertain Agent send. Connector socket futures remain tick-polled; this does not
+block heartbeat, but high-latency protocol progress needs separate qualification.
+
+Backend adapters classify typed connection/pool failures and explicit deadlines as
+`StorageError::Unavailable`. Malformed backend responses and unclassified backend
+failures use redacted `BackendFailure`, mapped to fatal `RuntimeError::Storage`.
+Own heartbeat mutations propagate these errors. Peer observation still reports
+Alive when either slot proves life, Unknown on uncertain evidence without life,
+and Dead only when both slots are confirmed absent.

@@ -183,6 +183,7 @@ mod http_middleware;
 mod lifecycle_wiring;
 mod output_admission_wiring;
 mod resource_builders;
+pub mod management;
 mod server_construct;
 mod server_infrastructure;
 mod server_run;

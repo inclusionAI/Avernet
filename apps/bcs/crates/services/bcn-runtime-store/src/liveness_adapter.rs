@@ -13,7 +13,12 @@ impl LivenessAdapter {
     }
 }
 fn error(e: StorageError) -> RuntimeError {
-    RuntimeError::Unavailable(e.to_string())
+    match e {
+        StorageError::BackendFailure(message)=>RuntimeError::Storage(message),
+        StorageError::Unavailable(message)=>RuntimeError::Unavailable(message),
+        StorageError::ConditionFailed{..}=>RuntimeError::Contention,
+        other=>RuntimeError::InvalidInput(other.to_string()),
+    }
 }
 #[async_trait]
 impl RuntimeLiveness for LivenessAdapter {

@@ -6,6 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sha2.workspace = true
+bcs-service-api.workspace = true
+bcs-domain.workspace = true
 uuid.workspace = true
 bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
 bcn-runtime-model.workspace = true
@@ -28,3 +31,11 @@ futures.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+bcs-bot-store.workspace = true
+bcs-group-store.workspace = true
+bcs-collaboration-store.workspace = true
+bcs-judge.workspace = true
+bcs-llm-api.workspace = true
+axum.workspace = true

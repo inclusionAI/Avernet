@@ -29,7 +29,6 @@ struct Actor {
     projection: Option<projection::PendingProjection>,
 }
 struct State {
-    life: Lifecycle,
     actors: BTreeMap<DispatchId, Actor>,
     commands: Option<String>,
     dispatches: Option<String>,
@@ -42,8 +41,36 @@ pub struct DefaultConnector {
     bindings: Vec<(FrozenTargetBinding, Arc<dyn AgentConnector>)>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
+    life: Mutex<Lifecycle>,
 }
 impl DefaultConnector {
+    async fn run_business(&self, mut shutdown: CancellationReceiver) -> RuntimeResult<()> {
+        loop {
+            if *shutdown.borrow() || shutdown.has_changed().is_err() {
+                break;
+            }
+            tokio::select! {result=self.tick()=>{recovery::continue_tick(result)?;},_=shutdown.changed()=>{break;}}
+            if self.status().await?.phase == RuntimePhase::Stopped {
+                return Ok(());
+            }
+            tokio::select! {_=tokio::time::sleep(Duration::from_millis(200))=>{},_=shutdown.changed()=>{break;}}
+        }
+        let deadline = self
+            .clock
+            .now_ms()
+            .saturating_add(RuntimeDefaults::default().drain_ms);
+        loop {
+            if self.clock.now_ms() >= deadline { return Ok(()); }
+            match self.drain(deadline).await {
+                Ok(report) if report.remaining == 0 || report.deadline_reached => break,
+                Ok(_) => {},
+                Err(error) => recovery::continue_after::<()>(Err(error))?,
+            }
+            recovery::continue_tick(self.tick().await)?;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        Ok(())
+    }
     pub fn new(
         node: NodeIdentity,
         ports: RuntimePorts,
@@ -66,8 +93,8 @@ impl DefaultConnector {
             ports,
             bindings,
             clock,
+            life: Mutex::new(Lifecycle::default()),
             state: Mutex::new(State {
-                life: Lifecycle::default(),
                 actors: BTreeMap::new(),
                 commands: None,
                 dispatches: None,
@@ -139,7 +166,7 @@ impl DefaultConnector {
     }
     async fn discover(&self, s: &mut State, now: u64) -> RuntimeResult<()> {
         let d = RuntimeDefaults::default();
-        if s.life.phase != RuntimePhase::Running {
+        if self.life.lock().await.phase != RuntimePhase::Running {
             return Ok(());
         }
         let remaining = d.recovery_concurrency.saturating_sub(s.actors.len() as u32);
@@ -193,7 +220,7 @@ impl DefaultConnector {
                 break;
             }
             if record.fence.owner != self.node {
-                if !s.life.may_takeover(now) {
+                if !self.life.lock().await.may_takeover(now) {
                     continue;
                 }
                 let observations = self
@@ -221,18 +248,18 @@ impl DefaultConnector {
         let mut s = self.state.lock().await;
         let now = self.clock.now_ms();
         let mut report = TickReport::default();
-        if s.life.phase == RuntimePhase::Stopped {
+        if self.life.lock().await.phase == RuntimePhase::Stopped {
             return Ok(report);
         }
-        s.life
+        self.life.lock().await
             .heartbeat(&self.node, self.ports.liveness.as_ref(), now)
             .await?;
-        if s.life.expired(now) {
+        if self.life.lock().await.expired(now) {
             s.actors.clear();
-            s.life.phase = RuntimePhase::Stopped;
+            self.life.lock().await.phase = RuntimePhase::Stopped;
             return Ok(report);
         }
-        if now < s.life.retry_at {
+        if now < self.life.lock().await.retry_at {
             return Ok(report);
         }
         if let Err(e) = self.discover(&mut s, now).await {
@@ -277,9 +304,9 @@ impl DefaultConnector {
             }
         }
         if report.errors.is_empty() {
-            s.life.progressed();
+            self.life.lock().await.progressed();
         } else {
-            s.life.backoff(now);
+            self.life.lock().await.backoff(now);
         }
         Ok(report)
     }
@@ -737,35 +764,19 @@ impl DefaultConnector {
 }
 #[async_trait]
 impl ConnectorRuntime for DefaultConnector {
-    async fn run(&self, mut shutdown: CancellationReceiver) -> RuntimeResult<()> {
-        loop {
-            if *shutdown.borrow() || shutdown.has_changed().is_err() {
-                break;
-            }
-            tokio::select! {result=self.tick()=>{result?;},_=shutdown.changed()=>{break;}}
-            if self.status().await?.phase == RuntimePhase::Stopped {
-                return Ok(());
-            }
-            tokio::select! {_=tokio::time::sleep(Duration::from_millis(200))=>{},_=shutdown.changed()=>{break;}}
-        }
-        let deadline = self
-            .clock
-            .now_ms()
-            .saturating_add(RuntimeDefaults::default().drain_ms);
-        loop {
-            let report = self.drain(deadline).await?;
-            if report.remaining == 0 || report.deadline_reached {
-                break;
-            }
-            self.tick().await?;
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        Ok(())
+    async fn run(&self, shutdown: CancellationReceiver) -> RuntimeResult<()> {
+        recovery::with_heartbeat(&self.life, &self.node, self.ports.liveness.as_ref(),
+            self.clock.as_ref(), self.run_business(shutdown)).await
     }
+
     async fn drain(&self, deadline_ms: u64) -> RuntimeResult<DrainReport> {
         let mut s = self.state.lock().await;
-        if !s.life.registered {
-            s.life
+        { let mut life = self.life.lock().await;
+            life.drain_deadline = Some(life.drain_deadline.map_or(deadline_ms, |d| d.min(deadline_ms)));
+            life.phase = RuntimePhase::Draining;
+        }
+        if !self.life.lock().await.registered {
+            self.life.lock().await
                 .heartbeat(
                     &self.node,
                     self.ports.liveness.as_ref(),
@@ -774,17 +785,11 @@ impl ConnectorRuntime for DefaultConnector {
                 .await?;
         }
         self.ports.liveness.mark_draining(&self.node).await?;
-        s.life.drain_deadline = Some(
-            s.life
-                .drain_deadline
-                .map_or(deadline_ms, |d| d.min(deadline_ms)),
-        );
-        s.life.phase = RuntimePhase::Draining;
         let remaining = s.actors.len() as u32;
-        let deadline_reached = s.life.expired(self.clock.now_ms());
+        let deadline_reached = self.life.lock().await.expired(self.clock.now_ms());
         if remaining == 0 || deadline_reached {
             s.actors.clear();
-            s.life.phase = RuntimePhase::Stopped;
+            self.life.lock().await.phase = RuntimePhase::Stopped;
         }
         Ok(DrainReport {
             completed: s.completed,
@@ -796,7 +801,7 @@ impl ConnectorRuntime for DefaultConnector {
         let s = self.state.lock().await;
         Ok(ConnectorStatus {
             node: self.node.clone(),
-            phase: s.life.phase,
+            phase: self.life.lock().await.phase,
             active_dispatches: s.actors.len() as u32,
         })
     }

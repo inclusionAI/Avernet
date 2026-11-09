@@ -18,7 +18,6 @@ struct PendingWork {
 }
 struct State {
     pending: BTreeMap<CommandId, PendingWork>,
-    life: Lifecycle,
     owned: BTreeMap<u16, OwnershipFence>,
     cursors: BTreeMap<u16, Option<String>>,
     shard: u16,
@@ -35,8 +34,37 @@ pub struct DefaultWorker {
     judge: Arc<dyn JudgeExecutor>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
+    life: Mutex<Lifecycle>,
+    effects: results::EffectRegistry,
 }
 impl DefaultWorker {
+    async fn run_business(&self, mut shutdown: CancellationReceiver) -> RuntimeResult<()> {
+        loop {
+            if *shutdown.borrow() || shutdown.has_changed().is_err() {
+                break;
+            }
+            tokio::select! {result=self.tick()=>{recovery::continue_tick(result)?;},_=shutdown.changed()=>{break;}}
+            if self.status().await?.phase == RuntimePhase::Stopped {
+                return Ok(());
+            }
+            tokio::select! {_=tokio::time::sleep(Duration::from_millis(500))=>{},_=shutdown.changed()=>{break;}}
+        }
+        let deadline = self
+            .clock
+            .now_ms()
+            .saturating_add(RuntimeDefaults::default().drain_ms);
+        loop {
+            if self.clock.now_ms() >= deadline { return Ok(()); }
+            match self.drain(deadline).await {
+                Ok(report) if report.remaining == 0 || report.deadline_reached => break,
+                Ok(_) => {},
+                Err(error) => recovery::continue_after::<()>(Err(error))?,
+            }
+            recovery::continue_tick(self.tick().await)?;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        Ok(())
+    }
     pub fn new(
         node: NodeIdentity,
         ports: RuntimePorts,
@@ -51,9 +79,10 @@ impl DefaultWorker {
             runners,
             judge,
             clock,
+            life: Mutex::new(Lifecycle::default()),
+            effects: Arc::new(std::sync::Mutex::new(Vec::new())),
             state: Mutex::new(State {
                 pending: BTreeMap::new(),
-                life: Lifecycle::default(),
                 owned: BTreeMap::new(),
                 cursors: BTreeMap::new(),
                 shard: 0,
@@ -71,17 +100,18 @@ impl DefaultWorker {
         shard: ShardId,
     ) -> RuntimeResult<Option<OwnershipFence>> {
         let actual = self.ports.ownership.read_owner(&shard).await?;
+        let (phase, may_takeover) = { let life = self.life.lock().await;
+            (life.phase, life.may_takeover(self.clock.now_ms())) };
         let fence = match actual {
             Some(f) if f.owner == self.node => Some(f),
-            None if s.life.phase == RuntimePhase::Running => Some(
+            None if phase == RuntimePhase::Running => Some(
                 self.ports
                     .ownership
                     .claim_shard(shard.clone(), self.node.clone(), None)
                     .await?,
             ),
             Some(f)
-                if s.life.phase == RuntimePhase::Running
-                    && s.life.may_takeover(self.clock.now_ms()) =>
+                if phase == RuntimePhase::Running && may_takeover =>
             {
                 let observed = self
                     .ports
@@ -114,7 +144,7 @@ impl DefaultWorker {
     /// One deterministic session turn, useful to drive an isolated scheduler without sleeps.
     pub async fn step(&self, session: &SessionId) -> RuntimeResult<u32> {
         let mut state = self.state.lock().await;
-        if state.life.phase == RuntimePhase::Stopped {
+        if self.life.lock().await.phase == RuntimePhase::Stopped {
             return Ok(0);
         }
         if !state.active.contains(session)
@@ -122,8 +152,7 @@ impl DefaultWorker {
         {
             return Err(RuntimeError::CapacityExceeded);
         }
-        state
-            .life
+        self.life.lock().await
             .heartbeat(
                 &self.node,
                 self.ports.liveness.as_ref(),
@@ -354,24 +383,24 @@ impl DefaultWorker {
         let mut s = self.state.lock().await;
         let now = self.clock.now_ms();
         let mut report = TickReport::default();
-        if s.life.phase == RuntimePhase::Stopped {
+        if self.life.lock().await.phase == RuntimePhase::Stopped {
             return Ok(report);
         }
-        s.life
+        self.life.lock().await
             .heartbeat(&self.node, self.ports.liveness.as_ref(), now)
             .await?;
-        if s.life.expired(now) {
+        if self.life.lock().await.expired(now) {
             s.pending.clear();
-            s.life.phase = RuntimePhase::Stopped;
+            self.life.lock().await.phase = RuntimePhase::Stopped;
             return Ok(report);
         }
-        if now < s.life.retry_at {
+        if now < self.life.lock().await.retry_at {
             return Ok(report);
         }
         let d = RuntimeDefaults::default();
         // Retained sessions are a hint, never a lifetime reservation of the turn budget.
-        let mut sessions = if s.life.phase == RuntimePhase::Running { BTreeSet::new() } else { s.active.clone() };
-        if s.life.phase == RuntimePhase::Running {
+        let mut sessions = if self.life.lock().await.phase == RuntimePhase::Running { BTreeSet::new() } else { s.active.clone() };
+        if self.life.lock().await.phase == RuntimePhase::Running {
             // Reserve at least half the turn for existing durable wake work even
             // when new admissions continuously fill the repair page.
             let page = self
@@ -475,10 +504,10 @@ impl DefaultWorker {
                     command.command_id.clone(),
                     PendingWork {
                         started_at: now,
-                        future: Box::pin(async move {
+                        future: results::drive(Box::pin(async move {
                             results::execute(&ports, judge.as_ref(), command.clone(), now).await?;
                             ports.commands.ack(&command.command_id, &node).await
-                        }),
+                        }), &self.effects),
                     },
                 );
             }
@@ -503,9 +532,9 @@ impl DefaultWorker {
             }
         }
         if report.errors.is_empty() {
-            s.life.progressed();
+            self.life.lock().await.progressed();
         } else {
-            s.life.backoff(now);
+            self.life.lock().await.backoff(now);
         }
         Ok(report)
     }
@@ -591,37 +620,20 @@ fn fallback(
 }
 #[async_trait]
 impl WorkerRuntime for DefaultWorker {
-    async fn run(&self, mut shutdown: CancellationReceiver) -> RuntimeResult<()> {
-        loop {
-            if *shutdown.borrow() || shutdown.has_changed().is_err() {
-                break;
-            }
-            tokio::select! {result=self.tick()=>{result?;},_=shutdown.changed()=>{break;}}
-            if self.status().await?.phase == RuntimePhase::Stopped {
-                return Ok(());
-            }
-            tokio::select! {_=tokio::time::sleep(Duration::from_millis(500))=>{},_=shutdown.changed()=>{break;}}
-        }
-        let deadline = self
-            .clock
-            .now_ms()
-            .saturating_add(RuntimeDefaults::default().drain_ms);
-        self.drain(deadline).await?;
-        loop {
-            let report = self.drain(deadline).await?;
-            if report.remaining == 0 || report.deadline_reached {
-                break;
-            }
-            self.tick().await?;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        Ok(())
+    async fn run(&self, shutdown: CancellationReceiver) -> RuntimeResult<()> {
+        let _effects=results::EffectScope(self.effects.clone());
+        recovery::with_heartbeat(&self.life, &self.node, self.ports.liveness.as_ref(),
+            self.clock.as_ref(), self.run_business(shutdown)).await
     }
-    /// Nonblocking drain poll. Existing sessions keep progressing; no new shard claims.
+
     async fn drain(&self, deadline_ms: u64) -> RuntimeResult<DrainReport> {
         let mut s = self.state.lock().await;
-        if !s.life.registered {
-            s.life
+        { let mut life = self.life.lock().await;
+            life.drain_deadline = Some(life.drain_deadline.map_or(deadline_ms, |d| d.min(deadline_ms)));
+            life.phase = RuntimePhase::Draining;
+        }
+        if !self.life.lock().await.registered {
+            self.life.lock().await
                 .heartbeat(
                     &self.node,
                     self.ports.liveness.as_ref(),
@@ -630,17 +642,11 @@ impl WorkerRuntime for DefaultWorker {
                 .await?;
         }
         self.ports.liveness.mark_draining(&self.node).await?;
-        s.life.drain_deadline = Some(
-            s.life
-                .drain_deadline
-                .map_or(deadline_ms, |d| d.min(deadline_ms)),
-        );
-        s.life.phase = RuntimePhase::Draining;
         let remaining = (s.active.len() + s.pending.len()) as u32;
-        let deadline_reached = s.life.expired(self.clock.now_ms());
+        let deadline_reached = self.life.lock().await.expired(self.clock.now_ms());
         if remaining == 0 || deadline_reached {
             s.pending.clear();
-            s.life.phase = RuntimePhase::Stopped;
+            self.life.lock().await.phase = RuntimePhase::Stopped;
         }
         Ok(DrainReport {
             completed: s.completed,
@@ -652,7 +658,7 @@ impl WorkerRuntime for DefaultWorker {
         let s = self.state.lock().await;
         Ok(WorkerStatus {
             node: self.node.clone(),
-            phase: s.life.phase,
+            phase: self.life.lock().await.phase,
             active_sessions: s.active.len() as u32,
             owned_shards: s.owned.len() as u32,
         })

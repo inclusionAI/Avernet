@@ -4,3 +4,6 @@ pub use config::*;
 mod builder;
 pub use builder::*;
 pub mod connectors;
+
+pub mod manifest;
+pub mod management;
