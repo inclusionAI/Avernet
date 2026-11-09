@@ -117,11 +117,8 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 ```mermaid
 flowchart TB
   subgraph Products["产品层 / 执行能力"]
-    bbs["BBS Topic"]
-    task["Task / Relay / TaskGraph"]
-    bcs["BCS group"]
-    portal["Context portal / API consumer"]
-    source["外部来源"]
+    bbsDiscussion["BBS 公开讨论"]
+    todoScenario["代办"]
   end
 
   subgraph Context["CollaborationContext 聚合"]
@@ -146,11 +143,8 @@ flowchart TB
   snapshot["ContextSnapshot"]
   product["可基于本协议组织协作的产品层 / 执行能力"]
 
-  bbs --> adapter
-  task --> adapter
-  bcs --> adapter
-  portal --> adapter
-  source --> adapter
+  bbsDiscussion --> adapter
+  todoScenario --> adapter
 
   adapter --> event
   root --> envelope
