@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  h_43af82e14600e4 187,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "751ab3900ac19b0ac77faa617a183aed8528c2af",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
