@@ -1,0 +1,40 @@
+apps/bcs/crates/services/bcn-runtime-store/src/commands.rs
+  s_06c1c2f5a78f1d::t_809100659e0c6f 8-12,32,38-64,66-73,98-134
+  s_c3a0b6b6fab230::t_cf61c488982562 65
+apps/bcs/crates/services/bcn-runtime-store/src/inbox.rs
+  s_06c1c2f5a78f1d::t_809100659e0c6f 29-51,55,76
+apps/bcs/crates/application/bcn-runtime-app/src/results.rs
+  s_c3a0b6b6fab230::t_23503a145c939f 3,7,10,15-16,18,46-82
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  s_c3a0b6b6fab230::t_5b37fe4ecfd8c3 483,487,495-496,506
+apps/bcs/crates/application/bcn-runtime-app/tests/effect_leases.rs
+  s_c3a0b6b6fab230::t_dae2c684d3dabd 1-99
+apps/bcs/crates/services/bcn-runtime-store/tests/effect_delivery.rs
+  s_c3a0b6b6fab230::t_81b7f6c23c3d83 1-77
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bcn_runtime.rs
+  s_c3a0b6b6fab230::t_8c6210b73c0c35 67-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6bdcd680e0746635852feb4d96e97541ed4d323b",
+  "prompts": {},
+  "sessions": {
+    "s_06c1c2f5a78f1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c106-980e-7360-821d-4a7da33d71c1",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    },
+    "s_c3a0b6b6fab230": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bef6-9c1b-7de3-a959-ba27f5cce386",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}
