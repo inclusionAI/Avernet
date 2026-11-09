@@ -43,16 +43,50 @@ def test_owner_installation_precedes_caller_refresh(caplog):
     )
 
 
-def test_caller_failure_is_retryable_without_exposing_credentials(caplog):
+@pytest.mark.parametrize("failure", [RuntimeError("caller-secret"), TimeoutError("iam-secret"), BotServiceError("asc-secret")])
+def test_caller_failure_preserves_owner_result_without_exposing_credentials(caplog, failure):
+    caplog.set_level("INFO")
     service = _service()
-    service._scheduled_caller_refresh.refresh.side_effect = RuntimeError("caller-secret")
-    with pytest.raises(BotServiceError, match="Caller credential refresh failed") as error:
-        _refresh(service)
-    assert "caller-secret" not in str(error.value)
-    assert "owner-secret" not in str(error.value)
+    service._scheduled_caller_refresh.refresh.side_effect = failure
+    result = _refresh(service)
+    assert result == {"token_prefix": "owner-secret", "bindings": [{"binding_id": 7}]}
+    service._hot_update_service_bot_passport_token.assert_called_once()
     assert "scheduled_caller_refresh_failed" in caplog.text
-    assert "caller-secret" not in caplog.text
-    assert "owner-secret" not in caplog.text
+    assert "scheduled_caller_refresh_succeeded" not in caplog.text
+    assert all(secret not in caplog.text for secret in ("caller-secret", "owner-secret", "iam-secret", "asc-secret"))
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.parametrize("operation", ["get_current_env", "avernet_tenant_scope"])
+def test_caller_preparation_failure_does_not_fail_owner_callback(operation, caplog):
+    caplog.set_level("INFO")
+    service = _service()
+    with patch("agentclaw.community.core.bot_management.utils.resolve_agent_code", return_value="agent-1"), patch(
+        "agentclaw.community.core.bot_management.services.bot_service." + operation,
+        side_effect=RuntimeError("prep-secret"),
+    ):
+        result = service.hot_update_passport_token_to_device("service-1", "current-owner", "owner-secret")
+    assert result["bindings"] == [{"binding_id": 7}]
+    service._scheduled_caller_refresh.refresh.assert_not_called()
+    assert "scheduled_caller_refresh_failed" in caplog.text
+    assert "scheduled_caller_refresh_succeeded" not in caplog.text
+    assert "prep-secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_real_http_callback_stays_successful_after_caller_failure():
+    from unittest.mock import AsyncMock
+    from agentclaw.community.adapters.http.bot_management.router import refresh_bot_passport_token
+
+    service = _service()
+    service._scheduled_caller_refresh.refresh.side_effect = TimeoutError("caller-secret")
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"bot_id": "service-1", "owner_workno": "current-owner", "token": "owner-secret"})
+    with patch("agentclaw.community.core.bot_management.utils.resolve_agent_code", return_value="agent-1"):
+        response = await refresh_bot_passport_token(request=request, bot_service=service)
+    assert response.success is True
+    assert response.error_code == 200
+    assert response.data["bindings"] == [{"binding_id": 7}]
 
 
 def test_owner_failure_does_not_invoke_caller_refresh():
@@ -91,11 +125,8 @@ def test_cross_tenant_callback_scopes_refresh_to_resolved_bot_and_restores_conte
 
     service._scheduled_caller_refresh.refresh.side_effect = record_tenant
     with avernet_tenant_scope("teamclaw"):
-        if fail:
-            with pytest.raises(BotServiceError, match="Caller credential refresh failed"):
-                _refresh(service)
-        else:
-            _refresh(service)
+        result = _refresh(service)
+        assert result["bindings"] == [{"binding_id": 7}]
         assert get_current_avernet_tenant() == "teamclaw"
     assert observed == ["external-tenant"]
 

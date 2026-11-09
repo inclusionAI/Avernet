@@ -104,8 +104,10 @@ not silently bypass another user's lock by querying a new Owner-qualified key.
 service Bot's Owner Passport runtime update succeeds. The composition root binds
 a no-op in public profiles and an enterprise service when ASC is supported.
 The explicit Bot entity is stable across Owner handoff; implementations resolve
-each actual Caller and sandbox independently. A refresh error fails the callback
-so existing Owner notification retries apply. This contract adds no scheduler
+each actual Caller and sandbox independently. Caller refresh is best effort:
+preparation or refresh errors log safe metadata and preserve the successful Owner
+callback result. Original Owner update errors still propagate. Caller failures
+do not trigger Owner notification retries. This contract adds no scheduler
 and makes no continuous-validity guarantee between Owner renewal callbacks.
 
 For direct legacy `BotService` construction, omission of the optional refresh
