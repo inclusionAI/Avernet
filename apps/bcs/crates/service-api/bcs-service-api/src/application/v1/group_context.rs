@@ -50,6 +50,8 @@ pub struct GroupContextRequestContext {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddGroupContext {
+    #[serde(default)]
+    pub slot: bool,
     pub actor_id: String,
     pub request_context: GroupContextRequestContext,
     pub name: String,
@@ -194,13 +196,6 @@ pub struct GroupContextGetResponse {
 #[async_trait]
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
-
-    async fn add_with_slot(&self, command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
-        if slot {
-            return Err(ApplicationError::invalid("invalid_param", "slots unavailable"));
-        }
-        self.add(command).await
-    }
 
     async fn inheritance_sources(
         &self,

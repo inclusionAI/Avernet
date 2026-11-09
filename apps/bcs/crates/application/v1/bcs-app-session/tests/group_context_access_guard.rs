@@ -132,6 +132,7 @@ fn add_command(
     request_context: GroupContextRequestContext,
 ) -> AddGroupContext {
     AddGroupContext {
+        slot: false,
         actor_id: actor_id.to_string(),
         request_context,
         name: "test_context".to_string(),

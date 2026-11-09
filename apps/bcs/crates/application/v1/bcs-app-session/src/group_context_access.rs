@@ -157,11 +157,6 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add(command).await
     }
 
-    async fn add_with_slot(&self, mut command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
-        self.authorize_add(&mut command).await?;
-        self.inner.add_with_slot(command, slot).await
-    }
-
     async fn inheritance_sources(
         &self,
         group_id: &str,

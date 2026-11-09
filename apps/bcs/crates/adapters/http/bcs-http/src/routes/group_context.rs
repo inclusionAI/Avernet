@@ -113,7 +113,8 @@ pub(crate) async fn add(
     let result = state
         .services
         .group_context
-        .add_with_slot(AddGroupContext {
+        .add(AddGroupContext {
+            slot: body.slot,
             actor_id,
             request_context: query.request_context(),
             name: body.name,
@@ -123,7 +124,7 @@ pub(crate) async fn add(
             collect_from: body.collect_from,
             valid_from: body.valid_from,
             valid_to: body.valid_to,
-        }, body.slot)
+        })
         .await?;
     Ok(json_ok(result))
 }

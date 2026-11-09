@@ -99,6 +99,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
     let app = service(repo.clone());
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -122,6 +123,7 @@ async fn add_resolves_raw_scope_and_rejects_duplicate_active() {
 
     let error = app
         .add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context: ctx(),
             name: "player_state".into(),
@@ -150,6 +152,7 @@ async fn add_session_and_round_scope_do_not_require_group_id() {
         request_context.group_id = None;
 
         app.add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context,
             name: name.into(),
@@ -183,6 +186,7 @@ async fn add_collect_from_is_optional_empty_and_independent_of_owner_authority()
         ("empty_collect", Some(policy(&[]))),
     ] {
         app.add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context: ctx(),
             name: name.into(),
@@ -231,6 +235,7 @@ async fn add_collect_from_is_optional_empty_and_independent_of_owner_authority()
     }
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "delegated_writer".into(),
@@ -303,6 +308,7 @@ async fn add_reports_missing_scope_boundary_with_scope_level() {
 
         let error = app
             .add(AddGroupContext {
+                slot: false,
                 actor_id: "judge_bot".into(),
                 request_context,
                 name: "boundary".into(),
@@ -412,6 +418,7 @@ async fn add_validates_content_and_required_scope_params() {
 
     let error = app
         .add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context: ctx(),
             name: "too_big".into(),
@@ -428,6 +435,7 @@ async fn add_validates_content_and_required_scope_params() {
 
     let error = app
         .add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context: GroupContextRequestContext {
                 group_id: Some("game-room-7".into()),
@@ -455,6 +463,7 @@ fn add_for_validation(
     collect_from: GroupContextPolicy,
 ) -> AddGroupContext {
     AddGroupContext {
+        slot: false,
         actor_id: actor_id.into(),
         request_context: GroupContextRequestContext {
             group_id: Some(group_id.to_string()),
@@ -610,6 +619,7 @@ async fn update_supersedes_preserves_omitted_fields_and_uses_old_writer_policy()
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -676,6 +686,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
     let before = Utc::now();
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "default_validity".into(),
@@ -701,6 +712,7 @@ async fn add_defaults_validity_and_preserves_explicit_validity() {
     let explicit_from = Utc.with_ymd_and_hms(2026, 10, 12, 8, 0, 0).unwrap();
     let explicit_to = Utc.with_ymd_and_hms(2026, 10, 13, 8, 0, 0).unwrap();
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "explicit_validity".into(),
@@ -731,6 +743,7 @@ async fn update_defaults_omitted_validity_to_new_effective_time_and_can_change_v
     let original_to = Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap();
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "validity_patch".into(),
@@ -808,6 +821,7 @@ async fn get_and_list_do_not_filter_by_business_valid_to() {
     let past_to = Utc::now() - Duration::days(1);
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "expired_business_window".into(),
@@ -874,6 +888,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
     assert_code(error, "not_found");
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "private_write".into(),
@@ -908,6 +923,7 @@ async fn update_maps_missing_permission_and_stale_supersede() {
     let conflict_app = service(conflict_repo);
     conflict_app
         .add(AddGroupContext {
+            slot: false,
             actor_id: "judge_bot".into(),
             request_context: ctx(),
             name: "racy".into(),
@@ -945,6 +961,7 @@ async fn add_update_and_systemset_record_version_creators() {
     let app = service(repo.clone());
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "creator_audit".into(),
@@ -1049,6 +1066,7 @@ async fn owner_can_update_all_fields_without_collect_from_membership() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -1114,6 +1132,7 @@ async fn w_only_non_owner_updates_content_and_validity_but_not_management_fields
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -1215,6 +1234,7 @@ async fn ownership_transfer_takes_effect_immediately() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -1317,6 +1337,7 @@ async fn update_validates_requested_owners() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),
@@ -1501,6 +1522,7 @@ async fn systemset_preserves_existing_owners_and_defaults_new_owner_to_system() 
     assert_eq!(second.owners, owners(["system"]));
 
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "owned_rule".into(),
@@ -1677,6 +1699,7 @@ async fn owner_list_and_get_bypass_policies_and_get_exposes_policy_to_owner_only
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = service(repo.clone());
     app.add(AddGroupContext {
+        slot: false,
         actor_id: "judge_bot".into(),
         request_context: ctx(),
         name: "player_state".into(),

@@ -136,10 +136,6 @@ impl GroupContextApplicationServiceImpl {
 
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
-    async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
-        self.add_with_slot(command, false).await
-    }
-
     async fn inheritance_sources(
         &self,
         _group_id: &str,
@@ -199,7 +195,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
     }
 
-    async fn add_with_slot(&self, command: AddGroupContext, slot: bool) -> Result<GroupContextAck, ApplicationError> {
+    async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_actor(&command.actor_id)?;
         validate_name(&command.name)?;
@@ -207,17 +203,17 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         if let Some(collect_from) = command.collect_from.as_ref() {
             validate_policy("collect_from", collect_from)?;
         }
-        if slot && (command.scope_level != ScopeLevel::Session || command.request_context.group_id.is_none()) {
+        if command.slot && (command.scope_level != ScopeLevel::Session || command.request_context.group_id.is_none()) {
             return Err(ApplicationError::invalid(INVALID_PARAM, "slot creation requires a session in a group"));
         }
         if let Some(group_id) = command.request_context.group_id.as_deref() {
             let defined = self.repo.slot_exists(group_id, &command.name).await.map_err(map_store_error)?;
-            if defined != slot {
+            if defined != command.slot {
                 return Err(ApplicationError::invalid(INVALID_PARAM, "slot flag must match the group slot definition"));
             }
         }
         self.create(
-            slot,
+            command.slot,
             scope,
             command.name,
             command.content,
