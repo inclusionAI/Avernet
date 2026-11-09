@@ -36,6 +36,15 @@ export class BotEngineOperations {
         || te && new RegExp(`^/api/v1/bot/cron/${leaf}/(?:enable|disable)$`).test(input.path))
       || ["PUT", "DELETE"].includes(input.method) && new RegExp(`^${prefix}/${te ? "bot/" : ""}cron/(?!status$|running$)${leaf}$`).test(input.path));
     if (!(write ? mutation : read)) throw new BotRuntimeError(403, "engine_operation_not_allowed", "Operation is outside the declared read or approved write contract");
+    if (te && fileRead) {
+      const field = input.path.endsWith("/read") ? "file_path" : "dir_path";
+      const path = (input.body as Record<string, unknown> | undefined)?.[field];
+      if (typeof path !== "string" || !/^\/(?:workspace|identity|config)(?:\/|$)/.test(path)
+        || /[\\\0\r\n]/u.test(path) || path.split("/").includes("..")) {
+        throw new BotRuntimeError(422, "invalid_engine_file_read",
+          `TE file ${input.path.endsWith("/read") ? "read" : "list"} requires body.${field} in /workspace, /identity or /config; physical host and AIS-local paths are not Engine file paths`);
+      }
+    }
     if (input.query !== undefined) {
       const query = input.query;
       if (!query || typeof query !== "object" || Array.isArray(query) || Object.keys(query).some(key => !["limit", "force"].includes(key))

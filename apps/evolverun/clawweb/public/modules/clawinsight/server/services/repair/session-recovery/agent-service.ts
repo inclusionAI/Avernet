@@ -155,13 +155,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId, task.request.target.entity_id);
     else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId, task.request.target.entity_id);
   }
-  async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
+  async release(input: RecoveryStoredTask, onlyWaitingOwner = false, observationPhase?: RecoveryStoredTask["phase"]): Promise<void> {
     const task = await this.required(input.taskId);
     const owner = resolveTaskControlPlaneEnvironment(task);
     if (owner && owner !== this.deps.controlPlaneEnvironment) return;
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
     await this.save(task, value => {
       if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
+      if (observationPhase && (value.status !== "running" || value.phase !== observationPhase)) fail(409, "任务已离开本轮观察，请读取当前阶段");
       return { ...value, execution: this.executions.end(value.execution!),
         timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] };
     }, task.execution.executionId);
@@ -530,7 +531,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (body.handoff !== undefined && body.kind !== "owner_handoff") fail(422, "handoff 交接说明仅用于 Owner 转交");
     if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
-      await this.release(task, true);
+      if (task.status === "waiting_owner") await this.release(task, true);
+      else if (task.status === "running" && ["observe", "verify"].includes(task.phase)) await this.release(task, false, task.phase);
+      else fail(409, "仅等待 Owner 或观察、验证阶段可以释放本次执行");
     } else if (body.kind === "assessment") {
       if (task.simulation) await this.deps.business().assessSimulation(task.taskId, task.version,
         { decision: body.decision, summary: body.summary, evidence_ids: body.evidence_ids, ...(body.knowledge === undefined ? {} : { knowledge: body.knowledge }), ...(body.message === undefined ? {} : { message: body.message }) } as RecoverySimulationAssessment, body.final_summary);
