@@ -12,6 +12,14 @@ pub(crate) struct AdmittedTask { pub metadata: TaskMetadata, pub admission_id: A
 impl AdmissionStore for RuntimeStore {
     async fn admit(&self, req: AdmissionRequest) -> RuntimeResult<AdmissionReceipt> {
         let scope = &req.admission_id.scope;
+        // Reserve output (896 KiB) and active questions (64 KiB) independently.
+        // Bound identity metadata before durable acceptance, including direct repository users.
+        let target_id = match &req.task.target { ExecutionTarget::Agent { agent_id } => &agent_id.value, ExecutionTarget::Group { group_id } => &group_id.value };
+        if [&req.task.task_id.value, &req.task.session_id.value, target_id].iter().any(|v| v.trim().is_empty() || v.len() > 256)
+            || !req.task.output.is_empty() || !req.task.active_interactions.is_empty() || req.task.error.is_some()
+            || encode(&req.task)?.len() > 16384 || encode(&req.spec)?.len() > 32768 {
+            return Err(invalid("admission metadata or initial projection exceeds reserved budget"));
+        }
         if &req.caller.scope != scope || &req.spec.session_id.scope != scope || &req.task.task_id.scope != scope || &req.input.event_id.scope != scope
             || target_scope(&req.spec.target) != scope || req.task.session_id != req.spec.session_id || req.task.target != req.spec.target
             || req.task.status != TaskStatus::Submitted || req.spec.policy.max_pending_tasks == 0 || req.spec.policy.max_pending_tasks > 16 {

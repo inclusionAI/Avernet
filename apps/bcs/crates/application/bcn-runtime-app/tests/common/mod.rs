@@ -101,6 +101,7 @@ impl AgentCatalog for Catalog {
         session: &SessionId,
     ) -> RuntimeResult<SessionSpec> {
         Ok(SessionSpec {
+            live_output_nodes: None,
             session_id: session.clone(),
             target: target.clone(),
             kind: RunnerKind::DirectA2a,

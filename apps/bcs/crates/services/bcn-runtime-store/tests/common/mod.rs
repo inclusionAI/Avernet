@@ -20,8 +20,8 @@ pub fn fixture() -> (RuntimeStore, Arc<MemoryAtomicStore>, AdmissionRequest) {
  let session = SessionId::new(scope(), "session/a");
  let task_id = TaskId::new(scope(), "task/a");
  let target = ExecutionTarget::Agent { agent_id: binding().target };
- let spec = SessionSpec { session_id: session.clone(), target: target.clone(), kind: RunnerKind::DirectA2a, definition: None, bindings: BTreeMap::from([("agent".into(), binding())]), policy: ExecutionPolicy { execution_timeout_ms: 10000, human_timeout_ms: 20000, judge_available: false, max_pending_tasks: 16, max_graph_nodes: 32, max_agents: 5 } };
- let task = TaskView { task_id: task_id.clone(), session_id: session.clone(), target, status: TaskStatus::Submitted, output: vec![], error: None, created_at_ms: 1000, updated_at_ms: 1000 };
+ let spec = SessionSpec { live_output_nodes: None, session_id: session.clone(), target: target.clone(), kind: RunnerKind::DirectA2a, definition: None, bindings: BTreeMap::from([("agent".into(), binding())]), policy: ExecutionPolicy { execution_timeout_ms: 10000, human_timeout_ms: 20000, judge_available: false, max_pending_tasks: 16, max_graph_nodes: 32, max_agents: 5 } };
+ let task = TaskView { active_interactions: vec![], task_id: task_id.clone(), session_id: session.clone(), target, status: TaskStatus::Submitted, output: vec![], error: None, created_at_ms: 1000, updated_at_ms: 1000 };
  let input = SessionInput { event_id: EventId::new(scope(), "submit/a"), at_ms: 1000, kind: SessionInputKind::Submit { task: QueuedTask { task_id, message: Message { message_id: MessageId::new(scope(), "message/a"), context_id: Some(session), task_id: None, parts: vec![MessagePart::Text { text: "hello".into() }] }, admitted_at_ms: 1000, terminal_intent: None } } };
  let request = AdmissionRequest { admission_id: AdmissionId::new(scope(), "admission/a"), caller: CallerContext { scope: scope(), principal: "alice".into(), trace_id: None }, request_digest: "digest-a".into(), spec, task, input };
  (repo, atomic, request)

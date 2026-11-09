@@ -10,6 +10,10 @@ pub enum RunnerKind { DirectA2a, StructuredGroup }
 /// Definition and bindings are frozen at admission, not reloaded during recovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSpec {
+    /// Frozen public token projection. None retains all-node compatibility; Some([])
+    /// hides tokens while preserving status, questions and authoritative final results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_output_nodes: Option<Vec<String>>,
     pub session_id: SessionId,
     pub target: ExecutionTarget,
     pub kind: RunnerKind,
@@ -81,6 +85,9 @@ pub struct NodeExecution {
     pub dispatch_id: Option<DispatchId>,
     pub handle: Option<ExecutionHandle>,
     pub interaction_id: Option<InteractionId>,
+    /// Retained in checkpoint so cumulative prompt size uses the existing budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_prompt: Option<String>,
     pub selected_branch: Option<String>,
     pub result_intent: Option<ResultIntent>,
     pub saved_result: Option<SavedResult>,
@@ -141,6 +148,7 @@ pub enum DomainEventKind {
     TaskStatusChanged { status: TaskStatus },
     NodeCompleted { node_id: String, result_id: ResultId },
     InputRequired { interaction_id: InteractionId, prompt: String },
+    InteractionResolved { interaction_id: InteractionId },
     BranchSelected { node_id: String, branch: String },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

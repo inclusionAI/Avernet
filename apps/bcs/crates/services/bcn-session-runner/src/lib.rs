@@ -91,6 +91,7 @@ fn node_execution() -> NodeExecution {
         dispatch_id: None,
         handle: None,
         interaction_id: None,
+        interaction_prompt: None,
         selected_branch: None,
         result_intent: None,
         saved_result: None,
@@ -254,7 +255,7 @@ fn reduce(
             if let Some(node) = node {
                 if !task.cancel_requested {
                     cancel_timers(&mut t, &task, &node);
-                    task.nodes.get_mut(&node).unwrap().interaction_id = None;
+                    resolve_interaction(&mut t, &mut task, &node);
                     if matches!(
                         state.graph[&node].kind,
                         NormalizedNodeKind::HumanInput { .. }
@@ -647,6 +648,14 @@ fn advance(t: &mut Transition, task: &mut TaskExecution, at_ms: u64) -> RuntimeR
     }
     Ok(())
 }
+fn resolve_interaction(t: &mut Transition, task: &mut TaskExecution, node: &str) {
+    let n = task.nodes.get_mut(node).unwrap();
+    n.interaction_prompt = None;
+    if let Some(interaction_id) = n.interaction_id.take() {
+        event(t, task, &format!("resolved:{}", interaction_id.value),
+            DomainEventKind::InteractionResolved { interaction_id });
+    }
+}
 fn wait_input(
     t: &mut Transition,
     task: &mut TaskExecution,
@@ -662,6 +671,7 @@ fn wait_input(
     let n = task.nodes.get_mut(node).unwrap();
     n.phase = NodePhase::WaitingInput;
     n.interaction_id = Some(interaction_id.clone());
+    n.interaction_prompt = Some(prompt.clone());
     status(t, task, TaskStatus::InputRequired);
     event(
         t,
@@ -705,6 +715,7 @@ fn freeze_node(
     {
         t.next_state.context_blocked = true;
     }
+    resolve_interaction(t, task, node);
     let intent = ResultIntent {
         result_id: ResultId::new(
             task.task_id.scope.clone(),
@@ -851,6 +862,7 @@ fn finish_task(t: &mut Transition, task: &mut TaskExecution, result_status: Task
 fn cancel_all(t: &mut Transition, task: &mut TaskExecution) -> RuntimeResult<()> {
     let ids: Vec<_> = task.nodes.keys().cloned().collect();
     for node in ids {
+        resolve_interaction(t, task, &node);
         match task.nodes[&node].phase {
             NodePhase::Pending => {
                 task.nodes.get_mut(&node).unwrap().phase = NodePhase::Skipped;

@@ -157,3 +157,25 @@ async fn reply_and_cancel_bypass_full_admission_and_replay_after_clock_and_task_
         TaskStatus::Cancelled
     );
 }
+
+#[tokio::test]
+async fn nontext_never_reaches_admission_or_human_reply_inbox() {
+    let f = Fixture::new();
+    let g = f.gateway();
+    for part in [MessagePart::Data { value: serde_json::json!({"x": 1}) }, MessagePart::File { uri: "local:file".into(), media_type: "text/plain".into() }] {
+        let mut bad = request("bad"); bad.message.parts = vec![part];
+        assert!(matches!(g.submit(caller(), bad).await, Err(RuntimeError::Unsupported(_))));
+    }
+    assert!(g.list(caller(), TaskQuery { target: None, session_id: None, cursor: None, limit: 100 }).await.unwrap().items.is_empty());
+    let mut good = request("json-text"); good.message.parts = text("{\"x\":1}");
+    let task = g.submit(caller(), good).await.unwrap();
+    let w = f.worker("w");
+    let c = f.connector("c", Arc::new(Transport::new(vec![Ok(AgentEvent::InputRequired { handle: handle(), prompt: text("question") })])));
+    f.pump(&w, &c, 8).await;
+    let before = f.ports.inbox.read_batch(&task.session_id, 0, 100).await.unwrap();
+    let mut reply = request("bad-reply"); reply.message.task_id = Some(task.task_id.clone());
+    reply.message.parts = vec![MessagePart::Data { value: serde_json::json!(true) }];
+    assert!(matches!(g.submit(caller(), reply).await, Err(RuntimeError::Unsupported(_))));
+    assert_eq!(f.ports.inbox.read_batch(&task.session_id, 0, 100).await.unwrap(), before);
+    assert_eq!(g.get(caller(), task.task_id).await.unwrap().status, TaskStatus::InputRequired);
+}

@@ -337,6 +337,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcn-api-http"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "bcn-runtime",
+ "bcn-runtime-api",
+ "bcn-runtime-app",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-domain",
+ "futures",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "bcn-runtime"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "bcn-agent-connectors",
+ "bcn-runtime-api",
+ "bcn-runtime-app",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-a2a-http",
+ "bcs-network-tracing",
+ "futures",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "bcn-runtime-api"
 version = "0.1.4-beta.3"
 dependencies = [

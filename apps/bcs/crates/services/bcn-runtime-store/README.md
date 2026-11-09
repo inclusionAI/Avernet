@@ -157,7 +157,7 @@ are included. No transaction spans network delivery or result-store I/O.
 | Dispatch receipt | 2 R + 1 C + 1 T | dispatch + inbox sequence/dedup; <=6 mutations |
 | Active dispatch page | 1 S + 1 R | <=100 IDs + <=100 records; independent of ACK/history |
 | Hard event | 6–7 R + 1 C + 1 T | optional final result lookup; 4 mutations |
-| Connector reset/delta | 4 R + 1 S + 1 C + 1 T | <=32 node projections (scan limit33); 4 mutations |
+| Connector reset/delta | 5 R + 1 S + 1 C + 1 T | <=32 node projections (scan limit33); 4 mutations |
 | Snapshot / event page | 1 R / 2 R + 1 S | <=100 events, snapshot consistency check |
 | Local result put | 1–2 R + 1 C + 1 T | committed intent/result + optional final result; <=3 mutations |
 | Liveness register/renew/drain | 1 C + 1 R + 1 T | one incarnation row |
@@ -205,3 +205,31 @@ LimitExceeded becomes explicit RuntimeError::CapacityExceeded. The transition
 outbox limit is 64 effects (still subject to existing 100-condition/mutation/byte
 bounds), allowing 32 cancellation intents plus one bounded task failure result.
 These are unreleased v1 extensions; no production backend is selected here.
+
+## Current questions and bounded snapshot metadata
+
+InputRequired and InteractionResolved update the existing Task snapshot in the
+same fenced publication transaction as cursor/event/publication receipt. No new
+query or historical scan is added to GetTask/list/fresh subscription. Per-node
+private projections remain retained; connector_event adds one bounded point read
+of the immutable Session header to apply live_output_nodes to the public aggregate.
+Saved results and question/status events are not filtered.
+
+The application reserves up to 896 KiB serialized aggregate artifact output and
+64 KiB serialized active-interaction list (IDs and JSON escaping included).
+Question text also lives in the checkpoint; overflow follows the existing
+TaskFailure/result barrier before hard-event publication. Admission requires
+empty initial output/questions/error; task/session/target value IDs are 1..256
+UTF-8 bytes, complete encoded initial TaskView is at most 16 KiB and SessionSpec
+at most 32 KiB. These local IDs are distinct from remote connector handle IDs.
+Scope components already have a 64-byte ASCII limit. Runtime connector error
+strings are bounded to 512 characters (up to 3072 escaped JSON bytes).
+
+The remaining 64 KiB reserve therefore covers <=16 KiB initial metadata, bounded
+error/status/timestamp growth and the additional Reset/EventSnapshot/event-ID,
+cursor and schema envelope. Tests construct maximum scopes, 256 escaped ID
+characters, u64::MAX timestamps/cursors, 512 escaped diagnostic characters and
+payloads approaching both 896/64 KiB quotas, then serialize the full persisted
+Envelope<Reset> below 1 MiB. A second real-repository case combines 15 × 60000
+bytes of artifacts with questions and proves bounded explicit failure, no stuck
+pending hard publication. This is a functional bounds proof, not a capacity test.

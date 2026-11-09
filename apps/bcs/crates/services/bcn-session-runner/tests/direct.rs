@@ -17,6 +17,7 @@ fn message() -> Message {
 }
 fn spec() -> SessionSpec {
     SessionSpec {
+        live_output_nodes: None,
         session_id: SessionId::new(scope(), "s"),
         target: ExecutionTarget::Agent {
             agent_id: AgentId::new(scope(), "bot"),

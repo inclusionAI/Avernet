@@ -21,6 +21,7 @@ impl AgentCatalog for GroupCatalog {
         id: &SessionId,
     ) -> RuntimeResult<SessionSpec> {
         Ok(SessionSpec {
+            live_output_nodes: None,
             session_id: id.clone(),
             target: target.clone(),
             kind: RunnerKind::StructuredGroup,

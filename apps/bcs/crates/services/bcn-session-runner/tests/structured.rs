@@ -11,6 +11,7 @@ fn node(targets: Value) -> Value {
 }
 fn spec(nodes: Value) -> SessionSpec {
     SessionSpec {
+        live_output_nodes: None,
         session_id: SessionId::new(scope(), "s"),
         target: ExecutionTarget::Group {
             group_id: GroupId::new(scope(), "g"),
@@ -669,4 +670,18 @@ fn terminal_human_with_judge_keeps_saved_answer_after_empty_target_selection() {
     assert_eq!(intent.output, answer.parts);
     assert!(saved_judge.next_state.current_task.as_ref().unwrap().nodes[&request.node_id]
         .saved_result.as_ref().unwrap().intent.output.is_empty());
+}
+
+#[test]
+fn frozen_live_selector_is_compatible_and_rejects_foreign_duplicate_or_nonfinal_nodes() {
+    let mut pre=node(json!({"complete":{"targets":["final"]}}));pre["final_output"]=json!(false);
+    let mut final_node=node(json!({}));final_node["final_output"]=json!(true);
+    let original=spec(json!({"pre":pre,"final":final_node}));
+    let mut encoded=serde_json::to_value(&original).unwrap();encoded.as_object_mut().unwrap().remove("live_output_nodes");
+    assert!(serde_json::from_value::<SessionSpec>(encoded).unwrap().live_output_nodes.is_none());
+    for invalid in [vec!["other"],vec!["pre"],vec!["final","final"]] {
+        let mut s=original.clone();s.live_output_nodes=Some(invalid.into_iter().map(str::to_owned).collect());
+        assert!(StructuredGroupRunner.validate(&s).is_err());
+    }
+    let mut s=original;s.live_output_nodes=Some(vec!["final".into()]);assert!(StructuredGroupRunner.validate(&s).is_ok());
 }

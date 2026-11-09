@@ -145,6 +145,7 @@ pub struct EventSnapshot { pub task: TaskView, pub cursor: EventCursor }
 pub struct EventPage { pub snapshot: EventSnapshot, pub events: Vec<TaskEvent>, pub cursor_expired: bool }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeDefaults {
     pub shards: u16, pub heartbeat_ms: u64, pub heartbeat_ttl_ms: u64,
     pub ownership_inspection_ms: u64, pub inbox_batch: u32, pub recovery_concurrency: u32,

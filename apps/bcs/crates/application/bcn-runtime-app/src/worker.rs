@@ -522,6 +522,12 @@ fn transition_fits(cp: &SessionCheckpoint, t: &Transition) -> RuntimeResult<bool
         })
         .sum::<usize>()
         + t.events.len();
+    // Keep the prompt projection within half the existing 128 KiB snapshot reserve.
+    // Artifacts may independently use 896 KiB; questions include scoped IDs/JSON overhead.
+    let interactions: Vec<_> = t.next_state.current_task.iter().flat_map(|task|task.nodes.values())
+        .filter_map(|node|node.interaction_id.as_ref().zip(node.interaction_prompt.as_ref()))
+        .map(|(interaction_id,prompt)|ActiveInteraction{interaction_id:interaction_id.clone(),prompt:prompt.clone()}).collect();
+    if size(&interactions)? > 65536 { return Ok(false); }
     let mut saved_reserve = 0;
     if let Some(task) = &t.next_state.current_task {
         for node in task.nodes.values().filter(|n| n.saved_result.is_none()) {

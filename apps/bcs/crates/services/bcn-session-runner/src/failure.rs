@@ -1,5 +1,5 @@
 //! Explicit application-budget failure through the same immutable result barrier.
-use crate::{cancel_agent, cancel_timers, id, queued_status, status};
+use crate::{cancel_agent, cancel_timers, id, queued_status, status, resolve_interaction};
 use bcn_runtime_model::*;
 pub(crate) fn fail(
     mut t: Transition,
@@ -37,6 +37,7 @@ pub(crate) fn fail(
                 t.next_state.context_blocked = true;
             }
             for node in nodes {
+                resolve_interaction(&mut t, &mut task, &node);
                 if task.nodes[&node].handle.is_some()
                     && matches!(
                         task.nodes[&node].phase,

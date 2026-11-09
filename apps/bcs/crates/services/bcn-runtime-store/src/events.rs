@@ -70,7 +70,12 @@ impl RuntimeStore {
         projections.push(Projection { node: projection.node.clone(), fence: projection.fence.clone(), output: projection.output.clone() });
         if projections.len() > 32 { return Err(RuntimeError::CapacityExceeded); }
         projections.sort_by(|a,b| a.node.cmp(&b.node));
-        snapshot.task.output = projections.into_iter().flat_map(|p| p.output).collect();
+        // The session header is immutable. Keep every private node projection for
+        // recovery; only the frozen public selector affects aggregate token output.
+        let spec = self.load_spec(&dispatch.record.context.session_id).await?.ok_or(RuntimeError::NotFound)?;
+        snapshot.task.output = projections.into_iter().filter(|p| spec.live_output_nodes.as_ref()
+            .is_none_or(|nodes| p.node.as_ref().is_some_and(|node| nodes.contains(node))))
+            .flat_map(|p| p.output).collect();
         // Delta has no node/address field: use Reset unless a consumer's ordinary
         // tail append produces exactly the new aggregate (including part boundaries).
         let is_reset = requested_reset || appended != snapshot.task.output;
@@ -120,11 +125,19 @@ impl TaskEventStore for RuntimeStore {
                     let result = self.row(&session.scope, entity("task-result", &domain.task_id.value)).await?;
                     let saved: SavedResult = decode(result.as_ref().ok_or_else(|| conflict("authoritative result not saved"))?)?;
                     if saved.intent.status != *status { return Err(conflict("terminal result status")); }
+                    snapshot.task.active_interactions.clear();
                     snapshot.task.output = saved.intent.output; snapshot.task.error = saved.intent.error;
                 }
                 snapshot.task.status = *status;
             }
-            DomainEventKind::InputRequired { .. } => snapshot.task.status = TaskStatus::InputRequired,
+            DomainEventKind::InputRequired { interaction_id, prompt } => {
+                snapshot.task.active_interactions.retain(|i| &i.interaction_id != interaction_id);
+                snapshot.task.active_interactions.push(ActiveInteraction { interaction_id: interaction_id.clone(), prompt: prompt.clone() });
+                snapshot.task.status = TaskStatus::InputRequired;
+            }
+            DomainEventKind::InteractionResolved { interaction_id } => {
+                snapshot.task.active_interactions.retain(|i| &i.interaction_id != interaction_id);
+            }
             _ => {}
         }
         snapshot.cursor.sequence = snapshot.cursor.sequence.checked_add(1).ok_or_else(|| invalid("event sequence exhausted"))?;

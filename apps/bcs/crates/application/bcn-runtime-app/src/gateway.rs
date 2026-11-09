@@ -181,6 +181,9 @@ impl GatewayService for DefaultGateway {
         {
             return Err(RuntimeError::CapacityExceeded);
         }
+        if request.message.parts.iter().any(|part| !matches!(part, MessagePart::Text { .. })) {
+            return Err(RuntimeError::Unsupported("MVP accepts text/plain only".into()));
+        }
         if let Some(task_id) = request.message.task_id.clone() {
             return self.reply(ctx, request, task_id).await;
         }
@@ -266,6 +269,7 @@ impl GatewayService for DefaultGateway {
         let now = self.clock.now_ms();
         let task_id = TaskId::new(ctx.scope.clone(), identity.clone());
         let task = TaskView {
+            active_interactions: vec![],
             task_id: task_id.clone(),
             session_id: session_id.clone(),
             target: request.target,

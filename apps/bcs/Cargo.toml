@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/adapters/http/bcn-api-http",
+    "crates/bootstrap/bcn-runtime",
     "crates/external-clients/bcn-agent-connectors",
     "crates/application/bcn-runtime-app",
     "crates/services/bcn-runtime-store",
@@ -153,6 +155,8 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcn-api-http = { path = "crates/adapters/http/bcn-api-http" }
+bcn-runtime = { path = "crates/bootstrap/bcn-runtime" }
 bcn-agent-connectors = { path = "crates/external-clients/bcn-agent-connectors" }
 bcn-runtime-app = { path = "crates/application/bcn-runtime-app" }
 bcn-runtime-store = { path = "crates/services/bcn-runtime-store" }

@@ -8,6 +8,9 @@ pub fn validate_common(spec: &SessionSpec, kind: RunnerKind) -> RuntimeResult<()
         .scope
         .validate()
         .map_err(|_| RuntimeError::AccessDenied)?;
+    if kind == RunnerKind::DirectA2a && spec.live_output_nodes.is_some() {
+        return invalid("Direct projection cannot select graph nodes");
+    }
     if spec.kind != kind {
         return invalid("runner kind mismatch");
     }
@@ -47,6 +50,13 @@ pub fn validate_definition(spec: &SessionSpec) -> RuntimeResult<()> {
         .definition
         .as_ref()
         .ok_or_else(|| RuntimeError::InvalidInput("missing definition".into()))?;
+    if let Some(selected) = &spec.live_output_nodes {
+        let unique: BTreeSet<_> = selected.iter().collect();
+        if unique.len() != selected.len() || selected.iter().any(|id|
+            !d.nodes.get(id).is_some_and(|n| n.final_output && n.kind == StateMachineNodeKind::BotTask)) {
+            return invalid("live output selection requires distinct final BotTask nodes in this frozen graph");
+        }
+    }
     if d.version != 1 || d.graph_mode != StateMachineGraphMode::Acyclic {
         return unsupported("only v1 acyclic definitions are supported");
     }

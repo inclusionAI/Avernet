@@ -51,3 +51,28 @@ separately from artifact `output`. A present empty list explicitly means no
 question; only legacy snapshots with None use output as the prompt fallback.
 The field defaults to None and is omitted when absent. This is a neutral runtime
 contract, not an additional A2A or Provider wire field.
+
+## Public question and live-output projections
+
+TaskView.active_interactions is a serde-default current list of scoped IDs and
+question strings, separate from output artifacts. InputRequired upserts its ID;
+InteractionResolved removes only that ID; terminal publication clears the list.
+NodeExecution.interaction_prompt is serde-default optional checkpoint data, so
+current questions participate in the existing cumulative checkpoint budget.
+HumanReply, cancellation, timeout and failure consume/clear the matching question
+through committed events. No unbounded event-history reconstruction is needed.
+
+SessionSpec.live_output_nodes is an optional, frozen list of node IDs in this
+Session's definition. None preserves previous all-node token projection behavior.
+Some selects distinct final BotTask nodes; Some([]) hides all live tokens while
+retaining status/questions/results. Direct does not accept a graph selector.
+The new bootstrap selects the unique final_output BotTask, or an empty list for
+a terminal HumanInput. Private/Shared graph visibility fields are not repurposed.
+Intermediate saved node results remain in ResultStore/read_group_records; this
+MVP does not merge them into additional public A2A Task artifacts. The authoritative
+terminal Task artifact remains the final summary result.
+
+These additive defaults preserve old serialized snapshots/specs/checkpoints.
+Rust construction sites must initialize the new fields. New InteractionResolved
+consumers and the selection-aware repository must deploy together in an isolated,
+explicitly enabled namespace; no legacy in-flight migration is provided.

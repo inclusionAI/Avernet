@@ -329,3 +329,20 @@ README records tick bounds, 64 KiB per-node/input limits, aggregate checkpoint
 budgets, immutable-result-preserving TaskFailure fallback, nonblocking drain,
 and actual repository access costs. New namespace admission remains explicit;
 no legacy in-flight migration or production wiring is introduced by this crate.
+
+## Public ingress and explicit assembly
+
+`adapters/http/bcn-api-http` translates pinned A2A 1.0 JSON-RPC/SSE models to
+GatewayService, with injected authentication and target binding. It rejects
+missing/empty/unsupported A2A-Version before admission and accepts only text/plain.
+Blocking send, query and snapshot subscriptions expose current questions separately
+from artifacts. Terminal streaming output is reloaded from authorized Gateway.get.
+
+`bootstrap/bcn-runtime` selects shared memory ports only for explicit local/test
+profiles; production requires external RuntimePorts. Config is unknown-key strict,
+admission defaults off and requires a new-Session allowlist. Fixed MVP defaults
+cannot be overridden. Worker and Connector use distinct node incarnations in the
+same deployment scope. Final-node live-output selection is frozen at new group
+admission; private node projections and SavedResults are retained, while public
+A2A final artifacts represent the summary only. Existing specs without a selector
+retain their all-node projection semantics. No legacy runtime path is changed.

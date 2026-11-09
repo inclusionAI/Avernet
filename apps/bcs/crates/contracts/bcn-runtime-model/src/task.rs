@@ -27,7 +27,12 @@ impl TaskStatus {
     pub fn is_terminal(self) -> bool { matches!(self, Self::Completed | Self::Failed | Self::Cancelled) }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActiveInteraction { pub interaction_id: InteractionId, pub prompt: String }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskView {
+    /// Current unresolved questions, separate from produced artifacts.
+    #[serde(default)]
+    pub active_interactions: Vec<ActiveInteraction>,
     pub task_id: TaskId,
     pub session_id: SessionId,
     pub target: ExecutionTarget,

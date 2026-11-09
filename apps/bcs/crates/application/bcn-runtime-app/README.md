@@ -127,3 +127,11 @@ projection/bounds failure retains partial output and live observation uncertaint
 A question with absent artifacts does not clear the prior partial projection.
 Runner emits the explicit prompt in InputRequired; only old snapshots without
 input_prompt use output as their question. Existing aggregate limits still apply.
+
+Gateway rejects Data/File business parts before admission or HumanReply inbox
+append. Text containing JSON remains text. Worker bounds the serialized current
+ActiveInteraction list to 64 KiB within the existing 128 KiB snapshot reserve,
+in addition to counting NodeExecution.interaction_prompt in checkpoint budgets.
+This composes with the existing 896 KiB public output limit. Exceeding either
+budget commits TaskFailure and its immutable result intent; pending questions
+are resolved rather than left visible as answerable. No row limit is enlarged.
