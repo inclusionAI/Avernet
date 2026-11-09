@@ -15,3 +15,7 @@ User requested temporarily closing the owner-callback Caller refresh branch unti
 ## PR CI failure repair
 
 Real JUnit artifacts from release run42644432021 and dev42644554524 each fail test_no_identity_vendor_in_core because the new rollout-gate Python comment names the credential vendor. Reproduce that architecture gate, replace only the comment and related core README vendor wording with neutral credential-provider terms, preserve default False and original behavior. Include identity-vendor architecture gate in release/dev targeted regression. Separately investigate Singlebox missing embedding CI configuration; do not fabricate credentials or lower gates.
+
+## Release PR scope correction (2026-11-10)
+
+Remove the upstream Singlebox backport from this release PR. Restore both Singlebox files to the release base, retain only Caller isolation/default-off changes, rerun relevant backend tests and inspect the new remote CI. Do not modify the dev PR or weaken CI gates.
