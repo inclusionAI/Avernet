@@ -773,35 +773,65 @@ pub(super) async fn handle_web_send_with_result(
     let admission = match prepared_command {
         Some(command) => match caller_deps {
             None => {
-            let admitted = flow
+            let managed = flow
                 .managed_deliveries
                 .as_ref()
-                .ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?
-                .admit(command)
-                .await;
-            match admitted {
-                Ok(result) => Some(result),
-                Err(error) => {
-                    use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError;
-                    use bcs_service_api::ManagedDeliveryError;
-                    // Only an explicit admission rejection proves no commit.
-                    // Storage/unknown errors may be lost COMMIT acknowledgements:
-                    // retain managed run identities and frozen output permits.
-                    // Direct targets have not started I/O and can be released.
-                    let rejected = matches!(
-                        error,
-                        ManagedDeliveryError::Conflict
-                            | ManagedDeliveryError::Repository(
-                                MessageDeliveryRepoError::Conflict
-                                    | MessageDeliveryRepoError::Invalid(_)
-                            )
-                    );
+                .ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?;
+            // Retry transient admission failures (e.g. storage timeouts)
+            // up to 2 additional times with exponential backoff before
+            // failing the request. Only explicit rejections (Conflict,
+            // Invalid) are not retried — they prove no commit occurred.
+            const MAX_ADMIT_ATTEMPTS: u32 = 3;
+            let mut last_error: Option<(bcs_service_api::ManagedDeliveryError, bool)> = None;
+            let mut admitted_result = None;
+            let mut committed_in_previous_attempt = false;
+            for attempt in 0..MAX_ADMIT_ATTEMPTS {
+                let admitted = managed.admit(command.clone()).await;
+                match admitted {
+                    Ok(result) => {
+                        admitted_result = Some(result);
+                        break;
+                    }
+                    Err(error) => {
+                        use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError;
+                        use bcs_service_api::ManagedDeliveryError;
+                        // Only an explicit admission rejection proves no commit.
+                        // Storage/unknown errors may be lost COMMIT acknowledgements:
+                        // retain managed run identities and frozen output permits.
+                        // Direct targets have not started I/O and can be released.
+                        let rejected = matches!(
+                            error,
+                            ManagedDeliveryError::Conflict
+                                | ManagedDeliveryError::Repository(
+                                    MessageDeliveryRepoError::Conflict
+                                        | MessageDeliveryRepoError::Invalid(_)
+                                )
+                        );
+                        // On retry after a successful inner commit (e.g.,
+                        // admit_after_commit failure), Conflict means the managed
+                        // run was already committed by a previous attempt.
+                        // It should survive; only direct runs need release.
+                        let effective_rejected = rejected
+                            && !committed_in_previous_attempt;
+                        if rejected || attempt + 1 >= MAX_ADMIT_ATTEMPTS {
+                            last_error = Some((error, effective_rejected));
+                            break;
+                        }
+                        committed_in_previous_attempt = true;
+                        tokio::time::sleep(std::time::Duration::from_millis(100 * 2u64.pow(attempt))).await;
+                    }
+                }
+            }
+            match admitted_result {
+                Some(result) => Some(result),
+                None => {
+                    let (error, rejected) = last_error.unwrap();
                     let unused = if rejected { &operation_run_ids } else { &direct_send_ids };
                     flow.release_output_runs(&operation_id, unused).await;
                     warn!(%operation_id, %error, rejected,
                         "queue admission failed; only proven unused runs released");
                     return Err(ServiceError::InternalError(
-                        "queue admission persistence failed".into(),
+                        "queue admission temporarily unavailable".into(),
                     ));
                 }
             }

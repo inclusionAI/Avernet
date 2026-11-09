@@ -1654,6 +1654,12 @@ pub async fn session_chat(
                 bcs_service_api::ServiceError::SessionNotFound(_) => {
                     (StatusCode::NOT_FOUND, e.to_string())
                 }
+                bcs_service_api::ServiceError::BotNotFound(id) => {
+                    (StatusCode::NOT_FOUND, format!("bot not found: {id}"))
+                }
+                bcs_service_api::ServiceError::InternalError(msg) => {
+                    (StatusCode::BAD_GATEWAY, msg.clone())
+                }
                 _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             };
             if code.is_server_error() {

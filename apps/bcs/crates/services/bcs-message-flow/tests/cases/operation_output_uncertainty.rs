@@ -23,14 +23,20 @@ async fn admission_error(commit: bool, reject: bool) {
     if reject {
         managed.set_admission_available(false);
     } else {
-        fault.arm(if commit { "admit_after_commit" } else { "admit" }, 1);
+        // Arm enough failures for admission retry (MAX_ADMIT_ATTEMPTS=3).
+        // For commit=true: only 1 consumed (retry detects Conflict on duplicate).
+        // For commit=false: all 3 consumed.
+        fault.arm(if commit { "admit_after_commit" } else { "admit" }, 10);
     }
     let admission = Arc::new(RecordingOutputAdmission::default());
     let flow = managed_output_flow(&s, repo, fault.clone(), admission.clone(), 10).await;
     let result = flow.handle_web_send(web_send("group-1", "human_1", Some("group-1:ffffffff"),
         &["bot-driver", "bot-observer"])).await;
     assert!(result.is_err(), "do not turn an unknown outcome into success");
-    assert_eq!(fault.remaining(), 0, "the intended failure point was exercised");
+    // With admission retry: commit=true consumes 1 (retry detects Conflict).
+    // commit=false consumes MAX_ADMIT_ATTEMPTS (3). reject=true arms none.
+    let expected_remaining = if reject { 0 } else if commit { 9 } else { 7 };
+    assert_eq!(fault.remaining(), expected_remaining, "the intended failure point was exercised");
     assert!(s.bot_delivery.frames().await.is_empty(), "direct targets never started");
     let registered = admission.registered_runs.lock().unwrap().clone();
     assert_eq!(registered.len(), 1);
@@ -62,7 +68,9 @@ async fn admission_error(commit: bool, reject: bool) {
         row.source_message_id.clone())).await.is_err());
     // Once storage is reachable again, the original Run resumes callback
     // processing with its original operation (no new admission/retry).
-    assert_eq!(fault.remaining(), 0, "the read outage was exercised");
+    // The lookup fault (armed 1, consumed 1) nets to zero; remaining
+    // faults are the unspent admission-retry budget.
+    assert_eq!(fault.remaining(), expected_remaining, "the read outage was exercised");
     flow.handle_bot_event(delta_event(&run, "bot-driver", Some("group-1:ffffffff"))).await.unwrap();
     let events = s.frontend_delivery.commands().await;
     assert_eq!(events.last().unwrap().operation_id.as_deref(), Some(registered[0].0.as_str()));
