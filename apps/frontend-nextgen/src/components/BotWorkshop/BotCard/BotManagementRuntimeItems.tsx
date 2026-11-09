@@ -89,7 +89,7 @@ export function BotManagementRuntimeItems({
               )}
             </Button>
           ) : null}
-          {isServiceBot && bot.lifecycle === 'draft' && onOpenEvaluation ? (
+          {isServiceBot && bot.lifecycle === 'draft' && bot.evalGateVisible === true && onOpenEvaluation ? (
             <Button
               variant="ghost"
               size="sm"

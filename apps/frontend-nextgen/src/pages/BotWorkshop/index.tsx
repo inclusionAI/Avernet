@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
+import { useServiceBotEvalMenuVisibility } from '@/hooks/useServiceBotEvalMenuVisibility';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
 import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import { Points } from '@/tracking/points';
@@ -26,6 +27,7 @@ import React, { useEffect, useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
+  const evalMenuBots = useServiceBotEvalMenuVisibility(workshop.items);
   // 对话菜单落地参数(2026-11-05):?create=cloud 默认唤起云端创建;?keyword=Bot 名称按名称
   // 过滤定位该 Bot(Bot 行「跳转至 Bot 管理」前置入口传入)。挂载一次性消费并清参,避免刷新/回退重复触发。
   useEffect(() => {
@@ -164,7 +166,7 @@ const BotWorkshopPage: React.FC = () => {
                 <>
                   <div data-testid="bot-workshop-table" className="overflow-hidden rounded-[10px] bg-card">
                     <BotTable
-                      bots={workshop.items}
+                      bots={evalMenuBots}
                       onView={handleView}
                       onEdit={(bot) =>
                         workshop.canEnterDetail(bot) ? workshop.openDetail(bot, 'edit') : setBasicInfoBot(bot)

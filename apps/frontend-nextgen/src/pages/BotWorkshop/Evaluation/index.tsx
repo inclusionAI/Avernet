@@ -61,10 +61,15 @@ const EvaluationPage: React.FC = () => {
       { value: 'eval_history', label: '历史评测记录' },
     ];
     return tabOptions.filter((option) => {
+      if (option.value === 'simple_cert_submit') return tabs?.simple_cert_submit?.visible !== false;
       if (option.value === 'restart_eval') return tabs?.restart_eval?.visible !== false;
       return true;
     });
   }, [tabs]);
+
+  const effectiveTab = options.some((option) => option.value === activeTab)
+    ? activeTab
+    : options[0]?.value ?? 'eval_history';
 
   const hasSimpleFiles = Boolean(sampleFile && reportFile);
   const hasRestartFiles = Boolean(datasetFile && (goalType === 'json' ? goalFile : true));
@@ -141,7 +146,7 @@ const EvaluationPage: React.FC = () => {
                 ) : null}
                 <div className="mt-4">
                   <Segmented<EvalTab>
-                    value={options.some((option) => option.value === activeTab) ? activeTab : 'simple_cert_submit'}
+                    value={effectiveTab}
                     options={options}
                     onChange={setActiveTab}
                     className="w-full max-w-3xl"
@@ -149,7 +154,7 @@ const EvaluationPage: React.FC = () => {
                   />
                 </div>
                 <div className="mt-4 rounded-lg border border-border p-4">
-                  {activeTab === 'simple_cert_submit' ? (
+                  {effectiveTab === 'simple_cert_submit' ? (
                     <div className="space-y-4">
                       <p className="m-0 text-xs text-muted-foreground">已有评测样本集和结果报告时，可直接上传并提交认证审核。</p>
                       <div className="grid gap-3 md:grid-cols-2">
@@ -162,7 +167,7 @@ const EvaluationPage: React.FC = () => {
                         </Button>
                       </div>
                     </div>
-                  ) : activeTab === 'restart_eval' ? (
+                  ) : effectiveTab === 'restart_eval' ? (
                     <div className="space-y-4">
                       <p className="m-0 text-xs text-muted-foreground">适合需要重新发起评测并重新编排执行的链路。</p>
                       <div className="grid gap-3 md:grid-cols-2">
