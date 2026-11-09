@@ -12,6 +12,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+a2a           = { package = "a2a-lf", version = "=0.4.2" }
+chrono        = { workspace = true }
 anyhow        = { workspace = true }
 async-trait   = { workspace = true }
 axum          = { workspace = true }

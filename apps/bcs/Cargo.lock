@@ -494,6 +494,7 @@ dependencies = [
  "axum",
  "bcs-a2a-binding-api",
  "bcs-bot-store",
+ "bcs-bridge-core",
  "bcs-chat-run-store",
  "bcs-db-api",
  "bcs-db-local",
@@ -516,7 +517,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
+ "tokio-util",
+ "toml",
  "tonic",
  "tracing",
 ]
@@ -1034,10 +1038,12 @@ dependencies = [
 name = "bcs-bridge-core"
 version = "0.1.4-beta.3"
 dependencies = [
+ "a2a-lf",
  "anyhow",
  "async-trait",
  "axum",
  "bcs-protocol",
+ "chrono",
  "dirs",
  "futures",
  "libc",

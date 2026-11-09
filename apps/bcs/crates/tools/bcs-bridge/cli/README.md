@@ -1,5 +1,7 @@
 # BCS Bridge
 
+Optional A2A server (Agent Cards, HTTP+JSON / JSON-RPC and SSE): [A2A.md](A2A.md).
+
 `bcs-bridge` connects a local engine (Claude Code, Codex or QwenWork) to BCS as
 a Bot. All three are members of the BCS workspace (`apps/bcs`) and follow its shared
 version and lint configuration. They live under `apps/bcs/crates/tools/bcs-bridge/`:

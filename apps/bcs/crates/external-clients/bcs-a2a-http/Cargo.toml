@@ -34,6 +34,10 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-bridge-core = { workspace = true }
+tempfile = { workspace = true }
+toml = { workspace = true }
+tokio-util = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-interaction = { workspace = true }
 bcs-message-store = { workspace = true }
