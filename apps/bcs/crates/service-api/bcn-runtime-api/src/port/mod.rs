@@ -36,6 +36,14 @@ pub enum AccessAction { Submit, Get, List, Subscribe, Cancel, HumanReply }
 /// Cross-cutting access hook registered by bootstrap; every applicable hook must allow.
 #[async_trait]
 pub trait AccessPolicy: Send + Sync {
+    /// Grants visibility of this entire caller/target/session collection, including its count.
+    /// Policies must keep per-task visibility consistent with this grant. Targetless listing
+    /// requires an explicit implementation; it cannot be inferred from a returned page.
+    async fn authorize_list(&self, ctx: &CallerContext, query: &TaskQuery) -> RuntimeResult<()> {
+        let target=query.target.as_ref().ok_or_else(||RuntimeError::Unsupported("targetless list authorization unavailable".into()))?;
+        self.authorize(ctx,AccessAction::List,target,query.session_id.as_ref(),None).await
+    }
+
     async fn authorize(&self, ctx: &CallerContext, action: AccessAction, target: &ExecutionTarget,
         session_id: Option<&SessionId>, task_id: Option<&TaskId>) -> RuntimeResult<()>;
 }

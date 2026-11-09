@@ -110,7 +110,7 @@ pub trait ResultStore: Send + Sync {
     /// Stable result_id, immutable payload. Return the authoritative existing result on retry.
     async fn put_if_absent(&self, intent: ResultIntent) -> RuntimeResult<SavedResult>;
     async fn get(&self, result_id: &ResultId) -> RuntimeResult<Option<SavedResult>>;
-    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<Page<TaskView>>;
+    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage>;
     async fn read_group_records(&self, task_id: &TaskId, cursor: Option<String>, limit: u32) -> RuntimeResult<Page<SavedResult>>;
 }
 
@@ -119,5 +119,5 @@ pub trait ResultStore: Send + Sync {
 #[async_trait]
 pub trait TaskQueryStore: Send + Sync {
     async fn get_task(&self, ctx: &CallerContext, task_id: &TaskId) -> RuntimeResult<TaskView>;
-    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<Page<TaskView>>;
+    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage>;
 }

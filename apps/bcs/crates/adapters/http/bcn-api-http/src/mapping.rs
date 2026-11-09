@@ -73,7 +73,7 @@ pub fn task(view: &TaskView) -> a2a::Task {
         message_id: format!("{}-questions",view.task_id.value), context_id: Some(view.session_id.value.clone()), task_id: Some(view.task_id.value.clone()),
         role: a2a::Role::Agent, parts: prompts, metadata: None, extensions: Some(vec![INTERACTION.into()]), reference_task_ids: None,
     }) };
-    a2a::Task { id: view.task_id.value.clone(), context_id: view.session_id.value.clone(), status:a2a::TaskStatus { state, message, timestamp:None },
+    a2a::Task { id: view.task_id.value.clone(), context_id: view.session_id.value.clone(), status:a2a::TaskStatus { state, message, timestamp:i64::try_from(view.updated_at_ms).ok().and_then(chrono::DateTime::from_timestamp_millis) },
         artifacts: if view.output.is_empty(){None}else{Some(vec![artifact(&view.output)])}, history:None,
         metadata: view.error.clone().map(|e|HashMap::from([("urn:avernet:bcn:error".into(),serde_json::json!(error(e).message))])),
     }

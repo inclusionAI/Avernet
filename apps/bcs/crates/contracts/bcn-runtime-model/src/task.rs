@@ -47,6 +47,8 @@ pub struct CancelCommand { pub task_id: TaskId, pub operation_id: OperationId }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskQuery { pub target: Option<ExecutionTarget>, pub session_id: Option<SessionId>, pub cursor: Option<String>, pub limit: u32 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskPage { pub items: Vec<TaskView>, pub next_cursor: Option<String>, pub total_size: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Page<T> { pub items: Vec<T>, pub next_cursor: Option<String> }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventCursor { pub epoch: u64, pub sequence: u64 }

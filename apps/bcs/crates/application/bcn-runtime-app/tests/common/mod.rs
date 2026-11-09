@@ -121,6 +121,7 @@ impl AgentCatalog for Catalog {
 pub struct Allow;
 #[async_trait]
 impl AccessPolicy for Allow {
+    async fn authorize_list(&self, _: &CallerContext, _: &TaskQuery) -> RuntimeResult<()> { Ok(()) }
     async fn authorize(
         &self,
         _: &CallerContext,
@@ -159,7 +160,7 @@ impl ResultStore for Results {
     async fn get(&self, id: &ResultId) -> RuntimeResult<Option<SavedResult>> {
         self.inner.get(id).await
     }
-    async fn list_tasks(&self, c: &CallerContext, q: TaskQuery) -> RuntimeResult<Page<TaskView>> {
+    async fn list_tasks(&self, c: &CallerContext, q: TaskQuery) -> RuntimeResult<TaskPage> {
         self.inner.list_tasks(c, q).await
     }
     async fn read_group_records(

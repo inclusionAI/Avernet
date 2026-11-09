@@ -22,3 +22,5 @@ pub use results::LocalResultStore;
 mod recovery;
 mod liveness_adapter;
 pub use liveness_adapter::LivenessAdapter;
+
+mod task_index;

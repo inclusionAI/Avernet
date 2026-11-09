@@ -60,7 +60,7 @@ async fn parallel_resets_replace_progress_and_terminal_artifacts_reconstruct_get
  let mut parallel=partial.clone();parallel.output=vec![MessagePart::Text{text:"node-a updated".into()},MessagePart::Text{text:"node-b".into()}];
  let mut terminal=view();terminal.status=TaskStatus::Completed;terminal.output=vec![MessagePart::Text{text:"authoritative joined result".into()}];
  *g.terminal.lock().unwrap()=Some(terminal.clone());
- let kinds=vec![TaskEventKind::Reset{snapshot:partial},TaskEventKind::Delta{text:" tail".into()},TaskEventKind::Reset{snapshot:parallel},TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"terminal"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status:TaskStatus::Completed}}}];
+ let kinds=vec![TaskEventKind::Reset{snapshot:partial},TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"working"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status:TaskStatus::Working}}},TaskEventKind::Delta{text:" tail".into()},TaskEventKind::Reset{snapshot:parallel},TaskEventKind::Domain{event:DomainEvent{event_id:EventId::new(scope(),"terminal"),task_id:terminal.task_id.clone(),kind:DomainEventKind::TaskStatusChanged{status:TaskStatus::Completed}}}];
  *g.events.lock().unwrap()=Some(kinds.into_iter().enumerate().map(|(n,kind)|TaskEvent{id:EventId::new(scope(),format!("e{n}")),task_id:terminal.task_id.clone(),cursor:EventCursor{epoch:1,sequence:n as u64},kind}).collect());
  let (_,response)=call(app.clone(),"SubscribeToTask",json!({"id":"task"}),Some("1.0"),true).await;
  let mut output=Vec::<a2a::Part>::new();let mut status=None;
@@ -69,7 +69,7 @@ async fn parallel_resets_replace_progress_and_terminal_artifacts_reconstruct_get
   match serde_json::from_value::<a2a::StreamResponse>(rpc.result.unwrap()).unwrap(){
    a2a::StreamResponse::Task(task)=>{output=task.artifacts.unwrap_or_default().into_iter().flat_map(|a|a.parts).collect();status=Some(task.status.state)},
    a2a::StreamResponse::ArtifactUpdate(event)=>{if event.append==Some(true){output.extend(event.artifact.parts)}else{output=event.artifact.parts}},
-   a2a::StreamResponse::StatusUpdate(event)=>status=Some(event.status.state),_=>panic!("unexpected message")
+   a2a::StreamResponse::StatusUpdate(event)=>{if event.status.state==a2a::TaskState::Working{assert!(event.status.timestamp.is_none());}else{assert!(event.status.timestamp.is_some());}status=Some(event.status.state)},_=>panic!("unexpected message")
   }
  }
  let (_,queried)=call(app,"GetTask",json!({"id":"task"}),Some("1.0"),true).await;
@@ -99,4 +99,16 @@ async fn discovery_card_advertises_only_implemented_modes_and_extensions(){
  assert_eq!(card["skills"][0]["inputModes"],json!(["text/plain"]));assert_eq!(card["skills"][0]["outputModes"],json!(["text/plain"]));
  assert_eq!(card["capabilities"]["extendedAgentCard"],false);
  assert_eq!(card["capabilities"]["extensions"].as_array().unwrap().len(),2);
+}
+
+#[tokio::test]
+async fn list_defaults_omit_artifacts_and_expose_matching_status_timestamp() {
+ let (app,g)=app();{let mut t=g.task.lock().unwrap();t.output=vec![bcn_runtime_model::MessagePart::Text{text:"saved".into()}];t.updated_at_ms=1234;}
+ let (_,v)=call(app.clone(),"ListTasks",json!({}),Some("1.0"),true).await;
+ assert_eq!(v["result"]["pageSize"],50);
+ assert_eq!(v["result"]["totalSize"],42);
+ assert!(v["result"]["tasks"][0].get("artifacts").is_none());
+ assert_eq!(v["result"]["tasks"][0]["status"]["timestamp"],"1970-01-01T00:00:01.234Z");
+ let (_,v)=call(app,"ListTasks",json!({"includeArtifacts":true}),Some("1.0"),true).await;
+ assert_eq!(v["result"]["tasks"][0]["artifacts"][0]["parts"][0]["text"],"saved");
 }

@@ -62,11 +62,11 @@ async fn dispatch(state:ApiState,ctx:CallerContext,rpc:JsonRpcRequest,headers:&a
         "ListTasks"=>{
             let r:a2a::ListTasksRequest=params(rpc.params)?;mapping::history(r.history_length)?;
             if r.status.is_some()||r.status_timestamp_after.is_some(){return Err(A2AError::unsupported_operation("status filters are unavailable"))}
-            let limit=r.page_size.unwrap_or(100);if !(1..=100).contains(&limit){return Err(A2AError::invalid_params("pageSize must be 1..100"))}
+            let limit=r.page_size.unwrap_or(50);if !(1..=100).contains(&limit){return Err(A2AError::invalid_params("pageSize must be 1..100"))}
             if let Some(c)=&r.context_id{mapping::id(c)?;}
             let page=state.gateway.list(ctx.clone(),TaskQuery{target:Some(state.target.clone()),session_id:r.context_id.map(|v|SessionId::new(ctx.scope.clone(),v)),cursor:r.page_token.filter(|s|!s.is_empty()),limit:limit as u32}).await.map_err(mapping::error)?;
-            let mut tasks:Vec<_>=page.items.iter().map(mapping::task).collect();if r.include_artifacts==Some(false){for t in &mut tasks{t.artifacts=None;}}
-            Ok(success(id,a2a::ListTasksResponse{total_size:tasks.len() as i32,tasks,next_page_token:page.next_cursor.unwrap_or_default(),page_size:limit}))
+            let mut tasks:Vec<_>=page.items.iter().map(mapping::task).collect();if !r.include_artifacts.unwrap_or(false){for t in &mut tasks{t.artifacts=None;}}else{for t in &mut tasks{if t.artifacts.is_none(){t.artifacts=Some(vec![]);}}}
+            Ok(success(id,a2a::ListTasksResponse{total_size:i32::try_from(page.total_size).map_err(|_|A2AError::internal("task count exceeds protocol range"))?,tasks,next_page_token:page.next_cursor.unwrap_or_default(),page_size:limit}))
         }
         "CancelTask"=>{
             let r:a2a::CancelTaskRequest=params(rpc.params)?;let task=get(&state,&ctx,&r.id).await?;

@@ -21,8 +21,14 @@ text. Data/File parts, incompatible requested output modes and push configuratio
 are rejected before submit. Bodies are bounded to 96 KiB; Gateway independently
 bounds payloads and rejects nontext on initial messages and original-task replies.
 History and list status/time filters are explicitly unsupported. Lists are
-bounded to 100 items; nextPageToken is opaque. totalSize is the returned page size,
-not an unbounded count of all stored tasks.
+bounded to 100 items (default 50); artifacts are omitted unless includeArtifacts
+is true. totalSize is the exact pre-pagination collection count. Tasks sort by
+status.timestamp descending, with task digest breaking equal-time ties. The
+opaque nextPageToken binds caller/target/context/page size and collection revision.
+Any collection admission or update invalidates an older token with InvalidParams;
+restart listing from the first page. This deliberately trades long-lived cursors
+for bounded, internally consistent pages without silent duplicates or skipped
+updates. Status/time filters and history remain explicitly Unsupported.
 
 SendMessage waits for terminal/input-required/auth-required observation unless
 returnImmediately is true. Cancellation reports current state after recording
@@ -47,3 +53,13 @@ The Card declares two optional extension URNs:
 
 Safe public errors omit internal storage/transport diagnostics. No production
 credentials, identity strategy or endpoint policy are supplied by this adapter.
+
+Task/Get/List/Reset status.timestamp is the exact stored updated_at_ms, formatted
+as RFC3339. The store updates ordering atomically whenever this timestamp changes,
+including soft token projection. Nonterminal status deltas carry no publication
+time, so their optional timestamp is omitted; terminal status uses authoritative
+GetTask. Admission/publication rejects times beyond year9999 before persistence.
+Collection authorization occurs before any index/count read and grants visibility
+of the full caller/target/optional-context collection, including its count. Current
+per-task authorization remains fail-closed; policies must have consistent visibility
+within an authorized collection. Targetless listing requires an explicit policy hook.

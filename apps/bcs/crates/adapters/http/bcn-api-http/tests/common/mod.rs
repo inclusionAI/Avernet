@@ -23,7 +23,7 @@ pub struct Gateway {pub submits:AtomicUsize,pub task:Mutex<TaskView>,pub request
 impl GatewayService for Gateway {
  async fn submit(&self,_:CallerContext,r:SubmitRequest)->RuntimeResult<TaskView>{ self.submits.fetch_add(1,Ordering::SeqCst);self.requests.lock().unwrap().push(r);Ok(self.task.lock().unwrap().clone()) }
  async fn get(&self,_:CallerContext,_:TaskId)->RuntimeResult<TaskView>{Ok(if self.events.lock().unwrap().is_some(){self.task.lock().unwrap().clone()}else{self.terminal.lock().unwrap().clone().unwrap_or_else(||self.task.lock().unwrap().clone())})}
- async fn list(&self,_:CallerContext,_:TaskQuery)->RuntimeResult<Page<TaskView>>{Ok(Page{items:vec![self.task.lock().unwrap().clone()],next_cursor:None})}
+ async fn list(&self,_:CallerContext,_:TaskQuery)->RuntimeResult<TaskPage>{Ok(TaskPage{total_size:42,items:vec![self.task.lock().unwrap().clone()],next_cursor:None})}
  async fn cancel(&self,_:CallerContext,_:CancelCommand)->RuntimeResult<TaskView>{Ok(self.task.lock().unwrap().clone())}
  async fn subscribe(&self,_:CallerContext,_:TaskId,_:Option<EventCursor>)->RuntimeResult<EventStream>{
   let snapshot=self.task.lock().unwrap().clone();

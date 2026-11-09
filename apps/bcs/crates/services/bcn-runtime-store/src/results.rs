@@ -35,7 +35,7 @@ impl ResultStore for LocalResultStore {
     async fn get(&self, id: &ResultId) -> RuntimeResult<Option<SavedResult>> {
         self.runtime.row(&id.scope, entity("local-result", &id.value)).await?.as_ref().map(decode).transpose()
     }
-    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<Page<TaskView>> { self.queries.list_tasks(ctx, query).await }
+    async fn list_tasks(&self, ctx: &CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage> { self.queries.list_tasks(ctx, query).await }
     async fn read_group_records(&self, task: &TaskId, after: Option<String>, limit: u32) -> RuntimeResult<Page<SavedResult>> {
         let page = self.runtime.page(&task.scope, &format!("group-result/{}/", digest(&[&task.value])), after, limit).await?;
         Ok(Page { items: page.entries.iter().map(|e| decode(&e.entry)).collect::<RuntimeResult<_>>()?, next_cursor: cursor(page.next_cursor)? })

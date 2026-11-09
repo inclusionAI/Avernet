@@ -15,12 +15,13 @@ async fn failed_admission_has_no_partial_receipt_and_index_queries_are_bounded()
  assert!(repo.get_receipt(&req.admission_id).await.unwrap().is_none());
  assert!(repo.read_snapshot(&req.task.task_id).await.unwrap().is_none());
  assert!(SessionStore::scan_active(&repo, &session_shard(&req.spec.session_id), None, 1).await.unwrap().items.is_empty());
+ assert_eq!(TaskQueryStore::list_tasks(&repo,&req.caller,TaskQuery{target:None,session_id:None,cursor:None,limit:1}).await.unwrap().total_size,0);
  observed.reset(); repo.admit(req.clone()).await.unwrap();
- { let count = observed.counts.lock().unwrap(); assert_eq!(count.reads, vec![3,2]); assert_eq!(count.writes, vec![(5,13)]); assert!(count.scans.is_empty()); }
+ { let count = observed.counts.lock().unwrap(); assert_eq!(count.reads, vec![3,2,4]); assert_eq!(count.writes, vec![(9,17)]); assert!(count.scans.is_empty()); }
  observed.reset();
  let tasks = TaskQueryStore::list_tasks(&repo, &req.caller, TaskQuery { target: None, session_id: None, cursor: None, limit: 100 }).await.unwrap();
  assert_eq!(tasks.items.len(), 1);
- { let count = observed.counts.lock().unwrap(); assert_eq!(count.scans, vec![100]); assert_eq!(count.reads, vec![1]); assert!(count.writes.is_empty()); }
+ { let count = observed.counts.lock().unwrap(); assert_eq!(count.scans, vec![100]); assert_eq!(count.reads, vec![1,1,1]); assert!(count.writes.is_empty()); }
  assert!(TaskQueryStore::list_tasks(&repo, &req.caller, TaskQuery { target: None, session_id: None, cursor: None, limit: 101 }).await.is_err());
 }
 #[tokio::test]
@@ -61,7 +62,7 @@ async fn maximum_task_page_uses_one_batched_read_and_preserves_continuation() {
  observed.reset();
  let first = TaskQueryStore::list_tasks(&repo, &template.caller, TaskQuery { target: None, session_id: None, cursor: None, limit: 100 }).await.unwrap();
  assert_eq!(first.items.len(), 100); assert!(first.next_cursor.is_some());
- { let counts = observed.counts.lock().unwrap(); assert_eq!(counts.scans, vec![100]); assert_eq!(counts.reads, vec![100]); }
+ { let counts = observed.counts.lock().unwrap(); assert_eq!(counts.scans, vec![100]); assert_eq!(counts.reads, vec![1,100,1]); }
  let last = TaskQueryStore::list_tasks(&repo, &template.caller, TaskQuery { target: None, session_id: None, cursor: first.next_cursor, limit: 100 }).await.unwrap();
  assert_eq!(last.items.len(), 1); assert!(last.next_cursor.is_none());
  assert!(!first.items.iter().any(|t| t.task_id == last.items[0].task_id));

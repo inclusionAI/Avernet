@@ -44,6 +44,7 @@ impl RuntimeStore {
         let key = entity("snapshot", &task.value);
         let row = self.row(&task.scope, key.clone()).await?;
         let mut snapshot: EventSnapshot = decode(row.as_ref().ok_or(RuntimeError::NotFound)?)?;
+        let old_task=snapshot.task.clone();
         if snapshot.cursor != expected { return Err(conflict("task projection cursor changed")); }
         if snapshot.task.status.is_terminal() { return Err(conflict("terminal task projection frozen")); }
         let prefix = projection_prefix(&task);
@@ -79,14 +80,18 @@ impl RuntimeStore {
         // Delta has no node/address field: use Reset unless a consumer's ordinary
         // tail append produces exactly the new aggregate (including part boundaries).
         let is_reset = requested_reset || appended != snapshot.task.output;
-        snapshot.task.updated_at_ms = self.atomic.server_time_ms().await.map_err(storage)?;
+        snapshot.task.updated_at_ms = snapshot.task.updated_at_ms.max(self.atomic.server_time_ms().await.map_err(storage)?);
+        let (index_conditions,index_mutations)=self.index_update(&old_task,&snapshot.task).await?;
         snapshot.cursor = if is_reset { EventCursor { epoch: expected.epoch.checked_add(1).ok_or_else(|| invalid("event epoch exhausted"))?, sequence: 1 } }
             else { EventCursor { epoch: expected.epoch, sequence: expected.sequence.checked_add(1).ok_or_else(|| invalid("event sequence exhausted"))? } };
         let kind = if is_reset { TaskEventKind::Reset { snapshot: snapshot.task.clone() } } else { TaskEventKind::Delta { text: text.ok_or_else(|| invalid("delta text missing"))? } };
         let event = TaskEvent { id: id.clone(), task_id: task.clone(), cursor: snapshot.cursor.clone(), kind };
         let mut mutations = Self::event_mutations(&snapshot, &event, fingerprint)?;
+        mutations.extend(index_mutations);
         mutations.push(put(projection_key(&task, node), &projection)?);
-        self.write(&task.scope, vec![dispatch_condition, command_condition, condition(key, &row), Condition { key: entity("event-published", &id.value), expected: Expected::Absent }], mutations).await?;
+        let mut conditions=vec![dispatch_condition, command_condition, condition(key, &row), Condition { key: entity("event-published", &id.value), expected: Expected::Absent }];
+        conditions.extend(index_conditions);
+        self.write(&task.scope, conditions, mutations).await?;
         Ok(snapshot.cursor)
     }
 }
@@ -119,6 +124,7 @@ impl TaskEventStore for RuntimeStore {
         let key = entity("snapshot", &domain.task_id.value);
         let row = self.row(&session.scope, key.clone()).await?;
         let mut snapshot: EventSnapshot = decode(row.as_ref().ok_or(RuntimeError::NotFound)?)?;
+        let old_task=snapshot.task.clone();
         match &domain.kind {
             DomainEventKind::TaskStatusChanged { status } => {
                 if status.is_terminal() {
@@ -141,12 +147,16 @@ impl TaskEventStore for RuntimeStore {
             _ => {}
         }
         snapshot.cursor.sequence = snapshot.cursor.sequence.checked_add(1).ok_or_else(|| invalid("event sequence exhausted"))?;
-        snapshot.task.updated_at_ms = self.atomic.server_time_ms().await.map_err(storage)?;
+        snapshot.task.updated_at_ms = snapshot.task.updated_at_ms.max(self.atomic.server_time_ms().await.map_err(storage)?);
+        let (index_conditions,index_mutations)=self.index_update(&old_task,&snapshot.task).await?;
         let event = TaskEvent { id: domain.event_id.clone(), task_id: domain.task_id.clone(), cursor: snapshot.cursor.clone(), kind: TaskEventKind::Domain { event: domain.clone() } };
         cp.pending_events.retain(|e| e.event_id != reference.event_id);
         let mut mutations = Self::event_mutations(&snapshot, &event, fingerprint)?;
+        mutations.extend(index_mutations);
         mutations.push(put(entity("checkpoint", &session.value), &cp)?);
-        self.fenced_write(fence, vec![condition(key, &row), Condition { key: entity("checkpoint", &session.value), expected: Expected::Revision(cp.revision) }, Condition { key: entity("event-published", &reference.event_id.value), expected: Expected::Absent }], mutations).await?;
+        let mut conditions=vec![condition(key, &row), Condition { key: entity("checkpoint", &session.value), expected: Expected::Revision(cp.revision) }, Condition { key: entity("event-published", &reference.event_id.value), expected: Expected::Absent }];
+        conditions.extend(index_conditions);
+        self.fenced_write(fence, conditions, mutations).await?;
         Ok(snapshot.cursor)
     }
     async fn append(&self, fence: &DispatchFence, event: TaskEvent) -> RuntimeResult<EventCursor> {

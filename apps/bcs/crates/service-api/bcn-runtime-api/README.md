@@ -66,3 +66,11 @@ dedup before returning `Conflict("task projection cursor changed")`; this
 specific response permits rebuilding against a fresh cursor. Generic conflicts
 and storage errors do not prove the original publication was uncommitted and
 must first retry the identical operation.
+
+Task listing returns TaskPage with an exact pre-pagination total_size. Gateway
+calls every AccessPolicy.authorize_list before querying rows or counts, then
+retains per-task List checks. The collection grant covers all tasks owned by the
+caller within the target/optional session and their count; policy implementations
+must keep item visibility consistent. The default hook delegates target List
+authorization and rejects targetless queries. Supporting targetless collection
+listing requires an explicit hook implementation, not a first-page inference.

@@ -311,7 +311,7 @@ impl GatewayService for DefaultGateway {
     async fn get(&self, ctx: CallerContext, id: TaskId) -> RuntimeResult<TaskView> {
         self.task(&ctx, &id, AccessAction::Get).await
     }
-    async fn list(&self, ctx: CallerContext, query: TaskQuery) -> RuntimeResult<Page<TaskView>> {
+    async fn list(&self, ctx: CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage> {
         if ctx.principal.trim().is_empty()
             || query
                 .session_id
@@ -320,16 +320,8 @@ impl GatewayService for DefaultGateway {
         {
             return Err(RuntimeError::AccessDenied);
         }
-        if let Some(target) = &query.target {
-            self.authorize(
-                &ctx,
-                AccessAction::List,
-                target,
-                query.session_id.as_ref(),
-                None,
-            )
-            .await?;
-        }
+        if query.target.as_ref().is_some_and(|target|target_scope(target)!=&ctx.scope) {return Err(RuntimeError::AccessDenied)}
+        for policy in &self.policies {policy.authorize_list(&ctx,&query).await?;}
         let page = self.ports.queries.list_tasks(&ctx, query).await?;
         for t in &page.items {
             self.authorize(

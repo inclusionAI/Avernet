@@ -21,7 +21,7 @@ pub struct DrainReport { pub completed: u32, pub remaining: u32, pub deadline_re
 pub trait GatewayService: Send + Sync {
     async fn submit(&self, ctx: CallerContext, request: SubmitRequest) -> RuntimeResult<TaskView>;
     async fn get(&self, ctx: CallerContext, task_id: TaskId) -> RuntimeResult<TaskView>;
-    async fn list(&self, ctx: CallerContext, query: TaskQuery) -> RuntimeResult<Page<TaskView>>;
+    async fn list(&self, ctx: CallerContext, query: TaskQuery) -> RuntimeResult<TaskPage>;
     /// Starts with authoritative snapshot/cursor; terminal tasks are queried, not subscribed.
     async fn subscribe(&self, ctx: CallerContext, task_id: TaskId, cursor: Option<EventCursor>) -> RuntimeResult<EventStream>;
     /// Records intent; must not report cancellation success without downstream evidence.

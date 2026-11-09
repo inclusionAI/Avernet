@@ -81,3 +81,15 @@ async fn send_message_waits_until_input_required_but_immediate_returns_submitted
  assert_eq!(result["result"]["task"]["status"]["state"],"TASK_STATE_INPUT_REQUIRED");
  assert_eq!(result["result"]["task"]["status"]["message"]["parts"][0]["text"],"Question?");
 }
+#[tokio::test]
+async fn route_bound_list_has_exact_totals_and_order_across_pages(){
+ let f=Fixture::new();let g=Arc::new(f.gateway());
+ let first=g.submit(caller(),runtime::request("older")).await.unwrap();f.clock.set(2000);
+ let second=g.submit(caller(),runtime::request("newer")).await.unwrap();
+ let route=app(g,first.target.clone());
+ let p=json_response(route.clone(),"ListTasks",json!({"pageSize":1})).await;
+ assert_eq!(p["result"]["totalSize"],2);assert_eq!(p["result"]["tasks"][0]["id"],second.task_id.value);
+ assert_eq!(p["result"]["tasks"][0]["status"]["timestamp"],"1970-01-01T00:00:02Z");
+ let p=json_response(route,"ListTasks",json!({"pageSize":1,"pageToken":p["result"]["nextPageToken"]})).await;
+ assert_eq!(p["result"]["totalSize"],2);assert_eq!(p["result"]["tasks"][0]["id"],first.task_id.value);assert_eq!(p["result"]["nextPageToken"],"");
+}

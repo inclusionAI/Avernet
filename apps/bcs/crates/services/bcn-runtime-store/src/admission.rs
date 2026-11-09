@@ -12,6 +12,8 @@ pub(crate) struct AdmittedTask { pub metadata: TaskMetadata, pub admission_id: A
 impl AdmissionStore for RuntimeStore {
     async fn admit(&self, req: AdmissionRequest) -> RuntimeResult<AdmissionReceipt> {
         let scope = &req.admission_id.scope;
+        crate::task_index::timestamp(req.task.created_at_ms)?;
+        crate::task_index::timestamp(req.task.updated_at_ms)?;
         // Reserve output (896 KiB) and active questions (64 KiB) independently.
         // Bound identity metadata before durable acceptance, including direct repository users.
         let target_id = match &req.task.target { ExecutionTarget::Agent { agent_id } => &agent_id.value, ExecutionTarget::Group { group_id } => &group_id.value };
@@ -53,9 +55,8 @@ impl AdmissionStore for RuntimeStore {
             put(task_key, &AdmittedTask { metadata: TaskMetadata { caller: req.caller.clone(), task: req.task.clone() }, admission_id: req.admission_id.clone() })?,
             put(entity("snapshot", &req.task.task_id.value), &EventSnapshot { task: req.task.clone(), cursor: EventCursor { epoch: 0, sequence: 0 } })?,
         ]);
-        for (target, session) in [(None,None), (Some(&req.task.target),None), (None,Some(&req.task.session_id)), (Some(&req.task.target),Some(&req.task.session_id))] {
-            mutations.push(put(format!("{}{}", query_prefix(&req.caller, target, session)?, digest(&[&req.task.task_id.value])), &req.task.task_id)?);
-        }
+        let (index_conditions,index_mutations)=self.index_admission(&req.caller,&req.task).await?;
+        conditions.extend(index_conditions);mutations.extend(index_mutations);
         self.write(scope, conditions, mutations).await?;
         Ok(receipt)
     }

@@ -135,10 +135,10 @@ are included. No transaction spans network delivery or result-store I/O.
 
 | Operation | Calls | Rows/scan bounds |
 | --- | --- | --- |
-| New admission | 2 R + 1 T | 5 reads, 5 conditions, 13 mutations; no scan |
+| New admission | 3 R + 1 T | 9 reads, 9 conditions, 17 mutations; no scan |
 | Admission retry / receipt | 1 R | 3 / 1 rows |
 | Task get | 1 R | metadata + snapshot (2 rows) |
-| Task list | 1 S + 1 R | page <=100 index IDs + <=100 snapshots, no history filter |
+| Task list | 1 S + 3 R | count/revision before + <=100 snapshots + revision after; no history filter |
 | Repair/active sessions | 1 S | <=100 live-index rows, examines <=limit+1 |
 | Claim/transfer shard | 1 R + 1 T | one owner condition and mutation |
 | Activation | 3 R + 1 T | owner twice + header/checkpoint, 1 checkpoint mutation |
@@ -156,8 +156,8 @@ are included. No transaction spans network delivery or result-store I/O.
 | Dispatch phase/handle/takeover | 1 R + 1 C + 1 T | dispatch + active index, 2 mutations |
 | Dispatch receipt | 2 R + 1 C + 1 T | dispatch + inbox sequence/dedup; <=6 mutations |
 | Active dispatch page | 1 S + 1 R | <=100 IDs + <=100 records; independent of ACK/history |
-| Hard event | 6–7 R + 1 C + 1 T | optional final result lookup; 4 mutations |
-| Connector reset/delta | 5 R + 1 S + 1 C + 1 T | <=32 node projections (scan limit33); 4 mutations |
+| Hard event | 8–9 R + 1 C + 1 T | optional final result lookup; 8 conditions, <=16 mutations |
+| Connector reset/delta | 7 R + 1 S + 1 C + 1 T | <=32 node projections (scan limit33); 8 conditions, <=16 mutations |
 | Snapshot / event page | 1 R / 2 R + 1 S | <=100 events, snapshot consistency check |
 | Local result put | 1–2 R + 1 C + 1 T | committed intent/result + optional final result; <=3 mutations |
 | Liveness register/renew/drain | 1 C + 1 R + 1 T | one incarnation row |
@@ -233,3 +233,30 @@ payloads approaching both 896/64 KiB quotas, then serialize the full persisted
 Envelope<Reset> below 1 MiB. A second real-repository case combines 15 × 60000
 bytes of artifacts with questions and proves bounded explicit failure, no stuck
 pending hard publication. This is a functional bounds proof, not a capacity test.
+
+## Exact bounded task listing
+
+Four existing principal/target/session query combinations have a persisted count
+row and ordered keys: descending updated_at_ms followed by task digest. Admission
+increments each count once in the receipt/snapshot transaction. Every hard or soft
+publication replaces all four ordered entries in its existing fenced transaction,
+rewriting count rows unchanged to advance their revisions. Exact publication and
+admission retries return the original receipt and do not increment or invalidate.
+At unchanged timestamps no redundant delete is needed. Counts are capped at the
+A2A integer maximum (2147483647); an admission beyond this fails atomically.
+
+TaskPage carries exact total_size separately from the bounded page. Cursor binds
+scope, caller/target/session prefix, page size and observed collection revision.
+A concurrent modification fails the page consistency check; an outdated cursor
+returns InvalidInput and requires restart. This is explicit cursor invalidation,
+not a snapshot retained across pages. No global history/count scan is performed.
+The four counter/revision rows can contend for a busy principal collection;
+conflicts remain explicit and require retry, not an internal busy loop. Production
+throughput remains unverified. Query-index absence for existing tasks fails closed;
+this unreleased index-layout change needs offline rebuild/discard before enabling
+older BCN data (legacy runtime data is unaffected).
+
+Admission validates created/updated time, and publication validates monotonic
+max(previous, server clock), within RFC3339 year9999 before durable changes. Wire
+status.timestamp uses exactly that stored value. The additional fixed query rows
+and indexes do not change the existing1 MiB per-value or8 MiB transaction limits.

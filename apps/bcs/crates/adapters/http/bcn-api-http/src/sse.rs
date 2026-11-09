@@ -63,7 +63,8 @@ pub fn response(state:ApiState,ctx:CallerContext,id:JsonRpcId,view:TaskView,stre
                         }
                         done=true;
                     }else{
-                        let task=mapping::task(&view);queue.push_back(encode(&id,StreamResponse::StatusUpdate(a2a::TaskStatusUpdateEvent{task_id:task.id,context_id:task.context_id,status:task.status,metadata:task.metadata}),Some(&cursor)));
+                        // Domain deltas carry no publication time; do not reuse an older snapshot timestamp.
+                        let mut task=mapping::task(&view);task.status.timestamp=None;queue.push_back(encode(&id,StreamResponse::StatusUpdate(a2a::TaskStatusUpdateEvent{task_id:task.id,context_id:task.context_id,status:task.status,metadata:task.metadata}),Some(&cursor)));
                     }
                 }
             }

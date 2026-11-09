@@ -76,3 +76,9 @@ These additive defaults preserve old serialized snapshots/specs/checkpoints.
 Rust construction sites must initialize the new fields. New InteractionResolved
 consumers and the selection-aware repository must deploy together in an isolated,
 explicitly enabled namespace; no legacy in-flight migration is provided.
+
+TaskPage separates exact collection total_size from its bounded items and opaque
+next_cursor. Runtime task lists order by updated_at_ms descending; that same time
+is exposed as A2A status.timestamp. Collection mutations explicitly invalidate
+page cursors rather than retaining unbounded snapshot history. Generic Page<T>
+remains unchanged for other repository traversals.
