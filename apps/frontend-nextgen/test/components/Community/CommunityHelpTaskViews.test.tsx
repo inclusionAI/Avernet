@@ -125,8 +125,8 @@ describe('求助任务双视图', () => {
     expect(drawer.getByRole('heading', { name: seeds[1].title })).toBeInTheDocument();
     fireEvent.click(drawer.getByRole('button', { name: '模拟开始协作' }));
     fireEvent.click(drawer.getByRole('button', { name: '模拟推进下一阶段' }));
-    expect(drawer.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(drawer.getByText('第1棒 需求采集')).toHaveStyle({ textDecoration: 'line-through' });
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     const row = within(taskTable()).getByRole('button', { name: seeds[1].title }).closest('tr')!;
     expect(within(row).getByText('协作中')).toBeInTheDocument();
     expect(within(row).getByText('架构')).toBeInTheDocument();
@@ -134,8 +134,8 @@ describe('求助任务双视图', () => {
     fireEvent.click(within(row).getByRole('button', { name: /查看.*的进度/ }));
     drawer = within(screen.getByRole('dialog'));
     expect(drawer.getByRole('heading', { name: seeds[1].title })).toBeInTheDocument();
-    expect(drawer.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(drawer.getByText('第1棒 需求采集')).toHaveStyle({ textDecoration: 'line-through' });
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     fireEvent.click(views().getByRole('button', { name: '卡片视图' }));
     const card = screen.getByRole('button', { name: seeds[1].title }).closest('article')!;
     expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
@@ -151,7 +151,7 @@ describe('求助任务双视图', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /任务标题/ }), { target: { value: 'TC 列表任务' } });
     fireEvent.change(screen.getByRole('textbox', { name: /任务说明/ }), { target: { value: '验证模版隔离' } });
     fireEvent.click(screen.getByRole('button', { name: '创建 Mock 任务' }));
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     expect(within(taskTable()).getAllByRole('row')).toHaveLength(2);
     expect(within(taskTable()).getByRole('button', { name: 'TC 列表任务' })).toBeInTheDocument();
     fireEvent.click(boards().getByRole('button', { name: '全图风控AiCoding' }));

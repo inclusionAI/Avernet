@@ -86,7 +86,7 @@ describe('CommunityHelpCenter', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /任务说明/ }), { target: { value: '仅在 TC 模版协作' } });
     fireEvent.click(screen.getByRole('button', { name: '创建 Mock 任务' }));
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'TC 模版任务' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     expect(screen.getAllByRole('article')).toHaveLength(1);
     fireEvent.click(boards.getByRole('button', { name: '全图风控AiCoding' }));
     expect(screen.getAllByRole('article')).toHaveLength(4);
@@ -152,16 +152,15 @@ describe('CommunityHelpCenter', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建 Mock 任务' }));
     const drawer = screen.getByRole('dialog');
     expect(within(drawer).getByRole('heading', { name: '修复登录页面问题' })).toBeInTheDocument();
-    expect(within(drawer).getByText('Task Discover · TD-NEW')).toBeInTheDocument();
-    expect(within(drawer).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+    expect(within(drawer).getByTestId('task-overview-v2')).toBeInTheDocument();
+    expect(within(drawer).getByText(/Task Discover.*TD-NEW/)).toBeInTheDocument();
+    expect(within(drawer).getByText('第1棒 需求采集')).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole('button', { name: '模拟开始协作' }));
     fireEvent.click(within(drawer).getByRole('button', { name: '模拟推进下一阶段' }));
-    expect(within(drawer).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
-    fireEvent.click(within(drawer).getByRole('button', { name: '执行动态' }));
-    expect(within(drawer).getByText(/需求采集.*已模拟完成/)).toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole('button', { name: '交付产物 (1)' }));
-    expect(within(drawer).getByRole('heading', { name: '需求采集 · 需求文档' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(within(drawer).getByText('第1棒 需求采集')).toHaveStyle({ textDecoration: 'line-through' });
+    expect(within(drawer).getByText('1 项')).toBeInTheDocument();
+    expect(within(drawer).getByText('需求采集 · 需求文档')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     const card = screen.getByRole('button', { name: '修复登录页面问题' }).closest('article')!;
     expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '17');
@@ -187,14 +186,26 @@ describe('CommunityHelpCenter', () => {
     render(<CommunityHelpCenter />);
     fireEvent.click(screen.getByRole('button', { name: '排查任务进度偶发停滞，补齐异常恢复路径' }));
     const drawer = screen.getByRole('dialog');
-    expect(within(drawer).getByText(/等待确认：失败重试/)).toBeInTheDocument();
+    expect(within(drawer).getByTestId('task-overview-v2')).toBeInTheDocument();
+    expect(within(drawer).getByRole('img', { name: '任务挂起' })).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole('button', { name: '模拟解除阻塞' }));
     expect(within(drawer).getByRole('button', { name: '模拟推进下一阶段' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起任务副屏' }));
     fireEvent.click(screen.getByRole('button', { name: '优化社区移动端任务卡片的响应式布局' }));
     expect(screen.getByRole('button', { name: '任务已完成' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '查看pr阶段' }));
-    expect(within(screen.getByRole('region', { name: '阶段详情' })).getByText(/未创建真实 PR/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选中节点 第6棒 pr' }));
+    expect(screen.getByRole('button', { name: '选中节点 第6棒 pr' })).toHaveStyle({
+      border: '1px solid rgb(37, 99, 235)',
+    });
+
+    const artifacts = within(screen.getByRole('dialog')).getByTestId('artifacts-section');
+    expect(within(artifacts).getAllByText('文件')).toHaveLength(5);
+    expect(within(artifacts).getAllByText('代码')).toHaveLength(1);
+    expect(within(artifacts).getByText('pr · PR 摘要').closest('li')).toHaveStyle({
+      border: '1px solid rgb(37, 99, 235)',
+    });
+    expect(within(artifacts).getByText('第1棒产物')).toBeInTheDocument();
+    expect(within(artifacts).getByText('最终产物')).toBeInTheDocument();
   });
 
   test('切走再挂载仍保留本次浏览会话内的 Mock 修改', () => {
