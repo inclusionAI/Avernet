@@ -1,0 +1,19 @@
+docs/plans/2026-11-09-bcn-runtime-mvp.md
+  s_c3a0b6b6fab230::t_90dab0d9499756 260,441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d5652ee6c9b5dc4f545723cc92092c014924928",
+  "prompts": {},
+  "sessions": {
+    "s_c3a0b6b6fab230": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bef6-9c1b-7de3-a959-ba27f5cce386",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}
