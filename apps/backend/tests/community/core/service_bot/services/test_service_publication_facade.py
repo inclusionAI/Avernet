@@ -17,6 +17,8 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.errors import (
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
     ServiceContainerConflictError,
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
@@ -809,6 +811,37 @@ async def test_staging_runs_when_actor_holds_lock(deps, monkeypatch):
     assert result["action"] == "publish_staging"
     assert result["operation_status"] == "pending"
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gate_status", "expected_error", "message"),
+    [
+        ("PENDING", ServicePublicationGatePendingError, "评测认证处理中"),
+        ("FAILED", ServicePublicationGateBlockedError, "评测未通过"),
+    ],
+)
+async def test_staging_rejects_gate_pending_and_blocked(
+    deps, monkeypatch, gate_status, expected_error, message
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [record(1, PublishStatus.DRAFT)]
+    deps.eval_gate.precheck.return_value = {
+        "gate_status": gate_status,
+        "allowed": False,
+        "display_message": message,
+    }
+
+    with pytest.raises(expected_error) as error:
+        await deps.facade.advance(
+            "bot-1", "staging", actor_id="owner", owner_id="owner"
+        )
+
+    assert error.value.gate_result["gate_status"] == gate_status
+    assert str(error.value) == message
+    deps.flow_service.process.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_prestable_stage_alias_runs_the_existing_publish_flow(deps, monkeypatch):

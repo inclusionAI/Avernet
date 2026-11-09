@@ -843,7 +843,7 @@ class ServiceBotModule(Module):
         publish_repo: BotPublishRepositoryProtocol,
         collaborator_service: CollaboratorServiceProtocol,
         eval_gate: ServiceBotEvalPlugin,
-    ) -> ServiceBotEvalServiceProtocol:
+    ) -> ServiceBotEvalService:
         """Bind evaluation release context and permissions to the selected plugin."""
         return ServiceBotEvalService(
             bot_repo=bot_repo,
