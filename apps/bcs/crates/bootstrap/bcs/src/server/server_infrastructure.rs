@@ -886,6 +886,7 @@ impl BcsServer {
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service = super::infrastructure_helpers::group_context_service(
             db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+            bot_authority.hook.clone(),
         );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())

@@ -40,4 +40,4 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 
 ## 权限与审计
 
-已有身份认证、成员准入和条目读写权限继续生效。Slot 管理接口本期要求身份认证，角色授权后续补充。新增时以实际调用者记录 creator 和 modifier，编辑时只更新 modifier。会话继承需遵守源条目的读取权限，并避免通过复制扩大内容的可读范围。
+已有身份认证、成员准入和条目读写权限继续生效。Slot 的增删改仅向群主 Bot（`driver_bot`）的 Owner 或 Admin（Bot Authority 中的 Manager）开放。新增时以实际调用者记录 creator 和 modifier，编辑时只更新 modifier。会话继承需遵守源条目的读取权限，并避免通过复制扩大内容的可读范围。

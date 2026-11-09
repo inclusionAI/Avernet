@@ -156,7 +156,13 @@ pub(crate) async fn change_slot(
     query: Result<Query<GroupContextQuery>, QueryRejection>,
     body: Result<Json<SlotRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
-    let actor = actor_id(&state, &headers, &uri).await?;
+    use super::group_messages::{GroupChatCaller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
+    let GroupChatCaller::Human(human) = caller else {
+        return Err(ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller").into());
+    };
     let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
     let Json(body) = body.map_err(GroupContextHttpError::from_json_rejection)?;
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
@@ -165,7 +171,7 @@ pub(crate) async fn change_slot(
         SlotRequest::Edit { name, new_name, description } => GroupContextSlotChange::Edit { name, new_name, description },
         SlotRequest::Delete { name } => GroupContextSlotChange::Delete { name },
     };
-    state.services.group_context.change_slot(&group_id, &actor, change).await?;
+    state.services.group_context.change_slot(&group_id, &human.actor_id, change).await?;
     Ok(json_ok(GroupContextAck::ok()))
 }
 
@@ -332,6 +338,23 @@ pub(crate) struct GroupContextHttpError {
 }
 
 impl GroupContextHttpError {
+    fn from_caller_status(status: StatusCode) -> Self {
+        let (group_status, message) = match status {
+            status if status.is_server_error() => (GroupContextStatus::InternalError, "Internal server error"),
+            StatusCode::UNAUTHORIZED => (GroupContextStatus::InvalidParam, "Authentication is required"),
+            StatusCode::FORBIDDEN => (GroupContextStatus::PermissionDenied, "Permission denied"),
+            _ => (GroupContextStatus::InvalidParam, "Invalid authentication request"),
+        };
+        Self {
+            status,
+            body: GroupContextErrorBody {
+                status: group_status,
+                error_msg: message.into(),
+            },
+        }
+    }
+
+
     fn from_query_rejection(error: QueryRejection) -> Self {
         Self::from_application(ApplicationError::invalid(
             "invalid_param",
@@ -427,6 +450,25 @@ fn _assert_response_shapes(
 mod group_context_error_tests {
     use super::*;
     use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn caller_errors_preserve_status_and_group_context_envelope() {
+        for (status, group_status) in [
+            (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+            (StatusCode::SERVICE_UNAVAILABLE, "internal_error"),
+            (StatusCode::UNAUTHORIZED, "invalid_param"),
+            (StatusCode::FORBIDDEN, "permission_denied"),
+        ] {
+            let response = GroupContextHttpError::from_caller_status(status).into_response();
+            assert_eq!(response.status(), status);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["status"], group_status);
+            if status.is_server_error() {
+                assert_eq!(body["error_msg"], "Internal server error");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn application_errors_map_to_http_status_and_response_body() {

@@ -543,7 +543,8 @@ Each entry contains `name`, `description`, `creator`, and `modifier`.
 | `delete` | `name` |
 
 Set the `operation` field to the operation name. The route requires an
-authenticated actor. Creation records that actor as both `creator` and
+authenticated Human with Owner or Manager (admin) authority on the Group
+driver Bot. Creation records that Human actor as both `creator` and
 `modifier`. Editing records the actor as `modifier` and retains `creator`.
 Names are unique within a Group. Editing or deleting a definition leaves
 previously recorded contexts intact.

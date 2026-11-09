@@ -618,6 +618,7 @@ impl BcsServer {
                 )),
                 sessions.clone(),
                 session_repo.clone(),
+                bot_authority.hook.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())

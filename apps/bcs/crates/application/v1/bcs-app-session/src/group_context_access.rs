@@ -13,13 +13,14 @@ use bcs_service_api::application::v1::{
     GroupContextApplicationService, GroupContextGetResponse, GroupContextListResponse,
     GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
 };
-use bcs_service_api::port::repo::SessionRepoPort;
+use bcs_service_api::port::{BotAuthorityPort, repo::SessionRepoPort};
 use bcs_service_api::{Group, GroupCoreService, Participant, Session};
 
 pub struct GroupContextAddAccessGuard {
     inner: Arc<dyn GroupContextApplicationService>,
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionRepoPort>,
+    bot_authority: Arc<dyn BotAuthorityPort>,
 }
 
 impl GroupContextAddAccessGuard {
@@ -27,11 +28,13 @@ impl GroupContextAddAccessGuard {
         inner: Arc<dyn GroupContextApplicationService>,
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionRepoPort>,
+        bot_authority: Arc<dyn BotAuthorityPort>,
     ) -> Self {
         Self {
             inner,
             groups,
             sessions,
+            bot_authority,
         }
     }
 
@@ -181,6 +184,16 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
 
     async fn change_slot(&self, group_id: &str, actor: &str, change: bcs_service_api::application::v1::GroupContextSlotChange) -> Result<(), ApplicationError> {
         let group = self.load_group(group_id).await?;
+        let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
+            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller"))?;
+        let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
+            .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
+        if !authorized {
+            return Err(ApplicationError::forbidden_code(
+                "permission_denied",
+                "slot management requires owner or admin authority on the Group driver Bot",
+            ));
+        }
         self.inner.change_slot(&group.id, actor, change).await
     }
 

@@ -586,21 +586,27 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
 }
 
 #[tokio::test]
-async fn slot_management_audits_actor_and_keeps_existing_contexts() {
+async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = app_with_repo(repo.clone()).await;
     let management = "/groupcontext/change-slot?groupId=slot-group";
     let list = "/groupcontext/list-slot?groupId=slot-group";
     let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
-    let (status, _) = post_json(
-        &app, management, token_for("admin"),
-        json!({"operation":"add","name":"timeline","creator":"spoofed"}),
-    ).await;
-    assert_eq!(status, StatusCode::OK);
+    for operation in ["add", "edit", "delete"] {
+        let (status, _) = post_json(
+            &app, management, token_for("admin"),
+            json!({"operation":operation,"name":"timeline"}),
+        ).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    repo.change_slot("slot-group", "human_owner",
+        bcs_domain::group_context::GroupContextSlotChange::Add {
+            name: "timeline".into(), description: String::new(),
+        },
+    ).await.unwrap();
     let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["slots"][0]["creator"], "admin");
-    assert_eq!(body["slots"][0]["modifier"], "admin");
+    assert_eq!(body["slots"][0]["creator"], "human_owner");
 
     let mut context = json!({
         "name":"timeline","scope_level":"session","content":"event",
@@ -611,18 +617,6 @@ async fn slot_management_audits_actor_and_keeps_existing_contexts() {
     context["slot"] = json!(true);
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context).await.0, StatusCode::OK);
 
-    let (status, _) = post_json(
-        &app, management, token_for("judge_bot"),
-        json!({"operation":"edit","name":"timeline","new_name":"events","description":"Key events"}),
-    ).await;
-    assert_eq!(status, StatusCode::OK);
-    let (_, body) = post_json(&app, list, token_for("admin"), json!({})).await;
-    assert_eq!(body["slots"][0], json!({
-        "name":"events","description":"Key events","creator":"admin","modifier":"judge_bot"
-    }));
-
-    assert_eq!(post_json(&app, management, token_for("admin"),
-        json!({"operation":"delete","name":"events"})).await.0, StatusCode::OK);
     let existing = repo.get_active("timeline", "slot-group:12345678").await.unwrap().unwrap();
     assert!(existing.is_slot);
     assert_eq!(existing.content, "event");
@@ -663,15 +657,10 @@ async fn session_create_inherits_only_the_selected_readable_contexts() {
     assert_eq!(status, StatusCode::CREATED, "{source}");
     let source_id = source["id"].as_str().unwrap();
 
-    let (status, body) = post(
-        format!("/groupcontext/change-slot?groupId={group_id}"),
-        json!({"operation":"add","name":"timeline"}),
-    ).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    for (name, slot) in [("timeline", true), ("skipped", false)] {
+    for name in ["timeline", "skipped"] {
         let (status, body) = post(
             format!("/groupcontext/add?sessionId={source_id}"),
-            json!({"name":name,"scope_level":"session","content":"event","visible_to":{"userIds":[]},"slot":slot}),
+            json!({"name":name,"scope_level":"session","content":"event","visible_to":{"userIds":[]}}),
         ).await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
