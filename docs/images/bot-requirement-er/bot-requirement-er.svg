@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="1120" viewBox="0 0 1580 1120"><defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#667085"/></marker></defs><rect width="1580" height="1120" fill="#fff"/><style>text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}.title{font-size:25px;font-weight:bold}.field{font-size:16px}.label{font-size:15px;paint-order:stroke;stroke:white;stroke-width:6px;stroke-linejoin:round}</style><text x="40" y="44" class="title">Bot 内需求视图 · 新老表 ER 关系（建议设计）</text><text x="40" y="78" font-size="16">蓝色：新增必需表　橙色：可选新增表　灰色：已有表　实线：ID 引用　虚线：条件字段匹配（非已建外键）</text>
+<rect x="40" y="130" width="410" height="236" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M40 173H450" stroke="#1677ff"/>
+<text x="54" y="158" font-size="18" font-weight="bold">新增 · bot_requirement_session</text>
+<text x="54" y="198" class="field">PK id</text>
+<text x="54" y="224" class="field">tenant_id / environment</text>
+<text x="54" y="250" class="field">bot_id</text>
+<text x="54" y="276" class="field">session_source / external_session_id</text>
+<text x="54" y="302" class="field">dima_work_item_id → DIMA 需求</text>
+<text x="54" y="328" class="field">entry_channel</text>
+<text x="54" y="354" class="field">UK 完整会话身份（不含需求 ID）</text>
+<rect x="40" y="535" width="410" height="184" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M40 578H450" stroke="#1677ff"/>
+<text x="54" y="563" font-size="18" font-weight="bold">新增 · bot_session_delegation</text>
+<text x="54" y="603" class="field">PK id</text>
+<text x="54" y="629" class="field">REF parent_session_id</text>
+<text x="54" y="655" class="field">REF child_session_id</text>
+<text x="54" y="681" class="field">parent_run_source / parent_run_id</text>
+<text x="54" y="707" class="field">collaboration_id / dispatch_id</text>
+<rect x="590" y="370" width="410" height="184" rx="8" fill="#edf5ff" stroke="#1677ff" stroke-width="2"/><path d="M590 413H1000" stroke="#1677ff"/>
+<text x="604" y="398" font-size="18" font-weight="bold">新增 · bot_session_channel</text>
+<text x="604" y="438" class="field">PK id</text>
+<text x="604" y="464" class="field">REF session_id</text>
+<text x="604" y="490" class="field">channel_type / channel_instance_id</text>
+<text x="604" y="516" class="field">purpose</text>
+<text x="604" y="542" class="field">UK session + type + instance + purpose</text>
+<rect x="590" y="690" width="410" height="158" rx="8" fill="#fff7e6" stroke="#d48806" stroke-width="2"/><path d="M590 733H1000" stroke="#d48806"/>
+<text x="604" y="718" font-size="18" font-weight="bold">可选 · bot_session_run</text>
+<text x="604" y="758" class="field">REF session_id</text>
+<text x="604" y="784" class="field">run_source / external_run_id</text>
+<text x="604" y="810" class="field">status / started_at / finished_at</text>
+<text x="604" y="836" class="field">UK session + source + external_run_id</text>
+<rect x="1120" y="130" width="420" height="132" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 173H1540" stroke="#86909c"/>
+<text x="1134" y="158" font-size="18" font-weight="bold">已有 · proxy_ding_app</text>
+<text x="1134" y="198" class="field">UK bot_id</text>
+<text x="1134" y="224" class="field">app_code / ding_app_key</text>
+<text x="1134" y="250" class="field">仅为钉应用资产，不是 Bot 主表</text>
+<rect x="1120" y="370" width="420" height="158" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 413H1540" stroke="#86909c"/>
+<text x="1134" y="398" font-size="18" font-weight="bold">已有 · proxy_group_session</text>
+<text x="1134" y="438" class="field">UK (session_key, bot_id)</text>
+<text x="1134" y="464" class="field">open_conversation_id / robot_code</text>
+<text x="1134" y="490" class="field">extra_data.runtimeSession（快照）</text>
+<text x="1134" y="516" class="field">extra_data.ddfSession（快照）</text>
+<rect x="1120" y="690" width="420" height="158" rx="8" fill="#f4f5f7" stroke="#86909c" stroke-width="2"/><path d="M1120 733H1540" stroke="#86909c"/>
+<text x="1134" y="718" font-size="18" font-weight="bold">已有 · proxy_group_card</text>
+<text x="1134" y="758" class="field">session_key / bot_id</text>
+<text x="1134" y="784" class="field">open_conversation_id / out_track_id</text>
+<text x="1134" y="810" class="field">extra_data.interaction.runId（部分）</text>
+<text x="1134" y="836" class="field">extra_data.callbackRouting.botId</text>
+<path d="M450 205 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<text x="640" y="194" class="label">N : 0..1 · bot_id 同域匹配</text>
+<path d="M450 300 H530 V430 H590" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
+<text x="480" y="350" class="label">1 : N · session_id = id</text>
+<path d="M190 366 V535" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
+<text x="55" y="438" class="label">1 : N · parent_session_id = id</text>
+<path d="M355 366 V535" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
+<text x="205" y="490" class="label">1 : N · child_session_id = id</text>
+<path d="M450 325 H505 V750 H590" fill="none" stroke="#667085" stroke-width="2" marker-end="url(#arr)"/>
+<text x="520" y="648" class="label">1 : N · session_id = id</text>
+<path d="M1000 440 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<text x="1008" y="423" class="label">群 ID 匹配</text>
+<path d="M1330 528 V690" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<text x="1190" y="609" class="label">1 : N* · 原绑定 → 卡片</text>
+<path d="M1000 780 H1120" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<text x="1003" y="761" class="label">Run 条件匹配*</text>
+<path d="M450 655 H555 V824 H590" fill="none" stroke="#667085" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+<text x="220" y="861" class="label">触发 Run 可定位 0..1 条索引*</text>
+<rect x="40" y="920" width="1500" height="163" rx="8" fill="#fafafa" stroke="#d9d9d9"/>
+<text x="60" y="950" font-size="17" font-weight="bold">关联键与边界</text>
+<text x="60" y="981" font-size="16">① 钉群：channel_type 为钉群时，channel_instance_id = open_conversation_id；群 ID 非唯一，不能据此确定具体旧会话行。</text>
+<text x="60" y="1009" font-size="16">② 旧绑定 → 卡片：仅在语义一致时按 (session_key, bot_id, open_conversation_id) 匹配；发卡 Bot 不等于执行 Bot。</text>
+<text x="60" y="1037" font-size="16">③ Run：委派按 (父会话, Run 来源, Run ID) 定位；卡片也须先确认会话及来源映射，不能仅凭 runId 关联。</text>
+<text x="60" y="1065" font-size="16">④ 一个执行会话最多绑定一个需求，冲突拒绝覆盖。DIMA 为外部系统；现有 Bot / Session / Run 权威表尚未确认。</text>
+</svg>
