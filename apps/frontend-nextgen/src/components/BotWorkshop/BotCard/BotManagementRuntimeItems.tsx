@@ -4,11 +4,11 @@ import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
 import { ArrowUpRight } from 'lucide-react';
 import {
   canRestartFailedServiceBot,
-  failedServiceDeleteReason,
+  botDeleteDisabledReason,
   publicationManagementAvailability,
 } from './botManagementPolicy';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
-import { ActionHelp, MenuSection } from './menuPrimitives';
+import { ActionHelp, DisabledActionHint, MenuSection } from './menuPrimitives';
 
 interface BotManagementRuntimeItemsProps {
   bot: BotDomain;
@@ -41,7 +41,7 @@ export function BotManagementRuntimeItems({
   const engineRestartDisabledReason = bot.disabledActions.engine_restart;
   const publication = publicationManagementAvailability(bot);
   const restartEnabled = bot.actions.includes('restart') || canRestartFailedServiceBot(bot);
-  const deleteReason = failedServiceDeleteReason(bot);
+  const deleteReason = botDeleteDisabledReason(bot, lockedByOther);
 
   return (
     <>
@@ -163,19 +163,21 @@ export function BotManagementRuntimeItems({
         </MenuSection>
       ) : null}
       <MenuSection>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
-          leftIcon={actionIcon.delete}
-          disabled={lockedByOther || !bot.actions.includes('delete')}
-          onClick={() => {
-            onClose();
-            onConfirm('delete');
-          }}
-        >
-          {deleteReason ? <ActionHelp description={deleteReason}>{actionLabel.delete}</ActionHelp> : actionLabel.delete}
-        </Button>
+        <DisabledActionHint description={deleteReason}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+            leftIcon={actionIcon.delete}
+            disabled={lockedByOther || !bot.actions.includes('delete')}
+            onClick={() => {
+              onClose();
+              onConfirm('delete');
+            }}
+          >
+            {actionLabel.delete}
+          </Button>
+        </DisabledActionHint>
       </MenuSection>
     </>
   );
