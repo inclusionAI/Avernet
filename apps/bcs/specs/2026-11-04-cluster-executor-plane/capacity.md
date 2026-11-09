@@ -9,7 +9,7 @@
 | Heartbeat (renews all of an executor's buckets) | 1 write | per node per second |
 | Roster read | 1 read | per node per second |
 | Claim of a bucket (either outcome) | 2 in one transaction (conditional increment + read-back) | only after a crash or at first start: ~4096/N per dead executor, split over the survivors; never per session |
-| Fence step | +1 single-row PK read of the bucket row, `FOR UPDATE` | per owner write transaction |
+| Fence step | +1 single-row PK checked UPDATE of the bucket row (token must match; exclusive lock) | per owner write transaction |
 | Transfer of a bucket | 1 | per drain or rebalance: ~4096/N per executor |
 | Inbound round persist | 1 | per round (required by write-before-ack) |
 | Owner pickup of fallback input | 1 indexed query over the owner's buckets **per executor per tick**, never per session | per executor per tick |

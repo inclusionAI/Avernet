@@ -286,15 +286,20 @@ the clear simply fails and the owner processes the input.
 
 ### 5.5 Fenced writes
 
-![A fenced write is one transaction: first the session's bucket lease row is locked (FOR UPDATE) and its token checked, then the durable writes. A token that is not the writer's makes the whole transaction roll back; a claim or transfer of the bucket waits for the in-flight fenced write.](assets/fenced-write.svg)
+![A fenced write is one transaction: first a checked UPDATE of the session's bucket lease row (token must match, one row changed), which also locks it, then the durable writes. A token that is not the writer's makes the whole transaction roll back; a claim or transfer of the bucket waits for the in-flight fenced write.](assets/fenced-write.svg)
 
 Every durable write an owner makes is one transaction whose first step locks
 S's bucket row and checks the token:
 
 ```sql
-SELECT fencing_token FROM bcs_task_leases
- WHERE bucket = :b FOR UPDATE;           -- must equal :mine, else LeaseLost
+UPDATE bcs_task_leases SET fence_seq = fence_seq + 1
+ WHERE bucket = :b AND fencing_token = :mine;   -- must change exactly 1 row
 ```
+
+It is a checked step (`ExecuteChecked`, expecting one row): the database
+API sends a transaction's steps in one call, so a step cannot read a value
+and branch on it; a changing conditional UPDATE both checks the token and
+takes the row lock, like `SELECT … FOR UPDATE`.
 
 followed by the real writes for S (run state, checkpoints, dispatch records,
 the Task record, `last_event_seq` and `unpublished` (§7.4), and
@@ -306,14 +311,14 @@ committed, and fenced writes that start after it see the new token. So there
 is no gap between "check" and "write" for a pause to fall into.
 (`write_seq` lets a handoff successor see what changed for each session.)
 
-**Why an exclusive lock is enough.** `FOR UPDATE` runs a bucket's fenced
+**Why an exclusive lock is enough.** The fence step runs a bucket's fenced
 writes one at a time, so what matters is how busy one bucket row gets:
 sessions per bucket, not the total. With 100,000 open sessions over 4,096
 buckets, a bucket holds about 25 sessions. At 10 k rounds/s × ~5 fenced
 writes ≈ 50 k writes/s, that is about 12 per bucket per second, each holding
 the lock a few milliseconds: a bucket row is busy about 5 % of the time.
-`FOR SHARE` would let a bucket's sessions write in parallel; it is an
-optional optimization if OceanBase supports shared row locks. A hot bucket
+A shared lock would let a bucket's sessions write in parallel, but the
+checked-step API can't express it; it isn't needed at this ratio. A hot bucket
 (one very busy group session, or skew) is what to measure (§14); if buckets
 ever get hot, the fallback is a per-session fence (§15).
 
@@ -860,7 +865,7 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
   `gateway`), `state`, `started_at`, `last_heartbeat_at`, `advertise_addr`,
   `build_version`.
 - `bcs_task_leases`: one row per bucket — `bucket` (primary key, 0–4095),
-  `node_id`, `fencing_token`, `adopted`; 4,096 rows created once. Index:
+  `node_id`, `fencing_token`, `fence_seq`, `adopted`; 4,096 rows created once. Index:
   `(node_id, adopted)`, for a dead executor's buckets and for buckets
   transferred but not yet adopted.
 - **Session row** (columns this design needs on the session record):
@@ -882,7 +887,7 @@ single-node implementation and a no-op one):
   default); choose a gateway for a dispatch (any healthy one, the least
   loaded).
 - **Task leases** — claim, transfer, list owned buckets, and a **fence
-  step** (lock the session's bucket row `FOR UPDATE` and check the token)
+  step** (a checked UPDATE of the session's bucket row: token must match, one row changed)
   that other components put first in their transactions (item 3's dispatch
   records use it).
 - **Gateway–executor protocol**:
@@ -936,7 +941,7 @@ its local database, so the takeover path is exercised everywhere.
 | 8 | Exact replay by `Last-Event-ID` | Stream ids are natural SSE ids; offer it as a BCN extension. Snapshots are enough for A2A |
 | 9 | Message queue products | Delta channels: a non-durable, sharded pub/sub (Redis 7+ sharded pub/sub or NATS core). Session channels: Redis Streams with **quorum durability** (no acknowledged entry lost on failover) — a requirement, verified with a failover test |
 | 10 | Delta channel granularity | One channel per bucket (an owner subscribes to ~4096/N channels); per-session channels only if one bucket's delta rate is too high for one subscriber |
-| 11 | Hot buckets | `FOR UPDATE` by default; measure per-bucket write rates; `FOR SHARE` if OceanBase supports it |
+| 11 | Hot buckets | Exclusive lock via the checked fence step; measure per-bucket write rates |
 | 12 | Bucket count | 4,096, fixed before launch |
 | 13 | Reading many session streams | One blocking read covers one hash slot; measure, and fall back to a pub/sub notification plus `XRANGE` |
 

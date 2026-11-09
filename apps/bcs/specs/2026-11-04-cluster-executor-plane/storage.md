@@ -55,7 +55,7 @@ majority". (MySQL therefore requires lossless semi-synchronous replication.)
   `(bucket, session_id)`), because a partition key must be part of the
   primary key.
 - Default isolation is READ COMMITTED; the design relies only on row locks —
-  the `FOR UPDATE` lock of the fence step and of a claim or transfer — which
+  the exclusive row lock taken by the fence step's checked UPDATE and by a claim or transfer — which
   behave the same.
 - Avoid hot rows (any cluster-wide counter touched per request). A bucket
   row is locked by every fenced write of its sessions, so what matters is
