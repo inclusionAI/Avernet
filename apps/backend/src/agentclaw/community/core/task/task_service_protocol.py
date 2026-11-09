@@ -106,7 +106,7 @@ class TaskServiceProtocol(Protocol):
     async def report(self, command: TaskReportCommand) -> TaskReportResult: ...
 
     async def search_bots(
-        self, *, query: str, task_id: str, node_id: str,
+        self, *, query: str, task_id: str, node_id: str, relay_token: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]: ...
