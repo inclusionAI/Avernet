@@ -257,3 +257,21 @@ _避免使用_: Manifest 原文、MCP 安装关系
 **Manifest Direct claim**:
 Manifest Apply 将显式 Skill 或 MCP 转换后的 Bot 级直接声明。普通 SkillSet membership 会被移除；Default/platform 供应以 exclusion 抑制，并与 Installation 共同表达 Direct 状态。该状态由现有事实推断，不是持久化 provenance。
 _避免使用_: managed-by-Manifest、Manifest 持续所有权
+
+## Backend runtime vocabulary
+
+**Runtime binding**:
+The existing association selected for a trusted Bot request, distinct from a
+Skill binding. Resolution returns a binding identity and source; it does not
+provision or select a physical device. See the
+[runtime-binding boundary](apps/backend/src/agentclaw/community/core/runtime_binding/README.md).
+
+**Runtime stage**:
+The draft, verify or online target defined by the owning API and
+[engine stage contract](apps/backend/src/agentclaw/community/core/engine_runtime/stage.py).
+Stage is separate from deployment environment.
+
+**Runtime device target**:
+A provider-specific destination within a resolved runtime. For Cron, a device UUID
+can select one instance; a Bot ID or binding ID alone is not that UUID. See the
+[Cron contract](apps/backend/src/agentclaw/community/core/cron/README.md).

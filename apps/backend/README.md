@@ -5,7 +5,20 @@ and workspace management. It builds and tests without `agentclaw.corp`.
 This guide applies to the `apps/backend/` layout, checked on 2026-10-26.
 Use the files in the target checkout; old `src/backend/` migration paths are historical.
 
-## Authority and reading order
+## Responsibilities and interfaces
+
+Backend owns product-facing Bot, access, configuration and conversation
+orchestration. Provider lifecycle and runtime execution remain behind their
+contracts; a successful metadata write does not imply runtime readiness.
+
+| Boundary | Entry point |
+| --- | --- |
+| HTTP/WS delivery and DTOs | `src/agentclaw/community/adapters/http/` |
+| Inbound business contracts | [Service API](src/agentclaw/community/api/README.md) |
+| Outbound capabilities | [Plugin API](src/agentclaw/community/plugin_api/README.md) |
+| Business domains and state ownership | [Core index](src/agentclaw/community/core/README.md), then the owning domain |
+
+### Authority and reading order
 
 | Concern | Source |
 | --- | --- |
@@ -83,6 +96,19 @@ For enterprise changes, inspect the matching superproject checkout, recorded
 Avernet gitlink, consumers, bindings, configuration, build and tests. Public
 branch merge is not proof of enterprise integration or deployment. Record the
 exact refs and any missing enterprise evidence in the private work ledger.
+
+## Flows and diagnostics
+
+| Task or symptom | Read next |
+| --- | --- |
+| Trace a request to its runtime target | [Backend runtime targeting](../../docs/flows/backend-runtime-targeting.md) |
+| Missing runtime/resource, wrong-instance result or timeout | [Runtime target diagnostics](docs/diagnostics/runtime-targeting.md) |
+| Backend manager/Owner projection into BCS | [Manager sync](docs/flows/bot-manager-sync.md), [Owner sync](docs/bot-ownership-sync-operations.md) |
+| Bot capability configuration and apply | [Manifest guide](docs/bot-config-manifest/README.zh-CN.md), [apply-engine boundary](src/agentclaw/community/core/apply_engine/README.md) |
+
+The [repository map](../../CONTEXT-MAP.md) selects the app; this README is its
+knowledge entry point. Detailed contracts, domain READMEs and existing runbooks
+remain the authoritative topic sources.
 
 ## Develop and verify
 
