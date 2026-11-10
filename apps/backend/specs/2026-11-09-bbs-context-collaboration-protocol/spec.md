@@ -56,10 +56,22 @@ ContextEvent 记录被接受的协作事实并驱动状态迁移。
 Context 由事件推进，不由任何 Bot 直接改状态：
 
 - `ContextCommand`：人类、系统或受信适配器提交的意图，例如“发布回复”“启动接力”“完成待办”“验收通过”。
-- `ContextEvent`：服务端接纳后的不可变事实，例如 `discussion.posted`、`work.completed`、`todo.completed`。
+- `ContextEvent`：服务端接纳后的不可变事实，例如 `contribution.posted`、`stage.completed`、`work.completed`、`todo.completed`。
 - `State`：Context 当前业务阶段，例如 `draft`、`discussing`、`executing`、`reviewing`、`waiting`、`done`。
 - `Transition`：显式状态迁移记录，包含来源状态、触发事件、命中规则、目标状态、守卫结果、操作者和迁移证据。
 - `StateMachineDefinition`：版本化状态机合同；Context 绑定后冻结其 revision。
+
+ContextEvent 命名分两层：
+
+1. **全局标准协议事件**
+   - 事件名只表达协议原语上的通用协作动作；产品、业务场景和具体阶段差异进入 payload。
+   - 事件对象只能来自协议白名单：`context`、`participant`、`mode`、`contribution`、`stage`、`todo`、`work`、`artifact`、`outcome`。
+   - 初始标准集包含 `context.created`、`context.info_updated` / `context.mode_switched` / `context.cancelled`、`participant.role_granted` / `participant.role_revoked`、`contribution.posted`、`stage.completed` / `stage.failed`、`todo.completed`、`work.requested` / `work.started` / `work.blocked` / `work.completed`、`artifact.submitted`、`outcome.accepted` / `outcome.rejected`。
+   - 例如 BBS Post 映射为 `contribution.posted` + `payload.contribution_kind=forum_post`；编码完成不叫 `coding.completed`，而是 `stage.completed` + `payload.stage_id=coding`。
+2. **Profile 扩展事件**
+   - 只有标准事件 + payload 无法表达、且状态机裁决必须依赖该业务事实时才允许声明。
+   - 必须由具体 `ContextStateMachineDefinition` 声明 payload schema，并自带 `<profile_namespace>.<event_name>` 形式；只在该 Profile 内合法，不进入全局标准事件集。
+   - Adapter 的默认责任是把外部事实映射为标准事件 + 结构化 payload；不能把产品事件名直接提升为协议事件。
 
 LLM 可以输出执行结果、摘要或建议，但不能直接改写 Context 状态。状态只能由服务端状态机根据已接纳事件确定地转换。
 
@@ -546,11 +558,11 @@ transitions:
 
 | 模式 | 参与规模 | 语义 | 协议产物 | 典型实现 |
 | --- | --- | --- | --- | --- |
-| `public_discussion`（公开讨论） | 全员可参与 | 通过公开讨论收敛共识、结论或共同认知 | `discussion.posted` / `decision.recorded` | BBS Topic、Context portal |
-| `autonomous_relay`（自主接力） | 部分参与者 | 明确工作由一小组指定或可认领参与者接力完成 | `work.requested` / `work.*` 事件 | Task / Relay、TaskGraph、相关执行适配器 |
-| `planning_execution`（规划执行） | 部分参与者 | 先形成执行计划，再由该组参与者按计划推进 | `plan.created` / `plan.updated` / `work.*` 事件 | Planning agent、TaskGraph、规划执行适配器 |
-| `competitive_assignment`（竞价上岗） | 单个执行者 | 竞价上岗后由一个获胜参与者执行 | `bid.posted` / `bid.selected` / `work.*` 事件 | 竞价适配器、公开执行市场 |
-| `direct_assignment`（直接指派） | 单个执行者 | 由责任人直接指定一个执行者完成工作 | `assignment.created` / `assignment.accepted` / `work.*` 事件 | Direct assignee、BCN group、直接代理执行者 |
+| `public_discussion`（公开讨论） | 全员可参与 | 通过公开讨论收敛共识、结论或共同认知 | `contribution.posted` / `outcome.accepted` | BBS Topic、Context portal |
+| `autonomous_relay`（自主接力） | 部分参与者 | 明确工作由一小组指定或可认领参与者接力完成 | `work.requested` / `work.completed` | Task / Relay、TaskGraph、相关执行适配器 |
+| `planning_execution`（规划执行） | 部分参与者 | 先形成执行计划，再由该组参与者按计划推进 | `artifact.submitted` + `artifact_type=plan`；`work.requested` / `work.completed` | Planning agent、TaskGraph、规划执行适配器 |
+| `competitive_assignment`（竞价上岗） | 单个执行者 | 竞价上岗后由一个获胜参与者执行 | `artifact.submitted` + `artifact_type=bid`；`participant.role_granted` + `role=executor`；`work.requested` / `work.completed` | 竞价适配器、公开执行市场 |
+| `direct_assignment`（直接指派） | 单个执行者 | 由责任人直接指定一个执行者完成工作 | `participant.role_granted` + `role=executor`；`work.requested` / `work.completed` | Direct assignee、BCN group、直接代理执行者 |
 
 设计不变量：
 - 单 Bot、BCN 群、BCS Run、TaskGraph、API Consumer 是产品形态或执行能力，不是新的协作模式。
@@ -736,7 +748,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 | `ContextStateMachineBinding.definition` | `definition_id=public_discussion_profile`；`definition_revision=1` |
 | `ContextStateMachineBinding.current_state` | 初始为 `draft`，只演进为 `discussing` / `accepted` / `refused` |
 | `ContextTodo[]` | 本 Profile 不要求使用 Todo；可为空 |
-| `ContextEvent` | `discussion.posted`、`outcome.accepted`、`outcome.rejected` |
+| `ContextEvent` | `contribution.posted` + `payload.contribution_kind=forum_post`；`outcome.accepted` / `outcome.rejected` |
 | `ContextOutcome` | 以 `decision_summary` 或结论文档引用作为 `ContextDeliverable.artifact_ref` |
 
 参考状态机定义：
@@ -777,7 +789,7 @@ ContextStateMachineDefinition
 ```
 
 执行语义：
-1. `discussion.posted` 是普通讨论事实，不改变业务状态；它只进入 Timeline。
+1. `contribution.posted` 是普通协作贡献事实，不改变业务状态；它只进入 Timeline。
 2. Context 信息完备后，`context.info_updated` 使状态从 `draft` 进入 `discussing`。
 3. 责任人显式裁决通过时，`outcome.accepted` 使状态从 `discussing` 直接进入 `accepted` 终态。
 4. 责任人显式裁决拒绝时，`outcome.rejected` 使状态从 `discussing` 直接进入 `refused` 终态。
@@ -801,7 +813,7 @@ ContextStateMachineDefinition
 | `ContextStateMachineBinding.definition` | `definition_id=ai_coding_assignment_profile`；`definition_revision=1` |
 | `ContextStateMachineBinding.current_state` | 初始为 `design`，只演进为 `coding` / `verification` / `pr` |
 | `ContextTodo[]` | 保存本次变更中的一至多条具体代办；`ContextTodo.status` 仍然使用 assigned / completed / blocked / cancelled，业务阶段由状态机承载 |
-| `ContextEvent` | `repo.ticket.created`、`repo.design.completed`、`repo.code.started`、`repo.code.completed`、`repo.code.blocked`、`repo.verification.failed`、`repo.pr.submitted` |
+| `ContextEvent` | **仅使用标准协议事件**：`context.info_updated`（含 issue / 方案输入事实）、`stage.completed` + `payload.stage_id`、`stage.failed` + `payload.stage_id`、`work.started` / `work.blocked`、`artifact.submitted` + `payload.artifact_type=pr` |
 | `ContextOutcome` | 以 `pr_ref` 作为 `ContextDeliverable.artifact_ref`，表示本次变更已产出可评审 PR |
 
 参考状态机定义：
@@ -827,35 +839,35 @@ ContextStateMachineDefinition
   └─ transitions[]
       ├─ transition_id: design_to_coding
       │   ├─ from_states: [design]
-      │   ├─ event_name: repo.design.completed
-      │   ├─ guard_refs: [info_is_complete]
+      │   ├─ event_name: stage.completed
+      │   ├─ guard_refs: [stage_id_is_design, info_is_complete]
       │   └─ to_state: coding
       ├─ transition_id: coding_to_verification
       │   ├─ from_states: [coding]
-      │   ├─ event_name: repo.code.completed
-      │   ├─ guard_refs: [required_todos_are_done]
+      │   ├─ event_name: stage.completed
+      │   ├─ guard_refs: [stage_id_is_coding, required_todos_are_done]
       │   └─ to_state: verification
       ├─ transition_id: verification_to_coding
       │   ├─ from_states: [verification]
-      │   ├─ event_name: repo.verification.failed
-      │   ├─ guard_refs: [failed_tests_are_recorded]
+      │   ├─ event_name: stage.failed
+      │   ├─ guard_refs: [stage_id_is_verification, failed_tests_are_recorded]
       │   └─ to_state: coding
       └─ transition_id: verification_to_pr
           ├─ from_states: [verification]
-          ├─ event_name: repo.pr.submitted
-          ├─ guard_refs: [actor_is_responsible_user]
+          ├─ event_name: artifact.submitted
+          ├─ guard_refs: [artifact_type_is_pr]
           └─ to_state: pr
 ```
 
 执行语义：
 1. Context 创建后直接进入 `design`，表示责任人或 Bot 正在确认问题、方案和影响面。
-2. `repo.design.completed` 通过 `info_is_complete` 后从 `design` 进入 `coding`。
-3. `repo.code.completed` 只有在全部必需 `ContextTodo.completed` 后，才允许从 `coding` 进入 `verification`。
+2. `stage.completed` + `payload.stage_id=design` 通过 `stage_id_is_design` / `info_is_complete` 后从 `design` 进入 `coding`。
+3. `stage.completed` + `payload.stage_id=coding` 只有在全部必需 `ContextTodo.completed` 后，才允许从 `coding` 进入 `verification`；协议不提供 `coding.completed` 事件名。
 4. `verification` 是自动或人工的验证评审阶段，不等同于 `pr`。
-5. 验证通过并提交 PR 时，`repo.pr.submitted` 允许从 `verification` 进入 `pr`，并将 PR 引用写入 `ContextOutcome.deliverables[]`。
-6. 验证失败时，`repo.verification.failed` 使状态回到 `coding`，必须记录失败证据后继续修改。
+5. 验证通过并提交 PR 时，`artifact.submitted` + `payload.artifact_type=pr` 允许从 `verification` 进入 `pr`，并将 PR 引用写入 `ContextOutcome.deliverables[]`。
+6. 验证失败时，`stage.failed` + `payload.stage_id=verification` 使状态回到 `coding`，必须记录失败证据后继续修改。
 7. `pr` 是本 Profile 的终态，业务目标是“产出可评审 PR”；PR 被 external review 通过与否不反向改写 Context 状态，除非产品层另行约定。
-8. `repo.code.started` / `repo.code.blocked` 是执行事实，不一定触发状态迁移；只有对应的 `ContextTransition` 才会改变 `current_state`。
+8. `work.started` / `work.blocked` 是通用执行事实，不一定触发状态迁移；只有对应的 `ContextTransition` 才会改变 `current_state`。
 
 ## 11. 分阶段交付
 
@@ -875,7 +887,7 @@ ContextStateMachineDefinition
 
 - Profile schema 校验：合法、非法、未知字段、缺初始状态、终态存在出边、重复 rule、未注册 guard / effect。
 - 状态机执行：合法迁移、非法迁移、guard PASS / FAIL / BLOCKED、effect 幂等。
-- 事件推进：`discussion.posted` 不改状态、`work.completed` 进入 review、`outcome.accepted` 进入终态。
+- 事件推进：`contribution.posted` 不改状态、`work.completed` 进入 review、`outcome.accepted` 进入终态。
 - Todo 事件：必需 Todo 未完成不能验收、完成后可验收、并发完成一个成功一个冲突。
 - 幂等：同 request id、同 source_event_id 重放返回同一结果；同 ID 不同内容返回冲突。
 - 事务：数据库失败不上抛伪成功；blocked effect 保留失败原因。
