@@ -691,30 +691,57 @@ Work 归属边界：
 
 ### 7.1 Backend 域位置
 
-建议实现时使用以下模块名，可在实施 PR 前调整，但角色必须明确：
+本方案不新增顶层 `collaboration_context` 域，也不再把实现挂在 `task/forum` 或 `task/bbs` 下面；Service API、核心模块、内部 HTTP 与 OpenAPI 公开面都收敛在 `task/context_collab` 这个 `task` 直接子目录中。核心模块目录直接映射第 4 节的四层架构，外部来源相关能力统一放在 `core/task/context_collab/source` 下。
 
 ```text
-apps/backend/src/agentclaw/community/
-  api/collaboration_context/
-    context_service_protocol.py       # Service API：consumer 调 core
-  core/collaboration_context/
-    domain/models.py                  # 聚合、事件、状态、Todo、Outcome
-    state_machine/engine.py           # 纯状态迁移决策
-    state_machine/validators.py       # profile schema 校验
-    services/context_service.py       # 应用服务与事务边界
-  plugin_api/collaboration_context/
-    source_readers.py                 # Plugin API：Core 读取外部来源
-    delivery_adapters.py              # Plugin API：Core 请求外部投递 / Work 启动
-  adapters/http/collaboration_context/
-    router.py                         # 内部 / openapi HTTP 薄适配
-  adapters/source/forum/
-    context_forum_adapter.py          # Topic / Post → ContextEvent
-  adapters/source/task/
-    context_task_adapter.py           # TaskGraph / Relay → ContextEvent
-  di/modules/collaboration_context_module.py
+apps/backend/src/agentclaw/community/api/task/context_collab/
+  context_service.py               # Service API re-export，仅回引 core 内的 Protocol
+
+apps/backend/src/agentclaw/community/core/task/context_collab/
+  context_service_protocol.py       # transport-agnostic contract，由 core 拥有并在 api re-export
+  collaboration/
+    mode.py                         # 协作层：CollaborationMode
+    mode_policy.py                  # 协作层：CollaborationModePolicy
+    participant.py                  # 协作层：ContextParticipant
+  state/
+    definition.py                   # 状态层：ContextStateMachineDefinition
+    binding.py                      # 状态层：ContextStateMachineBinding
+    todo.py                         # 状态层：ContextTodo
+    engine.py                       # 状态层：状态迁移裁决
+    validator.py                    # 状态层：状态机 definition 校验
+  event/
+    context_event.py               # 事件层：ContextEvent
+    context_transition.py           # 事件层：ContextTransition
+  representation/
+    context.py                      # 表示层：CollaborationContext
+    envelope.py                     # 表示层：ContextEnvelope
+    outcome.py                      # 表示层：CollaborationOutcome
+    snapshot.py                     # 表示层：ContextSnapshot
+  services/
+    context_service.py              # 跨层应用服务与事务边界
+apps/backend/src/agentclaw/community/core/task/context_collab/source/
+  source_reader.py                   # Context 内部的外部来源读取契约 / 实现
+  delivery_adapter.py                 # Context 内部的外部投递与 Work 启动契约 / 实现
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab/
+  router.py                          # 内部 HTTP / OpenAPI 公开面共用同一 Service API
+  schema.py                          # 内部 HTTP DTO / 域对象转换
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/context_collab/
+  router.py                          # OpenAPI 公开路由
+  schemas.py                         # OpenAPI 契约 DTO
+apps/backend/src/agentclaw/community/di/modules/task_context_collab_module.py
 ```
 
-Core 不 import HTTP、BCS 具体 client、外部来源 SDK 或具体 plugin implementation。所有外部能力通过 Plugin API 注入，由 Composition Root 绑定。
+目录与四层架构的对应关系如下：
+
+| 目录 | 协议层 | 只允许承担的职责 |
+| --- | --- | --- |
+| `core/task/context_collab/collaboration/` | 协作层 | 参与者、可见性、模式与 Policy 快照 |
+| `core/task/context_collab/state/` | 状态层 | 冻结的状态机 definition、运行时 binding、Todo 与迁移裁决 |
+| `core/task/context_collab/event/` | 事件层 | append-only 事实与迁移证明 |
+| `core/task/context_collab/representation/` | 表示层 | Context 根、Envelope、Outcome 与 Snapshot |
+| `core/task/context_collab/services/` | 跨层应用服务 | 只做命令编排、一致性校验和事务提交，不承载新的领域事实来源 |
+
+`api/` 只放 transport-agnostic 契约，不放具体实现；`adapters/` 只做协议转换与投递，不承载领域策略；`di/modules/` 只做 composition root 绑定。外部来源、投递与 Work 启动相关的接口统一放在 `core/task/context_collab/source` 下，作为本域内部能力收敛；本方案不在 `plugin_api` 下新增或修改任何文件。Core 不 import HTTP、BCS 具体 client 或外部来源 SDK。外部来源、投递与 Work 启动统一通过 `source/` 子模块的契约收口，最终由 Composition Root 绑定。
 
 ### 7.2 Service API 能力
 
