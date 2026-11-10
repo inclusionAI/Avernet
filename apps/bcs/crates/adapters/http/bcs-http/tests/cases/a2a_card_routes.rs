@@ -32,7 +32,7 @@ impl A2aBotManagementService for Management {
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.visibility.lock().unwrap().push(command.visibility.as_str().into());
-        assert_eq!(command.owners,vec!["owner"]);
+        assert_eq!(command.owners,Some(vec!["owner".into()]));
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }

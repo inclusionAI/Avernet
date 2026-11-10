@@ -47,7 +47,7 @@
 | agent_name | string | 等于已保存 Card.name；2～64 个 Unicode 码点，支持中文、区分大小写，无首尾空白或控制字符 |
 | agent_card_url | string 或响应中的 null | Card 的绝对 HTTP(S) URL；不是 Agent 调用接口地址；最长 2048 个字符 |
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |
-| owners | string[] | 注册必填且恰好一个元素；不带 human_ 前缀的所有者 ID；Provider 管理者负责归属授权，BCN 可为该 ID 建立 Human 记录 |
+| owners | string[] 或 null | 省略、null 或 [] 时使用 Provider 配置 `config.a2a.default_owner`；非空时须恰好一个有效负责人 ID，不带 human_ 前缀；默认值缺失或无效时拒绝注册 |
 | summary | string | 注册可选展示摘要，最长 4096 个 Unicode 码点；省略时取 Card.description，空字符串表示空摘要 |
 
 Agent 名称仅用于展示，可在同一 Provider 下重复。稳定身份是 bot_id；平台稳定键是 provider_bot_ref，同一环境和 Provider 下唯一。
@@ -233,13 +233,13 @@ Content-Type: application/json
 | 请求字段 | 必填 | 规则 |
 | --- | --- | --- |
 | provider_bot_ref | 是 | 平台稳定键；重复注册不覆盖已有 Bot |
-| owners | 是 | 见公共定义 |
+| owners | 否 | 省略、null 或 [] 时由 Provider 的 `config.a2a.default_owner` 补齐；非空时见公共定义 |
 | visibility | 否 | private、protected、public；默认 protected，不联动 user_visibility |
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
 
-名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下 provider_bot_ref 已存在时返回 409 / PROVIDER_BOT_REF_CONFLICT，不覆盖已有 Card。缺少或非法 ref 返回 400，owners 校验保持原规则。
+名称从 Card.name 获取，无需另传 agent_name。`owners` 省略、传 `null` 或 `[]` 时，BCN 从当前 Provider 的 `config.a2a.default_owner` 补齐负责人；配置缺失或无效时返回 422 / INVALID_OWNER，且不创建 Bot。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下 provider_bot_ref 已存在时返回 409 / PROVIDER_BOT_REF_CONFLICT，不覆盖已有 Card。缺少或非法 ref 返回 400。
 
 ## 4. 查询 AgentCard
 

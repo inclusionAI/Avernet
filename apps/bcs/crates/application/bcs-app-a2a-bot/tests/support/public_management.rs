@@ -24,7 +24,7 @@ async fn public_fixture() -> (RegistrationChain, A2aBotManagement) {
     chain
         .db
         .execute(DbStatement::new(
-            "UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'",
+            "UPDATE bcs_providers SET slug='orders', config='{\"downlink\":{\"enabled\":true,\"auth_mode\":\"static_bearer\"},\"a2a\":{\"default_owner\":\"default-owner\"}}' WHERE provider_id='provider-a'",
         ))
         .await
         .unwrap();
@@ -34,7 +34,7 @@ fn request(raw: serde_json::Value) -> RegisterAgentCommand {
     RegisterAgentCommand {
         provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),        visibility: Default::default(),
         provider_admin_token: "test-admin".into(),
-        owners: vec!["delegated-owner".into()],
+        owners: Some(vec!["delegated-owner".into()]),
         summary: None,
         source: A2aCardSource::Inline(raw),
         now_ms: 1000,
@@ -141,10 +141,23 @@ async fn public_registration_requires_owner_and_valid_platform_ref_before_fetch(
         command.source=A2aCardSource::Url("not-a-url".into());
         assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidRequest);
     }
-    for owners in [vec![],vec!["".into()],vec!["owner".into(),"another".into()]] {
-        let mut command=request(card("注册检查",None));command.owners=owners;
+    for owners in [vec!["".into()],vec!["owner".into(),"another".into()]] {
+        let mut command=request(card("注册检查",None));command.owners=Some(owners);
         assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidOwner);
     }
+    for owners in [None, Some(vec![])] {
+        let mut command=request(card("默认负责人",None));command.owners=owners;
+        let registered=service.register_agent(command).await.unwrap();
+        assert!(!registered.bot_id.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn missing_default_owner_rejects_empty_owner_registration_atomically() {
+    let (chain,service)=public_fixture().await;
+    chain.db.execute(DbStatement::new("UPDATE bcs_providers SET config='{\"downlink\":{\"enabled\":true,\"auth_mode\":\"static_bearer\"}}' WHERE provider_id='provider-a'")).await.unwrap();
+    let mut command=request(card("无默认负责人",None));command.owners=None;
+    assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidOwner);
     assert_empty(&chain).await;
 }
 

@@ -65,7 +65,7 @@ impl A2aBotManagementService for Management {
     async fn register_agent(&self, command: RegisterAgentCommand) -> ServiceResult<ManagedA2aCard> {
         *self.visibility.lock().unwrap() = Some(command.visibility);
         assert_eq!(command.provider_admin_token, "test-admin");
-        assert_eq!(command.owners, vec!["owner"]);
+        assert_eq!(command.owners, Some(vec!["owner".into()]));
         assert!(command.now_ms > 0);
         assert!(
             matches!(command.source,A2aCardSource::Url(ref url) if url=="https://example.org/card")

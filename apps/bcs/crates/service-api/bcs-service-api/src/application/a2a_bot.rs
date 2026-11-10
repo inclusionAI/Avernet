@@ -44,7 +44,8 @@ pub struct ManagedA2aCard {
 pub struct RegisterAgentCommand {
     pub provider_bot_ref:String,
     pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
-    pub provider_admin_token:String, pub owners:Vec<String>, pub summary:Option<String>,
+    /// None, null and an empty list request the Provider's configured default owner.
+    pub provider_admin_token:String, pub owners:Option<Vec<String>>, pub summary:Option<String>,
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
 }
 
