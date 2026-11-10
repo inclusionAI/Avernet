@@ -589,7 +589,71 @@ use super::*;
         }
     }
 
-    // ---- 10) list_friends is a pure delegation to the legacy service ----
+    // ---- 10) non-connect requests never leak into the legacy surface ----
+
+    #[tokio::test]
+    async fn legacy_listing_and_duplicate_check_ignore_non_connect_requests() {
+        let fx = fixture(&[TestBot::bot("botA"), TestBot::owned("botB", "owner1")]).await;
+
+        // A pending permission/rules request between the same pair is NOT a
+        // friend request: it must neither appear in the legacy list nor turn
+        // the next friend request into a 409.
+        fx.requests
+            .insert(PermissionRequest {
+                request_id: "rules-request".to_string(),
+                edge_id: None,
+                env: "dev".to_string(),
+                from_id: "botA".to_string(),
+                to_id: "botB".to_string(),
+                request_kind: RequestKind::Rules,
+                requested_ref_id: None,
+                requested_rules: None,
+                message: None,
+                status: RequestStatus::Pending,
+                decision_reason: None,
+                created_by: "botA".to_string(),
+                decided_by: None,
+                decided_at: None,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .await
+            .expect("insert rules request");
+
+        for direction in [
+            FriendRequestDirection::Sent,
+            FriendRequestDirection::All,
+            FriendRequestDirection::Received,
+        ] {
+            let label = format!("{direction:?}");
+            assert!(
+                list(&fx.facade, "botA", direction, Some(FriendRequestStatus::Pending))
+                    .await
+                    .is_empty(),
+                "non-connect requests must not be listed as friend requests ({label})"
+            );
+        }
+
+        let created = fx
+            .facade
+            .create_friend_request(create("botA", "botB"))
+            .await
+            .expect("a non-connect pending row must not trigger the legacy 409");
+        assert_eq!(created.status, FriendRequestStatus::Pending);
+        assert_ne!(created.id, "rules-request");
+
+        let listed = list(
+            &fx.facade,
+            "botA",
+            FriendRequestDirection::Sent,
+            Some(FriendRequestStatus::Pending),
+        )
+        .await;
+        assert_eq!(listed.len(), 1, "only the connect request is listed");
+        assert_eq!(listed[0].id, created.id);
+    }
+
+    // ---- 11) list_friends is a pure delegation to the legacy service ----
 
     #[tokio::test]
     async fn list_friends_delegates_to_the_legacy_service() {

@@ -117,7 +117,14 @@ impl EdgeConnectFriendService {
         if let Some(existing) = page
             .items
             .into_iter()
-            .find(|request| request.to_id == to_bot && request.created_by == caller)
+            // Only connect requests are friend requests: a pending
+            // permission/rules/revoke request is not a duplicate friend
+            // request and must not turn into a legacy 409.
+            .find(|request| {
+                request.request_kind == RequestKind::Connect
+                    && request.to_id == to_bot
+                    && request.created_by == caller
+            })
         {
             return Err(FriendUseCaseError::service(
                 ServiceError::PendingRequestExists {
@@ -276,6 +283,10 @@ impl FriendService for EdgeConnectFriendService {
             // created_by=caller) that the legacy list never exposed; keep only
             // rows the caller itself authored in the listed direction.
             .filter(|request| request.created_by == request.from_id)
+            // Only connect requests are friend requests; permission-profile,
+            // rules and revoke requests share the store but are not part of
+            // the legacy friend-request listing.
+            .filter(|request| request.request_kind == RequestKind::Connect)
             .map(|request| FriendRequest {
                 id: request.request_id,
                 from_bot: request.from_id,
