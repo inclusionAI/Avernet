@@ -197,16 +197,6 @@ pub struct GroupContextGetResponse {
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
 
-    async fn inheritance_sources(
-        &self,
-        _group_id: &str,
-        _session_id: &str,
-        _actor: &str,
-        _names: Option<&[String]>,
-    ) -> Result<Vec<GroupContextEntry>, ApplicationError> {
-        Err(ApplicationError::internal("context inheritance unavailable"))
-    }
-
     async fn list_slots(&self, _group_id: &str) -> Result<Vec<GroupContextSlot>, ApplicationError> {
         Err(ApplicationError::internal("slots unavailable"))
     }

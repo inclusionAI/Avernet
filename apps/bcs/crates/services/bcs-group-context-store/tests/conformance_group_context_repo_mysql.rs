@@ -46,9 +46,33 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
         set_session_timezone(plugin.as_ref(), timezone).await;
         clear_group_contexts(plugin.as_ref()).await;
         assert_group_context_roundtrip(plugin.clone(), suffix).await;
+        assert_slot_audit_roundtrip(&SqlGroupContextStore::oceanbase(plugin.clone()), suffix).await;
     }
 
     manager.close().await;
+}
+
+async fn assert_slot_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) {
+    use bcs_domain::group_context::GroupContextSlotChange::{Add, Delete, Edit};
+
+    let group = format!("slot-audit-{suffix}");
+    repo.change_slot(&group, "owner", Add {
+        name: "timeline".into(),
+        description: String::new(),
+    }).await.unwrap();
+    let before = repo.list_slots(&group).await.unwrap().remove(0);
+    repo.change_slot(&group, "admin", Edit {
+        name: "timeline".into(),
+        new_name: Some("events".into()),
+        description: None,
+    }).await.unwrap();
+    let after = repo.list_slots(&group).await.unwrap().remove(0);
+    assert_eq!(after.name, "events");
+    assert_eq!(after.creator, "owner");
+    assert_eq!(after.modifier, "admin");
+    assert_eq!(before.gmt_create, after.gmt_create);
+    assert!(after.gmt_modified >= before.gmt_modified);
+    repo.change_slot(&group, "admin", Delete { name: "events".into() }).await.unwrap();
 }
 
 async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {

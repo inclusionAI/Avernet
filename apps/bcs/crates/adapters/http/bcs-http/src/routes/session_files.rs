@@ -1099,7 +1099,6 @@ mod tests {
                     id: Some(sid.clone()),
                     meta: None,
                     message_visibility_version: 1,
-                    inherited_contexts: Vec::new(),
                 },
             )
             .await

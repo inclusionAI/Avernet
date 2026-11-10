@@ -711,7 +711,7 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
   pre-upgrade sid-less sessions in both directions; after restoring the
   fixed writers + `[api.auth]`, users re-login through the new chain.
 
-## Group Context slots and inheritance
+## Group Context slots
 
 SQLite `044_group_context_slot.sql`, MySQL `046_group_context_slot.sql`, and OceanBase
 `033_group_context_slot.sql` add the Group slot definitions and the

@@ -174,21 +174,6 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add(command).await
     }
 
-    async fn inheritance_sources(
-        &self,
-        group_id: &str,
-        session_id: &str,
-        actor: &str,
-        names: Option<&[String]>,
-    ) -> Result<Vec<bcs_domain::GroupContextEntry>, ApplicationError> {
-        let session = self.load_session(session_id).await?;
-        if session.group_id != group_id {
-            return Err(invalid_param("source session must belong to the target group"));
-        }
-        ensure_participant(&session.participants, actor, "the source Session")?;
-        self.inner.inheritance_sources(group_id, &session.id, actor, names).await
-    }
-
     async fn list_slots(&self, group_id: &str) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
         let group = self.load_group(group_id).await?;
         self.inner.list_slots(&group.id).await

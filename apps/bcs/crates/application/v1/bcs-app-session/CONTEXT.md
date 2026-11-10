@@ -36,7 +36,7 @@
 - `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
   verifies current-Session membership for session/round writes and Group membership for group writes, validates the
   `{sessionId}:{round}` format, resolves slot management against an existing
-  Group, and checks same-Group source Session membership for inheritance.
+  Group, and authorizes writes against the Group driver Bot.
   The underlying Group Context service owns slot and entry policies.
 
 ## Consumes
@@ -82,7 +82,7 @@
 ## Runtime ownership
 
 This crate owns V1 Session, Session File, and the public Group Context
-resource-membership gate for add and inheritance. The Group Context gate reads the persisted Session
+resource-membership gate for adds. The Group Context gate reads the persisted Session
 at request time so dynamically invited Session participants remain allowed;
 Group Context storage and field-policy semantics stay in the Group Context
 application service. For files, it enforces membership and the

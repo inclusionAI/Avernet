@@ -31,14 +31,6 @@ pub(super) enum SessionCommands {
         /// Initial GroupContext delivery for the driver (send or inject)
         #[arg(long, value_parser = ["send", "inject"])]
         group_context_delivery: Option<String>,
-
-        /// Same-group Session to copy contexts from.
-        #[arg(long)]
-        context_from_session_id: Option<String>,
-
-        /// JSON array of names to copy. Omit to copy all readable Session contexts.
-        #[arg(long, requires = "context_from_session_id")]
-        context_names: Option<String>,
     },
 
     /// List sessions under a group.

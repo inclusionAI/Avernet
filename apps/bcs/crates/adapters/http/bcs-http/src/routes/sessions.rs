@@ -158,8 +158,6 @@ pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> 
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
-    #[serde(flatten)]
-    pub context_inheritance: context_inheritance::ContextInheritance,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
@@ -275,13 +273,6 @@ pub async fn create_session_for_group(
         }
     };
 
-    let inherited_contexts = match body.context_inheritance
-        .resolve(&state, &group_id, caller.actor_id(), body.session_id.is_some())
-        .await
-    {
-        Ok(contexts) => contexts,
-        Err(error) => return error,
-    };
     let session_id = body.session_id;
     let request = SessionLaunchRequest {
         caller,
@@ -305,13 +296,6 @@ pub async fn create_session_for_group(
                     session_id,
                     request,
                 })
-                .await
-        }
-        None if !inherited_contexts.is_empty() => {
-            state
-                .services
-                .session_launch
-                .create_with_contexts(CreateSessionLaunch { request }, inherited_contexts)
                 .await
         }
         None => {
@@ -2293,5 +2277,3 @@ mod tests {
     // alongside the session_history_request_params and resolve_session_history_source_bots
     // functions that power the service layer.
 }
-
-mod context_inheritance;

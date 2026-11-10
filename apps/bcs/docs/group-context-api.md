@@ -528,7 +528,7 @@ versions).
 and still blocks duplicate `add`; business consumers decide how to interpret
 those timestamps. This release does not expose a history API.
 
-## Predefined names and Session inheritance
+## Predefined names
 
 `POST /groupcontext/list-slot?groupId=<group-id>` returns a `slots` array.
 Each entry contains `name`, `description`, `creator`, `modifier`, `gmtCreate`, and `gmtModified`.
@@ -554,25 +554,3 @@ or set `"slot": true` in the add request. The name must match a definition in
 the Session's Group and the scope must be `session`. Regular adds reject
 reserved names. The stored slot flag survives version updates and is omitted
 from list and get responses.
-
-```bash
-bcs-cli session create --group game-room-7 \
-  --context-from-session-id 'game-room-7:12345678' \
-  --context-names '["timeline","cause"]'
-```
-
-Send the equivalent `context_from_session_id` and
-`context_names` fields to `POST /groups/{id}/sessions`.
-Set `context_from_session_id` to a source Session in the same Group.
-Omit `context_names` to copy every current Session-scoped entry the caller
-can read. Inheritance is limited to 500 entries per request. Exceeding
-the limit returns HTTP 413 and aborts Session creation. If the field is
-supplied, it must contain 1–500 distinct names,
-and every named entry must be current and readable. The caller must
-participate in the source Session. The effective new Session creator must
-also be able to read every selected entry.
-
-The Session and all copies are persisted together. A missing, unreadable,
-or concurrently superseded selection prevents creation. Copies keep the source
-read/write policies and slot flag. Each copy starts an independent version
-chain owned by the new Session creator.

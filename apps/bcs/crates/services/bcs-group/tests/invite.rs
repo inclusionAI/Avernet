@@ -144,7 +144,6 @@ impl Fixture {
             id: None,
             meta: None,
             message_visibility_version: 1,
-            inherited_contexts: Vec::new(),
         };
         let outcome = self
             .sessions

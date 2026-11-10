@@ -112,7 +112,6 @@ fn insert_session(state: &mut MemoryState, session: Session) {
 pub struct MemorySessionRepo {
     state: Arc<RwLock<MemoryState>>,
     event_store: Option<Arc<MemoryEventStore>>,
-    group_contexts: Option<bcs_group_context_store::MemoryGroupContextRepo>,
     registry: Arc<crate::registry::MemorySessionRegistry>,
 }
 
@@ -122,29 +121,6 @@ impl MemorySessionRepo {
     /// Create a new empty in-memory session repository.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_group_contexts(mut self, repo: bcs_group_context_store::MemoryGroupContextRepo) -> Self {
-        self.group_contexts = Some(repo);
-        self
-    }
-
-    async fn stage_contexts(
-        &self,
-        params: &NewSessionParams,
-        session_id: &str,
-    ) -> ServiceResult<Option<impl FnOnce() + Send + use<>>> {
-        if params.inherited_contexts.is_empty() {
-            return Ok(None);
-        }
-        let repo = self.group_contexts.as_ref().ok_or_else(|| {
-            ServiceError::InternalError("context inheritance storage unavailable".into())
-        })?;
-        let owner = params.created_by.as_deref().ok_or_else(|| {
-            ServiceError::SessionInvalidParams("context inheritance requires a creator".into())
-        })?;
-        repo.stage_inheritance(&params.inherited_contexts, session_id, owner).await.map(Some)
-            .map_err(|error| ServiceError::Conflict(error.to_string()))
     }
 
     pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {

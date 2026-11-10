@@ -18,7 +18,6 @@ fn test_session_create_parses_minimal_args() {
                     input,
                     meta,
                     group_context_delivery,
-                    ..
                 },
             ..
         } => {
@@ -430,25 +429,4 @@ fn test_session_invite_link_parses_args() {
         }
         _ => panic!("expected session invite-link command"),
     }
-}
-
-#[test]
-fn test_session_create_requires_source_when_context_names_are_supplied() {
-    let base = ["bcs-cli", "session", "create", "--group", "g-1"];
-    let source = ["--context-from-session-id", "g-1:12345678"];
-    let names = ["--context-names", r#"["timeline"]"#];
-    assert!(Cli::try_parse_from(base.into_iter().chain(source)).is_ok());
-    assert!(Cli::try_parse_from(base.into_iter().chain(names)).is_err());
-    let cli = Cli::try_parse_from(base.into_iter().chain(source).chain(names)).unwrap();
-    assert!(matches!(
-        cli.command,
-        Commands::Session {
-            command: SessionCommands::Create {
-                context_from_session_id: Some(source),
-                context_names: Some(names),
-                ..
-            },
-            ..
-        } if source == "g-1:12345678" && names == r#"["timeline"]"#
-    ));
 }

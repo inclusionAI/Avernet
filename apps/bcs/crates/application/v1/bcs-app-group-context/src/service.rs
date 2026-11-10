@@ -17,8 +17,6 @@ use ulid::Ulid;
 use crate::permissions::{actor_can_read, actor_can_write, actor_is_owner, permission_for};
 use crate::scope::{ResolvedScope, resolve_scope, resolve_scopes};
 
-const MAX_INHERITED_CONTEXTS: usize = 500;
-
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024;
 pub const MAX_NAME_CHARS: usize = 255;
 pub const MAX_POLICY_BYTES: usize = 4096;
@@ -165,38 +163,6 @@ impl GroupContextApplicationServiceImpl {
 
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
-    async fn inheritance_sources(
-        &self,
-        _group_id: &str,
-        session_id: &str,
-        actor: &str,
-        names: Option<&[String]>,
-    ) -> Result<Vec<GroupContextEntry>, ApplicationError> {
-        validate_actor(actor)?;
-        let Some(names) = names else {
-            let mut entries = self.repo.inheritance_sources(session_id, None).await.map_err(map_store_error)?;
-            entries.retain(|entry| actor_can_read(entry, actor));
-            validate_inheritance_limit(entries.len())?;
-            return Ok(entries);
-        };
-        if names.is_empty() {
-            return Err(ApplicationError::invalid(INVALID_PARAM, "inheritance requires at least one context name"));
-        }
-        validate_inheritance_limit(names.len())?;
-        let mut distinct = std::collections::HashSet::new();
-        for name in names {
-            validate_name(name)?;
-            if !distinct.insert(name) {
-                return Err(ApplicationError::invalid(INVALID_PARAM, "inheritance names must be unique"));
-            }
-        }
-        let entries = self.repo.inheritance_sources(session_id, Some(names)).await.map_err(map_store_error)?;
-        if entries.len() != names.len() || entries.iter().any(|entry| !distinct.contains(&entry.name) || !actor_can_read(entry, actor)) {
-            return Err(permission_denied("one or more requested contexts are unavailable"));
-        }
-        Ok(entries)
-    }
-
     async fn list_slots(&self, group_id: &str) -> Result<Vec<GroupContextSlot>, ApplicationError> {
         validate_name(group_id)?;
         self.repo.list_slots(group_id).await.map_err(map_store_error)
@@ -624,15 +590,4 @@ mod tests {
         let internal = map_store_error(GroupContextStoreError::Backend("storage failed".into()));
         assert_eq!(internal.code(), "internal_error");
     }
-}
-
-
-fn validate_inheritance_limit(count: usize) -> Result<(), ApplicationError> {
-    if count > MAX_INHERITED_CONTEXTS {
-        return Err(ApplicationError::payload_too_large(
-            PAYLOAD_TOO_LARGE,
-            format!("context inheritance exceeds the limit of {MAX_INHERITED_CONTEXTS} entries"),
-        ));
-    }
-    Ok(())
 }

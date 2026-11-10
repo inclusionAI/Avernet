@@ -1,18 +1,17 @@
-# Group Context 名称预定义与会话继承
+# Group Context 名称预定义
 
 ## 概述
 
-Group 可以维护一份预定义的 Group Context 名称及描述，供会话参与者发现并显式使用。创建 Session 时可以指定源 Session，将其中的上下文带入新会话，减少重复整理。
+Group 可以维护一份预定义的 Group Context 名称及描述，供会话参与者发现并显式使用。
 
 ## 用户故事
 
 - 群管理者可以维护一个群聊的固定名称的group-context，例如问题排查群要有「时间线」「归因」等记录项及其用途。
 - Bot 可以查询当前群的预定义名称，在创建会话上下文时可以显式选择其中一项
-- 会话创建者可以从同群源会话继承显式指定名称且可读的上下文。
 
 ## 范围
 
-本期包括 BCS 后端服务接口及上述 CLI 能力。前端的上下文展示与 slot 编辑留到后续。
+本期包括 BCS 后端服务接口及上述 CLI 能力。前端的上下文展示与 slot 编辑留到后续。Session 上下文继承随 Fork 功能另行实现。
 
 ## Bot 入口（BCS CLI）
 
@@ -23,9 +22,7 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 |---|---|---|
 | B1 | 查询预定义 slot | 列出当前 Group 的 slot 名称和描述，bcs-cli group-context list-slot --group-id 'xxx' |
 | B2 | 按 slot 创建/修改 Group Context | 在现有 `group-context add` 中显式选择当前 Group 的 slot，以该名称创建 Session 作用域的上下文，创建 bcs-cli group-context add --scope-level 'session' --session-id 'xx' --name 'xx' --context 'xxx' --slot，如果没有--slot参数，name 不可以是slot定义的名字，更新Group-context时沿用原有is_slot字段|
-| B3 | 创建 Session 时继承上下文 | 在现有 `session create` 中指定同群源 Session。不指定名称时，继承全部session级别的、当前bot可读的group-context，否则仅继承指定名称列表部分，每个名称都必须对应可读的当前条目，否则整次创建失败。副本沿用源条目的读写策略， session的创建者成为新owner，并建立独立版本链。 新增参数 --context-from-session-id 'xx' --context-names '["name1","name2"]'，--context-names可省略。单次最多继承 500 条，超过上限时整次创建失败。|
 
-继承生成的 Group Context 保留源条目的 `is_slot` 值。源条目未记录该字段时，副本按 `false` 处理。
 
 ## Human 入口（后端管理接口）
 
@@ -40,4 +37,4 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 
 ## 权限与审计
 
-已有身份认证、成员准入和条目读写权限继续生效。Slot 的增删改仅向群主 Bot（`driver_bot`）的 Owner 或 Admin（Bot Authority 中的 Manager）开放。新增时以实际调用者记录 creator 和 modifier，编辑时只更新 modifier。会话继承需遵守源条目的读取权限，并避免通过复制扩大内容的可读范围。
+已有身份认证、成员准入和条目读写权限继续生效。Slot 的增删改仅向群主 Bot（`driver_bot`）的 Owner 或 Admin（Bot Authority 中的 Manager）开放。新增时以实际调用者记录 creator 和 modifier，编辑时只更新 modifier。

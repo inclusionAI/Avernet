@@ -339,10 +339,7 @@ impl Default for BcsServerState {
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
-        let group_context_repo = bcs_group_context_store::MemoryGroupContextRepo::new();
-        let session_repo = Arc::new(MemorySessionRepo::new()
-            .with_group_contexts(group_context_repo.clone())
-            .with_event_store(event_repo.clone()));
+        let session_repo = Arc::new(MemorySessionRepo::new().with_event_store(event_repo.clone()));
         // Strict authorization snapshot read (bot-authority plan
         // Task 7): the narrow Session snapshot Core plus the
         // operation-boundary delivery admission built over the same
@@ -705,7 +702,7 @@ impl Default for BcsServerState {
         let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
             Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
                 Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                    Arc::new(group_context_repo),
+                    Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),
                 )),
                 sessions.clone(),
                 session_repo.clone(),

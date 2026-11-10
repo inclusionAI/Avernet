@@ -22,46 +22,6 @@ struct MemoryState {
 }
 
 impl MemoryGroupContextRepo {
-    pub async fn stage_inheritance(
-        &self,
-        entries: &[GroupContextEntry],
-        destination: &str,
-        owner: &str,
-    ) -> StoreResult<impl FnOnce() + Send + use<>> {
-        let mut state = self.state.clone().write_owned().await;
-        let mut active_ids = entries.iter().map(|entry| entry.id).collect::<std::collections::HashSet<_>>();
-        let names = entries.iter().map(|entry| entry.name.as_str()).collect::<std::collections::HashSet<_>>();
-        for row in state.rows.iter().filter(|row| !row.is_superseded) {
-            active_ids.remove(&row.id);
-            if row.scope == destination && names.contains(row.name.as_str()) {
-                return Err(GroupContextStoreError::Conflict { name: row.name.clone(), scope: destination.into() });
-            }
-        }
-        if let Some(entry) = entries.iter().find(|entry| active_ids.contains(&entry.id)) {
-            return Err(GroupContextStoreError::Conflict { name: entry.name.clone(), scope: entry.scope.clone() });
-        }
-        let now = chrono::Utc::now();
-        let copies = entries.iter().cloned().map(|mut entry| {
-            entry.scope = destination.into();
-            entry.context_id = ulid::Ulid::new().to_string();
-            entry.creator = owner.into();
-            entry.owners = bcs_domain::GroupContextOwners::new([owner]);
-            entry.supersedes = None;
-            entry.change_reason = None;
-            entry.tx_time = now;
-            entry.gmt_create = now;
-            entry.gmt_modified = now;
-            entry
-        }).collect::<Vec<_>>();
-        Ok(move || {
-            for mut copy in copies {
-                state.next_id += 1;
-                copy.id = state.next_id;
-                state.rows.push(copy);
-            }
-        })
-    }
-
     pub fn new() -> Self {
         Self::default()
     }
@@ -69,13 +29,6 @@ impl MemoryGroupContextRepo {
 
 #[async_trait]
 impl GroupContextRepo for MemoryGroupContextRepo {
-    async fn inheritance_sources(&self, scope: &str, names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
-        Ok(self.state.read().await.rows.iter().filter(|row| {
-            row.scope == scope && row.scope_level == bcs_domain::ScopeLevel::Session
-                && !row.is_superseded && names.is_none_or(|names| names.contains(&row.name))
-        }).cloned().collect())
-    }
-
     async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
         Ok(self.state.read().await.slots.get(group_id).is_some_and(|slots| slots.contains_key(name)))
     }

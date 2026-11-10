@@ -55,10 +55,6 @@ pub struct NewGroupContextEntry {
 
 #[async_trait]
 pub trait GroupContextRepo: Send + Sync {
-    async fn inheritance_sources(&self, _scope: &str, _names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
-        Err(GroupContextStoreError::Backend("context inheritance unavailable".into()))
-    }
-
     async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
         Ok(self.list_slots(group_id).await?.iter().any(|slot| slot.name == name))
     }
@@ -285,26 +281,6 @@ impl SqlGroupContextStore {
 
 #[async_trait]
 impl GroupContextRepo for SqlGroupContextStore {
-    async fn inheritance_sources(&self, scope: &str, names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
-        let columns = self.select_cols();
-        let (sql, params) = match names {
-            None => (
-                format!("SELECT {columns} FROM bcs_group_contexts WHERE scope = ? AND is_superseded = FALSE AND scope_level = 'session'"),
-                vec![scope.into()],
-            ),
-            Some([]) => return Ok(Vec::new()),
-            Some(names) => {
-                let placeholders = vec!["?"; names.len()].join(", ");
-                let sql = format!("SELECT {columns} FROM bcs_group_contexts WHERE name IN ({placeholders}) AND scope = ? AND is_superseded = FALSE AND scope_level = 'session'");
-                let params = names.iter().map(|name| DbValue::from(name.as_str()))
-                    .chain(std::iter::once(scope.into())).collect();
-                (sql, params)
-            }
-        };
-        let rows = self.db.query(DbStatement::with_params(sql, params)).await.map_err(GroupContextStoreError::backend)?;
-        rows.iter().map(|row| self.row_to_entry(row)).collect()
-    }
-
     async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
         self.has_slot(group_id, name).await
     }
