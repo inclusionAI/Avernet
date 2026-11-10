@@ -257,6 +257,36 @@ def test_a_cross_env_source_is_refused(tmp_path):
     assert seen == []
 
 
+def test_the_source_row_is_read_by_bot_id_and_owner_not_by_bot_id_alone(tmp_path):
+    # A ``bot_id`` is not globally unique (the reserved ``default`` bot has a
+    # row per account), so the strategy reads the source row with
+    # ``get_by_id_and_owner(bot_id, owner_id)`` rather than ``get_by_id(bot_id)``
+    # — the latter's ``first()`` could return another owner's row and converge
+    # the wrong workspace. Assert the owner-scoped read is the one called, and
+    # that the source bot id + the caller's source owner reach it verbatim.
+    seen = []
+    port = _port(tmp_path, _recording_runner(seen))
+    _ok(port, source_owner_id="the_source_owner")
+    call = port._bot_repo.get_by_id_and_owner.call_args
+    assert call.args[0] == "src_1"
+    assert call.args[1] == "the_source_owner"
+    port._bot_repo.get_by_id.assert_not_called()
+
+
+def test_a_source_bot_under_a_different_owner_is_refused_without_rsync(tmp_path):
+    # When the owner-scoped read finds nothing (no row for this owner — a
+    # ``default`` bot_id that belongs to a *different* account), the port must
+    # surface "source bot not found" rather than fall back to reading by bot_id
+    # alone and converging someone else's workspace.
+    seen = []
+    port = _port(tmp_path, _recording_runner(seen))
+    port._bot_repo.get_by_id_and_owner.return_value = None  # nothing under this owner
+    result = _ok(port, source_owner_id="other_owner")
+    assert result.ok is False
+    assert result.reason == "source bot not found"
+    assert seen == []  # rsync never ran — the wrong owner matched no row
+
+
 def test_a_missing_source_workspace_runs_rsync_and_returns_a_composed_reason(tmp_path):
     seen = []
     # The NAS dir is never created, so the source workspace does not exist on
