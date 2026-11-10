@@ -302,6 +302,18 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """Stage-enriched first ``len(pairs)`` matches, without COUNT.
+
+        Same tenant/env/deletion scope and newest-first ordering as
+        list_bots_by_owner_bot_pairs(page=1, page_size=len(pairs)). At most
+        100 input pairs; empty input returns []. This grants no permissions.
+        """
+        ...
+
+    @abstractmethod
     def list_domain_bots(
         self,
         page: int | None = None,
