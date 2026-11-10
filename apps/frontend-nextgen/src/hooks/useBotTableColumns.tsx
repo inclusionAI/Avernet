@@ -1,6 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
-import BotCopyDeleteAction from '@/components/BotWorkshop/BotCard/BotCopyDeleteAction';
-import BotCopyRetryAction from '@/components/BotWorkshop/BotCard/BotCopyRetryAction';
+import { BotCopyActionsCell } from '@/components/BotWorkshop/BotCard/BotCopyActionsCell';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
@@ -143,29 +142,9 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
-          // copy_state 非空 → 操作列收敛:dst bot 尚在复制中(中间态)或已失败。
-          // view/edit/chat/logs/三点菜单等运行态操作此刻都打不到真目标,一律隐藏;
-          // FAILED 且有 retry → 留重试;删除按钮仅在 dst 已 ACTIVE(copy_state 非空且
-          // lifecycle=running)时展示 —— 中间态 dst 尚未起,删除无意义;FAILED 必然 ACTIVE。
-          // 删除走与三点菜单内删除项相同的 ``onAction('delete')`` + 原确认弹窗,page 层
-          // handler 删除成功后自带 load() 刷新列表。
-          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
-          if (copyState) {
-            const canDelete = bot.lifecycle === 'running' && Boolean(onAction);
-            if (!canDelete) {
-              if (copyState.status === 'FAILED' && onRetryCopy)
-                return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
-              return null;
-            }
-            return (
-              <div className="flex items-center justify-end gap-0" onClick={(event) => event.stopPropagation()}>
-                {copyState.status === 'FAILED' && onRetryCopy ? (
-                  <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />
-                ) : null}
-                <BotCopyDeleteAction bot={bot} onAction={onAction} />
-              </div>
-            );
-          }
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,见 BotCopyActionsCell
+          if (copyState)
+            return <BotCopyActionsCell bot={bot} copyState={copyState} onRetryCopy={onRetryCopy} onAction={onAction} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
