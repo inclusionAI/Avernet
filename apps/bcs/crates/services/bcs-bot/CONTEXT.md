@@ -15,6 +15,18 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
 - Authenticated provider coordination callbacks share reference claims with stream intake.
 - Bot service implementations for BCS, including the independent Bot
   control-plane Core.
+- Authorized candidate search (`BotCandidateSearchCore::search_authorized`)
+  used by the OpenAPI V1 search entry. It reuses the existing worker
+  recommendation and tag enrichment, asks the control plane to validate the
+  whole deduplicated recall batch with the viewer dimension plus approved
+  `friend_ids`, preserves provider order, then hydrates `RegisteredBot` rows
+  with the strict batched `registry.try_get_many`. Provider absence/failure or
+  an empty authorized subset falls back to a viewer-scoped name query;
+  control-plane and registry failures propagate as errors. The legacy
+  `search_candidates` policy is unchanged, and the authorized entry fails
+  closed until composition wiring injects the control plane. Genuinely missing
+  registry ids are skipped even when the entire semantic subset vanishes,
+  returning an empty `Semantic` result without triggering name fallback.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
 - Admin onboard (`BotOnboarding`) applies an optional `AvatarChange`

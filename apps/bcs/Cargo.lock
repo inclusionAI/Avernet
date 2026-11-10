@@ -633,6 +633,7 @@ dependencies = [
  "bcs-db-local",
  "bcs-domain",
  "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
@@ -2234,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

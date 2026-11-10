@@ -518,6 +518,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-memory".to_string()]),
             bot_uuids: None,
             name: Some(" needle ".to_string()),
@@ -527,6 +528,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: Some(BotSearchFriendshipFilter::All),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -540,6 +542,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: Some(vec![
                 "search-match-memory".to_string(),
@@ -552,6 +555,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -565,6 +569,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -574,6 +579,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -587,6 +593,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -596,6 +603,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -609,6 +617,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -618,6 +627,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: Some(BotSearchFriendshipFilter::Friends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -631,6 +641,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-memory".to_string()]),
             bot_uuids: None,
             name: None,
@@ -640,6 +651,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: Some(BotSearchFriendshipFilter::Friends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -654,6 +666,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-memory".to_string()]),
             bot_uuids: None,
             name: None,
@@ -663,6 +676,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: Some(BotSearchFriendshipFilter::NonFriends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -676,6 +690,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -685,6 +700,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: None,
             tc_bot: Some(true),
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -698,6 +714,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             acting_bot_id: "acting-memory-search".to_string(),
             env: env,
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -707,6 +724,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             status: None,
             friendship: None,
             tc_bot: Some(false),
+            name_only: false,
             offset: 0,
             limit: 20,
         })

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use bcs_bot::BotControlPlaneCore;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_service_api::{
-    BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities, BotControlPlaneCoreService,
+    ActorKind, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities, BotControlPlaneCoreService,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotRepoPort, ProviderBotBinding,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort,
 };
@@ -153,6 +153,7 @@ async fn candidate_views_preserve_repo_total_and_friend_flag() {
             acting_bot_id: "acting".to_string(),
             env: fixture.env.clone(),
             visibility: BotCandidateVisibility::Collaboration,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::from(["private-friend".to_string()]),
             name: None,
             offset: 0,

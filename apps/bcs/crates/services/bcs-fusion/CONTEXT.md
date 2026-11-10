@@ -5,6 +5,11 @@
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.
 - BCSFuse-backed `FusionCoreService` implementation using the transport-only external client.
 - BCSFuse-backed `WorkerProfileCoreService` implementation and worker sync helpers.
+- Recall-scope translation for worker recommendation: the Core passes a typed
+  `WorkerRecommendationScope`; this crate maps `LegacyDefault` to no outbound
+  `filters` (provider default preserved) and `AllVisibilities` to the controlled
+  `filters.availability = [public, protected, private]`. The fusion layer never
+  decides viewer authorization; it only translates the scope the Core chose.
 - Bot context file loading for `IDENTITY.md`, `SOUL.md`, `RULES.md`, and `MEMORY.md`.
 - Optional LLM-client abstraction used by the local fusion engine.
 

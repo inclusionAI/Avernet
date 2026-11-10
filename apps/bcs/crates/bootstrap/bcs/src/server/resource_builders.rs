@@ -452,18 +452,22 @@ pub(super) fn build_candidate_search_bindings(
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
     fuse_client: Option<Arc<FuseClient>>,
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 ) -> CandidateSearchBindings {
     let worker_profiles: Arc<dyn WorkerProfileCoreService> = match fuse_client {
         Some(client) => Arc::new(FuseWorkerProfileService::new(client)),
         None => Arc::new(EmptyWorkerProfileCoreService),
     };
-    let candidate_search: Arc<dyn BotCandidateSearchCoreService> =
-        Arc::new(BotCandidateSearchCore::new(
-            registry,
-            friends,
-            worker_profiles.clone(),
-            config.bcsfuse.recommend_min_score,
-        ));
+    let mut candidate_search = BotCandidateSearchCore::new(
+        registry,
+        friends,
+        worker_profiles.clone(),
+        config.bcsfuse.recommend_min_score,
+    );
+    if let Some(control_plane) = control_plane {
+        candidate_search = candidate_search.with_control_plane(control_plane);
+    }
+    let candidate_search: Arc<dyn BotCandidateSearchCoreService> = Arc::new(candidate_search);
 
     CandidateSearchBindings {
         worker_profiles,
@@ -727,22 +731,8 @@ pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifie
 mod gateway_principal_tests;
 
 #[cfg(test)]
-mod candidate_search_wiring_tests {
-    use super::*;
-    use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
-
-    #[test]
-    fn bindings_share_one_core_between_legacy_and_v1() {
-        let bindings = build_candidate_search_bindings(
-            &BcsConfig::default(),
-            Arc::new(NoopBotRegistryCoreService),
-            Arc::new(NoopFriendCoreService),
-            None,
-        );
-
-        assert!(Arc::ptr_eq(&bindings.legacy, &bindings.openapi_v1));
-    }
-}
+#[path = "candidate_search_wiring_tests.rs"]
+mod candidate_search_wiring_tests;
 
 pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
     if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
