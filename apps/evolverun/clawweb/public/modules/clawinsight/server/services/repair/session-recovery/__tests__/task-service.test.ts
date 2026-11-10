@@ -315,6 +315,22 @@ describe("self-healing task orchestration", () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
   });
+  it("lets a current Bot collaborator read a private task without granting operations or public sharing", async () => {
+    const { service, deps, records } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const canReadAsBotCollaborator = vi.fn().mockResolvedValue(true);
+    const reader = new SessionRecoveryTaskService({ ...deps, canReadAsBotCollaborator });
+    const collaborator = { userId: "member", isAdmin: false };
+    expect(await reader.detail(task_id, collaborator)).toMatchObject({
+      shared: false, canOperate: false, canManageShare: false,
+    });
+    expect(canReadAsBotCollaborator).toHaveBeenCalledExactlyOnceWith("member", request.target);
+    await expect(reader.setTaskShared(task_id, true, collaborator)).rejects.toMatchObject({ status: 403 });
+    await expect(reader.terminate(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
+    expect(records.get(task_id)?.shared).toBe(false);
+    canReadAsBotCollaborator.mockResolvedValue(false);
+    await expect(reader.detail(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
+  });
   it("lists private linked tasks for administrators without exposing them to other users", async () => {
     const { service } = setup(); const { task_id } = await service.create(request, actor);
     expect(await service.list(request.event_id, { userId: "admin", isAdmin: true })).toMatchObject([{ task_id }]);
