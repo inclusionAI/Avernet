@@ -31,7 +31,7 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 | 编号 | 功能 | 一期规则 |
 |---|---|---|
 | H1 | 查询 slot | 按 Group 列出 slot 名称和描述。 |
-| H2 | 新增 slot | 在指定 Group 下新增 slot。名称在群内唯一，描述可空。 |
+| H2 | 新增 slot | 在指定 Group 下新增 slot。名称区分大小写，在群内唯一，描述可空。 |
 | H3 | 编辑 slot | 可以修改名称或描述。名称变更后，后续创建使用新名称，已有上下文保留原名和内容。 |
 | H4 | 删除 slot | 从 Group 的预定义列表中移除该 slot，已有上下文保留原名和内容。同名重建后，新 slot 可供后续创建时选择。 |
 

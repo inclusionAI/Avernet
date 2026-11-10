@@ -1,5 +1,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[allow(dead_code)]
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -49,6 +52,7 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
         assert_slot_audit_roundtrip(&SqlGroupContextStore::oceanbase(plugin.clone()), suffix).await;
     }
 
+    common::slot_names_are_case_sensitive(&SqlGroupContextStore::oceanbase(plugin)).await;
     manager.close().await;
 }
 

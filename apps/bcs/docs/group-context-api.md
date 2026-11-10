@@ -552,7 +552,7 @@ Each route requires an
 authenticated Human with Owner or Manager (admin) authority on the Group
 driver Bot. Creation records that Human actor as both `creator` and
 `modifier`. Editing records the actor as `modifier` and retains `creator`.
-Names are unique within a Group. Editing or deleting a definition leaves
+Names are case-sensitive and unique within a Group. Editing or deleting a definition leaves
 previously recorded contexts intact.
 
 To create a context with a predefined name, use `group-context add --slot`

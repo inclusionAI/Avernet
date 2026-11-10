@@ -416,3 +416,26 @@ pub async fn current_row_with_expired_business_validity_still_blocks_and_is_retu
         .expect("list active");
     assert!(rows.iter().any(|row| row.name == created.name));
 }
+
+pub async fn slot_names_are_case_sensitive(repo: &dyn GroupContextRepo) {
+    use bcs_domain::group_context::GroupContextSlotChange::{Add, Delete};
+
+    let group = "case-sensitive-slots";
+    repo.change_slot(group, "owner", Add {
+        name: "Timeline".into(),
+        description: String::new(),
+    }).await.unwrap();
+    assert!(repo.slot_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.slot_exists(group, "timeline").await.unwrap());
+
+    repo.change_slot(group, "owner", Add {
+        name: "timeline".into(),
+        description: String::new(),
+    }).await.unwrap();
+    assert_eq!(repo.list_slots(group).await.unwrap().len(), 2);
+
+    repo.change_slot(group, "owner", Delete { name: "timeline".into() }).await.unwrap();
+    assert!(repo.slot_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.slot_exists(group, "timeline").await.unwrap());
+    repo.change_slot(group, "owner", Delete { name: "Timeline".into() }).await.unwrap();
+}

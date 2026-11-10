@@ -199,3 +199,9 @@ async fn sqlite_slot_mutations_are_scoped_and_preserve_creator() {
     repo.change_slot("one", "bob", Delete { name: "events".into() }).await.unwrap();
     assert!(repo.list_slots("one").await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn slot_names_are_case_sensitive_in_memory_and_sqlite() {
+    common::slot_names_are_case_sensitive(&MemoryGroupContextRepo::new()).await;
+    common::slot_names_are_case_sensitive(&sqlite_repo().await).await;
+}

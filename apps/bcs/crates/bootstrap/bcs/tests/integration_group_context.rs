@@ -652,6 +652,12 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context.clone()).await.0,
         StatusCode::BAD_REQUEST);
     context["slot"] = json!(true);
+    let mut mismatched_name = context.clone();
+    mismatched_name["name"] = json!("Timeline");
+    assert_eq!(
+        post_json(&app, add, token_for("judge_bot"), mismatched_name).await.0,
+        StatusCode::BAD_REQUEST
+    );
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context).await.0, StatusCode::OK);
 
     let existing = repo.get_active("timeline", "slot-group:12345678").await.unwrap().unwrap();

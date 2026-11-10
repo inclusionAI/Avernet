@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS bcs_group_context_slots (
     gmt_create TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     gmt_modified TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE KEY uk_group_context_slot_group_name (group_id, name)
-);
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
