@@ -1,5 +1,6 @@
 //! Token-scoped Card management by stable Bot ID.
 use super::*;
+use serde_json::Value;
 use bcs_service_api::application::a2a_bot::{ManagedA2aCard, RegisterAgentCommand};
 use bcs_service_api::types::a2a_bot::a2a_management::{
     self as policy, ManagementCode as Code, ManagementError,
@@ -21,7 +22,7 @@ fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
     })
 }
 impl A2aBotManagement {
-    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String)> {
+    async fn public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
         let provider = self.providers.authenticate_provider_admin(token).await?;
         if provider.disabled {
             return Err(failure(Code::PermissionDenied, "", "PROVIDER_DISABLED"));
@@ -33,7 +34,7 @@ impl A2aBotManagement {
         self.providers
             .pin_a2a_provider_name(&provider.provider_id, &name)
             .await?;
-        Ok((provider.provider_id, name))
+        Ok((provider.provider_id, name, provider.config))
     }
     async fn public_record_by_id(&self, provider: &str, bot_id: &str) -> ServiceResult<A2aBotRecord> {
         if bot_id.is_empty() || bot_id != bot_id.trim() || bot_id.chars().any(char::is_control) {
@@ -77,7 +78,7 @@ impl A2aBotManagement {
         &self,
         command: RegisterAgentCommand,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider_id, provider_name) =
+        let (provider_id, provider_name, provider_config) =
             self.public_provider(&command.provider_admin_token).await?;
         let provider = self
             .providers
@@ -91,14 +92,23 @@ impl A2aBotManagement {
                 "IDENTITY_AWARE_ADMISSION_REQUIRED",
             ));
         }
-        if command.owners.len() != 1
-            || command.owners[0].trim().is_empty()
-            || command.owners[0] != command.owners[0].trim()
-            || command.owners[0].starts_with("human_")
-            || command.owners[0].chars().any(char::is_control)
-        {
-            return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED"));
-        }
+        let owners = match command.owners.filter(|owners| !owners.is_empty()) {
+            Some(owners) => owners,
+            None => {
+                let config: Value = serde_json::from_str(&provider_config)
+                    .map_err(|_| failure(Code::InvalidOwner, "owners", "DEFAULT_OWNER_CONFIG_INVALID"))?;
+                let owner = config.get("a2a").and_then(|a2a| a2a.get("default_owner"))
+                    .and_then(Value::as_str).map(str::to_owned)
+                    .ok_or_else(|| failure(Code::InvalidOwner, "owners", "DEFAULT_OWNER_NOT_CONFIGURED"))?;
+                vec![owner]
+            }
+        };
+        if owners.len() != 1
+            || owners[0].trim().is_empty()
+            || owners[0] != owners[0].trim()
+            || owners[0].starts_with("human_")
+            || owners[0].chars().any(char::is_control)
+        { return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED")); }
         policy::validate_provider_bot_ref(&command.provider_bot_ref)?;
         let (url, card) = self.public_load(command.source).await?;
         policy::validate_summary(command.summary.as_deref(), &card.raw)?;
@@ -110,7 +120,7 @@ impl A2aBotManagement {
                     provider_admin_token: command.provider_admin_token,
                     name: String::new(),
                     provider_bot_ref: command.provider_bot_ref,
-                    owners: command.owners,
+                    owners,
                     summary: command.summary,
                     webhook_url: None,
                     domains: vec![],
@@ -134,7 +144,7 @@ impl A2aBotManagement {
         view(&provider_name, record)
     }
     pub(super) async fn public_find(&self, token:&str, provider_bot_ref:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
-        let (provider,label)=self.public_provider(token).await?;
+        let (provider,label,_)=self.public_provider(token).await?;
         policy::validate_provider_bot_ref(provider_bot_ref)?;
         let Some(record)=self.core.get_by_provider_ref(&provider,provider_bot_ref).await? else {return Ok(vec![])};
         let record=self.public_record_by_id(&provider,&record.bot_uuid).await?;
@@ -149,7 +159,7 @@ impl A2aBotManagement {
         token: &str,
         bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label) = self.public_provider(token).await?;
+        let (provider, label, _) = self.public_provider(token).await?;
         view(&label, self.public_record_by_id(&provider, bot_id).await?)
     }
     pub(super) async fn public_update(
@@ -159,7 +169,7 @@ impl A2aBotManagement {
         source: Option<A2aCardSource>,
         visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label) = self.public_provider(token).await?;
+        let (provider, label, _) = self.public_provider(token).await?;
         if source.is_none() && visibility.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
         let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
@@ -208,7 +218,7 @@ impl A2aBotManagement {
         token: &str,
         bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
-        let (provider, label) = self.public_provider(token).await?;
+        let (provider, label, _) = self.public_provider(token).await?;
         let old = self.public_record_by_id(&provider, bot_id).await?;
         let url = old
             .agent_card_url

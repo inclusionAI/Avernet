@@ -28,7 +28,7 @@ struct Registration {
     provider_bot_ref: String,
     #[serde(default)]
     visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
-    owners: Vec<String>,
+    owners: Option<Vec<String>>,
     summary: Option<String>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
