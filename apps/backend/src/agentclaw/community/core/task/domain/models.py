@@ -646,6 +646,17 @@ class NodeOpResult:
 
 
 @dataclass
+class TaskStopResult:
+    """Task-level manual stop result."""
+
+    task_id: str
+    status: Status
+    stopped_nodes: list[str]
+    reason: str = "manual_stop"
+    operator: str = ""
+
+
+@dataclass
 class TaskCallbackData:
     """回投数据协议(对齐执行模块文档)。
 

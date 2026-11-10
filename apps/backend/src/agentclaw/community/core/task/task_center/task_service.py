@@ -26,11 +26,13 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
+    NodeAction,
     NodeOpResult,
     Status,
     TaskCallbackData,
     TaskExecutionGraph,
     TaskNode,
+    TaskStopResult,
     TaskNodePatch,
     TaskOpResult,
     TaskContext,
@@ -41,7 +43,6 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
-
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
@@ -937,6 +938,95 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             exec_error=exec_error,
         )
         return await self._centralized_adapter.on_bbs_report(patch)
+
+    async def stop_task(
+        self,
+        task_id: str,
+        *,
+        reason: str = "manual_stop",
+        operator: str = "",
+    ) -> TaskStopResult:
+        """Manually cancel every non-terminal node in one task graph.
+
+        This is a small and bounded control-plane action, not a retry variant:
+        it never re-runs a selected candidate and never resets a node into
+        PENDING. It closes non-terminal nodes into the terminal CANCELLED
+        state and settles Relay delivery intents so the redriver cannot
+        revive a stopped baton.
+        """
+        graph = self._graph.query_task_dashboard(task_id)
+        if graph.status is Status.CANCELLED:
+            return TaskStopResult(
+                task_id=task_id,
+                status=Status.CANCELLED,
+                stopped_nodes=[],
+                reason=reason,
+                operator=operator,
+            )
+        if graph.status in {Status.SUCCESS, Status.DONE, Status.FAILED, Status.HUNG}:
+            raise TaskStateError(
+                f"task is already terminal: task_id={task_id} status={graph.status.value}"
+            )
+
+        stop_nodes = [
+            node for node in graph.tasks
+            if node.status in {Status.PENDING, Status.PLANNING, Status.RUNNING}
+        ]
+        if not stop_nodes:
+            raise TaskStateError(
+                f"task has no cancellable nodes: task_id={task_id} status={graph.status.value}"
+            )
+
+        stopped_nodes: list[str] = []
+        patch_props = {
+            "manual_stop": True,
+            "stop_reason": reason,
+            "stop_operator": operator or "unauthenticated",
+        }
+        for node in stop_nodes:
+            previous_status = node.status
+            result = await self.update_task_node_info(
+                task_id,
+                node.node_id,
+                status=Status.CANCELLED.value,
+                failure_reason=reason,
+                extend_props_patch=patch_props,
+            )
+            if not result.success:
+                raise TaskStateError(
+                    f"manual task stop failed: task_id={task_id} node={node.node_id}"
+                )
+
+            stop_token = str(
+                node.run_info.extend_props.get("relay_token") or ""
+            ).strip()
+            if stop_token and self._delivery_intents is not None:
+                self._delivery_intents.settle_delivery_intent(
+                    task_id, node.node_id, stop_token
+                )
+            self._graph.append_action_event(
+                task_id,
+                node.node_id,
+                NodeAction.TRANSITION,
+                {
+                    "reason": reason,
+                    "operator": operator,
+                    "action_result": "cancelled",
+                    "status_from": previous_status.value,
+                    "status_to": Status.CANCELLED.value,
+                },
+                status_from=previous_status,
+                status_to=Status.CANCELLED,
+            )
+            stopped_nodes.append(node.node_id)
+
+        return TaskStopResult(
+            task_id=task_id,
+            status=Status.CANCELLED,
+            stopped_nodes=stopped_nodes,
+            reason=reason,
+            operator=operator,
+        )
 
     async def update_task_node_info(
         self,

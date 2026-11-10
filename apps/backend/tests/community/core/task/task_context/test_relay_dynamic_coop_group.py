@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -15,6 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
+    NodeAction,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -78,6 +80,22 @@ def _graph_service() -> TaskGraphService:
     graph.tasks.append(root)
     service = TaskGraphService()
     service._graphs[graph.task_id] = graph
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "manager worker candidates",
+            "relay_token_fingerprint": hashlib.sha256(b"generation-1").hexdigest(),
+            "candidate_count": 2,
+            "candidates": [
+                {"bot_id": "bot-manager", "name": "Manager", "score": 0.9},
+                {"bot_id": "bot-worker", "name": "Worker", "score": 0.8},
+            ],
+        },
+    )
     return service
 
 
