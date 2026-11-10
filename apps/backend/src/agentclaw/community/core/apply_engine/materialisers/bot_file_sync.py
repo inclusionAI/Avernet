@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from agentclaw.community.log import get_logger
+
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.desired_state import DesiredBotFileSync
 from agentclaw.community.core.apply_engine.outcomes import (
@@ -52,6 +54,8 @@ from agentclaw.community.core.ports.bot_file_sync_port import (
     BotFileSyncPort,
     BotFileSyncTarget,
 )
+
+logger = get_logger()
 
 
 class BotFileSyncMaterialiser(Materialiser):
@@ -108,6 +112,14 @@ class BotFileSyncMaterialiser(Materialiser):
                     excludes=entry.excludes,
                 )
             except Exception:  # noqa: BLE001 — composed, never raw in the report
+                # The report says the catch-all ``"bot file sync failed"``;
+                # the log gets the traceback that says what actually failed,
+                # so a PARTIAL with no per-branch reason (resolve_build_plan /
+                # mkdir / rsync are logged inside the port) can still be traced.
+                logger.exception(
+                    "bot_file_sync.materialiser_failed bot_id=%s source_bot_id=%s",
+                    ctx.bot_id, entry.source_bot_id,
+                )
                 outcome = EntryOutcome.FAILED
                 reason = "bot file sync failed"
             else:
