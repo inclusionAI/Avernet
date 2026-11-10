@@ -242,7 +242,7 @@ impl BotService for FakeBotService {
         Ok(Page {
             items: vec![BotCandidate {
                 bot: physical_bot(),
-                is_friend: false,
+                is_friend: true,
             }],
             total: 1,
             offset: 5,

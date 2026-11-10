@@ -55,6 +55,16 @@ codes live only in a temporary directory/in memory and are not artifacts.
   login to prove saturation neither evicts live batches nor prevents recovery.
 - Concurrent V1/legacy refresh: exactly one HTTP request wins the CAS; stale
   logout still revokes its rotated descendant.
+- BCS-only candidate discovery: two actual OAuth browser sessions register Bots,
+  search as Human/managed Bot, enforce cross-viewer visibility and reject foreign
+  perspectives. Pending requests become approved Connect edges only after the
+  target manager accepts them. Lists and semantic search agree on `is_friend`,
+  including a friend subsequently made private. A loopback BCSFuse stub checks
+  real outbound recall scopes and supplies deterministic ordering, empty recalls
+  and HTTP failures; a separate provider-disabled process verifies name fallback.
+  Registration and relationship state are created through HTTP, never direct SQL
+  or Core calls. These processes use the existing OAuth runtime profile pool and
+  fail the companion on assertion errors, without changing coverage thresholds.
 - Operator startup: malformed source tables/values, unknown/duplicate sources,
   missing fields, invalid URLs/origins/redirects, secret lookup/key failures,
   and JSON/TOML native-value guards must fail before any server is published.

@@ -604,6 +604,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             friend_store.clone(),
             None,
+            Some(provider_control_plane.clone()),
         );
         let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> =
             Arc::new(bcs_bot::ActorDirectory::new(

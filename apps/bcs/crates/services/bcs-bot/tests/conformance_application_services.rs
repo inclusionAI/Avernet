@@ -491,6 +491,7 @@ async fn conformance_empty_worker_profile_core_service() {
             query: "contract query".to_string(),
             top_k: 7,
             min_score: 0.42,
+            scope: bcs_service_api::WorkerRecommendationScope::LegacyDefault,
         },
         &[],
         &serde_json::Value::Null,

@@ -1,10 +1,10 @@
 //! Shared contracts for candidate search and worker-profile enrichment.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use async_trait::async_trait;
 
-use super::{RegisteredBot, ServiceResult};
+use super::{ActorKind, RegisteredBot, ServiceResult};
 use crate::types::BotCandidateVisibility;
 
 /// Normalized input for candidate search.
@@ -16,6 +16,24 @@ pub struct BotCandidateSearchQuery {
     pub query: String,
     pub acting_actor_id: String,
     pub visibility: BotCandidateVisibility,
+    pub limit: usize,
+}
+
+/// Authorized candidate search input for the OpenAPI V1 viewer perspective.
+///
+/// `viewer_kind` selects the visibility dimension the authoritative control
+/// plane filters on (`user_visibility` for a Human viewer, `visibility` for a
+/// Bot viewer), while `friend_ids` carries the approved Connect/edge friend
+/// set used for the collaboration branch. Candidate recall may over-fetch,
+/// but the control plane re-checks these fields before anything is returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizedCandidateSearchQuery {
+    pub query: String,
+    pub acting_actor_id: String,
+    pub env: String,
+    pub viewer_kind: ActorKind,
+    pub visibility: BotCandidateVisibility,
+    pub friend_ids: HashSet<String>,
     pub limit: usize,
 }
 
@@ -76,6 +94,36 @@ pub trait BotCandidateSearchCoreService: Send + Sync {
         &self,
         query: BotCandidateSearchQuery,
     ) -> LegacyBotCandidateSearchCoreResult;
+
+    /// Search candidates for an authorized OpenAPI V1 viewer perspective.
+    ///
+    /// Production Core implementations validate the provider recall batch
+    /// against the authoritative control plane and then hydrate registry rows
+    /// strictly. The default refuses explicitly so test doubles and legacy
+    /// implementations keep compiling while an unconfigured composition never
+    /// returns an unauthorized success.
+    async fn search_authorized_candidates(
+        &self,
+        query: AuthorizedCandidateSearchQuery,
+    ) -> ServiceResult<BotCandidateSearchCoreResult> {
+        let _ = query;
+        Err(crate::types::ServiceError::InternalError(
+            "authorized candidate search is not configured".into(),
+        ))
+    }
+}
+
+/// Recall scope sent to a worker-profile provider.
+///
+/// Recall scope is NOT authorization: `LegacyDefault` preserves the provider
+/// default behaviour (BCSFuse excludes `availability=private`), while
+/// `AllVisibilities` asks the provider not to drop candidates before BCS can
+/// apply the authoritative viewer/edge filters. Every construction site must
+/// choose explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerRecommendationScope {
+    LegacyDefault,
+    AllVisibilities,
 }
 
 /// Worker-profile request for semantic candidate recommendation.
@@ -84,6 +132,7 @@ pub struct WorkerRecommendCommand {
     pub query: String,
     pub top_k: u32,
     pub min_score: f64,
+    pub scope: WorkerRecommendationScope,
 }
 
 /// One worker recommendation from a worker-profile provider such as BCSFuse.
