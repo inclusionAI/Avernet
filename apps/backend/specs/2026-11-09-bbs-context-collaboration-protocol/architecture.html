@@ -3,16 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ACCS L1-L6：Context 自主协作最小架构</title>
+  <title>ACCS L1-L6：Context 自主协作架构</title>
   <style>
     html, body { margin: 0; background: #fff; }
     .architecture { display: block; width: 100%; height: auto; }
-    .architecture text { fill: #262626; font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 22px; }
+    .architecture text { fill: #262626; font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 21px; }
     .heading { font-size: 31px; font-weight: 700; }
     .subheading { font-size: 19px; fill: #536273; }
     .layer-label { font-size: 27px; font-weight: 700; }
     .layer-name { font-size: 21px; font-weight: 700; }
     .band { stroke: #555; stroke-width: 3; stroke-dasharray: 8 8; }
+    .delivery { fill: #fff7e8; }
     .l1 { fill: #e7f0fa; }
     .l2 { fill: #eaf4fb; }
     .l3 { fill: #edf6fa; }
@@ -21,183 +22,230 @@
     .l6 { fill: #f1e8fb; }
     .card rect { fill: #fff; stroke: #68717a; stroke-width: 2.5; }
     .card-title { font-size: 23px; font-weight: 700; text-anchor: middle; }
-    .object { font-size: 19px; fill: #2f4e68; }
-    .note { font-size: 17px; fill: #5f6368; }
+    .object { font-size: 18px; fill: #2f4e68; }
+    .note { font-size: 16px; fill: #5f6368; }
+    .small { font-size: 15px; fill: #5f6368; }
     .connector { fill: none; stroke: #68717a; stroke-width: 3; stroke-dasharray: 8 8; marker-end: url(#arrowhead); }
     .governance rect { fill: #f8fafc; stroke: #7b8794; stroke-width: 3; }
     .governance text { font-size: 18px; }
+    .persistence rect { fill: #f3f8f5; stroke: #4f7b68; stroke-width: 3; }
   </style>
 </head>
 <body>
-  <!-- 只展示当前三个 API 必需的对象；L2/L3/L5/L6 仅以引用或枚举字段出现。 -->
-  <svg class="architecture" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 2540"
-       width="2400" height="2540" role="img" aria-labelledby="diagram-title diagram-description">
-    <title id="diagram-title">ACCS L1-L6：Context 自主协作最小架构</title>
-    <desc id="diagram-description">从上到下为 L6 到 L1，展示三个 API 所需的最小字段和两个持久化对象；底部为 G1-G4 横切治理。未使用的 ACCS 对象不创建。</desc>
+  <!-- Service API Delivery 位于 ACCS L1-L6 之外；领域对象按 L1-L6 保留，持久化只新增两张表。 -->
+  <svg class="architecture" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2600 3220"
+       width="2600" height="3220" role="img" aria-labelledby="diagram-title diagram-description">
+    <title id="diagram-title">ACCS L1-L6：基于 Context 自主协作架构</title>
+    <desc id="diagram-description">北向 Service API Delivery 位于 L1-L6 之外；L1 只承载 A2A 互操作与交付桥接，L2 到 L6 按需保留正式 ACCS 对象，G1 到 G4 横切治理，L4 领域事实只通过 Collet 与 Event record 两张表持久化。</desc>
     <defs>
       <marker id="arrowhead" viewBox="0 0 24 18" refX="24" refY="9" markerWidth="24" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
         <path d="M 0 0 L 24 9 L 0 18 L 5 9 Z" fill="#68717a"/>
       </marker>
     </defs>
 
-    <text class="heading" x="1200" y="48" text-anchor="middle">ACCS L1-L6：基于 Context 自主协作的最小架构</text>
-    <text class="subheading" x="1200" y="82" text-anchor="middle">只服务三个 API；两个持久化对象，其他层只保留必要字段或外部引用</text>
-    <path class="connector" d="M 116 2300 V 150"/>
-    <text class="note" x="85" y="135" text-anchor="middle">组合方向</text>
-    <text class="note" x="150" y="1250" text-anchor="middle" transform="rotate(-90 150 1250)">L1 → L6：交付基础逐层组合为产品</text>
+    <text class="heading" x="1300" y="48" text-anchor="middle">ACCS L1-L6：基于 Context 自主协作架构</text>
+    <text class="subheading" x="1300" y="82" text-anchor="middle">按 ACCS 正式对象命名；数据库只新增 Collet 与 Event record 两张表</text>
 
-    <!-- L6 -->
-    <g aria-label="L6 Compose Methods into Products">
-      <rect class="band l6" x="220" y="115" width="2100" height="300" rx="12"/>
-      <text class="layer-label" x="245" y="170">L6</text>
-      <text class="layer-name" x="245" y="205">Compose Methods</text>
-      <text class="layer-name" x="245" y="233">into Products</text>
+    <!-- 北向 Service API Delivery：不属于 L1-L6 -->
+    <g aria-label="北向 Service API Delivery，不属于 L1-L6">
+      <rect class="band delivery" x="220" y="110" width="2160" height="355" rx="12"/>
+      <text class="layer-label" x="245" y="165">北向 API</text>
+      <text class="layer-name" x="245" y="200">Service API</text>
+      <text class="layer-name" x="245" y="228">Delivery</text>
+      <text class="note" x="245" y="270">L1-L6 之外</text>
       <g class="card">
-        <rect x="535" y="150" width="790" height="230" rx="14"/>
-        <text class="card-title" x="930" y="190">本方案仅保留字段</text>
-        <text class="object" x="575" y="232">product_kind</text>
-        <text class="object" x="575" y="267">workflow_kind（可选）</text>
-        <text class="note" x="575" y="320">保存于 Collet.context_spec，不建 Profile 表</text>
+        <rect x="535" y="145" width="640" height="285" rx="14"/>
+        <text class="card-title" x="855" y="185">前端 Service API</text>
+        <text class="object" x="575" y="228">POST 创建协作上下文</text>
+        <text class="object" x="575" y="263">POST 新增协作上下文事件</text>
+        <text class="object" x="575" y="298">GET 查询最新状态与任务进度</text>
+        <text class="note" x="575" y="350">/api/v1/collaboration/task/context_collab</text>
+        <text class="note" x="575" y="380">使用 collab_context_id / parent_event / trunk_events</text>
       </g>
       <g class="card">
-        <rect x="1375" y="150" width="880" height="230" rx="14"/>
-        <text class="card-title" x="1815" y="190">当前产品取值</text>
-        <text class="object" x="1415" y="232">BBS：public_discussion</text>
-        <text class="object" x="1415" y="267">团队代办：team_todo</text>
-        <text class="note" x="1415" y="320">不新增 ProductProfile / WorkflowProfile</text>
+        <rect x="1225" y="145" width="640" height="285" rx="14"/>
+        <text class="card-title" x="1545" y="185">HTTP / OpenAPI Adapter</text>
+        <text class="object" x="1265" y="228">解析请求、认证上下文与 schema</text>
+        <text class="object" x="1265" y="263">错误映射与响应序列化</text>
+        <text class="object" x="1265" y="298">调用同一份 Service API 合同</text>
+        <text class="note" x="1265" y="350">/api/v1 与 /openapi/v1</text>
+        <text class="note" x="1265" y="380">不直接操作 L4 持久化对象</text>
+      </g>
+      <g class="card">
+        <rect x="1915" y="145" width="425" height="285" rx="14"/>
+        <text class="card-title" x="2127" y="185">边界</text>
+        <text class="object" x="1955" y="228">Delivery → L1 DTO</text>
+        <text class="object" x="1955" y="263">不属于 ACCS L1</text>
+        <text class="note" x="1955" y="315">不修改 plugin_api</text>
+        <text class="note" x="1955" y="345">不放 task/forum</text>
+        <text class="note" x="1955" y="375">不放 task/bbs</text>
+      </g>
+    </g>
+
+    <!-- L6 -->
+    <g aria-label="L6 Products">
+      <rect class="band l6" x="220" y="2110" width="2160" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="2165">L6</text>
+      <text class="layer-name" x="245" y="2200">Compose Methods</text>
+      <text class="layer-name" x="245" y="2228">into Products</text>
+      <g class="card">
+        <rect x="535" y="2145" width="800" height="230" rx="14"/>
+        <text class="card-title" x="935" y="2185">领域对象</text>
+        <text class="object" x="575" y="2227">ProductProfile · MethodComposition</text>
+        <text class="object" x="575" y="2262">ScenarioRole · DomainProfile · WorkflowProfile</text>
+        <text class="note" x="575" y="2310">Profile 引用与版本；不建立 Profile 注册表</text>
+      </g>
+      <g class="card">
+        <rect x="1385" y="2145" width="900" height="230" rx="14"/>
+        <text class="card-title" x="1835" y="2185">当前产品取值</text>
+        <text class="object" x="1425" y="2227">BBS：public_discussion</text>
+        <text class="object" x="1425" y="2262">团队代办：team_todo</text>
+        <text class="note" x="1425" y="2310">写入 Collet.context_spec 的产品语义</text>
       </g>
     </g>
 
     <!-- L5 -->
-    <g aria-label="L5 Compose Primitives into Methods">
-      <rect class="band l5" x="220" y="445" width="2100" height="300" rx="12"/>
-      <text class="layer-label" x="245" y="500">L5</text>
-      <text class="layer-name" x="245" y="535">Compose Primitives</text>
-      <text class="layer-name" x="245" y="563">into Methods</text>
+    <g aria-label="L5 Methods">
+      <rect class="band l5" x="220" y="1775" width="2160" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="1830">L5</text>
+      <text class="layer-name" x="245" y="1865">Compose Primitives</text>
+      <text class="layer-name" x="245" y="1893">into Methods</text>
       <g class="card">
-        <rect x="535" y="480" width="790" height="230" rx="14"/>
-        <text class="card-title" x="930" y="520">本方案仅保留字段</text>
-        <text class="object" x="575" y="562">method_kind</text>
-        <text class="object" x="575" y="597">executor_ref（Single 时必填）</text>
-        <text class="note" x="575" y="650">保存于 context_spec / current_snapshot</text>
+        <rect x="535" y="1810" width="800" height="230" rx="14"/>
+        <text class="card-title" x="935" y="1850">领域对象</text>
+        <text class="object" x="575" y="1892">Single · Group · Open</text>
+        <text class="object" x="575" y="1927">MethodBinding</text>
+        <text class="note" x="575" y="1975">方法可组合；当前采用 Open + Group、Single</text>
       </g>
       <g class="card">
-        <rect x="1375" y="480" width="880" height="230" rx="14"/>
-        <text class="card-title" x="1815" y="520">当前方法取值</text>
-        <text class="object" x="1415" y="562">BBS 公开讨论：Open + Group</text>
-        <text class="object" x="1415" y="597">团队任务代办：Single</text>
-        <text class="note" x="1415" y="650">不新增 MethodBinding / Lease</text>
+        <rect x="1385" y="1810" width="900" height="230" rx="14"/>
+        <text class="card-title" x="1835" y="1850">当前方法取值</text>
+        <text class="object" x="1425" y="1892">BBS 公开讨论：Open + Group</text>
+        <text class="object" x="1425" y="1927">团队任务代办：Single</text>
+        <text class="note" x="1425" y="1975">Single 时 executor_ref 必填；不建 Lease 表</text>
       </g>
     </g>
 
     <!-- L4 -->
-    <g aria-label="L4 Define Collaboration Context and Primitives">
-      <rect class="band l4" x="220" y="775" width="2100" height="385" rx="12"/>
-      <text class="layer-label" x="245" y="830">L4</text>
-      <text class="layer-name" x="245" y="865">Define Collaboration</text>
-      <text class="layer-name" x="245" y="893">Context and Primitives</text>
+    <g aria-label="L4 Context and Primitives">
+      <rect class="band l4" x="220" y="1350" width="2160" height="385" rx="12"/>
+      <text class="layer-label" x="245" y="1405">L4</text>
+      <text class="layer-name" x="245" y="1440">Define Collaboration</text>
+      <text class="layer-name" x="245" y="1468">Context and Primitives</text>
       <g class="card">
-        <rect x="535" y="810" width="790" height="315" rx="14"/>
-        <text class="card-title" x="930" y="850">两个持久化对象</text>
-        <text class="object" x="575" y="892">Collet：context_spec + current_snapshot</text>
-        <text class="object" x="575" y="927">ColletEvent：event + payload</text>
-        <text class="object" x="575" y="962">parent_event · current_event_id</text>
-        <text class="object" x="575" y="997">context_version · request_id</text>
-        <text class="note" x="575" y="1050">Task / Message / Progress 只是字段或事件语义</text>
-        <text class="note" x="575" y="1080">不单独落表，不新增独立生命周期</text>
+        <rect x="535" y="1385" width="800" height="315" rx="14"/>
+        <text class="card-title" x="935" y="1425">ACCS L4 正式对象</text>
+        <text class="object" x="575" y="1467">Collet · Participant · RoleBinding</text>
+        <text class="object" x="575" y="1502">Task · Activity · Decision</text>
+        <text class="object" x="575" y="1537">Message · Artifact · ResourceBinding</text>
+        <text class="object" x="575" y="1572">Requirement · Query · EventEnvelope</text>
+        <text class="note" x="575" y="1620">L4 正式对象完整保留，不等于每个对象建表</text>
+        <text class="note" x="575" y="1650">Event record 只是本地持久化记录</text>
       </g>
       <g class="card">
-        <rect x="1375" y="810" width="880" height="315" rx="14"/>
-        <text class="card-title" x="1815" y="850">用户可见事实</text>
-        <text class="object" x="1415" y="892">current_snapshot：目标 / 状态 / 进度</text>
-        <text class="object" x="1415" y="927">payload.content：用户互动正文</text>
-        <text class="object" x="1415" y="962">task_progress.events[]：事件 DAG</text>
-        <text class="object" x="1415" y="997">current_event：当前事件</text>
-        <text class="note" x="1415" y="1050">GET 组合响应，不新增独立查询表</text>
-        <text class="note" x="1415" y="1080">API ID：collab_context_id</text>
+        <rect x="1385" y="1385" width="900" height="315" rx="14"/>
+        <text class="card-title" x="1835" y="1425">权威事实与用户可见状态</text>
+        <text class="object" x="1425" y="1467">Collet：context_spec + current_snapshot</text>
+        <text class="object" x="1425" y="1502">Event record：EventEnvelope + parent_event + payload</text>
+        <text class="object" x="1425" y="1537">task_progress.events[]：事件 DAG</text>
+        <text class="object" x="1425" y="1572">current_event：当前事件与当前进度</text>
+        <text class="note" x="1425" y="1620">Task / Activity / Message / Artifact 是 L4 正式对象</text>
+        <text class="note" x="1425" y="1650">不为它们新增独立表和独立生命周期</text>
       </g>
     </g>
 
     <!-- L3 -->
-    <g aria-label="L3 Model Spaces and Resources">
-      <rect class="band l3" x="220" y="1190" width="2100" height="300" rx="12"/>
-      <text class="layer-label" x="245" y="1245">L3</text>
-      <text class="layer-name" x="245" y="1280">Model Spaces</text>
-      <text class="layer-name" x="245" y="1308">and Resources</text>
+    <g aria-label="L3 Spaces and Resources">
+      <rect class="band l3" x="220" y="1015" width="2160" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="1070">L3</text>
+      <text class="layer-name" x="245" y="1105">Model Spaces</text>
+      <text class="layer-name" x="245" y="1133">and Resources</text>
       <g class="card">
-        <rect x="535" y="1225" width="790" height="230" rx="14"/>
-        <text class="card-title" x="930" y="1265">本方案仅保留引用</text>
-        <text class="object" x="575" y="1307">space</text>
-        <text class="object" x="575" y="1342">resource_refs[]</text>
-        <text class="note" x="575" y="1395">写入 Collet.context_spec，不复制正文</text>
+        <rect x="535" y="1050" width="800" height="230" rx="14"/>
+        <text class="card-title" x="935" y="1090">领域对象</text>
+        <text class="object" x="575" y="1132">Space · Membership</text>
+        <text class="object" x="575" y="1167">Resource · Grant</text>
+        <text class="object" x="575" y="1202">Policy Authority</text>
+        <text class="note" x="575" y="1250">只保存 L3 引用；L4 通过 ResourceBinding 带入 Collet</text>
       </g>
       <g class="card">
-        <rect x="1375" y="1225" width="880" height="230" rx="14"/>
-        <text class="card-title" x="1815" y="1265">当前使用</text>
-        <text class="object" x="1415" y="1307">BBS Topic / Repo / Document</text>
-        <text class="object" x="1415" y="1342">作为 resource_ref 保存</text>
-        <text class="note" x="1415" y="1395">Space / Resource 的权限由外部系统负责</text>
+        <rect x="1385" y="1050" width="900" height="230" rx="14"/>
+        <text class="card-title" x="1835" y="1090">当前产品引用</text>
+        <text class="object" x="1425" y="1132">BBS Topic / Post / Repo / Document</text>
+        <text class="object" x="1425" y="1167">作为 resource_ref 写入 context_spec</text>
+        <text class="note" x="1425" y="1215">Space / Resource 的权限由外部系统负责</text>
       </g>
     </g>
 
     <!-- L2 -->
-    <g aria-label="L2 Define the Agent Network">
-      <rect class="band l2" x="220" y="1520" width="2100" height="300" rx="12"/>
-      <text class="layer-label" x="245" y="1575">L2</text>
-      <text class="layer-name" x="245" y="1610">Define the Agent</text>
-      <text class="layer-name" x="245" y="1638">Network</text>
+    <g aria-label="L2 Agent Network">
+      <rect class="band l2" x="220" y="680" width="2160" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="735">L2</text>
+      <text class="layer-name" x="245" y="770">Define the Agent</text>
+      <text class="layer-name" x="245" y="798">Network</text>
       <g class="card">
-        <rect x="535" y="1555" width="790" height="230" rx="14"/>
-        <text class="card-title" x="930" y="1595">本方案仅保留引用</text>
-        <text class="object" x="575" y="1637">principal_ref</text>
-        <text class="object" x="575" y="1672">actor_ref · executor_ref</text>
-        <text class="note" x="575" y="1725">身份、能力和授权不在本域建表</text>
+        <rect x="535" y="715" width="800" height="230" rx="14"/>
+        <text class="card-title" x="935" y="755">领域对象</text>
+        <text class="object" x="575" y="797">Principal · Agent · Capability · Delegation</text>
+        <text class="note" x="575" y="880">L2 正式对象引用；不复制身份与能力注册表</text>
       </g>
       <g class="card">
-        <rect x="1375" y="1555" width="880" height="230" rx="14"/>
-        <text class="card-title" x="1815" y="1595">指定执行约束</text>
-        <text class="object" x="1415" y="1637">Single → executor_ref 必填</text>
-        <text class="object" x="1415" y="1672">G1 校验 actor / executor 权限</text>
-        <text class="note" x="1415" y="1725">只保存稳定引用，不复制 Agent 注册</text>
+        <rect x="1385" y="715" width="900" height="230" rx="14"/>
+        <text class="card-title" x="1835" y="755">指定执行约束</text>
+        <text class="object" x="1425" y="797">Single → executor_ref 必填</text>
+        <text class="object" x="1425" y="832">G1 校验 actor / executor / capability</text>
+        <text class="note" x="1425" y="880">Participant 是协作关系，不等于权限</text>
+        <text class="note" x="1425" y="910">身份与授权仍由外部系统负责</text>
       </g>
     </g>
 
     <!-- L1 -->
     <g aria-label="L1 Interoperate and Deliver">
-      <rect class="band l1" x="220" y="1850" width="2100" height="300" rx="12"/>
-      <text class="layer-label" x="245" y="1905">L1</text>
-      <text class="layer-name" x="245" y="1940">Interoperate</text>
-      <text class="layer-name" x="245" y="1968">and Deliver</text>
+      <rect class="band l1" x="220" y="485" width="2160" height="155" rx="12"/>
+      <text class="layer-label" x="245" y="540">L1</text>
+      <text class="layer-name" x="245" y="575">Interoperate and Deliver</text>
       <g class="card">
-        <rect x="535" y="1885" width="790" height="230" rx="14"/>
-        <text class="card-title" x="930" y="1925">三个 Service API</text>
-        <text class="object" x="575" y="1967">POST 创建协作上下文</text>
-        <text class="object" x="575" y="2002">POST 新增协作上下文事件</text>
-        <text class="object" x="575" y="2037">GET 查询最新状态</text>
-        <text class="note" x="575" y="2085">/api/v1 + /openapi/v1 delivery</text>
-      </g>
-      <g class="card">
-        <rect x="1375" y="1885" width="880" height="230" rx="14"/>
-        <text class="card-title" x="1815" y="1925">交付边界</text>
-        <text class="object" x="1415" y="1967">解析 / 认证 / schema / 序列化</text>
-        <text class="object" x="1415" y="2002">调用同一份 Service API</text>
-        <text class="note" x="1415" y="2055">不引入 Agent Card、A2A Task 等对象</text>
-        <text class="note" x="1415" y="2085">不修改 plugin_api / task/forum / task/bbs</text>
+        <rect x="535" y="510" width="1750" height="105" rx="14"/>
+        <text class="object" x="575" y="552">Agent Card</text>
+        <text class="object" x="1075" y="552">a2a.Message · a2a.Task</text>
+        <text class="object" x="1645" y="552">Part · a2a.Artifact</text>
+        <text class="note" x="575" y="588">用于指定 Agent 的互操作 / 交付；北向 Service API 仍位于 L1-L6 之外</text>
       </g>
     </g>
 
-    <!-- Governance -->
+    <!-- 组合关系与方向 -->
+    <path class="connector" d="M 1300 640 V 680"/>
+    <path class="connector" d="M 1300 980 V 1015"/>
+    <path class="connector" d="M 1300 1315 V 1350"/>
+    <path class="connector" d="M 1300 1735 V 1775"/>
+    <path class="connector" d="M 1300 2075 V 2110"/>
+    <text class="note" x="92" y="1580" text-anchor="middle" transform="rotate(-90 92 1580)">L1 → L6：交付基础逐层组合为产品</text>
+    <path class="connector" d="M 130 2150 V 505"/>
+    <text class="note" x="90" y="450" text-anchor="middle">组合方向</text>
+
+    <!-- G1-G4 横切治理 -->
     <g class="governance" aria-label="G1-G4 横切治理面">
-      <rect x="220" y="2200" width="2100" height="245" rx="12"/>
-      <text class="heading" x="260" y="2250">G1-G4 横切治理面（仅服务三个 API）</text>
-      <text x="260" y="2290">G1：Authorization · Visibility</text>
-      <text x="960" y="2290">G2：request_id · expected_version · parent_event · trunk_events</text>
-      <text x="260" y="2335">G3：current_snapshot + task_progress.events[] 查询投影</text>
-      <text x="960" y="2335">G4：Schema · Version · 有限状态值校验</text>
-      <text class="note" x="260" y="2390">不创建 Audit、Lease、StateMachine、Metric 等独立表或对象</text>
+      <rect x="220" y="2450" width="2160" height="270" rx="12"/>
+      <text class="heading" x="260" y="2500">G1-G4 横切治理面</text>
+      <text x="260" y="2545">G1：Authentication · Authorization · Policy · Audit</text>
+      <text x="1370" y="2545">G2：Idempotency · Recovery · Reliability Signal</text>
+      <text x="260" y="2595">G3：Observation · Outcome → 查询投影</text>
+      <text x="1370" y="2595">G4：Schema · Version · State Machine · Conformance</text>
+      <text class="note" x="260" y="2660">治理规则横切 L1-L6；当前不建立独立 Audit、Lease、Metric 或 State Machine 表</text>
     </g>
 
-    <text class="subheading" x="1200" y="2500" text-anchor="middle">实现时最小落点：L1 Service API、L4 两个模型与 Repository、G1-G4 必要校验、两个 HTTP adapter</text>
+    <!-- 最小持久化说明 -->
+    <g class="persistence" aria-label="最小持久化边界">
+      <rect x="220" y="2760" width="2160" height="290" rx="12"/>
+      <text class="heading" x="260" y="2810">最小持久化边界（数据库仅两张表）</text>
+      <text class="object" x="300" y="2860">ac_context_collab_collet</text>
+      <text class="note" x="830" y="2860">Collet 聚合快照：context_spec、current_snapshot、current_event_id、context_version</text>
+      <text class="object" x="300" y="2915">ac_context_collab_event</text>
+      <text class="note" x="830" y="2915">Event record：EventEnvelope、event_kind、parent_event、payload、request_id、sequence_no</text>
+      <text class="note" x="300" y="2975">ACCS L4 正式对象通过聚合内对象、值对象、快照字段和事件语义表达；不因数据库最小化而删除领域对象</text>
+    </g>
+
+    <text class="subheading" x="1300" y="3150" text-anchor="middle">实现落点：core/task/context_collab/，按 l1-l6、g1-g4 分目录；不创建 source/，不修改 plugin_api、task/forum、task/bbs</text>
   </svg>
 </body>
 </html>
