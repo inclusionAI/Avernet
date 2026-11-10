@@ -47,6 +47,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
     handbookConfig?: RecoveryHandbookConfigStore;
+    canReadAsBotCollaborator?: (userId: string, target: RecoveryRequest["target"]) => Promise<boolean>;
   }) { this.now = deps.now ?? Date.now; }
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
@@ -289,7 +290,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView> {
     const task = await this.required(taskId);
     const canOperate = this.canOperate(task, actor);
-    if (!canOperate && task.shared !== true) this.fail(403, "权限不足，请联系任务 Owner 开启分享");
+    if (!canOperate && task.shared !== true
+      && (task.simulation || !await this.deps.canReadAsBotCollaborator?.(actor.userId, task.request.target))) {
+      this.fail(403, "权限不足，请联系任务 Owner 开启分享");
+    }
     const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...view } = task;
     const executions = await this.deps.agent.listExecutions(taskId);
     return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,

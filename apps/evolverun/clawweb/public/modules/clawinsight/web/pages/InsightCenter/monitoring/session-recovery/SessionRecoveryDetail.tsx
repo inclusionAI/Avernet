@@ -707,7 +707,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     </div>}
 
     {!task ? <div role="status" className="sr-empty large">{error ? '任务未能加载，请重试。' : '正在读取任务…'}</div> : <>
-      {!task.canOperate && <section role="status" className="sr-alert"><MonitoringIcon name="user" /><div><strong>共享的只读自愈任务</strong><p>可查看方案、执行过程与恢复结果；方案确认、配合事项和人工标注仅任务 Owner 可操作。</p></div></section>}
+      {!task.canOperate && <section role="status" className="sr-alert"><MonitoringIcon name="user" /><div><strong>{task.shared ? '共享的只读自愈任务' : 'Bot 协作者只读'}</strong><p>可查看方案、执行过程与恢复结果；方案确认、配合事项和人工标注仅任务 Owner 可操作。</p></div></section>}
       {task.status === 'canceled' && <section role={task.termination?.status === 'remote_stop_failed' ? 'alert' : 'status'} className="sr-alert">
         <div><strong>本次自愈已停止</strong><p>{task.termination?.status === 'remote_stopped' ? 'AIS 已停止，后续自愈处理已取消。'
           : task.termination?.status === 'remote_stop_failed' ? '后续干预已禁止，但 AIS 停止请求未成功，可重试停止 AIS。'
