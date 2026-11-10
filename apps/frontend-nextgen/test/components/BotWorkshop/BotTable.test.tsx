@@ -791,7 +791,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('普通空间成员不能使用非协作的 Coding Bot', () => {
+  test('团队空间普通成员未加入 Coding Bot 时展示去申请', () => {
     const bot = mapBotDto({
       bot_id: 'space-member-coding-bot',
       bot_name: '空间成员 Coding Bot',
@@ -800,18 +800,49 @@ describe('Agent Coding Bot row actions', () => {
       template_type: 'myTemplate',
       bot_type: 'personal',
       display_state: 'running',
-      actions: ['view', 'chat'],
+      actions: ['view'],
+      space: { space_id: '1', kind: 'team' },
+    }).item;
+    const onConversation = jest.fn();
+    const onAuthorize = jest.fn();
+    renderTable(bot, {
+      onConversation,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      canOpenConversation: (item) => item.actions.includes('edit'),
+      getCollaborationMode: () => 'request',
+      onAuthorize,
+    });
+
+    expect(screen.queryByRole('button', { name: '去使用 空间成员 Coding Bot' })).not.toBeInTheDocument();
+    const requestButton = screen.getByRole('button', { name: '去申请 空间成员 Coding Bot' });
+    fireEvent.click(requestButton);
+    expect(onAuthorize).toHaveBeenCalledWith(bot);
+    expect(onConversation).not.toHaveBeenCalled();
+  });
+
+  test('团队空间 Coding Bot 成员仍展示去使用', () => {
+    const bot = mapBotDto({
+      bot_id: 'space-collaborator-coding-bot',
+      bot_name: '团队成员 Coding Bot',
+      owner_id: 'owner-1',
+      active_engine: 'claude_code',
+      template_type: 'myTemplate',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['view', 'edit'],
+      space: { space_id: '1', kind: 'team' },
     }).item;
     const onConversation = jest.fn();
     renderTable(bot, {
       onConversation,
       onAction: jest.fn().mockResolvedValue(undefined),
       canOpenConversation: (item) => item.actions.includes('edit'),
+      getCollaborationMode: () => undefined,
+      onAuthorize: jest.fn(),
     });
 
-    const useButton = screen.getByRole('button', { name: '去使用 空间成员 Coding Bot' });
-    expect(useButton).toBeDisabled();
-    expect(onConversation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '去使用 团队成员 Coding Bot' }));
+    expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
   test('Coding Bot 行内仅固定展示去使用，任务实例与更多操作收口在气泡菜单', () => {
