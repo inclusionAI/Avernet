@@ -46,7 +46,7 @@ describe('WorkOrderCard 详情入口', () => {
   it('已通过的审批类只展示状态文字，不固定展示查看按钮', () => {
     render(<WorkOrderCard workOrder={buildWorkOrder({ status: 'APPROVED', can_approve: false })} />);
 
-    expect(screen.getByText('已通过')).toBeInTheDocument();
+    expect(screen.getByText('已同意')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
   });
 

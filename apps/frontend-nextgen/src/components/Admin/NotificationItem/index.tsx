@@ -1,8 +1,7 @@
-// 通知下拉单条。未读浅蓝底 + 未读 dot；已读透明无 dot。点击跳通知中心对应分类。
+// 通知预览：白底、红色未读点，标题与时间同行；沿用当前用户的本地时间显示。
 import { Button } from '@/components/ui';
 import type { NotificationSummary } from '@/domain/admin/models';
-import { cn } from '@/utils/cn';
-import { formatRelativeTime } from '@/utils/format';
+import { formatNotificationTime } from '@/utils/notificationTime';
 
 export interface NotificationItemProps {
   item: NotificationSummary;
@@ -10,25 +9,35 @@ export interface NotificationItemProps {
 }
 
 export function NotificationItem({ item, onClick }: NotificationItemProps) {
-  const unread = !item.isRead;
   return (
     <Button
       variant="ghost"
-      className={cn('h-auto w-full justify-start rounded-lg px-4 py-2.5 text-left', unread && 'bg-primary/5')}
+      className="group h-auto w-full justify-start whitespace-normal rounded-none px-4 py-2.5 text-left hover:bg-transparent focus-visible:bg-primary/5"
       onClick={() => onClick?.(item)}
     >
       <div className="flex w-full items-start gap-2">
-        <span className="mt-1 h-1.5 w-1.5 shrink-0">
-          {unread && <span className="block h-full w-full rounded-full bg-primary" aria-label="未读" />}
+        <span className="mt-[7px] h-1.5 w-1.5 shrink-0">
+          {!item.isRead && <span className="block h-full w-full rounded-full bg-destructive" aria-label="未读" />}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="m-0 truncate text-sm font-medium text-foreground">{item.title}</p>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+            <p className="m-0 min-w-0 flex-1 break-words text-[13px] font-medium leading-[18px] text-foreground group-hover:text-primary group-focus-visible:text-primary">
+              {item.title}
+            </p>
+            {item.gmtModified && (
+              <time
+                dateTime={item.gmtModified}
+                className="shrink-0 text-xs font-normal leading-[18px] text-muted-foreground"
+              >
+                {formatNotificationTime(item.gmtModified)}
+              </time>
+            )}
+          </div>
           {item.content && (
-            <p className="m-0 mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+            <p className="m-0 mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-[17px] text-muted-foreground">
               {item.content}
             </p>
           )}
-          <p className="m-0 mt-1 text-[10px] text-muted-foreground">{formatRelativeTime(item.gmtModified)}</p>
         </div>
       </div>
     </Button>
