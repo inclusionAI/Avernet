@@ -28,6 +28,22 @@ when there is supported content. Existing ADRs, API docs and
 machine-parsed Context Boundaries keep their formats and authoritative locations.
 Tool-specific instruction files point to shared guidance rather than repeating it.
 
+## Exclusions by file
+
+| File | Do not record |
+| --- | --- |
+| Root or app `AGENTS.md` | Full architecture, detailed runbooks, raw incident records or duplicated module contracts. |
+| `CONTEXT-MAP.md` | Detailed implementations, full specifications, credentials or runtime data. |
+| `CONTEXT.md` | Temporary incident conclusions, volatile configuration inventories or implementation walkthroughs. |
+| `docs/arch/` | One-off task plans or unverified incident hypotheses. |
+| `docs/adr/` | Routine task lists, transient observations or duplicate implementation guides. |
+| `docs/flows/` and app flow pages | Complete source listings, raw incidents or unverified runtime events. |
+| App README | Complete specifications, duplicated domain contracts or private runtime records. |
+| App diagnostics | Credentials, raw production data, unsupported root causes or unauthorized operational actions. |
+| Domain README/CONTEXT | Entire system workflows or rules that override the architecture constitution. |
+| `specs/` | Inferred deployment status, rewritten historical evidence or copies of all current documentation. |
+| Knowledge standard and templates | App-specific facts that are owned by another contract or domain document. |
+
 ## Existing docs and change specs
 
 `docs/` holds reusable knowledge; `specs/` records the intent, decisions, execution
