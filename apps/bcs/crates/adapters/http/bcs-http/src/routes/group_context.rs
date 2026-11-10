@@ -134,10 +134,13 @@ pub(crate) async fn list_slot(
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
 ) -> Result<Response, GroupContextHttpError> {
-    actor_id(&state, &headers, &uri).await?;
+    use super::group_messages::{application_caller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
     let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
-    let slots = state.services.group_context.list_slots(&group_id).await?;
+    let slots = state.services.group_context.list_slots(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
     Ok(json_ok(serde_json::json!({ "slots": slots })))
 }
 

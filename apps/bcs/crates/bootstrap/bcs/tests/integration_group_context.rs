@@ -34,7 +34,7 @@ fn fixture() -> WhoIsSpyFixture {
     .expect("fixture parses")
 }
 
-async fn app_with_repo(repo: Arc<MemoryGroupContextRepo>) -> axum::Router {
+async fn state_with_repo(repo: Arc<MemoryGroupContextRepo>) -> HttpAppState {
     let temp_dir = TempDir::new().expect("temp dir");
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for (bot_id, token) in [
@@ -62,7 +62,11 @@ async fn app_with_repo(repo: Arc<MemoryGroupContextRepo>) -> axum::Router {
         .registry(registry as Arc<dyn BotRegistryCoreService>)
         .group_context(group_context)
         .build_for_test();
-    build_router(HttpAppState::new(services))
+    HttpAppState::new(services)
+}
+
+async fn app_with_repo(repo: Arc<MemoryGroupContextRepo>) -> axum::Router {
+    build_router(state_with_repo(repo).await)
 }
 
 fn token_for(actor: &str) -> &'static str {
@@ -588,7 +592,26 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
 #[tokio::test]
 async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
-    let app = app_with_repo(repo.clone()).await;
+    use bcs_service_api::{Group, GroupCoreService, NewSessionParams, Participant, ParticipantRole, SessionRepoPort};
+
+    let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
+    let driver = Participant::bot("judge_bot", ParticipantRole::Driver);
+    let guest = Participant::bot("张三", ParticipantRole::Consultant);
+    groups.upsert(Group::new("slot-group", "judge_bot", vec![driver.clone()])).await.unwrap();
+    let sessions = Arc::new(bcs_session_store::MemorySessionRepo::new());
+    for (group, id) in [("slot-group", "slot-group:12345678"), ("other-group", "other-group:12345678")] {
+        sessions.create(group, NewSessionParams {
+            id: Some(id.into()),
+            participants: vec![driver.clone(), guest.clone()],
+            ..Default::default()
+        }).await.unwrap();
+    }
+    let mut state = state_with_repo(repo.clone()).await;
+    state.services.group_context = Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
+        state.services.group_context.clone(), groups, sessions,
+        Arc::new(bcs_test_support::NoopBotAuthorityPort),
+    ));
+    let app = build_router(state);
     let list = "/groupcontext/list-slot?groupId=slot-group";
     let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
     for operation in ["add", "update", "delete"] {
@@ -606,6 +629,21 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["slots"][0]["creator"], "human_owner");
+
+    let (status, body) = post_json(&app, list, token_for("张三"), json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body["error_msg"].as_str().unwrap().contains("sessionId"));
+    assert!(body["error_msg"].as_str().unwrap().contains("--session-id"));
+
+    let (status, body) = post_json(
+        &app, &format!("{list}&sessionId=slot-group:12345678"), token_for("张三"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["slots"][0]["name"], "timeline");
+    let (status, _) = post_json(
+        &app, &format!("{list}&sessionId=other-group:12345678"), token_for("张三"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let mut context = json!({
         "name":"timeline","scope_level":"session","content":"event",

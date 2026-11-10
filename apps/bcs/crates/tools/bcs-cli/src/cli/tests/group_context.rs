@@ -494,8 +494,15 @@ fn test_group_context_slot_commands_parse() {
         "bcs-cli", "group-context", "list-slot", "--group-id", "g-1",
     ]).unwrap();
     assert!(matches!(list.command, Commands::GroupContext {
-        command: GroupContextCommands::ListSlot { group_id }, ..
+        command: GroupContextCommands::ListSlot { group_id, session_id: None }, ..
     } if group_id == "g-1"));
+    let guest_list = Cli::try_parse_from([
+        "bcs-cli", "group-context", "list-slot", "--group-id", "g-1",
+        "--session-id", "g-1:12345678",
+    ]).unwrap();
+    assert!(matches!(guest_list.command, Commands::GroupContext {
+        command: GroupContextCommands::ListSlot { session_id: Some(session_id), .. }, ..
+    } if session_id == "g-1:12345678"));
     let add = Cli::try_parse_from([
         "bcs-cli", "group-context", "add", "--slot", "--scope-level", "session",
         "--session-id", "g-1:12345678", "--name", "timeline", "--context", "event",

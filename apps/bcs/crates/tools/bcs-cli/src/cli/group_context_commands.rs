@@ -189,8 +189,8 @@ pub(super) async fn execute(
                 oauth_headers.as_ref(),
             );
             let (operation, group_id, session_id, round_id, body) = match command {
-                GroupContextCommands::ListSlot { group_id } => (
-                    "list-slot", Some(group_id), None, None, json!({}),
+                GroupContextCommands::ListSlot { group_id, session_id } => (
+                    "list-slot", Some(group_id), session_id, None, json!({}),
                 ),
                 GroupContextCommands::Add {
                     slot,

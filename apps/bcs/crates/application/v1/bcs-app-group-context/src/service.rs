@@ -163,7 +163,7 @@ impl GroupContextApplicationServiceImpl {
 
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
-    async fn list_slots(&self, group_id: &str) -> Result<Vec<GroupContextSlot>, ApplicationError> {
+    async fn list_slots(&self, group_id: &str, _caller: &bcs_service_api::application::v1::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextSlot>, ApplicationError> {
         validate_name(group_id)?;
         self.repo.list_slots(group_id).await.map_err(map_store_error)
     }

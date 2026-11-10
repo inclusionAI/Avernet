@@ -174,9 +174,24 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add(command).await
     }
 
-    async fn list_slots(&self, group_id: &str) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
+    async fn list_slots(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
         let group = self.load_group(group_id).await?;
-        self.inner.list_slots(&group.id).await
+        if let Some(bot) = &caller.bot
+            && !group.participants.iter().any(|member| member.bot_uuid == bot.bot_uuid)
+        {
+            let session_id = session_id.filter(|id| !id.trim().is_empty()).ok_or_else(|| {
+                ApplicationError::forbidden_code(
+                    "permission_denied",
+                    "This Bot is not a Group member. If it participates in a Session in this Group, pass sessionId (CLI: --session-id) to verify Session membership.",
+                )
+            })?;
+            let session = self.load_session(session_id).await?;
+            if session.group_id != group.id {
+                return Err(invalid_param("sessionId must identify a Session in the requested Group"));
+            }
+            ensure_participant(&session.participants, &bot.bot_uuid, "the specified Session")?;
+        }
+        self.inner.list_slots(&group.id, caller, session_id).await
     }
 
     async fn add_slot(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {

@@ -31,6 +31,15 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(GroupContextAck::ok())
     }
 
+    async fn list_slots(
+        &self,
+        _: &str,
+        _: &bcs_service_api::application::v1::AuthenticatedCaller,
+        _: Option<&str>,
+    ) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
+        Ok(Vec::new())
+    }
+
     async fn add_slot(&self, _: &str, actor: &str, _: String, _: String) -> Result<(), ApplicationError> {
         self.slot_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
@@ -408,4 +417,33 @@ async fn slot_writes_require_live_authority_on_the_group_driver() {
     }
     assert_eq!(*inner.slot_actors.lock().unwrap(),
         ["human_owner", "human_owner", "human_owner", "human_admin", "human_admin", "human_admin"]);
+}
+
+#[tokio::test]
+async fn slot_discovery_requires_group_membership_or_an_explicit_session() {
+    use bcs_service_api::application::v1::{AuthenticatedBotIdentity, AuthenticatedCaller};
+
+    let (guard, _) = guard_with_group_member("group_member").await;
+    let bot = |id: &str| AuthenticatedCaller {
+        tenant: None,
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: id.into(),
+            owner_id: String::new(),
+            app_id: 0,
+            agent_code: String::new(),
+        }),
+        app: None,
+        access_key: None,
+    };
+
+    guard.list_slots(GROUP_ID, &bot("group_member"), None).await.unwrap();
+    guard.list_slots(GROUP_ID, &bot("session_member"), Some(SESSION_ID)).await.unwrap();
+
+    let missing_session = guard.list_slots(GROUP_ID, &bot("session_member"), None).await.unwrap_err();
+    assert_eq!(missing_session.code(), "permission_denied");
+    assert!(missing_session.to_string().contains("--session-id"));
+
+    let outsider = guard.list_slots(GROUP_ID, &bot("outsider"), Some(SESSION_ID)).await.unwrap_err();
+    assert_eq!(outsider.code(), "permission_denied");
 }

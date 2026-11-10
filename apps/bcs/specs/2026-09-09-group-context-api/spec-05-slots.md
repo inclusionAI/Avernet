@@ -20,7 +20,7 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 
 | 编号 | 功能 | 一期规则 |
 |---|---|---|
-| B1 | 查询预定义 slot | 列出当前 Group 的 slot 名称和描述，bcs-cli group-context list-slot --group-id 'xxx' |
+| B1 | 查询预定义 slot | 列出当前 Group 的 slot 名称和描述，bcs-cli group-context list-slot --group-id 'xxx'。群成员 Bot 可直接查询，仅参与 Session 的 Bot 必须提供 --session-id，服务端校验同群及当前 Session 成员身份。 |
 | B2 | 按 slot 创建/修改 Group Context | 在现有 `group-context add` 中显式选择当前 Group 的 slot，以该名称创建 Session 作用域的上下文，创建 bcs-cli group-context add --scope-level 'session' --session-id 'xx' --name 'xx' --context 'xxx' --slot，如果没有--slot参数，name 不可以是slot定义的名字，更新Group-context时沿用原有is_slot字段|
 
 

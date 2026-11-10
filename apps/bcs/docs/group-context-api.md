@@ -534,6 +534,11 @@ those timestamps. This release does not expose a history API.
 Each entry contains `name`, `description`, `creator`, `modifier`, `gmtCreate`, and `gmtModified`.
 Audit timestamps are returned in UTC with millisecond precision.
 `bcs-cli group-context list-slot --group-id <group-id>` uses this endpoint.
+Group member Bots can list directly. A Bot that participates only in a Session
+must also pass the `sessionId` query parameter or the CLI flag
+`--session-id <session-id>`. The Session must belong to the requested Group,
+and the Bot must be a current participant. If a Bot supplies only the Group ID
+and is not a Group member, the error explains how to supply the Session ID.
 
 Slot management uses three Human-only POST endpoints with the `groupId` query parameter.
 

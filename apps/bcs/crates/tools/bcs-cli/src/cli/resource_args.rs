@@ -20,6 +20,9 @@ pub(super) enum GroupContextCommands {
     ListSlot {
         #[arg(long)]
         group_id: String,
+        /// Required for Bots that participate only in a Session.
+        #[arg(long)]
+        session_id: Option<String>,
     },
     /// Add a new active context.
     Add {
