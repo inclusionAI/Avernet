@@ -258,10 +258,10 @@ impl BotControlPlaneCoreService for FakeControlPlane {
         ))
     }
 
-    async fn search_candidates(
+    async fn search_candidate_records(
         &self,
         query: BotSearchCandidateQuery,
-    ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)> {
+    ) -> ServiceResult<(Vec<bcs_service_api::BotCandidateReadRecord>, u64)> {
         self.queries.lock().unwrap().push(query.clone());
         if let Some(message) = &self.failure {
             return Err(ServiceError::InternalError(message.clone()));
@@ -310,15 +310,9 @@ impl BotControlPlaneCoreService for FakeControlPlane {
             .into_iter()
             .skip(query.offset as usize)
             .take(query.limit as usize)
-            .map(|record| {
-                let is_friend = query.friend_ids.contains(&record.bot_id);
-                BotControlPlaneCandidate {
-                    bot: BotControlPlaneView {
-                        record,
-                        provider: None,
-                    },
-                    is_friend,
-                }
+            .map(|bot| bcs_service_api::BotCandidateReadRecord {
+                is_friend: query.friend_ids.contains(&bot.bot_id),
+                bot,
             })
             .collect();
         Ok((page, total))

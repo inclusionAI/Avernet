@@ -48,6 +48,14 @@ array plus the fixed filters and page bounds), and COUNT binds the same shared
 exactly two statements (page + COUNT) and contains no per-friend `UNION ALL`
 chain; the friend-set binding count does not grow with the set size.
 
+The control-plane Core contract also exposes `search_candidate_records`, a
+Provider-hydration-free search path for authorization. The production
+`BotControlPlaneCore` delegates it directly to the repository's candidate
+record query; authorized candidate search must use it for visibility/edge
+filtering and hydrate Provider metadata only for the final displayed IDs.
+The existing `search_candidates` path remains the hydrated projection for
+callers that need Provider information.
+
 The same 5.0.0 change adds the authorized shared-search contract.
 `BotCandidateSearchCoreService::search_authorized_candidates` takes
 `AuthorizedCandidateSearchQuery` (query text, acting actor, env, `ActorKind`

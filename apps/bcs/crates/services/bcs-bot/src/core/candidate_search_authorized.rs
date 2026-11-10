@@ -93,7 +93,7 @@ impl BotCandidateSearchCore {
         // creation time before authorization.
         let validation_limit = recalled_ids.len() as u64;
         let (authorized, _) = control_plane
-            .search_candidates(BotSearchCandidateQuery {
+            .search_candidate_records(BotSearchCandidateQuery {
                 acting_bot_id: query.acting_actor_id.clone(),
                 env: query.env.clone(),
                 viewer_kind: Some(query.viewer_kind),
@@ -115,7 +115,7 @@ impl BotCandidateSearchCore {
 
         let allowed: HashSet<&str> = authorized
             .iter()
-            .map(|candidate| candidate.bot.record.bot_id.as_str())
+            .map(|candidate| candidate.bot.bot_id.as_str())
             .collect();
         let recalled_count = recalled_ids.len();
         let authorized_count = authorized.len();
@@ -182,7 +182,7 @@ impl BotCandidateSearchCore {
         // BEFORE storage pagination, so the fallback is bounded and scoped
         // exactly like the authoritative list.
         let (candidates, _) = control_plane
-            .search_candidates(BotSearchCandidateQuery {
+            .search_candidate_records(BotSearchCandidateQuery {
                 acting_bot_id: query.acting_actor_id.clone(),
                 env: query.env.clone(),
                 viewer_kind: Some(query.viewer_kind),
@@ -211,7 +211,7 @@ impl BotCandidateSearchCore {
 
         let ids: Vec<String> = candidates
             .iter()
-            .map(|candidate| candidate.bot.record.bot_id.clone())
+            .map(|candidate| candidate.bot.bot_id.clone())
             .collect();
         let bots = self.registry.try_get_many(&ids).await?;
         let rows = bots

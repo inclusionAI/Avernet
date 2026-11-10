@@ -4,7 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
-    ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
+    ActorKind, BotCandidateReadQuery, BotCandidateReadRecord, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
     ControllableCandidateQuery, ControlledBotCandidate,
@@ -192,6 +193,13 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
                 .collect(),
             total,
         ))
+    }
+
+    async fn search_candidate_records(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        self.control_plane.search_control_plane_candidates(query).await
     }
 
     async fn search_candidates(

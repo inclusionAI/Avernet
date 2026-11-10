@@ -22,8 +22,10 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
   `friend_ids`, preserves provider order, then hydrates `RegisteredBot` rows
   with the strict batched `registry.try_get_many`. Provider absence/failure or
   an empty authorized subset falls back to a viewer-scoped name query;
-  control-plane and registry failures propagate as errors. The legacy
-  `search_candidates` policy is unchanged, and the authorized entry fails
+  control-plane and registry failures propagate as errors. Authorization
+  uses the control-plane `search_candidate_records` contract, which must not
+  hydrate Provider metadata; only final displayed Bot IDs use the hydrated
+  control-plane projection. The legacy `search_candidates` policy is unchanged, and the authorized entry fails
   closed until composition wiring injects the control plane. Genuinely missing
   registry ids are skipped even when the entire semantic subset vanishes,
   returning an empty `Semantic` result without triggering name fallback.
