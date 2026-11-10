@@ -1,11 +1,9 @@
-"""BCN uplink PostRunCallback 实现。
-
-BCN 来源 run 执行完成后补发 uplink 事件，由 Worker 或 TaskMessageDispatcher
-在执行完毕后通过 ``callback_function`` 名查找并调用。
-"""
+"""Durable BCN final-event callback state machine."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from secbaas.community.api.bcn import ChatEvent, EventMessage, EventSpeaker, EventUsage
@@ -20,11 +18,15 @@ if TYPE_CHECKING:
 logger = get_logger("core-bot-run")
 
 
-def _build_chat_event(
-    record: BotRunRecord,
-    task_exception: BaseException | None,
-) -> ChatEvent:
-    """根据 BotRunRecord 构造 ChatEvent"""
+class BcnCallbackOutcome(StrEnum):
+    SENT = "SENT"
+    RETRYABLE_PENDING = "RETRYABLE_PENDING"
+    TERMINAL_FAILED = "TERMINAL_FAILED"
+    NOT_ELIGIBLE = "NOT_ELIGIBLE"
+    METADATA_WRITE_FAILED = "METADATA_WRITE_FAILED"
+
+
+def _build_chat_event(record: BotRunRecord) -> ChatEvent:
     if record.status in ("FAILED", "TIME_OUT"):
         state = "error"
     elif record.status == "ABORTED":
@@ -67,53 +69,177 @@ def _build_chat_event(
 
 
 class BcnUplinkCallback:
-    """BCN 来源 run 执行完成后补发 uplink 事件的 PostRunCallback 实现。
+    """Claim, deliver and durably finish one BCN final callback.
 
-    队列化前回调挂在 ``asyncio.Task.add_done_callback`` 上；队列化后请求由 Worker
-    跨进程执行，原 Task 不存在，改由本回调在内层执行器返回后处理。内容读
-    ``baas_bot_run``（结果/状态/metadata），去重标记写在队列工作项的 ``meta`` JSON 中。
-
-    触发条件（与旧行为对齐）：``baas_bot_run.metadata.from_bcn`` 为真且
-    ``request_type != "inject"`` 且 run 处终态（COMPLETED/FAILED）。
-
-    去重：``send_event`` 以 ``event_id=run_id`` 在 BCN 侧幂等；队列 ``meta.bcn_callback_sent``
-    标记避免恢复重跑重复上报。标记 **在上报成功后** 才置位，上报失败保持未置位，
-    留给恢复重投（至少一次 + BCN 侧去重）。
+    The callback never changes ``baas_bot_run.status`` or queue state.  Its only
+    writes are fenced delivery metadata transitions on the result row.
     """
 
     def __init__(
         self,
         uplink_client: UplinkClient,
         run_repository: BotRunRepository,
+        *,
+        max_attempts: int | None = 5,
+        lease_seconds: int | None = 45,
+        retry_backoff_seconds: int = 60,
     ) -> None:
+        # Keep minimal/legacy overlays compatible when DI resolves newly added
+        # callback keys to None.
+        max_attempts = 5 if max_attempts is None else int(max_attempts)
+        lease_seconds = 45 if lease_seconds is None else int(lease_seconds)
+        if max_attempts <= 0 or lease_seconds <= 0 or retry_backoff_seconds < 0:
+            raise ValueError("callback retry/lease configuration is invalid")
         self._uplink_client = uplink_client
         self._run = run_repository
+        self._max_attempts = max_attempts
+        self._lease_seconds = lease_seconds
+        self._retry_backoff_seconds = retry_backoff_seconds
 
-    async def __call__(self, run_id: str) -> None:
+    async def __call__(self, run_id: str) -> BcnCallbackOutcome:
         run = self._run.get_by_run_id(run_id)
-        if run is None:
-            logger.info(
-                "[BcnUplinkCallback] skip: run_id=%s run_found=%s",
+        if run is None or not run.bcn_callback_eligible:
+            return BcnCallbackOutcome.NOT_ELIGIBLE
+        if run.bcn_callback_function != "bcn_uplink":
+            return BcnCallbackOutcome.NOT_ELIGIBLE
+        if run.status not in {"COMPLETED", "FAILED", "TIME_OUT", "ABORTED"}:
+            return BcnCallbackOutcome.NOT_ELIGIBLE
+
+        try:
+            claim = self._run.claim_bcn_callback_attempt(
                 run_id,
-                run is not None,
+                now=datetime.now(),
+                lease_seconds=self._lease_seconds,
+                max_attempts=self._max_attempts,
             )
-            return
+        except Exception:
+            logger.warning(
+                "[BcnUplinkCallback] metadata claim failed run_id=%s", run_id
+            )
+            return BcnCallbackOutcome.METADATA_WRITE_FAILED
+        if claim is None:
+            return BcnCallbackOutcome.NOT_ELIGIBLE
 
-        if run.status not in ("COMPLETED", "FAILED", "TIME_OUT", "ABORTED"):
-            return  # 非终态：交由恢复流程在终态后上报
-
-        event = _build_chat_event(run, None)
+        run = claim.record
+        event = _build_chat_event(run)
         try:
             result = await self._uplink_client.send_event(
                 event, bot_id=run.bot_id, event_id=run_id
             )
-            logger.info(
-                "[BcnUplinkCallback] uplink sent run_id=%s ok=%s dedup=%s",
+        except TimeoutError:
+            return await self._persist_retryable(
+                claim, status="timeout", error_kind="timeout"
+            )
+        except Exception:
+            # Do not log exception text: it may contain a URL, response body or
+            # provider credential.  The durable state stores only a category.
+            logger.warning(
+                "[BcnUplinkCallback] uplink transport failure run_id=%s",
                 run_id,
-                getattr(result, "ok", None),
-                getattr(result, "deduplicated", None),
             )
-        except Exception as e:
-            logger.error(
-                "[BcnUplinkCallback] uplink failed run_id=%s err=%s", run_id, e
+            return await self._persist_retryable(
+                claim, status="transport", error_kind="transport"
             )
+
+        if getattr(result, "ok", False):
+            return await self._persist_success(
+                claim,
+                status=(
+                    "deduplicated"
+                    if getattr(result, "deduplicated", False)
+                    else str(getattr(result, "status_code", None) or "2xx")
+                ),
+            )
+        if getattr(result, "retryable", False):
+            return await self._persist_retryable(
+                claim,
+                status=str(getattr(result, "status_code", None) or "retryable"),
+                error_kind=str(getattr(result, "category", "retryable_http")),
+            )
+        return await self._persist_terminal(
+            claim,
+            status=str(getattr(result, "status_code", None) or "terminal"),
+            error_kind=str(getattr(result, "category", "terminal_http")),
+        )
+
+    async def _persist_success(self, claim, *, status: str) -> BcnCallbackOutcome:
+        try:
+            updated = self._run.finish_bcn_callback_success(
+                claim.record.run_id,
+                lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                status=status,
+            )
+        except Exception:
+            logger.warning(
+                "[BcnUplinkCallback] success metadata write failed run_id=%s",
+                claim.record.run_id,
+            )
+            return BcnCallbackOutcome.METADATA_WRITE_FAILED
+        return (
+            BcnCallbackOutcome.SENT
+            if updated
+            else BcnCallbackOutcome.METADATA_WRITE_FAILED
+        )
+
+    async def _persist_retryable(
+        self,
+        claim,
+        *,
+        status: str,
+        error_kind: str,
+    ) -> BcnCallbackOutcome:
+        retry_delay = min(
+            self._retry_backoff_seconds
+            * (2 ** max(0, claim.record.bcn_callback_attempts - 1)),
+            3600,
+        )
+        next_retry_at = datetime.now() + timedelta(seconds=retry_delay)
+        try:
+            updated = self._run.finish_bcn_callback_retryable_failure(
+                claim.record.run_id,
+                lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                next_retry_at=next_retry_at,
+                status=status,
+                error_kind=error_kind,
+                max_attempts=self._max_attempts,
+            )
+        except Exception:
+            logger.warning(
+                "[BcnUplinkCallback] retry metadata write failed run_id=%s",
+                claim.record.run_id,
+            )
+            return BcnCallbackOutcome.METADATA_WRITE_FAILED
+        if not updated:
+            return BcnCallbackOutcome.METADATA_WRITE_FAILED
+        if claim.record.bcn_callback_attempts >= self._max_attempts:
+            return BcnCallbackOutcome.TERMINAL_FAILED
+        return BcnCallbackOutcome.RETRYABLE_PENDING
+
+    async def _persist_terminal(
+        self,
+        claim,
+        *,
+        status: str,
+        error_kind: str,
+    ) -> BcnCallbackOutcome:
+        try:
+            updated = self._run.finish_bcn_callback_terminal_failure(
+                claim.record.run_id,
+                lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                status=status,
+                error_kind=error_kind,
+            )
+        except Exception:
+            logger.warning(
+                "[BcnUplinkCallback] terminal metadata write failed run_id=%s",
+                claim.record.run_id,
+            )
+            return BcnCallbackOutcome.METADATA_WRITE_FAILED
+        return (
+            BcnCallbackOutcome.TERMINAL_FAILED
+            if updated
+            else BcnCallbackOutcome.METADATA_WRITE_FAILED
+        )

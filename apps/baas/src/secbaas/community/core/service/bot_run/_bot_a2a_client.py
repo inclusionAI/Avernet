@@ -146,7 +146,7 @@ class BotA2aClient:
     def _http(self, *, timeout: float | None) -> httpx.AsyncClient:
         if self._http_factory is not None:
             return self._http_factory()
-        return httpx.AsyncClient(timeout=timeout, proxy=None)
+        return httpx.AsyncClient(timeout=timeout, proxy=None, trust_env=False)
 
     # ── 生命周期 ──
     @property

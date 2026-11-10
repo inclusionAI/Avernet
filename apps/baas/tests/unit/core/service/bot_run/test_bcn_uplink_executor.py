@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -62,6 +63,9 @@ class _FakeUplinkResult:
         self.deduplicated = deduplicated
 
 
+_BCN_METADATA = {"request_type": "chat", "bot_options": {"from_bcn": "true"}}
+
+
 class _FakeUplinkClient:
     def __init__(self, raise_exc: bool = False):
         self._raise = raise_exc
@@ -82,12 +86,14 @@ def _make_terminal(
 ) -> str:
     """创建 run + queue 记录并将 run 写入指定终态，返回 run_id。"""
     run_id = uuid4().hex
+    metadata = _BCN_METADATA
     repo.insert_run(
         run_id=run_id,
         bot_id="bot-1",
         api_key_prefix="sk-",
         message_long="m",
-        metadata={},
+        metadata=metadata,
+        callback_function="bcn_uplink",
     )
     queue.insert_queue(run_id=run_id, bot_id="bot-1", meta={"request_type": "chat"})
 
@@ -112,6 +118,12 @@ async def test_completed_sends_uplink_once(repo, queue):
     run_id = _make_terminal(repo, queue, terminal="COMPLETED")
     await cb(run_id)
 
+    assert client.calls == [("bot-1", run_id)]
+    record = repo.get_by_run_id(run_id)
+    assert record.bcn_callback_state == "SENT"
+    assert record.bcn_callback_sent is True
+
+    await cb(run_id)
     assert client.calls == [("bot-1", run_id)]
 
 
@@ -153,6 +165,22 @@ async def test_uplink_failure_does_not_raise(repo, queue):
     await cb(run_id)  # 不应抛异常
 
     assert len(client.calls) == 1
+    record = repo.get_by_run_id(run_id)
+    assert record.bcn_callback_state == "PENDING"
+    assert record.bcn_callback_sent is False
+
+
+async def test_retry_backoff_starts_at_one_minute_and_is_capped(repo, queue):
+    client = _FakeUplinkClient(raise_exc=True)
+    cb = BcnUplinkCallback(client, repo)
+    run_id = _make_terminal(repo, queue, terminal="COMPLETED")
+
+    await cb(run_id)
+    record = repo.get_by_run_id(run_id)
+    assert record.bcn_callback_next_retry_at is not None
+    assert (
+        55 <= (record.bcn_callback_next_retry_at - datetime.now()).total_seconds() <= 65
+    )
 
 
 async def test_failed_event_state_is_error(repo, queue):
@@ -234,3 +262,53 @@ async def test_aborted_event_state_is_aborted(repo, queue):
     assert captured_events[0].run_id == run_id
     assert captured_events[0].message is not None
     assert captured_events[0].message.text == "aborted by chat.abort"
+
+
+async def test_stale_lease_cannot_finish_over_reclaimed_lease(repo, queue):
+    run_id = _make_terminal(repo, queue, terminal="COMPLETED")
+    first = repo.claim_bcn_callback_attempt(
+        run_id, now=datetime.now(), lease_seconds=1, max_attempts=5
+    )
+    assert first is not None
+    second = repo.claim_bcn_callback_attempt(
+        run_id,
+        now=datetime.now() + timedelta(seconds=2),
+        lease_seconds=1,
+        max_attempts=5,
+    )
+    assert second is not None
+    assert second.lease_generation > first.lease_generation
+    assert (
+        repo.finish_bcn_callback_success(
+            run_id,
+            lease_token=first.lease_token,
+            lease_generation=first.lease_generation,
+            status="200",
+        )
+        is False
+    )
+    assert (
+        repo.finish_bcn_callback_success(
+            run_id,
+            lease_token=second.lease_token,
+            lease_generation=second.lease_generation,
+            status="200",
+        )
+        is True
+    )
+
+
+async def test_non_bcn_terminal_run_is_not_claimed(repo, queue):
+    run_id = uuid4().hex
+    repo.insert_run(
+        run_id=run_id,
+        bot_id="bot-1",
+        api_key_prefix="sk-",
+        message_long="m",
+        metadata={},
+    )
+    repo.update_result(run_id, "answer", {})
+    claim = repo.claim_bcn_callback_attempt(
+        run_id, now=datetime.now(), lease_seconds=1, max_attempts=5
+    )
+    assert claim is None

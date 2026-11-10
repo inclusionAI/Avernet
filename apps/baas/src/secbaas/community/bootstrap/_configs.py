@@ -401,6 +401,8 @@ class BcnUplinkConfigSchema(BaseModel):
 
     base_url: str = ""
     provider_id: str = ""
+    timeout: float = Field(default=10.0, gt=0)
+    max_retries: int = Field(default=3, ge=1, le=5)
 
 
 class _BcnApiKeyConfig(BaseSettings):
@@ -416,6 +418,8 @@ class _BcnUplinkConfig(BaseSettings):
     model_config = _CFG
     base_url: str = ""
     provider_id: str = ""
+    timeout: float = Field(default=10.0, gt=0)
+    max_retries: int = Field(default=3, ge=1, le=5)
 
 
 class BcnConfig(ConfigSchema):

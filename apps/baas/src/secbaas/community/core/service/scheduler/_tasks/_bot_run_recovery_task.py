@@ -1,64 +1,78 @@
-"""BotRun 队列恢复定时 task
+"""Bounded durable BCN callback recovery task.
 
-周期性地把"心跳过期"的 RUNNING 请求重置回 PENDING，
-供其他 Worker 重新认领。同时在抢到 ``bot_run_recovery_lock`` 的实例上
-对账清理 ``ac_lock_table`` 中过期的 ``botrun:session:`` 孤儿锁，
-不依赖锁 TTL（约 3h）自愈。
-
-依赖通过构造方法注入，由 DI 容器管理生命周期。
+This task is intentionally callback-only: it never claims Bot work, invokes a
+Bot executor, or rolls queue state back.  The queue recovery worker is drained
+separately during rollout; this sweep only scans terminal result rows and calls
+the explicitly injected ``bcn_uplink`` callback.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from secbaas.community.core.repository.bot_run_queue import BotRunQueueRepository
-from secbaas.community.core.repository.distributed_lock import (
-    DistributedLockRepository,
-)
+from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.logger import get_logger
 
 log = get_logger("core-scheduler")
 
-#: ``ac_lock_table`` 中 session 串行锁的命名前缀，与
-#: ``SerializingExecutor`` 的 ``DEFAULT_SESSION_LOCK_PREFIX`` 保持一致。
-DEFAULT_SESSION_LOCK_PREFIX = "botrun:session:"
-
 
 @dataclass
 class BotRunRecoveryTaskConfig:
-    """BotRun 队列恢复 task 配置"""
-
     enabled: bool = True
     lock_name: str = "bot_run_recovery_lock"
     lock_expire_seconds: int = 120
     cron_interval_seconds: int = 60
-    stale_seconds: int = 120
+    stale_seconds: int = 120  # retained for config compatibility; not used here
     dry_run: bool = False
-    #: 对账清理的 session 锁前缀；与 SerializingExecutor 的锁命名保持一致。
-    session_lock_prefix: str = DEFAULT_SESSION_LOCK_PREFIX
+    callback_batch_size: int | None = 2
+    callback_max_attempts: int | None = 5
+    callback_lease_seconds: int | None = 45
+    callback_budget_seconds: float | None = 35.0
+
+    def __post_init__(self) -> None:
+        # Older overlays and minimal test containers do not carry the durable
+        # callback keys. A dependency-injector configuration proxy resolves
+        # missing paths to None, which must retain the code-level defaults
+        # rather than reaching the validation casts below.
+        if self.callback_batch_size is None:
+            self.callback_batch_size = 2
+        if self.callback_max_attempts is None:
+            self.callback_max_attempts = 5
+        if self.callback_lease_seconds is None:
+            self.callback_lease_seconds = 45
+        if self.callback_budget_seconds is None:
+            self.callback_budget_seconds = 35.0
+
+        if not 1 <= int(self.callback_batch_size) <= 2:
+            raise ValueError("callback_batch_size must be between 1 and 2")
+        if int(self.callback_max_attempts) <= 0:
+            raise ValueError("callback_max_attempts must be positive")
+        if int(self.callback_lease_seconds) <= 0:
+            raise ValueError("callback_lease_seconds must be positive")
+        if float(self.callback_budget_seconds) <= 0:
+            raise ValueError("callback_budget_seconds must be positive")
 
 
 class BotRunRecoveryTask:
-    """BotRun 队列恢复 task
-
-    抢分布式锁 → 重置悬挂 RUNNING → 对账清理过期孤儿 session 锁 → 释放锁。
-    """
+    """Recover only durable BCN final callbacks under a bounded lease."""
 
     def __init__(
         self,
         config: BotRunRecoveryTaskConfig,
         lock_service: DistributedLockService,
-        queue_repo: BotRunQueueRepository,
-        lock_repo: DistributedLockRepository | None = None,
+        bot_run_repository: BotRunRepository | None = None,
+        bcn_uplink_callback: Callable[[str], Awaitable[Any]] | None = None,
     ) -> None:
         self._config = config
         self._lock_service = lock_service
-        self._queue_repo = queue_repo
-        self._lock_repo = lock_repo
+        self._bot_run_repository = bot_run_repository
+        self._bcn_uplink_callback = bcn_uplink_callback
 
     @property
     def name(self) -> str:
@@ -71,13 +85,10 @@ class BotRunRecoveryTask:
     async def run(self) -> None:
         start_time = time.monotonic()
         log.info("[BotRunRecovery] Task triggered at %s", datetime.now())
-
-        if not self._config.enabled:
-            log.info("[BotRunRecovery] Disabled, skipping")
+        if not self._config.enabled or self._config.dry_run:
             return
-
-        if self._config.dry_run:
-            log.info("[BotRunRecovery] DRY_RUN mode - skipping")
+        if self._bot_run_repository is None or self._bcn_uplink_callback is None:
+            log.warning("[BotRunRecovery] callback recovery dependencies unavailable")
             return
 
         with self._lock_service.try_lock(
@@ -86,56 +97,42 @@ class BotRunRecoveryTask:
             block=False,
         ) as lock:
             if not lock.acquired:
-                log.info(
-                    "[BotRunRecovery] Lock %s not acquired, skipping",
-                    self._config.lock_name,
-                )
+                log.info("[BotRunRecovery] lock not acquired, skipping")
                 return
 
-            try:
-                reset = self._queue_repo.reset_stale_running(self._config.stale_seconds)
-            except Exception:
-                log.exception("[BotRunRecovery] Error resetting stale RUNNING")
-                raise
+            rows = self._bot_run_repository.scan_bcn_callback_pending(
+                now=datetime.now(), limit=self._config.callback_batch_size
+            )
+            processed = 0
+            for row in rows:
+                if not self._lock_service.is_lock_held(
+                    self._config.lock_name, lock.lock_holder, verify_remote=True
+                ):
+                    log.warning("[BotRunRecovery] lock lost, stopping callback sweep")
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._bcn_uplink_callback(row.run_id),
+                        timeout=self._config.callback_budget_seconds,
+                    )
+                    processed += 1
+                except TimeoutError:
+                    log.warning(
+                        "[BotRunRecovery] callback budget exhausted run_id=%s",
+                        row.run_id,
+                    )
+                    break
+                except Exception:
+                    # One row must not prevent the next bounded row from being
+                    # attempted; callback state remains durable and fenced.
+                    log.warning(
+                        "[BotRunRecovery] callback invocation failed run_id=%s",
+                        row.run_id,
+                    )
 
-            # 对账：清理 ``ac_lock_table`` 中过期的 ``botrun:session:`` 孤儿锁。
-            # 失败仅 log，不阻塞主流程（reset 已完成）。
-            reaped = self._reap_orphan_session_locks()
-
-            duration = time.monotonic() - start_time
             log.info(
-                "[BotRunRecovery] Completed: reset=%s reaped=%s "
-                "stale_seconds=%s duration=%.2fs",
-                reset,
-                reaped,
-                self._config.stale_seconds,
-                duration,
+                "[BotRunRecovery] Completed: callbacks=%s scanned=%s duration=%.2fs",
+                processed,
+                len(rows),
+                time.monotonic() - start_time,
             )
-
-    def _reap_orphan_session_locks(self) -> int:
-        """清理过期孤儿 session 锁，返回被删除的行数；失败仅记录日志。
-
-        - 未注入 ``lock_repo`` 时跳过（兼容不依赖该对账的既有装配/测试）。
-        - 限定 ``session_lock_prefix``，仅清理已过期（``expire_time <= now``）
-          的 ``botrun:session:`` 锁；正常持有的锁由续期线程保持不会过期。
-        """
-        if self._lock_repo is None:
-            return 0
-        try:
-            now = datetime.now()
-            deleted = self._lock_repo.delete_expired_locks_by_prefix(
-                self._config.session_lock_prefix, now=now
-            )
-        except Exception:
-            log.exception(
-                "[BotRunRecovery] Error reaping orphan session locks (prefix=%s)",
-                self._config.session_lock_prefix,
-            )
-            return 0
-        if deleted:
-            log.info(
-                "[BotRunRecovery] reaped %s expired session locks (prefix=%s)",
-                deleted,
-                self._config.session_lock_prefix,
-            )
-        return deleted
