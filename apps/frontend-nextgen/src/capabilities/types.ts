@@ -5,6 +5,7 @@ import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
 import type { ConversationComposerProps } from './conversationComposer';
+import type { UserMessagePresenter } from './userMessagePresentation';
 
 export interface BotEditorPanelContext {
   botId: string;
@@ -633,6 +634,8 @@ export interface AppCapabilities {
   getBotEditorPanels: () => CapabilityResult<BotEditorPanelExtension[]>;
   /** Optional single-Bot composer decorator; public default is absent. */
   getConversationComposer: () => CapabilityResult<ComponentType<ConversationComposerProps> | null>;
+  /** Optional synchronous, zero-I/O user-message display projection; public default is pass-through. */
+  getUserMessagePresentation: () => CapabilityResult<UserMessagePresenter | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
