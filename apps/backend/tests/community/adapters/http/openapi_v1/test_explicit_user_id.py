@@ -643,7 +643,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The owner-scoped collaboration repair adds one path-addressed, user-scoped
 # operation; the non-user Bot overview stays path-addressed in the same total.
 # The relay-session task read is account-level and carries no bot_id parameter.
-_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 144}
+_BOT_ID_PLACEMENT = {"path": 226, "query": 1, "none": 144}
 
 
 
@@ -857,7 +857,9 @@ def test_the_pinned_number_of_operations_take_it():
     # The default-model read adds one Bot-addressed user-scoped operation.
     # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
-    assert len(taking) == 292
+    # The six service-Bot evaluation operations add six user-taking,
+    # path-addressed operations: 292 -> 298 / 220 -> 226.
+    assert len(taking) == 298
 
 
 def test_the_exempt_operations_take_none():
