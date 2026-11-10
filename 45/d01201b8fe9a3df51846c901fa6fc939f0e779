@@ -1,0 +1,44 @@
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_f9448a67993c61::t_f90b806cf61bd0 4,55-58,81-82
+apps/bcsfuse/packages/search-core/src/search_core/core/index_build_runner.py
+  s_f9448a67993c61::t_f90b806cf61bd0 1-51
+apps/bcsfuse/packages/search-core/tests/test_card_incremental.py
+  s_f9448a67993c61::t_8019fbdc118045 1-99
+  s_f9448a67993c61::t_b09f9015d8af7b 100-188
+  s_f9448a67993c61::t_1b099d0ad38508 189-208
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_f9448a67993c61::t_f90b806cf61bd0 32,137-138,145-146,280-285
+apps/bcsfuse/packages/search-core/tests/test_build_on_demand.py
+  s_f9448a67993c61::t_b09f9015d8af7b 38-73
+  s_f9448a67993c61::t_8019fbdc118045 1-37
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_f9448a67993c61::t_916bbc7b91280a 130-144
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_f9448a67993c61::t_c609a30fba0720 169-195
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_f9448a67993c61::t_868137d67f1f25 13,118-121,126-130,132,339-363,365-368,370-387,389,395-396,405-435,464,477-479,484,486,502-507
+apps/bcsfuse/packages/search-core/src/search_core/config/index_sync.py
+  s_f9448a67993c61::t_e3dd0f51a1b43e 28
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_f9448a67993c61::t_05636fe7645e7a 7,25-40
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  s_f9448a67993c61::t_db12c9900500df 30-33
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_f9448a67993c61::t_84274b9c9060b0 172-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "45d01201b8fe9a3df51846c901fa6fc939f0e779",
+  "prompts": {},
+  "sessions": {
+    "s_f9448a67993c61": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c37b-a948-7d12-8346-7160e12ca8b0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
