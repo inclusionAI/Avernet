@@ -1,6 +1,29 @@
 use super::*;
 
     #[tokio::test]
+    async fn emit_skips_with_warn_when_recipients_empty() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // No owner (`created_by = NULL`) → no resolvable notification recipients.
+        seed_bot(&db, "x:ownerless", "protected", "protected", "APPROVAL", "online", None).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let res = svc
+            .create_connect("human_1", "x:ownerless", Some("hi".into()), None)
+            .await
+            .expect("a pending connect without owner recipients still succeeds");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        // The notification port must not be called when nobody owns the target.
+        // `emit_friend_connect_notification` logs a `warn!` (request ids +
+        // target bot id) instead of returning silently; that warning is for
+        // human log observation and is not asserted here.
+        assert!(
+            events.lock().await.is_empty(),
+            "no recipients → no notification is sent"
+        );
+    }
+
+    #[tokio::test]
     async fn pending_friend_request_emits_notification_to_target_owner() {
 
         let (eg, pp, rq, bc, db) = assemble().await;

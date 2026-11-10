@@ -34,6 +34,11 @@
 
 The crate owns friendship rules and request lifecycle decisions. It does not own transport handling or implementation selection.
 
+The HTTP compatibility facade for friend connections has moved to
+`bcs-edge-permission::EdgeConnectFriendService`; this crate's legacy
+`Friend`/`FriendRequestCore` remain only for writeback, friend-name listing and
+transitional tests, and are deleted together with the legacy retirement.
+
 ## Tests
 
 - `cargo test --package bcs-friend --manifest-path src/bcs/Cargo.toml`

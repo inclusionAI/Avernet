@@ -36,6 +36,8 @@ const STAFF: &str = "327325";
 
 struct RecordingFriends {
     receiver: String,
+    /// When set, `create_friend_request` reports the target as hidden.
+    hidden_target: Mutex<Option<String>>,
     calls: Mutex<Vec<(&'static str, String)>>,
     list_commands: Mutex<Vec<ListFriendRequestsCommand>>,
 }
@@ -52,7 +54,11 @@ impl FriendService for RecordingFriends {
         &self,
         command: CreateFriendRequestCommand,
     ) -> Result<FriendRequest, FriendUseCaseError> {
+        let hidden_target = self.hidden_target.lock().await.clone();
         self.record("create", command.caller_actor_id.clone()).await;
+        if let Some(target) = hidden_target {
+            return Err(FriendUseCaseError::Service(ServiceError::BotHidden(target)));
+        }
         Ok(FriendRequest {
             id: "request-1".to_string(),
             from_bot: command.caller_actor_id,
@@ -151,6 +157,7 @@ fn fixture_with_query(
 ) -> Fixture {
     let friends = Arc::new(RecordingFriends {
         receiver: actor_id.to_string(),
+        hidden_target: Mutex::new(None),
         calls: Mutex::new(Vec::new()),
         list_commands: Mutex::new(Vec::new()),
     });
@@ -387,6 +394,27 @@ async fn received_bot_requests_follow_live_owner_and_manager_authority() {
             ("requests", "owned-bot".to_string()),
             ("requests", "owned-bot".to_string()),
         ]
+    );
+}
+
+#[tokio::test]
+async fn hidden_target_friend_request_maps_to_forbidden() {
+    let fixture = fixture(
+        HUMAN,
+        ActorKind::Human,
+        Some(STAFF),
+        bcs_test_support::failing_authority_hook(),
+    );
+    *fixture.friends.hidden_target.lock().await = Some("b1".to_string());
+    let response = send(&fixture.app, Method::POST, "/friends/request", HUMAN).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a hidden target must surface as 403, not an internal error"
+    );
+    assert_eq!(
+        fixture.friends.calls.lock().await.as_slice(),
+        &[("create", HUMAN.to_string())]
     );
 }
 

@@ -1102,6 +1102,12 @@ impl DbConnectService {
         request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<()> {
         if recipient_user_ids.is_empty() {
+            warn!(
+                request_ids = ?request_ids,
+                target_bot_id = %target_bot_id,
+                env = %self.env,
+                "friend connect notification skipped: no recipients"
+            );
             return Ok(());
         }
         // Resolve human-readable display names so the notification body says

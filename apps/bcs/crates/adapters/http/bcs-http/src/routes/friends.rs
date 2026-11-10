@@ -543,6 +543,7 @@ fn service_error_response(error: ServiceError) -> Response {
         | ServiceError::CannotAcceptRejected
         | ServiceError::CannotRejectAccepted => StatusCode::CONFLICT,
         ServiceError::PrivateBotCannotCollaborate => StatusCode::FORBIDDEN,
+        ServiceError::BotHidden(_) => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     error_response(status, error.to_string())
