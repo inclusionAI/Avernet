@@ -1,0 +1,49 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-workbench-store.test.ts
+  h_43af82e14600e4 1-79
+apps/evolverun/clawweb/public/modules/workflow/docs/dingtalk-approval-auth.md
+  h_43af82e14600e4 9,15-22
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval.ts
+  h_43af82e14600e4 83
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/Sidebar.tsx
+  h_43af82e14600e4 3,5,20,59
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/approval-workbench.test.ts
+  h_43af82e14600e4 1-76
+apps/evolverun/clawweb/public/modules/workflow/web/components/ApprovalSlidePanel.tsx
+  h_43af82e14600e4 3,68,84-85,98,100,168-170,175,192,223,230,235,259,262,272,277,294
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-concurrent-actions.test.ts
+  h_43af82e14600e4 1-19
+apps/evolverun/clawweb/public/modules/workflow/server/services/approval-workbench.ts
+  h_43af82e14600e4 1-85
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval-workbench.ts
+  h_43af82e14600e4 1-122
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-workbench-store.ts
+  h_43af82e14600e4 1-47
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-card-repository.ts
+  h_43af82e14600e4 177,236,240,248-250,257-260
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  h_43af82e14600e4 33,176-182
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  h_43af82e14600e4 1-133
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/approval-workbench.test.ts
+  h_43af82e14600e4 1-80
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-workbench.md
+  h_43af82e14600e4 1-91,93
+  h_43af82e14600e4 92
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/ApprovalWorkbench.tsx
+  h_43af82e14600e4 1-56
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/WorkspaceSidebar.test.tsx
+  h_43af82e14600e4 74-87
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  h_43af82e14600e4 6,24,35,270,352,359,375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1b3e25e68409ff2ae9f760923e7ce4333cb509a3",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

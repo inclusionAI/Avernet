@@ -1,0 +1,29 @@
+apps/bcs/crates/tools/bcs-cli/src/client.rs
+  s_cecdc98e721f4b::t_a0f4528fc5cd93 1794,2039
+apps/bcs/crates/tools/bcs-cli/tests/group_read_and_fuse_auth_tests.rs
+  s_cecdc98e721f4b::t_700922c0e2dec7 1-95
+apps/bcs/scripts/e2e-runner/authority-dual-migration-contract.json
+  s_cecdc98e721f4b::t_06a248dd290c00 104
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/contract.py
+  s_cecdc98e721f4b::t_78191cf330c07d 47
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/contract.py
+  s_cecdc98e721f4b::t_fd2357c7c82e65 18
+apps/bcs/scripts/e2e-runner/provider-publishes-migration-contract.json
+  s_cecdc98e721f4b::t_120f44903ba4be 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f419db232f41fb5efe4de60e597f01ed5b9e93eb",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

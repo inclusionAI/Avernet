@@ -1,0 +1,31 @@
+apps/backend/tests/community/core/service_bot/services/deploy/test_teclaw_file_promotion.py
+  s_e940335c721679::t_aeaeeb819e1646 11-12,266-315
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/teclaw_file_promotion.py
+  s_efdc569f38ed1d::t_2a480862fc0300 44-45,194-208
+.gitignore
+  s_efdc569f38ed1d::t_124c66a429d0ab 117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "be25ce6388b7c96239018f1f7f1a28c59702cdfd",
+  "prompts": {},
+  "sessions": {
+    "s_e940335c721679": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-2b47-7ba1-b9ee-9b314464130d",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_efdc569f38ed1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b6-7494-7731-aaa6-374472cea173",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

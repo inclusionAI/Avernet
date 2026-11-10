@@ -1,0 +1,480 @@
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/dependencies.py
+  s_785ac12e5de367::t_986a7147b003d1 1-90
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_785ac12e5de367::t_986a7147b003d1 106-111,143-153,1182,1232-1233,1358-1381,1399,1458-1459,2755,2776-2780,2782-2784,2791-2814,2816-2822
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_approval_service.py
+  s_785ac12e5de367::t_986a7147b003d1 77,162,242,293,376,459
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_785ac12e5de367::t_986a7147b003d1 3-12,114
+apps/backend/tests/community/knowledge_management/test_ownership.py
+  s_785ac12e5de367::t_986a7147b003d1 1-24
+apps/backend/tests/community/core/devices/services/test_handoff_resource_identity.py
+  s_785ac12e5de367::t_986a7147b003d1 1-81
+apps/backend/src/agentclaw/community/adapters/http/space_knowledge/registration.py
+  s_785ac12e5de367::t_986a7147b003d1 7-9,20
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_785ac12e5de367::t_986a7147b003d1 138,932
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_785ac12e5de367::t_986a7147b003d1 272
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/content_schemas.py
+  s_785ac12e5de367::t_986a7147b003d1 1-37
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/identity.py
+  s_785ac12e5de367::t_986a7147b003d1 1-8
+apps/backend/tests/community/endpoints/test_channel_router.py
+  s_785ac12e5de367::t_986a7147b003d1 179-214,430
+apps/backend/tests/community/endpoints/test_service_bot_draft_restore.py
+  s_785ac12e5de367::t_986a7147b003d1 129-133,137
+apps/backend/tests/community/knowledge_management/test_http.py
+  s_785ac12e5de367::t_986a7147b003d1 1-167
+apps/backend/tests/community/knowledge_management/test_enablement_candidate.py
+  s_785ac12e5de367::t_986a7147b003d1 1-184
+apps/backend/src/agentclaw/community/core/bot_public_risk/notices.py
+  s_785ac12e5de367::t_986a7147b003d1 1-201
+apps/backend/src/agentclaw/community/plugin_api/bot_publish_approval.py
+  s_785ac12e5de367::t_986a7147b003d1 95-97,117-119
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_785ac12e5de367::t_986a7147b003d1 706-709
+apps/backend/src/agentclaw/community/core/bot_management/addressing.py
+  s_785ac12e5de367::t_986a7147b003d1 52-55,118-135
+  s_785ac12e5de367::t_c9c8053d7e20e4 136-137
+apps/backend/src/agentclaw/community/core/agentswarm/runtime/pool/impl.py
+  s_785ac12e5de367::t_986a7147b003d1 605-607,611-612
+  s_785ac12e5de367::t_9a144eb7e3ae86 613
+apps/backend/tests/community/knowledge_management/conftest.py
+  s_785ac12e5de367::t_986a7147b003d1 1-293
+apps/backend/src/agentclaw/community/core/agentswarm/repository/agent/model.py
+  s_785ac12e5de367::t_986a7147b003d1 19
+apps/backend/src/agentclaw/community/api/knowledge_management_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1-54
+apps/backend/src/agentclaw/community/di/modules/infrastructure/community/app_services.py
+  s_785ac12e5de367::t_986a7147b003d1 9,12,14,24-26,32-34,41-43
+apps/backend/docs/openapi-v1/README.md
+  s_785ac12e5de367::t_986a7147b003d1 3-11
+apps/backend/src/agentclaw/community/core/devices/protocols.py
+  s_785ac12e5de367::t_986a7147b003d1 50-53
+apps/backend/src/agentclaw/community/core/devices/services/device_service_router.py
+  s_785ac12e5de367::t_986a7147b003d1 663-677,684-685,725,752
+apps/backend/tests/community/core/devices/services/test_device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 108-111,2090,2830-2848
+apps/backend/tests/community/e2e/test_bot_public_risk_flow.py
+  s_785ac12e5de367::t_986a7147b003d1 1-92
+apps/backend/src/agentclaw/community/core/knowledge_management/ports.py
+  s_785ac12e5de367::t_986a7147b003d1 1-89
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  s_785ac12e5de367::t_986a7147b003d1 63-64,157-158,178-179,459,491-492,506,531-532,539,550-553,573-576,598-607,614-622,643-644,654,687-699,703,711-712,714-715,724-734,742,762-787,802-824,1008,1018,1029,1032,1067-1069,1088-1089,1102-1114,1121-1123,1135-1136,1139-1140,1149,1164-1209,1221-1225,1228-1229,1274-1280,1291-1294
+apps/backend/src/agentclaw/community/plugins/http_client.py
+  s_785ac12e5de367::t_986a7147b003d1 79,212-214,334-392
+apps/backend/src/agentclaw/community/core/bot_public_risk/sql/2026_10_28_bot_public_risk_check.sql
+  s_785ac12e5de367::t_986a7147b003d1 1-36
+apps/backend/tests/community/core/bot_management/test_bot_create_extension_seam.py
+  s_785ac12e5de367::t_986a7147b003d1 1-296
+apps/backend/src/agentclaw/community/core/knowledge_management/config.py
+  s_785ac12e5de367::t_986a7147b003d1 1-21
+apps/backend/tests/community/core/service_bot/services/test_provider_behavior.py
+  s_785ac12e5de367::t_986a7147b003d1 147,162-164
+apps/backend/src/agentclaw/community/core/knowledge_management/README.md
+  s_785ac12e5de367::t_986a7147b003d1 1-37
+apps/backend/src/agentclaw/community/core/devices/README.md
+  s_785ac12e5de367::t_986a7147b003d1 5-11,103,110-115
+apps/backend/tests/community/knowledge_management/test_frontend_read_completion.py
+  s_785ac12e5de367::t_986a7147b003d1 1-339
+apps/backend/src/agentclaw/community/core/work_orders/models.py
+  s_785ac12e5de367::t_986a7147b003d1 170-173
+apps/frontend-nextgen/test/components/Community/CommunityTopicList.test.tsx
+  s_785ac12e5de367::t_986a7147b003d1 73-74,77,80-82
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/content.py
+  s_785ac12e5de367::t_986a7147b003d1 1-210
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_785ac12e5de367::t_986a7147b003d1 141,285
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_build.py
+  s_785ac12e5de367::t_986a7147b003d1 31-32,200,222,238,240,318,348
+apps/backend/src/agentclaw/community/di/modules/bot_public_risk_module.py
+  s_785ac12e5de367::t_986a7147b003d1 1-133
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  s_785ac12e5de367::t_986a7147b003d1 1-344
+apps/backend/src/agentclaw/community/core/approval/callback_handler.py
+  s_785ac12e5de367::t_986a7147b003d1 8-11,20,51-72
+apps/backend/src/agentclaw/community/plugin_api/models.py
+  s_785ac12e5de367::t_986a7147b003d1 126-137
+apps/backend/tests/community/knowledge_composition/test_access_policy.py
+  s_785ac12e5de367::t_986a7147b003d1 1-67
+apps/backend/tests/community/knowledge_management/http_contract.py
+  s_785ac12e5de367::t_986a7147b003d1 1-92
+apps/backend/specs/2026-10-28-knowledge-management-plugins/spec.md
+  s_785ac12e5de367::t_986a7147b003d1 1-40
+apps/backend/tests/community/knowledge_management/test_fixed_contract.py
+  s_785ac12e5de367::t_986a7147b003d1 1-56
+apps/backend/tests/community/core/channel/test_channel_service.py
+  s_785ac12e5de367::t_986a7147b003d1 54,1070,1073,1190
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 174-175,261
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/content_client.py
+  s_785ac12e5de367::t_986a7147b003d1 1-144
+apps/backend/tests/community/endpoints/test_knowledge_management.py
+  s_785ac12e5de367::t_986a7147b003d1 1-330
+apps/backend/tests/community/core/devices/services/conn_info_builders/test_baas_builder.py
+  s_785ac12e5de367::t_986a7147b003d1 56,160,225,236,246,265,286
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization.py
+  s_785ac12e5de367::t_986a7147b003d1 167-173,176,338-339,343,348
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/schemas.py
+  s_785ac12e5de367::t_986a7147b003d1 16
+apps/backend/src/agentclaw/community/plugins/community/bot_publish_approval.py
+  s_785ac12e5de367::t_986a7147b003d1 10,41-43,45-46
+apps/backend/tests/community/core/channel/test_channel_service_uses_resolver.py
+  s_785ac12e5de367::t_986a7147b003d1 86,176
+apps/frontend-nextgen/test/services/backendApi/community/communityController.test.ts
+  s_785ac12e5de367::t_986a7147b003d1 198,215,218-219
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_access.py
+  s_785ac12e5de367::t_986a7147b003d1 920-931
+apps/backend/src/agentclaw/community/adapters/http/antprocess/router.py
+  s_785ac12e5de367::t_986a7147b003d1 3-4,90,110,113
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  s_785ac12e5de367::t_986a7147b003d1 1-891
+apps/backend/tests/community/core/bot_public/test_risk_application.py
+  s_785ac12e5de367::t_986a7147b003d1 1-104
+apps/backend/tests/community/knowledge_management/test_membership_adapter.py
+  s_785ac12e5de367::t_986a7147b003d1 1-93
+apps/backend/tests/community/knowledge_management/test_space_adapter.py
+  s_785ac12e5de367::t_986a7147b003d1 1-243
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/draft_restore_ops_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 142
+apps/backend/src/agentclaw/community/core/agentswarm/repository/agent_attempt/model.py
+  s_785ac12e5de367::t_986a7147b003d1 22
+apps/backend/specs/2026-10-28-knowledge-management-plugins/plan.md
+  s_785ac12e5de367::t_986a7147b003d1 1-46
+apps/backend/src/agentclaw/community/kernel/knowledge_content.py
+  s_785ac12e5de367::t_986a7147b003d1 1-17
+apps/backend/tests/community/adapters/http/openapi_v1/test_admission_inventory.py
+  s_785ac12e5de367::t_986a7147b003d1 42,58,133-134,239,243,277
+apps/backend/tests/community/core/devices/services/test_baas_device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 608,614,626,640,654,673,685
+apps/backend/tests/community/_flows/knowledge_management/api_lifecycle.py
+  s_785ac12e5de367::t_986a7147b003d1 1-26
+apps/backend/src/agentclaw/community/core/agentswarm/sql/2026_10_08_agent_swarm.sql
+  s_785ac12e5de367::t_986a7147b003d1 41,220
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/config.py
+  s_785ac12e5de367::t_986a7147b003d1 1-15
+apps/backend/src/agentclaw/community/core/services/engine_config.py
+  s_785ac12e5de367::t_986a7147b003d1 32,229-233,256
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow_service.py
+  s_785ac12e5de367::t_986a7147b003d1 581
+apps/backend/tests/community/core/bot_public/test_risk_eligibility.py
+  s_785ac12e5de367::t_986a7147b003d1 1-38
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  s_785ac12e5de367::t_986a7147b003d1 45,62,2706-3057
+apps/backend/tests/community/repository/identity/test_bot_mcp_call_config_tenant_isolation.py
+  s_785ac12e5de367::t_986a7147b003d1 240-270
+apps/backend/tests/community/knowledge_management/test_available_budget.py
+  s_785ac12e5de367::t_986a7147b003d1 1-84
+apps/backend/src/agentclaw/community/core/bot_public_risk/lifecycle.py
+  s_785ac12e5de367::t_986a7147b003d1 1-103
+apps/backend/tests/community/knowledge_management/test_candidate_index.py
+  s_785ac12e5de367::t_986a7147b003d1 1-170
+apps/backend/tests/community/knowledge_management/test_catalog_transport.py
+  s_785ac12e5de367::t_986a7147b003d1 1-50
+apps/frontend-nextgen/src/hooks/useCommunity.ts
+  s_785ac12e5de367::t_986a7147b003d1 24-32,173
+apps/backend/tests/community/knowledge_management/test_async_transport.py
+  s_785ac12e5de367::t_986a7147b003d1 1-146
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  s_785ac12e5de367::t_986a7147b003d1 20
+apps/backend/tests/community/knowledge_management/test_content_http.py
+  s_785ac12e5de367::t_986a7147b003d1 1-524
+apps/backend/tests/community/knowledge_management/test_catalog_batch.py
+  s_785ac12e5de367::t_986a7147b003d1 1-181
+apps/backend/tests/community/knowledge_management/fixtures/management_contract.json
+  s_785ac12e5de367::t_986a7147b003d1 1-100
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  s_785ac12e5de367::t_986a7147b003d1 119-124
+apps/backend/src/agentclaw/community/core/devices/services/device_instance_service.py
+  s_785ac12e5de367::t_986a7147b003d1 514-520
+apps/backend/tests/community/_flows/bot_public_risk/api_lifecycle.py
+  s_785ac12e5de367::t_986a7147b003d1 1-50
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/restart_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 235-236,298-299
+apps/backend/tests/community/core/config_compose/test_collector.py
+  s_785ac12e5de367::t_986a7147b003d1 92-93,98,1267,1269
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  s_785ac12e5de367::t_986a7147b003d1 1-333
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/router.py
+  s_785ac12e5de367::t_986a7147b003d1 1-267
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/space_knowledge.py
+  s_785ac12e5de367::t_986a7147b003d1 1-256
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_785ac12e5de367::t_986a7147b003d1 194-195
+apps/backend/src/agentclaw/community/di/modules/bot_public_module.py
+  s_785ac12e5de367::t_986a7147b003d1 35-45,145-146,166-167,181-212
+apps/backend/src/agentclaw/community/api/knowledge_content_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1-84
+apps/backend/tests/community/knowledge_composition/conftest.py
+  s_785ac12e5de367::t_986a7147b003d1 1-6
+apps/backend/src/agentclaw/community/core/bot_public_risk/__init__.py
+  s_785ac12e5de367::t_986a7147b003d1 1
+apps/backend/src/agentclaw/community/di/container.py
+  s_785ac12e5de367::t_986a7147b003d1 29,32-34,41,44-45,47-48,51,64,70,74-75,83-87,94,96,107,113-115,117,123-124,128-130,133-135,137,211,221,242,335
+apps/backend/tests/community/core/services/test_engine_config_service.py
+  s_785ac12e5de367::t_986a7147b003d1 35,45-48
+apps/backend/src/agentclaw/community/api/bot_public_risk_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1-8
+apps/backend/tests/community/api/bot_management/_bot_router_test_support.py
+  s_785ac12e5de367::t_986a7147b003d1 131-135
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_mcps.py
+  s_785ac12e5de367::t_986a7147b003d1 94
+apps/backend/src/agentclaw/community/core/agentswarm/runtime/handler/impl.py
+  s_785ac12e5de367::t_986a7147b003d1 531-532,536-537
+  s_785ac12e5de367::t_9280f461952e49 538
+apps/backend/src/agentclaw/community/core/devices/services/local_device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 791-797
+apps/backend/src/agentclaw/community/core/bot_collaborator/interceptor/extractors.py
+  s_785ac12e5de367::t_986a7147b003d1 21-22
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 922
+apps/backend/src/agentclaw/community/di/modules/knowledge_management_module.py
+  s_785ac12e5de367::t_986a7147b003d1 1-165
+apps/backend/src/agentclaw/community/core/bot_public_risk/input_builder.py
+  s_785ac12e5de367::t_986a7147b003d1 1-213
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  s_785ac12e5de367::t_986a7147b003d1 1-174
+apps/frontend-nextgen/test/services/community/communityService.test.ts
+  s_785ac12e5de367::t_986a7147b003d1 340,367-369
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_785ac12e5de367::t_986a7147b003d1 347-350
+apps/frontend-nextgen/src/domain/community/mapper.ts
+  s_785ac12e5de367::t_986a7147b003d1 219
+apps/backend/tests/community/core/bot_public/test_risk_publish_adapter.py
+  s_785ac12e5de367::t_986a7147b003d1 1-45
+apps/backend/src/agentclaw/community/core/channel/services/channel_service.py
+  s_785ac12e5de367::t_986a7147b003d1 76,98,209-224,228-229,232,409-411,419,593-606,610,616,626
+apps/backend/tests/community/core/devices/services/test_local_device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 150-152,949-964
+apps/backend/src/agentclaw/community/core/bot_public_risk/service_protocol.py
+  s_785ac12e5de367::t_986a7147b003d1 1-44
+apps/backend/tests/community/e2e/test_knowledge_management_flows.py
+  s_785ac12e5de367::t_986a7147b003d1 1-14
+apps/backend/tests/community/knowledge_management/test_transport.py
+  s_785ac12e5de367::t_986a7147b003d1 1-146
+apps/backend/tests/community/knowledge_composition/test_review_composition.py
+  s_785ac12e5de367::t_986a7147b003d1 1-150
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository_protocol.py
+  s_785ac12e5de367::t_986a7147b003d1 1-94
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/errors.py
+  s_785ac12e5de367::t_986a7147b003d1 1-48
+apps/backend/tests/community/core/bot_management/test_addressing.py
+  s_785ac12e5de367::t_986a7147b003d1 41-74
+apps/backend/tests/community/adapters/http/test_two_phase_boot.py
+  s_785ac12e5de367::t_986a7147b003d1 305-308
+apps/backend/src/agentclaw/community/api/README.md
+  s_785ac12e5de367::t_986a7147b003d1 135-136
+apps/backend/src/agentclaw/community/adapters/http/channel/router.py
+  s_785ac12e5de367::t_986a7147b003d1 22,284,295-297
+apps/backend/tests/community/knowledge_management/test_bounded_grant_reads.py
+  s_785ac12e5de367::t_986a7147b003d1 1-183
+apps/backend/tests/community/architecture/test_e2e_module_coverage.py
+  s_785ac12e5de367::t_986a7147b003d1 10,17-24,27,31-33,38,53-54
+apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py
+  s_785ac12e5de367::t_986a7147b003d1 1-336
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_785ac12e5de367::t_986a7147b003d1 182,684
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_785ac12e5de367::t_986a7147b003d1 22
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_785ac12e5de367::t_986a7147b003d1 2488,2493-2494,2500-2506
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/content_router.py
+  s_785ac12e5de367::t_986a7147b003d1 1-175
+apps/backend/specs/2026-10-28-knowledge-management-plugins/tasks.md
+  s_785ac12e5de367::t_986a7147b003d1 1-45
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_785ac12e5de367::t_986a7147b003d1 3-8
+apps/backend/tests/community/core/task_queue/test_task_worker.py
+  s_785ac12e5de367::t_986a7147b003d1 578-598
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/grant_state_reader.py
+  s_785ac12e5de367::t_986a7147b003d1 1-66
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/space_membership.py
+  s_785ac12e5de367::t_986a7147b003d1 1-64
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access.py
+  s_785ac12e5de367::t_986a7147b003d1 75,81,95-105,108-109,113,116-117,120-121,123-124,126,130-131,133-134,205,247,259,279-286
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/release_phase_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 82
+apps/backend/tests/community/adapters/http/bot_public/test_risk_routes.py
+  s_785ac12e5de367::t_986a7147b003d1 1-574
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  s_785ac12e5de367::t_986a7147b003d1 10,168-178
+apps/backend/src/agentclaw/community/core/bot_public_risk/application.py
+  s_785ac12e5de367::t_986a7147b003d1 1-88
+apps/backend/src/agentclaw/community/core/knowledge_management/repository/source.py
+  s_785ac12e5de367::t_986a7147b003d1 1-195
+apps/backend/src/agentclaw/community/core/bot_management/bot_service_protocol.py
+  s_785ac12e5de367::t_986a7147b003d1 23-24
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/eval_publish_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 91
+apps/backend/src/agentclaw/community/core/config_compose/services/collector.py
+  s_785ac12e5de367::t_986a7147b003d1 820-823,825-829,831
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/rollback_ops_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 108
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/baas_builder.py
+  s_785ac12e5de367::t_986a7147b003d1 144
+apps/backend/src/agentclaw/community/core/devices/services/device_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1051-1057
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_address.py
+  s_785ac12e5de367::t_986a7147b003d1 1-55
+apps/backend/tests/community/adapters/http/bot_public/test_risk_contract.py
+  s_785ac12e5de367::t_986a7147b003d1 1-67
+apps/backend/tests/community/api/bot_management/test_bot_router_extension_envelopes.py
+  s_785ac12e5de367::t_986a7147b003d1 1-112
+apps/backend/tests/community/endpoints/test_bot_public_risk.py
+  s_785ac12e5de367::t_986a7147b003d1 1-94
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/http_client.py
+  s_785ac12e5de367::t_986a7147b003d1 2,15,42-46
+apps/backend/tests/community/core/services/test_publish_source_identity.py
+  s_785ac12e5de367::t_986a7147b003d1 1-134
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository.py
+  s_785ac12e5de367::t_986a7147b003d1 1-419
+apps/backend/src/agentclaw/community/core/devices/services/binding_identity.py
+  s_785ac12e5de367::t_986a7147b003d1 1-25
+apps/backend/tests/community/knowledge_management/test_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1-411
+apps/backend/tests/community/adapters/http/service_bot/test_publish_handoff_permissions.py
+  s_785ac12e5de367::t_986a7147b003d1 117-135
+  s_785ac12e5de367::t_827806268a484c 116
+apps/backend/src/agentclaw/community/core/services/engine_config_service_protocol.py
+  s_785ac12e5de367::t_986a7147b003d1 77-82
+apps/backend/src/agentclaw/community/plugin_api/bot_create_extension.py
+  s_785ac12e5de367::t_986a7147b003d1 1-137
+apps/backend/src/agentclaw/community/core/channel/README.md
+  s_785ac12e5de367::t_986a7147b003d1 29-39
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_785ac12e5de367::t_986a7147b003d1 3-10
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_draft_restore_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 119,279
+apps/backend/src/agentclaw/community/core/bot_public_risk/query.py
+  s_785ac12e5de367::t_986a7147b003d1 1-25
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_785ac12e5de367::t_986a7147b003d1 618-619,830
+apps/backend/src/agentclaw/community/core/knowledge_management/content_policy.py
+  s_785ac12e5de367::t_986a7147b003d1 1-23
+apps/backend/tests/community/core/bot_public/test_risk_input.py
+  s_785ac12e5de367::t_986a7147b003d1 1-301
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/content_ports.py
+  s_785ac12e5de367::t_986a7147b003d1 1-25
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/scale_mixin.py
+  s_785ac12e5de367::t_986a7147b003d1 58,174
+apps/backend/src/agentclaw/community/core/mcp/services/repositories.py
+  s_785ac12e5de367::t_986a7147b003d1 27-29
+apps/backend/tests/community/core/bot_public/test_risk_approval_guard.py
+  s_785ac12e5de367::t_986a7147b003d1 1-209
+apps/backend/tests/community/core/bot_public/test_risk_repository.py
+  s_785ac12e5de367::t_986a7147b003d1 1-272
+apps/backend/tests/community/core/skill_center/services/test_collect_bot_active_mcps_union.py
+  s_785ac12e5de367::t_986a7147b003d1 299-316
+apps/backend/src/agentclaw/community/adapters/http/bot_public/schemas_risk.py
+  s_785ac12e5de367::t_986a7147b003d1 1-119
+apps/backend/tests/community/endpoints/test_service_bot_publish_engine_config.py
+  s_785ac12e5de367::t_986a7147b003d1 17-18,46-47,59,82-88,93,238
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py
+  s_785ac12e5de367::t_986a7147b003d1 55,58,90
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  s_785ac12e5de367::t_986a7147b003d1 1-447
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_engine_config.py
+  s_785ac12e5de367::t_986a7147b003d1 148-151
+apps/backend/tests/community/core/bot_public/test_risk_lifecycle.py
+  s_785ac12e5de367::t_986a7147b003d1 1-121
+apps/backend/src/agentclaw/community/core/bot_public_risk/eligibility.py
+  s_785ac12e5de367::t_986a7147b003d1 1-22
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  s_785ac12e5de367::t_986a7147b003d1 331,354,368-369
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py
+  s_785ac12e5de367::t_986a7147b003d1 1-357
+apps/backend/tests/community/core/service_bot/services/test_publish_owner_handoff_lifecycle.py
+  s_785ac12e5de367::t_986a7147b003d1 117-118,121,142-143,148-149,159
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/provider_behavior.py
+  s_785ac12e5de367::t_986a7147b003d1 235-237
+apps/frontend-nextgen/src/components/Community/CommunityTopicList/index.tsx
+  s_785ac12e5de367::t_986a7147b003d1 6,96-98
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/job_reader.py
+  s_785ac12e5de367::t_986a7147b003d1 1-70
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/assembly.py
+  s_785ac12e5de367::t_986a7147b003d1 1-50
+apps/frontend-nextgen/test/components/Community/PublishTopicModal.test.tsx
+  s_785ac12e5de367::t_986a7147b003d1 125,130-131
+apps/backend/src/agentclaw/community/kernel/knowledge_management.py
+  s_785ac12e5de367::t_986a7147b003d1 1-7
+apps/backend/tests/community/core/agentswarm/runtime/pool/test_subagent_runtime.py
+  s_785ac12e5de367::t_986a7147b003d1 699-719
+apps/backend/tests/community/core/bot_public/test_risk_query.py
+  s_785ac12e5de367::t_986a7147b003d1 1-38
+apps/backend/specs/2026-10-28-knowledge-management-plugins/candidate-index.md
+  s_785ac12e5de367::t_986a7147b003d1 1-59
+apps/backend/src/agentclaw/community/core/approval/README.md
+  s_785ac12e5de367::t_986a7147b003d1 16-17
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_publish.py
+  s_785ac12e5de367::t_986a7147b003d1 192,402-409,411
+apps/backend/tests/community/core/devices/services/test_multi_instance.py
+  s_785ac12e5de367::t_986a7147b003d1 580,592,610,681
+apps/backend/tests/community/architecture/test_risk_repository_boundary.py
+  s_785ac12e5de367::t_986a7147b003d1 1-16
+apps/backend/specs/2026-10-28-knowledge-management-plugins/verification.md
+  s_785ac12e5de367::t_986a7147b003d1 1-89
+apps/backend/src/agentclaw/community/core/bot_public_risk/publish_adapter.py
+  s_785ac12e5de367::t_986a7147b003d1 1-44
+apps/backend/src/agentclaw/community/adapters/http/knowledge_management/schemas.py
+  s_785ac12e5de367::t_986a7147b003d1 1-148
+apps/backend/tests/community/di/test_bot_public_risk_input_wiring.py
+  s_785ac12e5de367::t_986a7147b003d1 1-55
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  s_785ac12e5de367::t_986a7147b003d1 1-261
+apps/backend/src/agentclaw/community/di/modules/bot_extension_module.py
+  s_785ac12e5de367::t_986a7147b003d1 1-18
+apps/backend/tests/community/core/agentswarm/test_production_gates.py
+  s_785ac12e5de367::t_986a7147b003d1 261-276,279,282-283,291-294,299-305,307-314,316,318-334,346-347,523
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  s_785ac12e5de367::t_986a7147b003d1 24,66,391-392,408-422,424-433,459-486,488-506,508-513,542-546,550-554,868-869,885-903,945-949,954-955
+  s_785ac12e5de367::t_fa099eac783eab 956
+apps/backend/src/agentclaw/community/plugins/local/bot_publish_approval.py
+  s_785ac12e5de367::t_986a7147b003d1 10,46-48,50-51
+apps/backend/src/agentclaw/community/core/knowledge_management/sql/2026_10_28_bot_candidates.sql
+  s_785ac12e5de367::t_986a7147b003d1 1-7
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/EditTopicModal.tsx
+  s_785ac12e5de367::t_986a7147b003d1 16
+apps/backend/tests/community/adapters/http/agentswarm/test_submit_schema_validation.py
+  s_785ac12e5de367::t_986a7147b003d1 7-9,33
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_785ac12e5de367::t_986a7147b003d1 3619,3658
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  s_785ac12e5de367::t_986a7147b003d1 25-30,83,96,106-109
+apps/backend/tests/community/core/channel/test_channel_owner_handoff.py
+  s_785ac12e5de367::t_986a7147b003d1 1-86
+apps/backend/tests/community/knowledge_management/test_ecb_contract.py
+  s_785ac12e5de367::t_986a7147b003d1 1-92
+apps/backend/src/agentclaw/community/core/bot_collaborator/interceptor/collaborator.py
+  s_785ac12e5de367::t_986a7147b003d1 197-210,212-216
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_defaults.py
+  s_785ac12e5de367::t_986a7147b003d1 187,196-197,203
+apps/backend/tests/community/endpoints/test_service_bot_build_handoff.py
+  s_785ac12e5de367::t_986a7147b003d1 1-72
+apps/frontend-nextgen/test/domain/community/mapper.test.ts
+  s_785ac12e5de367::t_986a7147b003d1 293-294,302-303
+apps/backend/tests/community/core/channel/test_channel_compose_identity.py
+  s_785ac12e5de367::t_986a7147b003d1 1-70
+apps/backend/src/agentclaw/community/core/bot_public_risk/access.py
+  s_785ac12e5de367::t_986a7147b003d1 1-51
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/app_services.py
+  s_785ac12e5de367::t_986a7147b003d1 15,18,20-22,26,50,107-109,111-113
+apps/backend/src/agentclaw/community/core/service_bot/services/bot_publish_service.py
+  s_785ac12e5de367::t_986a7147b003d1 1096
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea941e4567fc1faa13704e0af1fc29a44031a13a",
+  "prompts": {},
+  "sessions": {
+    "s_785ac12e5de367": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "09473ff1-a2db-4cd4-a9a5-e59dc77ed3e2",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

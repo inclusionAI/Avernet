@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowVersionDiff.tsx
+  h_43af82e14600e4 7,228,232,234
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlCodeViewer.tsx
+  h_43af82e14600e4 8-9,129,131,153,175-176
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowHistorySideBySide.test.tsx
+  h_43af82e14600e4 72-82
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlCodeViewer.test.tsx
+  h_43af82e14600e4 26-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "80c33ee8531f8e68f9df321525edfba0f6d5909c",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

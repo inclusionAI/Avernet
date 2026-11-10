@@ -1,0 +1,21 @@
+src/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_f1bcff5b11d65d::t_ce76aa2659d265 61-82
+src/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_f1bcff5b11d65d::t_0d382e88ba5bd4 467-468,495-514
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aebbce8063eaabc2f9b764cd1667dbfe7b971ece",
+  "prompts": {},
+  "sessions": {
+    "s_f1bcff5b11d65d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a221-b090-7f21-aca0-09103224674f",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

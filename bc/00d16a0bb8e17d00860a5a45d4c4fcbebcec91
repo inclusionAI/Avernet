@@ -1,0 +1,92 @@
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_intake.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 22,59
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_d23d2dd74fff18::t_c3c98203186a92 1-356
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 3-11,214-215,426-427,445-453
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_report.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 36,56,71,80,104,154,202
+apps/backend/specs/2026-11-07-task-request-extra-parameters/tasks.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-17
+apps/backend/tests/community/adapters/http/task/test_schemas.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 437,446-448,455,464-466,731-794
+apps/backend/src/agentclaw/community/core/task/domain/search_viewer.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-34
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_dispatch.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 11
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 84-87
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 144,146-149,162-165,192,213-216,488,549,555-557,846-954
+  s_d23d2dd74fff18::t_c3c98203186a92 3-4,6,10-21
+apps/backend/src/agentclaw/community/core/task/task_dispatch/search.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 10,24-25,40-44,48,56,71-74,76,89,96
+apps/backend/specs/2026-11-06-task-search-viewer/tasks.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-56
+apps/backend/src/agentclaw/community/core/task/task_harness/relay_runtime_policy.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 3,6-8
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 18,110-111
+apps/backend/src/agentclaw/community/adapters/http/task/schemas.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 935,956,982
+apps/backend/tests/community/adapters/http/task/test_request_extra_parameters.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-236
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 421,429-432,444,447-449,475-512
+  s_d23d2dd74fff18::t_96c61c051fb8c6 513
+apps/backend/specs/2026-09-23-task-cli/design.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 3-11
+apps/backend/specs/2026-11-06-runtime-reasons-persistence/implementation.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-47
+apps/backend/specs/2026-11-07-task-request-extra-parameters/spec.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-22
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_artifact.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 54
+apps/backend/specs/2026-11-07-task-request-extra-parameters/plan.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-13
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_search.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 5-18,24,30-38
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 3-4,18,80-81,94,104,148-149,151,176-179
+apps/backend/tests/community/repository/task/test_task_runtime_reasons.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-146
+apps/backend/tests/community/core/task/task_artifact/test_artifact_report_item.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 535-536,548
+apps/backend/src/agentclaw/community/core/task/task_runner/client/candidate_search.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 13-14,117-118,121-123,140
+apps/backend/tests/community/adapters/http/task/test_request_extra_http.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-57
+apps/backend/specs/2026-11-06-task-search-viewer/plan.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-140
+apps/backend/src/agentclaw/community/core/repository/implementations/task/task_graph_repository.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 44,195-200,215-217,738-746
+apps/backend/tests/community/adapters/http/task/test_task_artifact_api.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 245,251
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  s_d23d2dd74fff18::t_c3c98203186a92 51,103,106,248,268,272
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 221,245-247,255,260,263-267,276,281-283,292,308,355-358
+apps/backend/specs/2026-11-06-task-search-viewer/spec.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-48
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 9,140-141,146,148
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 1-244
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_d23d2dd74fff18::t_578c1ba3cfd89e 3-11,740,1258-1267,1505,1507,1511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc00d16a0bb8e17d00860a5a45d4c4fcbebcec91",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

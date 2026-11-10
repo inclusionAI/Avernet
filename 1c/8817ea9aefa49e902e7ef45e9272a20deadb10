@@ -1,0 +1,14 @@
+apps/baas/configs/application.yaml
+  h_dac96fb4da302f 60-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1c8817ea9aefa49e902e7ef45e9272a20deadb10",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
