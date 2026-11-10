@@ -265,6 +265,36 @@ async fn existing_duplicate_names_are_reported_as_conflicts() {
 }
 
 #[tokio::test]
+async fn first_card_attachment_rejects_invalid_source_without_mutating_bot() {
+    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION};
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Original' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    let v1=SOURCE_AGENT_EXTENSION.replace("v2.md","v1.md");
+    for extension in [
+        json!({"uri":v1,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"invalid_party"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":null}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":""}}),
+    ] {
+        let mut incoming=record();
+        incoming.agent_card["capabilities"]=json!({"extensions":[extension]});
+        assert!(store.get("bot").await.unwrap().is_none());
+        assert!(matches!(store.compare_and_set(&incoming,0).await,Err(ServiceError::A2aManagement(_))));
+        assert!(matches!(store.replace(&incoming).await,Err(ServiceError::A2aManagement(_))));
+        assert!(store.get("bot").await.unwrap().is_none());
+        let rows=db.query(DbStatement::new("SELECT name,agent_card_revision FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+        assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("Original"));
+        assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(),Some(0));
+    }
+    let mut valid=record();
+    valid.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    assert!(store.compare_and_set(&valid,0).await.unwrap());
+    assert_eq!(store.get("bot").await.unwrap().unwrap().agent_card,valid.agent_card);
+}
+
+#[tokio::test]
 async fn source_classification_can_be_removed_without_affecting_provider_identity() {
     use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
     let db=database().await;let store=DbA2aBotStore::sqlite(db,"test".into());

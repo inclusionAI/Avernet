@@ -44,6 +44,7 @@ fn rejects_retired_identity_invalid_party_and_duplicate_extensions() {
 
 #[test]
 fn provider_ref_uses_existing_ascii_contract_without_normalization() {
+    assert!(validate_provider_bot_ref(&"x".repeat(128)).is_ok());
     for key in ["001Ab","abc:001","A-b_c.d"] {assert!(validate_provider_bot_ref(key).is_ok());}
-    for key in [""," x","x ","x/y","中文","a\n",&"x".repeat(257)] {assert!(validate_provider_bot_ref(key).is_err());}
+    for key in [""," x","x ","x/y","中文","a\n",&"x".repeat(129)] {assert!(validate_provider_bot_ref(key).is_err());}
 }

@@ -43,7 +43,7 @@
 | --- | --- | --- |
 | provider_name | string | 仅作为响应中的 BCN Provider 标识；`^[a-z][a-z0-9_-]{0,63}$`，环境内唯一 |
 | bot_id | string | BCN 分配的稳定 Bot 标识，管理对象的稳定身份；从注册响应保存，并用于资源路径 |
-| provider_bot_ref | string | 注册必填的平台稳定键，1～256 字节，仅 ASCII 字母、数字、_、-、.、:，不做大小写或前导零归一化；不可通过 Card 更新修改 |
+| provider_bot_ref | string | 注册必填的平台稳定键，1～128 字节，仅 ASCII 字母、数字、_、-、.、:，不做大小写或前导零归一化；不可通过 Card 更新修改 |
 | agent_name | string | 等于已保存 Card.name；2～64 个 Unicode 码点，支持中文、区分大小写，无首尾空白或控制字符 |
 | agent_card_url | string 或响应中的 null | Card 的绝对 HTTP(S) URL；不是 Agent 调用接口地址；最长 2048 个字符 |
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |

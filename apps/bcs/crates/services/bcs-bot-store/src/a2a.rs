@@ -158,11 +158,10 @@ impl DbA2aBotStore {
         let name=bcs_service_api::types::a2a_names::card_bot_name(&record.agent_card).map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
         let previous=self.get(&record.bot_uuid).await?;
         if expected.is_some_and(|revision|revision!=previous.as_ref().map_or(0,|value|value.revision)) {return Ok(None);}
-        if let Some(previous)=&previous {
-            bcs_service_api::types::a2a_bot::a2a_management::validate_source_transition(&previous.agent_card,&record.agent_card)?;
-        }
-        // Fence even an unconditional replacement against an ID first assigned
-        // since the immutable-source check. Caller retries the local CAS only.
+        // Validate every incoming Card, including the first attachment to a legacy Bot.
+        bcs_service_api::types::a2a_bot::a2a_management::source_agent(&record.agent_card)?;
+        // Fence even an unconditional replacement against a concurrent Card write.
+        // Caller retries the local CAS only.
         let expected=Some(expected.unwrap_or_else(||previous.as_ref().map_or(0,|v|v.revision)));
         let visibility_assignment=if let Some(value)=visibility {format!("visibility='{}',",value.as_str())} else {String::new()};
         let mut params=vec![name.into(),name.into(),serde_json::to_string(&record.agent_card).map_err(error)?.into(),record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),

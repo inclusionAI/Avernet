@@ -348,7 +348,7 @@ pub fn validate_source_transition(_previous: &Value, next: &Value) -> Result<()>
 }
 
 pub fn validate_provider_bot_ref(reference: &str) -> Result<()> {
-    if reference.is_empty() || reference.len()>256 || !reference.bytes().all(|c|
+    if reference.is_empty() || reference.len()>128 || !reference.bytes().all(|c|
         c.is_ascii_alphanumeric() || matches!(c,b'_'|b'-'|b'.'|b':')) {
         return Err(ManagementError::new(ManagementCode::InvalidRequest,"provider_bot_ref","INVALID_PROVIDER_BOT_REF"));
     }

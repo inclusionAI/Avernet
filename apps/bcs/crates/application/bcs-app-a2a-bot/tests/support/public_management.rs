@@ -122,9 +122,20 @@ async fn same_names_are_allowed_but_provider_refs_conflict_and_party_can_change(
 }
 
 #[tokio::test]
+async fn public_registration_accepts_maximum_core_reference_length() {
+    let (_,service)=public_fixture().await;
+    let mut command=request(card("边界注册",None));
+    command.provider_bot_ref="x".repeat(128);
+    let registered=service.register_agent(command).await.unwrap();
+    assert_eq!(registered.provider_bot_ref,"x".repeat(128));
+    let found=service.find_agents_by_provider_ref("test-admin",&registered.provider_bot_ref).await.unwrap();
+    assert_eq!(found[0].bot_id,registered.bot_id);
+}
+
+#[tokio::test]
 async fn public_registration_requires_owner_and_valid_platform_ref_before_fetch() {
     let (chain,service)=public_fixture().await;
-    for reference in ["", " bad", "bad ", "bad/ref", "中文", &"x".repeat(257)] {
+    for reference in ["", " bad", "bad ", "bad/ref", "中文", &"x".repeat(129)] {
         let mut command=request(card("注册检查",None));
         command.provider_bot_ref=reference.into();
         command.source=A2aCardSource::Url("not-a-url".into());
