@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Bot } from 'lucide-react';
-import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { imageAvatarSource } from '@/utils/avatarSource';
 
 interface BotDisplayAvatarProps {
@@ -11,7 +11,7 @@ interface BotDisplayAvatarProps {
 }
 
 function AvatarImage({ botId, name, avatarUrl, size = 32 }: BotDisplayAvatarProps) {
-  const fallback = useMemo(() => generateBotAvatar(botId), [botId]);
+  const fallback = useMemo(() => resolveBotAvatarUrl(undefined, botId), [botId]);
   const [attempt, setAttempt] = useState(0);
   const candidates = avatarUrl && avatarUrl !== fallback ? [avatarUrl, fallback] : [fallback];
   const src = candidates[attempt];

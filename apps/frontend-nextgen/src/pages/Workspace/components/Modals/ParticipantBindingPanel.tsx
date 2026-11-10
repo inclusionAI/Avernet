@@ -41,7 +41,7 @@ export function ParticipantBindingPanel({
   return (
     <div data-role-binding-panel className="min-w-0 border-t border-border pt-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium text-foreground">角色绑定</span>
+        <span className="text-xs font-medium text-foreground">角色绑定</span>
         <span className="text-xs text-muted-foreground">
           已绑定 {boundCount} / {definitions.length} 个角色，共 {botCount} 个 Bot
         </span>
@@ -79,7 +79,7 @@ export function ParticipantBindingPanel({
                 onClick={() => onActiveKeyChange(definition.key)}
               >
                 <span className="flex min-w-0 items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-sm font-medium">
+                  <span className="min-w-0 truncate text-xs font-medium">
                     {label}
                     {definition.required ? <span className="text-destructive"> *</span> : null}
                   </span>
