@@ -13,7 +13,7 @@ import {
   listFriendConnections,
   type FriendConnectionSummaryDto,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
-import { discoverPublicBots } from '@/services/backendApi/collaboration/publicBotController';
+import { discoverPublicBots, type PublicBotDiscoveryDto } from '@/services/backendApi/collaboration/publicBotController';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface CollaborationBotView {
@@ -78,6 +78,33 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
     engine: dto.engine,
     botType: dto.bot_type,
     ...(isFriend !== undefined ? { isFriend } : {}),
+  };
+}
+
+/** Discover 已按 viewer 过滤可见性；已加载候选只补充元数据，不限制搜索结果。 */
+function mapDiscoveredBot(dto: PublicBotDiscoveryDto, id: string, known?: CollaborationBotView): RecommendCandidateView {
+  const online = typeof dto.is_online === 'boolean' ? dto.is_online : known?.online ?? dto.status === 'online';
+  const visibility = dto.visibility === 'public' || dto.visibility === 'protected' || dto.visibility === 'private'
+    ? dto.visibility : known?.visibility ?? 'private';
+  const recommendation = dto.recommendation ?? {};
+  const shortProfile = typeof recommendation.short_profile === 'string' ? recommendation.short_profile.trim() : '';
+  return {
+    ...known,
+    id,
+    name: dto.name?.trim() || known?.name || id,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url === undefined ? known?.avatarUrl : dto.avatar_url, dto.bot_id?.trim() || id),
+    summary: dto.description?.trim() || known?.summary,
+    online: online && known?.reachability !== 'unreachable',
+    status: online ? 'online' : 'hidden',
+    botStatus: dto.status || known?.botStatus,
+    reachability: known?.reachability ?? 'reachable',
+    visibility,
+    isFriend: typeof dto.is_friend === 'boolean' ? dto.is_friend : known?.isFriend,
+    engine: dto.engine || known?.engine,
+    botType: dto.bot_type || known?.botType,
+    recommendScore: typeof recommendation.score === 'number' && Number.isFinite(recommendation.score)
+      ? recommendation.score : 0,
+    ...(shortProfile ? { shortProfile } : {}),
   };
 }
 
@@ -307,12 +334,13 @@ export const collaborationCandidateService = {
     }
   },
 
-  /** 发起协作智能推荐：discover 结果与当前可协作列表求交集，在线优先、推荐分降序。 */
+  /** 发起协作语义发现：展示当前 viewer 的 discover 结果，在线优先、推荐分降序。 */
   async recommendCandidates(
     input: {
       actorId: string;
       actorKind: 'user' | 'bot';
       keyword: string;
+      /** 仅补充历史响应缺失的字段，不用本地已加载条目限制发现结果。 */
       candidates: CollaborationBotView[];
     },
     signal?: AbortSignal,
@@ -335,17 +363,12 @@ export const collaborationCandidateService = {
       );
       const candidateById = new Map(input.candidates.map((bot) => [bot.id, bot]));
       const recommended: RecommendCandidateView[] = [];
+      const seen = new Set<string>();
       for (const item of response.data?.items ?? []) {
-        const base = item.bot_uuid ? candidateById.get(item.bot_uuid) : undefined;
-        if (!base) continue;
-        const recommendation = (item.recommendation ?? {}) as { score?: unknown; short_profile?: unknown };
-        recommended.push({
-          ...base,
-          recommendScore: typeof recommendation.score === 'number' ? recommendation.score : 0,
-          ...(typeof recommendation.short_profile === 'string' && recommendation.short_profile
-            ? { shortProfile: recommendation.short_profile }
-            : {}),
-        });
+        const id = item.bot_uuid?.trim() || item.bot_id?.trim();
+        if (!id || (item.actor_kind && item.actor_kind !== 'bot') || seen.has(id)) continue;
+        seen.add(id);
+        recommended.push(mapDiscoveredBot(item, id, candidateById.get(id)));
       }
       recommended.sort((a, b) => (a.online === b.online ? b.recommendScore - a.recommendScore : a.online ? -1 : 1));
       return { ok: true, data: recommended };

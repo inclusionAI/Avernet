@@ -205,13 +205,14 @@ it('shows the filter mode switch only on the candidates tab and switches modes',
   expect(setFilterMode).toHaveBeenCalledWith('profile');
 });
 
-it('renders profile recommendations with short profile summaries', () => {
+it('renders profile recommendations and summaries despite an unrelated ordinary list error', () => {
   render(
     <GroupParticipantPicker
       picker={makePicker([], {
         tab: 'candidates',
         filterMode: 'profile',
         search: '值班',
+        error: '普通候选列表加载失败',
         recommendations: [
           {
             id: 'b1',

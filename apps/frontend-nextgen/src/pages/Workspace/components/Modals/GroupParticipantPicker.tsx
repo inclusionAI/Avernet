@@ -178,7 +178,7 @@ export function GroupParticipantPicker({
             重试
           </Button>
         </div>
-      ) : picker.error ? (
+      ) : !recommendActive && picker.error ? (
         <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.error}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retry}>
