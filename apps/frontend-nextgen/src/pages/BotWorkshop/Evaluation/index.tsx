@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
 import { Empty } from '@/components/ui/Empty';
 import { Segmented } from '@/components/ui/Segmented';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
+import { Textarea } from '@/components/ui/Textarea';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
 import { History, RefreshCw } from 'lucide-react';
 import { history, useParams, useSearchParams } from '@umijs/max';
@@ -175,42 +177,42 @@ const EvaluationPage: React.FC = () => {
                           <label className="text-xs font-medium text-muted-foreground" htmlFor="dataset-type">
                             评测集格式
                           </label>
-                          <select
-                            id="dataset-type"
-                            value={datasetType}
-                            onChange={(event) => setDatasetType(event.target.value)}
-                            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-                          >
-                            <option value="jsonl">JSONL</option>
-                            <option value="csv">CSV</option>
-                            <option value="odps">ODPS</option>
-                          </select>
+                          <Select value={datasetType} onValueChange={setDatasetType}>
+                            <SelectTrigger id="dataset-type" className="h-9 text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="jsonl">JSONL</SelectItem>
+                              <SelectItem value="csv">CSV</SelectItem>
+                              <SelectItem value="odps">ODPS</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         <EvalFileInput label="评测集文件" file={datasetFile} onSelect={setDatasetFile} />
                         <div className="space-y-1.5">
                           <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-type">
                             评测目标格式
                           </label>
-                          <select
-                            id="goal-type"
-                            value={goalType}
-                            onChange={(event) => setGoalType(event.target.value as GoalType)}
-                            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-                          >
-                            <option value="json">JSON</option>
-                            <option value="semantic">自然语义</option>
-                          </select>
+                          <Select value={goalType} onValueChange={(value) => setGoalType(value as GoalType)}>
+                            <SelectTrigger id="goal-type" className="h-9 text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="json">JSON</SelectItem>
+                              <SelectItem value="semantic">自然语义</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         {goalType === 'json' ? (
                           <EvalFileInput label="评测目标文件" accept=".json" file={goalFile} onSelect={setGoalFile} />
                         ) : null}
                       </div>
                       {goalType === 'semantic' ? (
-                        <textarea
-                          className="min-h-20 w-full rounded-md border border-border bg-background p-2 text-sm"
+                        <Textarea
+                          className="text-sm"
                           placeholder="例如：评估该 Bot 在金融政策问答场景下的准确率和安全性。"
-                        value={goalPrompt}
-                        onChange={(event) => setGoalPrompt(event.target.value)}
+                          value={goalPrompt}
+                          onChange={(event) => setGoalPrompt(event.target.value)}
                         />
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-2">
