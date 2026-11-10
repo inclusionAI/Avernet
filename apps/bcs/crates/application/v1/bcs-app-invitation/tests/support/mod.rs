@@ -70,6 +70,10 @@ pub struct FakeFriendService {
     list_error: Mutex<Option<ServiceError>>,
     /// Inbound auth context each mutating command carried, in call order.
     request_auths: Mutex<Vec<(&'static str, Option<RequestAuthHeaders>)>>,
+    /// Request ids the listing must hide, standing in for the converged
+    /// facade's `created_by == from_id` projection filter (a Bot↔Bot reverse
+    /// pending row is created by the requester and therefore never listed).
+    hidden_from_listing: Mutex<Vec<String>>,
 }
 
 impl FakeFriendService {
@@ -92,6 +96,20 @@ impl FakeFriendService {
     /// Seed a request row exactly as the legacy store would hold it.
     pub fn seed(&self, request: FriendRequest) {
         lock(&self.requests).push(request);
+    }
+
+    /// Hide a row from `list_friend_requests`, like the converged facade's
+    /// `created_by == from_id` filter drops a Bot↔Bot reverse pending row.
+    pub fn hide_from_listing(&self, request_id: &str) {
+        lock(&self.hidden_from_listing).push(request_id.to_string());
+    }
+
+    /// The stored row, irrespective of the listing projection.
+    pub fn snapshot(&self, request_id: &str) -> Option<FriendRequest> {
+        lock(&self.requests)
+            .iter()
+            .find(|request| request.id == request_id)
+            .cloned()
     }
 
     /// Current legacy status of a seeded/created request.
@@ -214,6 +232,7 @@ impl FriendService for FakeFriendService {
                     .as_ref()
                     .is_none_or(|status| &request.status == status)
             })
+            .filter(|request| !lock(&self.hidden_from_listing).contains(&request.id))
             .cloned()
             .collect())
     }
@@ -278,11 +297,21 @@ pub struct FakeConnectService {
     friendships: Mutex<Vec<(String, String)>>,
     revoke_calls: Mutex<Vec<(String, String)>>,
     revoke_error: Mutex<Option<ServiceError>>,
+    /// Optional view onto the legacy friend-request rows. In production both
+    /// surfaces are converged on the connect store; this fake mirrors the
+    /// mutation the legacy facade fake performs so `get_request` (the V1
+    /// decided-request read) observes it.
+    legacy_source: Option<std::sync::Arc<FakeFriendService>>,
 }
 
 impl FakeConnectService {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_legacy_source(mut self, source: std::sync::Arc<FakeFriendService>) -> Self {
+        self.legacy_source = Some(source);
+        self
     }
 
     /// Seed a symmetric friendship edge the revoke path can remove.
@@ -337,8 +366,36 @@ impl ConnectService for FakeConnectService {
         unreachable!("the V1 friendship facade must not call cancel")
     }
 
-    async fn get_request(&self, _request_id: &str) -> ServiceResult<PermissionRequest> {
-        unreachable!("the V1 friendship facade must not call get_request")
+    async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
+        let source = self
+            .legacy_source
+            .as_ref()
+            .unwrap_or_else(|| panic!("get_request needs a legacy source"));
+        let request = source.snapshot(request_id).ok_or_else(|| {
+            ServiceError::FriendRequestNotFound(request_id.to_string())
+        })?;
+        Ok(PermissionRequest {
+            request_id: request.id,
+            edge_id: None,
+            env: "dev".to_string(),
+            from_id: request.from_bot.clone(),
+            to_id: request.to_bot.clone(),
+            request_kind: bcs_domain::edge_permission::RequestKind::Connect,
+            requested_ref_id: None,
+            requested_rules: None,
+            message: None,
+            status: match request.status {
+                FriendRequestStatus::Pending => bcs_domain::edge_permission::RequestStatus::Pending,
+                FriendRequestStatus::Accepted => bcs_domain::edge_permission::RequestStatus::Approved,
+                FriendRequestStatus::Rejected => bcs_domain::edge_permission::RequestStatus::Rejected,
+            },
+            decision_reason: None,
+            created_by: request.from_bot,
+            decided_by: None,
+            decided_at: None,
+            created_at: request.created_at,
+            updated_at: request.updated_at,
+        })
     }
 
     async fn revoke_friend(

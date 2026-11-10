@@ -28,8 +28,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    invite_token_decode_and_verify, invite_token_encode, ActorKind, InviteTargetType,
-    InviteTokenError, InviteTokenPayload,
+    edge_permission::{PermissionRequest, RequestStatus as EdgeRequestStatus},
+    invite_token_decode_and_verify, invite_token_encode, ActorKind, FriendRequestStatus,
+    InviteTargetType, InviteTokenError, InviteTokenPayload,
 };
 use bcs_service_api::application::v1::{
     friend_connection::{
@@ -327,34 +328,28 @@ impl InvitationFriendshipServiceImpl {
     /// Rebuild the V1 projection after a friend-request decision.
     ///
     /// The legacy `accept/reject_friend_request` commands answer with no row,
-    /// and the legacy facade has no "get one request" entry. Re-read the
-    /// receiver's list and project the decided row by id: the facade's listing
-    /// drops the reverse Bot↔Bot pending row (`created_by != from_id`), so only
-    /// the forward row created for `request_id` can match.
+    /// so read the decided request from the connect store by id. The legacy
+    /// facade listing cannot serve this: its `created_by == from_id`
+    /// projection drops the Bot↔Bot reverse pending row, yet deciding that
+    /// reverse row is legal and the mutation already happened. A missing row
+    /// is a server inconsistency after a successful decision, so it maps to an
+    /// internal error (never a 404).
     async fn decided_friend_request(
         &self,
         receiver: &str,
         request_id: &str,
     ) -> Result<FriendRequest, ApplicationError> {
-        let requests = self
-            .legacy_friend
-            .list_friend_requests(ListFriendRequestsCommand {
-                caller_actor_id: receiver.to_string(),
-                direction: DomainFriendRequestDirection::All,
-                status_filter: None,
-            })
+        let request = self
+            .connect_service()?
+            .get_request(request_id)
             .await
-            .map_err(map_friend_use_case_error)?;
-        requests
-            .iter()
-            .find(|request| request.id == request_id)
-            .map(project_friend_request)
-            .ok_or_else(|| {
+            .map_err(|error| {
                 ApplicationError::internal(format!(
-                    "friend request '{request_id}' is missing from the facade listing \
-                     after the decision"
+                    "friend request '{request_id}' (receiver '{receiver}') is not readable from \
+                     the connect store after the decision: {error}"
                 ))
-            })
+            })?;
+        Ok(project_connect_friend_request(&request))
     }
 }
 
@@ -728,6 +723,30 @@ fn project_friend_request(request: &DomainFriendRequest) -> FriendRequest {
     }
 }
 
+/// Project a decided connect request onto the V1 friend-request wire shape.
+///
+/// The connect vocabulary is `pending|approved|rejected|cancelled`; V1 speaks
+/// `pending|accepted|rejected`, so `approved` maps to `accepted` and the
+/// terminal `cancelled` state projects as `rejected` (mirroring the legacy
+/// facade's status projection).
+fn project_connect_friend_request(request: &PermissionRequest) -> FriendRequest {
+    FriendRequest {
+        request_id: request.request_id.clone(),
+        from_bot_uuid: request.from_id.clone(),
+        to_bot_uuid: request.to_id.clone(),
+        status: match request.status {
+            EdgeRequestStatus::Pending => FriendRequestStatus::Pending,
+            EdgeRequestStatus::Approved => FriendRequestStatus::Accepted,
+            EdgeRequestStatus::Rejected | EdgeRequestStatus::Cancelled => {
+                FriendRequestStatus::Rejected
+            }
+        },
+        message: None,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
+    }
+}
+
 fn map_v1_target_to_domain(target: InvitationTargetType) -> InviteTargetType {
     match target {
         InvitationTargetType::Group => InviteTargetType::Group,
@@ -943,7 +962,7 @@ impl InvitationFriendshipServiceImpl {
     async fn resolve_request_decider(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
-        request: &bcs_domain::edge_permission::PermissionRequest,
+        request: &PermissionRequest,
     ) -> Result<String, ApplicationError> {
         let default_actor = Self::caller_default_actor(caller)?;
         if request.to_id == default_actor {
@@ -972,7 +991,7 @@ impl InvitationFriendshipServiceImpl {
     async fn ensure_can_cancel_request(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
-        request: &bcs_domain::edge_permission::PermissionRequest,
+        request: &PermissionRequest,
     ) -> Result<(), ApplicationError> {
         let default_actor = Self::caller_default_actor(caller)?;
         if request.created_by == default_actor || request.from_id == default_actor {
@@ -1201,7 +1220,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
 }
 
 fn project_friend_connection_request(
-    request: &bcs_domain::edge_permission::PermissionRequest,
+    request: &PermissionRequest,
 ) -> FriendConnectionRequestView {
     FriendConnectionRequestView {
         request_id: request.request_id.clone(),

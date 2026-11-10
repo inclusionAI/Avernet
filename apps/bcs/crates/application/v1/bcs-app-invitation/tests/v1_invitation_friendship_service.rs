@@ -102,7 +102,7 @@ impl Fixture {
             ),
         });
         let legacy_friend = Arc::new(FakeFriendService::new());
-        let connect = Arc::new(FakeConnectService::new());
+        let connect = Arc::new(FakeConnectService::new().with_legacy_source(legacy_friend.clone()));
         let service = InvitationFriendshipServiceImpl::new(
             friends.clone(),
             legacy_friend.clone(),
@@ -2087,5 +2087,48 @@ async fn friendship_commands_forward_the_inbound_request_auth() {
             ("reject", Some(reject_auth)),
         ],
         "the V1 commands must forward request_auth verbatim to the facade"
+    );
+}
+
+/// F4 regression: deciding a Bot↔Bot reverse pending row (from/to flipped,
+/// `created_by == from_id` false) is legal and the mutation already happened.
+/// The V1 response must come from the connect store, not from the legacy
+/// facade listing — that listing drops the reverse row and used to turn a
+/// successful decision into a 500.
+#[tokio::test]
+async fn accept_reverse_row_returns_decided_request_without_facade_listing() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    // The reverse row of a Bot↔Bot connect: B→A, created by A.
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "reverse-1".to_string(),
+        from_bot: "bot-b".to_string(),
+        to_bot: "bot-a".to_string(),
+        status: FriendRequestStatus::Pending,
+        created_at: 900,
+        updated_at: 900,
+    });
+    fx.legacy_friend.hide_from_listing("reverse-1");
+
+    let accepted = fx
+        .service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            request_id: "reverse-1".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("deciding the reverse row must not fail after the mutation");
+
+    assert_eq!(accepted.request_id, "reverse-1");
+    assert_eq!(accepted.from_bot_uuid, "bot-b");
+    assert_eq!(accepted.to_bot_uuid, "bot-a");
+    assert_eq!(accepted.status, FriendRequestStatus::Accepted);
+    assert_eq!(accepted.created_at, 900);
+    assert!(
+        accepted.updated_at > accepted.created_at,
+        "the decision stamps updated_at"
     );
 }
