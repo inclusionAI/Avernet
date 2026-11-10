@@ -81,11 +81,12 @@
 - 预期：刷新后 T 的卡片仍显示申请中（sent+pending），请求从
   `/openapi/v1/collaboration/friend-connections/**` 读回真实状态。
 
-### A5 Owner 切 Bot 角色收件并批准／拒绝
-- 步骤：B 登录 → 角色选择器切到受管 Bot M → 打开「好友申请」收件列表 →
+### A5 Owner 在通知中心收件并批准／拒绝
+- 步骤：B 登录 → 打开「通知中心」的好友申请列表（角色选择器切到受管 Bot M）→
   对 A 的申请分别演练批准与拒绝（拒绝后再由 A 重新申请一批）。
 - 预期：列表请求带 `actor_type=bot, actor_id=M, direction=received,
-  status=pending`；批准／拒绝均回读 BCS；操作后列表与 A 侧状态刷新正确。
+  status=pending`；批准／拒绝均回读 BCS；操作后通知中心列表与 A 侧状态刷新正确；
+  发现页不出现「好友申请」入口。
 
 ### A6 申请方刷新看到好友
 - 步骤：A5 批准后，A 刷新发现页。
@@ -105,7 +106,7 @@
 - 预期：不出现 Backend 建会话请求，也不发生旧会话跳转；卡片保持好友态。
 
 ### A9 未授权角色被拒
-- 步骤：B 切到无管理权限的 Bot（或 A 尝试以非 Owner Bot 视角打开收件列表）。
+- 步骤：B 切到无管理权限的 Bot（或 A 尝试以非 Owner Bot 视角在通知中心打开收件列表）。
 - 预期：BCS 返回鉴权错误，界面如实展示错误与重试入口，不显示假成功。
 
 ## B. full profile 回归场景（不得以 BCS-only 验收代替）

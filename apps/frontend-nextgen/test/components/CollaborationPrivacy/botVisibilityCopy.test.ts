@@ -1,10 +1,6 @@
 // Bot 好友审批入口深链（split-admin-space-ticket-pages）：approvalEntryPath 改指独立通知中心路由，
 // 不再经 /admin?tab=work-orders 单页；入口文案随页面拆分同步为「通知中心」。
-import {
-  bcsOnlyFriendApprovalEntry,
-  botFriendApprovalSection,
-  friendApprovalEntry,
-} from '@/components/CollaborationPrivacy/botVisibilityCopy';
+import { botFriendApprovalSection } from '@/components/CollaborationPrivacy/botVisibilityCopy';
 import { describe, expect, it } from '@jest/globals';
 
 describe('botFriendApprovalSection 审批入口深链', () => {
@@ -16,14 +12,5 @@ describe('botFriendApprovalSection 审批入口深链', () => {
   it('入口文案不再提及管理后台', () => {
     expect(botFriendApprovalSection.approvalEntryLabel).toContain('通知中心');
     expect(botFriendApprovalSection.approvalEntryLabel).not.toContain('管理后台');
-  });
-
-  it('BCS-only 入口直达发现页默认展开的好友申请面板', () => {
-    expect(bcsOnlyFriendApprovalEntry.approvalEntryPath).toBe(
-      '/collaboration-square/bots?panel=friend-requests',
-    );
-    expect(friendApprovalEntry(false).approvalEntryPath).toBe(
-      '/collaboration-square/bots?panel=friend-requests',
-    );
   });
 });

@@ -1,5 +1,4 @@
 import { PublicBotCatalogPanel } from '@/components/CollaborationSquare/PublicBotCatalogPanel';
-import { FriendRequestsPanel } from '@/components/CollaborationSquare/FriendRequestsPanel';
 import { GroupIdentityDisplay } from '@/components/CollaborationSquare/PublicGroupSquareSection/GroupIdentityDisplay';
 import { PublicGroupSquareSection } from '@/components/CollaborationSquare/PublicGroupSquareSection';
 import {
@@ -22,11 +21,9 @@ const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态�
 
 export interface SquarePageShellProps {
   resource: SquareResource;
-  /** 审批深链（?panel=friend-requests）：仅作为好友申请面板的初始展开态。 */
-  friendRequestsDefaultOpen?: boolean;
 }
 
-export function SquarePageShell({ resource, friendRequestsDefaultOpen }: SquarePageShellProps) {
+export function SquarePageShell({ resource }: SquarePageShellProps) {
   const square = useCollaborationSquare(resource);
   const scrollRootRef = useRef<HTMLElement>(null);
   const canLoadMore = square.hasMore && !square.loading && !square.loadingMore && !square.error;
@@ -140,17 +137,6 @@ export function SquarePageShell({ resource, friendRequestsDefaultOpen }: SquareP
           <section className={resource !== 'task' ? 'space-y-4' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
             {resource === 'task' && <PageHeader title={resourceTitle} description={TASK_DESCRIPTION} />}
             {resource === 'bot' && <TrackExpo point={Points.collabSquare.heroExpo} />}
-            {resource === 'bot' && (
-              // 所选角色的「好友申请」入口（Bot 列表顶部）：申请处理编排全在
-              // useFriendConnectionRequests，本组件只注入角色与卡片刷新回调。
-              <FriendRequestsPanel
-                resource={resource}
-                actor={square.activeActor}
-                userId={square.humanBotContext?.userId}
-                defaultOpen={friendRequestsDefaultOpen}
-                onRelationshipsChanged={() => square.load()}
-              />
-            )}
             {resource === 'bot' && (
               <PublicBotCatalogPanel
                 vm={botViewModel}

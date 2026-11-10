@@ -20,7 +20,7 @@
 - `src/services/collaborationSquare/publicBotMetadata.ts`：列表、语义结果与名称回退共用的 metadata 关联和服务发布过滤；`src/services/collaborationSquare/publicBotCursor.ts`：无 React 依赖的 BCS 原始偏移／可选 Backend metadata 拼页；`src/services/collaborationSquare/collaborationSquareApiAdapter.ts`：只做调用装配、画像降级和已有好友关系写操作，不放扫描循环。
 - `src/services/workspace/identityService.ts`：BCS-only 时身份仍由 `bots/mine` 装配，禁止额外查询 Backend `GET /openapi/v1/bots`；`src/pages/Workspace/Chat/hooks/useLegacyShareLinkGuard.ts`：区分 BCS 状态与 Backend 生命周期，不将 `online` 错判为失效。
 - `src/hooks/useCollaborationSquareList.ts`、`src/services/collaborationSquare/collaborationSquareGateway.ts`、`src/services/collaborationSquare/collaborationSquareService.ts`、`src/domain/collaborationSquare/types.ts`：为 Bot 列表引入 `nextOffset/hasMore`，Group/Task 不改分页；分享链接查询也改走同一游标语义。
-- `src/components/CollaborationSquare/FriendRequestsPanel/index.tsx` 和 `src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx`：所选角色的发出／收到申请与通过／拒绝入口。新增 `src/hooks/useFriendConnectionRequests.ts` 负责申请列表和写操作编排，`src/hooks/useCollaborationActorOperationScope.ts` 负责当前角色／代次回调守卫；组件不直接编排 Controller。`src/capabilities/types.ts`、`src/capabilities/defaultCapabilities.ts`、`src/typings/global.d.ts`：Backend 可选能力开关，并从同一能力决策派生 `getShellVisibility().value.notificationBell`；`src/hooks/useSpaceContext.ts`：BCS-only 时跳过 App 入口个人空间初始化，不停掉 BCS workspace 身份加载；不得在页面／Service 散落环境变量。
+- `src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx`：所选角色卡片关系与主操作。新增 `src/hooks/useCollaborationActorOperationScope.ts` 负责当前角色／代次回调守卫；组件不直接编排 Controller。好友申请列表由通知中心统一承载，发现页不新增「好友申请」入口。`src/capabilities/types.ts`、`src/capabilities/defaultCapabilities.ts`、`src/typings/global.d.ts`：Backend 可选能力开关，并从同一能力决策派生 `getShellVisibility().value.notificationBell`；`src/hooks/useSpaceContext.ts`：BCS-only 时跳过 App 入口个人空间初始化，不停掉 BCS workspace 身份加载；不得在页面／Service 散落环境变量。
 - `deploy/docker-entrypoint.sh`、`deploy/nginx/default.conf.template`、新增的 `deploy/nginx/default.bcs-only.conf.template`、`Dockerfile`、`config/config.local.ts`、`docs/deployment.md`：保留默认全栈部署，额外提供仅转发必要 BCS 路由的单服务 profile。测试文件遵循现有 `test/` 镜像目录，不改未关联的 Mock 或私有 overlay。
 
 ### Task 1：BCS 候选 Controller、模型映射与当前角色
@@ -173,11 +173,13 @@ applyHasMore(result.hasMore);
 
 - [ ] **Step 4: 绿灯与局部提交。** Run: `cd apps/frontend-nextgen && npx jest test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts test/hooks/useCollaborationSquare.test.tsx test/hooks/useCollaborationSquareList.test.tsx test/components/CollaborationSquare/PublicBotCatalogPanel.test.tsx test/hooks/useLegacyShareLinkGuard.test.tsx test/domain/collaborationSquare/bcsBotMapper.test.ts test/collaborationSquareService.test.ts test/shell/bcsOnlyDiscoveryBoot.test.tsx --runInBand && npm run typecheck`。Expected: BCS-only 无 Backend 调用、分享链接和加载更多不漏页、智能回退可识别。Commit: `git add apps/frontend-nextgen/src apps/frontend-nextgen/test && git commit -m 'feat(frontend-nextgen): use BCS for public Bot discovery'`。
 
-### Task 4：所选角色的申请处理、写操作代次隔离与 Human 建聊开关
+### Task 4：写操作代次隔离与 Human 建聊开关
 
-**Files:** Create `src/components/CollaborationSquare/FriendRequestsPanel/index.tsx`、`src/hooks/useFriendConnectionRequests.ts`、`src/hooks/useCollaborationActorOperationScope.ts`; Modify `src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx`、`src/components/CollaborationSquare/SquarePageShell/index.tsx`; `src/hooks/useCollaborationSquare.ts`; `src/services/collaborationPrivacy/botVisibilityCopy.ts` 或其消费组件（只改到达申请处理的入口）； `src/domain/collaborationSquare/types.ts`; Create `test/components/CollaborationSquare/FriendRequestsPanel.test.tsx`、`test/hooks/useFriendConnectionRequests.test.tsx`、`test/hooks/useCollaborationActorOperationScope.test.tsx`; Modify `test/hooks/useCollaborationSquare.test.tsx`。
+好友申请列表统一由「通知中心」承载，发现页不新增「好友申请」入口或面板，好友审批说明入口保持 `/ticket-center`；本 Task 只保留写操作代次隔离与 Human 建聊开关。
 
-- [ ] **Step 1: 写失败 DOM 测试。** 两名登录用户：Human 发申请后看到 sent+pending；Owner 在角色选择器切到目标 Bot 后拉 `direction=received,status=pending`，通过／拒绝按钮调用现有 BCS Controller 并刷新；无权限或切换角色后不得展示上一角色列表；错误态可重试，不显示假的成功。Backend disabled 时 Human 自动批准后不触发 `createBotSession` 且卡片展示好友，已有好友点击也不触发 Backend 私聊；enabled 时仍保留原私聊跳转，建聊失败保留好友成功态。
+**Files:** Create `src/hooks/useCollaborationActorOperationScope.ts`; Modify `src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx`、`src/components/CollaborationSquare/SquarePageShell/index.tsx`; `src/hooks/useCollaborationSquare.ts`; `src/domain/collaborationSquare/types.ts`; Create `test/hooks/useCollaborationActorOperationScope.test.tsx`; Modify `test/hooks/useCollaborationSquare.test.tsx`。
+
+- [ ] **Step 1: 写失败 DOM 测试。** Human 发申请后看到 sent+pending；Owner 在通知中心切到目标 Bot 视角后拉 `direction=received,status=pending` 并处理（通知中心链路不在本 Task 改动范围）。Backend disabled 时 Human 自动批准后不触发 `createBotSession` 且卡片展示好友，已有好友点击也不触发 Backend 私聊；enabled 时仍保留原私聊跳转，建聊失败保留好友成功态。
 
 用可手动 resolve/reject 的 Promise 分别覆盖申请、批准、拒绝、撤销和建聊：角色 A 发起操作后切到 B，让 B 已加载同一目标 Bot 的不同关系，然后完成 A 的请求；B 的卡片、申请列表、busy 和错误状态不能变化，不能触发旧角色的后续建聊、刷新或导航。再测 A→B→A、卸载／重新挂载，以及成功和失败两类迟到响应；重新挂载后同一目标不能被遗留 busy 永久禁用，旧 finally 也不能清除新操作的 busy；只比较 actor ID 或只检测 AbortError 均不足。建聊前切角色时不得发建聊请求；建聊已经发出后切角色，允许服务端完成但不得导航。切回 A 时新读取可以显示已提交的关系，不发送补偿性撤销请求。
 
@@ -192,10 +194,10 @@ expect(mockedAcceptFriendConnectionRequest).toHaveBeenCalledWith('request-1', ex
 expect(mockedCreateBotSession).not.toHaveBeenCalled();
 ```
 
-- [ ] **Step 2: 红灯。** Run: `cd apps/frontend-nextgen && npx jest test/components/CollaborationSquare/FriendRequestsPanel.test.tsx test/hooks/useFriendConnectionRequests.test.tsx test/hooks/useCollaborationActorOperationScope.test.tsx test/hooks/useCollaborationSquare.test.tsx --runInBand`。Expected: 无处理入口、BCS-only 仍建聊，或旧角色写响应污染新角色／触发过期导航。
-- [ ] **Step 3: 最小 UI 与状态更新。** 在 Bot 页标题操作区或 Bot 列表顶部加“好友申请”入口，展开所选角色的「发出／收到」分页列表；`actor_type/id` 来自 `useCollaborationSquareActorContext`，Human 只看本人、Bot 管理权限由 BCS 复验。申请列表与通过／拒绝／撤销由 `useFriendConnectionRequests` 调用 `collaborationFriendConnectionController.ts` 的现有函数；切换角色用 AbortController 清理读取，并为新角色重新加载。好友写操作必须额外使用下面的代次守卫，不能把 abort 当成服务端回滚。Backend 配置关闭时，将 `resolvePublicBotPrimaryAction` 的 `open_human_bot_conversation` 转为“已是好友”显示、禁止建聊；Backend 配置开启时延续已有建聊，失败时提示“已成为好友，但暂未进入对话”而非把已批准好友当成申请失败。当前仅指向 `/ticket-center` 的好友审批说明在 BCS-only 模式指向本入口。
+- [ ] **Step 2: 红灯。** Run: `cd apps/frontend-nextgen && npx jest test/hooks/useCollaborationActorOperationScope.test.tsx test/hooks/useCollaborationSquare.test.tsx --runInBand`。Expected: BCS-only 仍建聊，或旧角色写响应污染新角色／触发过期导航。
+- [ ] **Step 3: 最小 UI 与状态更新。** 不在发现页新增「好友申请」入口：申请列表与通过／拒绝／撤销统一由通知中心承载（`actor_type/id` 视角授权由 BCS 复验），好友审批说明入口保持 `/ticket-center`。发现页只保留卡片关系与主操作：Backend 配置关闭时，将 `resolvePublicBotPrimaryAction` 的 `open_human_bot_conversation` 转为“已是好友”显示、禁止建聊；Backend 配置开启时延续已有建聊，失败时提示“已成为好友，但暂未进入对话”而非把已批准好友当成申请失败。好友写操作必须使用下面的代次守卫，不能把 abort 当成服务端回滚。
 
-在新 Hook 中定义 `useCollaborationActorOperationScope(scopeKey: string)`，返回 `captureOperation(): () => boolean`。`scopeKey` 由登录 userId、当前 resource、actor.type/id 组成，使用 `JSON.stringify` 编码数组而不是易冲突的字符串拼接。`useLayoutEffect` 在角色提交时更新 key 和递增 epoch，cleanup 再递增 epoch 并置 inactive，覆盖卸载与 A→B→A；每次捕获返回独立 guard。`useCollaborationSquare` 和 `useFriendConnectionRequests` 各自调用同一个 Hook，guard 限制各自生命周期内的回调，不新增全局状态机。
+在新 Hook 中定义 `useCollaborationActorOperationScope(scopeKey: string)`，返回 `captureOperation(): () => boolean`。`scopeKey` 由登录 userId、当前 resource、actor.type/id 组成，使用 `JSON.stringify` 编码数组而不是易冲突的字符串拼接。`useLayoutEffect` 在角色提交时更新 key 和递增 epoch，cleanup 再递增 epoch 并置 inactive，覆盖卸载与 A→B→A；每次捕获返回独立 guard。`useCollaborationSquareFriendActions` 调用同一个 Hook，guard 限制其生命周期内的回调，不新增全局状态机。
 
 ```ts
 // src/hooks/useCollaborationActorOperationScope.ts
@@ -258,7 +260,7 @@ try {
 
 已有好友直接打开私聊的分支也必须在 await 后通过同一 guard 才能导航；通过／拒绝／撤销处理复用该守卫规则，不能仅修复申请分支。能力关闭时继续禁止所有建聊请求。测试双故意在 abort 后仍 resolve/reject，以证明保护来自代次而非 transport 的取消实现。
 
-- [ ] **Step 4: 绿灯并提交。** Run: `cd apps/frontend-nextgen && npx jest test/components/CollaborationSquare/FriendRequestsPanel.test.tsx test/hooks/useFriendConnectionRequests.test.tsx test/hooks/useCollaborationActorOperationScope.test.tsx test/hooks/useCollaborationSquare.test.tsx --runInBand && npm run typecheck`。Expected: 角色列表与审批刷新正确；过期写响应不更新新角色、不导航、不清理新操作状态；无 Backend 环境不建聊。Commit: `git add apps/frontend-nextgen/src apps/frontend-nextgen/test && git commit -m 'feat(frontend-nextgen): complete role-scoped BCS friend approvals'`。
+- [ ] **Step 4: 绿灯并提交。** Run: `cd apps/frontend-nextgen && npx jest test/hooks/useCollaborationActorOperationScope.test.tsx test/hooks/useCollaborationSquare.test.tsx --runInBand && npm run typecheck`。Expected: 过期写响应不更新新角色、不导航、不清理新操作状态；无 Backend 环境不建聊。Commit: `git add apps/frontend-nextgen/src apps/frontend-nextgen/test && git commit -m 'feat(frontend-nextgen): complete role-scoped BCS friend approvals'`。
 
 ### Task 5：BCS-only 同源部署、配置测试和全链路验收
 

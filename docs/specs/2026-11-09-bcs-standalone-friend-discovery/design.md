@@ -65,7 +65,7 @@ Human 和 Bot 视角的 `is_friend` 及依赖好友关系的筛选，统一以 C
 
 保留现有 `CollaborationSquareGateway` 抽象和公开 Bot 页面。传输协议适配集中在 `CollaborationSquareApiAdapter` 及其 Controller 中，不让页面组件同时处理两套响应格式。申请目标的规范身份只来自 BCS Bot UUID。只映射现有 v1 候选结果中适合展示的字段；不能将内部 `friend_ext`、AgentCard 或 descriptor skills 当作 Backend 已审核、已发布的 MCP/Skill 能力展示。未配置 Backend 时，申请弹窗画像使用已授权候选项中的名称、头像及摘要；已公开能力列表为空，Owner 展示名缺失时明确降级，不请求 Backend。BCS 申请接口会重新校验过期的候选项；申请被拒绝时显示实际失败原因，不报告成功。
 
-在「发现」页提供一个入口，查看所选角色发出和收到的申请。管理者选择自己管理的 Bot 后，可以读取该 Bot 收到的待处理申请，并通过现有 BCS Controller 直接通过或拒绝；Human 角色可以查看自己发出的申请。刷新后展示最新状态，审批完成后刷新申请列表和卡片状态。仅部署 BCS 时，原来只指向 Backend「通知中心」的提示应改为指向发现页的申请处理入口；配置 Backend 后仍可保留原通知中心作为增强入口，但它不能成为唯一审批路径。不要求主动推送通知。
+好友申请列表统一由「通知中心」承载，发现页不提供「好友申请」入口或面板。管理者选择自己管理的 Bot 后，在通知中心查看所选角色发出和收到的申请、读取该 Bot 收到的待处理申请，并通过现有 BCS Controller 直接通过或拒绝；Human 角色可以查看自己发出的申请。刷新后展示最新状态，审批完成后刷新申请列表和卡片状态。好友审批说明的入口保持指向「通知中心」，不随部署形态改指发现页。不要求主动推送通知。
 
 角色隔离同样约束写操作的异步回调。申请、通过、拒绝、撤销及后续建聊在发起时捕获登录用户、所选 actor 和操作代次；角色变化、离开页面或卸载使旧代次失效。每次 await 后及 catch/finally 中，只有仍属于当前代次的结果可以更新卡片／申请列表、提示成功或失败、清理当前 busy 状态、启动建聊或导航；A→B→A 也不能复活 A 的旧响应。AbortController 只用于取消客户端等待，不代表服务端写入已回滚；过期写入成功不撤销已持久化关系，切回该角色时通过新请求读回。
 
@@ -90,7 +90,7 @@ Human 和 Bot 视角的 `is_friend` 及依赖好友关系的筛选，统一以 C
 - BCS 智能搜索的名称回退应明确返回 `name_fallback`，不能伪造推荐分数。缺少可选 Backend 不得使好友流程整体失败。受部门范围约束的目标可能出现在发现列表中，却在申请时被部门策略拒绝；前端应准确展示该错误。
 - 同步更新权威的 BCS v1 公开／内部 OpenAPI 契约、`api-contracts/README.md`、应用／Core 契约以及现有符合性和兼容性测试。分别说明 v1 Service API 语义与 HTTP 交付契约的变更。标记 `eligible-candidates` 待废弃，但不虚构移除日期或迁移保障；本轮不删除接口。
 - BCS 单元／路由／契约测试覆盖：Human 与 Bot 的交叉可见性（包括 `visibility=private,user_visibility=public` 及反向情况）、Owner／Manager 授权、已批准 edge 与仅有旧关系的区别、待处理／通过／拒绝流程、身份与状态的准确回读、有无 BCSFuse 时的空查询／语义结果／名称回退、内存及 SQL 存储的过滤与分页计数、待废弃别名与正式接口等价，以及 Fuse 出站 filters 的 Human／Bot／legacy 差异、冷缓存严格批量回填及其失败传播；还要覆盖真实 edge/profile 读取失败、后续好友页失败、分页漂移、千级好友集合的 SQL 容量，以及从应用入口统计好友读取／控制面／registry／投影各阶段的查询数。不得只用 Connect 错误 stub 或 registry 局部计数证明整条链路不存在吞错与 N+1。保持原有 Bot 视角行为。
-- 前端测试覆盖：BCS DTO 映射、角色切换重置游标、过滤与缺失 metadata 时填满展示页、过期或中止的分页请求、画像降级、所选 Bot 收到申请后的处理、建立好友关系后不建聊，以及可选 Backend 建聊失败；挂载真实 `AppShell`、身份加载与发现页链路，验证 Human + 受管 Bot 冷启动、等待通知轮询周期及页面恢复可见后，metadata、通知和空间初始化请求均为零；用 deferred Promise 验证切换角色、A→B→A 和卸载后的写操作成功／失败回调均不污染当前状态或触发过期建聊导航；普通／语义／名称回退三条路径的 metadata 过滤一致，旧链接用 BCS `online|hidden` DTO 验证而非只用 `ACTIVE` fixture。不得将未获发布批准的 BCS descriptor 误展示为“已公开能力”。
+- 前端测试覆盖：BCS DTO 映射、角色切换重置游标、过滤与缺失 metadata 时填满展示页、过期或中止的分页请求、画像降级、建立好友关系后不建聊，以及可选 Backend 建聊失败；挂载真实 `AppShell`、身份加载与发现页链路，验证 Human + 受管 Bot 冷启动、等待通知轮询周期及页面恢复可见后，metadata、通知和空间初始化请求均为零；用 deferred Promise 验证切换角色、A→B→A 和卸载后的写操作成功／失败回调均不污染当前状态或触发过期建聊导航；普通／语义／名称回退三条路径的 metadata 过滤一致，旧链接用 BCS `online|hidden` DTO 验证而非只用 `ACTIVE` fixture。不得将未获发布批准的 BCS descriptor 误展示为“已公开能力”。
 - 使用真实 BCS v1 OAuth 会话及前端静态服务运行浏览器端到端测试，在 Backend、Gateway、BCSFuse 都不存在时走通「申请者 → Owner → 申请者」。实施后运行 BCS Cargo 和 API 契约测试、前端开源边界检查／类型检查／Lint／单测／构建，以及仅 BCS 的端到端检查。无法运行的门禁应明确说明，不能弱化 CI 覆盖基线。
 
 ## 实施计划文档边界
