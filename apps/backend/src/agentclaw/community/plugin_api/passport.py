@@ -388,7 +388,14 @@ class PassportPlugin(Plugin, Protocol):
         target_env: str | None = None,
         entity_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Query the full agent passport details."""
+        """Query the full agent passport details.
+
+        Optional ``handoff_ancestor_credential_ids`` is provider-verified normal
+        renewal provenance, newest ancestor first (at most 64). Every link must
+        preserve the Agent, entity, Owner, executor and handoff operation. Missing
+        or invalid history yields no proof; matching personnel alone is never
+        sufficient. Old providers may omit this additive field.
+        """
         ...
 
     def freeze_agent_passport(
