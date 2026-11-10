@@ -1,0 +1,23 @@
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_df42893724188f 12-13
+docs/arch/README.md
+  s_47ed8e91e4b8af::t_c9edec2e7e2486 12-13
+docs/flows/README.md
+  s_47ed8e91e4b8af::t_be425a59fc53d6 12-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "927dd6a5916511ef226b51c2a81252f9caa3971a",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
