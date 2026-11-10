@@ -1,5 +1,12 @@
 import { backendRequest } from '../httpClient';
-import type { BackendUnknownRecord } from '../types';
+import { isEnvelopeSuccess, type BackendUnknownRecord } from '../types';
+
+export interface ServiceBotEvalOpenApiResponse<T> extends BackendUnknownRecord {
+  code: number;
+  message?: string;
+  data?: T;
+  request_id?: string;
+}
 
 export interface ServiceBotEvalApiResponse<T> extends BackendUnknownRecord {
   success: boolean;
@@ -65,36 +72,60 @@ export interface ServiceBotEvalHistoryDto extends BackendUnknownRecord {
   };
 }
 
-const request = <T>(url: string, method = 'GET', params: BackendUnknownRecord = {}) =>
-  backendRequest<ServiceBotEvalApiResponse<T>>(url, { method, params });
+const request = async <T>(
+  url: string,
+  method = 'GET',
+  params: BackendUnknownRecord = {},
+  rawBody?: BodyInit,
+) => {
+  const envelope = await backendRequest<ServiceBotEvalOpenApiResponse<T>>(url, { method, params, rawBody });
+  return {
+    success: isEnvelopeSuccess(envelope),
+    message: envelope.message,
+    error_code: envelope.code,
+    data: envelope.data,
+  } satisfies ServiceBotEvalApiResponse<T>;
+};
 
-const basePath = (botId: string, botVersion: string, action: string) =>
-  `/api/service-bot/eval/${encodeURIComponent(botId)}/versions/${encodeURIComponent(botVersion)}/${action}`;
+const botBasePath = (botId: string) =>
+  `/openapi/v1/bots/${encodeURIComponent(botId)}/eval`;
+
+const versionBasePath = (botId: string, botVersion: string) =>
+  `${botBasePath(botId)}/versions/${encodeURIComponent(botVersion)}`;
 
 export const serviceBotEvalController = {
   detail: (botId: string, botVersion: string, ownerId?: string) =>
-    request<ServiceBotEvalDetailDto>(basePath(botId, botVersion, 'detail'), 'GET', {
+    request<ServiceBotEvalDetailDto>(versionBasePath(botId, botVersion), 'GET', {
       owner_id: ownerId,
     }),
   precheck: (botId: string, botVersion: string, ownerId?: string) =>
-    request<ServiceBotEvalGateResultDto>(basePath(botId, botVersion, 'simple-cert/precheck'), 'POST', {
-      owner_id: ownerId,
-    }),
+    request<ServiceBotEvalGateResultDto>(
+      `${versionBasePath(botId, botVersion)}/simple-cert/precheck`,
+      'POST',
+      { owner_id: ownerId },
+    ),
   sync: (botId: string, botVersion: string, ownerId?: string) =>
-    request<ServiceBotEvalGateResultDto>(basePath(botId, botVersion, 'simple-cert/sync'), 'POST', {
-      owner_id: ownerId,
-    }),
+    request<ServiceBotEvalGateResultDto>(
+      `${versionBasePath(botId, botVersion)}/simple-cert/sync`,
+      'POST',
+      { owner_id: ownerId },
+    ),
   history: (botId: string, botVersion: string, ownerId?: string, pageNo = 1, pageSize = 10) =>
-    request<ServiceBotEvalHistoryDto>(basePath(botId, botVersion, 'history'), 'GET', {
-      owner_id: ownerId,
-      page_no: pageNo,
-      page_size: pageSize,
-    }),
+    request<ServiceBotEvalHistoryDto>(
+      `${versionBasePath(botId, botVersion)}/history`,
+      'GET',
+      {
+        owner_id: ownerId,
+        page_no: pageNo,
+        page_size: pageSize,
+      },
+    ),
   submission: (botId: string, submissionId: string, ownerId?: string) =>
-    request<ServiceBotEvalSubmissionDto>('/api/service-bot/eval/submissions/' + encodeURIComponent(submissionId), 'GET', {
-      bot_id: botId,
-      owner_id: ownerId,
-    }),
+    request<ServiceBotEvalSubmissionDto>(
+      `${botBasePath(botId)}/submissions/${encodeURIComponent(submissionId)}`,
+      'GET',
+      { owner_id: ownerId },
+    ),
   submit: (
     botId: string,
     botVersion: string,
@@ -107,9 +138,11 @@ export const serviceBotEvalController = {
     sampleFiles.forEach((file) => body.append('sample_files', file, file.name));
     reportFiles.forEach((file) => body.append('report_files', file, file.name));
     body.append('trigger_source', triggerSource);
-    return backendRequest<ServiceBotEvalApiResponse<ServiceBotEvalSubmissionDto>>(
-      basePath(botId, botVersion, 'simple-cert/submissions'),
-      { method: 'POST', params: { owner_id: ownerId }, rawBody: body },
+    return request<ServiceBotEvalSubmissionDto>(
+      `${versionBasePath(botId, botVersion)}/simple-cert/submissions`,
+      'POST',
+      { owner_id: ownerId },
+      body,
     );
   },
 };

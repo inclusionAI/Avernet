@@ -123,6 +123,18 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
         if pending is not None:
             raise HandoffError("BOT_APPROVAL_PENDING")
 
+    def find_by_request(self, *, bot_pk, actor_id, new_owner_id, request_key):
+        with self._db.orm_session() as db:
+            prior = self._query(db).filter(
+                OwnerHandoffModel.bot_pk == bot_pk,
+                OwnerHandoffModel.request_key == request_key,
+            ).one_or_none()
+            if prior is None:
+                return None
+            if prior.actor_id != actor_id or prior.new_owner_id != new_owner_id:
+                raise HandoffError("IDEMPOTENCY_CONFLICT")
+            return _dict(prior)
+
     def begin(
         self,
         *,

@@ -223,6 +223,36 @@ def test_a_missing_source_bot_is_refused_without_rsync(tmp_path):
     assert seen == []
 
 
+def test_a_raising_source_lookup_is_a_composed_reason_and_logs_the_traceback(tmp_path, monkeypatch):
+    """``get_by_id`` raising (DB/MOSN transient, session failure) used to unwind
+    straight into ``BotFileSyncMaterialiser.write``'s catch — surfaced as the
+    catch-all ``"bot file sync failed"`` with no per-branch log. Now it is
+    wrapped here: the report gets the composed ``"bot workspace sync failed"``
+    and the traceback lands on the log under ``bot_file_sync.source_lookup_failed``,
+    so the same PARTIAL is traceable."""
+    seen = []
+    port = _port(tmp_path, _recording_runner(seen))
+    port._bot_repo.get_by_id.side_effect = RuntimeError("session expired: connection lost")
+
+    logged: list[tuple[str, tuple]] = []
+
+    class _SpyLogger:
+        def exception(self, msg, *args, **_):
+            logged.append((msg, args))
+
+    import agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync as mod
+
+    monkeypatch.setattr(mod, "logger", _SpyLogger())
+
+    result = _ok(port)
+
+    assert result.ok is False
+    assert result.reason == "bot workspace sync failed"
+    assert seen == []  # never reached rsync
+    assert any("bot_file_sync.source_lookup_failed" in m for m, _ in logged)
+
+
+
 def test_a_cross_engine_source_and_destination_is_refused(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={

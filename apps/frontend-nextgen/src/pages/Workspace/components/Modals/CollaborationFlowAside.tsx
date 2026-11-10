@@ -44,7 +44,7 @@ export function CollaborationFlowAside({ leaderOptions, binding }: Collaboration
       onSelectBinding={binding.setActiveParticipantKey}
       onLocateBinding={onLocateBinding}
     />
-  ) : <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">此次校验未返回流程预览数据</div>;
+  ) : <div className="flex flex-1 items-center justify-center p-6 text-xs text-muted-foreground">此次校验未返回流程预览数据</div>;
 
   return <>
     <div ref={anchorRef} className="absolute right-2 top-1/2 z-10 -translate-y-1/2 xl:hidden">
@@ -59,7 +59,7 @@ export function CollaborationFlowAside({ leaderOptions, binding }: Collaboration
       className="hidden min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-muted/20 xl:col-start-2 xl:row-start-2 xl:flex"
     >
       <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-5">
-        <div className="flex items-center gap-2"><Workflow aria-hidden className="size-4 text-muted-foreground" /><span className="text-sm font-semibold text-foreground">协作流程</span></div>
+        <div className="flex items-center gap-2"><Workflow aria-hidden className="size-4 text-muted-foreground" /><span className="text-xs font-semibold text-foreground">协作流程</span></div>
         <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}><Maximize2 className="size-4" aria-hidden />展开预览</Button>
       </div>
       <div data-testid="collaboration-flow-content" className="flex min-h-0 flex-1 flex-col">{renderPreview()}</div>
