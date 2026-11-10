@@ -25,6 +25,25 @@ def wait_for(path, process):
     raise AssertionError(f'timed out waiting for {path}')
 
 
+def wait_for_children_to_stop(pids, timeout=5):
+    """Allow SIGKILL-pending children to leave transient kernel wait states."""
+    deadline = time.monotonic() + timeout
+    running = {}
+    while time.monotonic() < deadline:
+        running = {}
+        for pid in pids:
+            try:
+                state = Path(f'/proc/{pid}/stat').read_text().split()[2]
+            except FileNotFoundError:
+                continue
+            if state not in {'X', 'Z'}:
+                running[pid] = state
+        if not running:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f'children still running: {running}')
+
+
 @pytest.fixture
 def companion_repo(tmp_path):
     scripts = tmp_path / 'scripts'
@@ -116,11 +135,9 @@ def test_sigterm_stops_owned_descendants_and_records_failure(companion_repo):
         process.send_signal(signal.SIGTERM)
         process.communicate(timeout=15)
         assert process.returncode != 0
-        for pid in children:
-            # Reparented children can briefly remain zombies until init reaps.
-            proc = Path(f'/proc/{pid}/stat')
-            if proc.exists():
-                assert proc.read_text().split()[2] == 'Z', f'child {pid} still running'
+        # A killed child can remain in uninterruptible kernel wait (D) before
+        # it reaches a terminal state; do not sample /proc only once.
+        wait_for_children_to_stop(children)
         assert json.loads((root / 'reports/companion-timings.json').read_text())['status'] == 'failed'
     finally:
         if process.poll() is None:

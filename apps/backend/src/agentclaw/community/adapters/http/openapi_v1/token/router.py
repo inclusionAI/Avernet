@@ -88,6 +88,17 @@ async def get_bot_iam_token(
     owner_id: str | None = Query(default=None, min_length=1, description="Exact Bot owner for an explicit friend IAM request; defaults to the acting user."),
     f_user_id: FriendUserIdQuery = None,
     session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
+    session_key: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Current chat session key used by TeClaw Caller credential refresh.",
+    ),
+    legacy_session_key: str | None = Query(
+        default=None,
+        min_length=1,
+        alias="sessionKey",
+        description="Compatibility alias for session_key.",
+    ),
     stage: RuntimeStage = Query(
         default=RuntimeStage.DRAFT,
         description="Bot runtime stage whose Caller identity may be prepared.",
@@ -124,8 +135,13 @@ async def get_bot_iam_token(
             raise EngineResourceNotFoundError("friend Bot identity is unavailable")
         normalized_entity_id = str(bot["entity_id"])
         friend_kwargs = {"friend_user_id": f_user_id, "session_key": session_id}
-    elif session_id is not None:
-        friend_kwargs = {"session_key": session_id}
+    else:
+        # ``session_id`` was the first OpenAPI spelling and remains compatible.
+        # Prefer the legacy IAM contract's canonical snake_case name, followed
+        # by its camelCase alias, without weakening friend-session validation.
+        effective_session_key = session_key or legacy_session_key or session_id
+        if effective_session_key is not None:
+            friend_kwargs = {"session_key": effective_session_key}
     # Every user owns a Bot named ``default``.  When the browser has no explicit
     # chat target yet, scope that otherwise-ambiguous identifier to the verified
     # user instead of attempting a tenant-wide unique lookup.
