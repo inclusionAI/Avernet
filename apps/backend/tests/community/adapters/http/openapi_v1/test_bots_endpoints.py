@@ -740,9 +740,44 @@ def test_change_bot_space_domain_failures_use_standard_envelope(
     assert "request_id" in body
 
 
-def test_restart_bot(client):
+def svc_restart_kwargs(svc) -> dict:
+    return svc.restart_bot_async.call_args.kwargs
+
+
+def test_restart_bot(client, svc):
     data = _ok(client.post("/openapi/v1/bots/b1/restart"))
+
     assert data["status"] == "PENDING"
+    assert svc_restart_kwargs(svc) == {
+        "bot_id": "b1",
+        "user_id": "u1",
+        "extra_configs": None,
+    }
+
+
+def test_restart_bot_forwards_extra_configs(client, svc):
+    data = _ok(
+        client.post(
+            "/openapi/v1/bots/b1/restart",
+            json={
+                "user_id": "ignored-body-value",
+                "extra_configs": {"confirmed_template_update": "true"},
+            },
+        )
+    )
+
+    assert data["status"] == "PENDING"
+    assert svc_restart_kwargs(svc) == {
+        "bot_id": "b1",
+        "user_id": "u1",
+        "extra_configs": {"confirmed_template_update": "true"},
+    }
+
+
+def test_restart_bot_ignores_malformed_extra_configs(client, svc):
+    _ok(client.post("/openapi/v1/bots/b1/restart", json={"extra_configs": "not-an-object"}))
+
+    assert svc_restart_kwargs(svc)["extra_configs"] is None
 
 
 def test_get_engine_config(client, engine_config):
