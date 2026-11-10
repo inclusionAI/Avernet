@@ -62,6 +62,7 @@ async fn register_bot(
 fn list_query(
     acting: &str,
     env: &str,
+    name_prefix: &str,
     purpose: BotCandidateVisibility,
     viewer: ActorKind,
     friend_ids: &HashSet<String>,
@@ -74,7 +75,8 @@ fn list_query(
         visibility: purpose,
         viewer_kind: viewer,
         friend_ids: friend_ids.clone(),
-        name: None,
+        // Contracts share a migrated MySQL database with other fixtures.
+        name: Some(name_prefix.to_string()),
         offset,
         limit,
     }
@@ -140,6 +142,7 @@ async fn walk_list(
     repo: &dyn BotControlPlaneRepoPort,
     acting: &str,
     env: &str,
+    prefix: &str,
     friend_ids: &HashSet<String>,
     expected_total: u64,
 ) -> Vec<String> {
@@ -151,6 +154,7 @@ async fn walk_list(
             list_query(
                 acting,
                 env,
+                prefix,
                 BotCandidateVisibility::Collaboration,
                 ActorKind::Bot,
                 friend_ids,
@@ -221,7 +225,7 @@ async fn verify_capacity(
     for viewer in [ActorKind::Bot, ActorKind::Human] {
         let (page, total) = list_page(
             repo,
-            list_query(acting, env, BotCandidateVisibility::Discovery, viewer, friends, 0, 100),
+            list_query(acting, env, prefix, BotCandidateVisibility::Discovery, viewer, friends, 0, 100),
         )
         .await;
         assert_eq!(total, 0, "{prefix}/{count}: discovery {viewer:?} total");
@@ -231,7 +235,7 @@ async fn verify_capacity(
     // Post-filter total with a one-row page, then the next row.
     let (first, total) = list_page(
         repo,
-        list_query(acting, env, BotCandidateVisibility::Collaboration, ActorKind::Bot, friends, 0, 1),
+        list_query(acting, env, prefix, BotCandidateVisibility::Collaboration, ActorKind::Bot, friends, 0, 1),
     )
     .await;
     assert_eq!(total, expected_total, "{prefix}/{count}: list total");
@@ -243,6 +247,7 @@ async fn verify_capacity(
             list_query(
                 acting,
                 env,
+                prefix,
                 BotCandidateVisibility::Collaboration,
                 ActorKind::Bot,
                 friends,
@@ -281,7 +286,7 @@ async fn verify_capacity(
         "{prefix}/{count}: search page 1"
     );
 
-    let listed = walk_list(repo, acting, env, friends, expected_total).await;
+    let listed = walk_list(repo, acting, env, prefix, friends, expected_total).await;
     let searched = walk_search(repo, acting, env, friends, expected_total, &name_needle).await;
     assert_eq!(listed.len(), count, "{prefix}/{count}: list page walk");
     assert_eq!(searched.len(), count, "{prefix}/{count}: search page walk");
@@ -305,6 +310,7 @@ async fn verify_capacity(
         list_query(
             acting,
             env,
+            prefix,
             BotCandidateVisibility::Collaboration,
             ActorKind::Bot,
             friends,
@@ -377,7 +383,7 @@ async fn verify_binding_edges(
             env,
             bot_id,
             bot_id,
-            "binding marker",
+            &format!("{prefix}-binding-marker"),
             "private",
             UserVisibility::Private,
         )
@@ -389,6 +395,7 @@ async fn verify_binding_edges(
         list_query(
             acting,
             env,
+            prefix,
             BotCandidateVisibility::Collaboration,
             ActorKind::Bot,
             &friends,
@@ -413,7 +420,7 @@ async fn verify_binding_edges(
             BotCandidateVisibility::Collaboration,
             ActorKind::Bot,
             &friends,
-            "binding marker",
+            &format!("{prefix}-binding-marker"),
             false,
             0,
             10,
@@ -439,7 +446,7 @@ pub async fn verify(
         bots,
         env,
         &acting,
-        "Candidate Capacity Acting",
+        &format!("{prefix} acting"),
         "acting summary",
         "private",
         UserVisibility::Private,
@@ -469,7 +476,7 @@ pub async fn verify(
         bots,
         env,
         &stranger,
-        "Candidate Capacity Stranger",
+        &format!("{prefix} stranger"),
         &marker,
         "private",
         UserVisibility::Private,

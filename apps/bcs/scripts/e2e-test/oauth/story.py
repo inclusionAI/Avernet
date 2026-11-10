@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 from provider_stub import provider_stub
 from harness import Environment
+from candidate_discovery import candidate_discovery
 from config_cases import invalid_configs
 from regressions import (default_environment, rollback_modes,
                          unlisted_provider_does_not_block_gateway,
@@ -47,6 +48,8 @@ def main():
                 result['scenarios'].append('rollback-modes')
                 pending_capacity(env)
                 result['scenarios'].append('pending-capacity')
+                candidate_discovery(env)
+                result['scenarios'].append('standalone-candidate-discovery')
                 invalid_configs(env)
                 result['scenarios'].append('startup-validation')
                 result['checks'] = env.checks

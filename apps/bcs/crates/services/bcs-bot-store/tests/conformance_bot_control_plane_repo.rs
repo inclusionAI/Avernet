@@ -275,6 +275,27 @@ async fn sqlite_candidate_friend_set_contract() {
     .await;
 }
 
+/// The full MySQL migration chain runs multiple contracts in the same env.
+/// Reproduce that precondition on SQLite too: a public unrelated Bot must not
+/// change this contract's capacity totals or quoted-ID assertions.
+#[tokio::test]
+async fn candidate_friend_set_contract_ignores_other_contract_rows() {
+    let (repo, _db) = fixture().await;
+    repo.create_registration_if_absent(
+        "unrelated-public-bot".into(),
+        BotCapabilities {
+            name: Some("Other contract's public Bot".into()),
+            visibility: "public".into(),
+            ..Default::default()
+        },
+        "other-owner",
+        "unrelated-public-bot-token",
+    ).await.expect("seed unrelated public bot");
+    candidate_friend_set_contract::verify(
+        &repo, &repo, &bcs_config::resolve_env_str(), "isolated-candidates", 256,
+    ).await;
+}
+
 /// The candidate stores must bind the whole friend set as ONE JSON array that
 /// the dialect expands with `json_each`, never as a per-friend `UNION ALL`
 /// chain. Page and COUNT share the same conditions and bindings; only the
