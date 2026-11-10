@@ -128,7 +128,13 @@ if [[ -z "$changed_files" ]]; then
   exit 0
 fi
 
-if matches_any '^apps/backend/'; then
+if matches_any '^middleware/python/avernet-common/'; then
+  # avernet-common 是共享库, 先跑它自己的单测; 消费方(backend)的卡点见下。
+  run_heavy bash -c 'cd "$1" && uv sync --frozen && uv run pytest -q' _ "$repo_root/middleware/python/avernet-common"
+fi
+
+# middleware/python/avernet-common 是 backend 的 path 依赖, 变更即 backend 变更。
+if matches_any '^(apps/backend/|middleware/python/avernet-common/)'; then
   # Backend 默认强卡点:
   # 1) python_sast_local.sh 近似线上 python-sast block 规则,且只扫本次变更 Python 文件
   # 2) backend ci_test.sh 跑 pytest + coverage + report_check

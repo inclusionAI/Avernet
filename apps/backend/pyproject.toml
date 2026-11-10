@@ -33,12 +33,11 @@ dependencies = [
   "aiofiles>=25.1.0",
   "fastapi>=0.115.0",
   "pycryptodome>=3.23.0",
-  # PyJWT verifies the gateway's signed X-Avernet-Principal token (auth design
-  # §7.1). Same library the gateway signs with, so both halves of the contract
-  # agree on claim handling; pinning `algorithms=` at the call site is what makes
-  # the verification safe, not the library choice. 2.9 added multi-issuer
-  # validation, used by the ordinary-HTTP issuer allow-list.
-  "pyjwt>=2.9.0",
+  # avernet-common: code shared across Avernet services, from this repo's
+  # middleware/python/avernet-common (path source below). Its principal_token
+  # module signs and verifies the X-Avernet-Principal token (auth design §7.1)
+  # for core/gateway_principal, and brings PyJWT with it.
+  "avernet-common",
   "redis==7.4.0",
   "sqlalchemy>=2.0.48",
   "tomlkit>=0.14.0",
@@ -123,7 +122,16 @@ dev = [
   # payloads against JSON Schemas. Test-only (no runtime src import); transitive
   # in the monorepo, must be named for the standalone community suite.
   "jsonschema>=4.20",
+  # pyjwt: tests mint and inspect principal tokens directly. Runtime signing and
+  # verification go through avernet-common, which carries its own pin.
+  "pyjwt>=2.9.0",
 ]
+
+[tool.uv.sources]
+# Editable, so a change under middleware/ is picked up without a reinstall.
+# docker/services/backend.dockerfile does not use this path: it builds the
+# package into a wheel in its own stage and installs that.
+avernet-common = { path = "../../middleware/python/avernet-common", editable = true }
 
 # Specify pypi index
 [[tool.uv.index]]

@@ -54,21 +54,15 @@ composition root (``utils/gateway_principal_config.py`` bindings via
 
 from __future__ import annotations
 
-import time
-
-import jwt
+from avernet_common.principal_token import (
+    PrincipalSignerConfig,
+    PrincipalTokenError,
+    issue_principal_token,
+)
 
 from agentclaw.community.core.gateway_principal.errors import (
     PrincipalVerificationError,
 )
-from agentclaw.community.core.gateway_principal.signer import (
-    PrincipalSignerConfig,
-)
-
-# Same pin as :mod:`.signer` — HS256 with the shared key is the contract on
-# this wire; signing anything else would either be rejected or, on a laxer
-# verifier, accepted as an algorithm nobody agreed to.
-_ALGORITHM = "HS256"
 
 #: How long a minted service token lives. The token is minted per send,
 #: immediately before the one PUT it authorizes, so a short window matches
@@ -117,15 +111,6 @@ def mint_service_app_principal(
     ``now`` defaults to the wall clock; it exists so tests can pin the
     time window, not so callers can backdate.
     """
-    if not signer.signing_key:
-        raise PrincipalVerificationError(
-            "no principal signing key is configured, so no service "
-            f"principal can be minted for aud={signer.audience!r}"
-        )
-    # Integer seconds, the shape every peer deserializes: BCS parses
-    # ``iat``/``exp`` as unsigned integers, and a fractional value would
-    # fail claim parsing there long before any logic ran.
-    issued_at = int(time.time() if now is None else now)
     if not tenant or not tenant.strip():
         raise PrincipalVerificationError(
             "refusing to mint a service principal with a blank tenant — "
@@ -133,10 +118,6 @@ def mint_service_app_principal(
             "this component must never assert"
         )
     claims = {
-        "iss": signer.issuer,
-        "aud": signer.audience,
-        "iat": issued_at,
-        "exp": issued_at + _SERVICE_TOKEN_TTL_SECONDS,
         "principals": [
             {
                 "type": "app",
@@ -151,9 +132,11 @@ def mint_service_app_principal(
             }
         ],
     }
-    return jwt.encode(
-        claims,
-        signer.signing_key,
-        algorithm=_ALGORITHM,
-        headers={"kid": signer.key_id},
-    )
+    # Stamps ``iss``/``aud``/``iat``/``exp`` (integer seconds) and ``kid``,
+    # and fails closed on an empty signing key.
+    try:
+        return issue_principal_token(
+            claims, signer, ttl_seconds=_SERVICE_TOKEN_TTL_SECONDS, now=now
+        )
+    except PrincipalTokenError as exc:
+        raise PrincipalVerificationError(str(exc)) from exc

@@ -18,6 +18,13 @@ identities, same lifetime, new `iss`/`aud`/`kid`. Verification comes first and i
 not optional there — a function that signed an unverified payload would be a
 token-minting oracle for every component that trusts the shared key.
 
+The token's HS256 envelope (signing, `iss`/`aud`/`kid`, lifetime, signature
+and claim checks, key fingerprint) is the shared
+`avernet_common.principal_token` package (`middleware/python/avernet-common`),
+so every component on the contract signs and verifies it the same way. This
+module keeps the backend's own part: the DTOs, the identity-set admission, and
+the decisions about *what* may be re-addressed or minted.
+
 Nothing here reads a framework, a header, the environment, or a secret store
 (Rule 7). The HTTP seam lives in `adapters/http/openapi_v1/dependencies.py`; the
 config — including resolving the shared signing key through `SecretResolver` —
@@ -51,6 +58,7 @@ provides:
   - MIN_SIGNING_KEY_BYTES
   - PrincipalVerificationError
 consumes:
+  - "avernet_common.principal_token (shared token envelope, in middleware/python/avernet-common)"
   - "Gateway PrincipalSigner (the signing half of the contract, in apps/gateway)"
   - "BCS/BCN GatewayPrincipalTokenVerifier (the target of a re-addressed token, in src/bcs)"
 internal_dependencies:
@@ -115,3 +123,13 @@ not accept inbound principals or re-address user identity. The composition root
 resolves the existing shared key; the envelope is `iss=backend`, `aud=bcs`,
 `kid=bare`, with a 60-second lifetime and the authoritative Bot tenant. BCS
 still verifies the signature and requires a matching trusted-App action rule.
+
+**Changed 2026-11-03 — the envelope moved to `avernet-common`.** Signing,
+verification and the key diagnostics are delegated to
+`avernet_common.principal_token`, with `iss`/`aud`/`kid` passed in as before.
+`PrincipalVerifierConfig`, `PrincipalSignerConfig`, `key_fingerprint`,
+`is_weak_signing_key` and `MIN_SIGNING_KEY_BYTES` are re-exported from it under
+the same import paths, and failures are still raised as
+`PrincipalVerificationError` (now a subclass of the shared `PrincipalTokenError`).
+A change to the pinned algorithm, leeway or required claims is now a change in
+that package, and reaches every component that uses it.

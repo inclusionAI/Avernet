@@ -11,6 +11,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiomysql" },
     { name = "apscheduler" },
+    { name = "avernet-common" },
     { name = "boto3" },
     { name = "cryptography" },
     { name = "fastapi" },
@@ -22,7 +23,6 @@ dependencies = [
     { name = "jsonschema" },
     { name = "oss2" },
     { name = "pycryptodome" },
-    { name = "pyjwt" },
     { name = "pymysql" },
     { name = "python-multipart" },
     { name = "pyyaml" },
@@ -39,6 +39,7 @@ dev = [
     { name = "fakeredis" },
     { name = "jsonschema" },
     { name = "moto", extra = ["s3"] },
+    { name = "pyjwt" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -55,6 +56,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "aiomysql", specifier = ">=0.2.0" },
     { name = "apscheduler", specifier = ">=3.10.0,<4.0.0" },
+    { name = "avernet-common", editable = "../../middleware/python/avernet-common" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "cryptography", specifier = ">=37.0.4" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -66,7 +68,6 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "oss2", specifier = ">=2.18" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
-    { name = "pyjwt", specifier = ">=2.9.0" },
     { name = "pymysql", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -83,6 +84,7 @@ dev = [
     { name = "fakeredis", specifier = ">=2.20" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0" },
+    { name = "pyjwt", specifier = ">=2.9.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
@@ -247,6 +249,20 @@ sdist = { url = "https://mirrors.aliyun.com/pypi/packages/9a/8e/82a0fe20a541c031
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl", hash = "sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309" },
 ]
+
+[[package]]
+name = "avernet-common"
+version = "0.1.0"
+source = { editable = "../../middleware/python/avernet-common" }
+dependencies = [
+    { name = "pyjwt" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyjwt", specifier = ">=2.9.0" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 
 [[package]]
 name = "boto3"

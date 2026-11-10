@@ -218,6 +218,7 @@ Module gates are selected from the committed files in the resulting diff:
 | Changed path | Pre-push gate |
 | --- | --- |
 | `apps/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
+| `middleware/python/avernet-common/` | avernet-common unit tests, then every gate of its consumers (Backend) |
 | `apps/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `engine/adapter/` | Engine SAST, unit tests, and changed-line coverage |
 | `apps/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |

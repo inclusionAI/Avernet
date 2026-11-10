@@ -49,9 +49,11 @@ the configs; ``core/work_orders/callbacks.py`` is the caller.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import jwt
+from avernet_common.principal_token import (
+    PrincipalSignerConfig,
+    PrincipalTokenError,
+    sign_principal_claims,
+)
 
 from agentclaw.community.core.gateway_principal.errors import (
     PrincipalVerificationError,
@@ -60,44 +62,15 @@ from agentclaw.community.core.gateway_principal.verifier import (
     PrincipalVerifierConfig,
     caller_from_claims,
     decode_principal_token,
-    key_fingerprint,
 )
 
-# Pinned for the same reason :mod:`.verifier` pins its accept list: every peer on
-# this contract verifies HS256 with the shared key, and signing anything else
-# would either be rejected or — worse, on a laxer verifier — accepted as an
-# algorithm nobody agreed to.
-_ALGORITHM = "HS256"
-
-
-@dataclass(frozen=True)
-class PrincipalSignerConfig:
-    """Where a re-addressed principal token is going, and what signs it.
-
-    ``signing_key`` is the same HMAC secret :class:`PrincipalVerifierConfig`
-    holds — one shared key across the gateway and every component on this
-    contract, so re-signing needs no second credential. An empty key means the
-    deployment resolved none, and :func:`resign_principal_token` then refuses to
-    sign rather than emitting a token signed with nothing.
-
-    ``audience`` and ``key_id`` are the target's half of the contract: what *it*
-    requires to accept a token, not what we require to accept one. ``issuer`` is
-    the other way round — it names the component doing the signing, so it is our
-    identity, and the target has to be configured to trust it. All three are
-    fixed in code beside the verifier's own constants — see
-    ``utils/gateway_principal_config.py`` for why that is a deliberate call
-    rather than a missing knob.
-    """
-
-    signing_key: str
-    audience: str
-    issuer: str
-    key_id: str
-
-    @property
-    def key_fingerprint(self) -> str:
-        """This config's key as :func:`key_fingerprint` renders it for a log."""
-        return key_fingerprint(self.signing_key)
+# ``PrincipalSignerConfig`` is the shared envelope config, re-exported so
+# existing ``gateway_principal.signer`` imports keep working. Its ``issuer`` is
+# this component's own name; ``audience`` and ``key_id`` are the target's
+# requirements. All three are fixed in code beside the verifier's own constants —
+# see ``utils/gateway_principal_config.py`` for why that is a deliberate call
+# rather than a missing knob.
+__all__ = ["PrincipalSignerConfig", "resign_principal_token"]
 
 
 def resign_principal_token(
@@ -120,16 +93,6 @@ def resign_principal_token(
             One error type, as in :mod:`.errors`: a caller cannot act on the
             distinction, and the message carries it for the log.
     """
-    if not signer.signing_key:
-        # Same reading as an unconfigured verifier key, from the other side: we
-        # cannot produce a credential the target will believe, and a token
-        # signed with an empty key is not a lesser credential but a forgeable
-        # one.
-        raise PrincipalVerificationError(
-            "no principal signing key is configured, so no token can be "
-            f"re-addressed to aud={signer.audience!r}"
-        )
-
     claims = decode_principal_token(token, verifier)
     # The result is deliberately dropped: this is the admission gate, not a
     # projection. Re-addressing an identity set this surface would answer 401
@@ -137,12 +100,10 @@ def resign_principal_token(
     # every public route makes runs before anything is signed.
     caller_from_claims(claims)
 
-    payload = dict(claims)
-    payload["iss"] = signer.issuer
-    payload["aud"] = signer.audience
-    return jwt.encode(
-        payload,
-        signer.signing_key,
-        algorithm=_ALGORITHM,
-        headers={"kid": signer.key_id},
-    )
+    # Replaces ``iss``/``aud`` and sets ``kid``; ``principals``, ``iat`` and
+    # ``exp`` are signed unchanged. An empty signing key fails closed there:
+    # a token signed with ``""`` is not a lesser credential but a forgeable one.
+    try:
+        return sign_principal_claims(claims, signer)
+    except PrincipalTokenError as exc:
+        raise PrincipalVerificationError(str(exc)) from exc
