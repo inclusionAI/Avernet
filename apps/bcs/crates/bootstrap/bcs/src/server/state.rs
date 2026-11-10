@@ -123,8 +123,9 @@ pub struct BcsServerState {
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
 
     /// Edge-permission ConnectService (real DB-backed impl in the production
-    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
-    /// `HttpAppState` for the `/friends/*` connect endpoints.
+    /// path; the real impl over in-memory repo ports in the in-memory/dev
+    /// path). Injected into the HTTP adapter `HttpAppState` for the
+    /// `/friends/*` connect endpoints.
     pub connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
 
     /// Edge-permission AdmissionService (real DB-backed impl in the production

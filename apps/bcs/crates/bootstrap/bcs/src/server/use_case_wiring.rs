@@ -52,6 +52,10 @@ pub(super) fn build_use_case_bundle(
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
+    // Edge-permission connect use case. The legacy `/friends/*` friend use
+    // cases are a compatibility facade over it (see `friend_use_cases`
+    // below); both construction paths wire the real `DbConnectService`.
+    connect: Arc<dyn bcs_service_api::application::ConnectService>,
     // The narrow authority hook consumed by the Bot
     // 删除/配置/状态 judgments and the Group
     // management control legs (plan Task 6.3).
@@ -153,12 +157,25 @@ pub(super) fn build_use_case_bundle(
     UseCaseBundle {
         actor_directory: Arc::new(actor_directory),
         candidate_search: candidate_search.openapi_v1,
-        friend_use_cases: Arc::new(bcs_friend::Friend::new(
-            bot_registry.clone(),
-            friend,
-            friend_request,
-            relation.clone(),
-        )),
+        friend_use_cases: {
+            // Legacy vocabulary/wire contract stays intact, but every mutation
+            // and read goes through the edge-permission connect use case. The
+            // legacy `bcs_friend::Friend` is retained only as the friend-name
+            // list delegate until the collaboration group gate stops reading
+            // the legacy friendship tables.
+            let legacy_delegate: Arc<dyn bcs_service_api::FriendService> =
+                Arc::new(bcs_friend::Friend::new(
+                    bot_registry.clone(),
+                    friend,
+                    friend_request,
+                    relation.clone(),
+                ));
+            Arc::new(bcs_edge_permission::EdgeConnectFriendService::new(
+                connect,
+                bot_registry.clone(),
+                legacy_delegate,
+            ))
+        },
         human_actors: Arc::new(bcs_bot::HumanActor::new(
             bot_registry.clone(),
             relation.clone(),

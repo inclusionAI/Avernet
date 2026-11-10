@@ -14,6 +14,9 @@
 //! `edge_grants` / `bcs_bots` / the two authority tables.
 
 pub mod authority;
+/// In-process implementations of the four edge-permission repo ports, used by
+/// the in-memory bootstrap path and by tests.
+pub mod memory;
 
 pub use authority::DbBotAuthorityStore;
 /// Pure SQL lifecycle step builders (Task 4): reused by
