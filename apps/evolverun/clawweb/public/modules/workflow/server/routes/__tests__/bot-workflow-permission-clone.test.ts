@@ -102,12 +102,26 @@ describe("POST / (bot workflow permission clone)", () => {
     expect(result).toMatchObject({ status: 409, body: { code: "IDENTITY_CONFLICT" } });
   });
 
-  it("returns 404 NO_SOURCE_GRANTS when the source bot has no permission rows", async () => {
+  it("returns a successful no-op when the source bot has no permission rows", async () => {
     stubReads([], []);
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "src-bot", source_owner_id: "src-owner",
         target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" });
-    expect(result).toMatchObject({ status: 404, body: { code: "NO_SOURCE_GRANTS" } });
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: {
+        success: true,
+        outcome: "no_source_grants",
+        message: "Clone complete: source bot has no workflow permissions to copy",
+        granted: 0,
+        rows: [],
+        source_effective_total: 0,
+      },
+    });
+    expect(listRowsForBot).toHaveBeenCalledTimes(1);
+    expect(listRowsForBot).toHaveBeenCalledWith("src-owner", "src-bot");
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("clones exact rows and resolves identity through the owner lookup", async () => {
@@ -123,7 +137,13 @@ describe("POST / (bot workflow permission clone)", () => {
       { source_bot_id: "src-bot", target_bot_id: "tgt-bot" });
 
     expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ success: true, granted: 2, dry_run: false });
+    expect(result.body).toMatchObject({
+      success: true,
+      outcome: "granted",
+      message: "Copied 2 workflows: w1, w2",
+      granted: 2,
+      dry_run: false,
+    });
     expect(result.body.source_resolved).toMatchObject({ bot_id: "src-bot", owner_id: "src-owner", source: "directory" });
     expect(result.body.target_resolved).toMatchObject({ bot_id: "tgt-bot", owner_id: "tgt-owner", source: "directory" });
     expect(upsert).toHaveBeenCalledTimes(2);
@@ -207,7 +227,43 @@ describe("POST / (bot workflow permission clone)", () => {
 
     expect(result.status).toBe(200);
     expect(upsert).not.toHaveBeenCalled();
-    expect(result.body).toMatchObject({ granted: 0, skipped: [{ workflow_id: "w1", reason: "already-covered" }] });
+    expect(result.body).toMatchObject({
+      outcome: "already_covered",
+      message: "Clone complete: target bot already covers 1 workflow: w1",
+      granted: 0,
+      skipped: [{ workflow_id: "w1", reason: "already-covered" }],
+    });
+  });
+
+  it("reports mixed copied and skipped workflows in real and dry-run messages", async () => {
+    stubReads(
+      [row("w1", [1, 1, 0]), row("w2", [1, 1, 1])],
+      [row("w1", [1, 1, 1], "tgt-bot", "tgt-owner")],
+    );
+    upsert.mockResolvedValue(row("w2", [1, 1, 1], "tgt-bot", "tgt-owner"));
+
+    const body = {
+      source_bot_id: "src-bot", source_owner_id: "src-owner",
+      target_bot_id: "tgt-bot", target_owner_id: "tgt-owner",
+    };
+    const copied = await request(createBotWorkflowPermissionCloneRouter(makeDeps()), body);
+    const previewed = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
+      { ...body, dry_run: true });
+
+    expect(copied.body).toMatchObject({
+      outcome: "granted",
+      message: "Copied 1 workflow: w2; skipped 1 already-covered workflow: w1",
+      granted: 1,
+      skipped: [{ workflow_id: "w1", reason: "already-covered" }],
+    });
+    expect(previewed.body).toMatchObject({
+      dry_run: true,
+      outcome: "granted",
+      message: "Would copy 1 workflow: w2; skipped 1 already-covered workflow: w1",
+      granted: 1,
+    });
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: "w2" }));
   });
 
   it("upgrades a weaker existing target row instead of skipping it", async () => {
@@ -236,7 +292,12 @@ describe("POST / (bot workflow permission clone)", () => {
         target_bot_id: "tgt-bot", target_owner_id: "tgt-owner", dry_run: true });
 
     expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ dry_run: true, granted: 2 });
+    expect(result.body).toMatchObject({
+      dry_run: true,
+      outcome: "granted",
+      message: "Would copy 2 workflows: w1, w2",
+      granted: 2,
+    });
     expect(upsert).not.toHaveBeenCalled();
     expect(result.body.rows).toEqual([
       { workflow_id: "w1", can_view: 1, can_execute: 1, can_edit: 1 },
