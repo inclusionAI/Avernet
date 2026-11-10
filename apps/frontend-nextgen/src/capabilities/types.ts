@@ -110,6 +110,11 @@ export interface TaskSessionJumpTarget {
 export interface ReleaseNotesData {
   version?: string;
   date?: string;
+  /**
+   * 发布标识（可选）：内源实现为 version + date + 内容指纹的组合 stamp，用于精确感知
+   * 「内容更新但标识未改」的配置单变更；未提供时消费方回退以 date 为标识比对已读。
+   */
+  stamp?: string;
   userReadmeHtml?: string;
   releaseNoteHtml?: string;
 }
@@ -117,12 +122,13 @@ export interface ReleaseNotesData {
 /**
  * 版本发布说明能力。Open Core 返回 null（不支持）；internal overlay 提供实现：
  * - load()：拉雨燕配置，失败/空返回 null（UI 降级「暂无内容」）
- * - markSeen(date)：用户打开 Modal 后写入 localStorage 记录已读日期，清除菜单红点
+ * - markSeen(stamp)：用户「主动关闭」Modal（按钮/ESC/遮罩统一收口）后写入 localStorage
+ *   记录已读标识，清除菜单红点（2026-11-10 已读语义拍板：打开不写已读）
  */
 export interface ReleaseNotesCapability {
   load(): Promise<ReleaseNotesData | null>;
-  markSeen(date: string): void;
-  /** 读取用户已读版本发布说明的日期记录；null=未读（菜单显示红点）。 */
+  markSeen(stamp: string): void;
+  /** 读取用户已读版本发布说明的标识记录；null=未读（菜单显示红点）。 */
   getSeenDate(): string | null;
 }
 
