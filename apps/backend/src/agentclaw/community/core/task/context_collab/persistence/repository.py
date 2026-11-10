@@ -118,6 +118,11 @@ def _collet_from_row(row: ContextCollabColletModel) -> Collet:
 
 def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
     """落库行 → ``EventRecord`` 领域对象;显式逐字段构造。"""
+    occurred_at = row.occurred_at
+    if occurred_at.tzinfo is None:
+        # 本仓储只写 UTC;SQLite / MySQL DATETIME 读回是 naive,读路径统一
+        # 补回 UTC,否则与创建返回值(tz-aware)比较 / 排序会静默出错。
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
     return EventRecord(
         collab_context_id=row.collab_context_id,
         event_id=row.event_id,
@@ -131,7 +136,7 @@ def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
         visibility=row.visibility,
         payload=json.loads(row.payload),
         context_version_after=int(row.context_version_after),
-        occurred_at=row.occurred_at,
+        occurred_at=occurred_at,
     )
 
 

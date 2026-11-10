@@ -6,7 +6,7 @@
 幂等与 JSON 编解码以落库行为准校验,不只看返回对象。
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -147,12 +147,21 @@ class TestCreateContext:
             assert isinstance(evt.occurred_at, datetime)
             assert evt.env == get_current_env()
 
-            # SQLite DATETIME 不保存时区,按落库值比较同一时刻。
-            stored_occurred_at = evt.occurred_at
+            # SQLite DATETIME 落库值不含时区;时刻与创建返回值一致。
+            assert record.initial_event.occurred_at.replace(tzinfo=None) == (
+                evt.occurred_at
+            )
 
-        assert record.initial_event.occurred_at.replace(tzinfo=None) == (
-            stored_occurred_at
+        # 读路径 round-trip 必须恢复 tz-aware UTC:本仓储只写 UTC,
+        # naive 恢复值统一补 UTC,与创建返回值可直接比较、可跨路径排序。
+        status = repo.get_current_status(
+            record.collet.collab_context_id, trunk_events=False
         )
+        assert status is not None
+        round_tripped = status.events[0]
+        assert round_tripped.occurred_at == record.initial_event.occurred_at
+        assert round_tripped.occurred_at.tzinfo is not None
+        assert round_tripped.occurred_at.utcoffset() == timedelta(0)
         # 返回的领域对象与落库行一致。
         assert record.collet.create_request_id == "create-collet-001"
         assert record.collet.context_spec == _context_spec()
