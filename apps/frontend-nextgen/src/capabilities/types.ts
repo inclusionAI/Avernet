@@ -354,6 +354,8 @@ export interface ConversationInstanceScopeBot {
   realBotId: string;
   /** Bot 类型('service' 触发实例范围链路)。 */
   botType?: string;
+  /** 引擎枚举；实例能力须跳过不支持容器查询的引擎（如 TEClaw）。 */
+  engine?: string;
   /** 好友 Bot 不支持实例选择(后端既有约束,f_user_id 场景不限定实例)。 */
   isFriendBot?: boolean;
 }
