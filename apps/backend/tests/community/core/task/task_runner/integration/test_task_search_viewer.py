@@ -140,15 +140,15 @@ async def test_task_search_uses_product_viewer_rules_and_preserves_readiness(
         **options,
     )
     expected = {
-        None: ["public:owner", "both:owner"],
-        "bot": ["public:owner", "both:owner"],
-        "human": ["public:owner", "both:owner"],
+        None: ["protected:owner", "public:owner", "both:owner"],
+        "bot": ["protected:owner", "public:owner", "both:owner"],
+        "human": ["protected:owner", "public:owner", "both:owner"],
     }
     assert [item.bot_id for item in result] == expected[viewer_type]
     assert recommendations[0]["top_k"] == 5
     params = calls[0]
     assert recommendations[0]["filters"] == {"runtime_state": ["online"]}
-    assert params["visibility"] == "public"
+    assert params["visibility"] == "public,protected"
     assert params["user_visibility"] == "public,protected,private"
     assert params["status"] == "online"
     if viewer_type is None:
@@ -235,7 +235,7 @@ async def test_explicit_viewer_keeps_five_candidate_cap_and_runtime_filter(viewe
     ]
     assert calls[0]["filters"] == {"runtime_state": ["online"]}
     assert calls[0]["catalog_filters"].viewer_actor_id == "viewer-id"
-    assert calls[0]["catalog_filters"].visibility == ("public",)
+    assert calls[0]["catalog_filters"].visibility == ("public", "protected")
     assert calls[0]["catalog_filters"].user_visibility == (
         "public",
         "protected",
