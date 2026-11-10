@@ -1529,7 +1529,7 @@ class TestSearchPublicBotsByKeyword:
         repository = MagicMock()
         non_public = _make_catalog_bot("bot-1", "entity-1")
         non_public["public"] = "0"
-        repository.list_bots_by_owner_bot_pairs.return_value = (1, [non_public])
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [non_public]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1564,10 +1564,8 @@ class TestSearchPublicBotsByKeyword:
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
         )
-        repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
+        repository.list_catalog_bots_by_owner_bot_pairs.assert_called_once_with(
             [("bot-1", "entity-1"), ("missing", "bcs-owner")],
-            page=1,
-            page_size=2,
         )
 
     def test_catalog_search_prefers_non_blank_backend_fields_and_uses_bcs_fallbacks(self):
@@ -1596,10 +1594,7 @@ class TestSearchPublicBotsByKeyword:
         fallback["entity_id"] = ""
         fallback["owner_id"] = "BCS-owner"
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            2,
-            [backend, fallback],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [backend, fallback]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1621,10 +1616,7 @@ class TestSearchPublicBotsByKeyword:
             total=21,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("bot-1", "entity-1")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("bot-1", "entity-1")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1650,10 +1642,7 @@ class TestSearchPublicBotsByKeyword:
             total=1,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("bot-1", "entity-1")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("bot-1", "entity-1")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1674,10 +1663,7 @@ class TestSearchPublicBotsByKeyword:
             [bcs_item], total=1
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("shared", "entity-a")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("shared", "entity-a")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1713,12 +1699,11 @@ class TestSearchPublicBotsByKeyword:
             [bcs_item], total=1
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            2,
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = (
             [
                 _make_catalog_bot("shared", "entity-a"),
                 _make_catalog_bot("shared", "entity-b"),
-            ],
+            ]
         )
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
@@ -1753,13 +1738,12 @@ class TestSearchPublicBotsByKeyword:
             total=3,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            3,
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = (
             [
                 _make_catalog_bot("shared", "entity-b"),
                 _make_catalog_bot("shared", "entity-other"),
                 _make_catalog_bot("shared", "entity-a"),
-            ],
+            ]
         )
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
@@ -1792,7 +1776,7 @@ class TestSearchPublicBotsByKeyword:
             )
 
         assert str(error.value) == ""
-        repository.list_bots_by_owner_bot_pairs.assert_not_called()
+        repository.list_catalog_bots_by_owner_bot_pairs.assert_not_called()
 
     def test_catalog_search_fails_closed_on_unexpected_metadata_error(self, caplog):
         metadata = MagicMock()
@@ -1839,7 +1823,7 @@ class TestSearchPublicBotsByKeyword:
             total=2,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (2, [malformed, sensitive])
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [malformed, sensitive]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
