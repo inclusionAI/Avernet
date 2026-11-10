@@ -39,9 +39,13 @@ credential installation there. The optional internal friend argument is not an
 authorization flag clients can supply directly to the application service.
 See `specs/2026-10-26-online-conversation-stage/spec.md` for the additive contract.
 
-IAM refresh accepts an optional `sessionKey` query parameter. The application
-passes its original value as `session_key` through the Caller contracts and
-runtime updater. Existing non-TeClaw callers need no session parameter.
+IAM refresh accepts `session_key` as the canonical optional query parameter and
+retains `sessionKey` as a compatibility alias. The Bot-scoped OpenAPI also
+retains its original `session_id` spelling. Friend IAM preparation always uses
+the server-verified owned `session_id`; an untrusted session-key alias cannot
+replace it. The application passes the selected value as `session_key` through
+the Caller contracts and runtime updater. Existing non-TeClaw callers need no
+session parameter.
 
 TeClaw uses the existing `service` Bot eligibility and the trusted binding's
 `device_provider`. `CallerSessionValidator` requires nonempty session context
