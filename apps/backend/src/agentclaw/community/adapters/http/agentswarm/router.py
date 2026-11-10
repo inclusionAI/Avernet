@@ -46,12 +46,13 @@ from agentclaw.community.api.agentswarm_service import (
     AgentSwarmServiceProtocol, SubmitRunRequest,
 )
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentSpec, ProviderKind, RunStatus,
+    AgentKind, AgentSpec, ProviderKind, RunStatus,
 )
 from agentclaw.community.core.agentswarm.domain.models import RunOptions
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentAuthorizationState, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
-    GlobalRunLimitExceeded, QueueDepthExceeded, TenantRunLimitExceeded,
+    GlobalRunLimitExceeded, IdentitySourceInvalid, IdentitySourceRequired,
+    QueueDepthExceeded, TenantRunLimitExceeded,
 )
 from agentclaw.community.core.agentswarm.repository.audit.impl import AgentSwarmAuditWriter, AuditAction
 from agentclaw.community.di import Injected
@@ -208,6 +209,18 @@ async def submit_run(
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="config_missing")
         raise
+    except IdentitySourceRequired as exc:
+        # No approval-gated path exists, so this is a caller error, not a
+        # transient condition: 400 and the message names the missing field.
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.SUBMIT_REJECTED, reason="identity_source_missing")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IdentitySourceInvalid as exc:
+        # Well-formed request naming a source it may not use: 422, matching
+        # what create-with-manifest answers for the same condition.
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.SUBMIT_REJECTED, reason="identity_source_invalid")
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     _audit(audit_writer, tenant=tenant, actor=user.staffId,
            action=AuditAction.SUBMIT_ACCEPTED, run_id=run_id)
     return summary
@@ -435,6 +448,13 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
                 identity_file=a.identity_file or "SOUL.md",
                 metadata=a.metadata,
                 config_manifest=a.config_manifest,
+                # Only a bot-kind agent provisions a Bot, so only it carries
+                # the run's identity source; an llm agent never holds a
+                # passport and must not look as though it does.
+                identity_bot_id=(
+                    (dto.identity_bot_id or "").strip()
+                    if a.kind is AgentKind.BOT else ""
+                ),
             )
             for a in dto.agents
         ),
@@ -442,6 +462,7 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
         idempotency_key=dto.idempotency_key,
         owner_id=owner_id,
         run_options=opts,
+        identity_bot_id=dto.identity_bot_id,
     )
 
 

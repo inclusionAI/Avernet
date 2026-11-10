@@ -64,6 +64,13 @@ class BotCreateSpec:
     identity_file: str = "SOUL.md"
     metadata: dict[str, str] = field(default_factory=dict)
     config_manifest: str = ""
+    identity_bot_id: str | None = None
+    """The Bot whose passport identity this one runs under.
+
+    Set for bot-kind agents when the run named an identity source; ``None``
+    means no source crossed this seam, so the platform provisions the Bot's
+    own passport and it may wait for human approval.
+    """
 
 
 

@@ -113,6 +113,17 @@ class SubmitRunDTO(BaseModel):
     provider: ProviderKind | None = None
     model: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=190)
+    identity_bot_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Provision this run's Bot agents under this Bot's AgentPass "
+            "identity; omit for the ordinary approval flow. The Bot must be "
+            "owned by the caller and hold an issued passport. When set, the "
+            "run's Bot agents never enter AWAITING_AUTHORIZATION, so no "
+            "consent URL is ever reported for them."
+        ),
+    )
     options: RunOptionsDTO | None = None
 
 
