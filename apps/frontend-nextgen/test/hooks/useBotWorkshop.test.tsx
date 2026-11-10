@@ -201,29 +201,25 @@ it('刷新页面时等待空间初始化完成，只加载一次 Bot 列表', as
   expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ spaceId: '10001' }));
 });
 
-it('首次加载结束后 3 秒再静默兜底读取一次，用于收敛刚触发的运行态变更', async () => {
+it('首次加载后不追加 3 秒兜底读取，仅保留 30 秒常规同步', async () => {
   jest.useFakeTimers();
   try {
     mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
     mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
 
-    const { result, unmount } = renderHook(() => useBotWorkshop());
+    const { unmount } = renderHook(() => useBotWorkshop());
     await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
 
-    mockedList.mockClear();
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(3_000);
-    });
-    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
-
-    // This is a bounded follow-up read, not a new three-second polling loop.
     mockedList.mockClear();
     await act(async () => {
       await jest.advanceTimersByTimeAsync(3_000);
     });
     expect(mockedList).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
     unmount();
   } finally {
     jest.useRealTimers();
@@ -241,13 +237,15 @@ it('列表每 30 秒静默同步状态，不受微前端容器的 visibilityStat
     await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
 
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(3_000);
+      await jest.advanceTimersByTimeAsync(30_000);
     });
-    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
+    expect(mockedList).toHaveBeenCalledTimes(2);
 
     mockedList.mockClear();
-    act(() => jest.advanceTimersByTime(30_000));
-    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
     unmount();
   } finally {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
