@@ -1,22 +1,36 @@
-"""Context collab 服务用例编排(G1 校验 + 仓储)。
+"""Context collab 服务用例编排(G1 校验 + G4 状态机 + 仓储)。
 
-本文件只实现 ``create_context``(spec §6.2);``append_event`` 与
-``get_status`` 的用例在后续任务落地,先留桩保证协议完整。
-服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
+本文件实现 ``create_context``(spec §6.2)与 ``append_event``
+(spec §6.3,接入 G4 状态机与守卫);``get_status`` 用例在后续
+任务落地,先留桩保证协议完整。服务层不感知 HTTP/Pydantic,
+仓储与授权都以协议注入。
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from injector import inject
 
 from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
+    validate_event_body,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
+    GUARD_REGISTRY,
+    GuardEvaluationInput,
+    MACHINE_REGISTRY,
+    resolve_transition,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
     ContextSpec,
     CurrentSnapshot,
 )
@@ -31,6 +45,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
+    AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
     CreateContextRecordRequest,
     InitialEventDraft,
@@ -93,6 +108,47 @@ def _created_event_projection(event: EventRecord) -> dict:
     }
 
 
+def _resolve_event_status(
+    collet: Collet, command: EventAppendCommand, context: ActorContext
+) -> str:
+    """G4 状态机裁决(spec §4):返回事件接纳后的新 status。
+
+    collet 的 ``workflow_kind`` 未命中 ``MACHINE_REGISTRY``,或当前状态
+    对该事件无规则命中 → status 不变(事件仍接纳)。守卫输入按
+    Controller Ruling R4 用值语义构造:actor 取已认证调用者,responsible
+    取 collet 快照 principal,executor 取创建参数 executor。guard
+    FAIL / BLOCKED 由 ``resolve_transition`` 抛 ``ContextCollabValidationError``
+    自然向外传。
+    """
+    current_status = collet.current_snapshot.status
+    machine = MACHINE_REGISTRY.get(collet.context_spec.workflow_kind)
+    if machine is None:
+        return current_status
+    matched_rules = [
+        rule
+        for rule in machine.transitions
+        if rule.event_name == command.event_kind
+        and current_status in rule.from_states
+    ]
+    if not matched_rules:
+        return current_status
+    guard_input = GuardEvaluationInput(
+        actor=context.actor,
+        responsible=collet.current_snapshot.principal_ref,
+        executor=collet.context_spec.executor_ref,
+        payload=command.payload,
+    )
+    guard_results = {
+        guard_ref: GUARD_REGISTRY[guard_ref](guard_input)
+        for rule in matched_rules
+        for guard_ref in rule.guard_refs
+    }
+    new_status = resolve_transition(
+        machine, current_status, command.event_kind, guard_results
+    )
+    return current_status if new_status is None else new_status
+
+
 class ContextCollabService(ContextCollabServiceProtocol):
     """三个北向用例的服务实现;P1 默认注入结构授权器。"""
 
@@ -152,8 +208,14 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
         # progress.current_event_id 为 None,权威事件指针在 Event record)。
+        # 重放路径不盲写初始事件 id:按仓储已存的事件指针投影 —— 上下文
+        # 可能已被后续事件推进,当行的 current_event_id 才反映当前状态。
         snapshot = _created_snapshot_projection(record.collet.current_snapshot)
-        snapshot["progress"]["current_event_id"] = record.initial_event.event_id
+        snapshot["progress"]["current_event_id"] = (
+            record.initial_event.event_id
+            if record.created
+            else record.collet.current_event_id
+        )
         return ContextCollabCreatedResult(
             collab_context_id=record.collet.collab_context_id,
             context_version=record.collet.context_version,
@@ -166,7 +228,60 @@ class ContextCollabService(ContextCollabServiceProtocol):
         self, collab_context_id: str, command: EventAppendCommand,
         context: ActorContext
     ) -> EventAcceptedResult:
-        raise NotImplementedError("append_event use case lands in the next task")
+        """追加事件用例(spec §6.3):加载 → G4 校验 → G1 check →
+        状态机裁决 → 仓储追加 → 组装结果。
+
+        涉及聚合状态的并发语义由仓储把守:``parent_event`` 存在性、
+        ``expected_version`` 乐观并发与 request_id 幂等重放都在仓储持锁
+        事务内裁决,相关错误(VersionConflict / ParentEventError 等)原样
+        上抛,本层不预查、不吞。重放(``created=False``)仍视为接收成功:
+        返回原事件 id,``current_status`` / ``context_version`` 取当行
+        collet 的最新投影(文档化的接受行为)。``snapshot_updater`` 是
+        只替换 status 的纯函数,由仓储在其行锁内求值,避免陈旧写。
+        """
+        status = self._repository.get_current_status(
+            collab_context_id, trunk_events=False
+        )
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        collet = status.collet
+        validate_event_body(
+            event_kind=command.event_kind,
+            primitive_type=command.primitive_type,
+            visibility=command.visibility,
+            payload=command.payload,
+        )
+        self._authorizer.check_append(collet, command, context)
+
+        new_status = _resolve_event_status(collet, command, context)
+        record = self._repository.append_event(
+            collab_context_id,
+            AppendEventRecordRequest(
+                request_id=command.request_id,
+                expected_version=command.expected_version,
+                event_kind=command.event_kind,
+                primitive_type=command.primitive_type,
+                actor_ref=command.actor_ref,
+                parent_event=command.parent_event,
+                visibility=command.visibility,
+                payload=command.payload,
+                snapshot_updater=lambda snapshot: replace(
+                    snapshot, status=new_status
+                ),
+            ),
+        )
+        return EventAcceptedResult(
+            accepted=True,
+            collab_context_id=collab_context_id,
+            event_id=record.event.event_id,
+            parent_event=record.event.parent_event,
+            event_kind=record.event.event_kind,
+            primitive_type=record.event.primitive_type,
+            context_version=record.collet.context_version,
+            current_status=record.collet.current_snapshot.status,
+        )
 
     def get_status(
         self, collab_context_id: str, *, trunk_events: bool,
