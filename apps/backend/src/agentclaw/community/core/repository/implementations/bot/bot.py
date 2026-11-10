@@ -147,6 +147,7 @@ class BotRepository(
             bot_type=bot_data.get("bot_type", "personal"),
             template_type=bot_data.get("template_type"),
             space_id=bot_data.get("space_id"),
+            identity_bot_id=bot_data.get("identity_bot_id"),
         )
 
     # ── queries (env-scoped — adopt prod) ───────────────────────
@@ -634,6 +635,7 @@ class BotRepository(
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -641,6 +643,8 @@ class BotRepository(
                 self.Model.owner_id == owner_id,
                 self._env(),
             )
+            if exclude_identity_inheriting:
+                query = query.filter(self.Model.identity_bot_id.is_(None))
             if exclude_bot_type:
                 query = query.filter(self.Model.bot_type != exclude_bot_type)
             if exclude_active_engine:
@@ -652,6 +656,24 @@ class BotRepository(
                     )
                 )
             return query.count()
+
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Owner-scoped like every other Bot query. Soft-deleted rows do not count:
+        they no longer run, so the source's deletion cannot strand them.
+        """
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.Model)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self.Model.identity_bot_id == bot_id,
+                    self._env(),
+                )
+                .count()
+            )
 
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         with self._db.orm_session() as db:
