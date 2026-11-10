@@ -532,6 +532,7 @@ those timestamps. This release does not expose a history API.
 
 `POST /groupcontext/list-slot?groupId=<group-id>` returns a `slots` array.
 Each entry contains `name`, `description`, `creator`, `modifier`, `gmtCreate`, and `gmtModified`.
+Audit timestamps are returned in UTC with millisecond precision.
 `bcs-cli group-context list-slot --group-id <group-id>` uses this endpoint.
 
 Slot management uses three Human-only POST endpoints with the `groupId` query parameter.

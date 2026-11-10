@@ -56,11 +56,15 @@ async fn assert_slot_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) 
     use bcs_domain::group_context::GroupContextSlotChange::{Add, Delete, Edit};
 
     let group = format!("slot-audit-{suffix}");
+    let create_started = Utc::now().timestamp_millis();
     repo.change_slot(&group, "owner", Add {
         name: "timeline".into(),
         description: String::new(),
     }).await.unwrap();
     let before = repo.list_slots(&group).await.unwrap().remove(0);
+    assert_eq!(before.gmt_create, before.gmt_modified);
+    assert!((create_started..=Utc::now().timestamp_millis()).contains(&before.gmt_create.timestamp_millis()));
+    let update_started = Utc::now().timestamp_millis();
     repo.change_slot(&group, "admin", Edit {
         name: "timeline".into(),
         new_name: Some("events".into()),
@@ -71,7 +75,7 @@ async fn assert_slot_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) 
     assert_eq!(after.creator, "owner");
     assert_eq!(after.modifier, "admin");
     assert_eq!(before.gmt_create, after.gmt_create);
-    assert!(after.gmt_modified >= before.gmt_modified);
+    assert!((update_started..=Utc::now().timestamp_millis()).contains(&after.gmt_modified.timestamp_millis()));
     repo.change_slot(&group, "admin", Delete { name: "events".into() }).await.unwrap();
 }
 

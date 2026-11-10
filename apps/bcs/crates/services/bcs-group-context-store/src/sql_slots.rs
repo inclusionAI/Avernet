@@ -45,21 +45,23 @@ impl SqlGroupContextStore {
         actor: &str,
         change: GroupContextSlotChange,
     ) -> StoreResult<()> {
-        let modified_at = match self.flavor {
-            DbSqlFlavor::Mysql => "CURRENT_TIMESTAMP(3)",
-            DbSqlFlavor::Sqlite => "strftime('%Y-%m-%d %H:%M:%f', 'now')",
-        };
+        let now = self.timestamp_param(Utc::now());
         let is_edit = matches!(&change, GroupContextSlotChange::Edit { .. });
         let (statement, name) = match change {
             GroupContextSlotChange::Add { name, description } => (
                 DbStatement::with_params(
-                    "INSERT INTO bcs_group_context_slots (group_id, name, description, creator, modifier) VALUES (?, ?, ?, ?, ?)",
+                    self.sql_with_timestamp_params(
+                        "INSERT INTO bcs_group_context_slots (group_id, name, description, creator, modifier, gmt_create, gmt_modified) \
+                         VALUES (?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, __bcs_group_context_timestamp_ms__)",
+                    ),
                     vec![
                         group_id.into(),
                         name.as_str().into(),
                         description.into(),
                         actor.into(),
                         actor.into(),
+                        now.clone(),
+                        now,
                     ],
                 ),
                 name,
@@ -70,11 +72,15 @@ impl SqlGroupContextStore {
                 description,
             } => (
                 DbStatement::with_params(
-                    format!("UPDATE bcs_group_context_slots SET name = COALESCE(?, name), description = COALESCE(?, description), modifier = ?, gmt_modified = {modified_at} WHERE group_id = ? AND name = ?"),
+                    self.sql_with_timestamp_params(
+                        "UPDATE bcs_group_context_slots SET name = COALESCE(?, name), description = COALESCE(?, description), \
+                         modifier = ?, gmt_modified = __bcs_group_context_timestamp_ms__ WHERE group_id = ? AND name = ?",
+                    ),
                     vec![
                         new_name.as_deref().into(),
                         description.as_deref().into(),
                         actor.into(),
+                        now,
                         group_id.into(),
                         name.as_str().into(),
                     ],
