@@ -9,6 +9,7 @@ import { validateWorkflowSnapshotRequest } from '../api/validateWorkflowSnapshot
 import { parseWorkflowYaml } from '../editor/yamlDraft'
 import { formatSpecForDiff, unifiedDiff } from './WorkflowVersionDiff'
 import { sideBySideDiff } from './workflow-version-diff/sideBySide'
+import SyntaxHighlightedText from './SyntaxHighlightedText'
 
 /** The Git choice imports values into the editor; it does not write either store. */
 export function parseGitWorkflowForImport(text: string, workflowId: string): WorkflowSpec {
@@ -46,8 +47,8 @@ export function DiffPanes({ rows, left, right, leftLabel, rightLabel }: {
           const line = row[side]
           return <div key={index} className={`flex min-h-6 ${line?.type === 'del' ? 'bg-destructive/10' : line?.type === 'add' ? 'bg-success/10' : ''}`}>
             <span aria-hidden="true" className="w-10 shrink-0 select-none border-r border-border px-2 text-right text-muted-foreground">{side === 'left' ? line?.fromLine : line?.toLine}</span>
-            <span className="whitespace-pre px-3 text-foreground">{line?.text ?? ''}</span>
-          </div>})}</div> : <pre className="m-0 whitespace-pre p-3 text-foreground">{text}</pre>}
+            <span className="whitespace-pre px-3 text-foreground"><SyntaxHighlightedText text={line?.text ?? ''} /></span>
+          </div>})}</div> : <pre className="m-0 whitespace-pre p-3 text-foreground"><SyntaxHighlightedText text={text} /></pre>}
       </div>
     </section>)}
   </div>
