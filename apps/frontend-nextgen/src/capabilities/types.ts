@@ -384,6 +384,8 @@ export interface ConversationInstanceScopeState {
  * 不包含 TeamClaw URL、内部应用地址或部署信息。
  */
 export interface CodingBotConversationHostProps {
+  /** Host sidebar identity (may be compound); optional for older/custom hosts. */
+  conversationBotId?: string;
   /**
    * AIXCoding runtime Bot ID. This is the head of TeamClaw's compound view ID
    * (`realBotId`); callers must not pass the URL identity `bot.botId`.
@@ -456,6 +458,11 @@ export type CodingBotSessionActionResult =
  */
 export interface CodingBotConversationHost {
   Stage: ComponentType<CodingBotConversationHostProps>;
+  /**
+   * 内部会话的可见性策略。Open Core 不注入时列表保留全部会话；
+   * TeamClaw 内部部署用它隐藏内部系统生成的 Coding 会话，不影响其他 Bot。
+   */
+  isSessionHidden?: (session: { title?: unknown }) => boolean;
   /**
    * 页面在识别出 Coding Bot、但目标 Session 详情尚未就绪时，可先触发宿主
    * 定向预载微应用入口资产。该函数必须幂等且不要求返回 Promise；Open Core

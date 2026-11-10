@@ -140,9 +140,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
-          // 复制失败(gated):仅 copy_state.status === FAILED 时,操作列折叠为重试入口。
-          // 中间态(复制中)不再占用操作列 —— dst bot 未收敛,但用户仍可走正常 actions 查看进度,
-          // 不强行塞重试按钮(避免对 RUNNING/FILE_SYNCED 的 bot 误导「可重试」)。
+          // 复制失败(gated):仅 FAILED 折叠为重试入口；中间态不占用操作列，也不误导可重试。
           const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
           if (copyState?.status === 'FAILED' && onRetryCopy)
             return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
@@ -154,6 +152,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
               onView={onView}
               onEdit={onEdit}
               onConversation={onConversation}
+              onRequestAccess={onAuthorize}
+              collaborationMode={getCollaborationMode?.(bot)}
               conversationAllowed={collaborationAllowsConversation && entry.enabled}
               conversationDisabledReason={
                 entry.enabled
