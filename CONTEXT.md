@@ -89,7 +89,7 @@ module. Do not use a glossary term as evidence of a specific deployment.
 
 **Skills Pool Admission Policy**: An environment-level policy governing the first Pool layout claim by an unclaimed Bot. Rules cover exact Bot, Owner + Engine, Environment + Engine and exact Bot exclusions; it does not execute migration, recovery or rollback. Avoid: Batch, acceptance batch, migration status.
 
-**Engine Admission Switch**: An operational fuse evaluated by Engine before first claim, ahead of all allow rules. Disabling it only blocks new claims for that Engine; it does not cancel, pause or roll back existing claims. Avoid: stopping running Bots, automatic rollback, Batch close.
+**Engine Admission Switch**: An operational fuse evaluated per Engine type before first claim, ahead of all allow rules. Disabling it only blocks new claims for that Engine; it does not cancel, pause or roll back existing claims. Avoid: stopping running Bots, automatic rollback, Batch close.
 
 **Policy Revision**: An immutable identifier for an atomic Skills Pool Admission Policy change. Writes use the previous revision for CAS. First claim freezes the matched revision and admission reason for observation, not as a later rollout gate. Avoid: Accepted Batch, Promotion Ready.
 
