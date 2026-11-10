@@ -10,7 +10,8 @@ class ScheduledCallerRefreshProtocol(Protocol):
     ``entity_id`` is the stable Bot subject; ``owner_user_id`` is its current
     human owner. Implementations resolve each actual Caller independently and
     must attempt all eligible targets before raising on partial failure. They
-    must not expose credential material in raised exceptions.
+    must not expose credential material in raised exceptions. The Owner callback
+    logs these failures without changing its successful Owner update result.
     """
 
     @abstractmethod
