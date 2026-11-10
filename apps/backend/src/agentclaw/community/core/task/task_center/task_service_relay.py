@@ -140,6 +140,7 @@ class TaskServiceRelayMixin:
         self, *, query: str, task_id: str, node_id: str, relay_token: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> list[BotCandidate]:
         """Project the catalog result to the stable Relay BotCandidate model."""
         if not query.strip() or not task_id or not node_id:
@@ -147,7 +148,9 @@ class TaskServiceRelayMixin:
         viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         relay_token_fingerprint = hashlib.sha256(relay_token.encode()).hexdigest()
         try:
-            raw = await self._relay_adapter.search.search_catalog(query, **viewer)
+            raw = await self._relay_adapter.search.search_catalog(
+                query, visibility=visibility, **viewer
+            )
         except Exception as exc:
             self._graph.append_action_event(
                 task_id,
