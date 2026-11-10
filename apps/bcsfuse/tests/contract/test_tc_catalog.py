@@ -15,7 +15,7 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "test")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "tc.sqlite3"))
     monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "qdrant"))
-    monkeypatch.setenv("QDRANT_MODE", "local")
+    monkeypatch.setenv("QDRANT_MODE", "server")
     registry = build_opensource_provider_registry("test")
     app = create_bcsfuse_app(
         ApplicationContext(

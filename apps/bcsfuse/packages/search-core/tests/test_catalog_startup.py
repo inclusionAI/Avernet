@@ -1,3 +1,5 @@
+from tests.qdrant_support import server_connection
+
 """Restoration controls readiness; pending Card preparation remains retryable."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -126,7 +128,7 @@ def test_ready_endpoint_succeeds_before_background_embedding_finishes(
 
     monkeypatch.setattr(DemoEmbedding, "embed", slow)
     with TestClient(
-        create_local_app(tmp_path, poll_seconds=0.05),
+        create_local_app(tmp_path, poll_seconds=0.05, connection=server_connection()),
         client=("127.0.0.1", 50000),
         base_url="http://127.0.0.1",
     ) as client:

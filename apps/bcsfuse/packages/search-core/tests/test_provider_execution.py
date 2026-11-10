@@ -1,5 +1,7 @@
 """The independently installed providers execute without importing TC."""
 
+from tests.qdrant_support import server_options
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -77,7 +79,9 @@ def test_reranker_wire_and_order(monkeypatch, model):
 
 
 def test_generic_keyword_does_not_scroll_for_worker_id(monkeypatch):
-    index = QdrantKeywordIndex()
+    index = QdrantKeywordIndex(
+        **server_options(),
+    )
     try:
         index.upsert(
             [
@@ -100,7 +104,9 @@ def test_generic_keyword_does_not_scroll_for_worker_id(monkeypatch):
 
 
 def test_filters_are_applied_before_top_k(tmp_path):
-    index = QdrantRetrievalIndex(path=str(tmp_path), dimension=2)
+    index = QdrantRetrievalIndex(
+        **server_options(str(tmp_path)), path=str(tmp_path), dimension=2
+    )
     try:
         index.upsert(
             [

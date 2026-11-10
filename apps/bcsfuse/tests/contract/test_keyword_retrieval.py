@@ -1,5 +1,7 @@
 """Keyword recall must survive filters, lifecycle changes and rerank failures."""
 
+from tests.qdrant_support import server_options
+
 import math
 
 import pytest
@@ -32,6 +34,7 @@ def point(worker, content, *, kind="full", similarity=0.1, **payload):
 @pytest.fixture
 def store(tmp_path):
     instance = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "vectors")),
         dimension=2,
         qdrant_path=str(tmp_path / "vectors"),
         persistence_backend=FakePersistenceBackend(),

@@ -1,4 +1,4 @@
-"""Dense and lexical retrieval through Qdrant Local or Server."""
+"""Dense and native BM25 retrieval through Qdrant Server."""
 
 import math
 
@@ -8,17 +8,15 @@ from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.index_lock import IndexLock
 from search_core.providers.keyword import QdrantKeywordIndex
-from search_core.providers.qdrant_ids import _logical_id_from_result
 from search_core.providers.qdrant_server import dense_store
 
 
 class QdrantRetrievalIndex:
     """One owner per index; no Worker-ID lookup or model calls.
 
-    Local rebuilds its sparse index from dense payloads at startup. Server keeps
-    both collections persistent and allows concurrent reads; writes are exclusive.
-    keyword_index_fields optionally provisions keyword payload indexes on both
-    Server collections at startup. Local ignores this performance-only option.
+    Server keeps both collections persistent and allows concurrent reads;
+    writes are exclusive. keyword_index_fields provisions filter payload indexes
+    on both collections. Python Local cannot execute multilingual BM25.
     Existing incompatible field indexes or provisioning failures fail startup.
     """
 
@@ -42,44 +40,20 @@ class QdrantRetrievalIndex:
         )
         self.connection = connection
         self._lock = IndexLock(concurrent_reads=connection.mode == "server")
+        self._keyword = QdrantKeywordIndex(
+            connection=connection,
+            collection_name=collection_name + "_keywords",
+        )
         self._dense = dense_store(
             connection=connection,
             path=path,
             dimension=dimension,
             collection_name=collection_name,
         )
-        self._keyword = QdrantKeywordIndex(
-            connection=connection,
-            collection_name=collection_name + "_keywords",
-        )
         try:
             self._dense._ensure_client()
             self._keyword._ensure_client()
-            if connection.mode == "server":
-                self._ensure_keyword_indexes(keyword_index_fields)
-                return
-            offset = None
-            while True:
-                records, offset = self._dense._client.scroll(
-                    collection_name,
-                    offset=offset,
-                    limit=256,
-                    with_vectors=False,
-                )
-                self._keyword.upsert(
-                    [
-                        VectorPoint(
-                            id=_logical_id_from_result(
-                                str(record.id), record.payload or {}
-                            ),
-                            vector=[],
-                            payload=record.payload or {},
-                        )
-                        for record in records
-                    ]
-                )
-                if offset is None:
-                    break
+            self._ensure_keyword_indexes(keyword_index_fields)
         except Exception:
             self.close()
             raise

@@ -1,5 +1,7 @@
 """Operator status exposes durable Docs and actual index points separately."""
 
+from tests.qdrant_support import server_options
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -41,7 +43,11 @@ def world(tmp_path):
         return VerifiedIdentity("operator")
 
     repo = sqlite_catalog_repository(str(tmp_path / "cards.db"))
-    index = QdrantRetrievalIndex(path=str(tmp_path / "qdrant"), dimension=16)
+    index = QdrantRetrievalIndex(
+        **server_options(str(tmp_path / "qdrant")),
+        path=str(tmp_path / "qdrant"),
+        dimension=16,
+    )
     model = Model()
     updates = CardUpdates(
         repo,

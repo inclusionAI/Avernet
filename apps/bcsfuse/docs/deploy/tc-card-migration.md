@@ -23,8 +23,9 @@ card 模式两套 API 共用一套新服务和索引加工任务，不再初始�
 复用现有公共 `/api/v2/agent-cards/{id}` 的 PUT/GET/DELETE 和 index-status，显式绑定 TC 新服务。
 单卡重建使用 `POST /api/v2/agent-cards/{id}/rebuild`，请求体为 `{"index_key":"<当前 Card 的 index-status 返回值>"}`。
 接口发布该 Card 的新 Doc，Qdrant 由现有索引同步更新。Card 资料和版本保持原值。
-TC Card 生成 Doc 时，关键词索引保留原有文本词项，并追加名称中英文及字母数字词的 3–6 字符词首和 `domains` 中明确提供的别名。
-例如 `UCT20` 可用 `UCT` 查到，业务也可在 `domains` 中提供 `UCT`。查询继续并行执行关键词和向量召回。已有 Card 可用同一 `index_key` 重建以应用此规则。
+TC 与支付宝共用 Qdrant Server 原生 BM25：名称和正文使用 multilingual 分词，名称三字符片段由 Whoosh 标准分词器生成，单独使用 BM25 评分，取最佳字段分数，不追加自定义权重。TC 不再追加名称前缀或查询侧同义词；Card 的 `domains` 仍作为明确提供的资料参与检索。关键词和向量继续并行召回，再走已有 RRF/可选精排。Python Local 不支持这套分词，明确报错；本地开发使用 Qdrant Server >=1.20。
+关键词与向量继续并行召回，RRF 合并后按配置精排。名称与片段信息不修改 embedding 或 rerank 输入。
+已有 Doc 缺少独立 `name` 字段，需要用已有重建能力重新生成 Doc 并等待本地索引应用。可以沿用当前 `index_key`，但仅重启或重放旧 Doc 不会补齐名称；只有重建过的 Card 获得完整的新能力。不要把局部重建当作全量生效。
 `/api/v2/search`、`/api/v2/recommend` 固定查询 TC 新索引。
 TC 仅补 GET/PUT `/api/v2/workers/{id}/config`，沿用已有配置请求/响应并固定保存新配置。
 状态和 availability 通过新 Card 字段更新，不复制整套 v2 sync/online/Fuse 路由。

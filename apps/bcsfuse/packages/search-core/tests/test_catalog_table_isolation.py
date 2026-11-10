@@ -1,5 +1,7 @@
 """Hosts can isolate business Cards without changing the default catalog."""
 
+from tests.qdrant_support import server_options
+
 import sqlite3
 
 import pytest
@@ -47,6 +49,7 @@ def test_delete_retires_only_its_business_docs_in_all_generations(tmp_path):
             )
             for key in ("model-old", "model-current"):
                 index = QdrantRetrievalIndex(
+                    **server_options(str(tmp_path / f"{repository.table}-{key}")),
                     path=str(tmp_path / f"{repository.table}-{key}"),
                     dimension=model.dimension,
                 )

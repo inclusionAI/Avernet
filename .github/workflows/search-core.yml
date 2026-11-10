@@ -14,6 +14,15 @@ permissions:
 jobs:
   contracts:
     runs-on: ubuntu-latest
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 6333:6333
+          - 6334:6334
+    env:
+      QDRANT_TEST_URL: http://127.0.0.1:6333
+      QDRANT_TEST_GRPC_PORT: '6334'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,8 +30,11 @@ jobs:
           python-version: '3.12'
       - name: Install public packages from this checkout
         run: python -m pip install -e 'apps/bcsfuse/packages/search-core[http,test]' -e 'apps/bcsfuse[dev]'
+      - name: Wait for Qdrant
+        run: curl --retry 20 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:6333/readyz
       - name: Core contracts
-        run: python -m pytest apps/bcsfuse/packages/search-core/tests -q
+        working-directory: apps/bcsfuse
+        run: python -m pytest -c pyproject.toml packages/search-core/tests -q
       - name: TC compatibility contracts
         working-directory: apps/bcsfuse
         run: >-

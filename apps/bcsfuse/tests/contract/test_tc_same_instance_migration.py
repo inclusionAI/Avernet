@@ -8,11 +8,10 @@ from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.bootstrap.app_factory import create_bcsfuse_app
 from app.bootstrap.application_context import ApplicationContext
 from app.bootstrap.opensource import build_opensource_provider_registry
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -222,7 +221,7 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
         assert result.json()["recommendations"][0]["short_profile"] == "德州扑克 · 游戏"
 
 
-def test_tc_keyword_index_adds_name_prefixes_and_domains_alongside_vectors(service):
+def test_tc_uses_shared_name_fragments_alongside_vectors(service):
     start, _ = service
     with start("card") as (client, registry):
         new_card(client, "uct-assistant", name="UCT技术助理Bot", runtime_state="online")
@@ -231,7 +230,6 @@ def test_tc_keyword_index_adds_name_prefixes_and_domains_alongside_vectors(servi
             client,
             "aliuct",
             name="aliuct值班助手",
-            domains=["UCT"],
             runtime_state="online",
         )
         new_card(
@@ -271,7 +269,12 @@ def test_tc_keyword_index_adds_name_prefixes_and_domains_alongside_vectors(servi
                 "uct-assistant",
                 "uct20",
                 "aliuct",
+                "deduct",
             }
+            assert (
+                hits["uct-assistant"]["keyword"]["rank"]
+                < hits["deduct"]["keyword"]["rank"]
+            )
             assert hits["deduct"]["vector"]
             assert "private-uct" not in hits
 

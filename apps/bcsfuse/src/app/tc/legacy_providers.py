@@ -40,11 +40,7 @@ def storage(context):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         vector_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or path
         index_path = (os.getenv("QDRANT_LOCAL_PATH") or path + ".qdrant") + "-legacy"
-        connection = (
-            QdrantConnection(mode="local")
-            if context.mode == "test"
-            else QdrantConnection.from_mapping(os.environ, default_mode="local")
-        )
+        connection = QdrantConnection.from_mapping(os.environ, default_mode="local")
         return (
             SQLiteWorkerRegistryStore(path),
             SQLiteWorkerProfileContentStore(path),

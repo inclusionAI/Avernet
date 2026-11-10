@@ -85,11 +85,7 @@ def storage(context):
             path,
             environment=environment,
         )
-        connection = (
-            QdrantConnection(mode="local")
-            if context.mode == "test"
-            else QdrantConnection.from_mapping(os.environ, default_mode="local")
-        )
+        connection = QdrantConnection.from_mapping(os.environ, default_mode="local")
         index_path = os.getenv("QDRANT_LOCAL_PATH") or str(default_dir / "tc_qdrant")
         if not registry.has("fused_profile_store"):
             from app.infra.adapters.sqlite_fused_profile_store import (
