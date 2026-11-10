@@ -264,9 +264,9 @@ mine 的 total 在全部筛选之后、分页之前计算；不能把前 500 个
 
 ### 8.0 mine 动态过滤
 
-1. Store 在一个读取快照中返回经过 env/kind/name/status 等持久化条件过滤、角色去重和稳定排序的轻量候选（ID、kind、status、access_relation），包含合法 Human self；不读取全量 Bot 配置来计数。
+1. Store 在一个读取快照中返回经过 env/kind/name/status 等持久化条件过滤、角色去重和稳定排序的轻量候选（ID、kind、status、access_relation、created_at），包含合法 Human self；不读取全量 Bot 配置来计数。
 2. Application 经 Registry Core 获取这些候选的 runtime-active 结果：一次读取当前实例 WS 连接集合，Provider binding/provider/credential 使用已有批量 port，参数最多 128 ID/块，不逐 Bot 解析 target。保持现有 `status=Online && (WS active || HTTP Provider routable)` 语义；存储错误返回错误，不伪装成 unreachable。
-3. 对全部候选应用 reachable/unreachable 后算 total，再 offset/limit，最后批量补本页展示字段。指定 reachability 时 Human self 仍按既有行为排除；未指定时 self 可展示 owner 标签，但不创建 Human→Human owner 边，Hook 仍拒绝把 Human 作为物理 Bot。
+3. 对全部候选应用 reachable/unreachable 过滤后，按页序排序（Human self 置顶，reachable 组在 unreachable 组前，组内 created_at 降序、bot_id 升序兜底；排序复用同一次 runtime 观测，显式指定 reachability 过滤时退化为纯 created_at 降序），再算 total、offset/limit，最后批量补本页展示字段。指定 reachability 时 Human self 仍按既有行为排除；未指定时 self 可展示 owner 标签，但不创建 Human→Human owner 边，Hook 仍拒绝把 Human 作为物理 Bot。
 4. 候选数据库快照与 runtime 观测不是跨系统原子快照；响应代表本次采样结果，连续页面可因在线状态改变而漂移。页内 total/items 使用同一候选和 runtime 采样。补页时发现目标删除或角色变化，整次重试一次；仍变化返回 `409 bot_list_changed`，不补空页冒充精确 total。
 
 候选空间/扫描为 O(N)，runtime 查询为有界块数而非 N 次 DB 往返；明确记录 N、Provider 数和批次数，不宣传为常数成本或使用截断后的 total。资源授权不依赖 mine 的采样结果。
