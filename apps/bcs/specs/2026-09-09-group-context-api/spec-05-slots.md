@@ -38,3 +38,5 @@ group-context新增一个字段，is_slot boolean类型，记录这条group-cont
 ## 权限与审计
 
 已有身份认证、成员准入和条目读写权限继续生效。Slot 的增删改仅向群主 Bot（`driver_bot`）的 Owner 或 Admin（Bot Authority 中的 Manager）开放。新增时以实际调用者记录 creator 和 modifier，编辑时只更新 modifier。
+
+`list-slot` 本期以方便合法参与者发现 Slot 为目标，沿用现有 Group 成员读取方式。群成员被移除后，其他 BCS 实例可能仍持有旧的 Group 成员缓存，并在缓存刷新前继续放行 Slot 查询。本期暂不要求跨实例即时撤权，也不为此增加强一致授权读取。常规成员准入仍按 B1 执行。
