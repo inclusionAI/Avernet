@@ -50,14 +50,14 @@ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
   <text x="68" y="337" class="field">dima_work_item_id → 外部需求/工作项</text>
   <text x="68" y="363" class="field">entry_channel</text>
   <text x="68" y="389" class="field">session_role / identity_namespace（建议补充）</text>
-  <text x="68" y="415" class="field">一句话：sessionA、sessionB、sessionC 各自一行，不模糊合并</text>
+  <text x="68" y="415" class="field">一句话：sessionA、sessionB 可直接落库；DDF 子会话仅在委派表可空承接</text>
   <rect x="52" y="504" width="550" height="333" rx="10" fill="#edf5ff" stroke="#1677ff" stroke-width="2" />
   <path d="M52 547H602" stroke="#1677ff" stroke-width="1.4" />
   <text x="68" y="533" class="box-title">新增 · bot_session_delegation</text>
   <text x="586" y="533" text-anchor="end" class="small" fill="#1677ff">父子事实</text>
   <text x="68" y="577" class="field">PK id</text>
   <text x="68" y="603" class="field">REF parent_session_id = sessionB 会话行 id</text>
-  <text x="68" y="629" class="field">REF child_session_id = sessionC 会话行 id</text>
+  <text x="68" y="629" class="field">REF child_session_id = 可空 DDF 子会话（当前不默认存在）</text>
   <text x="68" y="655" class="field">parent_run_source / parent_run_id</text>
   <text x="68" y="681" class="field">collaboration_id / collab_space_id</text>
   <text x="68" y="707" class="field">dispatch_source / dispatch_id</text>
@@ -98,16 +98,14 @@ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
   <text x="686" y="415" class="field">　teamclawSessionId = sessionB</text>
   <text x="686" y="441" class="field">　runId（执行/任务快照）</text>
   <text x="686" y="467" class="field">　taskId（业务触发锚点，视现有契约）</text>
-  <text x="686" y="493" class="field">extra_data.ddfSession：</text>
-  <text x="686" y="519" class="field">　ddfSessionId = sessionC</text>
-  <text x="686" y="545" class="field">　workflow</text>
+  <text x="686" y="493" class="field">extra_data 中当前无 ddfSession（不用它）</text>
   <rect x="670" y="633" width="550" height="196" rx="10" fill="#f6f1ff" stroke="#7d2ae8" stroke-width="2" />
   <path d="M670 676H1220" stroke="#7d2ae8" stroke-width="1.4" />
   <text x="686" y="662" class="box-title">身份解释 · 钉群场景</text>
   <text x="1204" y="662" text-anchor="end" class="small" fill="#7d2ae8">勿混用</text>
   <text x="686" y="706" class="field">sessionA：发起建群的原页面会话</text>
   <text x="686" y="732" class="field">sessionB：群内运行态 TC/DDF 父会话</text>
-  <text x="686" y="758" class="field">sessionC：分析后发起的 DDF 子会话（可选）</text>
+  <text x="686" y="758" class="field">sessionC：当前不在现库，仅在委派表可空承接</text>
   <text x="686" y="784" class="field">openConversationId：群通道；taskId：业务项；都不是会话身份</text>
   <rect x="670" y="885" width="550" height="250" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
   <path d="M670 928H1220" stroke="#86909c" stroke-width="1.4" />
@@ -269,14 +267,11 @@ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
   <text x="1854" y="1684" class="flow-sub">member_task_id</text>
   <text x="1854" y="1704" class="flow-sub">run_id</text>
   <text x="1854" y="1724" class="flow-sub">1 : N attempt</text>
-  <path d="M 941 1762 L 941 1785" fill="none" stroke="#D92D20" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#arr)" />
-  <text x="964" y="1778" class="label">可派生 DDF 子会话</text>
   <rect x="762" y="1785" width="360" height="130" rx="14" fill="#fff" stroke="#D92D20" stroke-width="2" />
-  <text x="777" y="1813" class="flow-node">sessionC（可选）</text>
-  <text x="777" y="1839" class="flow-sub">ddfSession.ddfSessionId</text>
-  <text x="777" y="1859" class="flow-sub">创建独立权威会话行</text>
-  <text x="777" y="1879" class="flow-sub">bot_session_delegation.child_session_id</text>
-  <text x="2080" y="1808" class="field">推荐：B 是 DDF 父 session，C 只作为子 session 另建行；taskId 是工作项锚点。</text>
+  <text x="777" y="1813" class="flow-node">DDF 子会话（可空）</text>
+  <text x="777" y="1839" class="flow-sub">当前不使用 extra_data</text>
+  <text x="777" y="1859" class="flow-sub">如未来出现，落 bot_session_delegation.child_session_id</text>
+  <text x="2080" y="1808" class="field">不依赖 sessionC：B 就是 DDF 父 session；若有子会话，才由 child_session_id 承接。</text>
   <text x="2080" y="1838" class="field">若 sessionB 为完整复合键 → accs_collab_task.session_id；若为引擎裸 ID → session_alias。</text>
   <text x="64" y="1948" class="small">说明：图中已有 accservice 表结构来自当前仓库 DDL；是否已在生产环境全部部署，仍需 ODC / 生产结构核对。</text>
 </svg>
