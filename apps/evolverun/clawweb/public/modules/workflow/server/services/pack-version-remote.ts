@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isMap, isScalar, parseDocument } from 'yaml';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
@@ -39,7 +40,7 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
           if (!verifyRefs.activeCommit) throw new Error('Active deployment unavailable');
           const metadata = await readPreparedPackMetadata(dir, input.workflowId, verifyRefs.activeCommit);
           const gitDocument = projectLegacyWorkflow(input.workflowId, metadata.content);
-          const dbDocument = activeHistoryDocument(input.workflowId, input.active.specJson, gitDocument.digest);
+          const dbDocument = activeHistoryDocument(input.workflowId, input.active.specJson, gitDocument);
           // The inventory reader omits the trailing slash used by prepared metadata.
           // Compare the actual canonical tree paths, not just matching manifest IDs.
           if (snapshot.packId !== input.packId || metadata.packId !== input.packId
@@ -74,7 +75,7 @@ function projectLegacyWorkflow(workflowId: string, yaml: string) {
  * entire DB document to the active Git YAML first. Only when it differs may
  * content be read as a legacy archive, after validating the entire projection.
  * This checks consistency, not historical provenance. Never unwrap twice. */
-function activeHistoryDocument(workflowId: string, specJson: string, gitDigest: string): unknown {
+function activeHistoryDocument(workflowId: string, specJson: string, gitDocument: ReturnType<typeof projectLegacyWorkflow>): unknown {
   // History can be a complete JSON/YAML document or one JSON/YAML string
   // containing that document. Decode only one string layer; token calculation
   // remains over the exact original DB text, never this parsed projection.
@@ -90,10 +91,18 @@ function activeHistoryDocument(workflowId: string, specJson: string, gitDigest: 
   // alias expansion, bounds, and workflow identity before projection.
   const outer = projectLegacyWorkflow(workflowId, source);
   const document = JSON.parse(outer.specJson) as Record<string, unknown>;
-  if (outer.digest === gitDigest || typeof document.content !== 'string') return document;
-  const archived = projectLegacyWorkflow(workflowId, document.content);
+  const activeGit = JSON.parse(gitDocument.specJson) as Record<string, unknown>;
+  // Old history writers omitted the authored top-level workflow version while
+  // preserving every other field. Accept only that exact omission; a different
+  // field remains a hard mismatch. The normal deployment UI still shows the
+  // warning because the stored history row is unchanged.
+  const repairedLegacyVersion = Object.hasOwn(activeGit, 'version') && !Object.hasOwn(document, 'version')
+    && isDeepStrictEqual({ ...document, version: activeGit.version }, activeGit)
+      ? { ...document, version: activeGit.version } : document;
+  if (outer.digest === gitDocument.digest || typeof repairedLegacyVersion.content !== 'string') return repairedLegacyVersion;
+  const archived = projectLegacyWorkflow(workflowId, repairedLegacyVersion.content);
   const archiveDocument = JSON.parse(archived.specJson) as Record<string, unknown>;
-  const reconstructed = projectWorkflowSnapshotJson(workflowId, JSON.stringify({ ...archiveDocument, content: document.content }));
+  const reconstructed = projectWorkflowSnapshotJson(workflowId, JSON.stringify({ ...archiveDocument, content: repairedLegacyVersion.content }));
   if (outer.digest !== reconstructed.digest) throw new Error('Invalid active history archive');
   return archiveDocument;
 }
