@@ -209,6 +209,7 @@ def _build_env(db, script: list[str]) -> tuple:
 
 def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal="e2e: map the incident to owning services",
         agents=(
@@ -338,3 +339,8 @@ class TestSingleProcessEndToEnd:
         assert _count_rows(db, om.AcAgentSwarmAgentModel, TENANT) == 2
         assert _count_rows(db, om.AcAgentSwarmAgentResultModel, TENANT) == 2
         assert _count_rows(db, om.AcAgentSwarmMessageModel, TENANT) == 4
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

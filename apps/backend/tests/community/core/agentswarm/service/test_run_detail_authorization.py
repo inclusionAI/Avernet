@@ -390,11 +390,14 @@ class TestRunDetailAuthorization:
         assert by_name["ready"].authorization is None
         assert by_name["rejected"].authorization is None
         assert by_name["llm"].authorization is None
-        # Every live bot-kind agent is asked — only the llm-kind row
-        # never reaches the source.
+        # Every bot-kind agent still short of a running Bot is asked; a
+        # READY row and the llm-kind row never reach the source. The READY
+        # row is skipped rather than queried-and-discarded: under manual
+        # consent its job payload still lists consent URLs, so asking the
+        # source would describe a running Bot as awaiting a decision.
         assert sorted(source.calls) == [
             (OWNER, "agent_swarm_f"), (OWNER, "agent_swarm_p"),
-            (OWNER, "agent_swarm_r"), (OWNER, "agent_swarm_x"),
+            (OWNER, "agent_swarm_x"),
         ]
 
     def test_nonparked_detail_shape_is_unchanged(self, db):
@@ -579,3 +582,39 @@ class TestUnknownRuns:
         assert service.get_run_detail("nope", TENANT) is None
         with pytest.raises(AgentSwarmRunNotFoundError):
             service.run_events("nope", TENANT)
+
+    def test_a_provisioned_bot_carries_no_gate_even_with_a_live_job(self, db):
+        """The Bot's own state outranks the creation job's stale payload.
+
+        Under manual consent every creation leaves a job carrying consent
+        URLs, so a Bot that has since reached READY would otherwise still be
+        described as awaiting authorization — telling a reader to approve a
+        Bot that is already running, with no application left to decide.
+        """
+        run = _mk_run()
+        for state in (dm.BotState.READY,):
+            agent = _mk_agent(
+                run.run_id, f"ready-{state.value.lower()}",
+                bot_id=f"agent_swarm_{state.value.lower()}",
+                bot_state=state,
+            )
+            source = FakeAuthorizationSource({
+                agent.bot_id: {
+                    "iframe_url": "https://tcauthmng.example/consent?stale=1",
+                    "redirect_url": "",
+                    "deadline": "2026-11-20T10:10:00",
+                    "application_id": "",
+                },
+            })
+            RunRepository(db).create(run)
+            AgentRepository(db).create(agent)
+
+            detail = _mk_service(db, source).get_run_detail(run.run_id, TENANT)
+
+            (item,) = detail.agents
+            assert item.bot_state == state.value, item
+            assert item.authorization is None, (
+                f"{state.value} bot must not surface a gate: {item.authorization}"
+            )
+            # The source is never consulted: the row alone answers.
+            assert source.calls == []

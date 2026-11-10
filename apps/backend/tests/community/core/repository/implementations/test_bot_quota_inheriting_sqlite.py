@@ -123,3 +123,39 @@ class TestQuota:
             "owner", exclude_bot_type="desktop", exclude_active_engine="teclaw",
             exclude_identity_inheriting=True,
         ) == 1
+
+
+class TestSpaceQuota:
+    """The Space quota is the path create-with-manifest actually takes.
+
+    A swarm provisions its Bot agents against a Space; if inheriting Bots
+    counted there, a space at its ceiling would refuse every agent even
+    though none of them holds an identity of its own.
+    """
+
+    def test_inheriting_bots_fit_a_personal_space_at_its_ceiling(self, repo):
+        _seed(
+            repo,
+            *[{"bot_id": f"b{i}"} for i in range(5)],
+            *[{"bot_id": f"w{i}", "inheriting_from": "b0"} for i in range(3)],
+        )
+        # Five ordinary Bots fill the personal-space slot; the three that
+        # borrow b0's identity add nothing to it.
+        assert repo.count_cloud_bots_in_personal_space(
+            owner_id="owner", personal_space_id=None,
+        ) == 5
+
+    def test_a_team_space_counts_only_identity_holders(self, repo):
+        with repo._db.orm_session() as session:
+            for i in range(4):
+                _add(session, bot_id=f"t{i}")
+                session.query(BotModel).filter(
+                    BotModel.bot_id == f"t{i}"
+                ).update({"space_id": 7})
+            for i in range(2):
+                _add(session, bot_id=f"tw{i}", inheriting_from="t0")
+                session.query(BotModel).filter(
+                    BotModel.bot_id == f"tw{i}"
+                ).update({"space_id": 7})
+            session.commit()
+        assert repo.count_cloud_bots_by_space(space_id=7) == 4

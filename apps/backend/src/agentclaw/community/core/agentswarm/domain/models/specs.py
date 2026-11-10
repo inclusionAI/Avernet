@@ -142,6 +142,19 @@ class AgentSpec:
     """Persona identity file in the manifest (SOUL.md, RULES.md,
     CLAUDE.md for claude_code); engine-gated."""
     metadata: dict[str, str] = field(default_factory=dict)
+    identity_bot_id: str = ""
+    """The Bot whose passport identity this agent's Bot runs under.
+
+    Set by the submit path on `bot`-kind agents only, from the run-level
+    source: an llm-kind agent never provisions a Bot and never carries a
+    passport, so the field stays empty for it. Empty means the caller built
+    the spec directly and no source was named -- the service refuses that at
+    submit.
+
+    An inheriting Bot holds a copy of its source's passport and skips the
+    human authorization gate entirely.
+    """
+
     config_manifest: str = ""
     """Full five-category `bot_config_manifest` YAML document
     (mcp/resources/skills/cli_tools/identity + sources + script),

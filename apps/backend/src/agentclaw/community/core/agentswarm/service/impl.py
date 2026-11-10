@@ -29,6 +29,8 @@ from agentclaw.community.core.agentswarm.service.protocols import (
     AgentEvent, AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
     BotAuthorizationDescriptor, BotAuthorizationSource,
     GlobalRunLimitExceeded, GuardEventDetailItem, GuardEventSummary,
+    AgentKind,
+    IdentitySourceInvalid, IdentitySourceRequired,
     QueueDepthExceeded, RoundDetailItem, RoundEvent, RunDetail, RunEvents,
     SubmitRunRequest, TenantRunLimitExceeded,
 )
@@ -81,7 +83,37 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         # the wait to zero.
         self._deadline: float = max(float(slice_max or 3600.0), 1.0)
 
+    def _require_identity_source(self, req: SubmitRunRequest) -> None:
+        """Refuse a submit that names no usable identity source.
+
+        Only runs that provision Bots need one: an ``llm`` agent completes
+        in-process and never holds a passport, so a pure-llm run carries no
+        identity requirement -- and a source it happens to name is ignored
+        rather than validated. Checked before any row is written: a refused
+        submit must leave no run behind.
+        """
+        if not any(a.kind is AgentKind.BOT for a in req.agents):
+            return
+        source_id = (req.identity_bot_id or "").strip()
+        if not source_id:
+            raise IdentitySourceRequired()
+        resolver = self._authorization_source
+        if resolver is None:
+            # No seam bound: this composition cannot verify the source, so the
+            # named id is taken as given. Refusing here would make every
+            # service test that does not care about identity fail on wiring
+            # it never exercised.
+            return
+        if resolver.identity_source(
+            owner_id=(req.owner_id or "").strip(), bot_id=source_id,
+        ) is None:
+            raise IdentitySourceInvalid(
+                source_id,
+                "is not a Bot owned by the caller holding an issued passport",
+            )
+
     async def submit_async(self, req: SubmitRunRequest) -> str:
+        self._require_identity_source(req)
         self._require_llm_config()
         if req.idempotency_key:
             existing = self._run_repo.get_by_idempotency(
@@ -438,6 +470,16 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             # detail response stays exactly as before this change.
             return None
         parked = agent.bot_state is BotState.AWAITING_AUTHORIZATION
+        if not parked and agent.bot_state is BotState.READY:
+            # The Bot is already up, so whatever the creation job still
+            # carries is history, not a decision a human can make. Reporting
+            # it would tell a reader to approve a running Bot — with no
+            # application left to decide.
+            #
+            # Only READY is excluded. A bare ``PROVISIONING`` row is the
+            # normal state of an agent still setting up, which the source
+            # must still be allowed to describe as pending.
+            return None
         if (
             self._authorization_source is None
             or not (run.owner_id or "").strip()
