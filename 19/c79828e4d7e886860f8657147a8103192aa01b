@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  s_2c75488fa42532::t_b4de828e868a31 15-21
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-active-baseline.test.ts
+  s_2c75488fa42532::t_b9cdb030622151 87-100
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  s_2c75488fa42532::t_98b68b7648c448 103,105
+  s_2c75488fa42532::t_22bef4b2325862 2,43,78,94-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "19c79828e4d7e886860f8657147a8103192aa01b",
+  "prompts": {},
+  "sessions": {
+    "s_2c75488fa42532": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c09d-d70a-70e3-989e-53272841b78e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
