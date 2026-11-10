@@ -11,8 +11,8 @@ import { Spin } from '@/components/ui/Spin';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
+import { useBotSessionFilesFeature } from '@/pages/Workspace/hooks/useBotSessionFilesFeature';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
@@ -94,12 +94,21 @@ export function DebugChatPanel({
     [bot.ownerId, ownerId],
   );
   const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries, identityId);
+  const clearContext = useCallback(async () => {
+    if (!identityId || !session) return;
+    const result = await botSessionService.clearContext(chatBot, identityId, session.sessionId);
+    if (!result.ok) {
+      toast.error(result.error.friendlyMessage);
+      return;
+    }
+    await debug.reloadHistory();
+  }, [chatBot, debug, identityId, session]);
+  const fileFeature = useBotSessionFilesFeature(chatBot, session, identityId, clearContext);
   const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
     setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
   }, []);
   const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
-  const capabilitySets = useBotCapabilitySets(chatBot, identityId);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -263,14 +272,15 @@ export function DebugChatPanel({
         )}
       </div>
       <DebugChatComposer
-        runtimeStage={chatBot.runtimeStage}
         key={session?.sessionId ?? 'no-session'}
-        botId={chatBot.realBotId}
         sessionId={session?.sessionId ?? null}
         userId={identityId}
-        ownerId={chatBot.ownerId}
         isRequesting={debug.chat.isRequesting}
-        capabilitySets={capabilitySets}
+        capabilitySets={fileFeature.capabilitySets}
+        command={fileFeature.command}
+        fileChip={fileFeature.fileChip}
+        senderRef={fileFeature.senderRef}
+        onUpload={fileFeature.openUpload}
         modelSelector={
           <BotModelSelector
             models={botModels.models}
@@ -283,6 +293,7 @@ export function DebugChatPanel({
         onSend={debug.send}
         onStop={debug.stop}
       />
+      {fileFeature.featureNode}
     </aside>
   );
 }
