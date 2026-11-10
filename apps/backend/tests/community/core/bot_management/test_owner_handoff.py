@@ -493,7 +493,7 @@ def test_verified_renewal_always_replays_authorization_and_runtime(world, phase)
     _verified_renewal(world, "renewed-twice")
     _verified_renewal(world, "latest-renewal")
     world.passport.query_auth_status = lambda *args, **kwargs: {
-        "status": "ISSUED", "token": "renewal-test-token",
+        "status": "ISSUED", "token": "test-renew",
     }
     assert not world.service().step(op)
     row = world.repo.get(op)
@@ -502,7 +502,7 @@ def test_verified_renewal_always_replays_authorization_and_runtime(world, phase)
     assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
     drain(world, op)
     assert len(world.runtime.calls) == old_runtime_calls + 1
-    assert world.runtime.calls[-1]["token"] == "renewal-test-token"
+    assert world.runtime.calls[-1]["token"] == "test-renew"
     assert world.passport.retired[-1]["keep_credential_id"] == "latest-renewal"
     assert len(world.passport.issues) == 1
     assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "B"
