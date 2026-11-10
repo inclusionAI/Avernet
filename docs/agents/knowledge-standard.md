@@ -44,6 +44,10 @@ Tool-specific instruction files point to shared guidance rather than repeating i
 | `specs/` | Inferred deployment status, rewritten historical evidence or copies of all current documentation. |
 | Knowledge standard and templates | App-specific facts that are owned by another contract or domain document. |
 
+Shared `CONTEXT.md` terminology is maintained in Chinese and English together;
+keep both definitions aligned when adding or changing a term. Other framework
+documents use English.
+
 ## Existing docs and change specs
 
 `docs/` holds reusable knowledge; `specs/` records the intent, decisions, execution
