@@ -5,7 +5,7 @@ impl SqlGroupContextStore {
         let rows = self
             .db
             .query(DbStatement::with_params(
-                "SELECT 1 FROM bcs_group_context_slots WHERE group_id = ? AND name = ?",
+                "SELECT 1 FROM bcs_group_context_item_presets WHERE group_id = ? AND name = ?",
                 vec![group_id.into(), name.into()],
             ))
             .await
@@ -13,9 +13,9 @@ impl SqlGroupContextStore {
         Ok(!rows.is_empty())
     }
 
-    pub(super) async fn load_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+    pub(super) async fn load_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
         let sql = format!(
-            "SELECT name, description, creator, modifier, {}, {} FROM bcs_group_context_slots WHERE group_id = ? ORDER BY name",
+            "SELECT name, description, creator, modifier, {}, {} FROM bcs_group_context_item_presets WHERE group_id = ? ORDER BY name",
             self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
             self.timestamp_ms_expr("gmt_modified", "gmt_modified_ms"),
         );
@@ -27,7 +27,7 @@ impl SqlGroupContextStore {
             .map(|row| {
                 let field =
                     |name| db_get_column(row, name).map_err(GroupContextStoreError::backend);
-                Ok(GroupContextSlot {
+                Ok(GroupContextItemPreset {
                     name: field("name")?,
                     description: field("description")?,
                     creator: field("creator")?,
@@ -43,15 +43,15 @@ impl SqlGroupContextStore {
         &self,
         group_id: &str,
         actor: &str,
-        change: GroupContextSlotChange,
+        change: GroupContextItemPresetChange,
     ) -> StoreResult<()> {
         let now = self.timestamp_param(Utc::now());
-        let is_edit = matches!(&change, GroupContextSlotChange::Edit { .. });
+        let is_edit = matches!(&change, GroupContextItemPresetChange::Edit { .. });
         let (statement, name) = match change {
-            GroupContextSlotChange::Add { name, description } => (
+            GroupContextItemPresetChange::Add { name, description } => (
                 DbStatement::with_params(
                     self.sql_with_timestamp_params(
-                        "INSERT INTO bcs_group_context_slots (group_id, name, description, creator, modifier, gmt_create, gmt_modified) \
+                        "INSERT INTO bcs_group_context_item_presets (group_id, name, description, creator, modifier, gmt_create, gmt_modified) \
                          VALUES (?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, __bcs_group_context_timestamp_ms__)",
                     ),
                     vec![
@@ -66,14 +66,14 @@ impl SqlGroupContextStore {
                 ),
                 name,
             ),
-            GroupContextSlotChange::Edit {
+            GroupContextItemPresetChange::Edit {
                 name,
                 new_name,
                 description,
             } => (
                 DbStatement::with_params(
                     self.sql_with_timestamp_params(
-                        "UPDATE bcs_group_context_slots SET name = COALESCE(?, name), description = COALESCE(?, description), \
+                        "UPDATE bcs_group_context_item_presets SET name = COALESCE(?, name), description = COALESCE(?, description), \
                          modifier = ?, gmt_modified = __bcs_group_context_timestamp_ms__ WHERE group_id = ? AND name = ?",
                     ),
                     vec![
@@ -87,9 +87,9 @@ impl SqlGroupContextStore {
                 ),
                 name,
             ),
-            GroupContextSlotChange::Delete { name } => (
+            GroupContextItemPresetChange::Delete { name } => (
                 DbStatement::with_params(
-                    "DELETE FROM bcs_group_context_slots WHERE group_id = ? AND name = ?",
+                    "DELETE FROM bcs_group_context_item_presets WHERE group_id = ? AND name = ?",
                     vec![group_id.into(), name.as_str().into()],
                 ),
                 name,

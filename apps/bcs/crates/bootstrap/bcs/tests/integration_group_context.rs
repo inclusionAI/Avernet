@@ -622,7 +622,7 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
     repo.change_slot("slot-group", "human_owner",
-        bcs_domain::group_context::GroupContextSlotChange::Add {
+        bcs_domain::group_context::GroupContextItemPresetChange::Add {
             name: "timeline".into(), description: String::new(),
         },
     ).await.unwrap();
@@ -661,7 +661,7 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context).await.0, StatusCode::OK);
 
     let existing = repo.get_active("timeline", "slot-group:12345678").await.unwrap().unwrap();
-    assert!(existing.is_slot);
+    assert!(existing.created_from_preset);
     assert_eq!(existing.content, "event");
 }
 

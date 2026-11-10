@@ -1,4 +1,4 @@
-use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
 
 use std::sync::Arc;
 
@@ -42,7 +42,7 @@ impl GroupContextApplicationServiceImpl {
 
     async fn create(
         &self,
-        is_slot: bool,
+        created_from_preset: bool,
         scope: ResolvedScope,
         name: String,
         content: String,
@@ -63,7 +63,7 @@ impl GroupContextApplicationServiceImpl {
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
-                is_slot,
+                created_from_preset,
                 context_id: new_context_id(),
                 name,
                 scope_level: scope.scope_level,
@@ -110,7 +110,7 @@ impl GroupContextApplicationServiceImpl {
                 &old.scope,
                 expected_active_id,
                 NewGroupContextEntry {
-                    is_slot: old.is_slot,
+                    created_from_preset: old.created_from_preset,
                     context_id: old.context_id.clone(),
                     name,
                     scope_level: scope.scope_level,
@@ -133,15 +133,15 @@ impl GroupContextApplicationServiceImpl {
 }
 
 impl GroupContextApplicationServiceImpl {
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> Result<(), ApplicationError> {
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> Result<(), ApplicationError> {
         validate_name(group_id)?;
         validate_actor(actor)?;
         match &change {
-            GroupContextSlotChange::Add { name, description } => {
+            GroupContextItemPresetChange::Add { name, description } => {
                 validate_name(name)?;
                 validate_content(description)?;
             }
-            GroupContextSlotChange::Edit { name, new_name, description } => {
+            GroupContextItemPresetChange::Edit { name, new_name, description } => {
                 validate_name(name)?;
                 if let Some(name) = new_name {
                     validate_name(name)?;
@@ -150,12 +150,12 @@ impl GroupContextApplicationServiceImpl {
                     validate_content(description)?;
                 }
             }
-            GroupContextSlotChange::Delete { name } => validate_name(name)?,
+            GroupContextItemPresetChange::Delete { name } => validate_name(name)?,
         }
         tracing::info!(group_id, actor, operation = match &change {
-            GroupContextSlotChange::Add { .. } => "add",
-            GroupContextSlotChange::Edit { .. } => "update",
-            GroupContextSlotChange::Delete { .. } => "delete",
+            GroupContextItemPresetChange::Add { .. } => "add",
+            GroupContextItemPresetChange::Edit { .. } => "update",
+            GroupContextItemPresetChange::Delete { .. } => "delete",
         }, "Group Context slot mutation");
         self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
     }
@@ -163,21 +163,21 @@ impl GroupContextApplicationServiceImpl {
 
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
-    async fn list_slots(&self, group_id: &str, _caller: &bcs_service_api::application::v1::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextSlot>, ApplicationError> {
+    async fn list_slots(&self, group_id: &str, _caller: &bcs_service_api::application::v1::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
         validate_name(group_id)?;
         self.repo.list_slots(group_id).await.map_err(map_store_error)
     }
 
     async fn add_slot(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
-        self.change_slot(group_id, actor, GroupContextSlotChange::Add { name, description }).await
+        self.change_slot(group_id, actor, GroupContextItemPresetChange::Add { name, description }).await
     }
 
     async fn update_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
-        self.change_slot(group_id, actor, GroupContextSlotChange::Edit { name, new_name, description }).await
+        self.change_slot(group_id, actor, GroupContextItemPresetChange::Edit { name, new_name, description }).await
     }
 
     async fn delete_slot(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
-        self.change_slot(group_id, actor, GroupContextSlotChange::Delete { name }).await
+        self.change_slot(group_id, actor, GroupContextItemPresetChange::Delete { name }).await
     }
 
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {

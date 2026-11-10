@@ -715,7 +715,7 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
 
 SQLite `044_group_context_slot.sql` and MySQL/OceanBase
 `mysql/046_group_context_slot.sql` add the Group slot definitions and the
-`is_slot` flag on context versions. Existing contexts read as `false`.
+`created_from_preset` flag on context versions. Existing contexts read as `false`.
 Apply remote DDL before starting the new server. SQLite applies its migration
 during startup.
 

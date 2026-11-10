@@ -1,4 +1,4 @@
-use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
 
 #[path = "sql_slots.rs"]
 mod sql_slots;
@@ -36,7 +36,7 @@ impl GroupContextStoreError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewGroupContextEntry {
-    pub is_slot: bool,
+    pub created_from_preset: bool,
     pub context_id: String,
     pub name: String,
     pub scope_level: ScopeLevel,
@@ -59,11 +59,11 @@ pub trait GroupContextRepo: Send + Sync {
         Ok(self.list_slots(group_id).await?.iter().any(|slot| slot.name == name))
     }
 
-    async fn list_slots(&self, _group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+    async fn list_slots(&self, _group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
         Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
     }
 
-    async fn change_slot(&self, _group_id: &str, _actor: &str, _change: GroupContextSlotChange) -> StoreResult<()> {
+    async fn change_slot(&self, _group_id: &str, _actor: &str, _change: GroupContextItemPresetChange) -> StoreResult<()> {
         Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
     }
 
@@ -152,7 +152,7 @@ impl SqlGroupContextStore {
 
     fn select_cols(&self) -> String {
         let base = "id, context_id, name, scope_level, scope, content, creator, visible_to_json, \
-                    collect_from_json, owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, \
+                    collect_from_json, owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, \
                     is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
             "{base}, {vfm}, {vtm}, {gsm}, {ttm}, {gcm}, {gmm}",
@@ -225,7 +225,7 @@ impl SqlGroupContextStore {
         let gmt_superseded_ms: Option<i64> =
             db_get_column_opt(row, "gmt_superseded_ms").map_err(GroupContextStoreError::backend)?;
         Ok(GroupContextEntry {
-            is_slot: db_get_column(row, "is_slot").map_err(GroupContextStoreError::backend)?,
+            created_from_preset: db_get_column(row, "created_from_preset").map_err(GroupContextStoreError::backend)?,
             id: db_get_column(row, "id").map_err(GroupContextStoreError::backend)?,
             context_id: db_get_column(row, "context_id")
                 .map_err(GroupContextStoreError::backend)?,
@@ -285,11 +285,11 @@ impl GroupContextRepo for SqlGroupContextStore {
         self.has_slot(group_id, name).await
     }
 
-    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
         self.load_slots(group_id).await
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> StoreResult<()> {
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
         self.write_slot(group_id, actor, change).await
     }
 
@@ -307,7 +307,7 @@ impl GroupContextRepo for SqlGroupContextStore {
         let sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+              owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
@@ -325,7 +325,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
-                    DbValue::from(params.is_slot),
+                    DbValue::from(params.created_from_preset),
                     params
                         .supersedes
                         .map(DbValue::from)
@@ -384,7 +384,7 @@ impl GroupContextRepo for SqlGroupContextStore {
         let insert_sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, is_slot, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+              owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
@@ -428,7 +428,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
-                    DbValue::from(params.is_slot),
+                    DbValue::from(params.created_from_preset),
                     DbValue::from(expected_active_id),
                     DbValue::from(params.change_reason.as_deref()),
                     valid_from,
@@ -790,7 +790,7 @@ mod tests {
             .expect("timestamp");
         let created = store
             .create_active(NewGroupContextEntry {
-                is_slot: false,
+                created_from_preset: false,
                 context_id: "ctx-load-by-id".into(),
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
@@ -830,7 +830,7 @@ mod tests {
         ] {
             store
                 .create_active(NewGroupContextEntry {
-                    is_slot: false,
+                    created_from_preset: false,
                     context_id: context_id.into(),
                     name: name.into(),
                     scope_level,

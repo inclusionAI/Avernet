@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
 
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ pub struct MemoryGroupContextRepo {
 
 #[derive(Default)]
 struct MemoryState {
-    slots: BTreeMap<String, BTreeMap<String, GroupContextSlot>>,
+    slots: BTreeMap<String, BTreeMap<String, GroupContextItemPreset>>,
     next_id: i64,
     rows: Vec<GroupContextEntry>,
 }
@@ -33,28 +33,28 @@ impl GroupContextRepo for MemoryGroupContextRepo {
         Ok(self.state.read().await.slots.get(group_id).is_some_and(|slots| slots.contains_key(name)))
     }
 
-    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
         Ok(self.state.read().await.slots.get(group_id)
             .into_iter().flat_map(|slots| slots.values().cloned()).collect())
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> StoreResult<()> {
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
         let mut state = self.state.write().await;
         let slots = state.slots.entry(group_id.to_owned()).or_default();
         let duplicate = |name| GroupContextStoreError::DuplicateActive { name, scope: group_id.into() };
         let missing = |name| GroupContextStoreError::NotFound { name, scope: group_id.into() };
         match change {
-            GroupContextSlotChange::Add { name, description } => {
+            GroupContextItemPresetChange::Add { name, description } => {
                 if slots.contains_key(&name) {
                     return Err(duplicate(name));
                 }
                 let now = chrono::Utc::now();
-                slots.insert(name.clone(), GroupContextSlot {
+                slots.insert(name.clone(), GroupContextItemPreset {
                     name, description, creator: actor.into(), modifier: actor.into(),
                     gmt_create: now, gmt_modified: now,
                 });
             }
-            GroupContextSlotChange::Edit { name, new_name, description } => {
+            GroupContextItemPresetChange::Edit { name, new_name, description } => {
                 let target = new_name.unwrap_or_else(|| name.clone());
                 if target != name && slots.contains_key(&target) {
                     return Err(duplicate(target));
@@ -68,7 +68,7 @@ impl GroupContextRepo for MemoryGroupContextRepo {
                 }
                 slots.insert(target, slot);
             }
-            GroupContextSlotChange::Delete { name } => {
+            GroupContextItemPresetChange::Delete { name } => {
                 slots.remove(&name).ok_or_else(|| missing(name))?;
             }
         }
@@ -190,7 +190,7 @@ impl GroupContextRepo for MemoryGroupContextRepo {
 
 fn row_from_new(id: i64, params: NewGroupContextEntry) -> GroupContextEntry {
     GroupContextEntry {
-        is_slot: params.is_slot,
+        created_from_preset: params.created_from_preset,
         id,
         context_id: params.context_id,
         name: params.name,

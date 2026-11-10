@@ -181,7 +181,7 @@ async fn sqlite_expired_business_validity_still_current() {
 
 #[tokio::test]
 async fn sqlite_slot_mutations_are_scoped_and_preserve_creator() {
-    use bcs_domain::group_context::GroupContextSlotChange::{Add, Delete, Edit};
+    use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete, Edit};
 
     let repo = sqlite_repo().await;
     let add = Add { name: "timeline".into(), description: String::new() };

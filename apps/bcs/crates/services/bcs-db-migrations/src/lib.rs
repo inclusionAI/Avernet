@@ -570,7 +570,7 @@ async fn apply_sqlite_migration_body(
             .filter(|sql| !sql.is_empty())
             .enumerate()
             {
-                if index == 0 && columns.iter().any(|column| column == "is_slot") {
+                if index == 0 && columns.iter().any(|column| column == "created_from_preset") {
                     continue;
                 }
                 db.execute(DbStatement::new(sql)).await?;

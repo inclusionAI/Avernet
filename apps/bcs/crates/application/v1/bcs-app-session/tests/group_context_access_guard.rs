@@ -36,7 +36,7 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         _: &str,
         _: &bcs_service_api::application::v1::AuthenticatedCaller,
         _: Option<&str>,
-    ) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
+    ) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
         Ok(Vec::new())
     }
 

@@ -15,7 +15,7 @@ Group 可以维护一份预定义的 Group Context 名称及描述，供会话�
 
 ## Bot 入口（BCS CLI）
 
-group-context新增一个字段，is_slot boolean类型，记录这条group-context是否是slot，服务端持久化，`list/get` 不返回
+group-context新增一个字段，created_from_preset boolean类型，记录这条group-context是否是slot，服务端持久化，`list/get` 不返回
 后续管理时slot定义变更不影响已经记录的is_slot字段
 
 | 编号 | 功能 | 一期规则 |

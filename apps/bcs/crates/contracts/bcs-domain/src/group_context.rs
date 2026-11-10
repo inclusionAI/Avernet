@@ -129,7 +129,7 @@ pub struct GroupContextEntryMeta {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupContextEntry {
     #[serde(default)]
-    pub is_slot: bool,
+    pub created_from_preset: bool,
     pub id: i64,
     pub context_id: String,
     pub name: String,
@@ -170,7 +170,7 @@ impl GroupContextEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GroupContextSlot {
+pub struct GroupContextItemPreset {
     pub name: String,
     pub description: String,
     pub creator: String,
@@ -182,7 +182,7 @@ pub struct GroupContextSlot {
 }
 
 #[derive(Debug, Clone)]
-pub enum GroupContextSlotChange {
+pub enum GroupContextItemPresetChange {
     Add { name: String, description: String },
     Edit { name: String, new_name: Option<String>, description: Option<String> },
     Delete { name: String },

@@ -174,7 +174,7 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add(command).await
     }
 
-    async fn list_slots(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextSlot>, ApplicationError> {
+    async fn list_slots(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
         let group = self.load_group(group_id).await?;
         if let Some(bot) = &caller.bot
             && !group.participants.iter().any(|member| member.bot_uuid == bot.bot_uuid)

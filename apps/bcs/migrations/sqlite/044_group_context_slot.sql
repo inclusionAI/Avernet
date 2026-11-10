@@ -1,6 +1,6 @@
-ALTER TABLE bcs_group_contexts ADD COLUMN is_slot BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE bcs_group_contexts ADD COLUMN created_from_preset BOOLEAN NOT NULL DEFAULT FALSE;
 
-CREATE TABLE IF NOT EXISTS bcs_group_context_slots (
+CREATE TABLE IF NOT EXISTS bcs_group_context_item_presets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,

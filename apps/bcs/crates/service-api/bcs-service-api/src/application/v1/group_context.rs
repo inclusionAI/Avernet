@@ -197,7 +197,7 @@ pub struct GroupContextGetResponse {
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
 
-    async fn list_slots(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextSlot>, ApplicationError> {
+    async fn list_slots(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
         Err(ApplicationError::internal("slots unavailable"))
     }
 
@@ -234,4 +234,4 @@ pub trait GroupContextApplicationService: Send + Sync {
     ) -> Result<GroupContextAck, ApplicationError>;
 }
 
-pub use bcs_domain::group_context::{GroupContextSlot, GroupContextSlotChange};
+pub use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};

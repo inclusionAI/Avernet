@@ -124,7 +124,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     // table (32), Group context (34), the collaboration-draft
     // tables (36) and the bot-authority tables (37); the Provider
     // storage upgrade itself adds no tables.
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_group_context_slots', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions', 'bot_ownership_transfers', 'bot_authority_changes', 'bcs_a2a_tasks', 'bcs_a2a_run_bindings', 'bcs_a2a_contexts', 'bcs_group_agent_cards') ORDER BY name")).await?;
+    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_group_context_item_presets', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions', 'bot_ownership_transfers', 'bot_authority_changes', 'bcs_a2a_tasks', 'bcs_a2a_run_bindings', 'bcs_a2a_contexts', 'bcs_group_agent_cards') ORDER BY name")).await?;
     assert_eq!(tables, original_tables);
     Ok(())
 }

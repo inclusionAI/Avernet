@@ -48,7 +48,7 @@ struct ConflictOnSupersedeRepo {
 
 #[async_trait]
 impl GroupContextRepo for ConflictOnSupersedeRepo {
-    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<bcs_domain::group_context::GroupContextSlot>> {
+    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<bcs_domain::group_context::GroupContextItemPreset>> {
         self.inner.list_slots(group_id).await
     }
 
@@ -1399,7 +1399,7 @@ async fn update_and_systemset_preserve_legacy_empty_owners() {
         .single()
         .unwrap();
     repo.create_active(NewGroupContextEntry {
-        is_slot: false,
+        created_from_preset: false,
         context_id: "ctx-legacy-empty-owners".into(),
         name: "legacy_empty_owners".into(),
         scope_level: ScopeLevel::Session,

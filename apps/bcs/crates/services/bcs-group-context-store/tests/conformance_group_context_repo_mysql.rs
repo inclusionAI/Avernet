@@ -57,7 +57,7 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
 }
 
 async fn assert_slot_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) {
-    use bcs_domain::group_context::GroupContextSlotChange::{Add, Delete, Edit};
+    use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete, Edit};
 
     let group = format!("slot-audit-{suffix}");
     let create_started = Utc::now().timestamp_millis();
@@ -111,7 +111,7 @@ async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
         .await;
     }
     let columns = db.query(DbStatement::new(
-        "SELECT COUNT(*) AS slot_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'is_slot'",
+        "SELECT COUNT(*) AS slot_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'created_from_preset'",
     ))
     .await
     .expect("check for the MySQL group context slot column");
@@ -167,7 +167,7 @@ async fn assert_group_context_roundtrip(plugin: Arc<MysqlDbPlugin>, suffix: &str
 
     let first = repo
         .create_active(NewGroupContextEntry {
-            is_slot: false,
+            created_from_preset: false,
             context_id: format!("ctx-{suffix}"),
             name: name.clone(),
             scope_level: ScopeLevel::Session,
@@ -207,7 +207,7 @@ async fn assert_group_context_roundtrip(plugin: Arc<MysqlDbPlugin>, suffix: &str
             &scope,
             first.id,
             NewGroupContextEntry {
-                is_slot: false,
+                created_from_preset: false,
                 context_id: first.context_id.clone(),
                 name: name.clone(),
                 scope_level: ScopeLevel::Session,
