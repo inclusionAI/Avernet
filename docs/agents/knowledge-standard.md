@@ -23,7 +23,8 @@ documentation until they are deliberately brought into this layout.
 
 This page extends [domain documentation](domain.md). Specs, plans and research
 keep their existing roles; unresolved incident hypotheses stay in research.
-Create a directory only when it has useful content. Existing ADRs, API docs and
+Framework directories contain a README describing their scope; add topic pages
+when there is supported content. Existing ADRs, API docs and
 machine-parsed Context Boundaries keep their formats and authoritative locations.
 Tool-specific instruction files point to shared guidance rather than repeating it.
 

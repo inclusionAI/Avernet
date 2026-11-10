@@ -21,11 +21,18 @@ Read only the sources relevant to the boundary being changed.
 | Backend apply engine, Bot Config Manifest and Bot Genome | [`core/apply_engine/README.md`](apps/backend/src/agentclaw/community/core/apply_engine/README.md) (the engine and its typed desired state), [`core/bot_config_manifest/README.md`](apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md) and [`core/bot_genome/README.md`](apps/backend/src/agentclaw/community/core/bot_genome/README.md) (the two compilers; the genome also subscribes to its applies' ends to settle promotions, RSI-04), [ADR 0019](docs/adr/0019-bot-genome-is-the-unit-of-evolution.md), [ADR 0020](docs/adr/0020-promotion-is-platform-owned.md), and [ADR 0022](docs/adr/0022-apply-engine-desired-state-and-observed-drift.md) |
 | BaaS | root `AGENTS.md`, the closest local guidance, and the affected protocol or deployment contract |
 | Engine | root `AGENTS.md`, the closest local guidance, and the relevant runtime-layout contract |
-| BCS | `src/bcs/AGENTS.md`, `src/bcs/CLAUDE.md`, then the closest crate `CONTEXT.md` |
+| BCS | `apps/bcs/AGENTS.md`, `apps/bcs/CLAUDE.md`, then the closest crate `CONTEXT.md` |
 | Frontend | `apps/frontend/AGENTS.md` and the affected API/UI contract |
 
 Add a module-level `CONTEXT.md` only when that module has stable vocabulary
 that is not already defined here. Add it to this map in the same change.
+
+## Knowledge framework
+
+- [Knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md): what each document records and excludes.
+- [Architecture](docs/arch/README.md), [decisions](docs/adr/README.md), and [cross-app flows](docs/flows/README.md).
+- Backend: [app README](apps/backend/README.md), [local flows](apps/backend/docs/flows/README.md), [diagnostics](apps/backend/docs/diagnostics/README.md), and [change specs](apps/backend/specs/README.md).
+- Domain boundaries stay beside their owning code, using an existing README or CONTEXT.md.
 
 ## Cross-app flows
 

@@ -28,4 +28,5 @@ private endpoints, credentials and runtime state outside this repository.
 
 A Markdown link is a navigation instruction, not proof that the target was loaded.
 Read the relevant row when its condition applies; load other topics only as needed.
+When creating or updating knowledge, use the [templates](docs/agents/templates/README.md) and the owning document; preserve existing contracts.
 Report actual verification, failures and remaining gaps separately.
