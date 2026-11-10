@@ -20,16 +20,16 @@ export function CreateGroupFooter({
     <div data-testid="create-group-modal-footer" className="col-span-full flex flex-wrap items-center gap-3 border-t border-border bg-muted/20 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-7">
       <div className="min-w-0 flex-1 empty:hidden">
         {yamlValidationError ? (
-          <p role="alert" className="m-0 text-left text-sm text-destructive">
+          <p role="alert" className="m-0 text-left text-xs text-destructive">
             {yamlValidationError}
           </p>
         ) : null}
       </div>
       <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-3 sm:w-auto">
-        <Button variant="outline" size="md" className="h-10 flex-1 rounded-lg px-5 sm:flex-none" disabled={creating} onClick={onClose}>
+        <Button variant="outline" size="sm" className="flex-1 sm:flex-none" disabled={creating} onClick={onClose}>
           取消
         </Button>
-        <Button size="md" className="h-10 flex-1 rounded-lg px-6 sm:flex-none" loading={creating} disabled={creating || !canSubmit} onClick={() => void onSubmit()}>
+        <Button size="sm" className="flex-1 sm:flex-none" loading={creating} disabled={creating || !canSubmit} onClick={() => void onSubmit()}>
           确认创建
         </Button>
       </div>
