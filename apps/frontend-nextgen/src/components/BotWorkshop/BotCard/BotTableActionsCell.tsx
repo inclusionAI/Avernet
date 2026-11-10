@@ -54,6 +54,8 @@ export function BotTableActionsCell({ bot, options }: BotTableActionsCellProps) 
       onView={onView}
       onEdit={onEdit}
       onConversation={onConversation}
+      onRequestAccess={onAuthorize}
+      collaborationMode={getCollaborationMode?.(bot)}
       conversationAllowed={collaborationAllowsConversation && entry.enabled}
       conversationDisabledReason={
         entry.enabled

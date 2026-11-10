@@ -151,6 +151,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
               onView={onView}
               onEdit={onEdit}
               onConversation={onConversation}
+              onRequestAccess={onAuthorize}
+              collaborationMode={getCollaborationMode?.(bot)}
               conversationAllowed={collaborationAllowsConversation && entry.enabled}
               conversationDisabledReason={
                 entry.enabled
