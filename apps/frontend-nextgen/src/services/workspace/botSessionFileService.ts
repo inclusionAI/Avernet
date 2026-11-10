@@ -55,7 +55,6 @@ function mapView(dto: BotSessionFileDto): BotSessionFileView {
     status: dto.status,
     sizeBytes: dto.size_bytes,
     errorCode: dto.error_code,
-    createdAt: dto.created_at ?? null,
   };
 }
 

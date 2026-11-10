@@ -36,20 +36,6 @@ const baseProps = {
 };
 
 describe('BotSessionFilesPanel（单聊「资源管理」右侧副屏）', () => {
-  it('真实文件行显示北京时间与大小，未知时间不显示日期', () => {
-    render(
-      <BotSessionFilesPanel
-        {...baseProps}
-        readyFiles={[
-          { ...readyFiles[0], createdAt: '2026-11-10T17:48:35Z' },
-          { ...readyFiles[0], resourceId: 'r2', displayName: 'unknown.json', createdAt: null },
-        ]}
-      />,
-    );
-    expect(screen.getByText('11/11 01:48 · 2.0 KB')).toBeInTheDocument();
-    expect(screen.getByText('2.0 KB', { exact: true })).toBeInTheDocument();
-  });
-
   it('副屏容器语义：统一面板头（标题「资源管理」+ 关闭按钮），无 Modal 弹窗语义', () => {
     render(<BotSessionFilesPanel {...baseProps} />);
 

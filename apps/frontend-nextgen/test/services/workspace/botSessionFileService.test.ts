@@ -227,19 +227,6 @@ describe('botSessionFileService 列表/删除/下载', () => {
       user_id: '149608', owner_id: '146836', f_user_id: '149608',
     });
   });
-  it('loadReady 保留 UTC created_at，未知时间保持 null', async () => {
-    mocked.listReady.mockResolvedValue({
-      files: [
-        { resource_id: 'r1', created_at: '2026-11-10T09:48:35Z' },
-        { resource_id: 'r2', created_at: null },
-        { resource_id: 'r3' },
-      ],
-    });
-    const result = await botSessionFileService.loadReady('bot-1', 's1', 'user-1');
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('Expected ready file list');
-    expect(result.data.items.map((item) => item.createdAt)).toEqual(['2026-11-10T09:48:35Z', null, null]);
-  });
   it('loadReady 映射 view', async () => {
     mocked.listReady.mockResolvedValue({
       files: [
