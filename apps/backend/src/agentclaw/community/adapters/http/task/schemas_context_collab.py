@@ -1,12 +1,16 @@
 """HTTP DTOs for the context collab delivery (spec §6.2-§6.5).
 
-Wire models are the §6.5 OpenAPI schema names verbatim — ``ColletCreateRequest``,
-``EventCreateRequest``, ``ContextCollabStatusResponse``, ``TaskProgress``,
-``ContextSpec`` and the L2/L3 reference DTOs. Request models carry
-``to_domain()`` builders for the service commands (the intake
-``TaskIntakeCommandDTO.to_domain`` pattern); response models mirror exactly
-what ``ContextCollabService`` projects, including the ``occurred_at`` field
-the GET ``current_event`` projection carries beyond the 7-field set.
+Wire models are the §6.5 OpenAPI schema names verbatim — ColletCreateRequest,
+EventCreateRequest, ContextCollabStatusResponse, TaskProgress,
+ContextSpec and the L2/L3 reference DTOs. Request models carry
+to_domain() builders for the service commands (the intake
+TaskIntakeCommandDTO.to_domain pattern); response models mirror exactly
+what ContextCollabService projects, including the occurred_at field
+the GET current_event projection carries beyond the 7-field set.
+
+Docstrings and Field descriptions are published verbatim into the public
+OpenAPI document (the /openapi/v1 twin mounts these models), so they stay
+caller documentation: no internal route paths, no RST markup.
 """
 
 from __future__ import annotations
@@ -39,49 +43,78 @@ from agentclaw.community.core.task.context_collab.service_api import (
 
 
 class PrincipalRefDto(BaseModel):
-    """L2 责任主体引用 wire 形态;``to_domain`` 复用 value object 校验。"""
+    """L2 accountable-principal reference; validated by the shared value object."""
 
     model_config = ConfigDict(extra="forbid")
 
-    principal_type: str = Field(min_length=1)
-    principal_id: str = Field(min_length=1)
+    principal_type: str = Field(
+        min_length=1,
+        description="Accountable principal type: human, bot, org, or system.",
+    )
+    principal_id: str = Field(
+        min_length=1,
+        description="External identifier of the accountable principal, as "
+        "issued by the identity system of record.",
+    )
 
     def to_domain(self) -> PrincipalRef:
         return PrincipalRef.from_dict(self.model_dump())
 
 
 class AgentRefDto(BaseModel):
-    """L2 执行 Agent 引用 wire 形态。"""
+    """L2 executing-agent reference."""
 
     model_config = ConfigDict(extra="forbid")
 
-    agent_type: str = Field(min_length=1)
-    agent_id: str = Field(min_length=1)
+    agent_type: str = Field(
+        min_length=1,
+        description="Executing agent type: bot or service.",
+    )
+    agent_id: str = Field(
+        min_length=1,
+        description="External identifier of the executing agent.",
+    )
 
     def to_domain(self) -> AgentRef:
         return AgentRef.from_dict(self.model_dump())
 
 
 class SpaceRefDto(BaseModel):
-    """L3 Space 引用 wire 形态。"""
+    """L3 space reference."""
 
     model_config = ConfigDict(extra="forbid")
 
-    space_id: str = Field(min_length=1)
-    environment: str = Field(min_length=1)
+    space_id: str = Field(
+        min_length=1,
+        description="L3 space identifier this collaboration runs in.",
+    )
+    environment: str = Field(
+        min_length=1,
+        description="Environment the space reference is valid in (e.g. prod).",
+    )
 
     def to_domain(self) -> SpaceRef:
         return SpaceRef.from_dict(self.model_dump())
 
 
 class ResourceRefDto(BaseModel):
-    """L3 外部资源引用 wire 形态;``revision`` 可空(无版本要求时)。"""
+    """L3 external-resource reference; revision optional when unversioned."""
 
     model_config = ConfigDict(extra="forbid")
 
-    resource_type: str = Field(min_length=1)
-    resource_id: str = Field(min_length=1)
-    revision: str | None = None
+    resource_type: str = Field(
+        min_length=1,
+        description="External resource type (e.g. forum_topic).",
+    )
+    resource_id: str = Field(
+        min_length=1,
+        description="External identifier of the referenced resource.",
+    )
+    revision: str | None = Field(
+        default=None,
+        description="Optional revision of the referenced resource; omit when "
+        "the collaboration does not require a specific version.",
+    )
 
     def to_domain(self) -> ResourceRef:
         return ResourceRef.from_dict(self.model_dump())
@@ -91,30 +124,60 @@ class ResourceRefDto(BaseModel):
 
 
 class ContextSpec(BaseModel):
-    """ContextSpec 形态的嵌套 DTO(spec §6.5 schema 名)。
+    """Nested context-spec shape published as its own schema (spec §6.5).
 
-    与 §6.2 请求表中除 ``request_id`` 外的字段一一对应;L2/L3/L5/L6 信息
-    以引用或枚举字符串保存,不复制外部注册表。
+    Fields map one-to-one onto the §6.2 create-request table except the
+    idempotent request_id; L2/L3/L5/L6 information is held as references or
+    enum strings rather than copied from the external registries.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    space: SpaceRefDto
-    principal_ref: PrincipalRefDto
-    product_kind: str | None = None
-    workflow_kind: str | None = None
-    method_kind: str = Field(min_length=1)
-    executor_ref: AgentRefDto | None = None
-    objective: str = Field(min_length=1)
-    resource_refs: list[ResourceRefDto] = Field(default_factory=list)
+    space: SpaceRefDto = Field(description="L3 space the collaboration runs in.")
+    principal_ref: PrincipalRefDto = Field(
+        description="L2 accountable principal owning the collaboration context."
+    )
+    product_kind: str | None = Field(
+        default=None,
+        description="Optional L6 product kind, e.g. team_todo or "
+        "public_discussion.",
+    )
+    workflow_kind: str | None = Field(
+        default=None,
+        description="Optional L6 workflow kind; stored as a plain string, no "
+        "profile table is created.",
+    )
+    method_kind: str = Field(
+        min_length=1,
+        description="L5 collaboration method: Single or Open+Group.",
+    )
+    executor_ref: AgentRefDto | None = Field(
+        default=None,
+        description="Required when method_kind is Single: the L2 agent "
+        "executing the collaboration.",
+    )
+    objective: str = Field(
+        min_length=1,
+        description="Current collaboration objective.",
+    )
+    resource_refs: list[ResourceRefDto] = Field(
+        default_factory=list,
+        description="Optional L3 external-resource references; resource "
+        "content is never copied.",
+    )
 
 
 class ColletCreateRequest(ContextSpec):
-    """spec §6.2 新增协作上下文请求 = ContextSpec 字段 + ``request_id`` 幂等键。"""
+    """Create-collaboration-context request: the context spec plus a request_id."""
 
     model_config = ConfigDict(extra="ignore")
 
-    request_id: str = Field(min_length=1)
+    request_id: str = Field(
+        min_length=1,
+        description="Client-supplied idempotency key: the same request_id "
+        "replays the original creation result instead of creating a second "
+        "context.",
+    )
 
     def to_domain(self) -> ContextCreateCommand:
         return ContextCreateCommand(
@@ -133,24 +196,56 @@ class ColletCreateRequest(ContextSpec):
 
 
 class EventCreateRequest(BaseModel):
-    """spec §6.3 追加事件请求;字段与请求表一一对应。
+    """Append-event request; fields map one-to-one onto the §6.3 request table.
 
-    ``actor_ref`` 与认证主体的对账规则(G1:不接受伪造 actor — delivery
-    层裁决):省略/为空时取已认证 principal;显式给出时其
-    ``principal_id`` 必须等于已认证 ``staffId``,否则
-    ``ContextCollabValidationError``(422),发生在调用服务之前。
+    actor_ref is reconciled against the authenticated principal at delivery
+    (G1: a forged actor is not accepted): omitted means the authenticated
+    principal, and when supplied its principal_id must equal the verified
+    caller's, otherwise the request fails validation with 422 before the
+    service is invoked.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    request_id: str = Field(min_length=1)
-    expected_version: int = Field(ge=1)
-    event_kind: str = Field(min_length=1)
-    primitive_type: str = Field(min_length=1)
-    actor_ref: PrincipalRefDto | None = None
-    parent_event: str | None = None
-    visibility: str = Field(min_length=1)
-    payload: dict = Field(default_factory=dict)
+    request_id: str = Field(
+        min_length=1,
+        description="Client-supplied idempotency key for this append.",
+    )
+    expected_version: int = Field(
+        ge=1,
+        description="Context version the append is based on; a mismatch with "
+        "the current version is rejected with a version-conflict error.",
+    )
+    event_kind: str = Field(
+        min_length=1,
+        description="Registry kind of the event, e.g. task.created or "
+        "user_interaction.posted.",
+    )
+    primitive_type: str = Field(
+        min_length=1,
+        description="L4 primitive the event carries: Task, Message, Activity, "
+        "or Artifact.",
+    )
+    actor_ref: PrincipalRefDto | None = Field(
+        default=None,
+        description="Optional accountable principal to attribute the event "
+        "to; defaults to the authenticated caller and must match the "
+        "verified principal id when supplied.",
+    )
+    parent_event: str | None = Field(
+        default=None,
+        description="Optional parent event id; events without one extend the "
+        "trunk chain directly.",
+    )
+    visibility: str = Field(
+        min_length=1,
+        description="Visibility scope of the event, e.g. workspace.",
+    )
+    payload: dict = Field(
+        default_factory=dict,
+        description="Event payload, validated against the event-kind schema "
+        "registry.",
+    )
 
     def to_domain(self, authenticated_actor: PrincipalRef) -> EventAppendCommand:
         actor_ref = (
@@ -177,99 +272,165 @@ class EventCreateRequest(BaseModel):
 
 
 class ProgressDto(BaseModel):
-    """§6.4 ``current_snapshot.progress`` 投影。"""
+    """Progress projection carried on each current_snapshot."""
 
-    percent: int
-    completed_count: int = 0
-    active_count: int = 0
-    blocked_count: int = 0
-    current_event_id: str | None = None
+    percent: int = Field(description="Completion percentage 0-100.")
+    completed_count: int = Field(
+        default=0, description="Number of completed events in the snapshot."
+    )
+    active_count: int = Field(
+        default=0, description="Number of active (in-flight) events."
+    )
+    blocked_count: int = Field(
+        default=0, description="Number of blocked events in the snapshot."
+    )
+    current_event_id: str | None = Field(
+        default=None,
+        description="Event id the current snapshot is anchored on, if any.",
+    )
 
 
 class CurrentSnapshotDto(BaseModel):
-    """§6.2/§6.4 响应中 ``current_snapshot`` 的形态。
+    """Shape of current_snapshot in the §6.2 create and §6.4 status responses.
 
-    ``principal_ref`` / ``executor_ref`` 在 wire 上是裸 ID 字符串
-    (响应示例即如此);服务两条路径投影形态不同(创建侧已是裸 ID,
-    查询侧 ``CurrentSnapshot.to_dict`` 返回引用 dict),由
-    ``_snapshot_to_dto`` 统一归一。
+    principal_ref and executor_ref are bare id strings on the wire (both
+    service projections are normalized by _snapshot_to_dto before
+    serialization).
     """
 
-    objective: str
-    status: str
-    principal_ref: str
-    executor_ref: str | None = None
-    method_kind: str
-    progress: ProgressDto
+    objective: str = Field(description="Current collaboration objective.")
+    status: str = Field(description="Current snapshot status, e.g. created.")
+    principal_ref: str = Field(
+        description="Bare id of the L2 accountable principal."
+    )
+    executor_ref: str | None = Field(
+        default=None,
+        description="Bare id of the executing agent, when one is bound.",
+    )
+    method_kind: str = Field(description="L5 collaboration method in effect.")
+    progress: ProgressDto = Field(description="Progress counters.")
 
 
 class ContextEventBriefDto(BaseModel):
-    """§6.2 响应 ``current_event`` 的基础四字段投影。"""
+    """Four-field brief of the §6.2 create-response current_event."""
 
-    event_id: str
-    parent_event: str | None = None
-    event_kind: str
-    primitive_type: str
+    event_id: str = Field(description="Immutable id of the event.")
+    parent_event: str | None = Field(
+        default=None, description="Parent event id, when the event has one."
+    )
+    event_kind: str = Field(description="Registry kind of the event.")
+    primitive_type: str = Field(description="L4 primitive the event carries.")
 
 
 class ContextCollabCreatedResultDto(BaseModel):
-    """§6.2 创建响应 + 服务幂等重放标记。"""
+    """Create response plus the idempotent-replay marker."""
 
-    collab_context_id: str
-    context_version: int
-    current_snapshot: CurrentSnapshotDto
-    current_event: ContextEventBriefDto
-    replayed: bool
+    collab_context_id: str = Field(
+        description="Id of the created collaboration context."
+    )
+    context_version: int = Field(
+        description="Context version after creation (1)."
+    )
+    current_snapshot: CurrentSnapshotDto = Field(
+        description="Snapshot anchored on the initial task.created event."
+    )
+    current_event: ContextEventBriefDto = Field(
+        description="The initial task.created event."
+    )
+    replayed: bool = Field(
+        description="True when an earlier create with the same request_id was "
+        "replayed instead of creating a new context."
+    )
 
 
 class EventAcceptedResultDto(BaseModel):
-    """§6.3 追加事件响应(8 字段)。"""
+    """Append-event acceptance response (8 fields)."""
 
-    accepted: bool
-    collab_context_id: str
-    event_id: str
-    parent_event: str | None
-    event_kind: str
-    primitive_type: str
-    context_version: int
-    current_status: str
+    accepted: bool = Field(
+        description="True when the event was accepted onto the context."
+    )
+    collab_context_id: str = Field(
+        description="Id of the collaboration context the event joined."
+    )
+    event_id: str = Field(description="Immutable id of the accepted event.")
+    parent_event: str | None = Field(
+        description="Parent event id the event was linked to, when one was "
+        "given."
+    )
+    event_kind: str = Field(description="Registry kind of the event.")
+    primitive_type: str = Field(description="L4 primitive the event carries.")
+    context_version: int = Field(
+        description="Context version after the accepted append."
+    )
+    current_status: str = Field(
+        description="Snapshot status after the append."
+    )
 
 
 class TaskProgressEventDto(BaseModel):
-    """§6.4 ``task_progress.events[]`` 条目(7 字段投影,无 ``occurred_at``)。"""
+    """One task_progress.events entry (7-field projection, no occurred_at)."""
 
-    event_id: str
-    parent_event: str | None = None
-    event_kind: str
-    primitive_type: str
-    status: str
-    summary: str | None = None
-    content: str | None = None
+    event_id: str = Field(description="Immutable id of the event.")
+    parent_event: str | None = Field(
+        default=None, description="Parent event id, when the event has one."
+    )
+    event_kind: str = Field(description="Registry kind of the event.")
+    primitive_type: str = Field(description="L4 primitive the event carries.")
+    status: str = Field(
+        description="Progress projection status of the event: the current "
+        "event is active, earlier ones completed."
+    )
+    summary: str | None = Field(
+        default=None, description="Optional one-line summary of the event."
+    )
+    content: str | None = Field(
+        default=None, description="Optional content payload of the event."
+    )
 
 
 class CurrentEventDto(TaskProgressEventDto):
-    """§6.4 ``current_event``:进度条目 + ``occurred_at``(服务返回的第 8 字段,
+    """§6.4 current_event: a progress entry plus occurred_at.
 
-    不能在 DTO 层丢掉)。"""
+    The occurred_at field is the 8th field the service projects on the
+    current event and must not be dropped at the DTO layer.
+    """
 
-    occurred_at: datetime | None = None
+    occurred_at: datetime | None = Field(
+        default=None,
+        description="Wall-clock time the current event was accepted, when "
+        "recorded.",
+    )
 
 
 class TaskProgress(BaseModel):
-    """spec §6.5 schema 名 ``TaskProgress``(§6.4 任务进度块)。"""
+    """Task progress block (spec §6.5 schema name, spec §6.4 response)."""
 
-    total_events: int
-    events: list[TaskProgressEventDto]
+    total_events: int = Field(
+        description="Total events in the projection, before any visibility "
+        "filtering applied by the read."
+    )
+    events: list[TaskProgressEventDto] = Field(
+        description="Event progress entries, oldest first; only the trunk "
+        "chain when trunk_events filtering is requested."
+    )
 
 
 class ContextCollabStatusResponse(BaseModel):
-    """spec §6.5 schema 名 ``ContextCollabStatusResponse``(§6.4 响应)。"""
+    """Status and task-progress response (spec §6.5 schema name, §6.4)."""
 
-    collab_context_id: str
-    context_version: int
-    current_snapshot: CurrentSnapshotDto
-    current_event: CurrentEventDto | None
-    task_progress: TaskProgress
+    collab_context_id: str = Field(
+        description="Id of the collaboration context."
+    )
+    context_version: int = Field(description="Current context version.")
+    current_snapshot: CurrentSnapshotDto = Field(
+        description="Snapshot anchored on the current event."
+    )
+    current_event: CurrentEventDto | None = Field(
+        description="The event the snapshot is anchored on, when one exists."
+    )
+    task_progress: TaskProgress = Field(
+        description="Event progress projection of the context."
+    )
 
 
 # ── *_to_dto 转换 ───────────────────────────────────────────────────────────
