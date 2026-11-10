@@ -1,5 +1,27 @@
 # BCSFuse - Open Source Runtime Candidate
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BCSFuse owns the shared search core, provider contracts and TC application; OCB owns its enterprise adapters and assembly.
+
+- [Existing document index](docs/README.md)
+- [Search architecture and boundaries](docs/architecture/search-core-boundary.md)
+- [Provider contracts](packages/search-core/docs/provider-contracts.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 ## Project Overview
 
 BCSFuse is a collaboration control plane for AI worker management, providing task understanding, retrieval, team composition, and OpenClaw integration. This is the open-source runtime candidate designed for public release.
