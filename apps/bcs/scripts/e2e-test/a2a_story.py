@@ -277,9 +277,9 @@ class A2aStory(Story):
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
-        registered = self.request("POST", "/a2a/agents", {"owners": [self.owner],
+        registered = self.request("POST", "/a2a/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
-        assert set(registered) == {"provider_name", "agent_name", "bot_id", "agent_card_url", "agent_card"}
+        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card"}
         assert registered["agent_name"] == self.peer.card["name"]
         bot_id = registered["bot_id"]
         bindings = self.request("GET", prefix, token=admin)
@@ -292,7 +292,7 @@ class A2aStory(Story):
         card_path = "/a2a/agents/" + bot_id + "/agent-card"
         named = self.request("GET", card_path, token=admin)
         assert named["agent_card"] == record["agent_card"]
-        assert not ({"provider_id", "bot_uuid", "provider_bot_ref", "revision"} & named.keys())
+        assert not ({"provider_id", "bot_uuid", "revision"} & named.keys())
         self.request("GET", card_path, token="wrong-admin", status=401)
         self.request("GET", control, status=401)
         card = self.request("GET", "/bots/" + bot_id + "/agent-card")
@@ -439,13 +439,15 @@ class A2aStory(Story):
     def named_rounds(self, provider, provider_name, card):
         card = copy.deepcopy(card)
         card["name"] = "订单助手-" + uuid.uuid4().hex[:8]
+        reference = "story-" + uuid.uuid4().hex
+        registration_body = {"provider_bot_ref": reference, "owners": [self.owner], "agent_card": card}
+        admin = provider["provider_admin_token"]
         registration = self.request("POST", "/a2a/providers/" + provider_name + "/bots",
-            {"owners": [self.owner], "agent_card": card}, token=provider["provider_admin_token"], status=201)
+            registration_body, token=admin, status=201)
         assert registration["bot_name"] == card["name"]
-        assert not ({"provider_id", "bot_uuid", "provider_bot_ref"} & registration.keys())
-        # Native admin lookup is only for fixture cleanup; customer calls below use names/run_id.
-        found = self.request("GET", "/bots/search?" + urlencode({"q": card["name"]}))
-        bot_id = next(item["bot_uuid"] for item in found["items"] if item["agent_card"]["name"] == card["name"])
+        assert registration["provider_bot_ref"] == reference
+        assert not ({"provider_id", "bot_uuid"} & registration.keys())
+        bot_id = registration["bot_id"]
         bindings = self.request("GET", "/providers/" + provider["provider_id"] + "/bots", token=provider["provider_admin_token"])
         self.bots.append((provider, next(item for item in bindings["items"] if item["bot_uuid"] == bot_id)))
         # Production A2A requires the server queue for this Bot, including direct calls.
@@ -458,12 +460,12 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = "/a2a/providers/" + provider_name + "/bots/" + quote(card["name"], safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
-            assert accepted["bot_name"] == card["name"] and "bot_uuid" not in accepted
+            assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
             run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:

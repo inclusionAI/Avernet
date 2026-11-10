@@ -69,7 +69,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/providers", post(routes::providers::register_provider))
         .route("/bots/{id}/agent-card", get(routes::bot_agent_card::get))
         .route("/a2a/providers/{provider_name}/bots", post(routes::a2a_names::register))
-        .route("/a2a/providers/{provider_name}/bots/{bot_name}/chat-async", post(routes::a2a_names::chat))
+        .route("/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async", post(routes::a2a_names::chat))
         .route("/a2a/agents", axum::routing::any(routes::a2a_management::handle))
         .route("/a2a/agents/{bot_id}/agent-card", axum::routing::any(routes::a2a_management::handle))
         .route("/a2a/agents/{bot_id}/agent-card:refresh", axum::routing::any(routes::a2a_management::handle))

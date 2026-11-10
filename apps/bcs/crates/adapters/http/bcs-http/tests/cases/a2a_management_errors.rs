@@ -40,6 +40,7 @@ impl Management {
 }
 fn card() -> ManagedA2aCard {
     ManagedA2aCard {
+        provider_bot_ref: "remote".into(),
         provider_name: "orders".into(),
         agent_name: "订单助手".into(),
         bot_id: "bot".into(),
@@ -49,9 +50,9 @@ fn card() -> ManagedA2aCard {
 }
 #[async_trait]
 impl A2aBotManagementService for Management {
-    async fn resolve_named_target(&self, provider: &str, name: &str) -> ServiceResult<String> {
+    async fn resolve_provider_ref_target(&self, provider: &str, name: &str) -> ServiceResult<String> {
         assert_eq!(provider, "orders");
-        assert_eq!(name, "订单助手");
+        assert_eq!(name, "remote");
         self.result()?;
         Ok("target-bot".into())
     }
@@ -83,6 +84,7 @@ impl A2aBotManagementService for Management {
         self.result()?;
         Ok(NamedA2aRegistration {
             card: NamedA2aCard {
+                provider_bot_ref: "remote".into(),
                 bot_id: "bot".into(),
                 provider_name: "orders".into(),
                 bot_name: "订单助手".into(),
@@ -171,7 +173,7 @@ async fn application_failures_have_stable_status_codes_and_safe_details() {
         (
             || ServiceError::Conflict(PRIVATE.into()),
             409,
-            Code::BotNameConflict,
+            Code::ProviderBotRefConflict,
         ),
         (
             || ServiceError::InvalidOperation {
@@ -300,14 +302,14 @@ async fn request_limits_null_fields_and_accept_precedence_reject_before_service_
         (
             "POST",
             "/a2a/agents",
-            json!({"owners":["owner"],"agent_card":null}).to_string(),
+            json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":null}).to_string(),
             "*/*",
             400,
         ),
         (
             "POST",
             "/a2a/agents",
-            json!({"owners":["owner"],"summary":null}).to_string(),
+            json!({"provider_bot_ref":"remote","owners":["owner"],"summary":null}).to_string(),
             "*/*",
             400,
         ),
@@ -371,7 +373,7 @@ async fn request_limits_null_fields_and_accept_precedence_reject_before_service_
 #[tokio::test]
 async fn url_registration_and_legacy_named_registration_keep_distinct_response_contracts() {
     let (app, service) = app(None);
-    let body = json!({"owners":["owner"],"agent_card_url":"https://example.org/card"}).to_string();
+    let body = json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card_url":"https://example.org/card"}).to_string();
     let response = app
         .clone()
         .oneshot(request("POST", "/a2a/agents", body.clone()))
@@ -393,8 +395,8 @@ async fn url_registration_and_legacy_named_registration_keep_distinct_response_c
     assert_eq!(value["bot_name"], "订单助手");
     assert!(value.get("bot_runtime_token").is_none());
     for body in [
-        json!({"owners":[]}),
-        json!({"owners":[],"agent_card":{},"agent_card_url":"https://example.org/card"}),
+        json!({"provider_bot_ref":"remote","owners":[]}),
+        json!({"provider_bot_ref":"remote","owners":[],"agent_card":{},"agent_card_url":"https://example.org/card"}),
     ] {
         let response = app
             .clone()
@@ -410,7 +412,7 @@ async fn url_registration_and_legacy_named_registration_keep_distinct_response_c
     let mut req = request(
         "POST",
         "/a2a/providers/orders/bots",
-        json!({"owners":[]}).to_string(),
+        json!({"provider_bot_ref":"remote","owners":[]}).to_string(),
     );
     req.headers_mut().remove("authorization");
     assert_eq!(
@@ -450,7 +452,7 @@ async fn legacy_registration_errors_are_redacted_and_unconfigured_routes_fail_cl
             .oneshot(request(
                 "POST",
                 "/a2a/providers/orders/bots",
-                json!({"owners":["owner"],"agent_card":{}}).to_string(),
+                json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}).to_string(),
             ))
             .await
             .unwrap();
@@ -463,7 +465,7 @@ async fn legacy_registration_errors_are_redacted_and_unconfigured_routes_fail_cl
         (
             "POST",
             "/a2a/providers/orders/bots",
-            r#"{"owners":[]}"#,
+            r#"{"provider_bot_ref":"remote","owners":[]}"#,
             503,
         ),
         (
@@ -514,7 +516,7 @@ async fn legacy_service_implementations_cannot_silently_admit_new_public_methods
         (
             "POST",
             "/a2a/agents",
-            json!({"owners":["owner"],"agent_card":{}}).to_string(),
+            json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}).to_string(),
         ),
         ("GET", QUERY, String::new()),
         (
@@ -530,7 +532,7 @@ async fn legacy_service_implementations_cannot_silently_admit_new_public_methods
         (
             "POST",
             "/a2a/providers/orders/bots",
-            json!({"owners":["owner"],"agent_card":{}}).to_string(),
+            json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}).to_string(),
         ),
     ] {
         let response = app
@@ -550,7 +552,7 @@ async fn legacy_service_implementations_cannot_silently_admit_new_public_methods
     // The same fail-closed guarantee applies to non-HTTP hosts of this Service API.
     assert!(
         LegacyOnly
-            .resolve_named_target("orders", "agent")
+            .resolve_provider_ref_target("orders", "agent")
             .await
             .is_err()
     );
@@ -655,7 +657,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
             .a2a_chat_runs(Arc::new(Runs))
             .build_for_test(),
     ));
-    let path = "/a2a/providers/orders/bots/%E8%AE%A2%E5%8D%95%E5%8A%A9%E6%89%8B/chat-async";
+    let path = "/a2a/providers/orders/bots/remote/chat-async";
     let response = app
         .clone()
         .oneshot(request("POST", path, r#"{"message":"hello"}"#))
@@ -664,7 +666,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let accepted = read(response).await;
     assert_eq!(accepted["provider_name"], "orders");
-    assert_eq!(accepted["bot_name"], "订单助手");
+    assert_eq!(accepted["provider_bot_ref"], "remote");
     assert_eq!(accepted["status"], "pending");
     assert_eq!(accepted["expires_at_ms"], 100);
     assert!(accepted.get("bot_uuid").is_none());
@@ -722,7 +724,7 @@ async fn registration_visibility_defaults_and_invalid_values_fail_before_admissi
     use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected, Public};
     for (value, expected) in [(None, Protected), (Some("protected"), Protected), (Some("public"), Public)] {
         let (app, service) = app(None);
-        let mut body = json!({"owners":["owner"],"agent_card_url":"https://example.org/card"});
+        let mut body = json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card_url":"https://example.org/card"});
         if let Some(value) = value { body["visibility"] = json!(value); }
         let response = app.oneshot(request("POST", "/a2a/agents", body.to_string())).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
@@ -730,7 +732,7 @@ async fn registration_visibility_defaults_and_invalid_values_fail_before_admissi
     }
     for value in [json!("private"), json!("PUBLIC"), json!(null), json!(true)] {
         let (app, service) = app(None);
-        let body = json!({"owners":["owner"],"agent_card_url":"https://example.org/card","visibility":value});
+        let body = json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card_url":"https://example.org/card","visibility":value});
         let response = app.oneshot(request("POST", "/a2a/agents", body.to_string())).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(service.calls.load(Ordering::SeqCst), 0);

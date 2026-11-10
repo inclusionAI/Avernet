@@ -14,6 +14,7 @@ pub struct ConfigureA2aBotCommand {
 
 #[derive(Clone,Debug)]
 pub struct NamedA2aCard {
+    pub provider_bot_ref:String,
     pub bot_id:String,
     pub provider_name:String,
     pub bot_name:String,
@@ -22,6 +23,7 @@ pub struct NamedA2aCard {
 }
 #[derive(Clone)]
 pub struct RegisterNamedA2aBotCommand {
+    pub provider_bot_ref:String,
     pub provider_name:String,
     pub provider_admin_token:String,
     pub owners:Vec<String>,
@@ -34,11 +36,13 @@ pub struct NamedA2aRegistration {pub card:NamedA2aCard,pub bot_runtime_token:Opt
 /// Public v0.1 management view, deliberately excludes runtime credentials.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ManagedA2aCard {
+    pub provider_bot_ref:String,
     pub provider_name:String, pub agent_name:String, pub bot_id:String,
     pub agent_card_url:Option<String>, pub agent_card:serde_json::Value,
 }
 #[derive(Clone)]
 pub struct RegisterAgentCommand {
+    pub provider_bot_ref:String,
     pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
     pub provider_admin_token:String, pub owners:Vec<String>, pub summary:Option<String>,
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
@@ -50,7 +54,7 @@ pub trait A2aBotManagementService: Send + Sync {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
     /// Exact source key recovery, scoped by authenticated Provider; zero or one result.
-    async fn find_agents_by_source_id(&self,_token:&str,_source_agent_id:&str)->ServiceResult<Vec<ManagedA2aCard>> {
+    async fn find_agents_by_provider_ref(&self,_token:&str,_provider_bot_ref:&str)->ServiceResult<Vec<ManagedA2aCard>> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
     /// Provider-scoped management uses the stable ID returned by registration, never Card.name.
@@ -70,7 +74,7 @@ pub trait A2aBotManagementService: Send + Sync {
 
     /// Resolve a target for the existing chat admission use case. This does not
     /// grant permission to call it; the caller must still pass chat authorization.
-    async fn resolve_named_target(&self,_provider:&str,_bot:&str)->ServiceResult<String> {
+    async fn resolve_provider_ref_target(&self,_provider:&str,_bot:&str)->ServiceResult<String> {
         Err(crate::ServiceError::InternalError("named A2A resolution is not configured".into()))
     }
     async fn register_named(&self,_command:RegisterNamedA2aBotCommand)->ServiceResult<NamedA2aRegistration> {

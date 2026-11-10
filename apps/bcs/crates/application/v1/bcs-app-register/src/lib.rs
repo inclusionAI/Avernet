@@ -200,7 +200,7 @@ fn provider_registration_error(error: ServiceError) -> ApplicationError {
         ServiceError::A2aManagement(error) => {
             use bcs_service_api::types::a2a_bot::a2a_management::ManagementCode as Code;
             match error.code {
-                Code::BotNameConflict|Code::SourceAgentConflict|Code::SourceAgentChangeNotAllowed =>
+                Code::ProviderBotRefConflict|Code::BotNameConflict|Code::SourceAgentConflict|Code::SourceAgentChangeNotAllowed =>
                     ApplicationError::conflict("registration_conflict", "A2A registration conflicts with an existing registration"),
                 Code::InternalError|Code::ServiceUnavailable => ApplicationError::internal("A2A registration unavailable"),
                 _ => ApplicationError::invalid("invalid_request", "A2A Card or source is not supported"),

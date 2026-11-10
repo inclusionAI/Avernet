@@ -25,6 +25,7 @@ pub struct Target {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registration {
+    provider_bot_ref: String,
     #[serde(default)]
     visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
     owners: Vec<String>,
@@ -42,7 +43,7 @@ struct Update {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SourceQuery { source_agent_id: String }
+struct SourceQuery { provider_bot_ref: String }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Refresh {}
@@ -65,6 +66,7 @@ fn message(code: Code) -> &'static str {
         Code::BotNotFound => "当前 Provider 下未找到该 Agent",
         Code::MethodNotAllowed => "此接口不支持该 HTTP 方法",
         Code::NotAcceptable => "此接口仅返回 JSON",
+        Code::ProviderBotRefConflict => "同一 Provider 下已存在该平台 Agent 标识",
         Code::BotNameConflict => "同一 Provider 下已存在该 Agent 名称",
         Code::SourceAgentConflict => "同一 Provider 下已存在该来源 Agent ID",
         Code::SourceAgentChangeNotAllowed => "已登记的来源 Agent ID 不可修改或删除",
@@ -97,7 +99,8 @@ pub(super) fn status(code: Code) -> StatusCode {
         Code::BotNotFound => StatusCode::NOT_FOUND,
         Code::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
         Code::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
-        Code::BotNameConflict
+        Code::ProviderBotRefConflict
+        | Code::BotNameConflict
         | Code::SourceAgentConflict
         | Code::SourceAgentChangeNotAllowed
         | Code::TargetChanged
@@ -126,7 +129,7 @@ fn failure(failure: ServiceError, id: &str) -> Response {
             ManagementError::new(Code::BotNotFound, "bot_id", "NOT_FOUND")
         }
         ServiceError::Conflict(_) => {
-            ManagementError::new(Code::BotNameConflict, "agent_card.name", "ALREADY_EXISTS")
+            ManagementError::new(Code::ProviderBotRefConflict, "provider_bot_ref", "ALREADY_EXISTS")
         }
         ServiceError::InvalidOperation { .. } => {
             ManagementError::new(Code::InvalidRequest, "", "INVALID_REQUEST")
@@ -243,8 +246,8 @@ async fn execute(
             return Ok((StatusCode::OK,ManagementView::Card(service.get_agent_by_id(&token,bot_id).await?)));
         }
         let Query(query) = Query::<SourceQuery>::try_from_uri(&parts.uri)
-            .map_err(|_|error(Code::InvalidRequest,"source_agent_id","INVALID_QUERY"))?;
-        let items = service.find_agents_by_source_id(&token,&query.source_agent_id).await?;
+            .map_err(|_|error(Code::InvalidRequest,"provider_bot_ref","INVALID_QUERY"))?;
+        let items = service.find_agents_by_provider_ref(&token,&query.provider_bot_ref).await?;
         return Ok((StatusCode::OK,ManagementView::Collection {items}));
     }
     if parts.uri.query().is_some() {return Err(error(Code::InvalidRequest,"","QUERY_NOT_ALLOWED"));}
@@ -265,6 +268,7 @@ async fn execute(
             .unwrap_or(0);
         let card = service
             .register_agent(RegisterAgentCommand {
+                provider_bot_ref: input.provider_bot_ref,
                 visibility: input.visibility,
                 provider_admin_token: token,
                 owners: input.owners,
