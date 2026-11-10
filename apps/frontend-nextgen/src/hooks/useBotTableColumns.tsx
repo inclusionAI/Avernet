@@ -1,4 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
+import BotCopyDeleteAction from '@/components/BotWorkshop/BotCard/BotCopyDeleteAction';
 import BotCopyRetryAction from '@/components/BotWorkshop/BotCard/BotCopyRetryAction';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
@@ -142,12 +143,29 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
-          // 复制失败(gated):仅 copy_state.status === FAILED 时,操作列折叠为重试入口。
-          // 中间态(复制中)不再占用操作列 —— dst bot 未收敛,但用户仍可走正常 actions 查看进度,
-          // 不强行塞重试按钮(避免对 RUNNING/FILE_SYNCED 的 bot 误导「可重试」)。
+          // copy_state 非空 → 操作列收敛:dst bot 尚在复制中(中间态)或已失败。
+          // view/edit/chat/logs/三点菜单等运行态操作此刻都打不到真目标,一律隐藏;
+          // FAILED 且有 retry → 留重试;删除按钮仅在 dst 已 ACTIVE(copy_state 非空且
+          // lifecycle=running)时展示 —— 中间态 dst 尚未起,删除无意义;FAILED 必然 ACTIVE。
+          // 删除走与三点菜单内删除项相同的 ``onAction('delete')`` + 原确认弹窗,page 层
+          // handler 删除成功后自带 load() 刷新列表。
           const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
-          if (copyState?.status === 'FAILED' && onRetryCopy)
-            return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
+          if (copyState) {
+            const canDelete = bot.lifecycle === 'running' && Boolean(onAction);
+            if (!canDelete) {
+              if (copyState.status === 'FAILED' && onRetryCopy)
+                return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
+              return null;
+            }
+            return (
+              <div className="flex items-center justify-end gap-0" onClick={(event) => event.stopPropagation()}>
+                {copyState.status === 'FAILED' && onRetryCopy ? (
+                  <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />
+                ) : null}
+                <BotCopyDeleteAction bot={bot} onAction={onAction} />
+              </div>
+            );
+          }
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
