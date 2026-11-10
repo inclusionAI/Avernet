@@ -191,7 +191,7 @@
 <text x="1406" y="1745" class="f">UK (bot_id, env)</text>
 <text x="1406" y="1765" class="f">client_id / token_hash / status</text>
 <text x="1406" y="1785" class="f">作用：本地补票权威</text>
-<text x="1406" y="1805" class="f">支持 exchange 换 Level-1 Token</text>
+<text x="1406" y="1805" class="f">OCB legacy；tcauth 不读此表</text>
 <path d="M1650 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
 <text x="1660" y="466" class="r">0..1 seat→credential</text>
 <path d="M1390 620H1360V340H1390" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
@@ -203,7 +203,7 @@
 <path d="M1650 1410V1430" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
 <text x="1660" y="1426" class="r">0..1 归属目录</text>
 <path d="M1910 1780H2020V1060H1910" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
-<text x="1928" y="1770" class="r">0..N exchange→L1</text>
+<text x="1928" y="1770" class="r">0..N OCB exchange→L1</text>
 <rect x="2050" y="230" width="520" height="220" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
 <path d="M2050 268H2570" stroke="#64748b" stroke-width="1"/>
 <text x="2066" y="255" class="box">accs_session</text>
