@@ -587,35 +587,13 @@ async def restart_bot(
 ) -> Envelope[Bot]:
     """Restart a bot's container.
 
-    Also what applies a changed startup script. The optional JSON body may
-    carry `extra_configs` for engine-owned restart extensions (for example,
-    AgentCoding's `confirmed_template_update`). Refused (409) for desktop
+    Also what applies a changed startup script. Refused (409) for desktop
     bots, whose lifecycle is managed by the desktop service, and for bots in
     a lifecycle state a restart cannot leave.
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
 
-    # The historical restart endpoint accepts an engine-agnostic extension
-    # envelope. Keep the parser intentionally permissive: unknown keys and
-    # empty/non-JSON bodies stay valid for existing callers.
-    extra_configs: dict[str, Any] | None = None
-    try:
-        request_body = await request.json()
-        candidate = (
-            request_body.get("extra_configs")
-            if isinstance(request_body, dict)
-            else None
-        )
-        if isinstance(candidate, dict):
-            extra_configs = candidate
-    except Exception:
-        extra_configs = None
-
-    bot = await bot_service.restart_bot_async(
-        bot_id=bot_id,
-        user_id=owner_id,
-        extra_configs=extra_configs,
-    )
+    bot = await bot_service.restart_bot_async(bot_id=bot_id, user_id=owner_id)
     # The result carries the base record, so a collaborator restarting a
     # shared bot gets it without the owner's template snapshot (`_to_bot`).
     return envelope(
