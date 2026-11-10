@@ -92,6 +92,19 @@ it('requires a registered immutable snapshot rather than a mutable spec or a for
   expect(f.child()).toBeUndefined(); expect(f.links()).toEqual([]);
 });
 
+it('remains available when externally provisioned flow_runs predates the snapshot association column', async () => {
+  const f = await fixture();
+  // Model a deployment-bound pre-v145 schema. A saved/draft run cannot use this
+  // compatibility path because its only pin lives in mutable state_json.
+  f.raw.prepare('INSERT INTO workflow_deploy_history (pack_id, workflow_id, deploy_number, version, tag_name, action, spec_json, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('pack', 'parent-wf', 1, 1, 'pack/1', 'deploy', JSON.stringify(f.spec), 1);
+  f.raw.exec("UPDATE flow_runs SET workflow_version=1, workflow_deploy_number=1 WHERE flow_id='parent'");
+  f.raw.exec('ALTER TABLE flow_runs DROP COLUMN workflow_snapshot_json');
+  const response = await f.post();
+  expect(response).toMatchObject({ status: 201, body: { success: true } });
+  expect(f.links()).toEqual([expectedLink]);
+});
+
 it('checks a saved snapshot against its registered digest, not the child claim', async () => {
   const f = await fixture();
   const parent = await f.repo.findFullByFlowId('parent');

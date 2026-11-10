@@ -69,7 +69,14 @@ export function parseParentRelation(value: unknown): ParentRelation | null {
 type ParentRun = {
   flow_id: string; workflow_id: string; status: string; state_json: string | null;
   origin_bot_id: string | null; user_id: string | null; origin_session_key: string | null; origin_session_id: string | null;
+  workflow_version: number | null; workflow_deploy_number: number | null;
 };
+function missingWorkflowSnapshotColumn(error: unknown): boolean {
+  const message = String(error).toLowerCase();
+  return message.includes('workflow_snapshot_json')
+    && (message.includes('no such column') || message.includes('unknown column'));
+}
+
 type ChildRun = ParentRun & { workflow_version: number | null; workflow_deploy_number: number | null;
   workflow_title: string | null; params_json: string | null; input_json: string | null; node_count: number;
   triggered_by: string | null; identity_key: string | null; current_phase: string | null; credentials_json: string | null;
@@ -170,7 +177,7 @@ function checkFanout(parent: ParentRun, relation: ParentRelation, child: FlowRun
 async function validateAuthority(tx: IDatabase, relation: ParentRelation, run: FlowRunInsert): Promise<{
   parent: ParentRun; execution: NodeExecution; link: FlowRunLink; validated: ValidatedParentRelation; groupState: Record<string, unknown> | null;
 }> {
-  const parentRows = await tx.query<ParentRun>(`SELECT flow_id,workflow_id,status,state_json,origin_bot_id,user_id,origin_session_key,origin_session_id FROM flow_runs WHERE flow_id = ?${locked(tx)}`, [relation.parent_flow_id]);
+  const parentRows = await tx.query<ParentRun>(`SELECT flow_id,workflow_id,status,state_json,origin_bot_id,user_id,origin_session_key,origin_session_id,workflow_version,workflow_deploy_number FROM flow_runs WHERE flow_id = ?${locked(tx)}`, [relation.parent_flow_id]);
   const parent = parentRows[0];
   if (!parent || parent.flow_id !== relation.parent_flow_id || parent.status !== 'running') throw conflict('Parent run is not running');
   const executions = await tx.query<NodeExecution>(`SELECT id,flow_id,workflow_id,node_id,status,attempt FROM node_executions WHERE flow_id = ? AND node_id = ? AND attempt = ? ORDER BY id DESC LIMIT 1${locked(tx)}`, [parent.flow_id, relation.parent_node_id, relation.parent_attempt]);
@@ -179,11 +186,34 @@ async function validateAuthority(tx: IDatabase, relation: ParentRelation, run: F
     || execution.node_id !== relation.parent_node_id || execution.status !== 'running' || execution.attempt !== relation.parent_attempt) {
     throw conflict('Parent node execution is not running');
   }
-  const snapshotRows = await tx.query<{ workflow_snapshot_json: string | null }>(
-    `SELECT workflow_snapshot_json FROM flow_runs WHERE flow_id = ?${locked(tx)}`, [parent.flow_id]);
-  const storedBinding = snapshotRows[0]?.workflow_snapshot_json ? parseWorkflowSnapshotBinding(snapshotRows[0].workflow_snapshot_json) : null;
-  if (!storedBinding || storedBinding.status !== 'resolved') throw conflict('Parent workflow snapshot is unavailable');
   const snapshots = new WorkflowSnapshotRepository(tx);
+  let storedBinding: Awaited<ReturnType<WorkflowSnapshotRepository['forRun']>>;
+  let hasAssociationColumn = true;
+  try {
+    const snapshotRows = await tx.query<{ workflow_snapshot_json: string | null }>(
+      `SELECT workflow_snapshot_json FROM flow_runs WHERE flow_id = ?${locked(tx)}`, [parent.flow_id]);
+    storedBinding = snapshotRows[0]?.workflow_snapshot_json
+      ? parseWorkflowSnapshotBinding(snapshotRows[0].workflow_snapshot_json) : null;
+  } catch (error) {
+    if (!missingWorkflowSnapshotColumn(error)) throw error;
+    hasAssociationColumn = false;
+    storedBinding = null;
+  }
+  if (!hasAssociationColumn) {
+    // Externally provisioned databases may run current code before migration v145;
+    // deployment-bound runs still have an immutable publish-history source. Draft
+    // or saved snapshots must wait for the association column rather than trust
+    // mutable state_json as a substitute registration receipt.
+    if (Number(parent.workflow_version ?? 0) <= 0 || Number(parent.workflow_deploy_number ?? 0) <= 0) {
+      throw conflict('Parent workflow snapshot is unavailable');
+    }
+    const resolved = await snapshots.forRun(parent.flow_id);
+    storedBinding = resolved;
+    if (storedBinding?.status === 'resolved' && storedBinding.snapshot.kind !== 'deployment') {
+      storedBinding = null;
+    }
+  }
+  if (!storedBinding || storedBinding.status !== 'resolved') throw conflict('Parent workflow snapshot is unavailable');
   let snapshot;
   try { snapshot = await snapshots.read(storedBinding.snapshot); } catch { throw conflict('Parent workflow snapshot is not immutable'); }
   const executor = findNodeExecutor(snapshot.workflowSpec, relation.parent_node_id);
