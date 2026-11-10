@@ -96,7 +96,7 @@ class DeviceAdapterTransport(Plugin, Protocol):
         Raises:
             DeviceAdapterEndpointNotFoundError: The runtime has no such endpoint.
             DeviceAdapterHTTPStatusError: The runtime returned another HTTP error.
-            DeviceAdapterTimeoutError: When an explicit ``timeout`` is exceeded.
+            DeviceAdapterTimeoutError: When the request times out (either via an explicit ``timeout`` or the transport's default timeout).
             ValueError: On transport/HTTP failure (prod impl), so callers
                 can surface a uniform error envelope.
         """
