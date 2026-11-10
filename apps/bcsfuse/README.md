@@ -1,5 +1,12 @@
 # BCSFuse - Open Source Runtime Candidate
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
 ## Knowledge navigation
 
 Public BCSFuse owns the shared search core, provider contracts and TC application; OCB owns its enterprise adapters and assembly.

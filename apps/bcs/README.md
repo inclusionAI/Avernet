@@ -1,5 +1,12 @@
 # BCS — Bot Coordination Service
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
 ## Knowledge navigation
 
 Public BCS owns coordination contracts, services, adapters and reusable plugins; OCB supplies the enterprise composition and internal providers.

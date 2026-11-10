@@ -3,8 +3,8 @@
 Use one repository map and one README per app as the entry points. Keep detailed
 knowledge beside its owner and link existing contracts instead of copying them.
 Backend, BaaS, BCS and BCSFuse initialize the same app-level entry points:
-`README.md`, `AGENTS.md`, `docs/flows/README.md`,
-`docs/diagnostics/README.md`, and `specs/README.md`. Populate them with
+`README.md`, `AGENTS.md`, `docs/agents/`, `docs/arch/`, `docs/adr/`,
+`docs/flows/README.md`, `docs/diagnostics/README.md`, and `specs/README.md`. Populate them with
 verified existing knowledge and links; add topic pages when supported content
 exists. Other apps retain their current documentation until deliberately brought
 into this layout.
@@ -21,6 +21,9 @@ into this layout.
 | `docs/flows/` | Important business flows spanning apps: participants, contracts, state changes and failure branches. |
 | App `README.md` | The app's purpose, interfaces, source layout, assembly, knowledge navigation and verification. |
 | App `AGENTS.md` | Additional working rules and applicable knowledge entry points. |
+| App `docs/agents/` | App-specific knowledge standard and access to shared templates. |
+| App `docs/arch/` | App-scoped architecture constraints and existing contract navigation. |
+| App `docs/adr/` | Durable app-scoped decisions and their lifecycle. |
 | App `docs/flows/` | Complex internal flows, when they need their own page. |
 | App `docs/diagnostics/` | Symptoms, candidate causes, distinguishing evidence, next actions and limitations. |
 | Domain `README.md` or `CONTEXT.md` | Local responsibilities, provided/consumed contracts, dependency boundaries and change impact. |
@@ -43,6 +46,8 @@ Tool-specific instruction files point to shared guidance rather than repeating i
 | `docs/adr/` | Routine task lists, transient observations or duplicate implementation guides. |
 | `docs/flows/` and app flow pages | Complete source listings, raw incidents or unverified runtime events. |
 | App README | Complete specifications, duplicated domain contracts or private runtime records. |
+| App knowledge standard/templates | Duplicated global rules, private evidence or facts owned by contracts. |
+| App architecture/ADRs | Unverified incidents, task plans or copies of system-wide decisions. |
 | App diagnostics | Credentials, raw production data, unsupported root causes or unauthorized operational actions. |
 | Domain README/CONTEXT | Entire system workflows or rules that override the architecture constitution. |
 | `specs/` | Inferred deployment status, rewritten historical evidence or copies of all current documentation. |

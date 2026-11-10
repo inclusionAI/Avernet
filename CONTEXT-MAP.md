@@ -51,6 +51,9 @@ in place; add topic pages where supported knowledge exists.
     ├── README.md                 # App entry and knowledge navigation
     ├── AGENTS.md                 # App-specific rules
     ├── docs/
+    │   ├── agents/               # App knowledge standard and templates
+    │   ├── arch/                 # App architecture constraints
+    │   ├── adr/                  # App-scoped decisions
     │   ├── flows/README.md       # App-local flow index
     │   └── diagnostics/README.md # App-local diagnostic index
     ├── specs/README.md           # Change intent, decisions and evidence

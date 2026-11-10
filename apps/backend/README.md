@@ -1,5 +1,12 @@
 # Backend development guide
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
 The public `agentclaw.community` backend provides bot lifecycle, sessions, chat,
 and workspace management. It builds and tests without `agentclaw.corp`.
 This guide applies to the `apps/backend/` layout, checked on 2026-10-26.
