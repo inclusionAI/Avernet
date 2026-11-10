@@ -17,7 +17,8 @@ type Child = ObjectValue & {
 };
 type Group = ObjectValue & {
   parentFlowId: string; groupNodeId: string; groupExecutionId: string; revision: number;
-  status: string; deadlineAt: string; childWorkflow: ObjectValue; childPublishedVersion?: number; children: Child[];
+  status: string; deadlineAt: string | null; childWorkflow: ObjectValue; childPublishedVersion?: number;
+  invocation?: ObjectValue; children: Child[];
 };
 type RunRow = { flow_id: string; workflow_id: string; status: string; origin_session_key: string | null; state_json: string | null };
 export type FanoutChildRecord = {
@@ -146,17 +147,31 @@ function validateGroup(value: unknown, parentFlowId: string, nodeId: string): as
   valid(value.schemaVersion === 'fanout.v1' && value.kind === 'subworkflowFanoutState', 'Unsupported fanout schema');
   valid(value.parentFlowId === parentFlowId && value.groupNodeId === nodeId && text(value.groupExecutionId), 'Invalid group identity');
   valid(integer(value.revision) && groupStatuses.has(String(value.status)), 'Invalid group revision or status');
-  valid(timestamp(value.createdAt) && timestamp(value.deadlineAt), 'Invalid group timestamps');
+  const singleInvocation = value.invocation !== undefined;
+  valid(timestamp(value.createdAt) && (singleInvocation ? (value.deadlineAt === null || timestamp(value.deadlineAt)) : timestamp(value.deadlineAt)), 'Invalid group timestamps');
   for (const key of ['sealedAt', 'cancelRequestedAt', 'cancelDeadlineAt']) valid(value[key] === null || timestamp(value[key]), `Invalid ${key}`);
   const config = value.config;
   valid(object(config) && config.schemaVersion === 'fanout.v1', 'Invalid fanout config');
   valid(config.successPolicy === 'all_done' && config.finishMode === 'wait_all' && config.resultPolicy === 'collect_all', 'Unsupported fanout policy');
   valid((text(config.items) || (Array.isArray(config.items) && config.items.every(object)))
     && Array.isArray(config.itemIdFrom) && config.itemIdFrom.length > 0 && config.itemIdFrom.every(text), 'Invalid fanout items');
-  valid(integer(config.concurrency, 1) && typeof config.groupTimeoutSeconds === 'number' && Number.isFinite(config.groupTimeoutSeconds)
-    && config.groupTimeoutSeconds > 0 && (config.cancelGraceSeconds === undefined || (typeof config.cancelGraceSeconds === 'number'
+  valid(integer(config.concurrency, 1)
+    && (singleInvocation
+      ? (config.groupTimeoutSeconds === undefined || (typeof config.groupTimeoutSeconds === 'number' && Number.isFinite(config.groupTimeoutSeconds) && config.groupTimeoutSeconds > 0))
+      : (typeof config.groupTimeoutSeconds === 'number' && Number.isFinite(config.groupTimeoutSeconds) && config.groupTimeoutSeconds > 0))
+    && (config.cancelGraceSeconds === undefined || (typeof config.cancelGraceSeconds === 'number'
     && Number.isFinite(config.cancelGraceSeconds) && config.cancelGraceSeconds > 0)), 'Invalid fanout limits');
   valid(value.childPublishedVersion === undefined || integer(value.childPublishedVersion, 1), 'Invalid child published version');
+  if (value.invocation !== undefined) {
+    valid(object(value.invocation), 'Invalid single-subworkflow invocation');
+    const invocationKeys = Object.keys(value.invocation);
+    valid(invocationKeys.every(key => ['schemaVersion', 'parentAttempt', 'parentExecutionId', 'onFailure'].includes(key))
+      && invocationKeys.includes('schemaVersion') && invocationKeys.includes('parentAttempt')
+      && invocationKeys.includes('parentExecutionId'), 'Invalid single-subworkflow invocation');
+    valid(value.invocation.schemaVersion === 'subworkflow.single.v1' && integer(value.invocation.parentAttempt, 1)
+      && text(value.invocation.parentExecutionId) && (value.invocation.onFailure === undefined || value.invocation.onFailure === 'skip'),
+      'Invalid single-subworkflow invocation');
+  }
   valid(object(value.childWorkflow) && text(value.childWorkflow.id)
     && Array.isArray(value.childWorkflow.nodes) && value.childWorkflow.nodes.every(node => object(node) && text(node.id) && object(node.executor)), 'Invalid child workflow snapshot');
   if (value.childResolved !== undefined) {
@@ -229,7 +244,7 @@ function storedGroup(state: ObjectValue, parentFlowId: string, nodeId: string): 
 }
 function frozenGroup(g: Group): unknown {
   return { parentFlowId: g.parentFlowId, groupNodeId: g.groupNodeId, groupExecutionId: g.groupExecutionId,
-    createdAt: g.createdAt, deadlineAt: g.deadlineAt, config: g.config, childWorkflow: g.childWorkflow, childPublishedVersion: g.childPublishedVersion, childRelease: g.childRelease, childResolved: g.childResolved, inputDigest: g.inputDigest,
+    createdAt: g.createdAt, deadlineAt: g.deadlineAt, config: g.config, childWorkflow: g.childWorkflow, childPublishedVersion: g.childPublishedVersion, invocation: g.invocation, childRelease: g.childRelease, childResolved: g.childResolved, inputDigest: g.inputDigest,
     children: g.children.map(({ status: _status, result: _result, error: _error, nativeFlowId: _nativeFlowId, dispatchClaimToken: _dispatchClaimToken, ...identity }) => identity) };
 }
 /** Compare request-key hashes exactly as the ordinary association store does.
@@ -286,8 +301,8 @@ export class FanoutStateRepository {
   withAdmissionConfig(config?: FanoutAdmissionConfig): FanoutStateRepository {
     return new FanoutStateRepository(this.db, config);
   }
-  private deadlineGuard(deadlineAt?: string): { sql: string; params: unknown[] } {
-    if (deadlineAt === undefined) return { sql: '', params: [] };
+  private deadlineGuard(deadlineAt?: string | null): { sql: string; params: unknown[] } {
+    if (deadlineAt === undefined || deadlineAt === null) return { sql: '', params: [] };
     // Evaluate time in the mutation, not before a lock/connection wait. Parent
     // (and existing child) row locks are acquired before this statement starts.
     const now = this.db.dbType === 'sqlite'

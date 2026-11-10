@@ -8,6 +8,7 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { FanoutStateRepository } from "./fanout-state-repository.js";
+import { registerParentRelatedRun, type ParentRelation } from '../services/parent-related-run-registration.js';
 
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -139,6 +140,10 @@ export class FlowRunRepository {
     this.ordinaryRequests = new OrdinaryRunRequestService(db, async (tx, run) => {
       if (!await new FlowRunRepository(tx).insert(run)) throw new Error("Run persistence failed");
     });
+  }
+
+  registerParentRelatedRun(body: Record<string, unknown>, run: FlowRunInsert, relation: ParentRelation) {
+    return registerParentRelatedRun(this.db, body, run, relation);
   }
 
   insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
