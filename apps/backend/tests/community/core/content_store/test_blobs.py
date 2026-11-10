@@ -236,3 +236,19 @@ def test_any_exception_while_copying_forward_does_not_fail_the_read(tmp_path, mo
 
     monkeypatch.setattr(storage, "get_etag", _boom)
     assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY
+
+
+def test_a_damaged_object_is_not_repaired_by_a_later_write(tmp_path):
+    """Pinned limit: the existence check cannot see damage, so an operator deletes the object to heal it."""
+    storage = _fs_storage(tmp_path)
+    store = ObjectStorageBlobStore(storage)
+    store.write(DIGEST, BODY)
+    damaged = tmp_path / "objstore" / "content-store" / "blobs" / HEX[:2] / HEX
+    damaged.write_bytes(BODY[:5])
+
+    store.write(DIGEST, BODY)
+    assert store.read(DIGEST) == BODY[:5]  # the service's hash check refuses it
+
+    damaged.unlink()
+    store.write(DIGEST, BODY)
+    assert store.read(DIGEST) == BODY

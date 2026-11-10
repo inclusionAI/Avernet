@@ -37,6 +37,14 @@ still reading this store.
   store hands back bytes it can prove, or fails. It never re-fetches.
   `ensure_stored` writes bytes alone, for a caller holding bytes whose row
   outlived its blob.
+
+  One limit of the object-storage medium: a write is skipped whenever an
+  object already sits under the key, and the plugin contract exposes no object
+  size to compare. An object that is present but damaged is therefore not
+  repaired by a re-apply or a re-capture — `read` keeps failing its hash check
+  (`ContentIntegrityError`) until an operator deletes that object, after which
+  the next store of the same bytes writes it again. The local tree repairs a
+  wrong-sized file itself.
 - **Provenance** lives in `ac_manifest_content`
   (`sql/2026_08_31_manifest_content.sql`, ORM in `models.py`, repository in
   `core/repository/{protocols,implementations}/bot/content_store.py`): an
