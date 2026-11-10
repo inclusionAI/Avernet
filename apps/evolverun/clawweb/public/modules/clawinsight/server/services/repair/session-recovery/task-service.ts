@@ -260,6 +260,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     await this.mutate(taskId, version, value => {
       if (value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "旧执行不能提交 Owner 处理事项");
       if (value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，请按正常效果流程回报；优化建议写入完成总结，不再请求 Owner 处理");
+      if (input.reason === "configuration" && value.phase === "assess" && hasAssessmentDelivery(value)) {
+        this.fail(422, "已有本轮消息投递记录，请先进入 observe 回收效果，再确认配置缺项");
+      }
       const { executionId: _execution, reportSummary, ...request } = input;
       return { ...value, ...requestOwnerCooperation(value, request, requestId, this.now()),
         timeline: [...value.timeline, this.event("waiting", "agent", reportSummary ?? request.summary, { owner_request_id: requestId, phase: value.phase })] };
@@ -275,7 +278,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       const confirmed = confirmOwnerRequest(value, requestId, actor.userId, feedback, this.now());
       accepted = confirmed !== value;
       return accepted ? { ...value, ...confirmed, timeline: [...value.timeline,
-        this.event("owner_decision", "owner", "Owner 已反馈处理完成，等待自愈核验", { owner_request_id: requestId, feedback, phase: "assess" })] }
+        this.event("owner_decision", "owner", "Owner 已反馈处理完成，等待自愈核验", { owner_request_id: requestId, owner_request_reason: confirmed.ownerRequest!.reason, feedback, phase: "assess" })] }
         : { ...value, version: value.version + 1 }; // A concurrent duplicate still respects the store CAS contract.
     });
     // The durable state is the queue. Maintenance recovers a crash before this dispatch.
