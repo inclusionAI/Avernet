@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import FastAPI
@@ -383,3 +384,60 @@ async def test_content_boundary_preparing_logs_terminal_202(caplog):
     assert [record.event for record in records] == ["request", "success"]
     assert records[-1].status == 202
     assert records[-1].size_bytes is None
+
+
+def test_concurrent_registrations_keep_exact_session_scope(client):
+    http, root = client
+    (root / "shared.txt").write_bytes(b"shared workspace output")
+    keys = (
+        "agent:main:session:first:user:330429",
+        "agent:main:session:second:user:330429",
+    )
+
+    def register(key):
+        response = http.post(
+            "/api/session-files",
+            params={"sessionKey": key},
+            json={"workspace_relative_path": "shared.txt"},
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        views = list(pool.map(register, keys))
+    assert views[0]["resource_id"] != views[1]["resource_id"]
+    for index, (key, view) in enumerate(zip(keys, views)):
+        assert view["availability"] == "ready"
+        listed = http.get("/api/session-files", params={"sessionKey": key})
+        assert listed.status_code == 200
+        assert listed.json() == {"files": [view]}
+        resource = f"/api/session-files/{view['resource_id']}/content"
+        assert http.get(resource, params={"sessionKey": key}).content == b"shared workspace output"
+        assert http.get(resource, params={"sessionKey": keys[1 - index]}).status_code == 404
+
+
+def test_registered_file_missing_before_list_is_not_ready(client):
+    http, root = client
+    source = root / "vanishing.txt"
+    source.write_bytes(b"completed before registration")
+    params = {"sessionKey": "session:vanishing"}
+    response = http.post(
+        "/api/session-files",
+        params=params,
+        json={"workspace_relative_path": "vanishing.txt"},
+    )
+    assert response.status_code == 200
+    view = response.json()
+    assert view["availability"] == "ready"
+    source.unlink()
+    listed = http.get("/api/session-files", params=params)
+    assert listed.status_code == 200
+    files = listed.json()["files"]
+    assert len(files) == 1
+    assert files[0]["resource_id"] == view["resource_id"]
+    assert files[0]["availability"] == "missing"
+    content = http.get(
+        f"/api/session-files/{view['resource_id']}/content", params=params
+    )
+    assert content.status_code == 409
+    assert content.json()["detail"] == "resource_missing"

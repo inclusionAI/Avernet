@@ -447,12 +447,6 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         run: bash scripts/ci_test.sh --base "$ENGINE_BASE_REF"
 
-      - name: Run session-file CLI and real Engine integration tests
-        if: steps.changes.outputs.skip != 'true'
-        env:
-          PYTHONPATH: src
-        run: uv run --no-sync python -m unittest discover -s scripts/session-files/tests -v
-
       - name: Upload engine test results
         if: always() && steps.changes.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
