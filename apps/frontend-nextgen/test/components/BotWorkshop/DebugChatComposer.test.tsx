@@ -2,6 +2,7 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import type { ConversationComposerProps } from '@/capabilities/conversationComposer';
 import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
+import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
@@ -39,6 +40,9 @@ const file = {
   status: 'ready' as const,
   sizeBytes: 10,
   errorCode: null,
+  creatorType: null,
+  creatorName: null,
+  createdAt: null,
 };
 const onSend = jest.fn();
 const onClear = jest.fn().mockResolvedValue(undefined);
@@ -231,7 +235,7 @@ it('没有会话时禁用输入，生成中保留停止动作', () => {
 });
 
 it('卸载时取消上传，旧会话上传回调不向新输入框插入附件', async () => {
-  let ready: ((uploaded: typeof file) => void) | undefined;
+  let ready: ((uploaded: BotSessionFileView) => void) | undefined;
   jest.mocked(useBotSessionFileUpload).mockReturnValue({
     tasks: [],
     isUploading: false,
