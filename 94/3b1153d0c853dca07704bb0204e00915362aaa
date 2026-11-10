@@ -1,0 +1,21 @@
+docs/agents/git-workflow.md
+  s_47ed8e91e4b8af::t_256cfcd9e8b32c 9
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_41c68d7c5c1ea9 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "943b1153d0c853dca07704bb0204e00915362aaa",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
