@@ -137,9 +137,10 @@ def _event_projection_dict(projection: EventProjection) -> dict:
 def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
     """按事件顺序取最后一个 payload 携带整数 ``percent`` 的值。
 
-    输入是已经过 visibility 过滤的事件序列(先于 trunk 过滤),保证
-    ``trunk_events`` 开关不影响 percent(§12.2 #4),也不向非参与方
-    泄露 private 分支的执行进度。``bool`` 不是合法 percent,跳过。
+    输入是已经过 visibility 过滤、未做 trunk 过滤的完整可见事件序列
+    (get_status 从全量事件推导,§12.2 #4 / R6),保证 ``trunk_events``
+    开关不影响 percent,也不向非参与方泄露 private 分支的执行进度。
+    ``bool`` 不是合法 percent,跳过。
     """
     last_percent = None
     for record in events:
@@ -331,16 +332,18 @@ class ContextCollabService(ContextCollabServiceProtocol):
     ) -> ContextCollabStatusProjection:
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
 
-        ``repo.get_current_status`` 返回按 sequence 升序的全量事件;
-        visibility 过滤(G1)先于 G3 投影,统计与事件列表都只反映
-        actor 可见的事件。``trunk_events`` 只过滤事件条目,不改
-        current_snapshot / current_event / 统计(§12.2 #4)。返回的
+        Controller Ruling R6 / spec §12.2 #4:服务总是向仓储全量取事件
+        (``trunk_events=False``),percent / 统计 / current_event 一律从
+        完整可见事件推导;``trunk_events=True`` 只过滤返回的
+        ``task_progress.events[]`` 条目(服务层完成),不改
+        current_snapshot / current_event / 统计。visibility 过滤(G1)
+        先于推导,统计与列表都只反映 actor 可见的事件。返回的
         ``current_snapshot`` 用 ``build_progress`` 的实时投影替换落库
         progress(落库值只是最后一次写时的陈旧快照);``current_event``
         按 collet 行指针取投影条目,指针事件不可见时为 ``None``。
         """
         status = self._repository.get_current_status(
-            collab_context_id, trunk_events=trunk_events
+            collab_context_id, trunk_events=False
         )
         if status is None:
             raise ContextCollabNotFoundError(
@@ -350,11 +353,24 @@ class ContextCollabService(ContextCollabServiceProtocol):
         visible_events = self._authorizer.filter_visible_events(
             collet, status.events, context
         )
+        # 投影始终基于全量可见事件:current 指针落在分支事件上时,
+        # 事件状态与统计仍按真实 sequence 推导,不因 trunk 开关退化。
         projection = project_events(
             visible_events,
             current_event_id=collet.current_event_id,
-            trunk_events=trunk_events,
+            trunk_events=False,
         )
+        listed_projection = projection
+        if trunk_events:
+            trunk_event_ids = {
+                record.event_id
+                for record in visible_events
+                if record.is_trunk
+            }
+            listed_projection = [
+                entry for entry in projection
+                if entry.event_id in trunk_event_ids
+            ]
         progress = build_progress(
             projection,
             current_event_id=collet.current_event_id,
@@ -377,7 +393,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
             current_snapshot=snapshot,
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(
-                total_events=len(projection),
-                events=[_event_projection_dict(entry) for entry in projection],
+                total_events=len(listed_projection),
+                events=[
+                    _event_projection_dict(entry) for entry in listed_projection
+                ],
             ),
         )

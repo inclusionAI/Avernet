@@ -102,15 +102,16 @@ def _event(
     parent_event: str | None,
     visibility: str = "public",
     is_trunk: bool = True,
+    sequence_no: int | None = None,
     payload: dict | None = None,
 ) -> EventRecord:
-    """按 event_id 尾号推导 sequence_no 的最小事件构造器。"""
-    sequence_no = int(event_id[-3:])
+    """最小事件构造器;sequence_no 默认按 event_id 尾号推导。"""
+    resolved_sequence_no = sequence_no or int(event_id[-3:])
     return EventRecord(
         collab_context_id=COLLET_ID,
         event_id=event_id,
         request_id=f"req_{event_id}",
-        sequence_no=sequence_no,
+        sequence_no=resolved_sequence_no,
         parent_event=parent_event,
         is_trunk=is_trunk,
         event_kind=event_kind,
@@ -118,7 +119,7 @@ def _event(
         actor_ref=PRINCIPAL,
         visibility=visibility,
         payload=dict(payload or {}),
-        context_version_after=sequence_no,
+        context_version_after=resolved_sequence_no,
         occurred_at=OCCURRED_AT,
     )
 
@@ -314,19 +315,24 @@ class TestGetStatusHappyPath:
 
 
 class TestTrunkFilterIdentity:
-    """§12.2 #4:trunk_events 只过滤事件,不改 current_snapshot /
-    current_event / 统计。"""
+    """§12.2 #4 / Controller Ruling R6:trunk_events 只过滤
+    task_progress.events[] 条目,不改 current_snapshot / current_event /
+    统计 / percent —— 即使分支事件携带 percent、计入统计、甚至充当
+    current 指针。"""
 
     @staticmethod
-    def _branch_event() -> EventRecord:
-        return _event(
-            "evt_006",
-            event_kind="task.progress.updated",
-            primitive_type="Activity",
-            parent_event="evt_004",
-            is_trunk=False,
-            payload={"summary": "主干外的分支补充"},
-        )
+    def _branch_event(**overrides) -> EventRecord:
+        """主干外分支事件;字段可覆盖。"""
+        fields = {
+            "event_id": "evt_006",
+            "event_kind": "task.progress.updated",
+            "primitive_type": "Activity",
+            "parent_event": "evt_004",
+            "is_trunk": False,
+            "payload": {"summary": "主干外的分支补充"},
+        }
+        fields.update(overrides)
+        return _event(**fields)
 
     def test_trunk_flag_filters_events_only(self):
         _, service = _make_service(
@@ -351,6 +357,106 @@ class TestTrunkFilterIdentity:
         assert trunk.current_snapshot["progress"]["completed_count"] == 2
         assert trunk.current_snapshot["progress"]["active_count"] == 1
         assert trunk.current_event["event_id"] == "evt_004"
+
+    def test_branch_percent_does_not_drive_trunk_percent(self):
+        """分支事件携带 percent=80:percent 从全量可见事件推导,
+        不因 trunk 开关翻回主干上的 40。"""
+        _, service = _make_service(
+            events=_fixture_events()
+            + [self._branch_event(payload={"summary": "分支提交更多进展",
+                                           "percent": 80})]
+        )
+        full = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor()
+        )
+        trunk = service.get_status(
+            COLLET_ID, trunk_events=True, context=make_actor()
+        )
+
+        assert full.task_progress.total_events == 6
+        assert [
+            entry["event_id"] for entry in trunk.task_progress.events
+        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_005"]
+        assert full.current_snapshot["progress"]["percent"] == 80
+        assert trunk.current_snapshot["progress"]["percent"] == 80
+
+    def test_branch_completion_counts_do_not_shift(self):
+        """已完成分支事件(current 之前、非 Message):统计从全量可见
+        事件推导,completed_count 不因 trunk 开关回退。"""
+        fixture = _fixture_events()
+        events = [
+            fixture[0],  # evt_001 Task completed
+            fixture[1],  # evt_002 workspace Message(不计数)
+            self._branch_event(
+                event_id="evt_branch_003",
+                parent_event="evt_002",
+                sequence_no=3,
+                payload={"summary": "分支上的活动已完成"},
+            ),
+            fixture[3],  # evt_004 Activity active(current)
+            fixture[4],  # evt_005 Activity pending
+        ]
+        _, service = _make_service(events=events)
+        full = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor()
+        )
+        trunk = service.get_status(
+            COLLET_ID, trunk_events=True, context=make_actor()
+        )
+
+        # 主干视图只有 evt_001 计入 completed;全量推导把分支活动
+        # 也算进去 —— 两个开关都必须报告全量推导值。
+        assert full.current_snapshot["progress"]["completed_count"] == 2
+        assert trunk.current_snapshot["progress"]["completed_count"] == 2
+        assert full.current_snapshot["progress"] == (
+            trunk.current_snapshot["progress"]
+        )
+        assert trunk.task_progress.total_events == 4
+
+    def test_current_pointer_on_branch_event_stays_projected(self):
+        """current 指针落在分支事件上(最强场景):current_event、事件
+        状态、统计在两个开关下完全一致,主干条目不退化成全 pending。"""
+        _, service = _make_service(
+            collet=_collet(current_event_id="evt_006"),
+            events=_fixture_events() + [self._branch_event()],
+        )
+        full = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor()
+        )
+        trunk = service.get_status(
+            COLLET_ID, trunk_events=True, context=make_actor()
+        )
+
+        # current_event 都指向分支事件且为 active,不因 trunk 开关消失。
+        assert full.current_event == trunk.current_event
+        assert full.current_event is not None
+        assert full.current_event["event_id"] == "evt_006"
+        assert full.current_event["status"] == "active"
+
+        # 统计一致:current 之前的全部非 Message 事件(evt_001/003/004/005)
+        # 都计入 completed,分支事件计入 active。
+        assert full.current_snapshot == trunk.current_snapshot
+        progress = full.current_snapshot["progress"]
+        assert progress["completed_count"] == 4
+        assert progress["active_count"] == 1
+        assert progress["blocked_count"] == 0
+        assert progress["current_event_id"] == "evt_006"
+
+        # 列出的主干条目状态与全量视图一致,不退化成全 pending。
+        assert [
+            entry["event_id"] for entry in trunk.task_progress.events
+        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_005"]
+        assert [
+            entry["status"] for entry in trunk.task_progress.events
+        ] == ["completed"] * 5
+        assert [
+            (entry["event_id"], entry["status"])
+            for entry in trunk.task_progress.events
+        ] == [
+            (entry["event_id"], entry["status"])
+            for entry in full.task_progress.events
+            if entry["event_id"] != "evt_006"
+        ]
 
 
 class TestVisibilityFiltering:
@@ -386,6 +492,32 @@ class TestVisibilityFiltering:
         ] == ["evt_001", "evt_002", "evt_004", "evt_005"]
         # evt_002 可见但 Message 不计数;evt_003(private)不可见。
         assert result.current_snapshot["progress"]["completed_count"] == 1
+
+    def test_filtered_event_percent_does_not_drive_percent(self):
+        """不可见事件携带 percent 时不得驱动该 actor 的进度百分比。"""
+        events = _fixture_events()
+        events[4] = _event(
+            "evt_005",
+            event_kind="task.progress.updated",
+            primitive_type="Activity",
+            parent_event="evt_004",
+            visibility="private",
+            payload={"summary": "完成设计并准备提交 PR", "percent": 90},
+        )
+        _, service = _make_service(events=events)
+
+        outsider = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor("u_9999")
+        )
+        # 外人看不到 private evt_005,percent 停留在可见的 evt_004(40)。
+        assert outsider.task_progress.total_events == 2
+        assert outsider.current_snapshot["progress"]["percent"] == 40
+
+        principal = service.get_status(
+            COLLET_ID, trunk_events=False, context=make_actor()
+        )
+        # principal 可见全量,percent 取最后携带值的事件(evt_005 的 90)。
+        assert principal.current_snapshot["progress"]["percent"] == 90
 
     def test_invisible_current_event_is_none_but_pointer_kept(self):
         """current 事件本身不可见时投影为 None;collet 行指针不变。"""
