@@ -2,7 +2,7 @@
 // useGroupWorkspace / GroupWorkspaceArea(会话/群管理面板、成员面板、邀请、
 // membership 深链)原样保留;跨模块切换收口到 App Shell 一级导航,
 // 本页不再含二级视图切换。页内数据源不依赖展开的 chat 分支。
-import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
+import { serializeWorkspaceRoutePreserving } from '@/domain/workspaceRoute';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { GroupWorkspaceArea } from '@/pages/Workspace/GroupWorkspaceArea';
@@ -29,9 +29,10 @@ export default function CollaborationPage(): JSX.Element {
   }, [isDesktop]);
 
   // 群聊 Store → URL 投影(语义与旧 useWorkspacePage 的 group 投影一致,视图恒 group)。
+  // 契约外参数(如聚焦页 showReturn=false)不属于本路由,投影时保留。
   useEffect(() => {
     if (!urlHydrated) return;
-    const next = serializeWorkspaceRoute({
+    const next = serializeWorkspaceRoutePreserving(window.location.search, {
       currentIdentityId: activeIdentityId,
       groupId: selectedGroupId,
       sessionId: selectedSessionId,
