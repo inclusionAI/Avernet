@@ -4,6 +4,7 @@
 
 - [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
 - [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
 - [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
 
 

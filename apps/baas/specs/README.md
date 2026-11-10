@@ -5,3 +5,9 @@ Record the intent, scope, decisions, implementation plan, verification and actua
 Do not copy complete current contracts or private session records here. A completed task is not proof of integration or deployment. An existing spec explicitly referenced as a contract keeps that authority until a reviewed replacement is adopted.
 
 When a change yields verified reusable knowledge, update its owning documentation and navigation; retain the task-specific evidence in the spec. Follow the [repository knowledge standard](../../../docs/agents/knowledge-standard.md).
+
+## Existing change records
+
+These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
+
+No change records are indexed in this checkout yet.

@@ -12,3 +12,5 @@ Use the [repository knowledge standard](../../../../docs/agents/knowledge-standa
 
 Current entry: [Bot manager synchronization](bot-manager-sync.md). For runtime
 selection across components, see [Backend runtime targeting](../../../../docs/flows/backend-runtime-targeting.md).
+
+For the wider inventory of existing app documentation and domain context, see the [existing knowledge catalog](../agents/existing-knowledge.md). Check each entry's status and target version.

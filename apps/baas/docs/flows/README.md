@@ -12,3 +12,5 @@ For cross-app flows start at the [repository flow index](../../../../docs/flows/
 ## Record and exclude
 
 Record trigger, participants, state ownership, failure branches and evidence. Keep app-local implementation here and link cross-app flows; do not copy incident transcripts or credentials.
+
+For the wider inventory of existing app documentation and domain context, see the [existing knowledge catalog](../agents/existing-knowledge.md). Check each entry's status and target version.

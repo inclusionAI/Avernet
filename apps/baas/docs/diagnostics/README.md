@@ -13,3 +13,5 @@ Keep credentials, private runtime data and raw sessions out of repository knowle
 ## Record and exclude
 
 Record symptoms, competing causes, distinguishing evidence, next actions and limits. Do not store secrets, raw private incident records or unverified conclusions.
+
+For the wider inventory of existing app documentation and domain context, see the [existing knowledge catalog](../agents/existing-knowledge.md). Check each entry's status and target version.
