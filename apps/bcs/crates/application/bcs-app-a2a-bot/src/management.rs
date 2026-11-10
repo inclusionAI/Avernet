@@ -15,6 +15,7 @@ fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
             .map_err(|_| failure(Code::InvalidCard, "agent_card.name", "INVALID_NAME"))?
             .into(),
         bot_id: record.bot_uuid,
+        provider_bot_ref: record.provider_bot_ref,
         agent_card_url: record.agent_card_url,
         agent_card: record.agent_card,
     })
@@ -98,6 +99,7 @@ impl A2aBotManagement {
         {
             return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED"));
         }
+        policy::validate_provider_bot_ref(&command.provider_bot_ref)?;
         let (url, card) = self.public_load(command.source).await?;
         policy::validate_summary(command.summary.as_deref(), &card.raw)?;
         let outcome = self
@@ -107,7 +109,7 @@ impl A2aBotManagement {
                     provider_id,
                     provider_admin_token: command.provider_admin_token,
                     name: String::new(),
-                    provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),
+                    provider_bot_ref: command.provider_bot_ref,
                     owners: command.owners,
                     summary: command.summary,
                     webhook_url: None,
@@ -131,17 +133,14 @@ impl A2aBotManagement {
             .ok_or_else(|| failure(Code::InternalError, "", "REGISTERED_CARD_MISSING"))?;
         view(&provider_name, record)
     }
-    pub(super) async fn public_find(&self, token:&str, source_agent_id:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
+    pub(super) async fn public_find(&self, token:&str, provider_bot_ref:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
         let (provider,label)=self.public_provider(token).await?;
-        if source_agent_id.is_empty() || source_agent_id.chars().count()>256
-            || source_agent_id!=source_agent_id.trim() || source_agent_id.chars().any(char::is_control) {
-            return Err(failure(Code::InvalidRequest,"source_agent_id","INVALID_SOURCE_AGENT_ID"));
-        }
-        let Some(record)=self.core.get_by_source_agent_id(&provider,source_agent_id).await? else {return Ok(vec![])};
+        policy::validate_provider_bot_ref(provider_bot_ref)?;
+        let Some(record)=self.core.get_by_provider_ref(&provider,provider_bot_ref).await? else {return Ok(vec![])};
         let record=self.public_record_by_id(&provider,&record.bot_uuid).await?;
         // Re-read may race a deletion/reassignment; never return an unrelated source identity.
-        if policy::source_agent(&record.agent_card)?.is_none_or(|source|source.agent_id!=source_agent_id) {
-            return Err(failure(Code::TargetChanged,"source_agent_id","TARGET_CHANGED"));
+        if record.provider_bot_ref!=provider_bot_ref {
+            return Err(failure(Code::TargetChanged,"provider_bot_ref","TARGET_CHANGED"));
         }
         Ok(vec![view(&label,record)?])
     }

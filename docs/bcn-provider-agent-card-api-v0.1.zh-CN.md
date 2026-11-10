@@ -43,13 +43,14 @@
 | --- | --- | --- |
 | provider_name | string | 仅作为响应中的 BCN Provider 标识；`^[a-z][a-z0-9_-]{0,63}$`，环境内唯一 |
 | bot_id | string | BCN 分配的稳定 Bot 标识，管理对象的稳定身份；从注册响应保存，并用于资源路径 |
+| provider_bot_ref | string | 注册必填的平台稳定键，1～256 字节，仅 ASCII 字母、数字、_、-、.、:，不做大小写或前导零归一化；不可通过 Card 更新修改 |
 | agent_name | string | 等于已保存 Card.name；2～64 个 Unicode 码点，支持中文、区分大小写，无首尾空白或控制字符 |
 | agent_card_url | string 或响应中的 null | Card 的绝对 HTTP(S) URL；不是 Agent 调用接口地址；最长 2048 个字符 |
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |
 | owners | string[] | 注册必填且恰好一个元素；不带 human_ 前缀的所有者 ID；Provider 管理者负责归属授权，BCN 可为该 ID 建立 Human 记录 |
 | summary | string | 注册可选展示摘要，最长 4096 个 Unicode 码点；省略时取 Card.description，空字符串表示空摘要 |
 
-Agent 名称在同一 Provider 下唯一，按原文精确匹配。
+Agent 名称仅用于展示，可在同一 Provider 下重复。稳定身份是 bot_id；平台稳定键是 provider_bot_ref，同一环境和 Provider 下唯一。
 
 agent_card 与 agent_card_url 二选一。URL 方式要求地址在 10 秒内直接返回 200 和 Card JSON，不支持重定向或鉴权；URL 不含用户名、密码或片段，且须符合平台网络策略。
 
@@ -61,7 +62,7 @@ agent_card 与 agent_card_url 二选一。URL 方式要求地址在 10 秒内直
 
 | 字段 | 类型 | BCN 必填 | BCN 要求及用途 |
 | --- | --- | --- | --- |
-| name | string | 是 | 2～64 个 Unicode 码点，无首尾空白或控制字符；支持中文、区分大小写，在同一 Provider 下唯一；作为 agent_name，更新时同步改名 |
+| name | string | 是 | 2～64 个 Unicode 码点，无首尾空白或控制字符；支持中文、区分大小写，允许重名；作为 agent_name，更新时同步改名 |
 | description | string | 是 | 非空能力介绍；注册未传 summary 时用作摘要，届时须满足摘要 4096 字符限制；完整描述始终保留在 Card 中 |
 | version | string | 是 | 非空 Agent 软件版本，例如 1.0.0 |
 | supportedInterfaces | object[] | 是 | 至少一项；按偏好排序，BCN 选择首个支持且满足地址策略的接口；各项规则见下表 |
@@ -76,7 +77,7 @@ agent_card 与 agent_card_url 二选一。URL 方式要求地址在 10 秒内直
 | securityRequirements | object[] | 否 | 推荐 []；省略按无需应用层认证处理。若声明，只能接入有匿名可满足路径的 Agent；见 2.2.5 |
 | signatures | object[] | 否 | 本期无需填写，不提供签名验真 |
 
-Card 不接受用旧版顶层 url 或 protocolVersion 代替 supportedInterfaces。来源平台 agentId 放入约定扩展，不是 Card 顶层标准字段。
+Card 不接受用旧版顶层 url 或 protocolVersion 代替 supportedInterfaces。平台身份使用注册外层 provider_bot_ref，不是 Card 字段。
 
 #### 2.2.2 supportedInterfaces 每项
 
@@ -105,36 +106,22 @@ Card 不接受用旧版顶层 url 或 protocolVersion 代替 supportedInterfaces
 | required | boolean | 否 | 省略等价 false；true 且 BCN 不支持时拒绝接入；纯数据扩展填写 false |
 | params | object | 否 | 扩展数据；已支持扩展按规范校验，未知可选扩展保留 |
 
-**BCN 来源信息扩展**
+**BCN 来源分类扩展**
 
-BCN 通过一个来源信息扩展保存 `agentId` 和 `party`。这两个字段由 BCN 定义，不是 A2A 标准字段；它们放在同一条 `capabilities.extensions` 的 `params` 中。
+通用来源扩展仅保存可选 party，不再保存 agentId。Provider 平台身份在注册外层通过 provider_bot_ref 提供。完整规范见 [source-agent/v2](specs/a2a/extensions/source-agent/v2.md)。
 
-| 字段 | 含义 | 填写要求 | 示例 |
-| --- | --- | --- | --- |
-| agentId | Agent 在接入方原平台中的标识，用于关联、检索来源 Agent | 使用本扩展时必填。1～256 个 Unicode 字符，无首尾空白或控制字符，同一 BCN Provider 下唯一；保留大小写和前导零。登记后不能通过 Card 更新或刷新修改、删除 | order-agent-001 |
-| party | Agent 的来源类别，用于区分一方、二方和三方 | 可选，取值见下表；省略表示未分类，可随 Card 更新 | first_party |
 
-| party 取值 | 分类 | 含义（以所属 Provider 为参照） |
-| --- | --- | --- |
-| first_party | 一方 | Provider 自身提供的 Agent |
-| second_party | 二方 | 与该 Provider 有直接合作关系的合作方提供的 Agent |
-| third_party | 三方 | 该 Provider 接入的其他外部 Agent |
-
-`agentId` 不代替 BCN 内部 ID 或 AgentCard.name；查询方结合响应外层的 provider_name 区分不同 Provider 的来源 Agent。`party` 仅表示来源分类，不代表权限或已通过平台认证。
-
-以下为完整扩展结构，放入 `capabilities.extensions` 数组。`uri` 由 BCN 统一发布，所有接入方填写同一个值；固定使用下方 Avernet 仓库规范地址。整个扩展可省略；若使用则填写 agentId，required 固定为 false。
+e.g. 放入 capabilities.extensions：
 
 ```json
 {
-  "uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v1.md",
-  "description": "Agent 来源标识及分类",
+  "uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md",
   "required": false,
-  "params": {
-    "agentId": "order-agent-001",
-    "party": "first_party"
-  }
+  "params": {"party": "first_party"}
 }
 ```
+
+party 可选：first_party（自身）、second_party（合作方）、third_party（其他外部来源）。分类不是权限或认证等级；允许修改或移除。params 必须为对象，party 不接受 null/空字符串；v1 以及通用 params.agentId 不再接受。未知附加字段仍保留。
 
 #### 2.2.4 skills 每项
 
@@ -162,6 +149,7 @@ BCN 通过一个来源信息扩展保存 `agentId` 和 `party`。这两个字段
 ```json
 {
   "provider_name": "order-service",
+  "provider_bot_ref": "order-agent-001",
   "bot_id": "bcn-bot-example",
   "agent_name": "订单助手",
   "agent_card_url": null,
@@ -207,6 +195,7 @@ Content-Type: application/json
 
 ```json
 {
+  "provider_bot_ref": "order-agent-001",
   "owners": ["owner-user-id"],
   "agent_card": {
     "name": "订单助手",
@@ -237,12 +226,13 @@ Content-Type: application/json
 
 | 请求字段 | 必填 | 规则 |
 | --- | --- | --- |
+| provider_bot_ref | 是 | 平台稳定键；重复注册不覆盖已有 Bot |
 | owners | 是 | 见公共定义 |
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
 
-名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下名称或已登记来源 agentId 重复时返回 409。
+名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下 provider_bot_ref 已存在时返回 409 / PROVIDER_BOT_REF_CONFLICT，不覆盖已有 Card。缺少或非法 ref 返回 400，owners 校验保持原规则。
 
 ## 4. 查询 AgentCard
 
@@ -307,8 +297,8 @@ Content-Type: application/json
 | 提交内容 | 提交完整 agent_card 或 agent_card_url，不能同时传；若只改 visibility 则都不传。不做 Card 部分合并、不提供 PATCH |
 | 更新范围 | 更新 Card 及来源，不修改 owners、summary；可选 visibility 为 protected/public，省略保持原值，也可只提交 visibility |
 | 来源切换 | 直接提交 Card 后清除旧 URL、停止自动刷新；提交 URL 后按新地址刷新 |
-| 名称变化 | 同步更新 agent_name，后续仍使用原 bot_id；重名则更新失败 |
-| 来源标识 | 已登记的 agentId 不允许修改或移除 |
+| 名称变化 | 同步更新 agent_name，后续仍使用原 bot_id；允许与其他 Bot 重名 |
+| 身份与分类 | provider_bot_ref 不属于 Card 更新范围；party 可以更新或移除 |
 | 并发更新 | 无需先查询版本；以最后成功写入为准，失败不部分更新 |
 | 已有任务 | 保持原任务关联，不切换到新接口地址 |
 
@@ -328,16 +318,13 @@ Content-Type: application/json
 
 直接提交 Card 的 Agent 没有来源 URL，应使用 PUT 更新。刷新结果若被其他更新取代，返回 409 / REFRESH_SUPERSEDED。
 
-## 6.1 按来源稳定键找回 Bot ID
+## 6.1 按平台稳定键找回 Bot ID
 
-```http
-GET /a2a/agents?source_agent_id=order-agent-001
-Authorization: Bearer <provider_admin_token>
-```
+GET /a2a/agents?provider_bot_ref=order-agent-001，携带 Provider 管理 Bearer token。
 
-source_agent_id 对应来源扩展 params.agentId：必填、1～256 字符、无首尾空白或控制字符，精确匹配，保留大小写与前导零。仅搜索 token 所属 Provider 下有效 gateway Agent。响应为 `{"items": [...]}`，包含 0 或 1 个 2.3 所示的管理对象；无结果返回 200 和空 items。省略筛选不支持全量列举。无需重新注册即可恢复 bot_id；此接口不是 upsert，也不提供注册幂等。未声明来源 agentId 的 Agent 无法按此条件找回。
+参数必填，按现有 ref 字符规则精确匹配；仅搜索 token 所属 Provider 的有效 gateway Bot。响应为 {"items": [...]}，0 或 1 个完整管理对象（包含 provider_bot_ref 和 bot_id）。无匹配返回 200/空列表；不支持 source_agent_id 别名或全量列举。查询现有绑定列，不扫描 Card JSON，不提供注册 upsert。
 
-本期不提供 versions 或历史快照接口；Card.version 是接入方软件版本，不是 BCS 历史版本号。
+本期无版本历史或 PATCH。Card.version 与内部 CAS revision 都不是历史快照接口。
 
 ## 7. 错误响应
 
@@ -346,12 +333,12 @@ BCN 产生的非 2xx 响应使用 `application/json`：
 ```json
 {
   "error": {
-    "code": "BOT_NAME_CONFLICT",
-    "message": "同一 Provider 下已存在该 Agent 名称",
+    "code": "PROVIDER_BOT_REF_CONFLICT",
+    "message": "同一 Provider 下已存在该平台标识",
     "request_id": "req-example-001",
     "details": [
       {
-        "field": "agent_card.name",
+        "field": "provider_bot_ref",
         "reason": "ALREADY_EXISTS"
       }
     ]
@@ -376,9 +363,7 @@ details.field 指出错误字段，例如 agent_card.name；reason 为原因标�
 | 404 | BOT_NOT_FOUND | 当前管理范围内未找到该 Bot ID |
 | 405 | METHOD_NOT_ALLOWED | 方法不支持；响应含 Allow |
 | 406 | NOT_ACCEPTABLE | Accept 不接受 JSON |
-| 409 | BOT_NAME_CONFLICT | 当前有效名称已占用 |
-| 409 | SOURCE_AGENT_CONFLICT | 同 Provider 下来源 agentId 重复 |
-| 409 | SOURCE_AGENT_CHANGE_NOT_ALLOWED | 试图修改或移除已登记来源标识 |
+| 409 | PROVIDER_BOT_REF_CONFLICT | 同 Provider 下平台稳定键已登记，先按 ref 找回 ID 再显式更新 |
 | 409 | TARGET_CHANGED | 请求期间目标被移除、绑定变化或持续并发冲突；按原 ID 查询后重试 |
 | 409 | CARD_URL_REQUIRED | 内联 Card 无法通过 URL 刷新 |
 | 409 | REFRESH_SUPERSEDED | 刷新结果已过期，没有应用；先查询最新配置 |

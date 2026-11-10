@@ -313,7 +313,7 @@ async fn named_registration_returns_stable_id_for_public_card_management() {
     let (chain,service,_,_)=fixture().await;
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
     let mut raw=validated().raw;raw["name"]=json!("订单助手");
-    let result=service.register_named(RegisterNamedA2aBotCommand {provider_name:"orders".into(),
+    let result=service.register_named(RegisterNamedA2aBotCommand {provider_bot_ref:"remote".into(),provider_name:"orders".into(),
         provider_admin_token:"test-admin".into(),owners:vec!["delegated-owner".into()],summary:None,
         source:A2aCardSource::Inline(raw.clone()),now_ms:1000}).await.unwrap();
     assert_eq!(result.card.bot_name,"订单助手");assert_eq!(result.card.provider_name,"orders");
@@ -331,16 +331,16 @@ async fn named_registration_returns_stable_id_for_public_card_management() {
 }
 
 #[tokio::test]
-async fn new_provider_reference_cannot_register_an_existing_card_name() {
+async fn new_provider_reference_can_register_an_existing_card_name() {
     let (chain,service,_,_)=fixture().await;
     let first=service.register_provider_bot(command(),"https://example.org/card.json".into(),1000).await.unwrap();
     let mut second=command();second.provider_bot_ref="another-reference".into();
-    assert!(matches!(service.register_provider_bot(second,"https://example.org/card.json".into(),2000).await,
-        Err(ServiceError::Conflict(_))));
+    let second=service.register_provider_bot(second,"https://example.org/card.json".into(),2000).await.unwrap();
+    assert_ne!(first.bot_uuid,second.bot_uuid);
     let rows=chain.db.query(DbStatement::new("SELECT bot_uuid FROM bcs_bots WHERE actor_kind='bot'")).await.unwrap();
-    assert_eq!(rows.len(),1);assert_eq!(rows[0].get_string("bot_uuid").unwrap().as_deref(),Some(first.bot_uuid.as_str()));
+    assert_eq!(rows.len(),2);
     let rows=chain.db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bot_authority_changes")).await.unwrap();
-    assert_eq!(rows[0].get_i64("n").unwrap(),Some(1));
+    assert_eq!(rows[0].get_i64("n").unwrap(),Some(2));
 }
 
 #[path = "support/public_management.rs"]

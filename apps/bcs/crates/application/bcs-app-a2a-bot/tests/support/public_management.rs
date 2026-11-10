@@ -13,9 +13,9 @@ fn card(name: &str, id: Option<&str>) -> serde_json::Value {
         "supportedInterfaces":[{"url":"https://example.org/agent","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
         "capabilities":{"streaming":true},"defaultInputModes":["text/plain"],"defaultOutputModes":["text/plain"],
         "skills":[{"id":"query","name":"查询","description":"完整技能说明","tags":[],"custom":{"keep":true}}]});
-    if let Some(id) = id {
+    if id.is_some() {
         card["capabilities"]["extensions"] = json!([{"uri":SOURCE_AGENT_EXTENSION,"required":false,
-        "params":{"agentId":id,"party":"first_party","future":[1,2]}}]);
+        "params":{"party":"first_party","future":[1,2]}}]);
     }
     card
 }
@@ -32,7 +32,7 @@ async fn public_fixture() -> (RegistrationChain, A2aBotManagement) {
 }
 fn request(raw: serde_json::Value) -> RegisterAgentCommand {
     RegisterAgentCommand {
-        visibility: Default::default(),
+        provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),        visibility: Default::default(),
         provider_admin_token: "test-admin".into(),
         owners: vec!["delegated-owner".into()],
         summary: None,
@@ -58,7 +58,7 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(registered.agent_name, "订单助手");
     let serialized = serde_json::to_value(&registered).unwrap();
     assert!(serialized.get("bot_runtime_token").is_none());
-    assert_eq!(serialized.as_object().unwrap().len(), 5);
+    assert_eq!(serialized.as_object().unwrap().len(), 6);
     assert_eq!(
         service
             .get_agent_by_id("test-admin", &registered.bot_id)
@@ -101,57 +101,40 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
 }
 
 #[tokio::test]
-async fn source_conflicts_and_id_changes_roll_back_entire_operation() {
-    let (chain, service) = public_fixture().await;
-    let first = service
-        .register_agent(request(card("订单助手", Some("001Ab"))))
-        .await
-        .unwrap();
-    assert_eq!(
-        code(
-            service
-                .register_agent(request(card("另一个助手", Some("001Ab"))))
-                .await
-                .unwrap_err()
-        ),
-        Code::SourceAgentConflict
-    );
-    for id in [None, Some("001ab"), Some("1Ab")] {
-        assert_eq!(
-            code(
-                service
-                    .update_agent_by_id(
-                        "test-admin",
-                        &first.bot_id,
-                        A2aCardSource::Inline(card("不应改名", id))
-                    )
-                    .await
-                    .unwrap_err()
-            ),
-            Code::SourceAgentChangeNotAllowed
-        );
-        assert_eq!(
-            service
-                .get_agent_by_id("test-admin", &first.bot_id)
-                .await
-                .unwrap()
-                .agent_card,
-            first.agent_card
-        );
+async fn same_names_are_allowed_but_provider_refs_conflict_and_party_can_change() {
+    let (_,service)=public_fixture().await;
+    let mut command=request(card("同名助手",Some("unused")));
+    command.provider_bot_ref="platform-001".into();
+    let first=service.register_agent(command.clone()).await.unwrap();
+    assert!(matches!(service.register_agent(command).await,Err(ServiceError::Conflict(_))));
+    let mut other=request(card("同名助手",None));other.provider_bot_ref="platform-002".into();
+    let second=service.register_agent(other).await.unwrap();
+    assert_ne!(first.bot_id,second.bot_id);
+    let raw=card("同名助手",None);
+    let updated=service.update_agent_by_id("test-admin",&first.bot_id,A2aCardSource::Inline(raw.clone())).await.unwrap();
+    assert_eq!(updated.provider_bot_ref,"platform-001");
+    assert_eq!(updated.agent_card,raw);
+    let found=service.find_agents_by_provider_ref("test-admin","platform-001").await.unwrap();
+    assert_eq!(found[0].bot_id,first.bot_id);
+    assert_eq!(service.resolve_provider_ref_target("orders","platform-001").await.unwrap(),first.bot_id);
+    assert_eq!(service.resolve_provider_ref_target("orders","platform-002").await.unwrap(),second.bot_id);
+    assert_eq!(service.get_agent_by_id("test-admin",&second.bot_id).await.unwrap().agent_card,card("同名助手",None));
+}
+
+#[tokio::test]
+async fn public_registration_requires_owner_and_valid_platform_ref_before_fetch() {
+    let (chain,service)=public_fixture().await;
+    for reference in ["", " bad", "bad ", "bad/ref", "中文", &"x".repeat(257)] {
+        let mut command=request(card("注册检查",None));
+        command.provider_bot_ref=reference.into();
+        command.source=A2aCardSource::Url("not-a-url".into());
+        assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidRequest);
     }
-    let rows = chain
-        .db
-        .query(DbStatement::new(
-            "SELECT COUNT(*) AS n FROM bcs_bots WHERE actor_kind='bot'",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(rows[0].get_i64("n").unwrap(), Some(1));
-    // Exact-string uniqueness preserves case and leading zeros.
-    service
-        .register_agent(request(card("大小写不同", Some("001ab"))))
-        .await
-        .unwrap();
+    for owners in [vec![],vec!["".into()],vec!["owner".into(),"another".into()]] {
+        let mut command=request(card("注册检查",None));command.owners=owners;
+        assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidOwner);
+    }
+    assert_empty(&chain).await;
 }
 
 #[tokio::test]
@@ -189,21 +172,14 @@ async fn public_admission_rejects_required_authentication_and_invalid_fields_bef
 }
 
 #[tokio::test]
-async fn parallel_registrations_cannot_commit_duplicate_source_ids() {
-    let (chain, service) = public_fixture().await;
-    let (a, b) = tokio::join!(
-        service.register_agent(request(card("助手甲", Some("same")))),
-        service.register_agent(request(card("助手乙", Some("same"))))
-    );
-    assert_ne!(a.is_ok(), b.is_ok(), "exactly one source owner must commit");
-    let rows = chain
-        .db
-        .query(DbStatement::new(
-            "SELECT COUNT(*) AS n FROM bcs_bots WHERE actor_kind='bot'",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(rows[0].get_i64("n").unwrap(), Some(1));
+async fn parallel_registrations_cannot_commit_duplicate_provider_refs() {
+    let (chain,service)=public_fixture().await;
+    let mut left=request(card("助手甲",None));left.provider_bot_ref="same-ref".into();
+    let mut right=request(card("助手乙",None));right.provider_bot_ref="same-ref".into();
+    let (a,b)=tokio::join!(service.register_agent(left),service.register_agent(right));
+    assert_ne!(a.is_ok(),b.is_ok());
+    let rows=chain.db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_bots WHERE actor_kind='bot'")).await.unwrap();
+    assert_eq!(rows[0].get_i64("n").unwrap(),Some(1));
 }
 
 #[tokio::test]

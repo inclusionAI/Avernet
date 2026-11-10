@@ -75,8 +75,8 @@ impl A2aBotManagement {
 impl A2aBotManagementService for A2aBotManagement {
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)
         ->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.public_register(command).await}
-    async fn find_agents_by_source_id(&self,token:&str,source_agent_id:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
-        self.public_find(token,source_agent_id).await
+    async fn find_agents_by_provider_ref(&self,token:&str,provider_bot_ref:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
+        self.public_find(token,provider_bot_ref).await
     }
     async fn get_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.public_get(token,bot_id).await
@@ -91,13 +91,14 @@ impl A2aBotManagementService for A2aBotManagement {
         self.public_refresh(token,bot_id).await
     }
 
-    async fn resolve_named_target(&self,provider:&str,bot:&str)->ServiceResult<String> {
+    async fn resolve_provider_ref_target(&self,provider:&str,bot:&str)->ServiceResult<String> {
         if !bcs_service_api::types::a2a_names::valid_provider_name(provider) {
             return Err(ServiceError::InvalidOperation {message:"invalid provider_name".into(),request_id:None});
         }
         let provider=self.providers.get_provider_by_slug(provider).await?
             .filter(|value|value.enabled).ok_or_else(||ServiceError::ProviderNotFound(provider.into()))?;
-        let record=self.core.get_by_name(&provider.provider_id,bot).await?
+        bcs_service_api::types::a2a_bot::a2a_management::validate_provider_bot_ref(bot)?;
+        let record=self.core.get_by_provider_ref(&provider.provider_id,bot).await?
             .ok_or_else(||ServiceError::BotNotFound(bot.into()))?;
         self.core.provider_binding(&provider.provider_id,&record.bot_uuid).await?;
         // Failed target lookups must not mutate another Provider. The pin still

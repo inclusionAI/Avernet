@@ -155,7 +155,10 @@ Harness rerun/deployment is claimed; the existing import-rule gate still fails
 identically on HEAD and this worktree.
 
 
-## Provider Bot name preflight (no new migration)
+## Provider Bot name preflight (historical, superseded for Card registration)
+
+The provider-ref revision below supersedes A2A name/source uniqueness and related
+preflight query budgets in this document. Ordinary non-Card Bot admission is unchanged.
 
 Registration rejects names already used by an active Bot in the same environment
 and Provider, including legacy non-A2A Bots. Different Providers may reuse names.
@@ -174,8 +177,8 @@ Public management uses GET/PUT `/a2a/agents/{bot_id}/agent-card` and POST
 `/a2a/agents/{bot_id}/agent-card:refresh`. POST `/a2a/agents` returns the stable
 `bot_id` and Location points to the ID resource. PUT body contains only Card
 source and/or visibility; refresh body is empty or {}. Old name-management routes
-are removed, not aliased. GET `/a2a/agents?source_agent_id=...` recovers zero or
-one Provider-scoped result by exact immutable source extension agentId. No version
+are removed, not aliased. GET `/a2a/agents?provider_bot_ref=...` recovers zero or
+one Provider-scoped result by exact platform reference in the existing binding. No version
 history or PATCH is introduced. Existing Provider-ID management remains ID-based;
 Provider-name registration also exposes bot_id. Named chat is a separate contract.
 Fresh validation is required; historical evidence above does not validate these changes.
@@ -188,3 +191,15 @@ if appropriate, or update the Card to declare the Bearer authentication the Agen
 actually enforces. Having an old Provider downlink token does not by itself make
 an anonymous Card authenticated. Never repair this by silently downgrading a
 failed authenticated request.
+
+
+## Provider-ref registration revision
+
+Public registration requires caller-supplied provider_bot_ref and returns it with bot_id.
+Same Provider/ref conflicts rather than updating; existing atomic binding uniqueness and
+rollback remain authoritative. Names are display-only and may repeat. Card admission and
+updates no longer perform name or source-agent uniqueness reads/locks. No new table,
+index or data migration is introduced. Provider chat resolves provider_bot_ref, never name.
+The optional source extension is now [v2](extensions/source-agent/v2.md), containing
+mutable party classification, not agentId. Owners remain required under existing policy.
+See the [public contract](../../bcn-provider-agent-card-api-v0.1.zh-CN.md) for input limits.

@@ -19,19 +19,20 @@ fn record() -> A2aBotRecord {
 
 #[async_trait]
 impl A2aBotManagementService for Management {
-    async fn find_agents_by_source_id(&self,token:&str,source_agent_id:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
-        assert_eq!(source_agent_id,"001Ab");
+    async fn find_agents_by_provider_ref(&self,token:&str,provider_bot_ref:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
+        assert_eq!(provider_bot_ref,"001Ab");
         Ok(vec![self.get_agent_by_id(token,"bot").await?])
     }
     async fn get_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.calls.fetch_add(1,Ordering::SeqCst);
         if token!="test-admin" {return Err(ServiceError::Forbidden("private-provider-id private-bot-uuid".into()));}
         assert_eq!(bot_id,"bot");
-        Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard {provider_name:"orders".into(),agent_name:"订单助手".into(),
+        Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard {provider_bot_ref:"remote".into(),provider_name:"orders".into(),agent_name:"订单助手".into(),
             bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         assert_eq!(command.owners,vec!["owner"]);
+        assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
     async fn update_agent_by_id(&self,token:&str,bot_id:&str,_source:bcs_service_api::types::a2a_bot::A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.get_agent_by_id(token,bot_id).await}
@@ -41,7 +42,7 @@ impl A2aBotManagementService for Management {
         assert_eq!(command.provider_name,"orders");
         assert!(matches!(command.source,bcs_service_api::types::a2a_bot::A2aCardSource::Inline(_)));
         let card=self.get_agent_by_id(&command.provider_admin_token,"bot").await?;
-        Ok(NamedA2aRegistration {card:NamedA2aCard {bot_id:card.bot_id,provider_name:card.provider_name,
+        Ok(NamedA2aRegistration {card:NamedA2aCard {provider_bot_ref:card.provider_bot_ref,bot_id:card.bot_id,provider_name:card.provider_name,
             bot_name:card.agent_name,agent_card_url:card.agent_card_url,agent_card:card.agent_card},
             bot_runtime_token:Some("test-runtime".into())})
     }
@@ -159,7 +160,7 @@ async fn provider_registration_accepts_inline_card_without_name_and_rejects_mixe
     let management=Arc::new(Management::default());
     let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
     let card=json!({"name":"Inline","unknown":{"keep":true}});
-    let body=json!({"owners":["owner"],"provider_bot_ref":"remote","agent_card":card});
+    let body=json!({"provider_bot_ref":"remote","owners":["owner"],"provider_bot_ref":"remote","agent_card":card});
     let response=app.clone().oneshot(Request::builder().method("POST").uri("/providers/provider/bots").header("authorization","Bearer test-admin").header("content-type","application/json").body(Body::from(body.to_string())).unwrap()).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
     let mut mixed=body;mixed["agent_card_url"]=json!("https://example.org/card");
@@ -198,7 +199,7 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
     let management=Arc::new(Management::default());
     let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
     let cases=[
-        ("POST","/a2a/agents",json!({"owners":["owner"],"agent_card":{"name":"订单助手"}}),StatusCode::CREATED),
+        ("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{"name":"订单助手"}}),StatusCode::CREATED),
         ("GET","/a2a/agents/bot/agent-card",Value::Null,StatusCode::OK),
         ("PUT","/a2a/agents/bot/agent-card",json!({"agent_card":{"name":"订单助手"}}),StatusCode::OK),
         ("POST","/a2a/agents/bot/agent-card:refresh",json!({}),StatusCode::OK),
@@ -212,7 +213,7 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
             let bytes=to_bytes(response.into_body(),8192).await.unwrap();
             let value:Value=serde_json::from_slice(&bytes).unwrap();
             assert!(!String::from_utf8_lossy(&bytes).contains("private-"));
-            for key in ["provider_id","bot_uuid","provider_bot_ref","revision"] {assert!(value.get(key).is_none());}
+            for key in ["provider_id","bot_uuid","revision"] {assert!(value.get(key).is_none());}
             if token==Some("test-admin") {
                 assert_eq!(value["agent_name"],"订单助手");assert_eq!(value["bot_id"],"bot");assert!(value.get("bot_runtime_token").is_none());
                 assert_eq!(value["agent_card"]["skills"][0]["unknown"],42);
@@ -227,16 +228,18 @@ async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
     let req=|method:&str,path:&str,body:Value| Request::builder().method(method).uri(path)
         .header("authorization","Bearer test-admin").header("content-type","application/json")
         .body(if body.is_null() {Body::empty()} else {Body::from(body.to_string())}).unwrap();
-    let response=app.clone().oneshot(req("POST","/a2a/agents",json!({"owners":["owner"],"agent_card":{}}))).await.unwrap();
+    let missing_ref=app.clone().oneshot(req("POST","/a2a/agents",json!({"owners":["owner"],"agent_card":{}}))).await.unwrap();
+    assert_eq!(missing_ref.status(),StatusCode::BAD_REQUEST);
+    let response=app.clone().oneshot(req("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}))).await.unwrap();
     assert_eq!(response.status(),StatusCode::CREATED);
     let location=response.headers()["location"].to_str().unwrap().to_owned();
     assert_eq!(location,"/a2a/agents/bot/agent-card");
     assert_eq!(app.clone().oneshot(req("GET",&location,Value::Null)).await.unwrap().status(),StatusCode::OK);
-    let response=app.clone().oneshot(req("GET","/a2a/agents?source_agent_id=001Ab",Value::Null)).await.unwrap();
+    let response=app.clone().oneshot(req("GET","/a2a/agents?provider_bot_ref=001Ab",Value::Null)).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
     let value:Value=serde_json::from_slice(&to_bytes(response.into_body(),8192).await.unwrap()).unwrap();
     assert_eq!(value["items"][0]["bot_id"],"bot");
-    for path in ["/a2a/agents", "/a2a/agents?agent_name=x", "/a2a/agents?source_agent_id=001Ab&provider_name=orders", "/a2a/agents?source_agent_id=a&source_agent_id=b"] {
+    for path in ["/a2a/agents?source_agent_id=001Ab", "/a2a/agents", "/a2a/agents?agent_name=x", "/a2a/agents?provider_bot_ref=001Ab&provider_name=orders", "/a2a/agents?provider_bot_ref=a&provider_bot_ref=b"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::BAD_REQUEST);
     }
     for method in ["PUT","POST"] {
@@ -261,7 +264,7 @@ async fn public_errors_are_structured_including_parser_and_method_failures() {
         ("POST","/a2a/agents","application/json","*/*","{",400,"INVALID_REQUEST"),
         ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"],"agent_card":{"name":"one","name":"two"}}"#,400,"INVALID_REQUEST"),
         ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"],"provider_name":"injected","agent_card":{}}"#,400,"INVALID_REQUEST"),
-        ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"]}"#,422,"CARD_SOURCE_INVALID"),
+        ("POST","/a2a/agents","application/json","*/*",r#"{"provider_bot_ref":"remote","owners":["owner"]}"#,422,"CARD_SOURCE_INVALID"),
         ("GET","/a2a/agents/bot/agent-card?provider_name=orders&agent_name=x","application/json","*/*","",400,"INVALID_REQUEST"),
         ("GET","/a2a/agents/bot/agent-card?agent_name=a&agent_name=b","application/json","*/*","",400,"INVALID_REQUEST"),
     ] {

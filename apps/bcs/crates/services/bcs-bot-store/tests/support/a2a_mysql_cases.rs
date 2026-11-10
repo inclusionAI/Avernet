@@ -79,20 +79,18 @@ pub async fn verify(db:Arc<dyn DbPlugin>) {
 
 
 async fn verify_source_identity(db:Arc<dyn DbPlugin>) {
-    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::{SOURCE_AGENT_EXTENSION,ManagementCode as Code}};
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
     db.execute(DbStatement::new("INSERT INTO bcs_providers (provider_id,env,name,config,created_by,owners) VALUES ('source-provider','source-test','Source','{}','owner','[]')")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,provider_id,provider_bot_ref,connection_mode) VALUES ('source-a','Source A','source-test','source-provider','a','gateway'),('source-b','Source B','source-test','source-provider','b','gateway')")).await.unwrap();
     let store=DbA2aBotStore::new(db.clone(),"source-test".into(),DbSqlFlavor::Mysql);
     let mut a=card();a.bot_uuid="source-a".into();a.provider_id="source-provider".into();a.provider_bot_ref="a".into();a.agent_card["name"]=json!("Source A");
-    a.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001Ab"}}]});
-    let mut b=a.clone();b.bot_uuid="source-b".into();b.provider_bot_ref="b".into();b.agent_card["name"]=json!("Source B");
+    a.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    let mut b=a.clone();b.bot_uuid="source-b".into();b.provider_bot_ref="b".into();
     let (left,right)=tokio::join!(store.compare_and_set(&a,0),store.compare_and_set(&b,0));
-    let winner=match (left,right) {
-        (Ok(true),Err(ServiceError::A2aManagement(error))) if error.code==Code::SourceAgentConflict=>a,
-        (Err(ServiceError::A2aManagement(error)),Ok(true)) if error.code==Code::SourceAgentConflict=>b,
-        other=>panic!("unexpected source race result: {other:?}"),
-    };
-    let mut changed=winner.clone();changed.agent_card["capabilities"]["extensions"]=json!([]);
-    assert!(matches!(store.replace(&changed).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentChangeNotAllowed));
-    assert_eq!(store.get(&winner.bot_uuid).await.unwrap(),Some(winner));
+    assert!(left.unwrap());assert!(right.unwrap());
+    assert_eq!(store.get_by_provider_ref("source-provider","a").await.unwrap().unwrap().bot_uuid,a.bot_uuid);
+    assert!(store.get_by_provider_ref("source-provider","A").await.unwrap().is_none());
+    assert_eq!(store.get_by_provider_ref("source-provider","b").await.unwrap().unwrap().bot_uuid,b.bot_uuid);
+    let mut changed=a;changed.agent_card["capabilities"]["extensions"]=json!([]);
+    assert_eq!(store.replace(&changed).await.unwrap().agent_card,changed.agent_card);
 }

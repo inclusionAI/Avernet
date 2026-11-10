@@ -41,22 +41,24 @@ async fn id_validation_and_provider_isolation_reject_before_fetch() {
 #[tokio::test]
 async fn source_key_recovery_is_exact_provider_scoped_and_rename_stable() {
     let (chain, service) = public_fixture().await;
-    let created = service.register_agent(request(card("来源查找", Some("001Ab")))).await.unwrap();
-    for key in ["001ab", "1Ab", "missing", "001Ab' OR 1=1 --"] {
-        assert!(service.find_agents_by_source_id("test-admin", key).await.unwrap().is_empty());
+    let mut command = request(card("来源查找", None));
+    command.provider_bot_ref = "001Ab".into();
+    let created = service.register_agent(command).await.unwrap();
+    for key in ["001ab", "1Ab", "missing"] {
+        assert!(service.find_agents_by_provider_ref("test-admin", key).await.unwrap().is_empty());
     }
     for key in ["", " 001Ab", "001Ab\n", &"x".repeat(257)] {
-        assert_eq!(code(service.find_agents_by_source_id("test-admin", key).await.unwrap_err()), Code::InvalidRequest);
+        assert_eq!(code(service.find_agents_by_provider_ref("test-admin", key).await.unwrap_err()), Code::InvalidRequest);
     }
-    assert!(service.find_agents_by_source_id("wrong-admin", "001Ab").await.is_err());
-    let found = service.find_agents_by_source_id("test-admin", "001Ab").await.unwrap();
+    assert!(service.find_agents_by_provider_ref("wrong-admin", "001Ab").await.is_err());
+    let found = service.find_agents_by_provider_ref("test-admin", "001Ab").await.unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].bot_id, created.bot_id);
     service.update_agent_by_id("test-admin", &created.bot_id, A2aCardSource::Inline(card("来源改名", Some("001Ab")))).await.unwrap();
-    assert_eq!(service.find_agents_by_source_id("test-admin", "001Ab").await.unwrap()[0].agent_name, "来源改名");
+    assert_eq!(service.find_agents_by_provider_ref("test-admin", "001Ab").await.unwrap()[0].agent_name, "来源改名");
     for mutation in ["provider_id='other'", "is_deleted=1", "connection_mode='plugin'"] {
         chain.db.execute(DbStatement::with_params(format!("UPDATE bcs_bots SET {mutation} WHERE bot_uuid=?"), vec![created.bot_id.clone().into()])).await.unwrap();
-        assert!(service.find_agents_by_source_id("test-admin", "001Ab").await.unwrap().is_empty());
+        assert!(service.find_agents_by_provider_ref("test-admin", "001Ab").await.unwrap().is_empty());
         chain.db.execute(DbStatement::with_params("UPDATE bcs_bots SET provider_id='provider-a',is_deleted=0,connection_mode='gateway' WHERE bot_uuid=?", vec![created.bot_id.clone().into()])).await.unwrap();
     }
 }

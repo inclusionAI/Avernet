@@ -51,7 +51,7 @@ stale writes and unchanged route semantics against real Bot core/SQLite storage.
 The injected Card fixture records network-port invocations. Listening HTTP
 fetch behavior is tested independently by the outbound client crate.
 
-Public target resolution validates the current A2A Card/name and Provider Bot binding
+Public target resolution validates the Provider/ref and active A2A Card/Provider Bot binding
 before pinning the Provider slug. Missing or invalid targets never mutate Provider
 metadata. The conditional pin still fences a concurrent Provider rename.
 
@@ -65,9 +65,11 @@ the stable Bot identity. Public get/update/refresh use only bot_id, never Card.n
 Updates fence the original Bot ID and Provider binding across the fetch, retry local
 CAS conflicts at most three times without refetching, and cannot retarget a renamed/deleted Bot.
 Refresh retains single-CAS protection against newer explicit updates. Unmounted name
-management handlers and their Service API methods are removed; named chat resolution remains.
-Source-key recovery authenticates the Provider, queries the existing immutable source
-agentId exactly, rechecks binding and returns zero or one management result. It is
+management handlers and their Service API methods are removed. Provider chat resolves
+provider_bot_ref, not mutable names. Public registration requires that ref and returns
+it with bot_id; Card names may repeat. Reference recovery authenticates the Provider,
+queries existing env/Provider/ref columns exactly, rechecks binding and returns zero
+or one management result. Classification v2 contains optional mutable party, no agentId. It is
 not registration upsert or history storage.
 The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
