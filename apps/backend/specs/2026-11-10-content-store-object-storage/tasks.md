@@ -49,8 +49,8 @@
 - **Goal:** The docs say where content lives and what an operator must check.
 - **Files:** `apps/backend/api-contracts/genome/v1/README.md` (§3.3 sentence on the content store), `apps/backend/docs/bot-evolution/01-genome.md` and `.zh-CN.md` only where they state the storage location, `core/content_store/service.py` / `settings.py` docstrings
 - **Done when:**
-  - [ ] No doc or docstring still says blobs live under a NAS path or local root without naming the backend key.
-  - [ ] The frozen migration file `core/content_store/sql/2026_08_31_manifest_content.sql` is untouched.
+  - [x] No doc or docstring still says blobs live under a NAS path or local root without naming the backend key.
+  - [x] The frozen migration file `core/content_store/sql/2026_08_31_manifest_content.sql` is untouched.
 - **Depends on:** Task 3
 
 ## Task 6: Tests & Verification

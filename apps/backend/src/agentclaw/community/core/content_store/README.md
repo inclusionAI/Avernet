@@ -18,15 +18,25 @@ still reading this store.
 
 ## Two halves, one mechanism
 
-- **Bytes** live in a content-addressed blob tree,
-  `<root>/blobs/<hex[:2]>/<hex64>`, under
-  `user_config.bot_config_manifest.content_store_dir` (parsed by
-  `settings.content_store_root_from_config`; the yaml key kept its name when
-  the component moved). The digest (`sha256:<hex64>`, `limits.DIGEST_RE`) IS
-  the address: identical bytes are written once, the write is durable before
-  it is visible (fsync, then `os.replace`), and `read` verifies the hash on
-  the same pass it reads — the store hands back bytes it can prove, or fails.
-  It never re-fetches.
+- **Bytes** live in a content-addressed blob store (`blobs.py`), chosen by
+  `user_config.bot_config_manifest.content_store_backend`
+  (`settings.content_store_backend_from_config`):
+  - `object_storage` (default) — the deployment's `ObjectStoragePlugin`,
+    under the key `content-store/blobs/<hex[:2]>/<hex64>`. Every backend
+    instance reads what any instance wrote, and the bytes outlive the
+    instance. The bucket must not expire that prefix. The local tree below is
+    then read through for blobs an earlier version wrote, and they are copied
+    forward on first read.
+  - `fs` — a local tree `<root>/blobs/<hex[:2]>/<hex64>` under
+    `content_store_dir` (`settings.content_store_root_from_config`), written
+    durable-before-visible (fsync, then `os.replace`). Shared between
+    instances only when the directory is a volume all of them mount.
+
+  The digest (`sha256:<hex64>`, `limits.DIGEST_RE`) IS the address: identical
+  bytes are written once, and `read` verifies the hash on every medium — the
+  store hands back bytes it can prove, or fails. It never re-fetches.
+  `ensure_stored` writes bytes alone, for a caller holding bytes whose row
+  outlived its blob.
 - **Provenance** lives in `ac_manifest_content`
   (`sql/2026_08_31_manifest_content.sql`, ORM in `models.py`, repository in
   `core/repository/{protocols,implementations}/bot/content_store.py`): an
@@ -62,7 +72,7 @@ longer identity rather than failing inside a write.
 ## Context Boundary
 
 ```yaml
-purpose: Own the platform's content-addressed copy of fetched and produced bytes — the blob tree, the append-only provenance log, the digest grammar, the acm-tree-v1 tree encoding and the audit identity width — behind one Service API the Bot Config Manifest and the Genome Registry both inject.
+purpose: Own the platform's content-addressed copy of fetched and produced bytes — the blob store, the append-only provenance log, the digest grammar, the acm-tree-v1 tree encoding and the audit identity width — behind one Service API the Bot Config Manifest and the Genome Registry both inject.
 provides:
   - ContentStoreProtocol  # the Service API both consumers inject
   - ContentStoreService

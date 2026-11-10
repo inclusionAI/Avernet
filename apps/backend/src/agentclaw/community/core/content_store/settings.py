@@ -16,8 +16,10 @@ from typing import Any, Mapping
 
 #: The blob root's neutral default, relative to the process working
 #: directory — the same shape as ``user_config.skill_scan.storage_dir``.
-#: A deployment that wants a shared volume points the key at an absolute
-#: NAS path in its own env overlay; the neutral base ships bare.
+#: This is the store itself only under the ``fs`` backend (where a
+#: deployment with several instances must point it at a volume they all
+#: mount); under ``object_storage`` it is the tree read through for blobs an
+#: earlier version wrote.
 DEFAULT_CONTENT_STORE_DIR = "./data/manifest_content"
 
 #: Where the key lives in the YAML tree, as one constant: the block name

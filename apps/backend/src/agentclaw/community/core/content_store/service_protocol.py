@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 from agentclaw.community.core.content_store.reader import ContentReader
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.content_store.blobs import BlobStore
     from agentclaw.community.core.content_store.models import (
         ContentScope,
         StoredContentRecord,
@@ -43,11 +44,14 @@ class ContentStoreProtocol(ContentReader, Protocol):
     def __init__(
         self,
         repository: ContentStoreRepositoryProtocol,
-        root: Path,
+        root: Optional[Path] = None,
+        *,
+        blobs: Optional[BlobStore] = None,
     ) -> None:
-        """The blob tree root is a constructor value — a config-borne
+        """Where the bytes live is a constructor value — a config-borne
         deployment decision handed in by the composition root, never an
-        environment read inside core.
+        environment read inside core. ``blobs`` is the medium; ``root`` is
+        shorthand for the local tree under that directory.
         """
         ...
 

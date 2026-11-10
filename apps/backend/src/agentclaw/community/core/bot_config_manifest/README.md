@@ -205,9 +205,9 @@ through `ContentStoreProtocol` and reads the copy back for delivery and
 git-delivered tree as `canonical_tree_bytes`; `fetch/limits.py` re-exports
 the store's `DIGEST_RE` as the fetch vocabulary. The store itself is
 constructed by `di/modules/content_store_module.py` from the
-`user_config.bot_config_manifest.content_store_dir` this package's config
-cluster still parses (`cfg.BotConfigManifestConfig`), so the yaml key kept its
-name.
+`user_config.bot_config_manifest.content_store_backend` and
+`content_store_dir` this package's config cluster still parses
+(`cfg.BotConfigManifestConfig`), so the yaml keys keep their place.
 
 ## Tenancy is load-bearing here
 

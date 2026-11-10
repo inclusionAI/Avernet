@@ -5,7 +5,7 @@ bootstrap emits the table — the side-effect import lives in ``core/schema.py``
 
 Two halves, one mechanism (§2.8, W11):
 
-- the BYTES live in the content-addressed blob directory owned by
+- the BYTES live in the content-addressed blob store behind
   :class:`~agentclaw.community.core.content_store.service.ContentStoreService`
   — never in this table, because schema §5 lets one entry be 100–200 MiB;
 - this table is the append-only PROVENANCE LOG — one row per store event,
