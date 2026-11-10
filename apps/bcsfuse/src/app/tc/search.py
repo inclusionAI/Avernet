@@ -1,13 +1,10 @@
 """TC candidate policy around shared recall, source aggregation, RRF and reranking."""
 
 import asyncio
-import re
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
-from search_core.api.errors import SearchUnavailable
-from search_core.api.models import RetrievalRequest, SearchItem, SearchResult
+from search_core.api.models import RetrievalRequest
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
 from search_core.application.catalog_retrieval import CatalogRetrieval
 from search_core.application.emergency import SearchCachePolicy
@@ -28,21 +25,6 @@ from app.tc.catalog import FILTER_FIELDS, TcDocumentConverter, matches_row
 
 class InvalidTcFilters(ValueError):
     pass
-
-
-def _name_score(query, name, domains):
-    name = unicodedata.normalize("NFKC", name).strip().casefold()
-    if name == query:
-        return 1.0
-    words = re.findall(r"[a-z0-9]+", name)
-    if query in words or any(
-        unicodedata.normalize("NFKC", domain).strip().casefold() == query
-        for domain in domains
-    ):
-        return 0.95
-    if any(word.startswith(query) for word in words):
-        return 0.9
-    return 0.0
 
 
 class TcSearch:
@@ -116,7 +98,6 @@ class TcSearch:
         expand_factor=10,
         reranker_model=None,
         legacy_defaults=True,
-        short_names=True,
     ):
         filters = dict(filters or {})
         if legacy_defaults:
@@ -147,29 +128,36 @@ class TcSearch:
                 scope = keys if scope is None else scope & keys
         if scope is not None:
             filters["source_id"] = sorted(scope)
+        selected_reranker = self.reranker
+        if reranker_model and rerank:
+            from app.infra.reranker.http_reranker import get_reranker
+
+            selected_reranker = get_reranker(reranker_model)
+        pipeline = HybridRetrievalService(
+            index=self.retrieval_index,
+            embedding=self.embedding,
+            reranker=selected_reranker if rerank else None,
+            group_by_source=True,
+            candidate_limit=max(30, limit),
+            recall_limit=max(60, limit * expand_factor),
+            allow_partial=True,
+            execution=self.execution,
+        )
+        retrieval = CachedRetrieval(
+            CatalogRetrieval(pipeline, self),
+            self.result_cache,
+            self.caches,
+            namespace=(rerank, expand_factor, reranker_model),
+        )
         request = RetrievalRequest(
             question, limit, {k: tuple(v) for k, v in filters.items()}
         )
-        result = None
-        vector_enabled = True
-        if short_names and self.storage_kind == "card" and limit > 0:
-            name_query = unicodedata.normalize("NFKC", question).strip()
-            if re.fullmatch(r"[A-Za-z]{3,6}", name_query):
-                try:
-                    result = await self.execution["keyword"].call(
-                        self._search_names, name_query.casefold(), request
-                    )
-                except TimeoutError as error:
-                    raise SearchUnavailable("TC name search timed out") from error
-                if result is None and name_query.isupper():
-                    vector_enabled = rerank = False
-        if result is None:
-            result = await self._hybrid_retrieve(
-                request, rerank, expand_factor, reranker_model, vector_enabled
-            )
+        result = await retrieval.retrieve(request)
         # TC exact identity priority never bypasses visibility or lifecycle rules.
         exact = self.catalog.get(question.strip())
         if exact and self.eligible(exact.card.agent_id, request.filters):
+            from search_core.api.models import SearchItem
+
             item = SearchItem(
                 exact.card.agent_id, exact.card.source_card["name"], "", 1.0, "exact_id"
             )
@@ -192,54 +180,6 @@ class TcSearch:
                     )
                 )
         return replace(result, items=tuple(items))
-
-    def _search_names(self, query, request):
-        candidates = sorted(
-            (-score, key)
-            for key, (name, domains) in self.updates.search_names.copy().items()
-            if (score := _name_score(query, name, domains))
-        )
-        items = []
-        for _, key in candidates:
-            if not self.eligible(key, request.filters):
-                continue
-            row = self.catalog.get(key)
-            if row is None:
-                continue
-            data = row.card.source_card
-            score = _name_score(query, data["name"], data.get("domains") or ())
-            if score:
-                items.append(SearchItem(key, data["name"], "", score, "name_match"))
-            if len(items) == request.limit:
-                break
-        return SearchResult(items=tuple(items)) if items else None
-
-    async def _hybrid_retrieve(
-        self, request, rerank, expand_factor, reranker_model, vector_enabled
-    ):
-        selected_reranker = self.reranker
-        if reranker_model and rerank:
-            from app.infra.reranker.http_reranker import get_reranker
-
-            selected_reranker = get_reranker(reranker_model)
-        pipeline = HybridRetrievalService(
-            index=self.retrieval_index,
-            embedding=self.embedding,
-            reranker=selected_reranker if rerank else None,
-            group_by_source=True,
-            vector_enabled=vector_enabled,
-            candidate_limit=max(30, request.limit),
-            recall_limit=max(60, request.limit * expand_factor),
-            allow_partial=True,
-            execution=self.execution,
-        )
-        retrieval = CachedRetrieval(
-            CatalogRetrieval(pipeline, self),
-            self.result_cache,
-            self.caches,
-            namespace=(rerank, expand_factor, reranker_model, vector_enabled),
-        )
-        return await retrieval.retrieve(request)
 
     def eligible(self, worker_id, filters):
         if "source_id" in filters and worker_id not in filters["source_id"]:
@@ -309,7 +249,6 @@ class TcSearch:
                     rerank=rerank,
                     expand_factor=config.get("expand_factor", 10),
                     reranker_model=config.get("reranker_model"),
-                    short_names=False,
                 )
             )
             selected = {c.worker_id for c in explicit}
