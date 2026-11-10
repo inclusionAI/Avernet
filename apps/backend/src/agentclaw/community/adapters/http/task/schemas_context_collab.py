@@ -223,8 +223,8 @@ class EventCreateRequest(BaseModel):
     )
     primitive_type: str = Field(
         min_length=1,
-        description="L4 primitive the event carries: Task, Message, Activity, "
-        "or Artifact.",
+        description="L4 primitive the event carries: Task, Message, or "
+        "Activity.",
     )
     actor_ref: PrincipalRefDto | None = Field(
         default=None,
