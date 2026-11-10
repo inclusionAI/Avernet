@@ -379,6 +379,8 @@ mod notifications;
 
 mod connect_lifecycle;
 
+mod connect_friend_service;
+
 mod admission;
 
 mod request_pagination;
