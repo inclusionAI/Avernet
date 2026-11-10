@@ -29,6 +29,37 @@ that is not already defined here. Add it to this map in the same change.
 
 ## Knowledge framework
 
+Use this shared layout to navigate and contribute knowledge. Backend is the
+first pilot; other apps adopt it as needed. Optional paths are created when
+there is material to maintain, and existing authoritative docs stay in place.
+
+```text
+<repo>/
+├── AGENTS.md                     # Agent entry and working rules
+├── CONTEXT-MAP.md                # Knowledge map and routing
+├── CONTEXT.md                    # Shared Chinese/English terminology
+├── docs/
+│   ├── agents/
+│   │   ├── knowledge-standard.md # Responsibilities and maintenance
+│   │   └── templates/            # Document templates
+│   ├── arch/                     # Architecture constraints
+│   ├── adr/                      # Durable decisions
+│   └── flows/                    # Cross-app flows
+└── apps/<app>/
+    ├── README.md                 # App entry and knowledge navigation
+    ├── AGENTS.md                 # App-specific rules, when needed
+    ├── docs/
+    │   ├── flows/                # App-local flows, when needed
+    │   └── diagnostics/          # App-local diagnostics, when needed
+    ├── specs/                    # Change intent, decisions and evidence
+    └── <domain>/
+        └── README.md or CONTEXT.md # Domain boundaries and contracts
+```
+
+The [knowledge standard](docs/agents/knowledge-standard.md) defines the
+responsibilities and exclusions for each location; this tree is a navigation
+overview, not a requirement to create empty directories or move existing docs.
+
 - [Knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md): what each document records and excludes.
 - [Architecture](docs/arch/README.md), [decisions](docs/adr/README.md), and [cross-app flows](docs/flows/README.md).
 - Backend: [app README](apps/backend/README.md), [local flows](apps/backend/docs/flows/README.md), [diagnostics](apps/backend/docs/diagnostics/README.md), and [change specs](apps/backend/specs/README.md).
