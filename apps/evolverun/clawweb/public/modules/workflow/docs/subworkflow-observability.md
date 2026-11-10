@@ -27,10 +27,29 @@ writes must propagate errors so failure rolls both back. The host is responsible
 for authenticating the caller, authorizing the parent/child binding, validating
 that runs and workflow identities match, and designing conflict/retry semantics.
 The repository is not an authorization boundary; ordinary clients must not be
-given table-write access. There is no new HTTP write API. In particular,
-`POST /api/internal/runs` has not been changed to create links, and its existing
-ordinary and trial registration paths cannot be assumed to atomically do so.
-No current trusted runtime writer is connected by this change.
+given table-write access. There is no public or generic link-registration HTTP API.
+The trusted engine `POST /api/internal/runs` path accepts an optional
+`parent_relation` only when covered by the existing engine signature. The server
+locks and validates the parent run, its currently-running node execution, its
+persisted immutable workflow snapshot, and—when present—the durable fanout
+group/item dispatch claim. It verifies the persisted parent bot/owner/session
+identity and child workflow before inserting the child run and `flow_run_links`
+in one transaction. The response includes the validated snake-case
+`parent_relation` receipt; it is not stored in or exposed as the public run row.
+Exact retries return the same receipt and relation; changed registration
+metadata, relation, authority, or an existing conflicting child/link is
+rejected. Current `state_json` and `current_phase` are mutable child run state:
+they may advance after registration, but that alone does not make a delayed exact
+retry a conflict. Link, child, or parent claim persistence failure rolls back the
+transaction.
+
+The parent remains `running` while the child owns `waiting` or `blocked` state;
+no parent waiting/propagation protocol is implied. A single subworkflow may use
+the durable fanout collector with a synthesized one-item group and an immutable
+`invocation` object (`schemaVersion: subworkflow.single.v1`, `parentAttempt`,
+`parentExecutionId`, optional `onFailure: skip`). The ordinary
+request-association route and trial registration path do not accept
+`parent_relation`; trial plus relation is fail-closed.
 
 Default `initDatabase` migration mode creates the table at v147 and applies v148
 to expand all four ID columns to `VARCHAR(255)` on MySQL/ZDAS. The generic DDL

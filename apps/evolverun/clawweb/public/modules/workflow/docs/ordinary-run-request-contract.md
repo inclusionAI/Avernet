@@ -113,7 +113,10 @@ registration is checked through the existing trial registration logic and
 rejected, not bypassed. Trial or unauthorized parents are concealed with 404.
 The legacy `POST /api/internal/runs` rejects these ordinary association fields;
 clients must not use it for this protocol. Old servers do not have the dedicated
-register path and return 404 rather than creating an unassociated run.
+register path and return 404 rather than creating an unassociated run. The trusted
+engine route has a separate, server-validated `parent_relation` receipt for
+subworkflow run links; it is not part of this ordinary request-association
+contract and must not be added to this route's envelope.
 
 ## Lookup
 
