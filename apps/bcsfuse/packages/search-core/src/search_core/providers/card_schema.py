@@ -27,6 +27,10 @@ def initialize_sqlite_cards(conn, *, table=TABLE):
         lease_until REAL NOT NULL DEFAULT 0,
         gmt_create REAL NOT NULL DEFAULT 0, gmt_modify REAL NOT NULL DEFAULT 0,
         PRIMARY KEY(environment,agent_id))""")
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{table}_changes "
+        f"ON {table}(environment,gmt_modify,agent_id)"
+    )
     current = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     if "labels" not in current:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN labels TEXT")
