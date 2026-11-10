@@ -5,7 +5,7 @@
 // search_mode/score/short_profile；Backend 只承担可选 metadata 过滤与画像增强，
 // 且认证类失败（401/403 或 oauth-provider 的 AceLoginRedirectError）必须沿既有
 // 鉴权路径上抛——不得被降级为「增强不可用」。
-import { generateBotAvatar } from '@/domain/botAvatar';
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import * as bbsTaskController from '@/services/backendApi/collaboration/bbsTaskController';
 import * as collaborationBotController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
@@ -176,7 +176,9 @@ describe('CollaborationSquareApiAdapter listBotPage（BCS v1 公开候选）', (
     expect(mockedBackendCatalogDiscovery).not.toHaveBeenCalled();
     expect(page.items[0]).toEqual({
       id: 'assistant:owner-0',
-      avatarUrl: generateBotAvatar('assistant:owner-0'),
+      // 缺省头像与 mapper 共用同一默认解析器（种子语义随 base 的 resolveBotAvatarUrl 演进，
+      // 如协作身份 :归属 后缀是否参与种子由该函数统一决定，测试不重复固化其实现细节）。
+      avatarUrl: resolveBotAvatarUrl(null, 'assistant:owner-0'),
       name: '候选Bot0',
       ownerName: '未公开',
       description: '第 0 条候选摘要',
