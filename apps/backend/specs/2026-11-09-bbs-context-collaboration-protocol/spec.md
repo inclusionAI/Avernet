@@ -107,7 +107,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作模式和参与者集合 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
-| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
+| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
 | `ContextTodo` | 子实体 | `context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
@@ -181,10 +181,11 @@ CollaborationContext
   ├─ context_id / scope / title
   ├─ envelope
   ├─ responsible_actor_ref
-  ├─ outcomes[]                 # ContextOutcome
   ├─ collaboration_mode       # CollaborationMode
-  ├─ state_machine_binding    # ContextStateMachineBinding，持有 ContextTodo[]
-  ├─ version / event_cursor / state_fencing_token
+  ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
+  ├─ outcomes[]               # ContextOutcome
+  ├─ version                   # 聚合乐观锁版本
+  ├─ event_cursor              # Context 事件日志位置：最近接纳事件的 sequence
   ├─ active_work_ref
   └─ created_by / created_from / created_at / updated_at / closed_at
 ```
@@ -257,7 +258,28 @@ ContextDeliverable
 - `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
 - 根只保存 `outcomes[]`，交付物由对应 Outcome 持有。
 
-### 4.5 子实体：CollaborationMode
+### 4.5 子实体：ContextStateMachineBinding
+
+`ContextStateMachineBinding` 是 Context 与某个 frozen state machine revision 的状态裁决绑定。它只负责状态阶段与迁移并发，不保存协作业务事实。
+
+```text
+ContextStateMachineBinding
+  ├─ context_id / binding_id
+  ├─ definition_id / definition_revision / content_digest
+  ├─ current_state
+  ├─ allowed_modes
+  ├─ transition_cursor         # 状态机已处理到的事件位置
+  ├─ state_fencing_token       # 状态迁移 fencing token
+  └─ todos[]                    # ContextTodo[]
+```
+
+设计约束：
+- 根只保留聚合级 `version` 与 `event_cursor`。`event_cursor` 是 Context 内 append-only 事件日志的末端位置，不保存完整事件列表。
+- `transition_cursor` 表示状态机已处理到的事件位置，与根上的 `event_cursor` 语义不同；两者都可以指向同一个事件序列。
+- `state_fencing_token` 只属于 `ContextStateMachineBinding`，用于防止旧命令影响新状态。
+- 变更状态必须由服务端状态机基于 ContextEvent 与本 binding 的 frozen revision 裁决。
+
+### 4.6 子实体：CollaborationMode
 
 `CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
 
@@ -277,7 +299,7 @@ CollaborationMode
 - participants 是协作关系，不是权限本身。
 - `active_work_ref` 属于聚合根，不属于 `CollaborationMode`。
 
-### 4.6 子实体：ContextParticipant
+### 4.7 子实体：ContextParticipant
 
 `ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。
 
@@ -556,12 +578,12 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ### 8.2 ACID 与幂等
 
-- Context 版本、state fencing token 和事件序号共同防止将新命令应用到旧状态上。
+- Context 根使用 `version` 与 `event_cursor` 记录最近接纳事件的 append-only 位置；`ContextStateMachineBinding` 使用 `transition_cursor` 与 `state_fencing_token` 控制状态迁移并发。
 - 事件、Transition、状态机版本、Todo 变更和必要的业务外键必须同一事务提交。
 - 初次创建 Context 时，来源绑定与 `context.created` 事件在同一事务中闭环；数据库失败必须向调用方返回错误，不产生假成功。
 - `work.requested` 抢占成功后在同一上下文中保存幂等意图，再通过 outbox 或等价机制触发外部启动；进程恢复后先读取外部状态，再决定继续、等待还是标记 blocked。
 - 相同 `request_id` / `source_event_id` 重放必须返回原结果；不同内容同 ID 返回冲突。
-- Context 根通过唯一 `active_work_ref`、状态机 guard、乐观锁和状态 fencing token 保证同一 Context 只有一个活跃 Work；模式切换和工作请求也分别按 request id 幂等。
+- Context 根通过唯一 `active_work_ref`、状态机 guard、乐观锁和 `ContextStateMachineBinding.state_fencing_token` 保证同一 Context 只有一个活跃 Work；模式切换和工作请求也分别按 request id 幂等。
 - 验收、取消、启动等命令使用 expected version 或状态 fencing token 串行裁决；输方收到冲突而不是覆盖赢家事实。
 - 外部投影失败不回滚本地事实；系统使用 outbox、事务性消息队列或等价机制做有界重试、人工重试和明确的同步状态。
 - 到达 `terminal_*` 状态后，仍可写入公开评论、来源同步或审计事实，但它们不能把 Context 拉出终态。
