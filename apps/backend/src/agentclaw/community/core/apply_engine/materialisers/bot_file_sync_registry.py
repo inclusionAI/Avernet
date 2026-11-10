@@ -73,6 +73,7 @@ class DelegatingBotFileSyncPort(BotFileSyncPort):
         *,
         target: BotFileSyncTarget,
         source_bot_id: str,
+        source_owner_id: str,
         path: str,
         excludes: tuple[str, ...],
     ) -> BotFileSyncResult:
@@ -80,6 +81,7 @@ class DelegatingBotFileSyncPort(BotFileSyncPort):
         return await strategy.sync(
             target=target,
             source_bot_id=source_bot_id,
+            source_owner_id=source_owner_id,
             path=path,
             excludes=excludes,
         )

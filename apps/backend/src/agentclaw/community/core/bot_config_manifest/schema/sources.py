@@ -62,12 +62,17 @@ _KEY_OWNER: dict[str, tuple[SourceKind, str]] = {
     "subpath": (SourceKind.GIT, "selects inside the tree a repository delivers"),
     "bucket": (SourceKind.OSS, "names a bucket in an object store"),
     "key": (SourceKind.OSS, "names an object inside that bucket"),
-    # ``bot_id`` is the whole of a bot source's addressing: which source bot's
-    # workspace the sync reads from. The entry's own ``path`` (a literal the
-    # copy serializer writes) selects within it at sync time, so there is no
-    # ``subpath`` on the source — and no ``auth``/``mode``/``ref``, because a
-    # bot source is not a fetch.
+    # A bot source's addressing is two fields: ``bot_id`` names *which* source
+    # bot's workspace the sync reads from, and ``owner_id`` names *whose* bot
+    # that is. A ``bot_id`` is not globally unique — the reserved ``default``
+    # bot has a row per account, and a shared/template id can collide across
+    # owners — so ``owner_id`` disambiguates the source row, the way a git
+    # source's ``ref`` disambiguates within one ``url``. The entry's own
+    # ``path`` (a literal the copy serializer writes) selects within the
+    # workspace at sync time, so there is no ``subpath`` on the source — and no
+    # ``auth``/``mode``, because a bot source is not a fetch.
     "bot_id": (SourceKind.BOT, "names the source bot whose workspace is synced"),
+    "owner_id": (SourceKind.BOT, "names the source bot's owner (disambiguates a shared bot_id)"),
 }
 
 #: How each protocol says where its content is — quoted back to a caller who
@@ -77,7 +82,7 @@ _ADDRESSING: dict[SourceKind, str] = {
     SourceKind.OSS: (
         "an oss source addresses its object with 'bucket' and 'key'"
     ),
-    SourceKind.BOT: "a bot source names its source bot with 'bot_id'",
+    SourceKind.BOT: "a bot source names its source bot with 'bot_id' and the owner with 'owner_id'",
 }
 
 _KEYS_BY_PROTOCOL: dict[SourceKind, frozenset[str]] = {
@@ -98,15 +103,17 @@ _REQUIRED_BY_PROTOCOL: dict[SourceKind, tuple[str, ...]] = {
     # apply. The fetcher re-asks it as a belt, for documents that reached
     # storage before this rule existed.
     SourceKind.OSS: ("bucket", "auth"),
-    # A bot source names exactly one source bot; without it the sync has
-    # nothing to read. ``bot_id`` is the protocol's only addressing field.
-    SourceKind.BOT: ("bot_id",),
+    # A bot source names exactly one source bot; ``bot_id`` says which and
+    # ``owner_id`` says whose — the two together are the addressing, because a
+    # ``bot_id`` is not globally unique (the reserved ``default`` bot has a
+    # row per account).
+    SourceKind.BOT: ("bot_id", "owner_id"),
 }
 
 #: The field each protocol says *where* with. Writing the other protocol's is
 #: one mistake, and the refusal for it already names the replacement — so the
 #: "you are missing X" complaint is suppressed rather than added to it.
-_ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket", "bot_id"})
+_ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket", "bot_id", "owner_id"})
 
 #: The protocols a source may declare. ``content`` is a
 #: :class:`~agentclaw.community.core.apply_engine.support_matrix.SourceKind`
@@ -190,6 +197,13 @@ class SourceDecl:
     #: entry's own ``path`` (a literal the copy serializer writes) selects
     #: within it at sync time, so there is no ``subpath`` on a bot source.
     bot_id: str | None = None
+    #: bot only — the source bot's owner. A ``bot_id`` is not globally unique
+    #: (the reserved ``default`` bot has a row per account, and a shared /
+    #: template id can collide across owners), so ``owner_id`` disambiguates
+    #: the source row the sync reads against, the way a git source's ``ref``
+    #: disambiguates within one ``url``. Paired with ``bot_id`` as the
+    #: protocol's two-field addressing.
+    owner_id: str | None = None
     #: The **name** of a stored credential. Never a value — the manifest has no
     #: vocabulary for one, at any depth.
     auth: str | None = None
@@ -361,6 +375,11 @@ def parse_source(
         add(".bot_id", "invalid_bot_id", "'bot_id' must name a source bot")
         bot_id = None
 
+    owner_id = None if "owner_id" in misplaced else raw.get("owner_id")
+    if owner_id is not None and (not isinstance(owner_id, str) or not owner_id):
+        add(".owner_id", "invalid_owner_id", "'owner_id' must name the source bot's owner")
+        owner_id = None
+
     auth = raw.get("auth")
     if auth is not None and (not isinstance(auth, str) or not auth):
         add(".auth", "invalid_auth", "'auth' must name a stored credential")
@@ -389,6 +408,7 @@ def parse_source(
             ref=ref,
             subpath=subpath,
             bot_id=bot_id,
+            owner_id=owner_id,
             auth=auth,
             mode=SourceMode(mode),
         ),

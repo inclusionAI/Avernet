@@ -172,6 +172,7 @@ def _build_manifest_document(
     *,
     script_body: str,
     source_bot_id: str,
+    source_owner_id: str,
     excludes: tuple[str, ...] = (),
     render_screen_rows: tuple[dict[str, str], ...] = (),
 ) -> str:
@@ -180,11 +181,14 @@ def _build_manifest_document(
     The document is what ``manifest_seam.persist`` stores under the dst bot's
     key and what ManifestCompiler compiles. v1 carried ``script`` only; this
     adds the file-sync section: a top-level ``sources.from_bot`` declaring
-    ``protocol: bot`` + the source bot's id, and one ``resources`` entry that
-    uses it with the literal ``workspace/`` path. ``excludes`` is the same
-    list the caller sent under ``request_detail`` — written into the manifest
-    entry so the compiler and a future sync materialiser read one source of
-    truth rather than reaching back across modules for the operation ledger.
+    ``protocol: bot`` + the source bot's addressing (``bot_id`` and
+    ``owner_id`` — a ``bot_id`` is not globally unique, so ``owner_id``
+    disambiguates the source row the sync reads), and one ``resources`` entry
+    that uses it with the literal ``workspace/`` path. ``excludes`` is the
+    same list the caller sent under ``request_detail`` — written into the
+    manifest entry so the compiler and a future sync materialiser read one
+    source of truth rather than reaching back across modules for the
+    operation ledger.
 
     ``render_screen_rows`` carries the source bot's render-screen set as the
     v1 ``bot_config.render_screen`` kind. Each row is the ``(name, cdn_url)``
@@ -208,7 +212,11 @@ def _build_manifest_document(
         "schema_version": 1,
         "script": {"body": script_body},
         "sources": {
-            "from_bot": {"protocol": "bot", "bot_id": source_bot_id},
+            "from_bot": {
+                "protocol": "bot",
+                "bot_id": source_bot_id,
+                "owner_id": source_owner_id,
+            },
         },
         "manifest": manifest,
     }
@@ -317,6 +325,7 @@ def submit_copy(
     manifest_document = _build_manifest_document(
         script_body=script_body,
         source_bot_id=source["bot_id"],
+        source_owner_id=source_owner_id,
         excludes=request_excludes,
         render_screen_rows=source_render_screens,
     )

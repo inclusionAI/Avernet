@@ -796,6 +796,7 @@ sources:
   bot_src:
     protocol: bot
     bot_id: src_1
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/
@@ -848,6 +849,7 @@ sources:
   bot_src:
     protocol: bot
     bot_id: src_1
+    owner_id: u1
 manifest:
   resources:
     - path: wk/one.md
@@ -866,6 +868,7 @@ sources:
   bot_src:
     protocol: bot
     bot_id: src_1
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/
@@ -883,6 +886,7 @@ sources:
   bot_src:
     protocol: bot
     bot_id: src_1
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/
@@ -904,6 +908,7 @@ sources:
   bot_src:
     protocol: bot
     bot_id: src_1
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/
@@ -930,7 +935,7 @@ def test_source_decl_kind_properties_report_the_protocol():
         parse_source,
     )
 
-    bot, _ = parse_source({"protocol": "bot", "bot_id": "src_1"})
+    bot, _ = parse_source({"protocol": "bot", "bot_id": "src_1", "owner_id": "u1"})
     assert bot.is_bot is True
     assert bot.is_git is False
 
@@ -951,6 +956,7 @@ sources:
   bad:
     protocol: bot
     bot_id: 12345
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/
@@ -966,6 +972,7 @@ sources:
   bad:
     protocol: bot
     bot_id: ""
+    owner_id: u1
 manifest:
   resources:
     - path: workspace/

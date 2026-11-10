@@ -96,7 +96,7 @@ async def test_a_bot_source_entry_is_skipped_by_the_resources_compiler() -> None
     stored-content entries. A mixed list is the case that proves the skip is in
     the right place — one inline file through, the bot entry invisible."""
     session, content, resolver = rig(
-        sources={"from_bot": {"protocol": "bot", "bot_id": "src_1"}}
+        sources={"from_bot": {"protocol": "bot", "bot_id": "src_1", "owner_id": "u1"}}
     )
     declared = await compile_resources(
         session,
