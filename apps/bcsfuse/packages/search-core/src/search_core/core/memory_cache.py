@@ -8,6 +8,39 @@ from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from threading import Lock
 
+_JSON_ATOMS = {str, int, float, bool, type(None)}
+
+
+def _copy_value(value, memo=None):
+    """Copy JSON containers cheaply; retain deepcopy for every other type.
+
+    Each read still owns its mutable containers. One memo preserves aliases and
+    cycles, including references crossing into objects handled by deepcopy.
+    Exact types keep custom container subclasses on their original copy path.
+    """
+    kind = type(value)
+    if kind not in (dict, list):
+        return deepcopy(value, memo)
+    if memo is None:
+        memo = {}
+    identity = id(value)
+    if identity in memo:
+        return memo[identity]
+    result = {} if kind is dict else []
+    memo[identity] = result
+    if kind is dict:
+        for key, item in value.items():
+            copied_key = key if type(key) in _JSON_ATOMS else deepcopy(key, memo)
+            result[copied_key] = (
+                item if type(item) in _JSON_ATOMS else _copy_value(item, memo)
+            )
+    else:
+        result.extend(
+            item if type(item) in _JSON_ATOMS else _copy_value(item, memo)
+            for item in value
+        )
+    return result
+
 
 def _weight(value):
     """Conservative retained-object estimate, plus a separate entry-count bound."""
@@ -68,12 +101,12 @@ class MemoryCache:
             self._entries.move_to_end(key)
             self._counts["hits"] += 1
             value = entry[1]
-        return deepcopy(value)
+        return _copy_value(value)
 
     def put(self, key, value):
         if not self._enabled:
             return
-        saved = deepcopy(value)
+        saved = _copy_value(value)
         weight = _weight(key) + _weight(saved) + 128
         with self._lock:
             if not self._enabled:
