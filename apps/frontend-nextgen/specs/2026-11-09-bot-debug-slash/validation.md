@@ -1,6 +1,6 @@
 # Validation checkpoint
 
-Updated: 2026-11-10. Core live preproduction acceptance is **complete**; no PR or deployed-product change is claimed.
+Updated: 2026-11-10. Personal-Bot live preproduction checks passed; service-Bot draft-versus-online acceptance is **not complete**. The user has reauthorized an Avernet dev PR after review; delivery is pending. No deployed-product change is claimed.
 
 ## Baselines and scope
 - Public source started at `df0411cfcece160549446e5ed30a70b699a59edc`.
@@ -51,5 +51,18 @@ Only the disposable local engineering snapshot was amended to sync these public 
 
 The extra actual-knowledge/debug integration suite also lives only in that disposable internal snapshot. No internal branch or test-ownership change has been committed or proposed. When consuming the public change, align the internal public-test manifest rather than running stale copies against the new internal component signature.
 
+## Service editor stage regression (2026-11-10)
+The earlier live checks used personal Bots, which always resolve to draft. They did not establish the service-Bot editing requirement. A new test mounts the actual detail page and debug panel, mocking request hooks and the leaf composer only. Before the fix, both a running service Bot opened with `type=edit&runtime_stage=online` and one without an explicit stage incorrectly passed `online` to debug requests and the composer: 2 failed, 6 passed. The detail page now chooses draft for editing, preserves explicit/lifecycle verification as verify, and preserves ordinary view stages. After the fix all 8 cases pass. The debug remount key uses the same resolved stage, keeping session/composer state isolated.
+
+Actual internal Sender + knowledge extension tests additionally cover draft/current, verify/last_recorded, online/last_recorded, distinct stage candidates, and rejection of an online-recorded response when draft/current was requested. The assembled stage and knowledge regression now passes 6 suites / 49 tests. APIs are mocked: this establishes frontend wiring, not live backend selection correctness.
+
+The changed detail source has been copied into the disposable assembled frontend and HMR compiled successfully. A live service Bot with differing draft/online enablement has **not** been exercised. No knowledge enablement, authorization, publication or edit-lock takeover was performed. The full public CI result above predates this stage fix; post-fix targeted checks are recorded separately, not presented as a new full-CI run.
+
+
+## Live service-Bot slash diagnosis (2026-11-10)
+The local service-Bot editing route with an explicit draft stage initially displayed “暂无调试会话”; the composer was disabled and the session-dependent knowledge extension was not mounted. This is a session prerequisite, not a service-type exclusion. Creating one empty “Bot 工坊调试” session enabled the input and established a connection. Typing `/` then displayed skill, file, clear and knowledge entries. Opening file completed with the expected empty-session message “暂无可引用文件,请先上传”. Opening knowledge displayed an actual enabled test knowledge-base candidate. No chat message was sent, no file was uploaded, and no enablement, authorization, publication or edit-lock takeover was performed by this diagnosis.
+
+The focused assembled regression was rerun: 3 suites / 22 tests passed. This live check establishes service-draft command availability after session creation; it does not establish a differing online selection, file transport or knowledge retrieval. The empty-session UI can misleadingly appear to lack slash support because its disabled placeholder still advertises commands; improving that guidance is a separate, small UI follow-up rather than relaxing session/identity requirements.
+
 ## Delivery gate
-Core browser acceptance and complete public CI passed. Self-review found no blocking issue: existing composer capability boundaries and identity/stage addressing are preserved; resource requests remain lazy on command entry rather than being repeated per keystroke. All changed source files are below the repository limits. The branch is being rebased onto refreshed dev without changing the validated frontend tree and submitted through the normal pre-push hook. No merge or deployed-product release is authorized or claimed.
+The user reauthorized review followed by an Avernet dev PR on 2026-11-10. Review, refreshed baseline validation and submission are in progress. The earlier rebase attempt was aborted cleanly after a missing-blob fetch failed. Live service-Bot command availability and current draft enablement matching were verified; differing online selection and service-Bot file/mixed-send transport remain untested live and must be disclosed in the PR. Knowledge-reference bubble rendering, removal of the internal authorization badge and empty-session guidance are excluded follow-ups.
