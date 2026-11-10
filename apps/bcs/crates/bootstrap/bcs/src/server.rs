@@ -134,7 +134,7 @@ use bcs_service_api::{
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, FriendRequestCoreService, FrontendDeliveryPort, GroupCoreService,
+    FriendCoreService, FriendService, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
     HandleBotTerminalEventCommand, HumanInputReadyEvent, InteractionService, InviteService,

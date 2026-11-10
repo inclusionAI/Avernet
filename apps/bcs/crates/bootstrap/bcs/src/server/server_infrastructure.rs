@@ -806,7 +806,7 @@ impl BcsServer {
             sessions.clone(),
             friend_svc.clone(),
             use_cases.candidate_search.clone(),
-            friend_request_svc,
+            use_cases.friend_use_cases.clone(),
             relation_svc.clone(),
             session_management.clone(),
             session_launch.clone(),

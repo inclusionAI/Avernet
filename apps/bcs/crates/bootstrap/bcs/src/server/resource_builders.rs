@@ -489,7 +489,7 @@ pub(super) fn build_openapi_v1_state(
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
-    friend_requests: Arc<dyn FriendRequestCoreService>,
+    legacy_friend: Arc<dyn FriendService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
@@ -653,7 +653,7 @@ pub(super) fn build_openapi_v1_state(
     let invitation_service = Arc::new(
         InvitationFriendshipServiceImpl::new(
             friends,
-            friend_requests,
+            legacy_friend,
             invitation_groups,
             invitation_sessions,
             registry.clone(),

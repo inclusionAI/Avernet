@@ -168,6 +168,13 @@ impl BcsServer {
         // process-local repo ports, so the legacy `/friends/*` facade and the
         // edge connect endpoints share one source of truth. These stores are
         // intentionally not file-backed (see `bcs_edge_permission_store::memory`).
+        //
+        // TODO(dima-2026110600120400669): this path holds TWO independent
+        // permission-profile sources — onboarding/runtime reads the shared
+        // `memory_profile_port` (`bot_repo`) while connect reads the separate
+        // `MemoryPermissionProfileStore` below. They drift as soon as a profile
+        // is written through one of them; unify them on a single store before
+        // the connect profile writes become authoritative.
         let edge_profiles = Arc::new(
             bcs_edge_permission_store::memory::MemoryPermissionProfileStore::new(),
         );
@@ -576,7 +583,7 @@ impl BcsServer {
             sessions.clone(),
             friend_store.clone(),
             use_cases.candidate_search.clone(),
-            friend_request_store,
+            use_cases.friend_use_cases.clone(),
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),

@@ -632,6 +632,17 @@ impl Default for BcsServerState {
             false,
         )
         .expect("default Eventing configuration must initialize");
+        // This test-utils composition root has no durable connect store (the
+        // V1 friend-connection entries use `NoopConnectService`), so the V1
+        // friendship facade keeps the legacy friend use case as its backend
+        // rather than layering the connect-backed facade over a noop connect.
+        let legacy_friend: Arc<dyn bcs_service_api::FriendService> =
+            Arc::new(bcs_friend::Friend::new(
+                bot_registry.clone(),
+                friend_store.clone(),
+                friend_request_store,
+                relation_store.clone(),
+            ));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             card_changes.clone(),
@@ -642,7 +653,7 @@ impl Default for BcsServerState {
             sessions.clone(),
             friend_store.clone(),
             candidate_search.openapi_v1,
-            friend_request_store,
+            legacy_friend,
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
