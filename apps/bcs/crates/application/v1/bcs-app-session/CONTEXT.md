@@ -35,9 +35,9 @@
   file commands, and orchestrates best-effort completion notifications.
 - `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
   verifies current-Session membership for session/round writes and Group membership for group writes, validates the
-  `{sessionId}:{round}` format, resolves slot management against an existing
+  `{sessionId}:{round}` format, resolves preset management against an existing
   Group, and authorizes writes against the Group driver Bot.
-  The underlying Group Context service owns slot and entry policies.
+  The underlying Group Context service owns preset and entry policies.
 
 ## Consumes
 

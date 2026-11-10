@@ -21,7 +21,7 @@ const SESSION_ID: &str = "bcs_grp_gcguard:00000001";
 #[derive(Default)]
 struct RecordingGroupContextService {
     adds: Mutex<Vec<AddGroupContext>>,
-    slot_actors: Mutex<Vec<String>>,
+    preset_actors: Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -31,7 +31,7 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(GroupContextAck::ok())
     }
 
-    async fn list_slots(
+    async fn list_presets(
         &self,
         _: &str,
         _: &bcs_service_api::application::v1::AuthenticatedCaller,
@@ -40,18 +40,18 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(Vec::new())
     }
 
-    async fn add_slot(&self, _: &str, actor: &str, _: String, _: String) -> Result<(), ApplicationError> {
-        self.slot_actors.lock().unwrap().push(actor.to_owned());
+    async fn add_preset(&self, _: &str, actor: &str, _: String, _: String) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
     }
 
-    async fn update_slot(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
-        self.slot_actors.lock().unwrap().push(actor.to_owned());
+    async fn update_preset(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
     }
 
-    async fn delete_slot(&self, _: &str, actor: &str, _: String) -> Result<(), ApplicationError> {
-        self.slot_actors.lock().unwrap().push(actor.to_owned());
+    async fn delete_preset(&self, _: &str, actor: &str, _: String) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
     }
 
@@ -148,7 +148,7 @@ fn add_command(
     request_context: GroupContextRequestContext,
 ) -> AddGroupContext {
     AddGroupContext {
-        slot: false,
+        preset: false,
         actor_id: actor_id.to_string(),
         request_context,
         name: "test_context".to_string(),
@@ -384,7 +384,7 @@ async fn round_add_resolves_session_and_uses_session_membership_rule() {
 }
 
 #[tokio::test]
-async fn slot_writes_require_live_authority_on_the_group_driver() {
+async fn preset_writes_require_live_authority_on_the_group_driver() {
     use bcs_test_support::{authority_edge_fixture, grant_manager_edge, grant_owner_edge};
 
     let authority = authority_edge_fixture();
@@ -403,9 +403,9 @@ async fn slot_writes_require_live_authority_on_the_group_driver() {
     );
     for actor in ["human_other", "driver", "human_owner", "human_admin"] {
         let results = [
-            guard.add_slot(GROUP_ID, actor, "timeline".into(), String::new()).await,
-            guard.update_slot(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
-            guard.delete_slot(GROUP_ID, actor, "timeline".into()).await,
+            guard.add_preset(GROUP_ID, actor, "timeline".into(), String::new()).await,
+            guard.update_preset(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
+            guard.delete_preset(GROUP_ID, actor, "timeline".into()).await,
         ];
         for result in results {
             if matches!(actor, "human_owner" | "human_admin") {
@@ -415,12 +415,12 @@ async fn slot_writes_require_live_authority_on_the_group_driver() {
             }
         }
     }
-    assert_eq!(*inner.slot_actors.lock().unwrap(),
+    assert_eq!(*inner.preset_actors.lock().unwrap(),
         ["human_owner", "human_owner", "human_owner", "human_admin", "human_admin", "human_admin"]);
 }
 
 #[tokio::test]
-async fn slot_discovery_requires_group_membership_or_an_explicit_session() {
+async fn preset_discovery_requires_group_membership_or_an_explicit_session() {
     use bcs_service_api::application::v1::{AuthenticatedBotIdentity, AuthenticatedCaller};
 
     let (guard, _) = guard_with_group_member("group_member").await;
@@ -437,13 +437,13 @@ async fn slot_discovery_requires_group_membership_or_an_explicit_session() {
         access_key: None,
     };
 
-    guard.list_slots(GROUP_ID, &bot("group_member"), None).await.unwrap();
-    guard.list_slots(GROUP_ID, &bot("session_member"), Some(SESSION_ID)).await.unwrap();
+    guard.list_presets(GROUP_ID, &bot("group_member"), None).await.unwrap();
+    guard.list_presets(GROUP_ID, &bot("session_member"), Some(SESSION_ID)).await.unwrap();
 
-    let missing_session = guard.list_slots(GROUP_ID, &bot("session_member"), None).await.unwrap_err();
+    let missing_session = guard.list_presets(GROUP_ID, &bot("session_member"), None).await.unwrap_err();
     assert_eq!(missing_session.code(), "permission_denied");
     assert!(missing_session.to_string().contains("--session-id"));
 
-    let outsider = guard.list_slots(GROUP_ID, &bot("outsider"), Some(SESSION_ID)).await.unwrap_err();
+    let outsider = guard.list_presets(GROUP_ID, &bot("outsider"), Some(SESSION_ID)).await.unwrap_err();
     assert_eq!(outsider.code(), "permission_denied");
 }

@@ -51,7 +51,7 @@ pub struct GroupContextRequestContext {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddGroupContext {
     #[serde(default)]
-    pub slot: bool,
+    pub preset: bool,
     pub actor_id: String,
     pub request_context: GroupContextRequestContext,
     pub name: String,
@@ -197,20 +197,20 @@ pub struct GroupContextGetResponse {
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
 
-    async fn list_slots(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
-        Err(ApplicationError::internal("slots unavailable"))
+    async fn list_presets(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
     }
 
-    async fn add_slot(&self, _group_id: &str, _actor: &str, _name: String, _description: String) -> Result<(), ApplicationError> {
-        Err(ApplicationError::internal("slots unavailable"))
+    async fn add_preset(&self, _group_id: &str, _actor: &str, _name: String, _description: String) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
     }
 
-    async fn update_slot(&self, _group_id: &str, _actor: &str, _name: String, _new_name: Option<String>, _description: Option<String>) -> Result<(), ApplicationError> {
-        Err(ApplicationError::internal("slots unavailable"))
+    async fn update_preset(&self, _group_id: &str, _actor: &str, _name: String, _new_name: Option<String>, _description: Option<String>) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
     }
 
-    async fn delete_slot(&self, _group_id: &str, _actor: &str, _name: String) -> Result<(), ApplicationError> {
-        Err(ApplicationError::internal("slots unavailable"))
+    async fn delete_preset(&self, _group_id: &str, _actor: &str, _name: String) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
     }
 
     async fn update(

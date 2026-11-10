@@ -265,10 +265,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
-        .route("/groupcontext/list-slot", post(routes::group_context::list_slot))
-        .route("/groupcontext/add-slot", post(routes::group_context::add_slot))
-        .route("/groupcontext/update-slot", post(routes::group_context::update_slot))
-        .route("/groupcontext/delete-slot", post(routes::group_context::delete_slot))
+        .route("/groupcontext/list-preset", post(routes::group_context::list_preset))
+        .route("/groupcontext/add-preset", post(routes::group_context::add_preset))
+        .route("/groupcontext/update-preset", post(routes::group_context::update_preset))
+        .route("/groupcontext/delete-preset", post(routes::group_context::delete_preset))
         .route("/groupcontext/add", post(routes::group_context::add))
         .route("/groupcontext/update", post(routes::group_context::update))
         .route("/groupcontext/list", post(routes::group_context::list))

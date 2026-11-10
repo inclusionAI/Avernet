@@ -1,7 +1,7 @@
 use super::*;
 
 impl SqlGroupContextStore {
-    pub(super) async fn has_slot(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+    pub(super) async fn has_preset(&self, group_id: &str, name: &str) -> StoreResult<bool> {
         let rows = self
             .db
             .query(DbStatement::with_params(
@@ -13,7 +13,7 @@ impl SqlGroupContextStore {
         Ok(!rows.is_empty())
     }
 
-    pub(super) async fn load_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+    pub(super) async fn load_presets(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
         let sql = format!(
             "SELECT name, description, creator, modifier, {}, {} FROM bcs_group_context_item_presets WHERE group_id = ? ORDER BY name",
             self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
@@ -39,7 +39,7 @@ impl SqlGroupContextStore {
             .collect()
     }
 
-    pub(super) async fn write_slot(
+    pub(super) async fn write_preset(
         &self,
         group_id: &str,
         actor: &str,
@@ -106,7 +106,7 @@ impl SqlGroupContextStore {
             }
         })?;
         // MySQL reports zero changed rows for a repeated identical edit.
-        if result.affected_rows == 0 && !(is_edit && self.has_slot(group_id, &name).await?) {
+        if result.affected_rows == 0 && !(is_edit && self.has_preset(group_id, &name).await?) {
             return Err(GroupContextStoreError::NotFound {
                 name,
                 scope: group_id.into(),

@@ -64,7 +64,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     assert_eq!(mysql[42], "043_actor_identity_collation.sql");
     assert_eq!(mysql[43], "044_actor_identity_no_pad.sql");
     assert_eq!(mysql[44], "045_delivery_session_lookup.sql");
-    assert_eq!(mysql[45], "046_group_context_slot.sql");
+    assert_eq!(mysql[45], "046_group_context_preset.sql");
 }
 
 #[tokio::test]

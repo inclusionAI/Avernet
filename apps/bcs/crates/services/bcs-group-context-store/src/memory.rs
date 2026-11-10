@@ -16,7 +16,7 @@ pub struct MemoryGroupContextRepo {
 
 #[derive(Default)]
 struct MemoryState {
-    slots: BTreeMap<String, BTreeMap<String, GroupContextItemPreset>>,
+    presets: BTreeMap<String, BTreeMap<String, GroupContextItemPreset>>,
     next_id: i64,
     rows: Vec<GroupContextEntry>,
 }
@@ -29,47 +29,47 @@ impl MemoryGroupContextRepo {
 
 #[async_trait]
 impl GroupContextRepo for MemoryGroupContextRepo {
-    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
-        Ok(self.state.read().await.slots.get(group_id).is_some_and(|slots| slots.contains_key(name)))
+    async fn preset_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        Ok(self.state.read().await.presets.get(group_id).is_some_and(|presets| presets.contains_key(name)))
     }
 
-    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
-        Ok(self.state.read().await.slots.get(group_id)
-            .into_iter().flat_map(|slots| slots.values().cloned()).collect())
+    async fn list_presets(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+        Ok(self.state.read().await.presets.get(group_id)
+            .into_iter().flat_map(|presets| presets.values().cloned()).collect())
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
+    async fn change_preset(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
         let mut state = self.state.write().await;
-        let slots = state.slots.entry(group_id.to_owned()).or_default();
+        let presets = state.presets.entry(group_id.to_owned()).or_default();
         let duplicate = |name| GroupContextStoreError::DuplicateActive { name, scope: group_id.into() };
         let missing = |name| GroupContextStoreError::NotFound { name, scope: group_id.into() };
         match change {
             GroupContextItemPresetChange::Add { name, description } => {
-                if slots.contains_key(&name) {
+                if presets.contains_key(&name) {
                     return Err(duplicate(name));
                 }
                 let now = chrono::Utc::now();
-                slots.insert(name.clone(), GroupContextItemPreset {
+                presets.insert(name.clone(), GroupContextItemPreset {
                     name, description, creator: actor.into(), modifier: actor.into(),
                     gmt_create: now, gmt_modified: now,
                 });
             }
             GroupContextItemPresetChange::Edit { name, new_name, description } => {
                 let target = new_name.unwrap_or_else(|| name.clone());
-                if target != name && slots.contains_key(&target) {
+                if target != name && presets.contains_key(&target) {
                     return Err(duplicate(target));
                 }
-                let mut slot = slots.remove(&name).ok_or_else(|| missing(name))?;
-                slot.name = target.clone();
-                slot.modifier = actor.into();
-                slot.gmt_modified = chrono::Utc::now();
+                let mut preset = presets.remove(&name).ok_or_else(|| missing(name))?;
+                preset.name = target.clone();
+                preset.modifier = actor.into();
+                preset.gmt_modified = chrono::Utc::now();
                 if let Some(description) = description {
-                    slot.description = description;
+                    preset.description = description;
                 }
-                slots.insert(target, slot);
+                presets.insert(target, preset);
             }
             GroupContextItemPresetChange::Delete { name } => {
-                slots.remove(&name).ok_or_else(|| missing(name))?;
+                presets.remove(&name).ok_or_else(|| missing(name))?;
             }
         }
         Ok(())

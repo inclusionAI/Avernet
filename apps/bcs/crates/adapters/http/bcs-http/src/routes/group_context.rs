@@ -45,7 +45,7 @@ impl GroupContextQuery {
 #[derive(Debug, Deserialize)]
 pub(crate) struct AddRequest {
     #[serde(default)]
-    slot: bool,
+    preset: bool,
     name: String,
     scope_level: ScopeLevel,
     content: String,
@@ -113,7 +113,7 @@ pub(crate) async fn add(
         .services
         .group_context
         .add(AddGroupContext {
-            slot: body.slot,
+            preset: body.preset,
             actor_id,
             request_context: query.request_context(),
             name: body.name,
@@ -128,7 +128,7 @@ pub(crate) async fn add(
     Ok(json_ok(result))
 }
 
-pub(crate) async fn list_slot(
+pub(crate) async fn list_preset(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
@@ -140,59 +140,59 @@ pub(crate) async fn list_slot(
         .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
     let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
-    let slots = state.services.group_context.list_slots(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
-    Ok(json_ok(serde_json::json!({ "slots": slots })))
+    let presets = state.services.group_context.list_presets(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
+    Ok(json_ok(serde_json::json!({ "presets": presets })))
 }
 
 #[derive(Deserialize)]
-pub(crate) struct AddSlotRequest { name: String, #[serde(default)] description: String }
+pub(crate) struct AddPresetRequest { name: String, #[serde(default)] description: String }
 
-pub(crate) async fn add_slot(
+pub(crate) async fn add_preset(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<AddSlotRequest>, JsonRejection>,
+    body: Result<Json<AddPresetRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
-    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
-    let Json(AddSlotRequest { name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
-    state.services.group_context.add_slot(&group_id, &actor, name, description).await?;
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(AddPresetRequest { name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.add_preset(&group_id, &actor, name, description).await?;
     Ok(json_ok(GroupContextAck::ok()))
 }
 
 #[derive(Deserialize)]
-pub(crate) struct UpdateSlotRequest { name: String, new_name: Option<String>, description: Option<String> }
+pub(crate) struct UpdatePresetRequest { name: String, new_name: Option<String>, description: Option<String> }
 
-pub(crate) async fn update_slot(
+pub(crate) async fn update_preset(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<UpdateSlotRequest>, JsonRejection>,
+    body: Result<Json<UpdatePresetRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
-    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
-    let Json(UpdateSlotRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
-    state.services.group_context.update_slot(&group_id, &actor, name, new_name, description).await?;
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(UpdatePresetRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.update_preset(&group_id, &actor, name, new_name, description).await?;
     Ok(json_ok(GroupContextAck::ok()))
 }
 
 #[derive(Deserialize)]
-pub(crate) struct DeleteSlotRequest { name: String }
+pub(crate) struct DeletePresetRequest { name: String }
 
-pub(crate) async fn delete_slot(
+pub(crate) async fn delete_preset(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<DeleteSlotRequest>, JsonRejection>,
+    body: Result<Json<DeletePresetRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
-    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
-    let Json(DeleteSlotRequest { name }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
-    state.services.group_context.delete_slot(&group_id, &actor, name).await?;
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(DeletePresetRequest { name }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.delete_preset(&group_id, &actor, name).await?;
     Ok(json_ok(GroupContextAck::ok()))
 }
 
-async fn slot_write_context(
+async fn preset_write_context(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
@@ -203,7 +203,7 @@ async fn slot_write_context(
     let caller = resolve_group_chat_caller(state, headers, uri).await
         .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
     let GroupChatCaller::Human(human) = caller else {
-        return Err(ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller").into());
+        return Err(ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller").into());
     };
     let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;

@@ -57,7 +57,7 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     assert!(report.contains("applied_versions=26\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
     assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
-    assert!(report.contains("- 046 group_context_slot checksum="), "{report}");
+    assert!(report.contains("- 046 group_context_preset checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())

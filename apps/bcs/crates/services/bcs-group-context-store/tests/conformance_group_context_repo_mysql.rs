@@ -49,38 +49,38 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
         set_session_timezone(plugin.as_ref(), timezone).await;
         clear_group_contexts(plugin.as_ref()).await;
         assert_group_context_roundtrip(plugin.clone(), suffix).await;
-        assert_slot_audit_roundtrip(&SqlGroupContextStore::oceanbase(plugin.clone()), suffix).await;
+        assert_preset_audit_roundtrip(&SqlGroupContextStore::oceanbase(plugin.clone()), suffix).await;
     }
 
-    common::slot_names_are_case_sensitive(&SqlGroupContextStore::oceanbase(plugin)).await;
+    common::preset_names_are_case_sensitive(&SqlGroupContextStore::oceanbase(plugin)).await;
     manager.close().await;
 }
 
-async fn assert_slot_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) {
+async fn assert_preset_audit_roundtrip(repo: &SqlGroupContextStore, suffix: &str) {
     use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete, Edit};
 
-    let group = format!("slot-audit-{suffix}");
+    let group = format!("preset-audit-{suffix}");
     let create_started = Utc::now().timestamp_millis();
-    repo.change_slot(&group, "owner", Add {
+    repo.change_preset(&group, "owner", Add {
         name: "timeline".into(),
         description: String::new(),
     }).await.unwrap();
-    let before = repo.list_slots(&group).await.unwrap().remove(0);
+    let before = repo.list_presets(&group).await.unwrap().remove(0);
     assert_eq!(before.gmt_create, before.gmt_modified);
     assert!((create_started..=Utc::now().timestamp_millis()).contains(&before.gmt_create.timestamp_millis()));
     let update_started = Utc::now().timestamp_millis();
-    repo.change_slot(&group, "admin", Edit {
+    repo.change_preset(&group, "admin", Edit {
         name: "timeline".into(),
         new_name: Some("events".into()),
         description: None,
     }).await.unwrap();
-    let after = repo.list_slots(&group).await.unwrap().remove(0);
+    let after = repo.list_presets(&group).await.unwrap().remove(0);
     assert_eq!(after.name, "events");
     assert_eq!(after.creator, "owner");
     assert_eq!(after.modifier, "admin");
     assert_eq!(before.gmt_create, after.gmt_create);
     assert!((update_started..=Utc::now().timestamp_millis()).contains(&after.gmt_modified.timestamp_millis()));
-    repo.change_slot(&group, "admin", Delete { name: "events".into() }).await.unwrap();
+    repo.change_preset(&group, "admin", Delete { name: "events".into() }).await.unwrap();
 }
 
 async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
@@ -111,14 +111,14 @@ async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
         .await;
     }
     let columns = db.query(DbStatement::new(
-        "SELECT COUNT(*) AS slot_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'created_from_preset'",
+        "SELECT COUNT(*) AS preset_columns FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'bcs_group_contexts' AND column_name = 'created_from_preset'",
     ))
     .await
-    .expect("check for the MySQL group context slot column");
-    if db_get_column::<i64>(&columns[0], "slot_columns").expect("read slot column count") == 0 {
+    .expect("check for the MySQL group context preset column");
+    if db_get_column::<i64>(&columns[0], "preset_columns").expect("read preset column count") == 0 {
         execute_group_context_migration(
             db,
-            include_str!("../../../../migrations/mysql/046_group_context_slot.sql"),
+            include_str!("../../../../migrations/mysql/046_group_context_preset.sql"),
         )
         .await;
     }

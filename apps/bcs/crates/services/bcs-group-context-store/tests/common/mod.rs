@@ -417,25 +417,25 @@ pub async fn current_row_with_expired_business_validity_still_blocks_and_is_retu
     assert!(rows.iter().any(|row| row.name == created.name));
 }
 
-pub async fn slot_names_are_case_sensitive(repo: &dyn GroupContextRepo) {
+pub async fn preset_names_are_case_sensitive(repo: &dyn GroupContextRepo) {
     use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete};
 
-    let group = "case-sensitive-slots";
-    repo.change_slot(group, "owner", Add {
+    let group = "case-sensitive-presets";
+    repo.change_preset(group, "owner", Add {
         name: "Timeline".into(),
         description: String::new(),
     }).await.unwrap();
-    assert!(repo.slot_exists(group, "Timeline").await.unwrap());
-    assert!(!repo.slot_exists(group, "timeline").await.unwrap());
+    assert!(repo.preset_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.preset_exists(group, "timeline").await.unwrap());
 
-    repo.change_slot(group, "owner", Add {
+    repo.change_preset(group, "owner", Add {
         name: "timeline".into(),
         description: String::new(),
     }).await.unwrap();
-    assert_eq!(repo.list_slots(group).await.unwrap().len(), 2);
+    assert_eq!(repo.list_presets(group).await.unwrap().len(), 2);
 
-    repo.change_slot(group, "owner", Delete { name: "timeline".into() }).await.unwrap();
-    assert!(repo.slot_exists(group, "Timeline").await.unwrap());
-    assert!(!repo.slot_exists(group, "timeline").await.unwrap());
-    repo.change_slot(group, "owner", Delete { name: "Timeline".into() }).await.unwrap();
+    repo.change_preset(group, "owner", Delete { name: "timeline".into() }).await.unwrap();
+    assert!(repo.preset_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.preset_exists(group, "timeline").await.unwrap());
+    repo.change_preset(group, "owner", Delete { name: "Timeline".into() }).await.unwrap();
 }

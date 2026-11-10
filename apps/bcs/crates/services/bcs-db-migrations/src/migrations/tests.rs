@@ -268,7 +268,7 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (41, "group_agent_cards".to_string(), "sqlite".to_string()),
             (42, "auth_session_version".to_string(), "sqlite".to_string()),
             (43, "delivery_session_lookup".to_string(), "sqlite".to_string()),
-            (44, "group_context_slot".to_string(), "sqlite".to_string()),
+            (44, "group_context_preset".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())
@@ -738,7 +738,7 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (41, "group_agent_cards".to_string(), "sqlite".to_string()),
             (42, "auth_session_version".to_string(), "sqlite".to_string()),
             (43, "delivery_session_lookup".to_string(), "sqlite".to_string()),
-            (44, "group_context_slot".to_string(), "sqlite".to_string()),
+            (44, "group_context_preset".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())

@@ -1,7 +1,7 @@
 //! Group and Session resource checks for public Group Context operations.
 //!
-//! The guard resolves the canonical Group for adds and slot definitions, and
-//! checks source Session membership before resolving inheritance selections.
+//! The guard resolves the canonical Group for adds and preset definitions, and
+//! checks Session membership when a Bot lists presets with a Session ID.
 //! Entry-level permissions remain in the Group Context application service.
 
 use std::sync::Arc;
@@ -151,16 +151,16 @@ suffix when scope_level=round",
 }
 
 impl GroupContextAddAccessGuard {
-    async fn authorize_slot_write(&self, group_id: &str, actor: &str) -> Result<Group, ApplicationError> {
+    async fn authorize_preset_write(&self, group_id: &str, actor: &str) -> Result<Group, ApplicationError> {
         let group = self.load_group(group_id).await?;
         let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
-            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller"))?;
+            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller"))?;
         let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
             .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
         if !authorized {
             return Err(ApplicationError::forbidden_code(
                 "permission_denied",
-                "slot management requires owner or admin authority on the Group driver Bot",
+                "preset management requires owner or admin authority on the Group driver Bot",
             ));
         }
         Ok(group)
@@ -174,7 +174,7 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add(command).await
     }
 
-    async fn list_slots(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
+    async fn list_presets(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
         let group = self.load_group(group_id).await?;
         if let Some(bot) = &caller.bot
             && !group.participants.iter().any(|member| member.bot_uuid == bot.bot_uuid)
@@ -191,22 +191,22 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
             }
             ensure_participant(&session.participants, &bot.bot_uuid, "the specified Session")?;
         }
-        self.inner.list_slots(&group.id, caller, session_id).await
+        self.inner.list_presets(&group.id, caller, session_id).await
     }
 
-    async fn add_slot(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
-        let group = self.authorize_slot_write(group_id, actor).await?;
-        self.inner.add_slot(&group.id, actor, name, description).await
+    async fn add_preset(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.add_preset(&group.id, actor, name, description).await
     }
 
-    async fn update_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
-        let group = self.authorize_slot_write(group_id, actor).await?;
-        self.inner.update_slot(&group.id, actor, name, new_name, description).await
+    async fn update_preset(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.update_preset(&group.id, actor, name, new_name, description).await
     }
 
-    async fn delete_slot(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
-        let group = self.authorize_slot_write(group_id, actor).await?;
-        self.inner.delete_slot(&group.id, actor, name).await
+    async fn delete_preset(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.delete_preset(&group.id, actor, name).await
     }
 
     async fn update(

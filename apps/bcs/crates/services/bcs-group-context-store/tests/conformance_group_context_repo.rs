@@ -16,7 +16,7 @@ async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
     for migration in [
         include_str!("../../../../migrations/sqlite/034_group_context.sql"),
         include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
-        include_str!("../../../../migrations/sqlite/044_group_context_slot.sql"),
+        include_str!("../../../../migrations/sqlite/044_group_context_preset.sql"),
     ] {
         for sql in migration
             .split(';')
@@ -180,28 +180,28 @@ async fn sqlite_expired_business_validity_still_current() {
 }
 
 #[tokio::test]
-async fn sqlite_slot_mutations_are_scoped_and_preserve_creator() {
+async fn sqlite_preset_mutations_are_scoped_and_preserve_creator() {
     use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete, Edit};
 
     let repo = sqlite_repo().await;
     let add = Add { name: "timeline".into(), description: String::new() };
-    repo.change_slot("one", "alice", add.clone()).await.unwrap();
-    repo.change_slot("two", "bob", add.clone()).await.unwrap();
-    assert!(repo.change_slot("one", "bob", add).await.is_err());
+    repo.change_preset("one", "alice", add.clone()).await.unwrap();
+    repo.change_preset("two", "bob", add.clone()).await.unwrap();
+    assert!(repo.change_preset("one", "bob", add).await.is_err());
     let rename = Edit { name: "timeline".into(), new_name: Some("events".into()), description: None };
-    repo.change_slot("one", "bob", rename).await.unwrap();
-    assert!(!repo.slot_exists("one", "timeline").await.unwrap());
-    assert!(repo.slot_exists("one", "events").await.unwrap());
-    assert!(repo.slot_exists("two", "timeline").await.unwrap());
-    let slots = repo.list_slots("one").await.unwrap();
-    assert_eq!(slots[0].creator, "alice");
-    assert_eq!(slots[0].modifier, "bob");
-    repo.change_slot("one", "bob", Delete { name: "events".into() }).await.unwrap();
-    assert!(repo.list_slots("one").await.unwrap().is_empty());
+    repo.change_preset("one", "bob", rename).await.unwrap();
+    assert!(!repo.preset_exists("one", "timeline").await.unwrap());
+    assert!(repo.preset_exists("one", "events").await.unwrap());
+    assert!(repo.preset_exists("two", "timeline").await.unwrap());
+    let presets = repo.list_presets("one").await.unwrap();
+    assert_eq!(presets[0].creator, "alice");
+    assert_eq!(presets[0].modifier, "bob");
+    repo.change_preset("one", "bob", Delete { name: "events".into() }).await.unwrap();
+    assert!(repo.list_presets("one").await.unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn slot_names_are_case_sensitive_in_memory_and_sqlite() {
-    common::slot_names_are_case_sensitive(&MemoryGroupContextRepo::new()).await;
-    common::slot_names_are_case_sensitive(&sqlite_repo().await).await;
+async fn preset_names_are_case_sensitive_in_memory_and_sqlite() {
+    common::preset_names_are_case_sensitive(&MemoryGroupContextRepo::new()).await;
+    common::preset_names_are_case_sensitive(&sqlite_repo().await).await;
 }

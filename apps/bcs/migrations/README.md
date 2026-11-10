@@ -711,13 +711,13 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
   pre-upgrade sid-less sessions in both directions; after restoring the
   fixed writers + `[api.auth]`, users re-login through the new chain.
 
-## Group Context slots
+## Group Context presets
 
-SQLite `044_group_context_slot.sql` and MySQL/OceanBase
-`mysql/046_group_context_slot.sql` add the Group slot definitions and the
+SQLite `044_group_context_preset.sql` and MySQL/OceanBase
+`mysql/046_group_context_preset.sql` add the Group preset definitions and the
 `created_from_preset` flag on context versions. Existing contexts read as `false`.
 Apply remote DDL before starting the new server. SQLite applies its migration
 during startup.
 
-The slot table uses an auto-increment primary key, a unique Group/name pair,
+The preset table uses an auto-increment primary key, a unique Group/name pair,
 and creation and modification timestamps.

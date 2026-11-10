@@ -590,16 +590,16 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
 }
 
 #[tokio::test]
-async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
+async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     use bcs_service_api::{Group, GroupCoreService, NewSessionParams, Participant, ParticipantRole, SessionRepoPort};
 
     let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
     let driver = Participant::bot("judge_bot", ParticipantRole::Driver);
     let guest = Participant::bot("张三", ParticipantRole::Consultant);
-    groups.upsert(Group::new("slot-group", "judge_bot", vec![driver.clone()])).await.unwrap();
+    groups.upsert(Group::new("preset-group", "judge_bot", vec![driver.clone()])).await.unwrap();
     let sessions = Arc::new(bcs_session_store::MemorySessionRepo::new());
-    for (group, id) in [("slot-group", "slot-group:12345678"), ("other-group", "other-group:12345678")] {
+    for (group, id) in [("preset-group", "preset-group:12345678"), ("other-group", "other-group:12345678")] {
         sessions.create(group, NewSessionParams {
             id: Some(id.into()),
             participants: vec![driver.clone(), guest.clone()],
@@ -612,23 +612,23 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
         Arc::new(bcs_test_support::NoopBotAuthorityPort),
     ));
     let app = build_router(state);
-    let list = "/groupcontext/list-slot?groupId=slot-group";
-    let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
+    let list = "/groupcontext/list-preset?groupId=preset-group";
+    let add = "/groupcontext/add?groupId=preset-group&sessionId=preset-group:12345678";
     for operation in ["add", "update", "delete"] {
         let (status, _) = post_json(
-            &app, &format!("/groupcontext/{operation}-slot?groupId=slot-group"), token_for("admin"),
+            &app, &format!("/groupcontext/{operation}-preset?groupId=preset-group"), token_for("admin"),
             json!({"name":"timeline"}),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
-    repo.change_slot("slot-group", "human_owner",
+    repo.change_preset("preset-group", "human_owner",
         bcs_domain::group_context::GroupContextItemPresetChange::Add {
             name: "timeline".into(), description: String::new(),
         },
     ).await.unwrap();
     let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["slots"][0]["creator"], "human_owner");
+    assert_eq!(body["presets"][0]["creator"], "human_owner");
 
     let (status, body) = post_json(&app, list, token_for("张三"), json!({})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -636,10 +636,10 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     assert!(body["error_msg"].as_str().unwrap().contains("--session-id"));
 
     let (status, body) = post_json(
-        &app, &format!("{list}&sessionId=slot-group:12345678"), token_for("张三"), json!({}),
+        &app, &format!("{list}&sessionId=preset-group:12345678"), token_for("张三"), json!({}),
     ).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["slots"][0]["name"], "timeline");
+    assert_eq!(body["presets"][0]["name"], "timeline");
     let (status, _) = post_json(
         &app, &format!("{list}&sessionId=other-group:12345678"), token_for("张三"), json!({}),
     ).await;
@@ -651,7 +651,7 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     });
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context.clone()).await.0,
         StatusCode::BAD_REQUEST);
-    context["slot"] = json!(true);
+    context["preset"] = json!(true);
     let mut mismatched_name = context.clone();
     mismatched_name["name"] = json!("Timeline");
     assert_eq!(
@@ -660,22 +660,22 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     );
     assert_eq!(post_json(&app, add, token_for("judge_bot"), context).await.0, StatusCode::OK);
 
-    let existing = repo.get_active("timeline", "slot-group:12345678").await.unwrap().unwrap();
+    let existing = repo.get_active("timeline", "preset-group:12345678").await.unwrap().unwrap();
     assert!(existing.created_from_preset);
     assert_eq!(existing.content, "event");
 }
 
-struct SlotTestIdentity;
+struct PresetTestIdentity;
 
 #[async_trait::async_trait]
-impl bcs_http::state::UserIdentityPort for SlotTestIdentity {
+impl bcs_http::state::UserIdentityPort for PresetTestIdentity {
     async fn extract(
         &self,
         _: &axum::http::HeaderMap,
         _: &axum::http::Uri,
     ) -> Option<bcs_http::state::HttpUserIdentity> {
         Some(bcs_http::state::HttpUserIdentity {
-            staff_no: Some("slot-owner".into()),
+            staff_no: Some("preset-owner".into()),
             nick_name: None,
         })
     }
@@ -683,7 +683,7 @@ impl bcs_http::state::UserIdentityPort for SlotTestIdentity {
     async fn ensure_identity(
         &self, _: &str, _: &str, _: Option<&str>, _: Option<&str>, _: &str,
     ) -> Result<String, bcs_auth_api::AuthError> {
-        panic!("slot management must not create an identity")
+        panic!("preset management must not create an identity")
     }
 
     async fn get_identity_by_token(
@@ -700,15 +700,15 @@ impl bcs_http::state::UserIdentityPort for SlotTestIdentity {
 }
 
 #[tokio::test]
-async fn human_slot_management_routes_persist_changes_and_report_validation_errors() {
+async fn human_preset_management_routes_persist_changes_and_report_validation_errors() {
     use bcs_service_api::{Group, GroupCoreService, Participant, ParticipantRole};
 
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let authority = bcs_test_support::authority_edge_fixture();
-    bcs_test_support::grant_owner_edge(&authority.repo, "slot-driver", "slot-owner").await;
+    bcs_test_support::grant_owner_edge(&authority.repo, "preset-driver", "preset-owner").await;
     let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
     groups.upsert(Group::new(
-        "slot-group", "slot-driver", vec![Participant::bot("slot-driver", ParticipantRole::Driver)],
+        "preset-group", "preset-driver", vec![Participant::bot("preset-driver", ParticipantRole::Driver)],
     )).await.unwrap();
     let service = bcs_app_session::GroupContextAddAccessGuard::new(
         Arc::new(GroupContextApplicationServiceImpl::new(repo.clone())),
@@ -717,18 +717,18 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
         authority.hook,
     );
     let services = Services::builder().group_context(Arc::new(service)).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(SlotTestIdentity)));
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(PresetTestIdentity)));
     let post = |uri: &str, body: Value| {
         let request = Request::post(uri).header("content-type", "application/json")
             .body(Body::from(body.to_string())).unwrap();
         app.clone().oneshot(request)
     };
 
-    let add = "/groupcontext/add-slot?groupId=slot-group";
-    let update = "/groupcontext/update-slot?groupId=slot-group";
-    let delete = "/groupcontext/delete-slot?groupId=slot-group";
+    let add = "/groupcontext/add-preset?groupId=preset-group";
+    let update = "/groupcontext/update-preset?groupId=preset-group";
+    let delete = "/groupcontext/delete-preset?groupId=preset-group";
     for (uri, body) in [
-        ("/groupcontext/add-slot", json!({"name":"timeline"})),
+        ("/groupcontext/add-preset", json!({"name":"timeline"})),
         (add, json!({})),
     ] {
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
@@ -742,16 +742,16 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["status"], "ok");
     }
-    let slots = repo.list_slots("slot-group").await.unwrap();
-    assert_eq!(slots.len(), 1);
-    assert_eq!(slots[0].name, "events");
-    assert_eq!(slots[0].description, "Key events");
-    assert_eq!(slots[0].creator, "human_slot-owner");
-    assert_eq!(slots[0].modifier, "human_slot-owner");
-    assert!(slots[0].gmt_modified >= slots[0].gmt_create);
+    let presets = repo.list_presets("preset-group").await.unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].name, "events");
+    assert_eq!(presets[0].description, "Key events");
+    assert_eq!(presets[0].creator, "human_preset-owner");
+    assert_eq!(presets[0].modifier, "human_preset-owner");
+    assert!(presets[0].gmt_modified >= presets[0].gmt_create);
 
     let body = json!({"name":"events"});
     assert_eq!(post(delete, body.clone()).await.unwrap().status(), StatusCode::OK);
-    assert!(repo.list_slots("slot-group").await.unwrap().is_empty());
+    assert!(repo.list_presets("preset-group").await.unwrap().is_empty());
     assert_eq!(post(delete, body).await.unwrap().status(), StatusCode::NOT_FOUND);
 }

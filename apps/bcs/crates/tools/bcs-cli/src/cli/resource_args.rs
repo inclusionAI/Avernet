@@ -17,7 +17,7 @@ pub(super) enum ChatRunCommands {
 #[derive(Subcommand)]
 pub(super) enum GroupContextCommands {
     /// List the predefined context names for a group.
-    ListSlot {
+    ListPreset {
         #[arg(long)]
         group_id: String,
         /// Required for Bots that participate only in a Session.
@@ -27,7 +27,7 @@ pub(super) enum GroupContextCommands {
     /// Add a new active context.
     Add {
         #[arg(long)]
-        slot: bool,
+        preset: bool,
         #[arg(long)]
         group_id: Option<String>,
         #[arg(long)]

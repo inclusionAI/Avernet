@@ -1,7 +1,7 @@
 use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
 
-#[path = "sql_slots.rs"]
-mod sql_slots;
+#[path = "sql_presets.rs"]
+mod sql_presets;
 
 use std::sync::Arc;
 
@@ -55,16 +55,16 @@ pub struct NewGroupContextEntry {
 
 #[async_trait]
 pub trait GroupContextRepo: Send + Sync {
-    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
-        Ok(self.list_slots(group_id).await?.iter().any(|slot| slot.name == name))
+    async fn preset_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        Ok(self.list_presets(group_id).await?.iter().any(|preset| preset.name == name))
     }
 
-    async fn list_slots(&self, _group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
-        Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
+    async fn list_presets(&self, _group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+        Err(GroupContextStoreError::Backend("preset storage unavailable".into()))
     }
 
-    async fn change_slot(&self, _group_id: &str, _actor: &str, _change: GroupContextItemPresetChange) -> StoreResult<()> {
-        Err(GroupContextStoreError::Backend("slot storage unavailable".into()))
+    async fn change_preset(&self, _group_id: &str, _actor: &str, _change: GroupContextItemPresetChange) -> StoreResult<()> {
+        Err(GroupContextStoreError::Backend("preset storage unavailable".into()))
     }
 
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry>;
@@ -281,16 +281,16 @@ impl SqlGroupContextStore {
 
 #[async_trait]
 impl GroupContextRepo for SqlGroupContextStore {
-    async fn slot_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
-        self.has_slot(group_id, name).await
+    async fn preset_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        self.has_preset(group_id, name).await
     }
 
-    async fn list_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
-        self.load_slots(group_id).await
+    async fn list_presets(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+        self.load_presets(group_id).await
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
-        self.write_slot(group_id, actor, change).await
+    async fn change_preset(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
+        self.write_preset(group_id, actor, change).await
     }
 
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry> {
@@ -624,7 +624,7 @@ mod tests {
         for migration in [
             include_str!("../../../../migrations/sqlite/034_group_context.sql"),
             include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
-            include_str!("../../../../migrations/sqlite/044_group_context_slot.sql"),
+            include_str!("../../../../migrations/sqlite/044_group_context_preset.sql"),
         ] {
             for sql in migration
                 .split(';')

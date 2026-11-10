@@ -208,7 +208,7 @@ fn policy_shape_is_json_object_with_user_ids() {
 #[test]
 fn commands_cover_all_groupcontext_endpoints_without_body_actor_for_systemset() {
     let add = AddGroupContext {
-        slot: false,
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
@@ -343,7 +343,7 @@ fn get_item_serializes_content_and_business_validity() {
 #[test]
 fn add_collect_from_is_optional_and_null_decodes_to_none() {
     let mut add = AddGroupContext {
-        slot: false,
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
@@ -372,7 +372,7 @@ fn add_collect_from_is_optional_and_null_decodes_to_none() {
         "valid_to": null
     });
     let decoded: AddGroupContext = serde_json::from_value(json).expect("null policy deserializes");
-    assert!(!decoded.slot);
+    assert!(!decoded.preset);
     assert_eq!(decoded.collect_from, None);
 
     add.collect_from = Some(GroupContextPolicy::users(["other_bot"]));
@@ -392,7 +392,7 @@ fn add_collect_from_is_optional_and_null_decodes_to_none() {
 fn commands_serialize_optional_business_validity_fields() {
     let valid_from = time("2026-10-12T08:16:08Z");
     let add = AddGroupContext {
-        slot: false,
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
