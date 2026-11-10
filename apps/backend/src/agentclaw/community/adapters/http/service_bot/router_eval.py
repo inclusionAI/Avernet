@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Sequence
-
 from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.service_bot.eval_files import read_upload_files
 from agentclaw.community.adapters.http.service_bot.schemas import ApiResponse
 from agentclaw.community.api.service_bot_eval import (
     ServiceBotEvalServiceProtocol,
@@ -19,15 +18,10 @@ from agentclaw.community.core.service_bot.errors import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.service_bot_eval import ServiceBotEvalFile
 
 logger = get_logger()
 
 router = APIRouter(prefix="/api/service-bot/eval", tags=["service-bot-eval"])
-
-MAX_FILES = 100
-MAX_SINGLE_FILE_BYTES = 64 * 1024 * 1024
-MAX_TOTAL_FILE_BYTES = 128 * 1024 * 1024
 
 
 def _actor(user: AuthenticatedUser) -> str:
@@ -35,64 +29,6 @@ def _actor(user: AuthenticatedUser) -> str:
     if not operator_id or operator_id == "anonymous":
         raise ServicePublicationConflictError("无法获取用户信息")
     return operator_id
-
-
-async def _files(
-    value: Sequence[UploadFile],
-    *,
-    file_kind: str,
-    empty_message: str,
-) -> list[ServiceBotEvalFile]:
-    value = list(value)
-    if not value:
-        raise ServicePublicationConflictError(empty_message)
-    files: list[ServiceBotEvalFile] = []
-    for item in value:
-        filename = item.filename or ""
-        has_drive_letter = len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha()
-        if (
-            not filename
-            or "/" in filename
-            or "\\" in filename
-            or has_drive_letter
-            or any(ord(ch) < 32 for ch in filename)
-        ):
-            raise ServicePublicationConflictError("评测材料文件名不合法")
-        content = await item.read()
-        if len(content) > MAX_SINGLE_FILE_BYTES:
-            raise ServicePublicationConflictError("单个评测材料不能超过64MiB")
-        files.append(
-            ServiceBotEvalFile(
-                filename=filename,
-                content=content,
-                content_type=item.content_type or "application/octet-stream",
-                file_kind=file_kind,  # type: ignore[arg-type]
-            )
-        )
-    return files
-
-
-async def _upload_files(
-    sample_files: Sequence[UploadFile],
-    report_files: Sequence[UploadFile],
-) -> list[ServiceBotEvalFile]:
-    samples = await _files(
-        sample_files,
-        file_kind="sample",
-        empty_message="评测样本材料不能为空",
-    )
-    reports = await _files(
-        report_files,
-        file_kind="report",
-        empty_message="评测报告材料不能为空",
-    )
-    values = [*samples, *reports]
-    if len(values) > MAX_FILES:
-        raise ServicePublicationConflictError("样本和报告合计最多上传100个文件")
-    if sum(len(file.content) for file in values) > MAX_TOTAL_FILE_BYTES:
-        raise ServicePublicationConflictError("样本和报告合计不能超过128MiB")
-    return values
-
 
 @router.get(
     "/submissions/{submission_id}",
@@ -207,7 +143,7 @@ async def submit(
             bot_version,
             actor_id=_actor(user),
             owner_id=owner_id,
-            files=await _upload_files(sample_files, report_files),
+            files=await read_upload_files(sample_files, report_files),
             trigger_source=trigger_source,
         )
         return ApiResponse(success=True, data=result, message="评测数据已提交，等待认证结果")
