@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/components/Community/HelpCenter/HelpTaskPanel.tsx
+  h_059e888e5e4e82 1-3,7-8,10-113,126-127,135-142,144-147,149-163
+apps/frontend-nextgen/test/components/Community/CommunityHelpCenter.test.tsx
+  h_059e888e5e4e82 89,155-157,160-163,189-190,193,196-208
+apps/frontend-nextgen/test/components/Community/CommunityHelpTaskViews.test.tsx
+  h_059e888e5e4e82 128-129,137-138,154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e87e5d409e129406d46ce8261d0d9ead9bcec524",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

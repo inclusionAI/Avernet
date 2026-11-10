@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_filesystem.py
+  s_e77a55edd4e0bd::t_ef76dfb553f52f 112-115,117-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6c29b7027bd48426cf64f614b524cc1b5fe40696",
+  "prompts": {},
+  "sessions": {
+    "s_e77a55edd4e0bd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac2-0bf9-7f13-8ec8-77ae441a2c9b",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

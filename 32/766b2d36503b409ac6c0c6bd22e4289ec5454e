@@ -1,0 +1,27 @@
+apps/bcs/crates/adapters/http/bcs-http/src/routes/group_messages.rs
+  s_e82c8d2a1ff4d0::t_6b258aaa0bbcdd 163-178
+apps/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher.rs
+  s_e82c8d2a1ff4d0::t_6fad557a79ad61 470-482
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_e82c8d2a1ff4d0::t_cc581e8962683c 467-482,484-495,497-500,502-505,509-513,518
+  s_e82c8d2a1ff4d0::t_e67f2d2da4ac18 464-466
+  s_e82c8d2a1ff4d0::t_e60336e8069b2f 508,514-517,519
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions.rs
+  s_e82c8d2a1ff4d0::t_8a1f0bbddbe207 1597-1613
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32766b2d36503b409ac6c0c6bd22e4289ec5454e",
+  "prompts": {},
+  "sessions": {
+    "s_e82c8d2a1ff4d0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b7964428-351c-48d8-a488-e8be6d2f7ccc",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

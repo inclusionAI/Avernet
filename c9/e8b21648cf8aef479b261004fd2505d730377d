@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-test/protected_result_leg_story.py
+  s_aaa6c69208f9c5::t_f92e1dd811e5b4 79
+  s_aaa6c69208f9c5::t_90d698efb49f32 65-70
+  s_aaa6c69208f9c5::t_d6754330785ddf 281-285
+  s_aaa6c69208f9c5::t_9f7d415daa7c79 23
+  s_aaa6c69208f9c5::t_c94a0e430698e5 336
+  s_aaa6c69208f9c5::t_8e8910ce5b03ab 56,59-60,64,71-78
+  s_aaa6c69208f9c5::t_05645ae58d11f5 267
+  s_aaa6c69208f9c5::t_f0e8e73750e656 303-305,307-308,310-311
+  s_aaa6c69208f9c5::t_6f87ebad789967 320-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c9e8b21648cf8aef479b261004fd2505d730377d",
+  "prompts": {},
+  "sessions": {
+    "s_aaa6c69208f9c5": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7dae3fc0-26c6-4513-a555-0cf337957ea8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

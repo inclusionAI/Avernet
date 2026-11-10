@@ -1,0 +1,19 @@
+singlebox/ci/tests/test_pre_push_hook.py
+  s_47ed8e91e4b8af::t_4ac983ff913d08 507-508,526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "77614c8b821f335a7d2b06d079801dbddd8e964a",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

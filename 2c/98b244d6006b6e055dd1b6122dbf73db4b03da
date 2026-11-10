@@ -1,0 +1,83 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/reference-materials.ts
+  s_413b6633e8b715::t_3aba4d14d24825 1-27,29-52
+  s_413b6633e8b715::t_85d2e35fa888ca 28
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/components/__tests__/task-reference-materials.test.tsx
+  s_413b6633e8b715::t_3a6cfa6f5e239c 1-72
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/hooks/useTaskReferenceMaterials.ts
+  s_413b6633e8b715::t_78a2fbe8ef0190 1-91
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-hardening/SKILL.md
+  s_413b6633e8b715::t_3afcb80cb4290d 8-9
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/components/TaskReferenceMaterials.tsx
+  s_413b6633e8b715::t_80d4fdac9cff4d 1-67
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/scripts/handlers/lib_business_core.py
+  s_413b6633e8b715::t_c0f25943c65682 24-35
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/singlebox.css
+  s_413b6633e8b715::t_d35ef03fabf6a0 2
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/task-start.ts
+  s_413b6633e8b715::t_82acb77f833577 14-15,63-64,75-78,80-84,92-93,99
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/evolve.ts
+  s_413b6633e8b715::t_82acb77f833577 23,960,965,1050,1101,1195,1239,1279,1392,1434,1454,1467,2195-2214,2387-2388,2396,2794,2797,2799,2801-2815,2817-2818,2821,2862
+  s_413b6633e8b715::t_3aba4d14d24825 1-2,317-320,1079,1165-1166,1217,1221,1267,1271,1327,1634,1637,1860,2192-2194,2384-2386,2390-2395,2397-2398,2705,2763-2767,2769,2800,2816,2819-2820,2822,5040,5065
+  s_413b6633e8b715::t_b6997737b0b4c2 2389
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-hardening/core/SKILL.md
+  s_413b6633e8b715::t_07b811f4218240 33-34
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/__tests__/reference-materials.test.ts
+  s_413b6633e8b715::t_15aa2a43fc5823 1-145
+  s_413b6633e8b715::t_608441621714cd 146-148
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/Evolve.tsx
+  s_413b6633e8b715::t_5ca5ff4bc81514 23-24,1102,1131,1191-1193,1249,1258,1264,2234
+  s_413b6633e8b715::t_a100bb18257b01 733
+  s_413b6633e8b715::t_5eb52072ab4913 732
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/SKILL.md
+  s_413b6633e8b715::t_d7b8d03fe079af 8-9
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/api/reference-materials.ts
+  s_413b6633e8b715::t_f7aed146243156 1-15
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/evolve-repository.ts
+  s_413b6633e8b715::t_82acb77f833577 358-370
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-plan/SKILL.md
+  s_413b6633e8b715::t_c008aeaa3bb580 8-9
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/clawevolve_runtime/reference_materials.py
+  s_413b6633e8b715::t_69cab5819acf89 1-49,97,100-171
+  s_413b6633e8b715::t_9cafdba3ada44d 50-96
+  s_413b6633e8b715::t_0200438f7bdf7a 98-99
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/reference-materials.ts
+  s_413b6633e8b715::t_3aba4d14d24825 1-2,4-13,16-60,64-83,87-99,102-103,105-108,111-145,147-148,151-163,168-169,171-192
+  s_413b6633e8b715::t_ac2db449dc79b4 3,14,109,149,164-167,170
+  s_413b6633e8b715::t_9cafdba3ada44d 15,100-101,104,110,146,150
+  s_413b6633e8b715::t_4c30cb78f922b5 61-63,84-86
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/SKILL.md
+  s_413b6633e8b715::t_91acf2dadc456e 8-9
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/scripts/handlers/clawevolve_optimize_run.py
+  s_413b6633e8b715::t_606ca78b8e9035 8555,9856
+  s_413b6633e8b715::t_0200438f7bdf7a 8557-8558,8635,8637-8638
+apps/evolverun/docs/clawweb/specs/clawevolve-task-reference-materials.md
+  s_413b6633e8b715::t_82acb77f833577 102
+  s_413b6633e8b715::t_099793777cf307 121,136
+  s_413b6633e8b715::t_b85be0cf948e3f 4,8,31,85,222,263,275
+  s_413b6633e8b715::t_9cafdba3ada44d 291
+  s_413b6633e8b715::t_fdc225b365633c 3,112,114,116,130,144,146,152,158,172,194,250,277,279-281,283-290,292-296,300
+  s_413b6633e8b715::t_3aba4d14d24825 1-2,5-7,9-30,32-84,86-101,103-111,113,115,117-120,122-129,131-135,137-143,145,147-151,153-157,159-171,173-193,195-221,223-249,251-262,264-274,276,278,282,297-299
+apps/evolverun/clawweb-skills/clawevolve-skills/platform/tests/test_reference_materials.py
+  s_413b6633e8b715::t_9cafdba3ada44d 22-72,79,89,102,111
+  s_413b6633e8b715::t_f04ac4f2a4a406 1-21,73-78,80-81,83-88,90-101,103-110,112-134
+  s_413b6633e8b715::t_4fb4f4249817d4 82
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/__tests__/reference-materials.test.ts
+  s_413b6633e8b715::t_4c30cb78f922b5 55-63
+  s_413b6633e8b715::t_34d15179c01918 1-54,64-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2c98b244d6006b6e055dd1b6122dbf73db4b03da",
+  "prompts": {},
+  "sessions": {
+    "s_413b6633e8b715": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c2b-9482-7110-82bf-7c8dff86cc5c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

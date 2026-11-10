@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_draft_density/__init__.py
+  s_cecdc98e721f4b::t_4d9511c4ab03b5 1-21
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_draft_density/contract.py
+  s_cecdc98e721f4b::t_72bda3f2791a57 1-349
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_draft_density/registration_proposal.py
+  s_cecdc98e721f4b::t_92850c41655ca2 1-16
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_draft_density/replay.py
+  s_cecdc98e721f4b::t_e2885a042fd01a 1-135
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_d5dba2725795ce 85,112
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_f3678318ce9023 381-383
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_draft_density.py
+  s_cecdc98e721f4b::t_3fabba7ec8de6a 1-146
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_250a12a505cd03 668-673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bffa9c7baedb61b5d0a04e0037cc11582752f066",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

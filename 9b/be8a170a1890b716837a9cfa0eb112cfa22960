@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowHistoryPanel.tsx
+  h_43af82e14600e4 175,250
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowVersionDiff.tsx
+  h_43af82e14600e4 5,220
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowHistorySideBySide.test.tsx
+  h_43af82e14600e4 1-35
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowVersionDiffView.test.tsx
+  h_43af82e14600e4 1-195
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/SideBySideView.tsx
+  h_43af82e14600e4 1-147
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/__tests__/sideBySide.test.ts
+  h_43af82e14600e4 1-105
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-version-diff/sideBySide.ts
+  h_43af82e14600e4 1-87
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 828
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9bbe8a170a1890b716837a9cfa0eb112cfa22960",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

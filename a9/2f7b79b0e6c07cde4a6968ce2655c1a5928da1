@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/pages/Workspace/GroupChatPane.test.tsx
+  h_059e888e5e4e82 14,667,710-712,714
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a92f7b79b0e6c07cde4a6968ce2655c1a5928da1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

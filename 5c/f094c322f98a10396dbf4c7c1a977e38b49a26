@@ -1,0 +1,27 @@
+apps/bcs/crates/services/bcs-message-flow/tests/caller_dispatch_stage_timeout_contract.rs
+  s_875e3f9d4d0db3::t_008d36f262f37f 211-212,221,226-236,240,245-246
+  s_875e3f9d4d0db3::t_0e1ef32ffbf471 1-210,213-220,222-225,237-239,241-244,247-293,295,298-303,306,308-309,312-316,318-319,326,328-441
+  s_875e3f9d4d0db3::t_70c5c479292a5f 294,296-297,304-305,307,310-311,320-325,327
+  s_875e3f9d4d0db3::t_5f017ed9774c14 317
+apps/bcs/crates/services/bcs-message-flow/tests/caller_protected_dispatch_runtime_contract/watchdog.rs
+  s_875e3f9d4d0db3::t_2e34a2c6eb7484 138-141
+  s_875e3f9d4d0db3::t_d45d04d9b77855 29-30,35-37,47-48
+  s_875e3f9d4d0db3::t_89eb94d2a0c6f3 28,31-34
+  s_875e3f9d4d0db3::t_0a4a4bdf554257 55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5cf094c322f98a10396dbf4c7c1a977e38b49a26",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
