@@ -134,6 +134,7 @@ flowchart TB
     inputSource["<b>InputSource</b><br/>────────────<br/>source_kind<br/>source_id<br/>revision"]
     material["<b>ContextMaterialReference</b><br/>────────────<br/>source_kind<br/>source_id<br/>revision<br/>digest"]
     collaborationMode["<b>CollaborationMode</b><br/>────────────<br/>mode_id<br/>mode_kind<br/>participants<br/>visibility<br/>mode_revision<br/>started_at<br/>ended_at"]
+    modeKind["<b>mode_kind</b><br/>────────────<br/>public_discussion<br/>autonomous_relay<br/>planning_execution<br/>competitive_assignment<br/>direct_assignment"]
     participant["<b>ContextParticipant</b><br/>────────────<br/>participant_id<br/>actor_kind<br/>actor_id<br/>roles<br/>scope<br/>granted_by<br/>granted_at<br/>revoked_by<br/>revoked_at"]
     deliverable["<b>ContextDeliverable</b><br/>────────────<br/>deliverable_id<br/>spec_ref<br/>artifact_ref<br/>produced_by<br/>produced_at<br/>evidence_refs"]
     todo["<b>ContextTodo</b><br/>────────────<br/>todo_id<br/>title<br/>instruction<br/>assignee_actor_ref<br/>required<br/>due_at<br/>status<br/>evidence_refs"]
@@ -157,6 +158,7 @@ flowchart TB
   envelope --> inputSource
   envelope --> material
   root --> collaborationMode
+  collaborationMode -. mode_kind 取值 .-> modeKind
   collaborationMode --> participant
   stateBinding --> todo
   root --> outcome
@@ -378,7 +380,7 @@ CollaborationMode
 
 ### 4.8 子实体：ContextParticipant
 
-`ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。
+`ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。它不是权限模型，而是“谁在这个 Mode 中，何时被授权/撤销，以及承担哪些协作角色”的事实载体。
 
 ```text
 ContextParticipant
@@ -389,6 +391,29 @@ ContextParticipant
   ├─ membership_events[]
   └─ visited_at
 ```
+
+各字段语义如下：
+
+| 属性 | 具体含义 |
+| --- | --- |
+| `participant_id` | 当前 `CollaborationMode` 内的**成员记录 ID**，不是全局用户 ID；用于定位这条参与关系 |
+| `actor_kind` | 参与者身份类型，例如 `human` / `bot` / `system`；决定后续用哪套身份系统验证 |
+| `actor_id` | 在对应身份系统中的稳定 actor ID，例如用户 ID、已验证 Bot ID、系统服务 ID |
+| `roles[]` | 该参与者在当前 Mode 内承担的协作角色，例如 `owner`、`responsible_user`、`info_editor`、`executor`、`observer` |
+| `scope` | 该参与关系的**业务作用域**，通常与当前 `ContextScope` / `CollaborationMode` 对齐；不是可见性，也不是权限本身 |
+| `granted_by` | 授权该参与者的 actor |
+| `granted_at` | 参与关系被授权的时间 |
+| `revoked_by` | 撤销该参与者的 actor |
+| `revoked_at` | 参与关系被撤销的时间 |
+| `membership_events[]` | 对应的 `ContextEvent` 引用列表，例如 `participant.role_granted` / `participant.role_revoked`，用于审计与回放 |
+| `visited_at` | 最近一次读取或操作时间，仅服务于未读、活跃度、在线状态等投影，不作为参与事实 |
+
+补充说明：
+- `revoked_at` 为空且当前 mode 仍有效时，该 participant 视为 active。
+- `roles[]` 是协作角色，不是权限清单；它用于状态机 guard、可用动作和展示分组。
+- `membership_events[]` 只保存事件引用，不直接保存可变 JSON 明细。
+- `visited_at` 不参与裁决，不能作为参与权的证明。
+- 每次 command 仍须独立校验身份、作用域、材料授权和执行能力，不能只依赖 participant 记录放行。
 
 - 同一作用域内一个 actor 只有一个 active participant。
 - Bot 参与者必须记录可验证的 Bot ID、Owner 或服务归属，不能由 Bot 自称。
