@@ -14,6 +14,8 @@ export type PackScriptSnapshot = {
   /** Full version inventory, only on explicit request. Paths are Pack-relative. */
   packPath?: string;
   draftHead?: string | null;
+  /** True only when the active DB history content differs from the active Git workflow. */
+  activeHistoryMismatch?: true;
   versionFiles?: Array<{ path: string; contentBase64: string; mode: '100644' | '100755' }>;
 };
 

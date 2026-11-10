@@ -30,10 +30,28 @@ export function parseGitWorkflowForImport(text: string, workflowId: string): Wor
   return validateWorkflowSnapshotRequest(serializeUnifiedSpec(spec), workflowId)
 }
 
-function escapeUnsafe(text: string): string {
+export function escapeUnsafe(text: string): string {
   return Array.from(text, char => containsUnsafeReviewText(char) ? `\\u{${char.codePointAt(0)!.toString(16)}}` : char).join('')
 }
 
+
+export function DiffPanes({ rows, left, right, leftLabel, rightLabel }: {
+  rows: ReturnType<typeof sideBySideDiff> | null; left: string; right: string; leftLabel: string; rightLabel: string
+}) {
+  return <div className="grid gap-3 lg:grid-cols-2">
+    {([['left', leftLabel, left], ['right', rightLabel, right]] as const).map(([side, label, text]) => <section key={side} aria-label={label} className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
+      <div className="border-b border-border bg-muted/50 px-3 py-2 text-xs font-semibold text-foreground">{label}</div>
+      <div tabIndex={0} role="region" aria-label={`${label}内容`} className="max-h-72 overflow-auto font-mono text-xs leading-6 focus-visible:outline-2 focus-visible:outline-primary">
+        {rows ? <div className="w-max min-w-full py-1">{rows.map((row, index) => {
+          const line = row[side]
+          return <div key={index} className={`flex min-h-6 ${line?.type === 'del' ? 'bg-destructive/10' : line?.type === 'add' ? 'bg-success/10' : ''}`}>
+            <span aria-hidden="true" className="w-10 shrink-0 select-none border-r border-border px-2 text-right text-muted-foreground">{side === 'left' ? line?.fromLine : line?.toLine}</span>
+            <span className="whitespace-pre px-3 text-foreground">{line?.text ?? ''}</span>
+          </div>})}</div> : <pre className="m-0 whitespace-pre p-3 text-foreground">{text}</pre>}
+      </div>
+    </section>)}
+  </div>
+}
 type Props = {
   review: ReconciliationReview
   current: ReconciliationContext
@@ -98,20 +116,7 @@ export default function WorkflowBaselineComparison({ review, current, onUseDatab
         <p className="text-xs text-muted-foreground">工作流：<span className="font-mono text-foreground">{review.workflowId}</span> · Git 路径：<span className="break-all font-mono text-foreground">{review.workflowPath}</span>。对比不修改数据库或 Git。</p>
         {(containsUnsafeReviewText(leftRaw) || containsUnsafeReviewText(review.gitYaml)) && <p role="status" className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning-foreground">不可安全显示的字符已转义显示；包含此类字符的 Git 内容不能直接载入编辑器。</p>}
         {rows === null && <p role="status" className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">文档较大，展示完整原文，不计算行级差异。</p>}
-        <div className="grid gap-3 lg:grid-cols-2">
-          {([['left', '数据库工作流 + 当前编辑', left], ['right', 'Git 原始 YAML', right]] as const).map(([side, label, text]) => <section key={side} aria-label={label} className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
-            <div className="border-b border-border bg-muted/50 px-3 py-2 text-xs font-semibold text-foreground">{label}</div>
-            <div tabIndex={0} role="region" aria-label={`${label}内容`} className="max-h-72 overflow-auto font-mono text-xs leading-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-              {rows ? <div className="w-max min-w-full py-1">{rows.map((row, index) => {
-                const line = row[side]
-                return <div key={index} className={`flex min-h-6 ${line?.type === 'del' ? 'bg-destructive/10' : line?.type === 'add' ? 'bg-success/10' : ''}`}>
-                  <span aria-hidden="true" className="w-10 shrink-0 select-none border-r border-border px-2 text-right text-muted-foreground">{side === 'left' ? line?.fromLine : line?.toLine}</span>
-                  <span className="whitespace-pre px-3 text-foreground">{line?.text ?? ''}</span>
-                </div>
-              })}</div> : <pre className="m-0 whitespace-pre p-3 text-foreground">{text}</pre>}
-            </div>
-          </section>)}
-        </div>
+        <DiffPanes rows={rows} left={left} right={right} leftLabel="数据库工作流 + 当前编辑" rightLabel="Git 原始 YAML" />
         <fieldset className="space-y-2"><legend className="text-sm font-semibold text-foreground">选择工作流来源</legend>
           <p className="text-xs text-muted-foreground">选择只影响编辑器，不会自动合并。可直接保存；部署仍需通过服务端安全校验。</p>
           <div className="grid gap-3 md:grid-cols-2">
@@ -140,12 +145,13 @@ export default function WorkflowBaselineComparison({ review, current, onUseDatab
   </div>
 }
 
-export function WorkflowBaselineNotice({ comparison, canCompare, busy, onCompare }: {
+export function WorkflowBaselineNotice({ comparison, canCompare, busy, onCompare, title, description }: {
   comparison: 'different' | 'uncomparable'; canCompare: boolean; busy: boolean; onCompare: () => void
+  title?: string; description?: string
 }) {
   return <div role="status" className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
-    <div className="min-w-0"><p className="text-sm font-medium text-warning-foreground">{comparison === 'different' ? 'Git 文件与数据库工作流存在差异' : 'Git 工作流与数据库内容暂时无法比较'}</p>
-      <p className="mt-1 text-xs text-muted-foreground">默认使用数据库工作流及当前编辑器修改；可直接保存并查看差异。部分运行端可能立即读取保存后的数据库草稿；部署仍需通过服务端安全校验。</p></div>
+    <div className="min-w-0"><p className="text-sm font-medium text-warning-foreground">{title ?? (comparison === 'different' ? 'Git 文件与数据库工作流存在差异' : 'Git 工作流与数据库内容暂时无法比较')}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{description ?? '默认使用数据库工作流及当前编辑器修改；可直接保存并查看差异。部分运行端可能立即读取保存后的数据库草稿；部署仍需通过服务端安全校验。'}</p></div>
     {canCompare && <button type="button" disabled={busy} onClick={onCompare} className="shrink-0 rounded-md border border-input bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40">查看差异</button>}
   </div>
 }
