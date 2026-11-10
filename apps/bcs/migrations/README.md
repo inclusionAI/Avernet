@@ -35,6 +35,13 @@ Apply remote DDL before enabling the updated queue path; SQLite bootstrap applie
 its migration automatically. Rollback binaries must retain history filtering for
 `run_reply` so internal summaries/diagnostic metadata are not exposed as chat.
 
+Session-scoped delivery lookup adds MySQL `045_delivery_session_lookup.sql` and SQLite `043_delivery_session_lookup.sql`:
+an additive `(env, session_id, source_message_id, kind, status)` index on
+`bcs_message_deliveries`. Session deletion uses it to cancel every unfinished
+lane of the Session, including Bots that are no longer participants. Apply the
+remote DDL before new server code; SQLite bootstrap applies it automatically.
+No backfill.
+
 The open-source v1 baseline starts from a single MySQL/OceanBase init schema.
 001 is the starting schema, not a snapshot of the latest schema. Fresh databases
 must apply the subsequent numbered migrations in order as well.

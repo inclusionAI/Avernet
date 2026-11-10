@@ -98,6 +98,7 @@ source "$SCRIPT_DIR/queued_message_cancellation_story.sh"
 source "$SCRIPT_DIR/task_handle_story.sh"
 source "$SCRIPT_DIR/service_policy_story.sh"
 source "$SCRIPT_DIR/group_card_story.sh"
+source "$SCRIPT_DIR/delivery_fault_isolation_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
 
 # Both registration paths share parent identity while each child keeps its own

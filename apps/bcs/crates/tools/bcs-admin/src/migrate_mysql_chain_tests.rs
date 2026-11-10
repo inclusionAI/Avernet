@@ -45,14 +45,15 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
     let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
     assert_eq!(before.current_version, Some(20));
-    assert_eq!(before.target_version, Some(44));
+    assert_eq!(before.target_version, Some(45));
     assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
-        (21..=44).collect::<Vec<_>>());
+        (21..=45).collect::<Vec<_>>());
 
     let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
     let report = format_mysql_apply_report(&after, &before.pending_versions);
-    assert!(report.contains("applied_versions=24\npending_versions=0"), "{report}");
+    assert!(report.contains("applied_versions=25\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
+    assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())
@@ -169,9 +170,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=44\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=45\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=44).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=45).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -357,6 +358,7 @@ async fn assert_direct_queue_indexes(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_chat_runs", "idx_env_delivery", 1, vec!["env", "delivery_id"]),
         ("bcs_group_sessions", "idx_callback_status", 1, vec!["env", "callback_status"]),
         ("bcs_group_sessions", "idx_session_callback_recovery", 1, vec!["env", "session_kind", "status", "callback_status", "callback_lease_token", "callback_lease_until_ms", "session_id"]),
+        ("bcs_message_deliveries", "idx_delivery_session_message", 1, vec!["env", "session_id", "source_message_id", "kind", "status"]),
     ] {
         let rows = db.query(DbStatement::with_params(
             "SELECT COLUMN_NAME AS col, NON_UNIQUE AS non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? ORDER BY seq_in_index",
@@ -404,8 +406,10 @@ async fn verify_original_043_history_upgrade(db: &dyn DbPlugin, global: &Migrate
         vec![DbValue::from(sha256_hex(original.as_bytes()))])).await?;
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_existing','Existing','dev','human')")).await?;
     let before = chain_history(db).await?;
+    // Every migration after the original 043 applies on top of it.
+    let expected = load_selected_migrations(&chain_args())?.len() - before.len();
     let report = apply_mysql_migrations(&chain_args(), global).await?;
-    assert!(report.contains("applied_versions=1\npending_versions=0"), "{report}");
+    assert!(report.contains(&format!("applied_versions={expected}\npending_versions=0")), "{report}");
     assert_eq!(chain_history(db).await?.into_iter().filter(|(v,_)| *v <= 43).collect::<Vec<_>>(), before);
     // Existing exact ID remains; a trailing-space-different ID is now independent.
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,actor_kind) VALUES ('human_existing ','Distinct','dev','human')")).await?;
