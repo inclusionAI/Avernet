@@ -1,5 +1,5 @@
 import { backendRequest } from '../httpClient';
-import type { BackendUnknownRecord } from '../types';
+import { isEnvelopeSuccess, type BackendUnknownRecord } from '../types';
 
 export interface ServiceBotEvalOpenApiResponse<T> extends BackendUnknownRecord {
   code: number;
@@ -80,7 +80,7 @@ const request = async <T>(
 ) => {
   const envelope = await backendRequest<ServiceBotEvalOpenApiResponse<T>>(url, { method, params, rawBody });
   return {
-    success: envelope.code === 200000,
+    success: isEnvelopeSuccess(envelope),
     message: envelope.message,
     error_code: envelope.code,
     data: envelope.data,
