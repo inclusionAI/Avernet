@@ -392,10 +392,10 @@ class TestRemoveChatBot:
         ("connect_chat_session", "/api/v1/expert-chats/test_bot/test_owner/sessions/connect", {"session_key": "session:test"}),
     ],
 )
-def test_unpublished_online_session_is_a_business_failure(client_with_mock, caplog, method, path, body):
+def test_unpublished_online_session_is_a_business_failure(client_with_mock, method, path, body):
     client, service = client_with_mock
     getattr(service, method).side_effect = EngineStageNotLiveError("private detail")
-    with caplog.at_level(logging.WARNING):
+    with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log:
         response = client.post(path, json=body) if body else client.post(path)
     assert response.status_code == 200
     result = response.json()
@@ -404,8 +404,11 @@ def test_unpublished_online_session_is_a_business_failure(client_with_mock, capl
     assert result["message"] == "Bot未发布或发布版本不可用"
     assert not result.get("data")
     assert "private detail" not in response.text
-    assert "Unexpected error" not in caplog.text
-    assert "Traceback" not in caplog.text
+    log.warning.assert_called_once_with(
+        f"[expert_chats.{method}] Online publication unavailable: bot=%s owner=%s",
+        "test_bot", "test_owner",
+    )
+    log.error.assert_not_called()
 
 
 @pytest.mark.parametrize("operation", ["get", "connect"])

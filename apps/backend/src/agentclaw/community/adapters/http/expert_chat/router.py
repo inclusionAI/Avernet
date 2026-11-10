@@ -189,7 +189,10 @@ async def get_chat_session(
         return ApiResponse(success=False, message=str(e), error_code=4001)
 
     except EngineStageNotLiveError:
-        logger.warning("[expert_chats.get_chat_session] Online publication unavailable")
+        logger.warning(
+            "[expert_chats.get_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
         return ApiResponse(success=False, message="Bot未发布或发布版本不可用", error_code=4001)
 
     except ChatPermissionError as e:
@@ -407,7 +410,10 @@ async def connect_chat_session(
             success=False, message=str(error), error_code=4001
         )
     except EngineStageNotLiveError:
-        logger.warning("[expert_chats.connect_chat_session] Online publication unavailable")
+        logger.warning(
+            "[expert_chats.connect_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
         return ApiResponse(
             success=False, message="Bot未发布或发布版本不可用", error_code=4001
         )
