@@ -196,13 +196,13 @@ CollaborationContext
 
 ```text
 ContextScope
-  ├─ scope_kind             # community / workspace / personal
+  ├─ scope_kind             # open / workspace / personal
   ├─ scope_id               # 该 kind 下的稳定对象 ID
   └─ environment            # 运行/部署环境
 ```
 
 取值说明：
-- `community`：公开社区场景，例如 BBS Topic 所属社区。
+- `open`：开放工作空间。
 - `workspace`：项目空间、工作空间、协作空间，例如 Dima 项目空间或 TaskDiscover 事件集合所在空间。
 - `personal`：个人任务、私人待办或单个用户私有的 Context。
 
