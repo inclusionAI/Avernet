@@ -67,7 +67,7 @@ ContextEvent 命名分两层：
 1. **全局标准协议事件**
    - 事件名只表达协议原语上的通用协作动作；产品、业务场景和具体阶段差异进入 payload。
    - 事件对象只能来自协议白名单：`context`、`participant`、`mode`、`contribution`、`stage`、`todo`、`work`、`artifact`、`outcome`。
-   - 初始标准集包含 `context.created`、`context.info_updated` / `context.mode_switched` / `context.cancelled`、`participant.role_granted` / `participant.role_revoked`、`contribution.posted`、`stage.completed` / `stage.failed`、`todo.completed`、`work.requested` / `work.started` / `work.blocked` / `work.completed`、`artifact.submitted`、`outcome.accepted` / `outcome.rejected`。
+   - 初始标准集包含 `context.created`、`context.info_updated` / `context.mode_switched` / `context.cancelled`、`participant.role_granted` / `participant.role_revoked`、`contribution.posted`、`user_interaction.posted`、`stage.completed` / `stage.failed`、`todo.completed`、`work.requested` / `work.started` / `work.blocked` / `work.completed`、`artifact.submitted`、`outcome.accepted` / `outcome.rejected`。
    - 例如 BBS Post 映射为 `contribution.posted` + `payload.contribution_kind=forum_post`；编码完成不叫 `coding.completed`，而是 `stage.completed` + `payload.stage_id=coding`。
 2. **Profile 扩展事件**
    - 只有标准事件 + payload 无法表达、且状态机裁决必须依赖该业务事实时才允许声明。
@@ -298,7 +298,7 @@ TransitionDefinition
 
 ```text
 ContextStateMachineBinding
-  ├─ context_id / binding_id
+  ├─ collab_context_id / binding_id
   ├─ definition_id / definition_revision / content_digest
   ├─ current_state
   ├─ allowed_modes             # 从 frozen Definition + current_state 派生，只读
@@ -347,7 +347,7 @@ ContextStateMachineBinding
 
 ```text
 CollaborationContext
-  ├─ context_id
+  ├─ collab_context_id
   ├─ scope                    # ContextScope
   ├─ title
   ├─ envelope                 # ContextEnvelope
@@ -447,6 +447,33 @@ ContextDeliverable
 - 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
 
 
+### 4.4.4 ContextSnapshot 与 Task Progress
+
+`ContextSnapshot` 是面向产品用户的只读投影，可作为 `/api/v1/collaboration/task/context_collab/{collab_context_id}` 的响应体核心。除业务状态、Mode、目标、参与者和验收结果外，它还必须暴露 `task_progress`，让用户能直接看懂三件事：当前到哪一步、哪些事情已经做完、还有哪些事情待办。
+
+```text
+ContextSnapshot
+  ├─ snapshot_id / snapshot_revision
+  ├─ collab_context_id / root_version
+  ├─ state                       # 来自 active binding
+  ├─ mode                       # 来自 active CollaborationMode
+  ├─ envelope                   # 来自 Context 根
+  ├─ participants[]
+  └─ task_progress
+      ├─ percent
+      ├─ current_step
+      ├─ steps[]
+      └─ recent_events[]
+```
+
+设计约束：
+- `task_progress` 是只读展示投影，由 `ContextStateMachineBinding`、`ContextTodo[]`、`ContextEvent[]` 和 `ContextTransition[]` 派生；它不参与状态机裁决，也不能成为第二份权威状态。
+- `steps[]` 是当前阶段的任务视图，应包含可读的 `title`、`status`、`assignee`、时间线和结果摘要，供前端直接展示。
+- `current_step` 表示当前正在推进的那一步；对 `direct_assignment`、`competitive_assignment` 等单执行者模式，同一时刻至多一个 assigned / in_progress step。
+- `recent_events[]` 只展示可见范围内的近期事实摘要，完整历史仍通过 Timeline 读取。
+- `Snapshot` 可以按消费者重建，但 `task_progress` 不得引用未接纳事件或外部系统内部状态。
+
+
 ### 4.5 跨层运行机制：一条命令如何贯穿四层
 
 四层是领域职责的横向分解，不是“协作层调用状态层、状态层调用事件层、表示层最后被动接收”的代码调用栈。一次命令会同时受到身份、协作 Policy、状态 Definition、当前 Binding 和材料授权的约束；通过裁决后，事实、迁移、运行态和聚合快照在同一事务内形成一致结果。
@@ -479,24 +506,24 @@ ContextDeliverable
 
 前面按架构层解释职责，下面保留按领域对象查询的清单，方便实现和评审时快速定位身份、权威关系与生命周期。该清单是四层设计的索引，不是第五层，也不改变前述对象归属。
 
-`CollaborationContext` 是本协议唯一的聚合根。其它对象一律不是新的聚合根，而是聚合内的子实体、值对象、版本化协议资源或只读投影。子实体 ID 都必须带 `context_id` 语义，不能脱离 Context 被单独共享；值对象没有独立生命周期，只能随所属 Context 或命令事实变更。
+`CollaborationContext` 是本协议唯一的聚合根。其它对象一律不是新的聚合根，而是聚合内的子实体、值对象、版本化协议资源或只读投影。子实体 ID 都必须带 `collab_context_id` 语义，不能脱离 Context 被单独共享；值对象没有独立生命周期，只能随所属 Context 或命令事实变更。
 
 | 对象 | 类型 | 主要身份 / 相等性 | 权威关系 | 生命周期 |
 | --- | --- | --- | --- | --- |
-| `CollaborationContext` | 聚合根 | `context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
+| `CollaborationContext` | 聚合根 | `collab_context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
 | `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有，统一承载目标、输入来源与输入材料引用 | 随 `context.info_updated` 事实演进 |
 | `InputSource` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，标识 Dima 项目空间、TaskDiscover 模块自动挖掘的事件集合等外部来源 | 随 envelope 事实演进 |
 | `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，稳定引用具体输入材料，不拥有内容 | 随 envelope 事实演进 |
-| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 CollaborationOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
-| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作形态、参与者集合、visibility 与策略快照 | 随模式切换事件演进 |
+| `ContextDeliverable` | 子实体 | `collab_context_id + deliverable_id + spec_ref` | 由 CollaborationOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
+| `CollaborationMode` | 子实体 | `collab_context_id + mode_id` | 承载当前协作形态、参与者集合、visibility 与策略快照 | 随模式切换事件演进 |
 | `CollaborationModePolicy` | 值对象 | 四项策略内容相等；随 mode_revision 冻结 | 由 Mode 持有，定义参与、协调、执行者和完成规则 | 无独立生命周期；随合法模式切换替换 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + definition_revision + content_digest` | 共享状态机合同 | 注册后不可原位修改 |
-| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
+| `ContextStateMachineBinding` | 子实体 | `collab_context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
-| `ContextTransition` | 子实体 | `context_id + transition_id`；`accepted_event_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
-| `ContextTodo` | 子实体 | `context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
-| `CollaborationOutcome` | 子实体 | `context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
+| `ContextTransition` | 子实体 | `collab_context_id + transition_id`；`accepted_event_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
+| `ContextTodo` | 子实体 | `collab_context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
+| `CollaborationOutcome` | 子实体 | `collab_context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
 | `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
 
 
@@ -750,7 +777,7 @@ apps/backend/src/agentclaw/community/di/modules/task_context_collab_module.py
 | 能力 | 输入 | 输出 |
 | --- | --- | --- |
 | Create Context | 作用域、来源、目标、可见性、profile ID、mode_kind / mode_policy、幂等键 | Context 快照 |
-| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、最近已接纳执行事实、可执行 Actions 摘要 |
+| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、`task_progress`（当前步骤、steps、recent_events）、最近已接纳执行事实、可执行 Actions 摘要 |
 | Get Timeline | context ID、游标、分页 | 事件分页与完成证据引用 |
 | Update Envelope | 目标、背景、约束、输入材料、交付物规格、验收，expected version | 新 Context version |
 | Apply Context Command | actor、Command、request ID、expected version | 接纳结果、状态变化、错误原因 |
@@ -765,22 +792,353 @@ apps/backend/src/agentclaw/community/di/modules/task_context_collab_module.py
 
 ### 7.3 HTTP 面
 
-生产公开面可以挂载：
+内部 API 统一挂在 `/api/v1/collaboration/task/context_collab` 下，OpenAPI 公开面使用同一合同，将前缀 `/api/v1` 换成 `/openapi/v1` 即可。首版必须提供以下三个核心接口，其余能力可在后续阶段扩展。内部面与公开面共享同一请求 / 响应 schema。
 
 ```text
-GET    /api/v1/collaboration/contexts
-POST   /api/v1/collaboration/contexts
-GET    /api/v1/collaboration/contexts/{context_id}
-GET    /api/v1/collaboration/contexts/{context_id}/timeline
-POST   /api/v1/collaboration/contexts/{context_id}/commands
-POST   /api/v1/collaboration/contexts/{context_id}/todos
+POST   /api/v1/collaboration/task/context_collab
+POST   /api/v1/collaboration/task/context_collab/{collab_context_id}/events
+GET    /api/v1/collaboration/task/context_collab/{collab_context_id}
 
-GET    /openapi/v1/collaboration/contexts
-GET    /openapi/v1/collaboration/contexts/{context_id}
-GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
+POST   /openapi/v1/collaboration/task/context_collab
+POST   /openapi/v1/collaboration/task/context_collab/{collab_context_id}/events
+GET    /openapi/v1/collaboration/task/context_collab/{collab_context_id}
 ```
 
-写命令是否公开取决于 PR 权限范围；公开面默认只读。BBS、Task 和 BCN 的系统式服务端适配器在本服务面之外使用共享 Service API，不单靠 HTTP 循环调用。内部面与公开面必须保持同一 Envelope 约定与错误类别。
+#### 1. 新增协作上下文
+
+```http
+POST /api/v1/collaboration/task/context_collab
+```
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `request_id` | body | string | 是 | 幂等键；同 ID 不同内容返回冲突 |
+| `scope.scope_kind` | body | string | 是 | 取值可为 `workspace` / `personal` / `open` |
+| `scope.scope_id` | body | string | 是 | 作用域对象 ID |
+| `scope.environment` | body | string | 是 | 运行环境 |
+| `profile_id` | body | string | 是 | 状态机 Profile ID，例如 `direct_assignment_profile` |
+| `mode.mode_kind` | body | string | 是 | 协作模式，例如 `public_discussion` / `autonomous_relay` / `planning_execution` / `competitive_assignment` / `direct_assignment` |
+| `mode.visibility` | body | string | 是 | 当前模式可见性，`public` / `workspace` / `participants` |
+| `mode.mode_policy` | body | object | 是 | 协作策略快照，见下方示例 |
+| `envelope.objective` | body | string | 是 | 协作目标 |
+| `envelope.background` | body | string | 否 | 目标背景 |
+| `envelope.input_sources[]` | body | array | 否 | 外部输入源引用 |
+| `envelope.material_refs[]` | body | array | 否 | 输入材料引用 |
+| `envelope.acceptance[]` | body | array | 否 | 验收口径 |
+| `participants[]` | body | array | 是 | 初始参与者，至少包含责任人 |
+| `responsible_actor_ref.actor_kind` | body | string | 是 | 责任人身份类型 |
+| `responsible_actor_ref.actor_id` | body | string | 是 | 责任人 ID |
+
+请求示例：
+
+```json
+{
+  "request_id": "create-context-01",
+  "scope": {
+    "scope_kind": "team_workspace",
+    "scope_id": "ws_001",
+    "environment": "prod"
+  },
+  "profile_id": "direct_assignment_profile",
+  "mode": {
+    "mode_kind": "direct_assignment",
+    "visibility": "workspace",
+    "mode_policy": {
+      "participation_policy": "assigned_participants",
+      "coordination_policy": "direct_selection",
+      "executor_policy": "single_assignee",
+      "completion_policy": "responsible_user_confirmation"
+    }
+  },
+  "envelope": {
+    "objective": "整理 Context 协作协议评审结论",
+    "background": "基于 BBS 讨论与 Task 输入材料",
+    "input_sources": [
+      {
+        "source_kind": "forum_topic",
+        "source_id": "topic_001",
+        "revision": "3"
+      }
+    ],
+    "material_refs": [
+      {
+        "source_kind": "dima_workspace",
+        "source_id": "ws_001",
+        "revision": "7"
+      }
+    ],
+    "acceptance": ["输出一版可评审的设计结论"]
+  },
+  "participants": [
+    {
+      "actor_kind": "human",
+      "actor_id": "u_1001",
+      "roles": ["responsible_user"]
+    },
+    {
+      "actor_kind": "bot",
+      "actor_id": "20261028_xxx:001",
+      "roles": ["assignee"]
+    }
+  ],
+  "responsible_actor_ref": {
+    "actor_kind": "human",
+    "actor_id": "u_1001"
+  }
+}
+```
+
+响应示例：
+
+```json
+{
+  "collab_context_id": "ctx_01",
+  "version": 1,
+  "state": "draft",
+  "mode_kind": "direct_assignment",
+  "visibility": "workspace",
+  "state_machine_binding": {
+    "profile_id": "direct_assignment_profile",
+    "definition_revision": 1,
+    "current_state": "draft",
+    "allowed_modes": ["direct_assignment"]
+  },
+  "event_cursor": 1,
+  "latest_event": {
+    "event_id": "evt_01",
+    "event_kind": "context.created"
+  }
+}
+```
+
+#### 2. 新增协作上下文事件
+
+```http
+POST /api/v1/collaboration/task/context_collab/{collab_context_id}/events
+```
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `collab_context_id` | path | string | 是 | Context ID |
+| `request_id` | body | string | 是 | 幂等键 |
+| `expected_version` | body | int | 是 | 调用方持有的 Context 版本 |
+| `event_kind` | body | string | 是 | 标准事件类型，如 `user_interaction.posted` / `context.info_updated` / `outcome.accepted` |
+| `actor_ref.actor_kind` | body | string | 是 | 事件 actor 类型 |
+| `actor_ref.actor_id` | body | string | 是 | 事件 actor ID |
+| `visibility` | body | string | 是 | 事件可见性，不得大于当前 Mode 可见性 |
+| `payload` | body | object | 是 | 事件结构化载荷；禁止携带 token、cookie、private key、私有路径 |
+
+> 事件不一定触发状态迁移；只有命中 frozen state machine 的一条合法迁移规则时，`transition` 才会返回非空对象，否则保持为 `null`。调用方必须以服务端返回的 `context_version` 和 `state` 为准。
+
+请求示例：
+
+```json
+{
+  "request_id": "append-event-01",
+  "expected_version": 1,
+  "event_kind": "user_interaction.posted",
+  "actor_ref": {
+    "actor_kind": "human",
+    "actor_id": "u_1001"
+  },
+  "visibility": "team_workspace",
+  "payload": {
+    "contribution_kind": "interactive_message",
+    "content": "上下文做一下补充xxx",
+    "summary": "用户在协作上下文中新增了一条互动消息"
+  }
+}
+```
+
+响应示例：
+
+```json
+{
+  "accepted": true,
+  "collab_context_id": "ctx_01",
+  "event_id": "evt_02",
+  "event_kind": "user_interaction.posted",
+  "context_version": 2,
+  "state": "draft",
+  "transition": null
+}
+```
+
+#### 3. 查询协作上下文最新状态
+
+```http
+GET /api/v1/collaboration/task/context_collab/{collab_context_id}
+```
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `collab_context_id` | path | string | 是 | Context ID |
+
+> `task_progress` 是只读展示投影：`steps[]` 说明已做、正在做和待做的事，`current_step` 标明当前进展到哪一步；`recent_events[]` 是这些步骤背后的近期事件摘要。该字段由 `ContextStateMachineBinding`、`ContextTodo[]` 和事件日志推导，不参与状态机裁决，也不是新的权威状态。
+响应示例：
+
+```json
+{
+  "snapshot_id": "snapshot_01",
+  "snapshot_revision": 3,
+  "collab_context_id": "ctx_01",
+  "version": 3,
+  "scope": {
+    "scope_kind": "workspace",
+    "scope_id": "ws_001",
+    "environment": "prod"
+  },
+  "state": {
+    "current_state": "assigned",
+    "governance_kind": "active",
+    "profile_id": "direct_assignment_profile",
+    "definition_revision": 1
+  },
+  "task_progress": {
+    "total": 4,
+    "assigned": 1,
+    "completed": 1,
+    "blocked": 0,
+    "cancelled": 0,
+    "percent": 25,
+    "current_step": {
+      "step_id": "todo_002",
+      "title": "梳理评审范围与关键结论",
+      "status": "assigned",
+      "assignee_ref": {
+        "actor_kind": "bot",
+        "actor_id": "20261028_xxx:001"
+      },
+      "started_at": "2026-11-10T08:20:00Z",
+      "summary": "正在梳理评审范围、接口边界和状态演进"
+    },
+    "steps": [
+      {
+        "step_id": "todo_001",
+        "title": "确认协作目标",
+        "status": "completed",
+        "assignee_ref": {
+          "actor_kind": "bot",
+          "actor_id": "20261028_xxx:001"
+        },
+        "started_at": "2026-11-10T08:05:00Z",
+        "completed_at": "2026-11-10T08:10:00Z",
+        "summary": "已确认目标、验收口径和参与者边界"
+      },
+      {
+        "step_id": "todo_002",
+        "title": "梳理评审范围与关键结论",
+        "status": "assigned",
+        "assignee_ref": {
+          "actor_kind": "bot",
+          "actor_id": "20261028_xxx:001"
+        },
+        "started_at": "2026-11-10T08:20:00Z",
+        "summary": "正在梳理评审范围、接口边界和状态演进"
+      },
+      {
+        "step_id": "todo_003",
+        "title": "补充接口与状态说明",
+        "status": "pending",
+        "summary": "待补充三个核心接口的参数与进度语义"
+      },
+      {
+        "step_id": "todo_004",
+        "title": "输出最终评审结论",
+        "status": "pending",
+        "summary": "待汇总结论并交由责任人验收"
+      }
+    ],
+    "recent_events": [
+      {
+        "event_id": "evt_01",
+        "event_kind": "context.created",
+        "summary": "创建协作上下文",
+        "occurred_at": "2026-11-10T08:00:00Z"
+      },
+      {
+        "event_id": "evt_02",
+        "event_kind": "todo.completed",
+        "summary": "完成协作目标确认",
+        "occurred_at": "2026-11-10T08:10:00Z"
+      },
+      {
+        "event_id": "evt_03",
+        "event_kind": "user_interaction.posted",
+        "summary": "补充一条用户互动消息",
+        "occurred_at": "2026-11-10T08:30:00Z"
+      }
+    ]
+  },
+  "mode": {
+    "mode_kind": "direct_assignment",
+    "visibility": "workspace",
+    "mode_revision": 1,
+    "mode_policy": {
+      "participation_policy": "assigned_participants",
+      "coordination_policy": "direct_selection",
+      "executor_policy": "single_assignee",
+      "completion_policy": "responsible_user_confirmation"
+    }
+  },
+  "envelope": {
+    "objective": "整理 Context 协作协议评审结论",
+    "acceptance": ["输出一版可评审的设计结论"]
+  },
+  "participants": [
+    {
+      "participant_id": "participant_01",
+      "actor_kind": "human",
+      "actor_id": "u_1001",
+      "roles": ["responsible_user"],
+      "revoked_at": null
+    },
+    {
+      "participant_id": "participant_02",
+      "actor_kind": "bot",
+      "actor_id": "20261028_xxx:001",
+      "roles": ["assignee"],
+      "revoked_at": null
+    }
+  ],
+  "todos": [
+    {
+      "todo_id": "todo_001",
+      "title": "确认协作目标",
+      "status": "completed"
+    },
+    {
+      "todo_id": "todo_002",
+      "title": "梳理评审范围与关键结论",
+      "status": "assigned"
+    },
+    {
+      "todo_id": "todo_003",
+      "title": "补充接口与状态说明",
+      "status": "pending"
+    },
+    {
+      "todo_id": "todo_004",
+      "title": "输出最终评审结论",
+      "status": "pending"
+    }
+  ],
+  "outcome": null,
+  "latest_event": {
+    "event_id": "evt_03",
+    "event_kind": "user_interaction.posted",
+    "occurred_at": "2026-11-10T08:30:00Z"
+  },
+  "available_actions": [
+    "user_interaction.posted",
+    "context.info_updated",
+    "work.started",
+    "work.completed",
+    "outcome.accepted",
+    "outcome.rejected"
+  ]
+}
+```
 
 ### 7.4 Adapter 事实映射
 
@@ -805,7 +1163,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 | 持久化分组 | 必须保留的唯一 / 一致性约束 |
 | --- | --- |
-| Context root + state binding | `context_id` 唯一；每 Context 一个 active binding；`context_id + current_state` 由事务写入 |
+| Context root + state binding | `collab_context_id` 唯一；每 Context 一个 active binding；`collab_context_id + current_state` 由事务写入 |
 | Event / Transition | `event_id` 唯一；按 Context / 来源命名空间去重；每个已接纳 Event 对应零或一条 Transition，`accepted_event_id` 唯一 |
 | Source refs / collaboration_mode | 来源关联按 scope 唯一；每个 Context 一个 active Mode；四维 mode_policy 随 mode_revision 保存；Work 引用只存在于事件和外部 Work 权威数据 |
 | Participant / Todo / Deliverable / Outcome | 子实体 ID 在 Context 内唯一；Actor 作用域内 active participant 唯一；交付物必须绑定规格和事实引用；裁决事实留下完整 actor 证据 |
