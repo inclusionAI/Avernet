@@ -6,22 +6,26 @@ Registry files what it produces and reads it back scoped by the rows it filed.
 Both inject :class:`ContentStoreProtocol`, so the store binds once, here,
 rather than inside either consumer's module.
 
-The blob root is a ``user_config.bot_config_manifest.content_store_dir``
-decision. The one yaml read stays in ``ManifestFetchModule.bot_config_manifest``
+Where the blobs live is a ``user_config.bot_config_manifest`` decision:
+``content_store_backend`` picks the medium and ``content_store_dir`` is the
+local tree. The one yaml read stays in ``ManifestFetchModule.bot_config_manifest``
 (the typed ``cfg.BotConfigManifestConfig`` cluster, parsed by the store's own
-``content_store_root_from_config``); this module only consumes the parsed
-value, so the key keeps its name and its deployment overlays keep working.
+``settings`` readers); this module only consumes the parsed values, so the
+keys keep their names and their deployment overlays keep working.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.core.content_store import (
     ContentStoreProtocol,
     ContentStoreService,
+    LocalBlobStore,
 )
+from agentclaw.community.core.content_store.blobs import ObjectStorageBlobStore
+from agentclaw.community.core.content_store.settings import BACKEND_FS
 from agentclaw.community.core.repository.implementations.bot.content_store import (
     ContentStoreRepository,
 )
@@ -50,9 +54,21 @@ class ContentStoreModule(Module):
         self,
         repository: ContentStoreRepositoryProtocol,
         manifest_config: cfg.BotConfigManifestConfig,
+        injector: Injector,
     ) -> ContentStoreProtocol:
-        """The store: blob root from the typed config cluster, never an environment read."""
+        """The store over the configured medium, from the typed config cluster, never an environment read.
+
+        The local tree is the store under ``fs``. Under ``object_storage``
+        it is what the object store reads through to, for blobs an earlier
+        version wrote to this instance's disk. The object storage plugin is
+        resolved only when it is the chosen medium.
+        """
+        local = LocalBlobStore(Path(manifest_config.content_store_dir))
+        if manifest_config.content_store_backend == BACKEND_FS:
+            return ContentStoreService(repository, blobs=local)
+        from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+
         return ContentStoreService(
             repository,
-            Path(manifest_config.content_store_dir),
+            blobs=ObjectStorageBlobStore(injector.get(ObjectStoragePlugin), legacy=local),
         )

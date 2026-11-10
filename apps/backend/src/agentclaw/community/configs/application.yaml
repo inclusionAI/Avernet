@@ -255,6 +255,21 @@ user_config:
   # content_store_root_from_config（manifest_fetch_module 解析，content_store_module
   # 装配存储服务时注入）。
   #
+  # content_store_backend: where the content store's bytes live.
+  #   "object_storage" (default) — the deployment's object storage (the bound
+  #     ObjectStoragePlugin), under the key prefix content-store/blobs/. Every
+  #     backend instance reads what any instance wrote, and the bytes outlive
+  #     the instance. The bucket must have NO lifecycle/expiry rule covering
+  #     that prefix: this store's retention is "never delete". content_store_dir
+  #     is then only read: a blob an earlier version wrote there is served and
+  #     copied to the object storage on first read.
+  #   "fs" — the local tree under content_store_dir, as before. Correct with
+  #     one backend instance, or when the directory is a volume all instances
+  #     mount (set an absolute path). With several instances and a local
+  #     directory, an instance cannot read what another one stored.
+  # Any other value stops the process at startup. Reader:
+  # core/content_store/settings.py content_store_backend_from_config.
+  #
   # teclaw_platform_managed（W8 #1476）：teclaw 系 bot 的 manifest 走「平台管理」
   # 投递——每个类目物化进平台状态（数据库行 + bot-data 对象存储里的托管文件，
   # 键布局即记录，没有索引表），artifact 带 ownership 映射，容器起来前就能
@@ -268,6 +283,7 @@ user_config:
   # teclaw_platform_managed_from_config（manifest_fetch_module 在装配时调用）。
   bot_config_manifest:
     fetch_transport_allowlist: []
+    content_store_backend: "object_storage"
     content_store_dir: "./data/manifest_content"
     teclaw_platform_managed: false
 

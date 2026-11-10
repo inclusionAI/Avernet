@@ -29,10 +29,10 @@
 - **Goal:** Select the blob store from config, defaulting to object storage, with the test profile on `fs`.
 - **Files:** `core/content_store/settings.py`, `di/config.py`, `di/modules/manifest_fetch_module.py`, `di/modules/content_store_module.py`, `configs/application.yaml`, `configs/application-test.yaml`, `tests/community/di/test_content_store_module_wiring.py`, `tests/community/core/content_store/` (settings tests)
 - **Done when:**
-  - [ ] `user_config.bot_config_manifest.content_store_backend` accepts `object_storage` (default) and `fs`; any other value fails at startup with a message naming the key.
-  - [ ] `object_storage` wires `ObjectStorageBlobStore` with the `content_store_dir` tree as legacy; `fs` wires `LocalBlobStore` and never resolves `ObjectStoragePlugin`.
-  - [ ] `application.yaml` documents the key, what `content_store_dir` means under each backend, and the no-expiry requirement on the bucket prefix; `application-test.yaml` sets `fs`.
-  - [ ] The community profile boots with its default `fs` object storage and round-trips a blob (wiring test).
+  - [x] `user_config.bot_config_manifest.content_store_backend` accepts `object_storage` (default) and `fs`; any other value fails at startup with a message naming the key.
+  - [x] `object_storage` wires `ObjectStorageBlobStore` with the `content_store_dir` tree as legacy; `fs` wires `LocalBlobStore` and never resolves `ObjectStoragePlugin`.
+  - [x] `application.yaml` documents the key, what `content_store_dir` means under each backend, and the no-expiry requirement on the bucket prefix; `application-test.yaml` sets `fs`.
+  - [x] The community profile boots with its default `fs` object storage and round-trips a blob (wiring test).
 - **Depends on:** Task 2
 
 ## Task 4: Self-heal in the Manifest compiler

@@ -8,6 +8,11 @@ user_config:
   task_dispatch:
     backend_url: "http://localhost:8888"
 
+  # The test profile's object storage is a mock (MockObjectStoragePlugin), so
+  # the content store keeps its bytes on the local tree.
+  bot_config_manifest:
+    content_store_backend: "fs"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests only. Real
   # employee ids never ship in community source; corp overlays carry production
   # ids. Endpoint tests authorize with "100000" (the doc-example placeholder).

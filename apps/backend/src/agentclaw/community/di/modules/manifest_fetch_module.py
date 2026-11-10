@@ -161,6 +161,7 @@ class ManifestFetchModule(Module):
             teclaw_delivery_mode_from_config,
         )
         from agentclaw.community.core.content_store.settings import (
+            content_store_backend_from_config,
             content_store_root_from_config,
         )
         from agentclaw.community.core.bot_config_manifest.fetch.limits import (
@@ -172,6 +173,7 @@ class ManifestFetchModule(Module):
             fetch_transport_allowlist=tuple(
                 sorted(transport_allowlist_from_config(tree))
             ),
+            content_store_backend=content_store_backend_from_config(tree),
             content_store_dir=str(content_store_root_from_config(tree)),
             # W8's switch, parsed by the delivery seam's own reader so the yaml
             # key and its consumer stay defined together — and parsed straight
