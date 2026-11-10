@@ -106,7 +106,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 ContextOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
 | `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作形态、参与者集合与 visibility 边界 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
-| `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
+| `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + definition_revision + content_digest` | 共享状态机合同 | 注册后不可原位修改 |
 | `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
 | `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
 | `ContextTransition` | 子实体 | `event_id + rule_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
@@ -275,7 +275,55 @@ ContextDeliverable
 - `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
 - 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
 
-### 4.5 子实体：ContextStateMachineBinding
+### 4.5 版本化协议资源：ContextStateMachineDefinition
+
+`ContextStateMachineDefinition` 是可共享、声明式、可版本化的状态机合同。它是 Context 绑定的静态定义，不是运行态，也不是新的聚合根。
+
+```text
+ContextStateMachineDefinition
+  ├─ definition_id
+  ├─ definition_revision
+  ├─ schema_version
+  ├─ content_digest
+  ├─ display_name / description
+  ├─ initial_state
+  ├─ states[]                  # StateDefinition[]
+  ├─ transitions[]             # TransitionDefinition[]
+  ├─ declared_guards[]         # 只允许已注册 guard 名称
+  ├─ declared_effects[]        # 只允许已注册 effect 名称
+  ├─ compatibility_policy
+  └─ registered_by / registered_at
+```
+
+```text
+StateDefinition
+  ├─ state_id / governance_kind
+  ├─ display_name
+  ├─ allowed_modes[]
+  ├─ required_roles[]
+  ├─ allowed_actors[]
+  └─ entry_actions[]           # 声明式 effect 名称
+```
+
+```text
+TransitionDefinition
+  ├─ transition_id
+  ├─ from_states[] / to_state
+  ├─ event_name
+  ├─ guard_refs[]
+  └─ effect_refs[]
+```
+
+设计约束：
+- 身份与相等性由 `definition_id + definition_revision + content_digest` 决定；发布后的 revision 不可原位修改，内容变化必须创建新 revision。
+- 该对象只保存状态、迁移、guard / effect 引用和兼容策略，不保存任何 Context 的运行事实。
+- `current_state`、`transition_cursor`、`state_fencing_token`、Todo 等运行态事实只能由 `ContextStateMachineBinding` 保存。
+- guard 和 effect 都是注册后的白名单名称，不能包含脚本、SQL、网络调用、文件访问或框架 import。
+- Context 不能直接持有 mutable definition；只能通过 binding 冻结某个 `definition_id + definition_revision + content_digest`。
+- `compatibility_policy` 声明该 revision 是否允许已有 Context 显式迁移，以及迁移时必须满足的校验。
+- 第 5.1 节的 YAML 可以视为该对象的声明式序列化形式；字段名可在实现前细化，但语义不变。
+
+### 4.6 子实体：ContextStateMachineBinding
 
 `ContextStateMachineBinding` 是 Context 与某个 frozen state machine revision 的状态裁决绑定。它只负责状态阶段与迁移并发，不保存协作业务事实。
 
@@ -296,7 +344,7 @@ ContextStateMachineBinding
 - `state_fencing_token` 只属于 `ContextStateMachineBinding`，用于防止旧命令影响新状态。
 - 变更状态必须由服务端状态机基于 ContextEvent 与本 binding 的 frozen revision 裁决。
 
-### 4.6 子实体：CollaborationMode
+### 4.7 子实体：CollaborationMode
 
 `CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
 
@@ -323,7 +371,7 @@ CollaborationMode
 - visibility 属于当前 `CollaborationMode`，不是 `ContextEnvelope` 或 `scope`。
 - participants 是协作关系，不是权限本身。
 
-### 4.7 子实体：ContextParticipant
+### 4.8 子实体：ContextParticipant
 
 `ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。
 
@@ -345,7 +393,7 @@ ContextParticipant
 
 ### 5.1 状态机合同
 
-目标 schema 采用 `context-state-machine/1`，示例结构如下；字段名可在实现前细化，但语义不变：
+`ContextStateMachineDefinition` 的声明式序列化 schema 采用 `context-state-machine/1`；目标合同通过第 4.5 节定义的对象承载，字段等于该对象的协议投影。
 
 ```yaml
 schema: context-state-machine/1
