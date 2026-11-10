@@ -599,7 +599,10 @@ impl BcsServer {
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
             principal_verifier.clone(),
-            Arc::new(bcs_test_support::NoopConnectService),
+            // The V1 friendship surface shares the in-memory connect store with
+            // the legacy `/friends/*` routes: an unfriend here must revoke the
+            // same edges those routes and `GET .../friendships` read.
+            connect_service.clone(),
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
