@@ -97,3 +97,13 @@ it('group selection updates only the scoped URL', async () => {
   act(() => useWorkspaceStore.getState().selectSession('next'));
   await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('session=next')));
 });
+
+it('group projection preserves extra params such as showReturn=false', async () => {
+  mockPath = '/workspace/collaboration/group';
+  mockSearch = '?current=human_test&group=g&session=g%3As&showReturn=false';
+  render(<FocusedCollaborationPage />);
+  await screen.findByText('受限协作区域内容');
+  act(() => useWorkspaceStore.getState().selectSession('next'));
+  await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('session=next')));
+  expect(mockReplace).toHaveBeenLastCalledWith(expect.stringContaining('showReturn=false'));
+});
