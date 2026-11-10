@@ -21,6 +21,8 @@ card 模式两套 API 共用一套新服务和索引加工任务，不再初始�
 ## 新接口与正式导入入口
 
 复用现有公共 `/api/v2/agent-cards/{id}` 的 PUT/GET/DELETE 和 index-status，显式绑定 TC 新服务。
+单卡重建使用 `POST /api/v2/agent-cards/{id}/rebuild`，请求体为 `{"index_key":"<当前 Card 的 index-status 返回值>"}`。
+接口发布该 Card 的新 Doc，Qdrant 由现有索引同步更新。Card 资料和版本保持原值。
 `/api/v2/search`、`/api/v2/recommend` 固定查询 TC 新索引。
 TC 仅补 GET/PUT `/api/v2/workers/{id}/config`，沿用已有配置请求/响应并固定保存新配置。
 状态和 availability 通过新 Card 字段更新，不复制整套 v2 sync/online/Fuse 路由。

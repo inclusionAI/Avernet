@@ -1,7 +1,8 @@
 """TC v2 always binds the new Card/Doc service, independently of v1 storage."""
 
 from fastapi import APIRouter, Request
-from search_core.adapters.http.cards import create_card_router
+from search_core.adapters.http.cards import CardStatus
+from search_core.adapters.http.catalog_cards import create_card_router
 from search_core.adapters.http.routes import create_search_router
 from search_core.api.models import SearchResult, VerifiedIdentity
 from search_core.application.search import CatalogSearchApplication
@@ -95,6 +96,9 @@ class CardOperations:
     def status(self, agent_id):
         return services(self.app)[1].updates.status(agent_id)
 
+    def rebuild(self, agent_id, index_key):
+        return services(self.app)[1].updates.rebuild(agent_id, index_key)
+
 
 class NewRetrieval:
     def __init__(self, app):
@@ -110,7 +114,9 @@ class NewRetrieval:
 
 
 def include_v2(app, *, search_router=None):
-    app.include_router(create_card_router(CardOperations(app), authenticate))
+    app.include_router(
+        create_card_router(CardOperations(app), authenticate, status_model=CardStatus)
+    )
     search = CatalogSearchApplication(
         NewRetrieval(app),
         filter_fields=FILTER_FIELDS | {"worker_id", "profile_key", "resource_type"},
