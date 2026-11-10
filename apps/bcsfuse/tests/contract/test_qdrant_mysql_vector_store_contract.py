@@ -17,6 +17,8 @@ Optional real integration tests are gated by:
 - QDRANT_LOCAL_PATH, QDRANT_COLLECTION, VECTOR_DIMENSION
 """
 
+from tests.qdrant_support import server_options, server_connection
+
 import os
 import sys
 import pytest
@@ -44,7 +46,7 @@ class TestQdrantMySQLVectorStoreContract:
         )
 
         # Should not raise error on construction
-        store = QdrantMySQLVectorStore()
+        store = QdrantMySQLVectorStore(connection=server_connection())
         assert store is not None
         assert store.collection_name == "bcsfuse_vectors"
         assert store.dimension == 4096
@@ -52,6 +54,7 @@ class TestQdrantMySQLVectorStoreContract:
 
         # Should also accept explicit config without connecting
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name="test_collection",
             qdrant_path="/tmp/test_qdrant",
             dimension=768,
@@ -72,7 +75,7 @@ class TestQdrantMySQLVectorStoreContract:
             QdrantMySQLVectorStore,
         )
 
-        store = QdrantMySQLVectorStore()
+        store = QdrantMySQLVectorStore(connection=server_connection())
 
         # Required methods from vector store pattern
         assert hasattr(store, "upsert")
@@ -216,6 +219,7 @@ class TestQdrantMySQLVectorStoreContract:
 
         # Use invalid config that will fail on connection
         store = QdrantMySQLVectorStore(
+            **server_options(),
             mysql_host="invalid-host-that-does-not-exist",
             mysql_port=9999,
             mysql_user="invalid-user",
@@ -355,6 +359,7 @@ class TestQdrantMySQLVectorStoreIntegration:
         qdrant_path = tempfile.mkdtemp(prefix="test_qdrant_mysql_")
 
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name=f"test_collection_{os.getenv('QDRANT_COLLECTION', 'default')}",
             qdrant_path=qdrant_path,
             dimension=int(os.getenv("VECTOR_DIMENSION", "4096")),

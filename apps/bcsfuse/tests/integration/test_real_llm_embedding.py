@@ -14,6 +14,8 @@
     pytest tests/integration/test_real_llm_embedding.py -v --tb=short
 """
 
+from tests.qdrant_support import server_options
+
 import os
 import time
 
@@ -257,6 +259,7 @@ class TestVectorStoreWithRealEmbedding:
 
             # 创建 store
             store = QdrantSQLiteVectorStore(
+                **server_options(str(db_path)),
                 dimension=settings.dimension,
                 db_path=str(db_path),
                 auto_load=False,
@@ -287,6 +290,7 @@ class TestVectorStoreWithRealEmbedding:
 
             # 创建新实例加载持久化数据
             store2 = QdrantSQLiteVectorStore(
+                **server_options(str(db_path)),
                 dimension=settings.dimension,
                 db_path=str(db_path),
                 auto_load=True,

@@ -1,5 +1,7 @@
 """Real SQLite/Qdrant Local acceptance, with no internal application imports."""
 
+from tests.qdrant_support import server_options, server_connection
+
 import importlib.util
 import time
 
@@ -12,7 +14,9 @@ def local_factory():
     )
     from search_core.bootstrap.local import create_local_app
 
-    return create_local_app
+    from functools import partial
+
+    return partial(create_local_app, connection=server_connection())
 
 
 def applied(client, revision, deleted=False):
@@ -136,7 +140,9 @@ def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path
     repository.save(card, 0)
     for instance in ("first", "restored"):
         index = QdrantRetrievalIndex(
-            path=str(tmp_path / instance), dimension=model.dimension
+            **server_options(str(tmp_path / instance)),
+            path=str(tmp_path / instance),
+            dimension=model.dimension,
         )
         try:
             updates = CardUpdates(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.qdrant_support import server_options, server_connection
+
 import os
 from uuid import uuid4
 
@@ -38,6 +40,7 @@ def test_incremental_sync_propagates_remote_upsert_and_soft_delete(tmp_path) -> 
     primary_backend = MySQLVectorPersistenceBackend(vector_dimension=dimension)
     remote_backend = MySQLVectorPersistenceBackend(vector_dimension=dimension)
     store = QdrantMySQLVectorStore(
+        connection=server_connection(),
         collection_name=f"sync-e2e-{uuid4().hex}",
         qdrant_path=str(tmp_path / "qdrant"),
         dimension=dimension,
@@ -88,8 +91,18 @@ def test_worker_payload_state_persists_and_replays_to_another_index(tmp_path):
     ids = [f"{owner}:old:full", f"{owner}:release:skills:1", f"{owner}:nested:default:full"]
     primary = MySQLVectorPersistenceBackend(vector_dimension=dimension)
     replica_backend = MySQLVectorPersistenceBackend(vector_dimension=dimension)
-    store = QdrantMySQLVectorStore(dimension=dimension, qdrant_path=str(tmp_path / "primary"), persistence_backend=primary)
-    replica = QdrantMySQLVectorStore(dimension=dimension, qdrant_path=str(tmp_path / "replica"), persistence_backend=replica_backend)
+    store = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "primary")),
+        dimension=dimension,
+        qdrant_path=str(tmp_path / "primary"),
+        persistence_backend=primary,
+    )
+    replica = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "replica")),
+        dimension=dimension,
+        qdrant_path=str(tmp_path / "replica"),
+        persistence_backend=replica_backend,
+    )
     try:
         # Commit through the other instance: the primary local index is empty.
         replica.upsert([

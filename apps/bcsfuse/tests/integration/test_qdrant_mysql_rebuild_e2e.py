@@ -23,6 +23,8 @@ If MySQL/Qdrant env unavailable, test must skip clearly:
 SKIPPED_MYSQL_ENV_UNAVAILABLE or SKIPPED_QDRANT_ENV_UNAVAILABLE
 """
 
+from tests.qdrant_support import server_connection
+
 import os
 import sys
 import pytest
@@ -63,6 +65,7 @@ class TestQdrantMySQLRebuildE2E:
         collection_name = f"e2e_test_{uuid.uuid4().hex[:8]}"
 
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name=collection_name,
             qdrant_path=qdrant_path,
             dimension=int(os.getenv("VECTOR_DIMENSION", "4096")),
@@ -295,6 +298,7 @@ class TestQdrantMySQLRebuildE2E:
         )
         collection_name = store.collection_name
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name=collection_name,
             qdrant_path=qdrant_path,
             dimension=int(os.getenv("VECTOR_DIMENSION", "4096")),

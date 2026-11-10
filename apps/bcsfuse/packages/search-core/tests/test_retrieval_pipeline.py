@@ -1,3 +1,4 @@
+from tests.qdrant_support import server_options
 import asyncio
 from threading import Event
 
@@ -14,7 +15,11 @@ class Embedding:
 
 def test_real_qdrant_recall_filters_and_restart(tmp_path):
     def open_index():
-        return QdrantRetrievalIndex(path=str(tmp_path / "index"), dimension=3)
+        return QdrantRetrievalIndex(
+            **server_options(str(tmp_path / "index")),
+            path=str(tmp_path / "index"),
+            dimension=3,
+        )
 
     index = open_index()
     index.upsert(

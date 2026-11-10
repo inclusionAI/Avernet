@@ -1,5 +1,7 @@
 """Local Qdrant with SQLite implements the point-read contract used by vector consumers."""
 
+from tests.qdrant_support import server_options
+
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +16,7 @@ from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLit
 
 
 def test_get_returns_latest_live_point_and_defensive_payload(tmp_path):
-    store = QdrantSQLiteVectorStore(dimension=2)
+    store = QdrantSQLiteVectorStore(**server_options(), dimension=2)
     assert isinstance(store, VectorStoreAdapter)
     assert store.get("missing") is None
     store.upsert([VectorPoint(id="bot:1:default", vector=[3, 4], payload={"tags": ["old"]})])
@@ -26,7 +28,7 @@ def test_get_returns_latest_live_point_and_defensive_payload(tmp_path):
     store.upsert([VectorPoint(id="bot:1:default", vector=[0, 1], payload={"tags": ["new"]})])
     assert store.get("bot:1:default").vector == pytest.approx([0, 1])
     store.save_snapshot(str(tmp_path))
-    restored = QdrantSQLiteVectorStore(dimension=2)
+    restored = QdrantSQLiteVectorStore(**server_options(), dimension=2)
     restored.load_snapshot(str(tmp_path))
     assert restored.get("bot:1:default").payload == {"tags": ["new"]}
     restored.delete(["bot:1:default"])
@@ -34,7 +36,11 @@ def test_get_returns_latest_live_point_and_defensive_payload(tmp_path):
 
 
 def test_sqlite_worker_cleanup_removes_orphans_and_preserves_other_owners(tmp_path):
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=str(tmp_path / "vectors.db"))
+    store = QdrantSQLiteVectorStore(
+        **server_options(str(tmp_path / "vectors.db")),
+        dimension=2,
+        db_path=str(tmp_path / "vectors.db"),
+    )
     store.upsert([
         VectorPoint(id="a:orphan:full", vector=[1., 0.], payload={"worker_id": "a"}),
         VectorPoint(id="a:b:default:full", vector=[0., 1.], payload={"worker_id": "a:b"}),
@@ -44,5 +50,9 @@ def test_sqlite_worker_cleanup_removes_orphans_and_preserves_other_owners(tmp_pa
     assert indexer.delete_by_worker("a") == 1
     assert indexer.delete_by_worker("a") == 0
     assert store.get_vector_ids() == ["a:b:default:full"]
-    restored = QdrantSQLiteVectorStore(dimension=2, db_path=str(tmp_path / "vectors.db"))
+    restored = QdrantSQLiteVectorStore(
+        **server_options(str(tmp_path / "vectors.db")),
+        dimension=2,
+        db_path=str(tmp_path / "vectors.db"),
+    )
     assert restored.get_vector_ids() == ["a:b:default:full"]

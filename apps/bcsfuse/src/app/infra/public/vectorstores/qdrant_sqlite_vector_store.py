@@ -22,6 +22,7 @@ class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
         qdrant_path: str | None = None,
         auto_load: bool = True,
         connection: QdrantConnection = LOCAL_QDRANT,
+        collection_name: str = "bcsfuse_vectors",
     ):
         self._db_path = db_path
         self._temporary_index = None
@@ -35,6 +36,7 @@ class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
                 qdrant_path = db_path + ".qdrant"
         super().__init__(
             dimension=dimension,
+            collection_name=collection_name,
             connection=connection,
             qdrant_path=qdrant_path,
             persistence_backend=SQLiteVectorPersistenceBackend(db_path=db_path),

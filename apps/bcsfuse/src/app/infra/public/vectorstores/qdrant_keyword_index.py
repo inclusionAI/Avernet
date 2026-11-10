@@ -1,9 +1,9 @@
-"""TC keyword text and Worker-ID priority around shared sparse retrieval."""
+"""TC keyword text and Worker-ID priority around shared native BM25."""
 
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.keyword import QdrantKeywordIndex as SharedKeywordIndex
-from search_core.providers.keyword import normalize, sparse
+from search_core.providers.keyword import normalize
 
 
 class QdrantKeywordIndex(SharedKeywordIndex):

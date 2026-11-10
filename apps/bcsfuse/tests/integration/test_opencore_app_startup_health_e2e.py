@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def test_client(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[TestClient]:

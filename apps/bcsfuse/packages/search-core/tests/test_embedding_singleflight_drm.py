@@ -1,5 +1,7 @@
 """Emergency updates switch coalescing independently from embedding cache TTL."""
 
+from tests.qdrant_support import server_options
+
 import asyncio
 
 import pytest
@@ -49,7 +51,11 @@ def test_emergency_toggle_works_without_cache_and_preserves_inflight_snapshot(
                 return await super().embed(text)
 
         model = RecordingModel()
-        index = QdrantRetrievalIndex(path=str(tmp_path / "index"), dimension=2)
+        index = QdrantRetrievalIndex(
+            **server_options(str(tmp_path / "index")),
+            path=str(tmp_path / "index"),
+            dimension=2,
+        )
 
         async def auth(request):
             return VerifiedIdentity("test")

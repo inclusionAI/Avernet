@@ -90,16 +90,9 @@ def _profile_summary(raw_text):
 
 
 def _keyword_text(card, search_text):
-    words = re.findall(r"[a-z0-9]+", normalize(card.get("name") or ""))
-    prefixes = {
-        word[:length]
-        for word in words
-        if not word.isdigit()
-        for length in range(3, min(6, len(word)) + 1)
-    }
     aliases = {normalize(domain) for domain in card.get("domains") or ()}
     indexed_words = set(re.findall(r"[a-z0-9_]+", normalize(search_text)))
-    extra = sorted((prefixes | aliases) - indexed_words - {""})
+    extra = sorted(aliases - indexed_words - {""})
     return " ".join([search_text, *extra])
 
 
@@ -121,7 +114,7 @@ class TcCardUpdates(CardUpdates):
         documents = super()._prepare_documents(row, previous)
         if row.card.deleted:
             return documents
-        # Name prefixes and aliases belong on the main sparse document once.
+        # Explicit Card aliases belong on the main keyword document once.
         main = documents[0]
         payload = main.point.payload
         text = payload["search_text"]
