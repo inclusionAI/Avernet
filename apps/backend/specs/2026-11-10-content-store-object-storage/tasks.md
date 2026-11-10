@@ -57,10 +57,10 @@
 - **Goal:** Ensure the feature meets the spec acceptance criteria.
 - **Files:** —
 - **Done when:**
-  - [ ] `DEPLOY_PROFILE=test uv run pytest tests/community/core/content_store tests/community/core/bot_genome tests/community/core/bot_config_manifest tests/community/core/apply_engine tests/community/di -q` passes.
-  - [ ] `./scripts/ci_test.sh` passes (changed-line coverage ≥ 80%, total ≥ 75%).
-  - [ ] Every spec acceptance criterion maps to a passing test, or is stated in the PR as not verifiable locally (cross-instance behaviour on a real bucket; instance replacement).
-  - [ ] No file over 1,000 lines; no unrelated formatting changes in the diff.
+  - [x] `DEPLOY_PROFILE=test uv run pytest tests/community/core/content_store tests/community/core/bot_genome tests/community/core/bot_config_manifest tests/community/core/apply_engine tests/community/di -q` passes.
+  - [x] `./scripts/ci_test.sh` passes (changed-line coverage ≥ 80%, total ≥ 75%).
+  - [x] Every spec acceptance criterion maps to a passing test, or is stated in the PR as not verifiable locally (cross-instance behaviour on a real bucket; instance replacement).
+  - [x] No file over 1,000 lines; no unrelated formatting changes in the diff.
 - **Depends on:** Tasks 1–5
 
 ---
