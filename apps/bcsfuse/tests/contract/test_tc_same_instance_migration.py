@@ -151,6 +151,59 @@ def test_card_preparation_indexes_generated_profile_and_reuses_current_input(
         assert len(calls) == 2
 
 
+def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
+    service, monkeypatch
+):
+    from app.tc import bootstrap
+
+    start, _ = service
+    with start("card") as (client, registry):
+        new_card(client, "dealer", name="poker_发牌师傅", runtime_state="online")
+        new_card(client, "other", name="测试一下")
+        card = client.get("/api/v2/agent-cards/dealer").json()
+        runtime = registry.require("tc_card_search")
+        documents = runtime.updates.documents
+        before = documents.load_by_id("dealer")
+        other = documents.load_by_id("other")
+        index_key = client.get("/ready").json()["index_key"]
+
+    gateway = SimpleNamespace(
+        generate=lambda *_args, **_kwargs: SimpleNamespace(
+            raw_text='{"topic":"扑克游戏"}', errors=[]
+        )
+    )
+    monkeypatch.setattr(bootstrap, "_create_profile_gateway", lambda: gateway)
+    with start("card") as (client, registry):
+        path = "/api/v2/agent-cards/dealer/rebuild"
+        updates = registry.require("tc_card_search").updates
+        documents = updates.documents
+        assert client.post(path, json={"index_key": "wrong"}).status_code == 409
+        assert documents.load_by_id("dealer").version == before.version
+
+        response = client.post(path, json={"index_key": index_key})
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "published": True,
+            "index_key": index_key,
+            "card_version": card["card_version"],
+        }
+        assert client.get("/api/v2/agent-cards/dealer").json() == card
+        assert documents.load_by_id("other").version == other.version
+        rebuilt = documents.load_by_id("dealer")
+        assert rebuilt.version > before.version
+        assert "扑克游戏" in rebuilt.point.payload["search_text"]
+        catalog = registry.require("tc_catalog_repository")
+        assert catalog.get("dealer").profile["content"]["summary"] == "扑克游戏"
+        updates.run_once()
+        result = client.post(
+            "/api/v1/recommend",
+            json={"question": "游戏", "topK": 1, "enable_rerank": False},
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["recommendations"][0]["worker_id"] == "dealer"
+        assert result.json()["recommendations"][0]["short_profile"] == "扑克游戏"
+
+
 def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(service):
     start, path = service
     with start() as (client, registry):
