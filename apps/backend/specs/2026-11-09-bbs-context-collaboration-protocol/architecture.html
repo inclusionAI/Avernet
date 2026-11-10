@@ -3,146 +3,201 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BBS Context 协作协议四层架构</title>
+  <title>ACCS L1-L6：Context 自主协作最小架构</title>
   <style>
     html, body { margin: 0; background: #fff; }
     .architecture { display: block; width: 100%; height: auto; }
-    .architecture text {
-      fill: #262626;
-      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-      font-size: 25px;
-      text-anchor: middle;
-    }
-    .band { fill: #6ec4c4; stroke: #585a5a; stroke-width: 4; stroke-dasharray: 8 8; }
-    .card rect { fill: #e8f7cf; stroke: #585a5a; stroke-width: 4; }
-    .architecture .heading, .architecture .layer-label { font-size: 28px; font-weight: 700; }
-    .architecture .layer-label, .architecture .mode-summary { text-anchor: start; }
-    .architecture .mode-summary { font-size: 24px; }
-    .connector { fill: none; stroke: #585a5a; stroke-width: 4; stroke-dasharray: 8 8; marker-end: url(#arrowhead); }
+    .architecture text { fill: #262626; font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 22px; }
+    .heading { font-size: 31px; font-weight: 700; }
+    .subheading { font-size: 19px; fill: #536273; }
+    .layer-label { font-size: 27px; font-weight: 700; }
+    .layer-name { font-size: 21px; font-weight: 700; }
+    .band { stroke: #555; stroke-width: 3; stroke-dasharray: 8 8; }
+    .l1 { fill: #e7f0fa; }
+    .l2 { fill: #eaf4fb; }
+    .l3 { fill: #edf6fa; }
+    .l4 { fill: #dff3ed; }
+    .l5 { fill: #fff0d6; }
+    .l6 { fill: #f1e8fb; }
+    .card rect { fill: #fff; stroke: #68717a; stroke-width: 2.5; }
+    .card-title { font-size: 23px; font-weight: 700; text-anchor: middle; }
+    .object { font-size: 19px; fill: #2f4e68; }
+    .note { font-size: 17px; fill: #5f6368; }
+    .connector { fill: none; stroke: #68717a; stroke-width: 3; stroke-dasharray: 8 8; marker-end: url(#arrowhead); }
+    .governance rect { fill: #f8fafc; stroke: #7b8794; stroke-width: 3; }
+    .governance text { font-size: 18px; }
   </style>
 </head>
 <body>
-  <!-- Keep the reference image's proportions and layout at every viewport size. -->
-  <svg class="architecture" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2210 1538"
-       width="2210" height="1538" role="img" aria-labelledby="diagram-title diagram-description">
-    <title id="diagram-title">BBS Context 协作协议四层架构</title>
-    <desc id="diagram-description">从上到下为协作层、状态层、事件层、表示层。协作模式关联模式策略及五种模式；状态机定义关联运行绑定；迁移引用事件；协作上下文关联输入与结果。</desc>
+  <!-- 只展示当前三个 API 必需的对象；L2/L3/L5/L6 仅以引用或枚举字段出现。 -->
+  <svg class="architecture" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 2540"
+       width="2400" height="2540" role="img" aria-labelledby="diagram-title diagram-description">
+    <title id="diagram-title">ACCS L1-L6：Context 自主协作最小架构</title>
+    <desc id="diagram-description">从上到下为 L6 到 L1，展示三个 API 所需的最小字段和两个持久化对象；底部为 G1-G4 横切治理。未使用的 ACCS 对象不创建。</desc>
     <defs>
-      <marker id="arrowhead" viewBox="0 0 24 18" refX="24" refY="9"
-              markerWidth="24" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
-        <path d="M 0 0 L 24 9 L 0 18 L 5 9 Z" fill="#585a5a"/>
+      <marker id="arrowhead" viewBox="0 0 24 18" refX="24" refY="9" markerWidth="24" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M 0 0 L 24 9 L 0 18 L 5 9 Z" fill="#68717a"/>
       </marker>
     </defs>
-    <g class="layer" aria-label="协作层">
-      <rect class="band" x="29" y="37" width="2157" height="318"/>
-        <text class="layer-label" x="43" y="205">协作层</text>
-      <path class="connector" d="M 752 204 H 914"/>
-      <path class="connector" d="M 1399 204 H 1607"/>
-      <g class="card" aria-label="CollaborationMode">
-        <rect x="270" y="86" width="482" height="237" rx="18"/>
-        <text class="heading" x="511.0" y="125">CollaborationMode</text>
-        <text x="511.0" y="164">mode_kind</text>
-        <text x="511.0" y="206">participants</text>
-        <text x="511.0" y="248">visibility</text>
-        <text x="511.0" y="290">mode_policy</text>
+
+    <text class="heading" x="1200" y="48" text-anchor="middle">ACCS L1-L6：基于 Context 自主协作的最小架构</text>
+    <text class="subheading" x="1200" y="82" text-anchor="middle">只服务三个 API；两个持久化对象，其他层只保留必要字段或外部引用</text>
+    <path class="connector" d="M 116 2300 V 150"/>
+    <text class="note" x="85" y="135" text-anchor="middle">组合方向</text>
+    <text class="note" x="150" y="1250" text-anchor="middle" transform="rotate(-90 150 1250)">L1 → L6：交付基础逐层组合为产品</text>
+
+    <!-- L6 -->
+    <g aria-label="L6 Compose Methods into Products">
+      <rect class="band l6" x="220" y="115" width="2100" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="170">L6</text>
+      <text class="layer-name" x="245" y="205">Compose Methods</text>
+      <text class="layer-name" x="245" y="233">into Products</text>
+      <g class="card">
+        <rect x="535" y="150" width="790" height="230" rx="14"/>
+        <text class="card-title" x="930" y="190">本方案仅保留字段</text>
+        <text class="object" x="575" y="232">product_kind</text>
+        <text class="object" x="575" y="267">workflow_kind（可选）</text>
+        <text class="note" x="575" y="320">保存于 Collet.context_spec，不建 Profile 表</text>
       </g>
-      <g class="card" aria-label="CollaborationModePolicy">
-        <rect x="917" y="86" width="482" height="237" rx="18"/>
-        <text class="heading" x="1158.0" y="125">CollaborationModePolicy</text>
-        <text x="1158.0" y="164">participation_policy　谁可以参与</text>
-        <text x="1158.0" y="206">coordination_policy　如何组织协作</text>
-        <text x="1158.0" y="248">executor_policy　有几个执行者</text>
-        <text x="1158.0" y="290">completion_policy　如何判定完成</text>
-      </g>
-      <g class="card" aria-label="五种协作模式">
-        <rect x="1610" y="86" width="558" height="237" rx="18"/>
-        <text class="mode-summary" x="1616" y="128">公开讨论：全员参与 / 开放贡献 / 无独占执行者</text>
-        <text class="mode-summary" x="1616" y="170">自主接力：部分参与 / 顺序移交 / 每阶段一个执行者</text>
-        <text class="mode-summary" x="1616" y="212">规划执行：部分参与 / 先规划后执行 / 按计划分工</text>
-        <text class="mode-summary" x="1616" y="254">竞价上岗：多人竞价 / 单人中标执行</text>
-        <text class="mode-summary" x="1616" y="296">直接指派：直接选定 / 单人执行</text>
+      <g class="card">
+        <rect x="1375" y="150" width="880" height="230" rx="14"/>
+        <text class="card-title" x="1815" y="190">当前产品取值</text>
+        <text class="object" x="1415" y="232">BBS：public_discussion</text>
+        <text class="object" x="1415" y="267">团队代办：team_todo</text>
+        <text class="note" x="1415" y="320">不新增 ProductProfile / WorkflowProfile</text>
       </g>
     </g>
-    <g class="layer" aria-label="状态层">
-      <rect class="band" x="29" y="429" width="2157" height="351"/>
-        <text class="layer-label" x="35" y="612">状态层</text>
-      <path class="connector" d="M 983 607 H 1263"/>
-      <g class="card" aria-label="ContextStateMachineDefinition">
-        <rect x="336" y="449" width="647" height="317" rx="18"/>
-        <text class="heading" x="659.5" y="488">ContextStateMachineDefinition</text>
-        <text x="659.5" y="546">definition_id</text>
-        <text x="659.5" y="588">definition_revision</text>
-        <text x="659.5" y="630">initial_state</text>
-        <text x="659.5" y="672">states</text>
-        <text x="659.5" y="714">transitions</text>
+
+    <!-- L5 -->
+    <g aria-label="L5 Compose Primitives into Methods">
+      <rect class="band l5" x="220" y="445" width="2100" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="500">L5</text>
+      <text class="layer-name" x="245" y="535">Compose Primitives</text>
+      <text class="layer-name" x="245" y="563">into Methods</text>
+      <g class="card">
+        <rect x="535" y="480" width="790" height="230" rx="14"/>
+        <text class="card-title" x="930" y="520">本方案仅保留字段</text>
+        <text class="object" x="575" y="562">method_kind</text>
+        <text class="object" x="575" y="597">executor_ref（Single 时必填）</text>
+        <text class="note" x="575" y="650">保存于 context_spec / current_snapshot</text>
       </g>
-      <g class="card" aria-label="ContextStateMachineBinding">
-        <rect x="1266" y="449" width="614" height="317" rx="18"/>
-        <text class="heading" x="1573.0" y="488">ContextStateMachineBinding</text>
-        <text x="1573.0" y="543">definition_id</text>
-        <text x="1573.0" y="585">definition_revision</text>
-        <text x="1573.0" y="627">current_state</text>
-        <text x="1573.0" y="669">transition_cursor</text>
-        <text x="1573.0" y="711">state_fencing_token</text>
-        <text x="1573.0" y="753">todos</text>
+      <g class="card">
+        <rect x="1375" y="480" width="880" height="230" rx="14"/>
+        <text class="card-title" x="1815" y="520">当前方法取值</text>
+        <text class="object" x="1415" y="562">BBS 公开讨论：Open + Group</text>
+        <text class="object" x="1415" y="597">团队任务代办：Single</text>
+        <text class="note" x="1415" y="650">不新增 MethodBinding / Lease</text>
       </g>
     </g>
-    <g class="layer" aria-label="事件层">
-      <rect class="band" x="29" y="822" width="2157" height="207"/>
-        <text class="layer-label" x="35" y="936">事件层</text>
-      <path class="connector" d="M 1266 927 H 986"/>
-      <g class="card" aria-label="ContextEvent">
-        <rect x="336" y="842" width="647" height="171" rx="18"/>
-        <text class="heading" x="659.5" y="881">ContextEvent</text>
-        <text x="659.5" y="912">event_kind</text>
-        <text x="659.5" y="954">actor</text>
-        <text x="659.5" y="996">visibility</text>
+
+    <!-- L4 -->
+    <g aria-label="L4 Define Collaboration Context and Primitives">
+      <rect class="band l4" x="220" y="775" width="2100" height="385" rx="12"/>
+      <text class="layer-label" x="245" y="830">L4</text>
+      <text class="layer-name" x="245" y="865">Define Collaboration</text>
+      <text class="layer-name" x="245" y="893">Context and Primitives</text>
+      <g class="card">
+        <rect x="535" y="810" width="790" height="315" rx="14"/>
+        <text class="card-title" x="930" y="850">两个持久化对象</text>
+        <text class="object" x="575" y="892">Collet：context_spec + current_snapshot</text>
+        <text class="object" x="575" y="927">ColletEvent：event + payload</text>
+        <text class="object" x="575" y="962">parent_event · current_event_id</text>
+        <text class="object" x="575" y="997">context_version · request_id</text>
+        <text class="note" x="575" y="1050">Task / Message / Progress 只是字段或事件语义</text>
+        <text class="note" x="575" y="1080">不单独落表，不新增独立生命周期</text>
       </g>
-      <g class="card" aria-label="ContextTransition">
-        <rect x="1266" y="842" width="614" height="171" rx="18"/>
-        <text class="heading" x="1573.0" y="881">ContextTransition</text>
-        <text x="1573.0" y="912">event_kind</text>
-        <text x="1573.0" y="954">from_state</text>
-        <text x="1573.0" y="996">to_state</text>
-      </g>
-    </g>
-    <g class="layer" aria-label="表示层">
-      <rect class="band" x="29" y="1070" width="2157" height="438"/>
-        <text class="layer-label" x="35" y="1301">表示层</text>
-      <path class="connector" d="M 917 1303 H 755"/>
-      <path class="connector" d="M 1399 1303 H 1607"/>
-      <g class="card" aria-label="ContextEnvelope">
-        <rect x="270" y="1107" width="482" height="392" rx="18"/>
-        <text class="heading" x="511.0" y="1146">ContextEnvelope</text>
-        <text x="511.0" y="1248">objective</text>
-        <text x="511.0" y="1290">background</text>
-        <text x="511.0" y="1332">input_sources</text>
-        <text x="511.0" y="1374">material_refs</text>
-        <text x="511.0" y="1416">constraints</text>
-      </g>
-      <g class="card" aria-label="CollaborationContext">
-        <rect x="917" y="1107" width="482" height="392" rx="18"/>
-        <text class="heading" x="1158.0" y="1146">CollaborationContext</text>
-        <text x="1158.0" y="1204">scope</text>
-        <text x="1158.0" y="1246">envelope</text>
-        <text x="1158.0" y="1288">responsible_actor_ref</text>
-        <text x="1158.0" y="1330">collaboration_mode</text>
-        <text x="1158.0" y="1372">state_machine_binding</text>
-        <text x="1158.0" y="1414">outcome</text>
-        <text x="1158.0" y="1456">version</text>
-      </g>
-      <g class="card" aria-label="CollaborationOutcome">
-        <rect x="1610" y="1107" width="482" height="392" rx="18"/>
-        <text class="heading" x="1851.0" y="1146">CollaborationOutcome</text>
-        <text x="1851.0" y="1206">outcome_id</text>
-        <text x="1851.0" y="1248">decision</text>
-        <text x="1851.0" y="1290">judged_by</text>
-        <text x="1851.0" y="1332">judged_at</text>
-        <text x="1851.0" y="1374">reason_ref</text>
-        <text x="1851.0" y="1416">deliverables</text>
-        <text x="1851.0" y="1458">visibility</text>
+      <g class="card">
+        <rect x="1375" y="810" width="880" height="315" rx="14"/>
+        <text class="card-title" x="1815" y="850">用户可见事实</text>
+        <text class="object" x="1415" y="892">current_snapshot：目标 / 状态 / 进度</text>
+        <text class="object" x="1415" y="927">payload.content：用户互动正文</text>
+        <text class="object" x="1415" y="962">task_progress.events[]：事件 DAG</text>
+        <text class="object" x="1415" y="997">current_event：当前事件</text>
+        <text class="note" x="1415" y="1050">GET 组合响应，不新增独立查询表</text>
+        <text class="note" x="1415" y="1080">API ID：collab_context_id</text>
       </g>
     </g>
+
+    <!-- L3 -->
+    <g aria-label="L3 Model Spaces and Resources">
+      <rect class="band l3" x="220" y="1190" width="2100" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="1245">L3</text>
+      <text class="layer-name" x="245" y="1280">Model Spaces</text>
+      <text class="layer-name" x="245" y="1308">and Resources</text>
+      <g class="card">
+        <rect x="535" y="1225" width="790" height="230" rx="14"/>
+        <text class="card-title" x="930" y="1265">本方案仅保留引用</text>
+        <text class="object" x="575" y="1307">space</text>
+        <text class="object" x="575" y="1342">resource_refs[]</text>
+        <text class="note" x="575" y="1395">写入 Collet.context_spec，不复制正文</text>
+      </g>
+      <g class="card">
+        <rect x="1375" y="1225" width="880" height="230" rx="14"/>
+        <text class="card-title" x="1815" y="1265">当前使用</text>
+        <text class="object" x="1415" y="1307">BBS Topic / Repo / Document</text>
+        <text class="object" x="1415" y="1342">作为 resource_ref 保存</text>
+        <text class="note" x="1415" y="1395">Space / Resource 的权限由外部系统负责</text>
+      </g>
+    </g>
+
+    <!-- L2 -->
+    <g aria-label="L2 Define the Agent Network">
+      <rect class="band l2" x="220" y="1520" width="2100" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="1575">L2</text>
+      <text class="layer-name" x="245" y="1610">Define the Agent</text>
+      <text class="layer-name" x="245" y="1638">Network</text>
+      <g class="card">
+        <rect x="535" y="1555" width="790" height="230" rx="14"/>
+        <text class="card-title" x="930" y="1595">本方案仅保留引用</text>
+        <text class="object" x="575" y="1637">principal_ref</text>
+        <text class="object" x="575" y="1672">actor_ref · executor_ref</text>
+        <text class="note" x="575" y="1725">身份、能力和授权不在本域建表</text>
+      </g>
+      <g class="card">
+        <rect x="1375" y="1555" width="880" height="230" rx="14"/>
+        <text class="card-title" x="1815" y="1595">指定执行约束</text>
+        <text class="object" x="1415" y="1637">Single → executor_ref 必填</text>
+        <text class="object" x="1415" y="1672">G1 校验 actor / executor 权限</text>
+        <text class="note" x="1415" y="1725">只保存稳定引用，不复制 Agent 注册</text>
+      </g>
+    </g>
+
+    <!-- L1 -->
+    <g aria-label="L1 Interoperate and Deliver">
+      <rect class="band l1" x="220" y="1850" width="2100" height="300" rx="12"/>
+      <text class="layer-label" x="245" y="1905">L1</text>
+      <text class="layer-name" x="245" y="1940">Interoperate</text>
+      <text class="layer-name" x="245" y="1968">and Deliver</text>
+      <g class="card">
+        <rect x="535" y="1885" width="790" height="230" rx="14"/>
+        <text class="card-title" x="930" y="1925">三个 Service API</text>
+        <text class="object" x="575" y="1967">POST 创建协作上下文</text>
+        <text class="object" x="575" y="2002">POST 新增协作上下文事件</text>
+        <text class="object" x="575" y="2037">GET 查询最新状态</text>
+        <text class="note" x="575" y="2085">/api/v1 + /openapi/v1 delivery</text>
+      </g>
+      <g class="card">
+        <rect x="1375" y="1885" width="880" height="230" rx="14"/>
+        <text class="card-title" x="1815" y="1925">交付边界</text>
+        <text class="object" x="1415" y="1967">解析 / 认证 / schema / 序列化</text>
+        <text class="object" x="1415" y="2002">调用同一份 Service API</text>
+        <text class="note" x="1415" y="2055">不引入 Agent Card、A2A Task 等对象</text>
+        <text class="note" x="1415" y="2085">不修改 plugin_api / task/forum / task/bbs</text>
+      </g>
+    </g>
+
+    <!-- Governance -->
+    <g class="governance" aria-label="G1-G4 横切治理面">
+      <rect x="220" y="2200" width="2100" height="245" rx="12"/>
+      <text class="heading" x="260" y="2250">G1-G4 横切治理面（仅服务三个 API）</text>
+      <text x="260" y="2290">G1：Authorization · Visibility</text>
+      <text x="960" y="2290">G2：request_id · expected_version · parent_event · trunk_events</text>
+      <text x="260" y="2335">G3：current_snapshot + task_progress.events[] 查询投影</text>
+      <text x="960" y="2335">G4：Schema · Version · 有限状态值校验</text>
+      <text class="note" x="260" y="2390">不创建 Audit、Lease、StateMachine、Metric 等独立表或对象</text>
+    </g>
+
+    <text class="subheading" x="1200" y="2500" text-anchor="middle">实现时最小落点：L1 Service API、L4 两个模型与 Repository、G1-G4 必要校验、两个 HTTP adapter</text>
   </svg>
 </body>
 </html>
