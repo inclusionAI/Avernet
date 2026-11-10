@@ -34,6 +34,8 @@ FAIL_OUTCOME = GuardOutcome(verdict="FAIL", reason="test stub fail")
 P_RESPONSIBLE = PrincipalRef(principal_type="human", principal_id="u-1")
 P_OTHER = PrincipalRef(principal_type="human", principal_id="u-2")
 A_EXECUTOR = AgentRef(agent_type="bot", agent_id="bot-1")
+P_EXECUTOR_BOT = PrincipalRef(principal_type="bot", principal_id="bot_coding_001")
+A_EXECUTOR_BOT = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
 # ---------------------------------------------------------------- 内置 machine 词汇
@@ -101,7 +103,8 @@ def test_validate_builtin_passes_with_blocked_exemption():
 
 def test_undefined_initial_state_rejected():
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, initial_state="uploads")
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError,
+                       match="initial_state is not a defined state"):
         validate_definition(bad)
 
 
@@ -115,7 +118,8 @@ def test_unreachable_non_exempt_state_rejected():
         for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError,
+                       match="is unreachable from initial state"):
         validate_definition(bad)
 
 
@@ -131,7 +135,7 @@ def test_duplicate_rule_id_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (dup,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="duplicate rule_id"):
         validate_definition(bad)
 
 
@@ -148,7 +152,7 @@ def test_ambiguous_conflicting_rules_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (conflict,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="ambiguous transition rules"):
         validate_definition(bad)
 
 
@@ -178,7 +182,8 @@ def test_unknown_event_name_rejected():
         (stale,) + TEAM_TODO_EXECUTION_MACHINE.transitions[1:]
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, transitions=transitions)
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError,
+                       match="unregistered event_name"):
         validate_definition(bad)
 
 
@@ -194,7 +199,7 @@ def test_undefined_state_reference_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (bad_rule,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="undefined to_state"):
         validate_definition(bad)
 
 
@@ -210,7 +215,7 @@ def test_unknown_guard_ref_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (bad_rule,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="unregistered guard"):
         validate_definition(bad)
 
 
@@ -223,7 +228,7 @@ def test_invalid_governance_kind_rejected():
         for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="unknown governance_kind"):
         validate_definition(bad)
 
 
@@ -236,7 +241,7 @@ def test_invalid_allowed_method_rejected():
         for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="declares unknown method"):
         validate_definition(bad)
 
 
@@ -265,10 +270,27 @@ def test_resolve_transition_terminal_has_no_outgoing():
 
 
 def test_resolve_transition_guard_fail_raises():
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError, match="rejected event"):
         resolve_transition(
             TEAM_TODO_EXECUTION_MACHINE, "reviewing", "task.accepted",
             {"actor_is_responsible_principal": FAIL_OUTCOME},
+        )
+
+
+def test_resolve_transition_missing_guard_result_raises():
+    """守卫结果缺失:fail-closed,禁止假定通过(§4.3 禁止静默失败)。"""
+    with pytest.raises(ContextCollabValidationError,
+                       match="missing guard result"):
+        resolve_transition(TEAM_TODO_EXECUTION_MACHINE, "created", "task.started", {})
+
+
+def test_resolve_transition_blocked_guard_raises():
+    """守卫 BLOCKED 同样显式拒绝(fail-closed),不许静默降级。"""
+    blocked = GuardOutcome(verdict="BLOCKED", reason="executor unreachable")
+    with pytest.raises(ContextCollabValidationError, match="blocked event"):
+        resolve_transition(
+            TEAM_TODO_EXECUTION_MACHINE, "created", "task.started",
+            {"actor_can_start_task": blocked},
         )
 
 
@@ -284,7 +306,8 @@ def test_resolve_transition_ambiguous_matches_raise():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (conflict,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError,
+                       match="ambiguous transition rules match"):
         resolve_transition(bad, "created", "task.started", {})
 
 
@@ -301,6 +324,21 @@ def test_guard_actor_can_start_task():
     guard = GUARD_REGISTRY["actor_can_start_task"]
     assert guard(_input()).verdict == "PASS"
     outcome = guard(_input(actor=P_OTHER, executor=A_EXECUTOR))
+    assert outcome.verdict == "FAIL"
+    assert outcome.reason == "actor is neither responsible principal nor executor"
+
+
+def test_guard_actor_can_start_task_executor_bot():
+    """Ruling R4:actor 与 executor 结构类型不同,须按值比较 bot 型 principal
+    的 principal_id 与 executor 的 agent_id(spec §6.2 / §6.3)。"""
+    guard = GUARD_REGISTRY["actor_can_start_task"]
+    assert guard(
+        _input(actor=P_EXECUTOR_BOT, executor=A_EXECUTOR_BOT)
+    ).verdict == "PASS"
+    # agent_id 不同 → 不是执行者,显式 FAIL
+    outcome = guard(
+        _input(actor=P_EXECUTOR_BOT, executor=AgentRef("bot", "bot_other_001"))
+    )
     assert outcome.verdict == "FAIL"
     assert outcome.reason == "actor is neither responsible principal nor executor"
 

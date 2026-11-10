@@ -337,8 +337,9 @@ def resolve_transition(
             raise ContextCollabValidationError(
                 f"unknown guard verdict: {outcome.verdict!r}"
             )
+        action = "blocked" if outcome.verdict == "BLOCKED" else "rejected"
         raise ContextCollabValidationError(
-            f"guard {guard_ref!r} rejected event {event_kind!r} on rule "
+            f"guard {guard_ref!r} {action} event {event_kind!r} on rule "
             f"{rule.rule_id!r}: {outcome.reason}"
         )
     return rule.to_state
@@ -350,9 +351,19 @@ def resolve_transition(
 def _guard_actor_can_start_task(
     evaluation: GuardEvaluationInput,
 ) -> GuardOutcome:
-    if evaluation.actor == evaluation.responsible or \
-            evaluation.actor == evaluation.executor:
+    # actor 是北向 API 的 PrincipalRef(spec §6.3:人与 bot 同用 principal_type
+    # + principal_id),executor 是 AgentRef(spec §6.2),两者结构类型不同,
+    # 跨类型相等恒为 False。判"actor 即执行者"必须按值比较:bot 型 principal
+    # 且 principal_id == executor.agent_id(Controller Ruling R4)。
+    if evaluation.actor == evaluation.responsible:
         return GuardOutcome(verdict="PASS", reason="actor may start the task")
+    executor = evaluation.executor
+    if (
+        executor is not None
+        and evaluation.actor.principal_type == "bot"
+        and evaluation.actor.principal_id == executor.agent_id
+    ):
+        return GuardOutcome(verdict="PASS", reason="actor is the executor agent")
     return GuardOutcome(
         verdict="FAIL", reason="actor is neither responsible principal nor executor",
     )
