@@ -43,7 +43,7 @@ it("updates the single permission button after Owner feedback", async () => {
   await notifier.notifyOwnerRequest({ task: { ...pending, status: "running", ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith({
     outTrackId: initial.outTrackId,
-    cardParamMap: { ...initial.cardParamMap, confirm_enabled: "false", confirm_status: "disabled", status: "已收到处理反馈，正在核验" },
+    cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "已收到处理反馈，正在核验" },
   });
   expect(sender.sendCard).toHaveBeenCalledOnce();
 });
