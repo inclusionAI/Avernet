@@ -36,7 +36,7 @@ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
   <circle cx="640" cy="108" r="5" fill="#7d2ae8" />
   <text x="652" y="113" class="small">身份/结论</text>
   <text x="52" y="139" class="section">一、建议在线关联层</text>
-  <text x="670" y="139" class="section">二、现有 proxy 会话承载层</text>
+  <text x="670" y="139" class="section">二、现有 proxy 钉群链路</text>
   <text x="1290" y="139" class="section">三、现有 accservice DDF 链路</text>
   <text x="1930" y="139" class="section">四、派发事实与边界</text>
   <rect x="52" y="160" width="550" height="322" rx="10" fill="#edf5ff" stroke="#1677ff" stroke-width="2" />
@@ -109,12 +109,22 @@ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#172b4d}
   <text x="686" y="784" class="field">openConversationId：群通道；taskId：业务项；都不是会话身份</text>
   <rect x="670" y="885" width="550" height="250" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
   <path d="M670 928H1220" stroke="#86909c" stroke-width="1.4" />
-  <text x="686" y="914" class="box-title">外围支撑 · 不纳入本目标 ER</text>
-  <text x="1204" y="914" text-anchor="end" class="small" fill="#86909c">外围</text>
-  <text x="686" y="958" class="field">proxy_group_card：会话内卡片明细</text>
-  <text x="686" y="984" class="field">proxy_ding_app：Bot 与钉应用的资产/凭据</text>
-  <text x="686" y="1010" class="field">仅支撑交互和资产校验</text>
-  <text x="686" y="1036" class="field">不参与需求—会话—DDF 主关系</text>
+  <text x="686" y="914" class="box-title">现有 · proxy_group_card</text>
+  <text x="1204" y="914" text-anchor="end" class="small" fill="#86909c">交互卡片</text>
+  <text x="686" y="958" class="field">PK id / bot_id</text>
+  <text x="686" y="984" class="field">session_key / open_conversation_id</text>
+  <text x="686" y="1010" class="field">out_track_id</text>
+  <text x="686" y="1036" class="field">extra_data.interaction.runId（部分链路）</text>
+  <text x="686" y="1062" class="field">extra_data.callbackRouting.botId</text>
+  <text x="686" y="1088" class="field">卡片需先确认 session / channel / Run，不能只用群或 runId</text>
+  <rect x="670" y="1163" width="550" height="225" rx="10" fill="#f4f5f7" stroke="#86909c" stroke-width="2" />
+  <path d="M670 1206H1220" stroke="#86909c" stroke-width="1.4" />
+  <text x="686" y="1192" class="box-title">现有 · proxy_ding_app</text>
+  <text x="1204" y="1192" text-anchor="end" class="small" fill="#86909c">资产</text>
+  <text x="686" y="1236" class="field">PK id / owner_user_id</text>
+  <text x="686" y="1262" class="field">UK bot_id</text>
+  <text x="686" y="1288" class="field">app_code / ding_app_key</text>
+  <text x="686" y="1314" class="field">钉应用资产与凭据，不是 Bot 执行身份</text>
   <rect x="1290" y="160" width="550" height="407" rx="10" fill="#eafaf1" stroke="#12805c" stroke-width="2" />
   <path d="M1290 203H1840" stroke="#12805c" stroke-width="1.4" />
   <text x="1306" y="189" class="box-title">DDF 现有 · accs_collab_task</text>
