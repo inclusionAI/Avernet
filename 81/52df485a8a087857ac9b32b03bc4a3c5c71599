@@ -1,0 +1,52 @@
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_service.py
+  s_7517e37f6fcee5::t_57abcafe336b9f 641-711
+  s_7517e37f6fcee5::t_5c4326b17588c0 354-420
+  s_7517e37f6fcee5::t_c85af51f584464 712-778,780-786
+  s_7517e37f6fcee5::t_9de6eab9f0b158 779
+  s_7517e37f6fcee5::t_a33829299b774b 787-864
+  s_7517e37f6fcee5::t_ca6876574760a8 865-950
+  s_7517e37f6fcee5::t_1a177724bc40af 951-1016
+src/ecb/tests/application/task_benchmark/test_wave_batch.py
+  s_7517e37f6fcee5::t_1a177724bc40af 511,522-524,527-532
+  s_7517e37f6fcee5::t_8da2c94a2e3869 512-521,525-526
+  s_7517e37f6fcee5::t_c85af51f584464 558-581
+  s_7517e37f6fcee5::t_b6476d284d7d90 510,557
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_8cd8717aaedc20 164-170,816-846
+  s_7517e37f6fcee5::t_0cab7f0aafd6ce 445-457,502,505-512
+  s_7517e37f6fcee5::t_fe39a7981e9cb7 463-466
+  s_7517e37f6fcee5::t_ca7fe98f49eed6 470-500
+  s_7517e37f6fcee5::t_9de6eab9f0b158 469
+  s_7517e37f6fcee5::t_d41c42f636a20b 940-982
+  s_7517e37f6fcee5::t_05e8c495bd75cf 468
+src/ecb/tests/infrastructure/task_benchmark/test_odc_client.py
+  s_7517e37f6fcee5::t_8ec78c049999b5 1,3,59-97
+  s_7517e37f6fcee5::t_618033ce060fb4 98-99
+src/ecb/ecb/interfaces/task_benchmark/oncall_effect_router.py
+  s_7517e37f6fcee5::t_d41c42f636a20b 126,128
+src/ecb/ecb/application/task_benchmark/online_service.py
+  s_7517e37f6fcee5::t_9812333da57282 5114,6046-6049,6438-6441
+  s_7517e37f6fcee5::t_fe39a7981e9cb7 5133-5151
+  s_7517e37f6fcee5::t_1e17bd50c467e4 5096-5113,5115-5132,6073-6074,6491
+  s_7517e37f6fcee5::t_cc978f4906c422 5167-5177
+  s_7517e37f6fcee5::t_06d7e4e8a59345 7200,7431
+  s_7517e37f6fcee5::t_d41c42f636a20b 5081-5095
+src/ecb/ecb/infrastructure/task_benchmark/odc_client.py
+  s_7517e37f6fcee5::t_e5fb327f27a8ea 175-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8152df485a8a087857ac9b32b03bc4a3c5c71599",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

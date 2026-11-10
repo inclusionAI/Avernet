@@ -1,0 +1,66 @@
+apps/bcs-internal/Cargo.lock
+  h_f4a73db4ad12be 510-575,597-623,634-647,668-699,717-724
+apps/bcs-internal/Cargo.toml
+  h_f4a73db4ad12be 3-4,44-47
+apps/bcs-internal/configs/bcn-runtime-example.json
+  h_f4a73db4ad12be 1-137
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/Cargo.toml
+  h_f4a73db4ad12be 1-36
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/catalog.rs
+  h_f4a73db4ad12be 1-18
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/config.rs
+  h_f4a73db4ad12be 1-67
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/identity.rs
+  h_f4a73db4ad12be 1-41
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/lib.rs
+  h_f4a73db4ad12be 1-110
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/main.rs
+  h_f4a73db4ad12be 1-7
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/telemetry.rs
+  h_f4a73db4ad12be 1-21
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/tests/config_identity.rs
+  h_f4a73db4ad12be 1-43
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/tests/live_processes.rs
+  h_f4a73db4ad12be 1-30
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/tests/live_runloops.rs
+  h_f4a73db4ad12be 1-84
+apps/bcs-internal/crates/bootstrap/bcn-worker-internal/Cargo.toml
+  h_f4a73db4ad12be 1-10
+apps/bcs-internal/crates/bootstrap/bcn-worker-internal/src/main.rs
+  h_f4a73db4ad12be 1-7
+apps/bcs-internal/crates/plugins/bcn-results-ob/src/lib.rs
+  h_f4a73db4ad12be 173,190-191
+apps/bcs-internal/crates/plugins/bcn-results-ob/tests/live_ob.rs
+  h_f4a73db4ad12be 20
+apps/bcs-internal/crates/plugins/bcn-results-ob/tests/results.rs
+  h_f4a73db4ad12be 14,143-153
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/atomic.rs
+  h_f4a73db4ad12be 1,26,29,33,39-40,56,104,111,128,146,161,163,167
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/lib.rs
+  h_f4a73db4ad12be 56,103-104,108-118,128-139
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/liveness.rs
+  h_f4a73db4ad12be 3,34-35,37,122-129,131,155,193,237-239,278,285
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/liveness.rs
+  h_f4a73db4ad12be 311-324
+apps/bcs-internal/docs/overlay/bcn-runtime.md
+  h_f4a73db4ad12be 1-98
+apps/bcs-internal/scripts/bcn-functional-processes.py
+  h_f4a73db4ad12be 1-159
+apps/bcs-internal/scripts/check-bcn-runtime.sh
+  h_f4a73db4ad12be 1-15
+apps/bcs-internal/scripts/make-bcn-local-fixture.py
+  h_f4a73db4ad12be 1-62
+docs/plans/2026-11-09-bcn-runtime-mvp-acceptance.md
+  h_f4a73db4ad12be 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9c7b5b5ad0284221cbc74e7e8d3abd2b21208d77",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

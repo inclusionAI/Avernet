@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-fanout-auth.test.ts
+  s_10a9cbf7587430::t_2b59c6eb338d3b 27-29
+  s_10a9cbf7587430::t_6186d196024b80 9,30
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-save-first-draft-router-host.test.ts
+  s_10a9cbf7587430::t_6186d196024b80 9,11,41,50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bfb31c7224c45f438e8d1c42ac8a9aa41acb262c",
+  "prompts": {},
+  "sessions": {
+    "s_10a9cbf7587430": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf6f-34d9-74a2-ae29-95df3a1f5cef",
+        "model": "GPT-6.1-TERRA"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
