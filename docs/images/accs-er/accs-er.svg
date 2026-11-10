@@ -1,0 +1,236 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="2000" viewBox="0 0 2600 2000">
+<defs><marker id="arr" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="#344054" stroke-width="1.6"/></marker></defs>
+<rect width="2600" height="2000" fill="#fff"/>
+<style>text{font-family:Inter,Segoe UI,Arial,"PingFang SC",sans-serif;fill:#111827}.t{font-size:32px;font-weight:700}.s{font-size:17px;fill:#4b5563}.sec{font-size:21px;font-weight:700;fill:#1f2937}.box{font-size:19px;font-weight:700}.tag{font-size:13px;fill:#4b5563}.f{font-size:14px;fill:#4b5563}.r{font-size:13px;fill:#1f2937;paint-order:stroke;stroke:#fff;stroke-width:5px}</style>
+<text x="70" y="70" class="t">asfagent · ACCS 表关系 ER 图</text>
+<text x="70" y="105" class="s">21 张 accs_* 表 · 逻辑关系视图 · 不含数据库物理外键</text>
+<rect x="70" y="128" width="16" height="16" rx="3" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/><text x="94" y="141" class="f">协作 / 成员任务</text>
+<rect x="410" y="128" width="16" height="16" rx="3" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/><text x="434" y="141" class="f">事件 / 消息 / 水位</text>
+<rect x="750" y="128" width="16" height="16" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><text x="774" y="141" class="f">席位 / 凭据 / Bot 身份</text>
+<rect x="1090" y="128" width="16" height="16" rx="3" fill="#f8fafc" stroke="#64748b" stroke-width="2"/><text x="1114" y="141" class="f">连接与基础账本</text>
+<text x="70" y="195" class="sec">一、协作与成员任务</text>
+<text x="730" y="195" class="sec">二、事件与消息</text>
+<text x="1390" y="195" class="sec">三、席位与凭证</text>
+<text x="2050" y="195" class="sec">四、连接与基础</text>
+<rect x="70" y="230" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 268H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="255" class="box">accs_collab_task</text>
+<text x="574" y="255" text-anchor="end" class="tag">聚合根</text>
+<text x="86" y="285" class="f">PK id</text>
+<text x="86" y="305" class="f">UK collab_id / collab_space_id</text>
+<text x="86" y="325" class="f">status / conclusion</text>
+<text x="86" y="345" class="f">next_slice_seq（事件发号器）</text>
+<text x="86" y="365" class="f">作用：DDF 协作主表</text>
+<rect x="70" y="470" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 508H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="495" class="box">accs_member_task</text>
+<text x="574" y="495" text-anchor="end" class="tag">成员任务</text>
+<text x="86" y="525" class="f">PK id</text>
+<text x="86" y="545" class="f">UK (collab_id, member_task_id)</text>
+<text x="86" y="565" class="f">UK (collab_id, idem_key)</text>
+<text x="86" y="585" class="f">state / attempt_no</text>
+<text x="86" y="605" class="f">assignee_bot_id / node_key_json</text>
+<rect x="70" y="710" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 748H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="735" class="box">accs_member_task_attempt</text>
+<text x="574" y="735" text-anchor="end" class="tag">执行尝试</text>
+<text x="86" y="765" class="f">PK id</text>
+<text x="86" y="785" class="f">UK (member_task_id, attempt_no)</text>
+<text x="86" y="805" class="f">run_id（首次写入后不可变）</text>
+<text x="86" y="825" class="f">status / conclusion</text>
+<text x="86" y="845" class="f">started_at / ended_at</text>
+<rect x="70" y="950" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 988H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="975" class="box">accs_member_task_ignored_transition</text>
+<text x="574" y="975" text-anchor="end" class="tag">CAS 抢输归档</text>
+<text x="86" y="1005" class="f">PK id</text>
+<text x="86" y="1025" class="f">idx (member_task_id, gmt_create)</text>
+<text x="86" y="1045" class="f">verb / expected_state</text>
+<text x="86" y="1065" class="f">actual_state / stale_reason</text>
+<text x="86" y="1085" class="f">作用：保留 409 事实</text>
+<rect x="70" y="1190" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 1228H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="1215" class="box">accs_artifact_ref</text>
+<text x="574" y="1215" text-anchor="end" class="tag">产物引用</text>
+<text x="86" y="1245" class="f">PK id</text>
+<text x="86" y="1265" class="f">UK artifact_id</text>
+<text x="86" y="1285" class="f">collab_id / member_task_id</text>
+<text x="86" y="1305" class="f">parts_json（只存引用）</text>
+<text x="86" y="1325" class="f">作用：产物元数据</text>
+<rect x="70" y="1430" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 1468H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="1455" class="box">accs_input_request</text>
+<text x="574" y="1455" text-anchor="end" class="tag">人工输入</text>
+<text x="86" y="1485" class="f">PK id</text>
+<text x="86" y="1505" class="f">UK request_id</text>
+<text x="86" y="1525" class="f">collab_id / member_task_id</text>
+<text x="86" y="1545" class="f">kind / resolution / resolved_by</text>
+<text x="86" y="1565" class="f">作用：input-required / auth-required</text>
+<rect x="70" y="1670" width="520" height="220" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<path d="M70 1708H590" stroke="#2563eb" stroke-width="1"/>
+<text x="86" y="1695" class="box">accs_member_task_timeout</text>
+<text x="574" y="1695" text-anchor="end" class="tag">超时通知</text>
+<text x="86" y="1725" class="f">PK id</text>
+<text x="86" y="1745" class="f">UK member_task_id</text>
+<text x="86" y="1765" class="f">collab_id / seq</text>
+<text x="86" y="1785" class="f">deadline_unix_ms / detected_at_unix_ms</text>
+<text x="86" y="1805" class="f">seq 与 slice_event 共用发号器</text>
+<rect x="730" y="230" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 268H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="255" class="box">accs_slice_event</text>
+<text x="1234" y="255" text-anchor="end" class="tag">事件流</text>
+<text x="746" y="285" class="f">PK id</text>
+<text x="746" y="305" class="f">UK (collab_id, seq)</text>
+<text x="746" y="325" class="f">UK (collab_id, emitter_bot_id, seq_epoch, envelope_seq)</text>
+<text x="746" y="345" class="f">member_task_id / attempt_id nullable</text>
+<text x="746" y="365" class="f">event_time / payload_json</text>
+<rect x="730" y="470" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 508H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="495" class="box">accs_emitter_watermark</text>
+<text x="1234" y="495" text-anchor="end" class="tag">发送者水位</text>
+<text x="746" y="525" class="f">PK id</text>
+<text x="746" y="545" class="f">UK (env, collab_id, emitter_bot_id)</text>
+<text x="746" y="565" class="f">seq_epoch / seq</text>
+<text x="746" y="585" class="f">作用：永久幂等游标</text>
+<text x="746" y="605" class="f">校验：空洞 / 重复</text>
+<rect x="730" y="710" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 748H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="735" class="box">accs_message</text>
+<text x="1234" y="735" text-anchor="end" class="tag">协作消息</text>
+<text x="746" y="765" class="f">PK id</text>
+<text x="746" y="785" class="f">UK message_id</text>
+<text x="746" y="805" class="f">UK (collab_id, idempotency_key)</text>
+<text x="746" y="825" class="f">member_task_id / attempt_id nullable</text>
+<text x="746" y="845" class="f">sender_bot_id / in_reply_to</text>
+<rect x="730" y="950" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 988H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="975" class="box">accs_idempotency_record</text>
+<text x="1234" y="975" text-anchor="end" class="tag">幂等记录</text>
+<text x="746" y="1005" class="f">PK id</text>
+<text x="746" y="1025" class="f">UK (scope_bot_id, operation_id, idem_key)</text>
+<text x="746" y="1045" class="f">status / request_fingerprint</text>
+<text x="746" y="1065" class="f">resource_id / expires_at</text>
+<text x="746" y="1085" class="f">服务于 create / dispatch / messages.send</text>
+<rect x="730" y="1190" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 1228H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="1215" class="box">accs_scan_watermark</text>
+<text x="1234" y="1215" text-anchor="end" class="tag">扫描水位</text>
+<text x="746" y="1245" class="f">PK job_name</text>
+<text x="746" y="1265" class="f">watermark_ms / last_id</text>
+<text x="746" y="1285" class="f">作用：后台续扫点</text>
+<text x="746" y="1305" class="f">不是分布式锁</text>
+<text x="746" y="1325" class="f">覆盖 idem_gc / credential_gc / member_task_deadline</text>
+<rect x="730" y="1430" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
+<path d="M730 1468H1250" stroke="#15803d" stroke-width="1"/>
+<text x="746" y="1455" class="box">accs_schema_migration</text>
+<text x="1234" y="1455" text-anchor="end" class="tag">迁移账本</text>
+<text x="746" y="1485" class="f">PK version</text>
+<text x="746" y="1505" class="f">name / checksum</text>
+<text x="746" y="1525" class="f">applied_at</text>
+<text x="746" y="1545" class="f">作用：schema 版本账本</text>
+<text x="746" y="1565" class="f">不参与运行时业务关系</text>
+<rect x="1390" y="230" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 268H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="255" class="box">accs_participant</text>
+<text x="1894" y="255" text-anchor="end" class="tag">已入座席位</text>
+<text x="1406" y="285" class="f">PK id</text>
+<text x="1406" y="305" class="f">UK (collab_id, name)</text>
+<text x="1406" y="325" class="f">UK (collab_id, bot_id)</text>
+<text x="1406" y="345" class="f">state / capability_card_json</text>
+<text x="1406" y="365" class="f">作用：participants.join / leave / read</text>
+<rect x="1390" y="470" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 508H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="495" class="box">accs_roster_agent</text>
+<text x="1894" y="495" text-anchor="end" class="tag">名册邀请</text>
+<text x="1406" y="525" class="f">PK id</text>
+<text x="1406" y="545" class="f">UK (collab_id, agent_bot_id)</text>
+<text x="1406" y="565" class="f">UK (collab_id, name)</text>
+<text x="1406" y="585" class="f">requires_json</text>
+<text x="1406" y="605" class="f">作用：被点名但未必已入座</text>
+<rect x="1390" y="710" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 748H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="735" class="box">accs_collab_credential</text>
+<text x="1894" y="735" text-anchor="end" class="tag">短期协作凭证</text>
+<text x="1406" y="765" class="f">PK id</text>
+<text x="1406" y="785" class="f">UK (collab_id, bot_id)</text>
+<text x="1406" y="805" class="f">token_prefix / token_hash</text>
+<text x="1406" y="825" class="f">status / expires_at</text>
+<text x="1406" y="845" class="f">prev_* / overlaps</text>
+<rect x="1390" y="950" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 988H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="975" class="box">accs_bot_token</text>
+<text x="1894" y="975" text-anchor="end" class="tag">长期 Token</text>
+<text x="1406" y="1005" class="f">PK id</text>
+<text x="1406" y="1025" class="f">UK token_prefix</text>
+<text x="1406" y="1045" class="f">bot_id / env / status</text>
+<text x="1406" y="1065" class="f">scopes</text>
+<text x="1406" y="1085" class="f">作用：Bot API 身份证</text>
+<rect x="1390" y="1190" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 1228H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="1215" class="box">accs_bot_credential_health</text>
+<text x="1894" y="1215" text-anchor="end" class="tag">凭据健康账本</text>
+<text x="1406" y="1245" class="f">PK id</text>
+<text x="1406" y="1265" class="f">UK (bot_id, env)</text>
+<text x="1406" y="1285" class="f">last_renew_ok / last_renew_fail</text>
+<text x="1406" y="1305" class="f">last_connected_at / last_disconnect</text>
+<text x="1406" y="1325" class="f">consecutive_failures / first_failed_at</text>
+<rect x="1390" y="1430" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 1468H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="1455" class="box">accs_bot_owner</text>
+<text x="1894" y="1455" text-anchor="end" class="tag">归属人目录</text>
+<text x="1406" y="1485" class="f">PK id</text>
+<text x="1406" y="1505" class="f">UK (env, bot_id)</text>
+<text x="1406" y="1525" class="f">owner_workno / owner_name</text>
+<text x="1406" y="1545" class="f">source / verified_at_ms</text>
+<text x="1406" y="1565" class="f">作用：观测台工号来源</text>
+<rect x="2050" y="230" width="520" height="220" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<path d="M2050 268H2570" stroke="#64748b" stroke-width="1"/>
+<text x="2066" y="255" class="box">accs_session</text>
+<text x="2554" y="255" text-anchor="end" class="tag">WebSocket 会话</text>
+<text x="2066" y="285" class="f">PK id</text>
+<text x="2066" y="305" class="f">UK (env, bot_id)</text>
+<text x="2066" y="325" class="f">epoch / connection_id</text>
+<text x="2066" y="345" class="f">acked_through / last_seen_at</text>
+<text x="2066" y="365" class="f">作用：连接状态与续传</text>
+<rect x="2050" y="470" width="520" height="220" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<path d="M2050 508H2570" stroke="#64748b" stroke-width="1"/>
+<text x="2066" y="495" class="box">accs_bot_advert</text>
+<text x="2554" y="495" text-anchor="end" class="tag">能力广告</text>
+<text x="2066" y="525" class="f">PK id</text>
+<text x="2066" y="545" class="f">UK (env, bot_id)</text>
+<text x="2066" y="565" class="f">session_epoch / advertised_at</text>
+<text x="2066" y="585" class="f">advert_json / aix_version</text>
+<text x="2066" y="605" class="f">作用：派发前能力发现</text>
+<path d="M330 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="245" y="466" class="r">1..N collab_id</text>
+<path d="M590 580H640V950" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<path d="M640 950H590" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="620" y="936" class="r">0..N CAS/failed / terminal</text>
+<path d="M640 950V1190" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<path d="M640 1190H590" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="620" y="1176" class="r">0..N update</text>
+<path d="M640 1190V1430" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<path d="M640 1430H590" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="620" y="1416" class="r">0..N required</text>
+<path d="M640 1430V1670" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<path d="M640 1670H590" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="620" y="1656" class="r">0..1 timeout</text>
+<path d="M590 300H730" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="610" y="291" class="r">1..N next_slice_seq</text>
+<path d="M990 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="1010" y="466" class="r">1..N watermark</text>
+<path d="M590 580V800H730" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="610" y="786" class="r">0..N member_task_id / message_id</text>
+<path d="M2310 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="2330" y="466" class="r">1..1 env+bot_id+epoch</text>
+<path d="M1650 450V470" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="466" class="r">0..1 roster→seat</text>
+<path d="M1650 930V950" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="946" class="r">1..1 collab_id+bot_id</text>
+<path d="M1910 1060H1370" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1500" y="1046" class="r">1..N bot_id+env</text>
+<path d="M1650 1170V1190" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="1186" class="r">1..1 bot_id+env</text>
+<path d="M1650 1410V1430" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="1426" class="r">1..1 env+bot_id</text>
+</svg>
