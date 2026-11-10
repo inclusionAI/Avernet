@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, appendFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, appendFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -35,7 +35,7 @@ async function create(level = "approval", patch = {}) {
   return current(ack.task_id);
 }
 const inspect = (task: RecoveryStoredTask, key = "read-1") => agent.sessionRead(task, { clientRequestId: key, purpose: "观察原会话实际执行" });
-it.each([false, true])("extends handoff into Owner feedback and sends one fresh continuation (initial delivery: %s)", async hadInitial => {
+it.each([[false, false], [false, true], [true, false], [true, true]])("extends Owner feedback into one fresh continuation (initial delivery: %s, NAS: %s)", async (hadInitial, useNas) => {
   const first = hadInitial ? await toObserve(await create()) : await create();
   expect((await agent.bootstrap(first)).ownerCooperationProtocol).toBe("session-recovery-owner/v1");
   const oldDelivery = first.delivery;
@@ -54,7 +54,21 @@ it.each([false, true])("extends handoff into Owner feedback and sends one fresh 
   await expect(agent.report(saved, { phase: "assess", kind: "blocked", reason: "user_continued", summary: "仅根据旧记录宣称用户续聊", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
   const body = { clientRequestId: "continue-1", purpose: "权限反馈后的续接", message: "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
   await expect(agent.retryMessage(saved, body)).rejects.toMatchObject({ status: 409 });
-  await inspect(saved, "fresh-after-feedback");
+  const readBody = { purpose: "读取反馈后的最新原会话", from_line: 1, ...(useNas ? { nas_evidence: {
+    source: `${directory}/prod/prod_staff_owner_openclaw_default/.openclaw/agents/main/sessions/original.jsonl`,
+    session_id: "original", delivery_key: request.delivery_key, messages: [],
+  } } : {}) };
+  if (useNas) {
+    vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("live read unavailable"));
+    expect(await agent.sessionRead(saved, { ...readBody, clientRequestId: "failed-fresh-read" })).toMatchObject({ status: "failed" });
+    saved = await current(saved.taskId);
+    expect(saved.requiresFreshObservation).toBe(true);
+    await expect(agent.retryMessage(saved, body)).rejects.toMatchObject({ status: 409 });
+  }
+  const fresh = await agent.sessionRead(saved, { ...readBody, clientRequestId: "fresh-after-feedback" });
+  expect(fresh).toMatchObject({ status: "succeeded", result: { source: await realpath(sessionFile),
+    messages: expect.arrayContaining([expect.objectContaining({ record: expect.objectContaining({ id: "failed-operation" }) })]) } });
+  expect((await current(saved.taskId)).requiresFreshObservation).toBe(false);
   const resumed = await agent.retryMessage(await current(saved.taskId), body);
   await agent.retryMessage(await current(saved.taskId), { ...body, clientRequestId: "different-agent-id" });
   saved = await current(saved.taskId);
