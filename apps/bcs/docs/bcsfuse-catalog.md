@@ -168,3 +168,15 @@ and reconciliation before routing discovery traffic to the destination.
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-config-api -p bcs-fuse-client -p bcs-fusion
 cargo test --manifest-path apps/bcs/Cargo.toml -p bcs --test integration_fuse_cards
 ```
+
+The Singlebox `stories` suite also runs `scripts/e2e-test/fuse_cards_story.py`
+against an isolated production BCS process configured for v2. It uses a local
+HTTP catalog peer to verify Agent/Group publication, all visibility values,
+private-friend search and the existing response shape, failed acknowledgements,
+bounded retries, deletion during retry, and restart without backfill. The process
+inherits `LLVM_PROFILE_FILE`, so these requests contribute to the existing E2E
+coverage gate alongside the shared stack's v1 scenarios. Run it directly with:
+
+```sh
+python3 apps/bcs/scripts/e2e-test/fuse_cards_story.py --binary apps/bcs/target/debug/bcs
+```
