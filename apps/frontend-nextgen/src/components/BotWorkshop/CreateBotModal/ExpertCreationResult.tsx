@@ -47,7 +47,7 @@ export function ExpertCreationResult({
     history.push(botId ? `/bot-workshop?highlight_bot_id=${encodeURIComponent(botId)}` : '/bot-workshop');
   };
   return (
-    <section aria-label="专家 Bot 创建结果" className="space-y-3">
+    <section aria-label="专家 创建结果" className="space-y-3">
       <p role="status">
         {unknown
           ? '首次提交结果未知，请先到 Bot 列表确认，避免重复创建。'
