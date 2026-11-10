@@ -52,10 +52,11 @@ beforeEach(() => {
   gs.getVisibleGroups.mockImplementation((xs: any[]) => xs);
   gs.canManageGroup.mockImplementation(() => ({ allowed: true }));
   gs.canDissolveGroup.mockImplementation(() => ({ allowed: true }));
+  gs.loadGroupDetailOrBcs.mockResolvedValue({ ok: false, error: { friendlyMessage: 'missing' } });
 });
 
 describe('useSelectedGroupDetail warm remount（经 useGroupWorkspace 真实组合）', () => {
-  it('列表请求进行中不翻转 membership；稳定后深链纠正仍生效', async () => {
+  it('列表请求进行中不翻转 membership；稳定后按 ID 兜底', async () => {
     warmStore();
     const pending = deferred<{ ok: true; data: GroupView[] }>();
     gs.loadGroups.mockReturnValue(pending.promise);
@@ -69,12 +70,12 @@ describe('useSelectedGroupDetail warm remount（经 useGroupWorkspace 真实组�
     // 请求 in-flight 期间，记住的 direct 视角不得被误翻转为 session_only。
     expect(useWorkspaceStore.getState().membership).toBe('direct');
 
-    // 列表稳定后 g1 不在列表中 → 深链纠正应把 membership 切到 session_only。
+    // 列表稳定后 g1 不在当前页：保持 direct，由选中群详情独立加载负责兜底。
     await act(async () => {
       pending.resolve({ ok: true, data: [] });
       await Promise.resolve();
     });
-    await waitFor(() => expect(useWorkspaceStore.getState().membership).toBe('session_only'));
+    await waitFor(() => expect(useWorkspaceStore.getState().membership).toBe('direct'));
   });
 
   it('列表包含选中群时 membership 保持 direct', async () => {
