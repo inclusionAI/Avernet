@@ -13,6 +13,7 @@ import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
+import { useDebugChatClearContext } from '@/pages/Workspace/hooks/useDebugChatClearContext';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { DebugUserMessage } from '@/components/BotWorkshop/Editor/DebugUserMessage';
@@ -117,15 +118,7 @@ export function DebugChatPanel({
       setCreatingSession(false);
     }
   };
-  const clearContext = async () => {
-    if (!identityId || !session) return;
-    const result = await botSessionService.clearContext(chatBot, identityId, session.sessionId);
-    if (!result.ok) {
-      toast.error(result.error.friendlyMessage);
-      return;
-    }
-    await debug.reloadHistory();
-  };
+  const clearContext = useDebugChatClearContext(chatBot, identityId, session?.sessionId, debug.reloadHistory);
   const connection =
     debug.connectionStatus === 'connected'
       ? { text: '在线', tone: 'success' as const }

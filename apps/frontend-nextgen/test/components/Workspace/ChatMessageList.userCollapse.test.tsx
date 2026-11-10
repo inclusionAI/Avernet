@@ -67,10 +67,10 @@ jest.mock('@/components/Workspace/ChatPanel/ChatMessageSkeleton', () => ({
 }));
 jest.mock('@/components/Workspace/MessageInteractionToolbar', () => ({
   MessageCopyAction: ({ onCopy, onEdit }: { onCopy: () => void; onEdit: () => void }) => {
-    const React = require('react');
-    return React.createElement('div', null,
-      React.createElement('button', { onClick: onCopy }, 'copy'),
-      React.createElement('button', { onClick: onEdit }, 'edit'));
+    return <div>
+      <button type="button" onClick={onCopy}>copy</button>
+      <button type="button" onClick={onEdit}>edit</button>
+    </div>;
   },
   MessageInteractionToolbar: () => null,
   MessageSelectionToolbar: () => null,
