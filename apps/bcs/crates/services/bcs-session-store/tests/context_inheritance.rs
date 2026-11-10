@@ -134,7 +134,7 @@ mod mysql_chain;
 async fn mysql_commits_contexts_with_session() {
     let db = mysql_chain::MysqlConformanceDb::open_empty().await;
     let versions = db.apply_full_migration_chain().await;
-    assert_eq!(versions.last(), Some(&47));
+    assert_eq!(versions.last(), Some(&46));
     let contexts = SqlGroupContextStore::oceanbase(db.plugin.clone());
     let sessions = MySqlSessionStore::new(db.plugin.clone(), "dev".into());
     assert_atomic_inheritance(&sessions, &contexts).await;

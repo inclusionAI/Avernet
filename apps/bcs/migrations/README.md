@@ -719,7 +719,5 @@ SQLite `044_group_context_slot.sql`, MySQL `046_group_context_slot.sql`, and Oce
 Apply remote DDL before starting the new server. SQLite applies its migration
 during startup.
 
-SQLite `045_group_context_slot_audit.sql`, MySQL `047_group_context_slot_audit.sql`, and OceanBase
-`034_group_context_slot_audit.sql` add a generated primary key and audit
-timestamps to slot definitions. Existing definitions and their group/name
-uniqueness are preserved. Existing definitions receive migration-time timestamps.
+The slot table uses an auto-increment primary key, a unique Group/name pair,
+and creation and modification timestamps.
