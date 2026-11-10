@@ -71,6 +71,25 @@ def _seed_bot(world) -> None:
     )
 
 
+def _seed_bot_without_owner_name(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    # owner_name 落库为 NULL 的历史数据：查询结果必须如实返回 null。
+    world.get(BotRepository).insert(
+        {
+            "bot_id": "metadata-legacy-bot",
+            "bot_name": "Legacy Owner Name Bot",
+            "bot_desc": "Display-safe description",
+            "owner_id": _OWNER_ID,
+            "entity_id": _OWNER_ID,
+            "entity_type": "staff",
+            "creator_id": "another-user",
+            "status": "ACTIVE",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+    )
+
+
 def _seed_default_bots(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     repo = world.get(BotRepository)
@@ -112,6 +131,7 @@ def _seed_default_bots(world) -> None:
                     {
                         "bot_id": _BOT_ID,
                         "owner_id": _OWNER_ID,
+                        "owner_name": _OWNER_ID,
                         "bot_name": "Metadata Bot",
                     }
                 ],
@@ -152,6 +172,37 @@ def search_bot_metadata_ok():
 )
 def search_default_bot_metadata_by_owner_ok():
     """The owner half of the key prevents cross-user default Bot matches."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/metadata/queries",
+    scenario="null_owner_name_stays_null",
+    seed=_seed_bot_without_owner_name,
+    input=CaseInput(
+        headers=_headers(),
+        query_params=_QUERY,
+        json_body={"bots": [{"bot_id": "metadata-legacy-bot", "owner_id": _OWNER_ID}]},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_id": "metadata-legacy-bot",
+                        "owner_id": _OWNER_ID,
+                        "owner_name": None,
+                    }
+                ],
+            },
+        },
+    ),
+)
+def search_bot_metadata_null_owner_name():
+    """Owner name snapshot is NULL in storage; the field must be null, not dropped."""
 
 
 @endpoint_test(
