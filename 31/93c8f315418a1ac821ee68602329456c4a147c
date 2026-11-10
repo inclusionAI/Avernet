@@ -1,0 +1,23 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/cct-drill-evaluation-minimal-fanout.yaml
+  s_0205332b370112::t_9fda11f9655ca1 1-85
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-state-roundtrip.test.ts
+  s_0205332b370112::t_ba04abf86b3476 1-70
+clawmind-clawweb-runs-analysis.html
+  s_0205332b370112::t_59e5ed09267a6e 1-589
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3193c8f315418a1ac821ee68602329456c4a147c",
+  "prompts": {},
+  "sessions": {
+    "s_0205332b370112": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba4a-731b-7000-a7f8-4bb745bc25cf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
