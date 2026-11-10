@@ -298,11 +298,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   async sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (task.request.target.engine === "TE") throw new SessionRecoveryError(422, "unsupported_session_read", "TE 通过 trajectory_read 读取 AIVision，不提供会话 API 读取");
     return this.tool(task, body, "session_read", false, async () => {
-      const output = body.nas_evidence ? this.nasEvidence(task, body.nas_evidence) : await this.reader.read({ target: task.simulation ? await this.historicalSessionTarget(task) : task.runtimeTarget!.target, sessionKey: task.request.session_key,
+      // The wrapper normally supplies NAS evidence. After Owner feedback, read the
+      // live session here so the same tool call can satisfy the freshness gate.
+      const requireLiveRead = !task.simulation && task.requiresFreshObservation && !!task.ownerRequest;
+      const output = body.nas_evidence && !requireLiveRead ? this.nasEvidence(task, body.nas_evidence) : await this.reader.read({ target: task.simulation ? await this.historicalSessionTarget(task) : task.runtimeTarget!.target, sessionKey: task.request.session_key,
         ...(task.simulation ? { cutoff: { messageId: task.simulation.cutoffNode.messageId!, atMs: task.simulation.cutoffAtMs } } : {}),
         deliveryKey: this.latestDeliveryKey(task), expectedSessionId: this.originalSessionId(task),
         ...(body.from_line === undefined ? {} : { fromLine: body.from_line as number }), ...(body.offset === undefined ? {} : { offset: body.offset as number }), ...(body.limit === undefined ? {} : { limit: body.limit as number }) });
-      if (!task.simulation && task.requiresFreshObservation && (!task.ownerRequest || !body.nas_evidence)) {
+      if (!task.simulation && task.requiresFreshObservation) {
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
