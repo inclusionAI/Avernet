@@ -46,6 +46,9 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.core.bot_config_manifest.creation import ManifestCreationSeam
+from agentclaw.community.core.bot_management.bot_service_protocol import (
+    BotServiceProtocol,
+)
 from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
@@ -224,6 +227,7 @@ def submit_copy(
     passport_plugin: PassportPlugin,
     space_context: BusinessSpaceContextProtocol,
     render_screen_service: RenderScreenServiceProtocol,
+    bot_service: BotServiceProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
 
@@ -266,6 +270,25 @@ def submit_copy(
 
     current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=None)
     space_id = getattr(current_space, "numeric_id", None)
+
+    # Pre-flight platform validation (quota / reserved-engine / name) before
+    # Passport or any manifest is spent — the same call ordinary creation makes
+    # ahead of its passport step. Copy reuses the manifest-creation flow, whose
+    # ``create_job`` also enforces quota, but only *after* Passport auth and the
+    # dst ``ac_bots`` row are written: an over-quota copy would otherwise send
+    # the owner through AgentPassport authorization, then FAIL with no dst row
+    # for FE's detail poll to land on (60s timeout + a misleading message).
+    # Branching the check here closes that window for the same engine/name
+    # validations create runs. Mirrors ``create_flow._create``'s placement of
+    # ``check_create_bot_preflight`` ahead of ``_apply_passport``.
+    bot_service.check_create_bot_preflight(
+        user_id=owner_id,
+        bot_id=dst_bot_id,
+        engine_type=engine,
+        bot_name=body.bot_name,
+        space_id=space_id,
+        space_quota=True,
+    )
 
     # Route B: serialize source's config into a manifest document (v1: script only).
     source_owner_id = source.get("owner_id") or owner_id
@@ -546,6 +569,7 @@ async def copy_bot(
     render_screen_service: RenderScreenServiceProtocol = Injected(
         RenderScreenServiceProtocol
     ),
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
     del caller
@@ -560,6 +584,7 @@ async def copy_bot(
         passport_plugin=passport_plugin,
         space_context=space_context,
         render_screen_service=render_screen_service,
+        bot_service=bot_service,
     )
     return envelope(result, request)
 
