@@ -119,31 +119,32 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 ```mermaid
 flowchart TB
   subgraph Products["产品层 / 执行能力"]
-    bbsDiscussion["BBS 公开讨论"]
-    todoScenario["代办"]
+    bbsDiscussion["<b>BBS 公开讨论</b><br/>────────────<br/>topic_id<br/>origin_ref<br/>posts<br/>decision_summary"]
+    todoScenario["<b>AI Coding 场景</b><br/>────────────<br/>scope<br/>task_id<br/>executor<br/>pr_ref"]
   end
 
   subgraph AdapterLayer["Adapter 层"]
-    adapter["标准 Command / Adapter"]
+    adapter["<b>ContextAdapter</b><br/>────────────<br/>actor_ref<br/>command<br/>request_id<br/>async_result"]
   end
 
   subgraph Context["CollaborationContext 聚合 / 状态机合同"]
-    root["CollaborationContext"]
-    envelope["ContextEnvelope"]
-    inputSource["InputSource"]
-    material["ContextMaterialReference"]
-    collaborationMode["CollaborationMode"]
-    participant["ContextParticipant"]
-    deliverable["ContextDeliverable"]
-    todo["ContextTodo"]
-    outcome["ContextOutcome"]
-    event["ContextEvent"]
-    transition["ContextTransition"]
+    root["<b>CollaborationContext</b><br/>────────────<br/>context_id<br/>scope<br/>title<br/>envelope<br/>responsible_actor_ref<br/>collaboration_mode<br/>state_machine_binding<br/>outcome<br/>version<br/>event_cursor"]
+    scope["<b>ContextScope</b><br/>────────────<br/>scope_kind<br/>scope_id<br/>environment"]
+    envelope["<b>ContextEnvelope</b><br/>────────────<br/>objective<br/>background<br/>input_sources<br/>material_refs<br/>constraints<br/>deliverable_specs<br/>acceptance<br/>origin_ref<br/>envelope_revision"]
+    inputSource["<b>InputSource</b><br/>────────────<br/>source_kind<br/>source_id<br/>revision"]
+    material["<b>ContextMaterialReference</b><br/>────────────<br/>source_kind<br/>source_id<br/>revision<br/>digest"]
+    collaborationMode["<b>CollaborationMode</b><br/>────────────<br/>mode_id<br/>mode_kind<br/>participants<br/>visibility<br/>mode_revision<br/>started_at<br/>ended_at"]
+    participant["<b>ContextParticipant</b><br/>────────────<br/>participant_id<br/>actor_kind<br/>actor_id<br/>roles<br/>scope<br/>granted_by<br/>granted_at<br/>revoked_by<br/>revoked_at"]
+    deliverable["<b>ContextDeliverable</b><br/>────────────<br/>deliverable_id<br/>spec_ref<br/>artifact_ref<br/>produced_by<br/>produced_at<br/>evidence_refs"]
+    todo["<b>ContextTodo</b><br/>────────────<br/>todo_id<br/>title<br/>instruction<br/>assignee_actor_ref<br/>required<br/>due_at<br/>status<br/>evidence_refs"]
+    outcome["<b>ContextOutcome</b><br/>────────────<br/>outcome_id<br/>decision<br/>judged_by<br/>judged_at<br/>reason_ref<br/>deliverables<br/>visibility"]
+    event["<b>ContextEvent</b><br/>────────────<br/>event_id<br/>event_kind<br/>actor_ref<br/>payload<br/>request_id<br/>source_event_id<br/>sequence<br/>occurred_at"]
+    transition["<b>ContextTransition</b><br/>────────────<br/>transition_id<br/>rule_id<br/>from_states<br/>to_state<br/>event_name<br/>guard_results<br/>effect_results"]
 
     subgraph StateMachine["状态机合同 / Binding"]
       direction LR
-      stateDef["ContextStateMachineDefinition"]
-      stateBinding["ContextStateMachineBinding"]
+      stateDef["<b>ContextStateMachineDefinition</b><br/>────────────<br/>definition_id<br/>definition_revision<br/>schema_version<br/>content_digest<br/>initial_state<br/>states<br/>transitions<br/>declared_guards<br/>declared_effects<br/>compatibility_policy"]
+      stateBinding["<b>ContextStateMachineBinding</b><br/>────────────<br/>context_id<br/>binding_id<br/>definition_id<br/>definition_revision<br/>current_state<br/>allowed_modes<br/>transition_cursor<br/>state_fencing_token<br/>todos"]
     end
   end
 
@@ -151,6 +152,7 @@ flowchart TB
   todoScenario --> adapter
   adapter --> event
 
+  root --> scope
   root --> envelope
   envelope --> inputSource
   envelope --> material
