@@ -206,6 +206,7 @@ pub(super) fn validate_mysql_migration_record(
         && !is_legacy_human_input_index_record(plan, applied)
         && !is_legacy_mysql_syntax_record(plan, applied)
         && !is_legacy_actor_identity_record(plan, applied)
+        && !is_legacy_bot_authority_record(plan, applied)
     {
         bail!(
             "mysql migration checksum mismatch for version {:03} ({}): applied={}, current={}",
@@ -324,4 +325,17 @@ pub(super) fn is_legacy_actor_identity_record(
         && plan.name == "actor_identity_collation" && applied.name == plan.name
         && plan.checksum == "6552917207bee98cdac987e518b506aa568eef08566320db4caedb3d7cffcc79"
         && applied.checksum == "6ee7a645bbf340b5ca71fa3a3ae21e64961f0925766f4c14edd0fb6f50204c24"
+}
+
+// Explicit OceanBase generated-column correction for 036. Accept only the
+// archived/current pair; skip recorded DDL without changing its history or
+// assuming that existing OceanBase schema has been repaired. See
+// migrations/reconciliation/bot-authority-generated-columns.md.
+pub(super) fn is_legacy_bot_authority_record(
+    plan: &MysqlMigrationPlan, applied: &AppliedMysqlMigration,
+) -> bool {
+    plan.version == 36 && applied.version == 36 && applied.dialect == "mysql"
+        && plan.name == "bot_authority" && applied.name == plan.name
+        && plan.checksum == "70eb337d39d104395792534dfc91f6bfca9a1b23cf98ce7e90e41788a3d83571"
+        && applied.checksum == "d8f1487e6d0e2d9e28f12e354637dff6a36d7b05e23f8a6e2641162d8c4227ec"
 }
