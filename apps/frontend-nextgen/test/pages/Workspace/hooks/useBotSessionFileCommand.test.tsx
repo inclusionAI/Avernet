@@ -4,8 +4,7 @@ import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFi
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import { botSessionFileService } from '@/services/workspace/botSessionFileService';
 import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
-import type { CommandItem } from '@tc-chat/ui/es/Sender';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/services/workspace/botSessionFileService');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
@@ -45,17 +44,13 @@ it('未打开文件面板时,/file 唤起经 onSearch 动态拉取服务端已�
       jest.fn(),
     ),
   );
-  const fileOnSearch = () =>
-    result.current.command.categories[0].items?.find((item) => item.name === 'file')?.subConfig?.categories[0]
-      .onSearch;
-  // 懒加载契约(2026-10-21):挂载不预加载,/file 唤起前不调接口,清单经 onSearch 动态拉取。
-  expect(typeof fileOnSearch()).toBe('function');
+  const fileCommand = () => result.current.command.categories[0].items!.find((item) => item.name === 'file')!;
   expect(botSessionFileService.loadReady).not.toHaveBeenCalled();
-  // /file 唤起:经 onSearch 动态拉取(每次唤起都调接口),返回服务端最新文件清单。
-  let items: CommandItem[] = [];
   await act(async () => {
-    items = (await fileOnSearch()?.('')) ?? [];
+    result.current.command.onSelect?.(fileCommand());
   });
+  await waitFor(() => expect(fileCommand().subConfig?.categories[0].items).toHaveLength(1));
+  const items = fileCommand().subConfig!.categories[0].items!;
   expect(items.map((item) => item.name)).toEqual(['已上传文件.txt']);
   expect(result.current.fileDrawerOpen).toBe(false);
   expect(botSessionFileService.loadReady).toHaveBeenCalledTimes(1);

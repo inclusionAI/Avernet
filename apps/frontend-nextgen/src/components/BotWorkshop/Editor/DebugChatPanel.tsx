@@ -135,6 +135,15 @@ export function DebugChatPanel({
       setCreatingSession(false);
     }
   };
+  const clearContext = async () => {
+    if (!identityId || !session) return;
+    const result = await botSessionService.clearContext(chatBot, identityId, session.sessionId);
+    if (!result.ok) {
+      toast.error(result.error.friendlyMessage);
+      return;
+    }
+    await debug.reloadHistory();
+  };
   const connection =
     debug.connectionStatus === 'connected'
       ? { text: '在线', tone: 'success' as const }
@@ -263,12 +272,13 @@ export function DebugChatPanel({
         )}
       </div>
       <DebugChatComposer
-        runtimeStage={chatBot.runtimeStage}
-        key={session?.sessionId ?? 'no-session'}
-        botId={chatBot.realBotId}
-        sessionId={session?.sessionId ?? null}
+        key={JSON.stringify([
+          chatBot.realBotId, chatBot.ownerId, chatBot.engineOwnerId, chatBot.botType, identityId, chatBot.runtimeStage, session?.sessionId,
+        ])}
+        bot={chatBot}
+        session={session}
         userId={identityId}
-        ownerId={chatBot.ownerId}
+        onClear={clearContext}
         isRequesting={debug.chat.isRequesting}
         capabilitySets={capabilitySets}
         modelSelector={
