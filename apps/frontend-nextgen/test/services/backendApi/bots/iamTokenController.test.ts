@@ -23,9 +23,29 @@ describe('iamTokenController OpenAPI contract', () => {
       headers: new Headers({ 'content-type': 'application/json' }),
       json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'bot-token' } }),
     } as Response);
-    await expect(getBotIamToken('bot-1', 'u1', 'owner-1', 'online')).resolves.toBe('bot-token');
+    await expect(
+      getBotIamToken('bot-1', 'u1', 'owner-1', 'online', { sessionKey: 'online-session' }),
+    ).resolves.toBe('bot-token');
     expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online',
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&session_key=online-session',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('uses the verified friend session parameters for an online friend Bot', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'test-token' } }),
+    } as Response);
+    await expect(
+      getBotIamToken('bot-1', 'u1', 'entity-1', 'online', {
+        sessionKey: 'friend-session',
+        friendUserId: 'u1',
+        ownerId: 'owner-1',
+      }),
+    ).resolves.toBe('test-token');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=entity-1&stage=online&owner_id=owner-1&f_user_id=u1&session_id=friend-session',
       expect.objectContaining({ method: 'POST' }),
     );
   });
