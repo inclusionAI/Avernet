@@ -529,7 +529,7 @@ mod tests {
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), &main.file)).with_filter(build_output_targets_filter(&main)))
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), "console.log")).with_filter(build_env_filter(&config)));
         let dispatch = tracing::Dispatch::new(subscriber);
-        let rows = "1,1000,boot,0,0,0,0,0,1,3,0,0,0,1,1000\n1,1000,boot,0,0,0,0,0,2,1,0,0,0,1,1000";
+        let rows = "1000,10000,20,18,16,1,0,0,2,1,3,2,0,1,0,12.5,1,0,1,0,0,0,2";
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::info!(target: DELIVERY_MONITOR_TARGET, ignored = "never-written", "{rows}");
             tracing::error!("ordinary message");
@@ -537,10 +537,10 @@ mod tests {
         drop(guard);
         let monitor = fs::read_to_string(dir.path().join("message-delivery.log")).unwrap();
         assert_eq!(monitor, format!("{rows}\n"));
-        assert!(monitor.lines().all(|line| line.split(',').count() == 15));
+        assert!(monitor.lines().all(|line| line.split(',').count() == 23));
         for file in ["bcs.log", "console.log"] {
             let text = fs::read_to_string(dir.path().join(file)).unwrap();
-            assert!(text.contains("ordinary message"), "{file}: {text:?}"); assert!(!text.contains("1,1000,boot"));
+            assert!(text.contains("ordinary message"), "{file}: {text:?}"); assert!(!text.contains("1000,10000,20,18"));
         }
     }
 
