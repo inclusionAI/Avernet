@@ -1,0 +1,24 @@
+apps/bcs-internal/bcn-configs/README.md
+  h_45bbed694cc8b0 1-7
+apps/bcs-internal/bcn-configs/bcs-config-dev.toml
+  h_45bbed694cc8b0 1-141
+apps/bcs-internal/bcn-configs/bcs-config-gray.toml
+  h_45bbed694cc8b0 1-4
+apps/bcs-internal/bcn-configs/bcs-config-pre.toml
+  h_45bbed694cc8b0 1-103
+apps/bcs-internal/bcn-configs/bcs-config-prod.toml
+  h_45bbed694cc8b0 1-87
+apps/bcs-internal/bcn-configs/bcs-config.toml
+  h_45bbed694cc8b0 1-410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4fc8cb7997b98f7b4fb92ac22c61f9282689fad",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

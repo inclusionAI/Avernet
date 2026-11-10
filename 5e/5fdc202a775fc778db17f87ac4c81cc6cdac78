@@ -1,0 +1,16 @@
+docs/plans/2026-11-09-bcn-runtime-mvp-execution.md
+  h_f4a73db4ad12be 151,159-162
+docs/plans/2026-11-09-bcn-runtime-mvp.md
+  h_f4a73db4ad12be 23-24,249-250,385,478-480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5e5fdc202a775fc778db17f87ac4c81cc6cdac78",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

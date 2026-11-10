@@ -1,0 +1,22 @@
+apps/gateway/tests/test_gateway_config.py
+  s_620fb772f449f4::t_9b27727f01f819 9,11,23-46
+  s_620fb772f449f4::t_c6f7badccb0f8f 47-48
+apps/gateway/configs/application-prod.yaml
+  s_620fb772f449f4::t_f1abf029e982ed 9-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fc25fcb65b09c90ed1edadd54947c30a27abee67",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
