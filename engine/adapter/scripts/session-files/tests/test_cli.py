@@ -1,5 +1,6 @@
 """Standalone CLI tests; no Engine imports or third-party dependencies."""
 
+import concurrent.futures
 import contextlib
 import http.client
 import importlib.machinery
@@ -33,6 +34,13 @@ class FakeEngine(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(self.server.body)
 
+    def do_GET(self):
+        self.server.get_calls.append((self.path, dict(self.headers)))
+        self.send_response(self.server.get_status)
+        self.send_header("Location", "http://remote.invalid/SECRET")
+        self.end_headers()
+        self.wfile.write(self.server.get_body)
+
     def log_message(self, *args):
         pass
 
@@ -46,6 +54,13 @@ class CliTests(unittest.TestCase):
         with patch.object(sys, "dont_write_bytecode", True):
             loader.exec_module(cls.cli)
 
+    def setUp(self):
+        clean_env = dict(os.environ)
+        clean_env.pop("HITL_SESSION_KEY", None)
+        environment = patch.dict(os.environ, clean_env, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def invoke(self, *args):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -53,9 +68,11 @@ class CliTests(unittest.TestCase):
         return status, json.loads(out.getvalue()), err.getvalue()
 
     @contextlib.contextmanager
-    def server(self, status=200, body=None):
+    def server(self, status=200, body=None, get_status=200, get_body=None):
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeEngine)
         server.status, server.body, server.calls = status, body or json.dumps(VIEW).encode(), []
+        server.get_status, server.get_calls = get_status, []
+        server.get_body = json.dumps({"files": [VIEW]}).encode() if get_body is None else get_body
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -77,15 +94,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(urlsplit(path).path, "/api/session-files")
         self.assertEqual(parse_qs(urlsplit(path).query), {"sessionKey": ["agent:bot:chat:a/b ?&=中文"]})
         self.assertEqual(json.loads(body), {"workspace_relative_path": "输出/report.txt"})
+        self.assertEqual(server.get_calls[0][0], path)
+        self.assertEqual(len(server.calls), 1)
+        self.assertEqual(len(server.get_calls), 1)
+        self.assertFalse({k.lower() for k in server.get_calls[0][1]} & {"authorization", "cookie"})
         self.assertFalse({k.lower() for k in headers} & {"authorization", "cookie"})
         self.assertNotIn("SECRET", result.stdout + result.stderr)
         diagnostics = [json.loads(line) for line in result.stderr.splitlines()]
-        self.assertEqual([item["event"] for item in diagnostics], ["request", "success"])
+        self.assertEqual([item["event"] for item in diagnostics], ["request", "success", "verification_request", "verification_success", "published"])
         for item in diagnostics:
             self.assertEqual(item["system"], "engine")
             self.assertEqual(item["direction"], "out")
             self.assertEqual(item["operation"], "publish")
-            self.assertEqual(item["method"], "POST")
+            self.assertEqual(item["method"], "GET" if item["event"].startswith("verification_") else "POST")
             self.assertEqual(item["path"], "/api/session-files")
             self.assertEqual(item["sessionKey"], "agent:bot:chat:a/b ?&=中文")
             self.assertEqual(item["workspace_relative_path"], "输出/report.txt")
@@ -96,11 +117,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(diagnostics[-1][key], value)
 
     def test_invalid_arguments_do_not_connect_or_echo(self):
-        cases = [[], ["publish", "a"], ["publish", "/SECRET", "--session-key", "s"],
+        cases = [[], ["publish", "/SECRET", "--session-key", "s"],
                  ["publish", "a/../SECRET", "--session-key", "s"],
                  ["publish", "C:\\SECRET", "--session-key", "s"],
-                 ["publish", "a", "--session-key", ""],
-                 ["publish", "a", "--session-key", " s"],
                  ["publish", "a", "--session-key", "s", "--SECRET"]]
         with patch.object(http.client.HTTPConnection, "connect", side_effect=AssertionError):
             for args in cases:
@@ -171,6 +190,110 @@ class CliTests(unittest.TestCase):
             with patch.object(http.client.HTTPConnection, "request", side_effect=exc):
                 status, data, err = self.invoke("publish", "a", "--session-key", "s")
                 self.assertEqual((status, data["code"]), (3, code))
+                self.assertNotIn("SECRET", json.dumps(data) + err)
+
+    def test_main_reads_authoritative_environment_every_call(self):
+        with self.server() as (server, url):
+            for key in ("agent:a/中文 ?&=", "opaque:second"):
+                with patch.dict(os.environ, {"HITL_SESSION_KEY": key}):
+                    status, data, _ = self.invoke("publish", "a", "--engine-url", url)
+                    self.assertEqual((status, data["code"]), (0, "published"))
+                    status, data, _ = self.invoke("publish", "a", "--session-key", key, "--engine-url", url)
+                    self.assertEqual((status, data["code"]), (0, "published"))
+            keys = [parse_qs(urlsplit(call[0]).query)["sessionKey"][0] for call in server.calls]
+            self.assertEqual(keys, ["agent:a/中文 ?&=", "agent:a/中文 ?&=", "opaque:second", "opaque:second"])
+            self.assertEqual([call[0] for call in server.calls], [call[0] for call in server.get_calls])
+
+    def test_invalid_session_context_never_connects_or_echoes(self):
+        cases = [(None, None, "missing_session_key"), ("trusted", "other-SECRET", "session_key_mismatch")]
+        for invalid in ("", "current", "CURRENT", "Latest", "default", "DeFaUlT", " s", "s ", "s\nSECRET", "s\x7fSECRET", "s\x85SECRET", "s\x9fSECRET"):
+            cases.extend([(invalid, "manual", "invalid_session_key"),
+                          (None, invalid, "invalid_session_key"),
+                          ("trusted", invalid, "invalid_session_key")])
+        with patch.object(http.client.HTTPConnection, "connect", side_effect=AssertionError("must not connect")):
+            for runtime, explicit, code in cases:
+                with self.subTest(runtime=runtime, explicit=explicit):
+                    env = {} if runtime is None else {"HITL_SESSION_KEY": runtime}
+                    args = ["publish", "a"]
+                    if explicit is not None:
+                        args += ["--session-key", explicit]
+                    with patch.dict(os.environ, env, clear=True):
+                        status, data, err = self.invoke(*args)
+                    self.assertEqual((status, data["code"]), (2, code))
+                    self.assertNotIn("SECRET", json.dumps(data) + err)
+
+    def test_parallel_subprocess_environments_do_not_share_sessions(self):
+        keys = ["agent:first/中文 ?&=", "agent:second/中文 ?&="]
+        with self.server() as (server, url):
+            def run(key):
+                return subprocess.run([sys.executable, str(CLI), "publish", "a", "--engine-url", url],
+                                      env=dict(os.environ, HITL_SESSION_KEY=key), capture_output=True,
+                                      text=True, timeout=10, check=False)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(run, keys))
+            for result in results:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["code"], "published")
+            for calls in (server.calls, server.get_calls):
+                self.assertCountEqual([parse_qs(urlsplit(call[0]).query)["sessionKey"][0] for call in calls], keys)
+            for key, result in zip(keys, results):
+                events = [json.loads(line) for line in result.stderr.splitlines()]
+                self.assertTrue(all(event["sessionKey"] == key for event in events))
+
+    def test_get_must_confirm_exact_resource_ready_without_retry(self):
+        cases = [(200, {"files": []}, "registration_not_confirmed"),
+                 (200, {"files": [dict(VIEW, resource_id="other")]}, "registration_not_confirmed"),
+                 (200, {"files": [dict(VIEW, availability="missing")]}, "registration_not_confirmed"),
+                 (200, {"files": [dict(VIEW, availability="changed")]}, "registration_not_confirmed"),
+                 (200, {"files": [VIEW, VIEW]}, "verification_failed"),
+                 (200, {}, "verification_failed"), (200, {"files": {}}, "verification_failed"),
+                 (200, {"files": [None]}, "verification_failed"),
+                 (200, {"files": [dict(VIEW, size_bytes=True)]}, "verification_failed"),
+                 (302, {"SECRET": "value"}, "verification_failed"),
+                 (404, {"SECRET": "value"}, "verification_failed"),
+                 (500, {"SECRET": "value"}, "verification_failed")]
+        cases += [(200, body, "verification_failed") for body in (b"SECRET", b"x" * 65537)]
+        for http_status, body, code in cases:
+            raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+            with self.subTest(status=http_status, body=raw[:60]), self.server(get_status=http_status, get_body=raw) as (server, url):
+                status, data, err = self.invoke("publish", "a", "--session-key", "s", "--engine-url", url)
+                self.assertEqual((status, data["code"]), (6, code))
+                self.assertFalse(data["ok"])
+                self.assertTrue(data["registration_may_have_succeeded"])
+                self.assertNotIn("SECRET", json.dumps(data) + err)
+                self.assertEqual((len(server.calls), len(server.get_calls)), (1, 1))
+                events = [json.loads(line) for line in err.splitlines()]
+                self.assertIn("success", [event["event"] for event in events])
+                self.assertNotIn("published", [event["event"] for event in events])
+                self.assertEqual(events[-2]["event"], "verification_failure")
+                self.assertEqual(events[-2]["method"], "GET")
+                self.assertEqual(events[-2]["http_status"], http_status)
+
+    def test_get_confirmed_view_is_projected_without_extra_secrets(self):
+        refreshed = dict(VIEW, size_bytes=25, creator_type="bot", creator_name="助手")
+        body = json.dumps({"files": [dict(VIEW, resource_id="other", availability="missing"),
+                                      dict(refreshed, signed_url="SECRET", credentials={"token": "SECRET"})]}).encode()
+        with self.server(get_body=body) as (server, url):
+            status, data, err = self.invoke("publish", "a", "--session-key", "s", "--engine-url", url)
+        self.assertEqual((status, data), (0, {"ok": True, "code": "published", "file": refreshed}))
+        self.assertNotIn("SECRET", json.dumps(data) + err)
+        self.assertEqual((len(server.calls), len(server.get_calls)), (1, 1))
+
+    def test_get_transport_failure_is_uncertain_and_not_retried(self):
+        original = http.client.HTTPConnection.request
+        for exc in (TimeoutError("SECRET"), OSError("SECRET"), http.client.BadStatusLine("SECRET")):
+            methods = []
+            def request(connection, method, *args, **kwargs):
+                methods.append(method)
+                if method == "GET":
+                    raise exc
+                return original(connection, method, *args, **kwargs)
+            with self.subTest(exc=type(exc)), self.server() as (_, url):
+                with patch.object(http.client.HTTPConnection, "request", request):
+                    status, data, err = self.invoke("publish", "a", "--session-key", "s", "--engine-url", url)
+                self.assertEqual((status, data["code"]), (6, "verification_failed"))
+                self.assertTrue(data["registration_may_have_succeeded"])
+                self.assertEqual(methods, ["POST", "GET"])
                 self.assertNotIn("SECRET", json.dumps(data) + err)
 
     def test_independent_tar_install_in_workspace_with_spaces(self):

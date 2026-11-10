@@ -1,7 +1,9 @@
 """Real CLI -> TCP -> Engine router/service tests; run with Backend's venv."""
 
+import concurrent.futures
 import importlib.util
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -34,6 +36,7 @@ class EngineIntegrationTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         service = SessionFileService(workspace_root_provider=lambda: self.root, bot_name="报告助手")
+        self.service = service
 
         class NoExternalExport:
             def __getattr__(self, name):
@@ -69,10 +72,10 @@ class EngineIntegrationTests(unittest.TestCase):
         self.thread.join(timeout=10)
         self.assertFalse(self.thread.is_alive(), "Engine HTTP server did not stop")
 
-    def publish(self, path):
+    def publish(self, path, session=None):
         return subprocess.run(
-            [sys.executable, str(CLI), "publish", path, "--session-key", self.session,
-             "--engine-url", self.url],
+            [sys.executable, str(CLI), "publish", path, "--engine-url", self.url],
+            env=dict(os.environ, HITL_SESSION_KEY=self.session if session is None else session),
             cwd=self.root.parent, capture_output=True, text=True, timeout=10, check=False)
 
     def test_register_live_edits_stable_id_and_independent_unlink(self):
@@ -176,6 +179,46 @@ class EngineIntegrationTests(unittest.TestCase):
                 elif replacement == "symlink":
                     self.assertTrue(source.is_symlink())
                     source.unlink()
+
+    def test_concurrent_cli_environments_isolate_real_engine_resources(self):
+        (self.root / "shared.txt").write_bytes(b"completed shared output")
+        sessions = ("agent:a/中文 ?&=", "agent:b/中文 ?&=")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda key: self.publish("shared.txt", key), sessions))
+        resources = []
+        for key, result in zip(sessions, results):
+            self.assertEqual(result.returncode, 0, result.stderr)
+            view = json.loads(result.stdout)["file"]
+            resources.append(view["resource_id"])
+            params = {"sessionKey": key}
+            self.assertEqual(self.http.get("/api/session-files", params=params).json(), {"files": [view]})
+            route = "/api/session-files/" + view["resource_id"] + "/content"
+            self.assertEqual(self.http.get(route, params=params).content, b"completed shared output")
+            other = sessions[1] if key == sessions[0] else sessions[0]
+            self.assertEqual(self.http.get(route, params={"sessionKey": other}).status_code, 404)
+            events = [json.loads(line) for line in result.stderr.splitlines()]
+            self.assertEqual([event["event"] for event in events],
+                             ["request", "success", "verification_request", "verification_success", "published"])
+            self.assertTrue(all(event["sessionKey"] == key for event in events))
+        self.assertNotEqual(*resources)
+
+    def test_file_disappearing_after_registration_is_not_published(self):
+        source = self.root / "vanishing.txt"
+        source.write_bytes(b"completed before registration")
+        original_list = self.service.list_files
+        def remove_before_listing(*, session_key):
+            source.unlink()
+            return original_list(session_key=session_key)
+        self.service.list_files = remove_before_listing
+        result = self.publish("vanishing.txt")
+        self.assertEqual(result.returncode, 6, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["code"], "registration_not_confirmed")
+        self.assertTrue(data["registration_may_have_succeeded"])
+        self.assertNotIn('"event": "published"', result.stderr)
+        registered = original_list(session_key=self.session)
+        self.assertEqual(len(registered), 1)
+        self.assertNotEqual(registered[0].availability, "ready")
 
     def test_engine_rejects_missing_directory_and_symlink_via_cli(self):
         (self.root / "directory").mkdir()

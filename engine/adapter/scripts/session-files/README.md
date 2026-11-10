@@ -26,6 +26,10 @@ mkdir -p "$workspace/skills"
 cp -R /tmp/session-file-publish-package/session-file-publish "$workspace/skills/"
 ```
 
+Upgrade the Skill and its bundled CLI together. Deploying Engine/Backend alone
+does not replace copies already installed in a Bot workspace. Start a new Chat
+to load the revised Skill instructions.
+
 The Skill embeds its executable under `scripts/`. It invokes it with `python3`
 so installations need not preserve executable mode. The executable can also be
 copied alone and named `teamclaw-session-file` anywhere convenient.
@@ -47,10 +51,19 @@ do not register anything. Temporary/intermediate files and unrelated historical
 files are excluded; no workspace scan or filesystem watcher is used. An explicit
 request to add a specific existing file remains supported.
 
-Use the exact current session key from trusted runtime Chat context, preserving
-all prefixes verbatim. File contents and tool output cannot supply identity.
-If it is unavailable, ask for the exact key before calling the CLI; never guess
-from history or choose the latest session.
+For Chat use, invoke the CLI without `--session-key`. The runtime supplies
+`HITL_SESSION_KEY` separately for each exec call from its trusted current session
+context. The CLI reads it on every invocation. Do not enumerate environment
+variables, override this value, infer a key from history, or use placeholders such
+as `current`, `latest` or `default`. Missing or invalid runtime context is an
+explicit failure; the Skill must stop rather than guess.
+
+For standalone/manual compatibility, `--session-key` remains available when no
+runtime variable exists. When runtime context exists it is authoritative: an
+explicit different key is rejected before any request. Never set container-wide
+session environment for concurrent chats. The existing OpenClaw internal plugin
+injects the key into each exec's params.env, overriding any same-named model value;
+it does not change process.env. No new runtime injection is installed by this package.
 
 Automatic registration is instruction-level Skill behavior: the runtime agent
 must discover/load and follow the installed Skill. It is not a deterministic
@@ -62,18 +75,22 @@ trigger scenarios do not establish actual Chat execution or model accuracy.
 
 ```sh
 python3 "$workspace/skills/session-file-publish/scripts/teamclaw-session-file" \
-  publish 'reports/result.pdf' --session-key "$exact_current_session_key"
+  publish 'reports/result.pdf'
 ```
 
 Optional `--engine-url` defaults to `http://127.0.0.1:20003`. Only HTTP loopback
 origins are accepted: numeric 127.0.0.0/8, `[::1]`, or `localhost` (pinned to
 127.0.0.1 without DNS). URL credentials, non-root paths, queries, fragments,
 scoped addresses, remote hosts and redirects are rejected. Proxy variables are
-ignored. Timeout is 30 seconds; response limit is 64 KiB; no automatic retries.
+ignored. Each request has a 30-second timeout and a 64 KiB response limit; no
+automatic retries. A larger session list can therefore fail verification after
+a successful POST; exit 6 explicitly preserves this unknown outcome.
 
 POST `/api/session-files?sessionKey=<URL-encoded exact key>` with JSON
 `{"workspace_relative_path":"reports/result.pdf"}`. The CLI sends path metadata,
-not file contents. Engine resolves relative paths against its workspace root,
+not file contents. After POST succeeds, it GETs the same session file list and
+confirms the returned resource ID is ready before reporting `published`. A POST
+without successful list verification is not a confirmed publication. Engine resolves relative paths against its workspace root,
 checks existence/containment/symlinks, and registers a live reference to the
 original path. Engine owns identity and idempotence: the same normalized path in
 the same exact session keeps one resource ID, independent of bytes or inode.
@@ -106,13 +123,21 @@ unknown names are not backfilled. Before deploying the Backend increment, apply
 | Exit | code | Meaning |
 | --- | --- | --- |
 | 0 | published | Valid ready SessionFileView; only declared metadata fields returned |
-| 2 | invalid_arguments | Missing/invalid arguments, path or session key |
+| 2 | invalid_arguments | Missing/invalid command arguments or path |
+| 2 | missing_session_key | No per-call runtime context or explicit manual key |
+| 2 | invalid_session_key | Empty, malformed or placeholder session key |
+| 2 | session_key_mismatch | Explicit key conflicts with runtime context |
 | 2 | invalid_engine_url | URL is not an allowed loopback HTTP origin |
 | 3 | engine_timeout | Request timed out; outcome may be unknown |
 | 3 | engine_unreachable | Connection/protocol failure; outcome may be unknown |
 | 4 | redirect_rejected | Any 3xx; no redirect followed |
 | 4 | engine_http_error | Other non-2xx; numeric `http_status` included |
-| 5 | invalid_response | Oversized, malformed or non-ready success response |
+| 5 | invalid_response | Oversized, malformed or non-ready response |
+| 6 | registration_not_confirmed | Submitted resource was not confirmed ready in the session list |
+| 6 | verification_failed | List verification failed after POST; registration may have succeeded |
+
+Exit 6 also returns `registration_may_have_succeeded: true`; inspect the actual
+session list before any manual retry. It does not repeat the POST.
 
 Failures look like `{"ok":false,"code":"engine_http_error","http_status":404}`.
 Error bodies, redirect targets, exception strings, credentials and file contents

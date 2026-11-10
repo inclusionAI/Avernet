@@ -5,6 +5,7 @@ import argparse
 import http.client
 import ipaddress
 import json
+import os
 import sys
 import time
 from pathlib import PurePosixPath, PureWindowsPath
@@ -53,15 +54,36 @@ def endpoint(raw):
         raise Failure("invalid_engine_url", 2) from None
 
 
+def validate_session_key(session_key):
+    # COSEC: reject ambiguous identities without normalizing the trusted key.
+    if (not session_key or session_key != session_key.strip()
+            or session_key.lower() in ("current", "latest", "default")
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in session_key)):
+        raise Failure("invalid_session_key", 2)
+
+
+def resolve_session_key(explicit, environment):
+    runtime = environment.get("HITL_SESSION_KEY")
+    if runtime is not None:
+        validate_session_key(runtime)
+    if explicit is not None:
+        validate_session_key(explicit)
+    # COSEC: runtime context is authoritative; never fall back after rejection.
+    if runtime is not None and explicit is not None and runtime != explicit:
+        raise Failure("session_key_mismatch", 2)
+    if runtime is None and explicit is None:
+        raise Failure("missing_session_key", 2)
+    return runtime if runtime is not None else explicit
+
+
 def validate_arguments(path, session_key):
     # COSEC: lexical checks only; Engine owns filesystem/symlink containment.
     if (not path or PurePosixPath(path).is_absolute() or PureWindowsPath(path).drive
             or "\\" in path or ".." in path.split("/")
             or str(PurePosixPath(path)) == "."
-            or any(ord(char) < 32 or ord(char) == 127 for char in path)
-            or not session_key or session_key != session_key.strip()
-            or any(ord(char) < 32 or ord(char) == 127 for char in session_key)):
+            or any(ord(char) < 32 or ord(char) == 127 for char in path)):
         raise Failure("invalid_arguments", 2)
+    validate_session_key(session_key)
 
 
 def view_from_response(raw):
@@ -93,10 +115,56 @@ def view_from_response(raw):
         raise Failure("invalid_response", 5) from None
 
 
-def log_event(event, **metadata):
+def log_event(event, method="POST", **metadata):
     print(json.dumps(dict(system="engine", direction="out", operation="publish", event=event,
-                          method="POST", path="/api/session-files", **metadata),
+                          method=method, path="/api/session-files", **metadata),
                      sort_keys=True), file=sys.stderr)
+
+
+def verify_registration(host, port, session_key, view, context):
+    started = time.monotonic()
+    log_event("verification_request", method="GET", **context,
+              resource_id=view["resource_id"], http_status=None, elapsed_ms=0)
+    # COSEC: reuse the validated numeric loopback endpoint, with no credentials,
+    # proxies or redirects. A failed verification must never repeat the POST.
+    connection = http.client.HTTPConnection(host, port, timeout=TIMEOUT_SECONDS)
+    status = None
+    try:
+        connection.request("GET", "/api/session-files?" + urlencode({"sessionKey": session_key}),
+                           headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        status = response.status
+        if not 200 <= status < 300:
+            raise Failure("verification_failed", 6, status)
+        raw = response.read(MAX_RESPONSE + 1)
+        if len(raw) > MAX_RESPONSE:
+            raise Failure("verification_failed", 6, status)
+        listing = json.loads(raw)
+        if not isinstance(listing, dict) or not isinstance(listing.get("files"), list):
+            raise ValueError
+        for item in listing["files"]:
+            if not isinstance(item, dict) or not isinstance(item.get("resource_id"), str):
+                raise ValueError
+        matches = [item for item in listing["files"] if item["resource_id"] == view["resource_id"]]
+        if not matches or any(item.get("availability") != "ready" for item in matches):
+            raise Failure("registration_not_confirmed", 6, status)
+        if len(matches) != 1:
+            raise ValueError
+        confirmed = view_from_response(json.dumps(matches[0]))
+        log_event("verification_success", method="GET", **context, **confirmed,
+                  http_status=status, elapsed_ms=round((time.monotonic() - started) * 1000))
+        return confirmed
+    except (Failure, TypeError, ValueError, UnicodeError, RecursionError,
+            OSError, http.client.HTTPException) as exc:
+        code = "verification_failed"
+        if isinstance(exc, Failure) and exc.code == "registration_not_confirmed":
+            code = exc.code
+        log_event("verification_failure", method="GET", **context, resource_id=view["resource_id"],
+                  code=code, http_status=status,
+                  elapsed_ms=round((time.monotonic() - started) * 1000))
+        raise Failure(code, 6, status) from None
+    finally:
+        connection.close()
 
 
 def publish(path, session_key, engine_url):
@@ -126,9 +194,12 @@ def publish(path, session_key, engine_url):
         view = view_from_response(raw)
         log_event("success", **context, **view, http_status=status,
                   elapsed_ms=round((time.monotonic() - started) * 1000))
-        return view
+        confirmed = verify_registration(host, port, session_key, view, context)
+        log_event("published", **context, **confirmed, http_status=status,
+                  elapsed_ms=round((time.monotonic() - started) * 1000))
+        return confirmed
     except Failure as exc:
-        if exc.http_status is None:
+        if exc.http_status is None and exc.exit_code != 6:
             exc.http_status = status
         raise
     except TimeoutError:
@@ -144,18 +215,23 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
     command = commands.add_parser("publish", allow_abbrev=False)
     command.add_argument("workspace_relative_path")
-    command.add_argument("--session-key", required=True)
+    command.add_argument("--session-key")
     command.add_argument("--engine-url", default=DEFAULT_ENGINE_URL)
     started = time.monotonic()
     args = None
     try:
         args = parser.parse_args(argv)
+        args.session_key = resolve_session_key(args.session_key, os.environ)
         view = publish(args.workspace_relative_path, args.session_key, args.engine_url)
         result, exit_code = {"ok": True, "code": "published", "file": view}, 0
     except Failure as exc:
         result, exit_code = {"ok": False, "code": exc.code}, exc.exit_code
         if exc.http_status is not None:
             result["http_status"] = exc.http_status
+        if exc.exit_code == 6:
+            result["registration_may_have_succeeded"] = True
+            result["message"] = ("Registration may have succeeded, but list verification did not confirm it. "
+                                 "No automatic retry was attempted.")
         context = {}
         if args is not None and exc.exit_code != 2:
             context = {"sessionKey": args.session_key,
