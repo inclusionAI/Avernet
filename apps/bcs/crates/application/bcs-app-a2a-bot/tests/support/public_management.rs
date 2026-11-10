@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "public_management_by_id.rs"]
 mod by_id;
+#[path = "public_management_reference.rs"]
+mod reference;
 use bcs_service_api::application::a2a_bot::RegisterAgentCommand;
 use bcs_service_api::types::a2a_bot::{
     A2aCardSource,
@@ -36,6 +38,7 @@ fn request(raw: serde_json::Value) -> RegisterAgentCommand {
         provider_admin_token: "test-admin".into(),
         owners: vec!["delegated-owner".into()],
         summary: None,
+        provider_bot_ref: None,
         source: A2aCardSource::Inline(raw),
         now_ms: 1000,
     }
@@ -58,7 +61,8 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(registered.agent_name, "订单助手");
     let serialized = serde_json::to_value(&registered).unwrap();
     assert!(serialized.get("bot_runtime_token").is_none());
-    assert_eq!(serialized.as_object().unwrap().len(), 5);
+    assert_eq!(serialized.as_object().unwrap().len(), 6);
+    assert_eq!(registered.provider_bot_ref, None);
     assert_eq!(
         service
             .get_agent_by_id("test-admin", &registered.bot_id)

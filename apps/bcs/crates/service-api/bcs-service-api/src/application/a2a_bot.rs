@@ -35,12 +35,17 @@ pub struct NamedA2aRegistration {pub card:NamedA2aCard,pub bot_runtime_token:Opt
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ManagedA2aCard {
     pub provider_name:String, pub agent_name:String, pub bot_id:String,
+    /// Provider-supplied call identifier; `None` when BCS generated the reference.
+    pub provider_bot_ref:Option<String>,
     pub agent_card_url:Option<String>, pub agent_card:serde_json::Value,
 }
 #[derive(Clone)]
 pub struct RegisterAgentCommand {
     pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
     pub provider_admin_token:String, pub owners:Vec<String>, pub summary:Option<String>,
+    /// Optional call identifier callers pass to the Provider to reach this Agent
+    /// (for a hosted Agent, its own ID). Unique in the Provider, immutable.
+    pub provider_bot_ref:Option<String>,
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
 }
 
@@ -51,6 +56,11 @@ pub trait A2aBotManagementService: Send + Sync {
     }
     /// Exact source key recovery, scoped by authenticated Provider; zero or one result.
     async fn find_agents_by_source_id(&self,_token:&str,_source_agent_id:&str)->ServiceResult<Vec<ManagedA2aCard>> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    /// Exact call identifier (`provider_bot_ref`) recovery, scoped by authenticated
+    /// Provider; zero or one result. Independent of the Card source extension.
+    async fn find_agents_by_provider_bot_ref(&self,_token:&str,_provider_bot_ref:&str)->ServiceResult<Vec<ManagedA2aCard>> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
     /// Provider-scoped management uses the stable ID returned by registration, never Card.name.

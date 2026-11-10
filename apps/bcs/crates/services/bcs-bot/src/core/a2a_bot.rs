@@ -49,6 +49,10 @@ impl A2aBotCoreService for A2aBotCore {
         self.cards.get_by_source_agent_id(provider_id,source_agent_id).await
     }
 
+    async fn binding_by_provider_bot_ref(&self,provider_id:&str,provider_bot_ref:&str)->ServiceResult<Option<BotProviderRecord>> {
+        self.bots.get_provider_bot_by_ref(provider_id,provider_bot_ref).await
+    }
+
     async fn refreshable_cards(&self, after:Option<&str>, limit:u32)->ServiceResult<Vec<A2aBotRecord>> {
         self.cards.refreshable(after,limit).await
     }

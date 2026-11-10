@@ -23,15 +23,20 @@ impl A2aBotManagementService for Management {
         assert_eq!(source_agent_id,"001Ab");
         Ok(vec![self.get_agent_by_id(token,"bot").await?])
     }
+    async fn find_agents_by_provider_bot_ref(&self,token:&str,provider_bot_ref:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
+        assert_eq!(provider_bot_ref,"hosted-007");
+        Ok(vec![self.get_agent_by_id(token,"bot").await?])
+    }
     async fn get_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.calls.fetch_add(1,Ordering::SeqCst);
         if token!="test-admin" {return Err(ServiceError::Forbidden("private-provider-id private-bot-uuid".into()));}
         assert_eq!(bot_id,"bot");
         Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard {provider_name:"orders".into(),agent_name:"订单助手".into(),
-            bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
+            bot_id:bot_id.into(),provider_bot_ref:None,agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         assert_eq!(command.owners,vec!["owner"]);
+        assert!(command.provider_bot_ref.as_deref().is_none_or(|reference|reference=="订单-001"));
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
     async fn update_agent_by_id(&self,token:&str,bot_id:&str,_source:bcs_service_api::types::a2a_bot::A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.get_agent_by_id(token,bot_id).await}
@@ -212,10 +217,12 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
             let bytes=to_bytes(response.into_body(),8192).await.unwrap();
             let value:Value=serde_json::from_slice(&bytes).unwrap();
             assert!(!String::from_utf8_lossy(&bytes).contains("private-"));
-            for key in ["provider_id","bot_uuid","provider_bot_ref","revision"] {assert!(value.get(key).is_none());}
+            for key in ["provider_id","bot_uuid","revision"] {assert!(value.get(key).is_none());}
             if token==Some("test-admin") {
                 assert_eq!(value["agent_name"],"订单助手");assert_eq!(value["bot_id"],"bot");assert!(value.get("bot_runtime_token").is_none());
                 assert_eq!(value["agent_card"]["skills"][0]["unknown"],42);
+                // The platform Agent ID is always present; null when BCS generated the reference.
+                assert_eq!(value.get("provider_bot_ref"),Some(&Value::Null));
             }
         }
     }
@@ -232,11 +239,17 @@ async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
     let location=response.headers()["location"].to_str().unwrap().to_owned();
     assert_eq!(location,"/a2a/agents/bot/agent-card");
     assert_eq!(app.clone().oneshot(req("GET",&location,Value::Null)).await.unwrap().status(),StatusCode::OK);
-    let response=app.clone().oneshot(req("GET","/a2a/agents?source_agent_id=001Ab",Value::Null)).await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    let value:Value=serde_json::from_slice(&to_bytes(response.into_body(),8192).await.unwrap()).unwrap();
-    assert_eq!(value["items"][0]["bot_id"],"bot");
-    for path in ["/a2a/agents", "/a2a/agents?agent_name=x", "/a2a/agents?source_agent_id=001Ab&provider_name=orders", "/a2a/agents?source_agent_id=a&source_agent_id=b"] {
+    let response=app.clone().oneshot(req("POST","/a2a/agents",json!({"owners":["owner"],"provider_bot_ref":"订单-001","agent_card":{}}))).await.unwrap();
+    assert_eq!(response.status(),StatusCode::CREATED);
+    // The call identifier and the Card source agentId are separate lookup keys.
+    for path in ["/a2a/agents?provider_bot_ref=hosted-007", "/a2a/agents?source_agent_id=001Ab"] {
+        let response=app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap();
+        assert_eq!(response.status(),StatusCode::OK);
+        let value:Value=serde_json::from_slice(&to_bytes(response.into_body(),8192).await.unwrap()).unwrap();
+        assert_eq!(value["items"][0]["bot_id"],"bot");
+    }
+    for path in ["/a2a/agents", "/a2a/agents?agent_name=x", "/a2a/agents?source_agent_id=001Ab&provider_name=orders",
+        "/a2a/agents?source_agent_id=a&source_agent_id=b", "/a2a/agents?provider_bot_ref=a&source_agent_id=b", "/a2a/agents?provider_bot_ref=a&provider_bot_ref=b"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::BAD_REQUEST);
     }
     for method in ["PUT","POST"] {
@@ -262,6 +275,7 @@ async fn public_errors_are_structured_including_parser_and_method_failures() {
         ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"],"agent_card":{"name":"one","name":"two"}}"#,400,"INVALID_REQUEST"),
         ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"],"provider_name":"injected","agent_card":{}}"#,400,"INVALID_REQUEST"),
         ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"]}"#,422,"CARD_SOURCE_INVALID"),
+        ("POST","/a2a/agents","application/json","*/*",r#"{"owners":["owner"],"provider_bot_ref":null,"agent_card":{}}"#,400,"INVALID_REQUEST"),
         ("GET","/a2a/agents/bot/agent-card?provider_name=orders&agent_name=x","application/json","*/*","",400,"INVALID_REQUEST"),
         ("GET","/a2a/agents/bot/agent-card?agent_name=a&agent_name=b","application/json","*/*","",400,"INVALID_REQUEST"),
     ] {

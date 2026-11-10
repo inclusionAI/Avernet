@@ -15,6 +15,8 @@ fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
             .map_err(|_| failure(Code::InvalidCard, "agent_card.name", "INVALID_NAME"))?
             .into(),
         bot_id: record.bot_uuid,
+        provider_bot_ref: (!policy::is_generated_provider_bot_ref(&record.provider_bot_ref))
+            .then_some(record.provider_bot_ref),
         agent_card_url: record.agent_card_url,
         agent_card: record.agent_card,
     })
@@ -98,16 +100,32 @@ impl A2aBotManagement {
         {
             return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED"));
         }
+        // The call identifier is independent of the Card source extension: a hosted
+        // Agent is called by its own ID while the Card may name the platform Agent ID.
+        let supplied = command.provider_bot_ref;
+        if let Some(reference) = &supplied {
+            policy::validate_provider_bot_ref(reference)?;
+        }
         let (url, card) = self.public_load(command.source).await?;
         policy::validate_summary(command.summary.as_deref(), &card.raw)?;
-        let outcome = self
+        let reference_taken = || failure(Code::ProviderBotRefConflict, "provider_bot_ref", "ALREADY_EXISTS");
+        if let Some(reference) = &supplied {
+            // Deleted Bots keep reserving their reference, matching storage uniqueness.
+            if self.core.binding_by_provider_bot_ref(&provider_id, reference).await?.is_some() {
+                return Err(reference_taken());
+            }
+        }
+        let provider_bot_ref = supplied.clone().unwrap_or_else(|| {
+            format!("{}{}", policy::GENERATED_PROVIDER_BOT_REF_PREFIX, uuid::Uuid::new_v4().simple())
+        });
+        let registered = self
             .register_loaded_with_visibility(
                 bcs_service_api::RegisterProviderBotCommand {
                     avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
-                    provider_id,
+                    provider_id: provider_id.clone(),
                     provider_admin_token: command.provider_admin_token,
                     name: String::new(),
-                    provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),
+                    provider_bot_ref: provider_bot_ref.clone(),
                     owners: command.owners,
                     summary: command.summary,
                     webhook_url: None,
@@ -123,7 +141,14 @@ impl A2aBotManagement {
                 command.now_ms,
                 command.visibility,
             )
-            .await?;
+            .await;
+        let outcome = match registered {
+            // A concurrent registration won the reference after the preflight.
+            Err(ServiceError::Conflict(_)) if supplied.is_some()
+                && self.core.binding_by_provider_bot_ref(&provider_id, &provider_bot_ref).await?.is_some() =>
+                return Err(reference_taken()),
+            other => other?,
+        };
         let record = self
             .core
             .get_card(&outcome.bot_uuid)
@@ -142,6 +167,24 @@ impl A2aBotManagement {
         // Re-read may race a deletion/reassignment; never return an unrelated source identity.
         if policy::source_agent(&record.agent_card)?.is_none_or(|source|source.agent_id!=source_agent_id) {
             return Err(failure(Code::TargetChanged,"source_agent_id","TARGET_CHANGED"));
+        }
+        Ok(vec![view(&label,record)?])
+    }
+    pub(super) async fn public_find_by_reference(&self, token:&str, reference:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
+        let (provider,label)=self.public_provider(token).await?;
+        policy::validate_provider_bot_ref(reference)?;
+        // Storage collation may fold case, so the reference is compared exactly here.
+        let Some(binding)=self.core.binding_by_provider_bot_ref(&provider,reference).await?
+            .filter(|binding|binding.provider_bot_ref==reference && !binding.is_deleted
+                && binding.connection_mode==bcs_service_api::bot_provider::BotConnectionMode::Gateway)
+            else {return Ok(vec![])};
+        let record=match self.public_record_by_id(&provider,&binding.bot_uuid).await {
+            Ok(record)=>record,
+            Err(ServiceError::A2aManagement(error)) if error.code==Code::BotNotFound=>return Ok(vec![]),
+            Err(error)=>return Err(error),
+        };
+        if record.provider_bot_ref!=reference {
+            return Err(failure(Code::TargetChanged,"provider_bot_ref","TARGET_CHANGED"));
         }
         Ok(vec![view(&label,record)?])
     }

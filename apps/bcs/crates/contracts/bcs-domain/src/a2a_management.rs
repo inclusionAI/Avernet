@@ -20,6 +20,7 @@ pub enum ManagementCode {
     NotAcceptable,
     BotNameConflict,
     SourceAgentConflict,
+    ProviderBotRefConflict,
     SourceAgentChangeNotAllowed,
     TargetChanged,
     CardUrlRequired,
@@ -338,6 +339,39 @@ pub fn source_agent(card: &Value) -> Result<Option<SourceAgent<'_>>> {
         });
     }
     Ok(found)
+}
+
+/// Prefix reserved for references BCS generates when a Provider supplies no
+/// call identifier. Provider-supplied references never use it.
+pub const GENERATED_PROVIDER_BOT_REF_PREFIX: &str = "bcs-generated:";
+/// Shared Provider identity normalization caps every reference at 128 bytes.
+pub const MAX_PROVIDER_BOT_REF_BYTES: usize = 128;
+
+pub fn is_generated_provider_bot_ref(reference: &str) -> bool {
+    reference.starts_with(GENERATED_PROVIDER_BOT_REF_PREFIX)
+}
+
+/// `provider_bot_ref` is the identifier callers pass to the Provider to reach
+/// this Agent (a hosted Agent's own ID, not necessarily the platform Agent ID in
+/// the Card source extension). It only needs basic hygiene; storage enforces
+/// Provider-scoped uniqueness.
+pub fn valid_provider_bot_ref(reference: &str) -> bool {
+    !reference.is_empty()
+        && reference == reference.trim()
+        && reference.len() <= MAX_PROVIDER_BOT_REF_BYTES
+        && !reference.chars().any(char::is_control)
+        && !is_generated_provider_bot_ref(reference)
+}
+
+pub fn validate_provider_bot_ref(reference: &str) -> Result<()> {
+    if !valid_provider_bot_ref(reference) {
+        return Err(ManagementError::new(
+            ManagementCode::InvalidRequest,
+            "provider_bot_ref",
+            "INVALID_PROVIDER_BOT_REF",
+        ));
+    }
+    Ok(())
 }
 
 pub fn validate_source_transition(previous: &Value, next: &Value) -> Result<()> {

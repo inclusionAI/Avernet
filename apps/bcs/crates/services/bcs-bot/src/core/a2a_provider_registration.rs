@@ -47,8 +47,9 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &params.provider_bot_ref)
             .map_err(invalid)?;
         let reference = &identity.provider_bot_ref;
-        if reference.is_empty() || reference.len() > 256 || !reference.bytes().all(|c|
-            c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.' | b':')) {
+        // A call identifier may be any text; normalization already bounds its
+        // length and whitespace, and storage enforces Provider-scoped uniqueness.
+        if reference.is_empty() || reference.chars().any(char::is_control) {
             return Err(invalid("invalid provider_bot_ref"));
         }
         if self.bots.get_provider_bot_by_ref(provider_id, reference).await?.is_some() {

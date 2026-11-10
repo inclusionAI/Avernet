@@ -265,7 +265,7 @@ curl --fail-with-body -sS "$BCN_BASE/providers/$PROVIDER_ID/bots" \
 
 | 请求字段 | 类型 | A2A 注册规则 |
 | --- | --- | --- |
-| `provider_bot_ref` | string，必填 | Provider 内稳定引用，唯一；1–256 字节，仅 ASCII 字母、数字、`_`、`-`、`.`、`:`；部分平台身份模式另有归一化规则 |
+| `provider_bot_ref` | string，必填 | Provider 内稳定引用，唯一；1–128 字节，任意 Unicode 文本，无首尾空白或控制字符；部分平台身份模式另有归一化规则 |
 | `owners` | string[]，必填 | 当前必须恰好一个非空的有效所有者身份；不从 Card 推导 |
 | `agent_card_url` | string，条件必填 | 与 `agent_card` 二选一；非空，无首尾空白 |
 | `agent_card` | object，条件必填 | 完整原始 Card 对象；不能是字符串或 JSON 数组 |

@@ -29,6 +29,7 @@ struct Registration {
     visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
     owners: Vec<String>,
     summary: Option<String>,
+    provider_bot_ref: Option<String>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
 }
@@ -42,7 +43,10 @@ struct Update {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SourceQuery { source_agent_id: String }
+struct SourceQuery {
+    source_agent_id: Option<String>,
+    provider_bot_ref: Option<String>,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Refresh {}
@@ -67,6 +71,7 @@ fn message(code: Code) -> &'static str {
         Code::NotAcceptable => "此接口仅返回 JSON",
         Code::BotNameConflict => "同一 Provider 下已存在该 Agent 名称",
         Code::SourceAgentConflict => "同一 Provider 下已存在该来源 Agent ID",
+        Code::ProviderBotRefConflict => "同一 Provider 下已存在该调用标识",
         Code::SourceAgentChangeNotAllowed => "已登记的来源 Agent ID 不可修改或删除",
         Code::TargetChanged => "处理期间目标已发生变化，请重新查询",
         Code::CardUrlRequired => "此 Card 没有来源 URL，请直接提交更新",
@@ -99,6 +104,7 @@ pub(super) fn status(code: Code) -> StatusCode {
         Code::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
         Code::BotNameConflict
         | Code::SourceAgentConflict
+        | Code::ProviderBotRefConflict
         | Code::SourceAgentChangeNotAllowed
         | Code::TargetChanged
         | Code::CardUrlRequired
@@ -215,7 +221,7 @@ fn accepts_json(headers: &HeaderMap) -> bool {
 fn body<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ServiceError> {
     let value = bcs_service_api::types::a2a_bot::a2a_management::parse_card_json(bytes)
         .map_err(|_| error(Code::InvalidRequest, "", "INVALID_JSON_OR_DUPLICATE_FIELD"))?;
-    if ["agent_card_url", "agent_card", "summary"]
+    if ["agent_card_url", "agent_card", "summary", "provider_bot_ref"]
         .iter()
         .any(|key| value.get(key).is_some_and(Value::is_null))
     {
@@ -243,8 +249,13 @@ async fn execute(
             return Ok((StatusCode::OK,ManagementView::Card(service.get_agent_by_id(&token,bot_id).await?)));
         }
         let Query(query) = Query::<SourceQuery>::try_from_uri(&parts.uri)
-            .map_err(|_|error(Code::InvalidRequest,"source_agent_id","INVALID_QUERY"))?;
-        let items = service.find_agents_by_source_id(&token,&query.source_agent_id).await?;
+            .map_err(|_|error(Code::InvalidRequest,"","INVALID_QUERY"))?;
+        // The call identifier and the Card source agentId are different keys; exactly one.
+        let items = match (query.provider_bot_ref, query.source_agent_id) {
+            (Some(reference), None) => service.find_agents_by_provider_bot_ref(&token,&reference).await?,
+            (None, Some(source)) => service.find_agents_by_source_id(&token,&source).await?,
+            _ => return Err(error(Code::InvalidRequest,"","EXACTLY_ONE_LOOKUP_KEY_REQUIRED")),
+        };
         return Ok((StatusCode::OK,ManagementView::Collection {items}));
     }
     if parts.uri.query().is_some() {return Err(error(Code::InvalidRequest,"","QUERY_NOT_ALLOWED"));}
@@ -269,6 +280,7 @@ async fn execute(
                 provider_admin_token: token,
                 owners: input.owners,
                 summary: input.summary,
+                provider_bot_ref: input.provider_bot_ref,
                 source: source(input.agent_card_url, input.agent_card)?,
                 now_ms,
             })

@@ -78,6 +78,9 @@ impl A2aBotManagementService for A2aBotManagement {
     async fn find_agents_by_source_id(&self,token:&str,source_agent_id:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
         self.public_find(token,source_agent_id).await
     }
+    async fn find_agents_by_provider_bot_ref(&self,token:&str,provider_bot_ref:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
+        self.public_find_by_reference(token,provider_bot_ref).await
+    }
     async fn get_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.public_get(token,bot_id).await
     }

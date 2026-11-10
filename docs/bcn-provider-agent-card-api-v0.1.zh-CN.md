@@ -5,7 +5,7 @@
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | 0.1 | 2026-11-03 | 初始对接合同：Provider token 定位归属、注册、AgentCard 查询/更新/刷新、统一错误定义 |
-| 0.2 | 本次变更 | 管理路径统一 Bot ID；Location 使用 ID；支持 source_agent_id 找回 ID；无 name 兼容、无版本历史 |
+| 0.2 | 本次变更 | 管理路径统一 Bot ID；Location 使用 ID；支持 source_agent_id 找回 ID；无 name 兼容、无版本历史；注册可选 provider_bot_ref 调用标识，并支持按其找回 ID |
 
 状态：对接评审稿
 
@@ -48,6 +48,7 @@
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |
 | owners | string[] | 注册必填且恰好一个元素；不带 human_ 前缀的所有者 ID；Provider 管理者负责归属授权，BCN 可为该 ID 建立 Human 记录 |
 | summary | string | 注册可选展示摘要，最长 4096 个 Unicode 码点；省略时取 Card.description，空字符串表示空摘要 |
+| provider_bot_ref | string 或响应中的 null | 注册可选的**调用标识**：调用方经接入方平台调用该 Agent 时使用的 ID。平台自有 Agent 通常为平台 agentId；托管 Agent 为托管方自己的 agentId，可与来源扩展中的平台 agentId 不同。1～128 字节，任意 Unicode 文本，无首尾空白或控制字符，不得以 `bcs-generated:` 开头；同一 Provider 内唯一，按原文精确匹配；登记后不可修改，Agent 删除后仍保留占用。未传时响应为 null，之后不能补登 |
 
 Agent 名称在同一 Provider 下唯一，按原文精确匹配。
 
@@ -164,6 +165,7 @@ BCN 通过一个来源信息扩展保存 `agentId` 和 `party`。这两个字段
   "provider_name": "order-service",
   "bot_id": "bcn-bot-example",
   "agent_name": "订单助手",
+  "provider_bot_ref": "order-agent-001",
   "agent_card_url": null,
   "agent_card": {
     "name": "订单助手",
@@ -190,6 +192,7 @@ BCN 通过一个来源信息扩展保存 `agentId` 和 `party`。这两个字段
 | provider_name | token 所属 Provider 名称 |
 | agent_name | 已保存的 AgentCard.name |
 | bot_id | BCN Bot 标识；改名后保持不变 |
+| provider_bot_ref | 注册时提交的调用标识；未提交时为 null |
 | agent_card_url | URL 来源地址；直接提交 Card 时为 null |
 | agent_card | 完整 Card，保留可选字段及扩展 |
 
@@ -241,8 +244,9 @@ Content-Type: application/json
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
+| provider_bot_ref | 否 | 调用标识，规则见 2.1；与 Card 来源扩展的 agentId 相互独立，BCN 不从扩展推导，也不要求两者一致 |
 
-名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下名称或已登记来源 agentId 重复时返回 409。
+名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下名称或已登记来源 agentId 重复时返回 409；调用标识已被占用（包括已删除的 Agent）时返回 409 / PROVIDER_BOT_REF_CONFLICT。
 
 ## 4. 查询 AgentCard
 
@@ -337,6 +341,13 @@ Authorization: Bearer <provider_admin_token>
 
 source_agent_id 对应来源扩展 params.agentId：必填、1～256 字符、无首尾空白或控制字符，精确匹配，保留大小写与前导零。仅搜索 token 所属 Provider 下有效 gateway Agent。响应为 `{"items": [...]}`，包含 0 或 1 个 2.3 所示的管理对象；无结果返回 200 和空 items。省略筛选不支持全量列举。无需重新注册即可恢复 bot_id；此接口不是 upsert，也不提供注册幂等。未声明来源 agentId 的 Agent 无法按此条件找回。
 
+```http
+GET /a2a/agents?provider_bot_ref=hosted-agent-007
+Authorization: Bearer <provider_admin_token>
+```
+
+provider_bot_ref 按注册时提交的调用标识精确查找，规则见 2.1，响应格式相同。source_agent_id 与 provider_bot_ref 是两个独立的键，只能二选一传入，互不回退：例如托管 Agent 用托管 agentId 按 provider_bot_ref 查找，用平台 agentId 按 source_agent_id 查找。
+
 本期不提供 versions 或历史快照接口；Card.version 是接入方软件版本，不是 BCS 历史版本号。
 
 ## 7. 错误响应
@@ -378,6 +389,7 @@ details.field 指出错误字段，例如 agent_card.name；reason 为原因标�
 | 406 | NOT_ACCEPTABLE | Accept 不接受 JSON |
 | 409 | BOT_NAME_CONFLICT | 当前有效名称已占用 |
 | 409 | SOURCE_AGENT_CONFLICT | 同 Provider 下来源 agentId 重复 |
+| 409 | PROVIDER_BOT_REF_CONFLICT | 同 Provider 下调用标识已被占用，包括已删除的 Agent |
 | 409 | SOURCE_AGENT_CHANGE_NOT_ALLOWED | 试图修改或移除已登记来源标识 |
 | 409 | TARGET_CHANGED | 请求期间目标被移除、绑定变化或持续并发冲突；按原 ID 查询后重试 |
 | 409 | CARD_URL_REQUIRED | 内联 Card 无法通过 URL 刷新 |

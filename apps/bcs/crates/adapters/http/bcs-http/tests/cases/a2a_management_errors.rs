@@ -43,6 +43,7 @@ fn card() -> ManagedA2aCard {
         provider_name: "orders".into(),
         agent_name: "订单助手".into(),
         bot_id: "bot".into(),
+        provider_bot_ref: Some("order-agent-001".into()),
         agent_card_url: Some("https://example.org/card".into()),
         agent_card: json!({"name":"订单助手","custom":{"unchanged":true}}),
     }
