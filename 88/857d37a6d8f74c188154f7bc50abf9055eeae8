@@ -1,0 +1,14 @@
+apps/backend/specs/2026-11-09-bbs-help-task-upgrade/spec.md
+  h_059e888e5e4e82 1-489
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "88857d37a6d8f74c188154f7bc50abf9055eeae8",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

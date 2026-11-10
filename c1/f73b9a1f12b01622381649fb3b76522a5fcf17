@@ -1,0 +1,40 @@
+engine/adapter/src/engine/community/openclaw/client/tests/test_session_tool_children.py
+  s_0973af6fbd2b40::t_0a52a21cd0f8dd 1,4-6,8,10-71,73-79
+  s_0973af6fbd2b40::t_fd33d810ccaac5 80-113,116-117,121-123
+  s_0973af6fbd2b40::t_be9dcf2d68a6a1 124-132,134-138
+  s_0973af6fbd2b40::t_e2c5887f1b9050 72
+  s_0973af6fbd2b40::t_6da0c9a19a440a 7,9,114-115,118-120
+  s_0973af6fbd2b40::t_c1af61c5cd2e50 2-3,133
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_0973af6fbd2b40::t_073aec9753a0ca 817
+  s_0973af6fbd2b40::t_93b4ecd471ec6d 405-412,489-491,493,498,612
+  s_0973af6fbd2b40::t_c1af61c5cd2e50 488,494-497,712-714
+engine/adapter/src/engine/community/openclaw/client/child_runs.py
+  s_0973af6fbd2b40::t_073aec9753a0ca 120
+  s_0973af6fbd2b40::t_93b4ecd471ec6d 100-119,121-130
+engine/adapter/src/engine/community/openclaw/client/tests/test_session_tool_subscription.py
+  s_0973af6fbd2b40::t_64e407ab9b69f9 7,135-220
+  s_0973af6fbd2b40::t_a02600db738d18 77-105
+  s_0973af6fbd2b40::t_be9dcf2d68a6a1 10,106-134
+  s_0973af6fbd2b40::t_24fc85fbfe46f9 1-6,8-9,11-76
+engine/adapter/src/engine/community/openclaw/client/gateway_connection.py
+  s_0973af6fbd2b40::t_a02600db738d18 379-383,391-393,397-399
+  s_0973af6fbd2b40::t_c1af61c5cd2e50 164,190,364,377,404,415
+  s_0973af6fbd2b40::t_93b4ecd471ec6d 376,378,384-390,394-396,400-403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1f73b9a1f12b01622381649fb3b76522a5fcf17",
+  "prompts": {},
+  "sessions": {
+    "s_0973af6fbd2b40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0383d-905d-79f2-911d-ef58e355eebd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
