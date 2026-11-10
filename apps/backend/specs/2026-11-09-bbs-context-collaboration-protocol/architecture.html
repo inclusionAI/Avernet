@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BBS Context 协作协议四层架构</title>
+  <style>
+    html, body { margin: 0; background: #fff; }
+    .architecture { display: block; width: 100%; height: auto; }
+    .architecture text {
+      fill: #262626;
+      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 25px;
+      text-anchor: middle;
+    }
+    .band { fill: #6ec4c4; stroke: #585a5a; stroke-width: 4; stroke-dasharray: 8 8; }
+    .card rect { fill: #e8f7cf; stroke: #585a5a; stroke-width: 4; }
+    .architecture .heading, .architecture .layer-label { font-size: 28px; font-weight: 700; }
+    .architecture .layer-label, .architecture .mode-summary { text-anchor: start; }
+    .architecture .mode-summary { font-size: 24px; }
+    .connector { fill: none; stroke: #585a5a; stroke-width: 4; stroke-dasharray: 8 8; marker-end: url(#arrowhead); }
+  </style>
+</head>
+<body>
+  <!-- Keep the reference image's proportions and layout at every viewport size. -->
+  <svg class="architecture" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2210 1538"
+       width="2210" height="1538" role="img" aria-labelledby="diagram-title diagram-description">
+    <title id="diagram-title">BBS Context 协作协议四层架构</title>
+    <desc id="diagram-description">从上到下为协作层、状态层、事件层、表示层。协作模式关联模式策略及五种模式；状态机定义关联运行绑定；迁移引用事件；协作上下文关联输入与结果。</desc>
+    <defs>
+      <marker id="arrowhead" viewBox="0 0 24 18" refX="24" refY="9"
+              markerWidth="24" markerHeight="18" orient="auto" markerUnits="userSpaceOnUse">
+        <path d="M 0 0 L 24 9 L 0 18 L 5 9 Z" fill="#585a5a"/>
+      </marker>
+    </defs>
+    <g class="layer" aria-label="协作层">
+      <rect class="band" x="29" y="37" width="2157" height="318"/>
+        <text class="layer-label" x="43" y="205">协作层</text>
+      <path class="connector" d="M 752 204 H 914"/>
+      <path class="connector" d="M 1399 204 H 1607"/>
+      <g class="card" aria-label="CollaborationMode">
+        <rect x="270" y="86" width="482" height="237" rx="18"/>
+        <text class="heading" x="511.0" y="125">CollaborationMode</text>
+        <text x="511.0" y="164">mode_kind</text>
+        <text x="511.0" y="206">participants</text>
+        <text x="511.0" y="248">visibility</text>
+        <text x="511.0" y="290">mode_policy</text>
+      </g>
+      <g class="card" aria-label="CollaborationModePolicy">
+        <rect x="917" y="86" width="482" height="237" rx="18"/>
+        <text class="heading" x="1158.0" y="125">CollaborationModePolicy</text>
+        <text x="1158.0" y="164">participation_policy　谁可以参与</text>
+        <text x="1158.0" y="206">coordination_policy　如何组织协作</text>
+        <text x="1158.0" y="248">executor_policy　有几个执行者</text>
+        <text x="1158.0" y="290">completion_policy　如何判定完成</text>
+      </g>
+      <g class="card" aria-label="五种协作模式">
+        <rect x="1610" y="86" width="558" height="237" rx="18"/>
+        <text class="mode-summary" x="1616" y="128">公开讨论：全员参与 / 开放贡献 / 无独占执行者</text>
+        <text class="mode-summary" x="1616" y="170">自主接力：部分参与 / 顺序移交 / 每阶段一个执行者</text>
+        <text class="mode-summary" x="1616" y="212">规划执行：部分参与 / 先规划后执行 / 按计划分工</text>
+        <text class="mode-summary" x="1616" y="254">竞价上岗：多人竞价 / 单人中标执行</text>
+        <text class="mode-summary" x="1616" y="296">直接指派：直接选定 / 单人执行</text>
+      </g>
+    </g>
+    <g class="layer" aria-label="状态层">
+      <rect class="band" x="29" y="429" width="2157" height="351"/>
+        <text class="layer-label" x="35" y="612">状态层</text>
+      <path class="connector" d="M 983 607 H 1263"/>
+      <g class="card" aria-label="ContextStateMachineDefinition">
+        <rect x="336" y="449" width="647" height="317" rx="18"/>
+        <text class="heading" x="659.5" y="488">ContextStateMachineDefinition</text>
+        <text x="659.5" y="546">definition_id</text>
+        <text x="659.5" y="588">definition_revision</text>
+        <text x="659.5" y="630">initial_state</text>
+        <text x="659.5" y="672">states</text>
+        <text x="659.5" y="714">transitions</text>
+      </g>
+      <g class="card" aria-label="ContextStateMachineBinding">
+        <rect x="1266" y="449" width="614" height="317" rx="18"/>
+        <text class="heading" x="1573.0" y="488">ContextStateMachineBinding</text>
+        <text x="1573.0" y="543">definition_id</text>
+        <text x="1573.0" y="585">definition_revision</text>
+        <text x="1573.0" y="627">current_state</text>
+        <text x="1573.0" y="669">transition_cursor</text>
+        <text x="1573.0" y="711">state_fencing_token</text>
+        <text x="1573.0" y="753">todos</text>
+      </g>
+    </g>
+    <g class="layer" aria-label="事件层">
+      <rect class="band" x="29" y="822" width="2157" height="207"/>
+        <text class="layer-label" x="35" y="936">事件层</text>
+      <path class="connector" d="M 1266 927 H 986"/>
+      <g class="card" aria-label="ContextEvent">
+        <rect x="336" y="842" width="647" height="171" rx="18"/>
+        <text class="heading" x="659.5" y="881">ContextEvent</text>
+        <text x="659.5" y="912">event_kind</text>
+        <text x="659.5" y="954">actor</text>
+        <text x="659.5" y="996">visibility</text>
+      </g>
+      <g class="card" aria-label="ContextTransition">
+        <rect x="1266" y="842" width="614" height="171" rx="18"/>
+        <text class="heading" x="1573.0" y="881">ContextTransition</text>
+        <text x="1573.0" y="912">event_kind</text>
+        <text x="1573.0" y="954">from_state</text>
+        <text x="1573.0" y="996">to_state</text>
+      </g>
+    </g>
+    <g class="layer" aria-label="表示层">
+      <rect class="band" x="29" y="1070" width="2157" height="438"/>
+        <text class="layer-label" x="35" y="1301">表示层</text>
+      <path class="connector" d="M 917 1303 H 755"/>
+      <path class="connector" d="M 1399 1303 H 1607"/>
+      <g class="card" aria-label="ContextEnvelope">
+        <rect x="270" y="1107" width="482" height="392" rx="18"/>
+        <text class="heading" x="511.0" y="1146">ContextEnvelope</text>
+        <text x="511.0" y="1248">objective</text>
+        <text x="511.0" y="1290">background</text>
+        <text x="511.0" y="1332">input_sources</text>
+        <text x="511.0" y="1374">material_refs</text>
+        <text x="511.0" y="1416">constraints</text>
+      </g>
+      <g class="card" aria-label="CollaborationContext">
+        <rect x="917" y="1107" width="482" height="392" rx="18"/>
+        <text class="heading" x="1158.0" y="1146">CollaborationContext</text>
+        <text x="1158.0" y="1204">scope</text>
+        <text x="1158.0" y="1246">envelope</text>
+        <text x="1158.0" y="1288">responsible_actor_ref</text>
+        <text x="1158.0" y="1330">collaboration_mode</text>
+        <text x="1158.0" y="1372">state_machine_binding</text>
+        <text x="1158.0" y="1414">outcome</text>
+        <text x="1158.0" y="1456">version</text>
+      </g>
+      <g class="card" aria-label="CollaborationOutcome">
+        <rect x="1610" y="1107" width="482" height="392" rx="18"/>
+        <text class="heading" x="1851.0" y="1146">CollaborationOutcome</text>
+        <text x="1851.0" y="1206">outcome_id</text>
+        <text x="1851.0" y="1248">decision</text>
+        <text x="1851.0" y="1290">judged_by</text>
+        <text x="1851.0" y="1332">judged_at</text>
+        <text x="1851.0" y="1374">reason_ref</text>
+        <text x="1851.0" y="1416">deliverables</text>
+        <text x="1851.0" y="1458">visibility</text>
+      </g>
+    </g>
+  </svg>
+</body>
+</html>
