@@ -41,7 +41,9 @@ class ReplayQueryFidelityPolicy:
 
     def decide(self, row: SessionRow, candidate_query: str = "") -> ReplayQueryDecision:
         invocation = self.source_slash_command(row)
-        candidate = compact_replay_text(candidate_query, max_len=900)
+        # Generated replay input is already selected by the judge. Preserve its
+        # full context and URLs; only source slash commands may override it.
+        candidate = candidate_query.strip()
         if not invocation:
             return ReplayQueryDecision(query=candidate)
         return ReplayQueryDecision(
