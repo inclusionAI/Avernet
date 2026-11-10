@@ -1,14 +1,15 @@
-"""Context collab 服务用例编排(G1 校验 + G4 状态机 + 仓储)。
+"""Context collab 服务用例编排(G1 校验 + G4 状态机 + G3 投影 + 仓储)。
 
-本文件实现 ``create_context``(spec §6.2)与 ``append_event``
-(spec §6.3,接入 G4 状态机与守卫);``get_status`` 用例在后续
-任务落地,先留桩保证协议完整。服务层不感知 HTTP/Pydantic,
-仓储与授权都以协议注入。
+本文件实现 ``create_context``(spec §6.2)、``append_event``
+(spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
+纯读路径:visibility 过滤 → G3 投影 → 进度统计,不写任何行)。
+服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Sequence
 
 from injector import inject
 
@@ -19,6 +20,11 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
+    EventProjection,
+    build_progress,
+    project_events,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
@@ -58,6 +64,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ContextCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
+    TaskProgressProjectionDTO,
 )
 
 CREATION_EVENT_KIND = "task.created"
@@ -106,6 +113,41 @@ def _created_event_projection(event: EventRecord) -> dict:
         "event_kind": event.event_kind,
         "primitive_type": event.primitive_type,
     }
+
+
+_EVENT_PROJECTION_FIELDS = (
+    "event_id",
+    "parent_event",
+    "event_kind",
+    "primitive_type",
+    "status",
+    "summary",
+    "content",
+)
+
+
+def _event_projection_dict(projection: EventProjection) -> dict:
+    """投影事件 → ``task_progress.events[]`` 条目(spec §6.4)。
+
+    字段集合不含 ``steps``(§12.2 #5);值全部取自 G3 投影,不回读仓储。
+    """
+    return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
+
+
+def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
+    """按事件顺序取最后一个 payload 携带整数 ``percent`` 的值。
+
+    输入是已经过 visibility 过滤的事件序列(先于 trunk 过滤),保证
+    ``trunk_events`` 开关不影响 percent(§12.2 #4),也不向非参与方
+    泄露 private 分支的执行进度。``bool`` 不是合法 percent,跳过。
+    """
+    last_percent = None
+    for record in events:
+        percent = record.payload.get("percent")
+        if isinstance(percent, bool) or not isinstance(percent, int):
+            continue
+        last_percent = percent
+    return last_percent
 
 
 def _resolve_event_status(
@@ -287,4 +329,55 @@ class ContextCollabService(ContextCollabServiceProtocol):
         self, collab_context_id: str, *, trunk_events: bool,
         context: ActorContext
     ) -> ContextCollabStatusProjection:
-        raise NotImplementedError("get_status use case lands in the read-model task")
+        """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
+
+        ``repo.get_current_status`` 返回按 sequence 升序的全量事件;
+        visibility 过滤(G1)先于 G3 投影,统计与事件列表都只反映
+        actor 可见的事件。``trunk_events`` 只过滤事件条目,不改
+        current_snapshot / current_event / 统计(§12.2 #4)。返回的
+        ``current_snapshot`` 用 ``build_progress`` 的实时投影替换落库
+        progress(落库值只是最后一次写时的陈旧快照);``current_event``
+        按 collet 行指针取投影条目,指针事件不可见时为 ``None``。
+        """
+        status = self._repository.get_current_status(
+            collab_context_id, trunk_events=trunk_events
+        )
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        collet = status.collet
+        visible_events = self._authorizer.filter_visible_events(
+            collet, status.events, context
+        )
+        projection = project_events(
+            visible_events,
+            current_event_id=collet.current_event_id,
+            trunk_events=trunk_events,
+        )
+        progress = build_progress(
+            projection,
+            current_event_id=collet.current_event_id,
+            last_percent=_last_payload_percent(visible_events),
+        )
+        # to_dict 返回全新嵌套 dict,替换 progress 不会写回 collet 行。
+        snapshot = collet.current_snapshot.to_dict()
+        snapshot["progress"] = progress.to_dict()
+        current_event = None
+        for entry in projection:
+            if entry.event_id == collet.current_event_id:
+                current_event = {
+                    **_event_projection_dict(entry),
+                    "occurred_at": entry.occurred_at,
+                }
+                break
+        return ContextCollabStatusProjection(
+            collab_context_id=collet.collab_context_id,
+            context_version=collet.context_version,
+            current_snapshot=snapshot,
+            current_event=current_event,
+            task_progress=TaskProgressProjectionDTO(
+                total_events=len(projection),
+                events=[_event_projection_dict(entry) for entry in projection],
+            ),
+        )
