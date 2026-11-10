@@ -46,6 +46,15 @@ Catalog Search intersects BCS visibility/order with Backend service Bot
 `online_available` before public pagination. Joins are bounded to 100 candidates
 per batch; exact totals scan the matching catalog and retain only the requested
 window. Personal and BCS-native Bots keep their existing inclusion rules.
+Search offloads synchronous work at the HTTP boundary. After the first batch,
+at most two page reads overlap and are merged in BCS order; a process-wide
+two-scan reservation bounds extra workers and busy scans use the serial path.
+All first/parallel/serial page reads additionally share a four-read process budget.
+Every worker copies the request ContextVars and owns its repository Session.
+Catalog joins skip unused COUNT via `list_catalog_bots_by_owner_bot_pairs`;
+other repository callers keep their count and paging contract. No result cache
+or approximation of filtered totals is introduced. See the read-budget spec
+under `specs/2026-11-09-catalog-search-budget/` for rollout constraints.
 Display projections include only the saved avatar URL, not raw extension data.
 `publication_actions` and `friend_catalog_actions` contain the publication and
 friend/catalog responsibilities composed by `BotPublicService`; shared errors
