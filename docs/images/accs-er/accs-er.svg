@@ -3,7 +3,7 @@
 <rect width="2600" height="2000" fill="#fff"/>
 <style>text{font-family:Inter,Segoe UI,Arial,"PingFang SC",sans-serif;fill:#111827}.t{font-size:32px;font-weight:700}.s{font-size:17px;fill:#4b5563}.sec{font-size:21px;font-weight:700;fill:#1f2937}.box{font-size:19px;font-weight:700}.tag{font-size:13px;fill:#4b5563}.f{font-size:14px;fill:#4b5563}.r{font-size:13px;fill:#1f2937;paint-order:stroke;stroke:#fff;stroke-width:5px}</style>
 <text x="70" y="70" class="t">asfagent · ACCS 表关系 ER 图</text>
-<text x="70" y="105" class="s">21 张 accs_* 表 · 逻辑关系视图 · 不含数据库物理外键</text>
+<text x="70" y="105" class="s">代码基线 22 张 accs_* 表 · ODC 快照 21 张（缺 accs_device_binding） · 逻辑关系视图 · 不含数据库物理外键</text>
 <rect x="70" y="128" width="16" height="16" rx="3" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/><text x="94" y="141" class="f">协作 / 成员任务</text>
 <rect x="410" y="128" width="16" height="16" rx="3" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/><text x="434" y="141" class="f">事件 / 消息 / 水位</text>
 <rect x="750" y="128" width="16" height="16" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/><text x="774" y="141" class="f">席位 / 凭据 / Bot 身份</text>
@@ -115,16 +115,16 @@
 <path d="M730 1228H1250" stroke="#15803d" stroke-width="1"/>
 <text x="746" y="1215" class="box">accs_scan_watermark</text>
 <text x="1234" y="1215" text-anchor="end" class="tag">扫描水位</text>
-<text x="746" y="1245" class="f">PK job_name</text>
+<text x="746" y="1245" class="f">PK id · UK job_name</text>
 <text x="746" y="1265" class="f">watermark_ms / last_id</text>
 <text x="746" y="1285" class="f">作用：后台续扫点</text>
 <text x="746" y="1305" class="f">不是分布式锁</text>
-<text x="746" y="1325" class="f">覆盖 idem_gc / credential_gc / member_task_deadline</text>
+<text x="746" y="1325" class="f">推水位 5 job；member_task_repush 不在此表</text>
 <rect x="730" y="1430" width="520" height="220" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="2"/>
 <path d="M730 1468H1250" stroke="#15803d" stroke-width="1"/>
 <text x="746" y="1455" class="box">accs_schema_migration</text>
 <text x="1234" y="1455" text-anchor="end" class="tag">迁移账本</text>
-<text x="746" y="1485" class="f">PK version</text>
+<text x="746" y="1485" class="f">PK id · UK version</text>
 <text x="746" y="1505" class="f">name / checksum</text>
 <text x="746" y="1525" class="f">applied_at</text>
 <text x="746" y="1545" class="f">作用：schema 版本账本</text>
@@ -134,46 +134,46 @@
 <text x="1406" y="255" class="box">accs_participant</text>
 <text x="1894" y="255" text-anchor="end" class="tag">已入座席位</text>
 <text x="1406" y="285" class="f">PK id</text>
-<text x="1406" y="305" class="f">UK (collab_id, name)</text>
-<text x="1406" y="325" class="f">UK (collab_id, bot_id)</text>
-<text x="1406" y="345" class="f">state / capability_card_json</text>
-<text x="1406" y="365" class="f">作用：participants.join / leave / read</text>
+<text x="1406" y="305" class="f">UK (collab_id, name) / (collab_id, bot_id)</text>
+<text x="1406" y="325" class="f">state / capability_card_json</text>
+<text x="1406" y="345" class="f">last_alive_at / provisioned_by_collab</text>
+<text x="1406" y="365" class="f">作用：join / leave / seats</text>
 <rect x="1390" y="470" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
 <path d="M1390 508H1910" stroke="#c2410c" stroke-width="1"/>
-<text x="1406" y="495" class="box">accs_roster_agent</text>
-<text x="1894" y="495" text-anchor="end" class="tag">名册邀请</text>
+<text x="1406" y="495" class="box">accs_collab_credential</text>
+<text x="1894" y="495" text-anchor="end" class="tag">短期协作凭证</text>
 <text x="1406" y="525" class="f">PK id</text>
-<text x="1406" y="545" class="f">UK (collab_id, agent_bot_id)</text>
-<text x="1406" y="565" class="f">UK (collab_id, name)</text>
-<text x="1406" y="585" class="f">requires_json</text>
-<text x="1406" y="605" class="f">作用：被点名但未必已入座</text>
+<text x="1406" y="545" class="f">UK (collab_id, bot_id)</text>
+<text x="1406" y="565" class="f">token_prefix / token_hash / scopes</text>
+<text x="1406" y="585" class="f">status / expires_at / prev_*</text>
+<text x="1406" y="605" class="f">作用：Level-2 协作凭证</text>
 <rect x="1390" y="710" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
 <path d="M1390 748H1910" stroke="#c2410c" stroke-width="1"/>
-<text x="1406" y="735" class="box">accs_collab_credential</text>
-<text x="1894" y="735" text-anchor="end" class="tag">短期协作凭证</text>
+<text x="1406" y="735" class="box">accs_roster_agent</text>
+<text x="1894" y="735" text-anchor="end" class="tag">名册邀请</text>
 <text x="1406" y="765" class="f">PK id</text>
-<text x="1406" y="785" class="f">UK (collab_id, bot_id)</text>
-<text x="1406" y="805" class="f">token_prefix / token_hash</text>
-<text x="1406" y="825" class="f">status / expires_at</text>
-<text x="1406" y="845" class="f">prev_* / overlaps</text>
+<text x="1406" y="785" class="f">UK (collab_id, agent_bot_id)</text>
+<text x="1406" y="805" class="f">UK (collab_id, name)</text>
+<text x="1406" y="825" class="f">requires_json</text>
+<text x="1406" y="845" class="f">作用：被点名但未必入座</text>
 <rect x="1390" y="950" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
 <path d="M1390 988H1910" stroke="#c2410c" stroke-width="1"/>
 <text x="1406" y="975" class="box">accs_bot_token</text>
-<text x="1894" y="975" text-anchor="end" class="tag">长期 Token</text>
+<text x="1894" y="975" text-anchor="end" class="tag">Level-1 Token</text>
 <text x="1406" y="1005" class="f">PK id</text>
 <text x="1406" y="1025" class="f">UK token_prefix</text>
 <text x="1406" y="1045" class="f">bot_id / env / status</text>
-<text x="1406" y="1065" class="f">scopes</text>
-<text x="1406" y="1085" class="f">作用：Bot API 身份证</text>
+<text x="1406" y="1065" class="f">scopes（列，非表）</text>
+<text x="1406" y="1085" class="f">作用：Level-1 API 身份证</text>
 <rect x="1390" y="1190" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
 <path d="M1390 1228H1910" stroke="#c2410c" stroke-width="1"/>
 <text x="1406" y="1215" class="box">accs_bot_credential_health</text>
 <text x="1894" y="1215" text-anchor="end" class="tag">凭据健康账本</text>
 <text x="1406" y="1245" class="f">PK id</text>
 <text x="1406" y="1265" class="f">UK (bot_id, env)</text>
-<text x="1406" y="1285" class="f">last_renew_ok / last_renew_fail</text>
-<text x="1406" y="1305" class="f">last_connected_at / last_disconnect</text>
-<text x="1406" y="1325" class="f">consecutive_failures / first_failed_at</text>
+<text x="1406" y="1285" class="f">last_renew/exchange / last_connected</text>
+<text x="1406" y="1305" class="f">consecutive_failures / first_failed_ms</text>
+<text x="1406" y="1325" class="f">作用：凭据健康观测账本</text>
 <rect x="1390" y="1430" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
 <path d="M1390 1468H1910" stroke="#c2410c" stroke-width="1"/>
 <text x="1406" y="1455" class="box">accs_bot_owner</text>
@@ -182,7 +182,28 @@
 <text x="1406" y="1505" class="f">UK (env, bot_id)</text>
 <text x="1406" y="1525" class="f">owner_workno / owner_name</text>
 <text x="1406" y="1545" class="f">source / verified_at_ms</text>
-<text x="1406" y="1565" class="f">作用：观测台工号来源</text>
+<text x="1406" y="1565" class="f">作用：观测台归属人目录</text>
+<rect x="1390" y="1670" width="520" height="220" rx="10" fill="#fff7ed" stroke="#c2410c" stroke-width="2"/>
+<path d="M1390 1708H1910" stroke="#c2410c" stroke-width="1"/>
+<text x="1406" y="1695" class="box">accs_device_binding</text>
+<text x="1894" y="1695" text-anchor="end" class="tag">容器身份绑定</text>
+<text x="1406" y="1725" class="f">PK id</text>
+<text x="1406" y="1745" class="f">UK (bot_id, env)</text>
+<text x="1406" y="1765" class="f">client_id / token_hash / status</text>
+<text x="1406" y="1785" class="f">作用：本地补票权威</text>
+<text x="1406" y="1805" class="f">支持 exchange 换 Level-1 Token</text>
+<path d="M1650 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="466" class="r">0..1 seat→credential</text>
+<path d="M1390 620H1360V340H1390" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1260" y="610" class="r">0..1 roster→seat</text>
+<path d="M1910 1060H1960V620H1910" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1920" y="1050" class="r">0..N admin revoke by bot_id</text>
+<path d="M1650 1170V1190" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="1186" class="r">0..1 health by env+bot_id</text>
+<path d="M1650 1410V1430" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1660" y="1426" class="r">0..1 归属目录</text>
+<path d="M1910 1780H2020V1060H1910" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
+<text x="1928" y="1770" class="r">0..N exchange→L1</text>
 <rect x="2050" y="230" width="520" height="220" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
 <path d="M2050 268H2570" stroke="#64748b" stroke-width="1"/>
 <text x="2066" y="255" class="box">accs_session</text>
@@ -223,14 +244,5 @@
 <text x="610" y="786" class="r">0..N member_task_id / message_id</text>
 <path d="M2310 450V470" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
 <text x="2330" y="466" class="r">1..1 env+bot_id+epoch</text>
-<path d="M1650 450V470" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
-<text x="1660" y="466" class="r">0..1 roster→seat</text>
-<path d="M1650 930V950" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-<text x="1660" y="946" class="r">1..1 collab_id+bot_id</text>
-<path d="M1910 1060H1370" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5" fill="none" marker-end="url(#arr)"/>
-<text x="1500" y="1046" class="r">1..N bot_id+env</text>
-<path d="M1650 1170V1190" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-<text x="1660" y="1186" class="r">1..1 bot_id+env</text>
-<path d="M1650 1410V1430" stroke="#344054" stroke-width="2" fill="none" marker-end="url(#arr)"/>
-<text x="1660" y="1426" class="r">1..1 env+bot_id</text>
+<text x="70" y="1960" class="r">审计结论：accs_bot_token_scopes.sql 是为 accs_bot_token 添加 scopes 列的 ALTER，不是表；代码基线 22 张 CREATE TABLE；ODC 快照 21 张，差异为 accs_device_binding。</text>
 </svg>
