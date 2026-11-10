@@ -328,13 +328,15 @@ Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢�
 
 等待期间由现有wrapper轮询；临近Base期限仅释放execution并保存上下文。反馈可在活执行继续，也可启动新的execution恢复同一Task。原执行票据、CAS启动互斥和未知写入核实保持有效。CW重启后maintenance恢复已保存、尚未启动的确认任务。
 
+续接消息的投递身份绑定本次 Owner 待办，工具请求号标识单次发送尝试。发送前失败后可用新的工具请求号重试，已有进行中、通道已受理或结果未知的尝试时返回原回执。评估提交 `decision=message` 需有当前待办已受理或结果未知的投递回执；原任务已自行推进时提交 `decision=observe`。
+
 Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 ```json
 { "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } }, "bot_overrides": [] }
 ```
 
-保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试，首次创建后只更新固定outTrackId，不重建未知卡。未知创建之后的成功更新不独立证明Owner已收到卡片。
+保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 

@@ -612,3 +612,72 @@ it.each(["not_recovered", "unknown"] as const)("does not downgrade verified reco
   expect(await current(task.taskId)).toMatchObject({ status: "running", version: task.version, judgment: { effect: "recovered" }, observationDeadlineAt: task.observationDeadlineAt });
   expect(notifier.notify).not.toHaveBeenCalled(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
+
+async function confirmPermissionRequest(task: RecoveryStoredTask) {
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { phase: task.phase, kind: "owner_handoff", summary: "缺服务权限", evidence_ids: [read.evidenceId],
+    owner_request: { reason: "permission", instructions: "开通服务权限" } });
+  const waiting = await current(task.taskId);
+  await service.confirmOwner(task.taskId, waiting.ownerRequest!.requestId, actor);
+  const fresh = await inspect(await current(task.taskId), "fresh-after-permission");
+  expect(fresh.status).toBe("succeeded");
+  return { task: await current(task.taskId), fresh };
+}
+
+const ownerContinuation = { clientRequestId: "owner-continue", purpose: "权限反馈后恢复原任务", message: "请重试已开通权限的原操作。" };
+
+it("allows a new attempt after a pre-dispatch failure, and concurrent attempts share one dispatch", async () => {
+  const { task } = await confirmPermissionRequest(await create());
+  vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("temporary session locator failure"));
+  const failed = await agent.retryMessage(task, ownerContinuation);
+  expect(failed).toMatchObject({ status: "failed", result: { dispatched: false } });
+  expect(await agent.retryMessage(await current(task.taskId), ownerContinuation)).toEqual(failed);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+
+  const fresh = await current(task.taskId);
+  const [retry, concurrent] = await Promise.all([
+    agent.retryMessage(fresh, { ...ownerContinuation, clientRequestId: "owner-continue-2" }),
+    agent.retryMessage(fresh, { ...ownerContinuation, clientRequestId: "owner-continue-3" }),
+  ]);
+  expect(retry.toolCallId).not.toBe(failed.toolCallId);
+  expect(concurrent.toolCallId).toBe(retry.toolCallId);
+  expect(await agent.toolGet(fresh, retry.toolCallId)).toMatchObject({ status: "succeeded", result: { status: "accepted" } });
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it.each(["accepted", "unknown"] as const)("reuses the %s continuation receipt across executions", async status => {
+  const { task } = await confirmPermissionRequest(await create());
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status });
+  const sent = await agent.retryMessage(task, ownerContinuation);
+  await agent.release(await current(task.taskId));
+  await agent.start(await current(task.taskId));
+  const replacement = await current(task.taskId);
+  expect(replacement.execution!.executionId).not.toBe(task.execution!.executionId);
+
+  expect(await agent.retryMessage(replacement, ownerContinuation)).toEqual(sent);
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+  await expect(agent.report(await current(task.taskId), { kind: "blocked", phase: "assess", summary: "续接效果未确认" })).rejects.toMatchObject({ status: 422 });
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
+    summary: "继续观察本次投递结果", evidence_ids: [sent.evidenceId] });
+  expect((await current(task.taskId)).phase).toBe("observe");
+});
+
+it.each(["blocked", "owner_handoff"])("allows %s when Owner reevaluation cannot proceed and only an earlier send exists", async kind => {
+  const { task, fresh } = await confirmPermissionRequest(await toObserve(await create()));
+  await agent.report(task, { kind, phase: "assess", summary: "续接仍受阻，需先处理剩余事项", evidence_ids: [fresh.evidenceId] });
+  expect((await current(task.taskId)).status).toBe(kind === "blocked" ? "failed" : "completed");
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it("rejects a message assessment based on an earlier send or a failed current continuation", async () => {
+  const { task, fresh } = await confirmPermissionRequest(await toObserve(await create()));
+  const assessment = { kind: "assessment", phase: "assess", decision: "message", summary: "报告本轮投递", evidence_ids: [fresh.evidenceId] };
+  await expect(agent.report(task, assessment)).rejects.toMatchObject({ status: 422 });
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status: "failed" });
+  const failed = await agent.retryMessage(task, ownerContinuation);
+  expect(failed).toMatchObject({ status: "failed", result: { status: "failed" } });
+  await expect(agent.report(await current(task.taskId), { ...assessment, evidence_ids: [failed.evidenceId] })).rejects.toMatchObject({ status: 422 });
+  expect((await current(task.taskId)).phase).toBe("assess");
+  await agent.report(await current(task.taskId), { ...assessment, decision: "observe" });
+  expect((await current(task.taskId)).phase).toBe("observe");
+});
