@@ -185,9 +185,9 @@ CollaborationContext
   ├─ responsible_actor_ref
   ├─ collaboration_mode       # CollaborationMode，持有 visibility
   ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
-  ├─ outcomes[]               # ContextOutcome
-  ├─ version                   # 聚合乐观锁版本
-  ├─ event_cursor              # Context 事件日志位置：最近接纳事件的 sequence
+  ├─ outcome                  # 当前 active ContextOutcome
+  ├─ version                  # 聚合乐观锁版本
+  ├─ event_cursor             # Context 事件日志位置：最近接纳事件的 sequence
   ├─ active_work_ref
   └─ created_by / created_from / created_at / updated_at / closed_at
 ```
@@ -270,11 +270,11 @@ ContextDeliverable
 ```
 
 设计约束：
-- 一个 Context 同一时刻只有一个 active `ContextOutcome`；一个 `ContextOutcome` 可以包含多个 `ContextDeliverable`。
+- 一个 Context 同一时刻只有一个 active `ContextOutcome`；一个 `ContextOutcome` 通过 `deliverables[]` 表达多个协作产物，不需要在根上再保存 `outcomes[]`。
 - 验收通过、驳回或返工都必须通过 `outcome.accepted` / `outcome.rejected` 完成。
 - `ContextOutcome` 先记录“结果是什么”，再记录“是否被验收”；二者都属于同一个判定单元。
 - `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
-- 根只保存 `outcomes[]`，交付物由对应 Outcome 持有。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
+- 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
 
 ### 4.5 子实体：ContextStateMachineBinding
 
