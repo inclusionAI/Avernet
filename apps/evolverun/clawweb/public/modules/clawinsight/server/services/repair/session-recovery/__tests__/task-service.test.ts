@@ -1,6 +1,7 @@
 import { recoveryTargetSnapshot } from "../agent-service.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRecoveryError } from "../errors.js";
+import { DingTalkCardNotDispatchedError } from "../../../notifications/dingtalk-sender.js";
 import type { RecoveryStoredTask, RecoveryTaskStore } from "../task-contracts.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { parseRequest } from "../validation.js";
@@ -41,6 +42,24 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
+  it("retries card creation if the first request never left the notifier", async () => {
+    let now = 40000;
+    const { service, records, deps } = setup(false, () => now);
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.status = "waiting_owner";
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    const notify = vi.fn().mockRejectedValueOnce(new DingTalkCardNotDispatchedError(new Error("token unavailable"))).mockResolvedValueOnce(true);
+    deps.notifier.notifyOwnerRequest = notify;
+    await service.maintenance(); await flush();
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", dispatched: false });
+
+    now += 61000;
+    await service.maintenance(); await flush();
+    expect(notify.mock.calls.map(([input]) => input.updateOnly)).toEqual([false, false]);
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", state: "sent" });
+  });
+
   it("reconciles a crashed card send with bounded updates of the same instance, retaining unknown delivery", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);

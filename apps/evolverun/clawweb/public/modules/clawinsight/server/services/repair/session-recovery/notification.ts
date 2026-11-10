@@ -1,4 +1,4 @@
-import type { DingTalkNotificationSender } from "../../notifications/dingtalk-sender.js";
+import { DingTalkCardNotDispatchedError, type DingTalkNotificationSender } from "../../notifications/dingtalk-sender.js";
 import type { RecoveryTaskNotifier } from "./task-service.js";
 import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { fromMarkdown } from "mdast-util-from-markdown";
@@ -72,17 +72,12 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     private readonly controlPlaneEnvironment?: AgentControlPlaneEnvironment) {}
 
   async notifyOwnerRequest({ task, updateOnly }: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean> {
-    const request = task.ownerRequest, environment = this.controlPlaneEnvironment;
-    if (!request || !environment || resolveTaskControlPlaneEnvironment(task) !== environment) return false;
-    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-    if (!row) return false;
-    if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
-    if (!ownerNotificationEnabled(row.config_json, row.enabled, { ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: request.summary })) return false;
-    const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
-    if (!config?.callback_route_key) return false;
-    if (!this.sender?.sendCard || !this.sender.updateCard) throw new Error("Native card notification unavailable");
-    const url = new URL("/insight", this.publicBaseUrl);
-    url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
+    const prepared = await this.prepareOwnerCard(task).catch(error => { throw new DingTalkCardNotDispatchedError(error); });
+    if (!prepared) return false;
+    const { request, environment, config, url } = prepared;
+    if (!this.sender?.sendCard || !this.sender.updateCard) {
+      throw new DingTalkCardNotDispatchedError(new Error("Native card notification unavailable"));
+    }
     const terminal = ["completed", "failed", "canceled"].includes(task.status);
     const canConfirm = !terminal && request.status === "pending";
     const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
@@ -99,6 +94,20 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
       templateId: config.template_id, callbackRouteKey: config.callback_route_key });
     return true;
+  }
+
+  private async prepareOwnerCard(task: RecoveryStoredTask) {
+    const request = task.ownerRequest, environment = this.controlPlaneEnvironment;
+    if (!request || !environment || resolveTaskControlPlaneEnvironment(task) !== environment) return;
+    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
+    if (!row) return;
+    if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+    if (!ownerNotificationEnabled(row.config_json, row.enabled, { ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: request.summary })) return;
+    const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
+    if (!config?.callback_route_key) return;
+    const url = new URL("/insight", this.publicBaseUrl);
+    url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
+    return { request, environment, config, url };
   }
 
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {

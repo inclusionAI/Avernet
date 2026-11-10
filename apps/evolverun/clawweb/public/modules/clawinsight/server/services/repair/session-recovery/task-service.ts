@@ -7,7 +7,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { cronJobId } from "./session-identity.js";
 import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
-import { confirmOwnerRequest, requestOwnerCooperation } from "./owner-cooperation.js";
+import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation } from "./owner-cooperation.js";
+import { DingTalkCardNotDispatchedError } from "../../notifications/dingtalk-sender.js";
 import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
@@ -156,9 +157,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           cronWait: value.cronWait ?? { startedAt: this.now(), deadlineAt: this.now() + CRON_WAIT_MS },
           timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
       }
-      const ownerMessage = value.ownerRequest?.status === "confirmed" && value.timeline.some(event => event.kind === "operation"
-        && (event.payload.result as Record<string, unknown>)?.owner_request_id === value.ownerRequest!.requestId);
-      if (input.decision === "message" && !value.delivery && !ownerMessage && !(value.level === "debug" && value.timeline.some(event =>
+      const ownerRequest = value.ownerRequest;
+      if (input.decision === "message" && ownerRequest?.status === "confirmed") {
+        if (!hasAssessmentDelivery(value)) this.fail(422, "message 决策需要本次 Owner 反馈对应的已受理或结果未知的续接投递回执；发送前失败可用新请求号重试，已在推进请选择 observe");
+      } else if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
         event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(422, "message 决策需要已留存的初始消息或拟发送内容。若 retry_message 在投递前失败且无法继续，请保留受阻结论并返回 blocked；不要改写为已发送，也不要盲目重发结果未知的消息。");
       const debugFinished = value.level === "debug" && input.decision !== "environment";
       const observationPhase = value.ownerRequest?.status === "confirmed" && value.ownerRequest.resumePhase === "verify" ? "verify" as const : "observe" as const;
@@ -389,7 +391,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (input.effect !== undefined && !["recovered", "not_recovered", "unknown"].includes(input.effect)) this.fail(422, "Owner 转交效果仅接受 recovered / not_recovered / unknown，按原任务实际执行证据判断");
       const effect = input.effect ?? value.judgment?.effect ?? "unknown";
       if (effect === "recovered" || value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，不能以 owner_handoff 结束；assess 回报 decision=observe，plan 回报 observation，其他阶段按正常效果流程回报，优化建议写入完成总结");
-      if (value.phase === "assess" && value.delivery && value.delivery.delivery.status !== "failed") this.fail(422, "已有初始消息投递记录，不能转交结束并跳过效果回收；请回报 assessment、decision=message 进入 observe，不重复发送");
+      if (value.phase === "assess" && hasAssessmentDelivery(value)) this.fail(422, "已有本轮消息投递记录，不能转交结束并跳过效果回收；请回报 assessment、decision=message 进入 observe，不重复发送");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
         && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
@@ -554,18 +556,27 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return;
     }
     const id = `${key}-${attempts.length}`;
-    const updateOnly = task.timeline.some(event => event.kind === "notification" && event.payload.channel === "owner_card" && event.payload.state === "sending");
+    const notDispatched = new Set(task.timeline.filter(event => event.kind === "notification"
+      && event.payload.channel === "owner_card" && event.payload.dispatched === false).map(event => event.event_id));
+    const updateOnly = task.timeline.some(event => event.kind === "notification" && event.payload.channel === "owner_card"
+      && event.payload.operation === "create" && event.payload.state === "sending" && !notDispatched.has(`${event.event_id}-result`));
     const payload = { channel: "owner_card", owner_request_id: request.requestId, notification_key: key, kind: "owner_request", phase: task.phase, operation: updateOnly ? "update" : "create" };
     if (!await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", "正在同步 Owner 待办卡片", { ...payload, state: "sending" }), event_id: id })) return;
-    let state = "unconfirmed", synced = false;
+    let state = "unconfirmed", synced = false, failedBeforeDispatch = false;
     try {
       synced = !!await this.deps.notifier.notifyOwnerRequest?.({ task, updateOnly });
       // Updating an instance cannot prove a previous uncertain create/delivery succeeded.
       const delivered = !updateOnly || task.timeline.some(event => event.payload.channel === "owner_card" && event.payload.operation === "create" && event.payload.state === "sent");
       state = synced ? delivered ? "sent" : "unconfirmed" : "disabled";
     }
-    catch (error) { logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_unconfirmed", { taskId: task.taskId, ...repairLogError(error) }); }
-    await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", state === "sent" ? "Owner 待办卡片已同步" : state === "disabled" ? "卡片通知未启用，请在任务页处理" : "卡片发送结果未确认，请在任务页处理", { ...payload, state, sent: state === "sent", synced }), event_id: `${id}-result` });
+    catch (error) {
+      failedBeforeDispatch = error instanceof DingTalkCardNotDispatchedError;
+      logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_unconfirmed", { taskId: task.taskId, ...repairLogError(error) });
+    }
+    const summary = state === "sent" ? "Owner 待办卡片已同步" : state === "disabled" ? "卡片通知未启用，请在任务页处理"
+      : failedBeforeDispatch ? "卡片请求未发出" : "卡片发送结果未确认，请在任务页处理";
+    await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", summary,
+      { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` });
     if (["sent", "disabled"].includes(state) || attempts.length === 2) await this.settleOwnerCard(task.taskId, stateKey);
     // A slow old send must not leave a newer revision/terminal state overwritten.
     const latest = await this.required(task.taskId);
