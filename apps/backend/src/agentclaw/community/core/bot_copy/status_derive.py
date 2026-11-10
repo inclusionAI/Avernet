@@ -98,12 +98,17 @@ def compute_copy_status(
         # on_container apply running: device is up (on only runs post-ACTIVE).
         return BotCopyStatus.BOT_STARTED
 
-    if on.status == ApplyStatus.SUCCEEDED.value:
-        # Both applies terminal + device up → converged. Device not yet ACTIVE
-        # means the report outran the device-alive callback — still BOT_STARTED.
+    if on.status in (ApplyStatus.SUCCEEDED.value, ApplyStatus.PARTIAL.value):
+        # on_container is terminal: SUCCEEDED fully converged; PARTIAL means some
+        # entries did not land but the phase finished (a retry must converge the
+        # remainder via detail-page manifest apply, not the copy retry endpoint).
+        # Either way, with the dst device ACTIVE the copy itself is converged —
+        # the bot is up and usable; the partial remainder is a separate concern.
+        # Device not yet ACTIVE means the report outran the device-alive callback
+        # — still BOT_STARTED.
         return BotCopyStatus.CONVERGED if dst_bot_status == _ACTIVE else BotCopyStatus.BOT_STARTED
 
-    # on_container PARTIAL or otherwise non-terminal: not converged.
+    # on_container otherwise non-terminal: not converged.
     return BotCopyStatus.BOT_STARTED
 
 
