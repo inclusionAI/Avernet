@@ -589,8 +589,8 @@ impl SessionLaunchService for SessionLaunchApplication {
         let group_id = command.request.group_id.clone();
         let mut prepared = self.prepare(command.request).await?;
         if let Some(creator) = &prepared.params.created_by {
-            if contexts.iter().any(|entry| !entry.owners.contains(creator) && !entry.visible_to.is_visible_to(creator)) {
-                return Err(SessionLaunchError::Forbidden("session creator cannot read all requested contexts".into()));
+            if let Some(entry) = contexts.iter().find(|entry| !entry.owners.contains(creator) && !entry.visible_to.is_visible_to(creator)) {
+                return Err(SessionLaunchError::Forbidden(format!("session creator cannot read context {}", entry.name)));
             }
         }
         prepared.params.inherited_contexts = contexts;

@@ -531,18 +531,18 @@ those timestamps. This release does not expose a history API.
 ## Predefined names and Session inheritance
 
 `POST /groupcontext/list-slot?groupId=<group-id>` returns a `slots` array.
-Each entry contains `name`, `description`, `creator`, and `modifier`.
+Each entry contains `name`, `description`, `creator`, `modifier`, `gmtCreate`, and `gmtModified`.
 `bcs-cli group-context list-slot --group-id <group-id>` uses this endpoint.
 
-`POST /groupcontext/change-slot?groupId=<group-id>` accepts one operation:
+Slot management uses three Human-only POST endpoints with the `groupId` query parameter.
 
 | Operation | Request fields |
 | --- | --- |
-| `add` | `name` and optional `description` |
-| `edit` | Current `name`, optional `new_name`, and optional `description` |
-| `delete` | `name` |
+| `/groupcontext/add-slot` | `name` and optional `description` |
+| `/groupcontext/edit-slot` | Current `name`, optional `new_name`, and optional `description` |
+| `/groupcontext/delete-slot` | `name` |
 
-Set the `operation` field to the operation name. The route requires an
+Each route requires an
 authenticated Human with Owner or Manager (admin) authority on the Group
 driver Bot. Creation records that Human actor as both `creator` and
 `modifier`. Editing records the actor as `modifier` and retains `creator`.

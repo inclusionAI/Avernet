@@ -150,6 +150,23 @@ suffix when scope_level=round",
     }
 }
 
+impl GroupContextAddAccessGuard {
+    async fn authorize_slot_write(&self, group_id: &str, actor: &str) -> Result<Group, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
+            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller"))?;
+        let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
+            .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
+        if !authorized {
+            return Err(ApplicationError::forbidden_code(
+                "permission_denied",
+                "slot management requires owner or admin authority on the Group driver Bot",
+            ));
+        }
+        Ok(group)
+    }
+}
+
 #[async_trait]
 impl GroupContextApplicationService for GroupContextAddAccessGuard {
     async fn add(&self, mut command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
@@ -177,19 +194,19 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.list_slots(&group.id).await
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: bcs_service_api::application::v1::GroupContextSlotChange) -> Result<(), ApplicationError> {
-        let group = self.load_group(group_id).await?;
-        let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
-            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller"))?;
-        let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
-            .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
-        if !authorized {
-            return Err(ApplicationError::forbidden_code(
-                "permission_denied",
-                "slot management requires owner or admin authority on the Group driver Bot",
-            ));
-        }
-        self.inner.change_slot(&group.id, actor, change).await
+    async fn add_slot(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_slot_write(group_id, actor).await?;
+        self.inner.add_slot(&group.id, actor, name, description).await
+    }
+
+    async fn edit_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        let group = self.authorize_slot_write(group_id, actor).await?;
+        self.inner.edit_slot(&group.id, actor, name, new_name, description).await
+    }
+
+    async fn delete_slot(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_slot_write(group_id, actor).await?;
+        self.inner.delete_slot(&group.id, actor, name).await
     }
 
     async fn update(

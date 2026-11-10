@@ -31,10 +31,17 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(GroupContextAck::ok())
     }
 
-    async fn change_slot(
-        &self, _group_id: &str, actor: &str,
-        _change: bcs_service_api::application::v1::GroupContextSlotChange,
-    ) -> Result<(), ApplicationError> {
+    async fn add_slot(&self, _: &str, actor: &str, _: String, _: String) -> Result<(), ApplicationError> {
+        self.slot_actors.lock().unwrap().push(actor.to_owned());
+        Ok(())
+    }
+
+    async fn edit_slot(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
+        self.slot_actors.lock().unwrap().push(actor.to_owned());
+        Ok(())
+    }
+
+    async fn delete_slot(&self, _: &str, actor: &str, _: String) -> Result<(), ApplicationError> {
         self.slot_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
     }
@@ -369,7 +376,6 @@ async fn round_add_resolves_session_and_uses_session_membership_rule() {
 
 #[tokio::test]
 async fn slot_writes_require_live_authority_on_the_group_driver() {
-    use bcs_service_api::application::v1::GroupContextSlotChange;
     use bcs_test_support::{authority_edge_fixture, grant_manager_edge, grant_owner_edge};
 
     let authority = authority_edge_fixture();
@@ -386,18 +392,20 @@ async fn slot_writes_require_live_authority_on_the_group_driver() {
     let guard = GroupContextAddAccessGuard::new(
         inner.clone(), groups, Arc::new(MemorySessionRepo::new()), authority.hook,
     );
-    for change in [
-        GroupContextSlotChange::Add { name: "timeline".into(), description: String::new() },
-        GroupContextSlotChange::Edit { name: "timeline".into(), new_name: None, description: Some("events".into()) },
-        GroupContextSlotChange::Delete { name: "timeline".into() },
-    ] {
-        for actor in ["human_other", "driver"] {
-            assert_eq!(guard.change_slot(GROUP_ID, actor, change.clone()).await.unwrap_err().code(),
-                "permission_denied");
-        }
-        for actor in ["human_owner", "human_admin"] {
-            guard.change_slot(GROUP_ID, actor, change.clone()).await.unwrap();
+    for actor in ["human_other", "driver", "human_owner", "human_admin"] {
+        let results = [
+            guard.add_slot(GROUP_ID, actor, "timeline".into(), String::new()).await,
+            guard.edit_slot(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
+            guard.delete_slot(GROUP_ID, actor, "timeline".into()).await,
+        ];
+        for result in results {
+            if matches!(actor, "human_owner" | "human_admin") {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().code(), "permission_denied");
+            }
         }
     }
-    assert_eq!(*inner.slot_actors.lock().unwrap(), ["human_owner", "human_admin"].repeat(3));
+    assert_eq!(*inner.slot_actors.lock().unwrap(),
+        ["human_owner", "human_owner", "human_owner", "human_admin", "human_admin", "human_admin"]);
 }

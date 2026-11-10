@@ -95,8 +95,10 @@ impl GroupContextRepo for MemoryGroupContextRepo {
                 if slots.contains_key(&name) {
                     return Err(duplicate(name));
                 }
+                let now = chrono::Utc::now();
                 slots.insert(name.clone(), GroupContextSlot {
                     name, description, creator: actor.into(), modifier: actor.into(),
+                    gmt_create: now, gmt_modified: now,
                 });
             }
             GroupContextSlotChange::Edit { name, new_name, description } => {
@@ -107,6 +109,7 @@ impl GroupContextRepo for MemoryGroupContextRepo {
                 let mut slot = slots.remove(&name).ok_or_else(|| missing(name))?;
                 slot.name = target.clone();
                 slot.modifier = actor.into();
+                slot.gmt_modified = chrono::Utc::now();
                 if let Some(description) = description {
                     slot.description = description;
                 }

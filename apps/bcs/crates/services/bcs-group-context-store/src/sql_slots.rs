@@ -14,8 +14,13 @@ impl SqlGroupContextStore {
     }
 
     pub(super) async fn load_slots(&self, group_id: &str) -> StoreResult<Vec<GroupContextSlot>> {
+        let sql = format!(
+            "SELECT name, description, creator, modifier, {}, {} FROM bcs_group_context_slots WHERE group_id = ? ORDER BY name",
+            self.timestamp_ms_expr("gmt_create", "gmt_create_ms"),
+            self.timestamp_ms_expr("gmt_modified", "gmt_modified_ms"),
+        );
         let rows = self.db.query(DbStatement::with_params(
-            "SELECT name, description, creator, modifier FROM bcs_group_context_slots WHERE group_id = ? ORDER BY name",
+            sql,
             vec![group_id.into()],
         )).await.map_err(GroupContextStoreError::backend)?;
         rows.iter()
@@ -27,6 +32,8 @@ impl SqlGroupContextStore {
                     description: field("description")?,
                     creator: field("creator")?,
                     modifier: field("modifier")?,
+                    gmt_create: millis_column(row, "gmt_create_ms")?,
+                    gmt_modified: millis_column(row, "gmt_modified_ms")?,
                 })
             })
             .collect()
@@ -38,6 +45,10 @@ impl SqlGroupContextStore {
         actor: &str,
         change: GroupContextSlotChange,
     ) -> StoreResult<()> {
+        let modified_at = match self.flavor {
+            DbSqlFlavor::Mysql => "CURRENT_TIMESTAMP(3)",
+            DbSqlFlavor::Sqlite => "strftime('%Y-%m-%d %H:%M:%f', 'now')",
+        };
         let is_edit = matches!(&change, GroupContextSlotChange::Edit { .. });
         let (statement, name) = match change {
             GroupContextSlotChange::Add { name, description } => (
@@ -59,7 +70,7 @@ impl SqlGroupContextStore {
                 description,
             } => (
                 DbStatement::with_params(
-                    "UPDATE bcs_group_context_slots SET name = COALESCE(?, name), description = COALESCE(?, description), modifier = ? WHERE group_id = ? AND name = ?",
+                    format!("UPDATE bcs_group_context_slots SET name = COALESCE(?, name), description = COALESCE(?, description), modifier = ?, gmt_modified = {modified_at} WHERE group_id = ? AND name = ?"),
                     vec![
                         new_name.as_deref().into(),
                         description.as_deref().into(),

@@ -19,21 +19,19 @@ pub fn inheritance_step(
     use bcs_db_api::{DbStatement, DbTransactionStep, DbValue};
 
     let owners = serde_json::to_string(&bcs_domain::GroupContextOwners::new([owner]))?;
-    let mut params = vec![destination.into(), owner.into(), owners.into()];
-    let mut sources = Vec::with_capacity(entries.len());
+    let mut params = Vec::with_capacity(entries.len() * 3 + 3);
     for entry in entries {
-        sources.push("SELECT ? AS source_id, ? AS new_context_id");
-        params.extend([
-            DbValue::from(entry.id),
-            DbValue::from(ulid::Ulid::new().to_string()),
-        ]);
+        params.push(DbValue::from(entry.id));
+        params.push(DbValue::from(ulid::Ulid::new().to_string()));
     }
-    let sources = sources.join(" UNION ALL ");
+    params.extend([DbValue::from(destination), owner.into(), owners.into()]);
+    params.extend(entries.iter().map(|entry| DbValue::from(entry.id)));
+    let cases = vec!["WHEN ? THEN ?"; entries.len()].join(" ");
+    let ids = vec!["?"; entries.len()].join(", ");
     let sql = format!(
         "INSERT INTO bcs_group_contexts (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, owners_json, is_slot, valid_from, valid_to, tx_time) \
-         SELECT sources.new_context_id, source.name, source.scope_level, ?, source.content, ?, source.visible_to_json, source.collect_from_json, ?, source.is_slot, source.valid_from, source.valid_to, CURRENT_TIMESTAMP \
-         FROM bcs_group_contexts source JOIN ({sources}) sources ON source.id = sources.source_id \
-         WHERE source.scope_level = 'session' AND source.is_superseded = FALSE"
+         SELECT CASE id {cases} END, name, scope_level, ?, content, ?, visible_to_json, collect_from_json, ?, is_slot, valid_from, valid_to, CURRENT_TIMESTAMP \
+         FROM bcs_group_contexts WHERE id IN ({ids}) AND is_superseded = FALSE AND scope_level = 'session'"
     );
     Ok(DbTransactionStep::ExecuteChecked {
         statement: DbStatement::with_params(sql, params),

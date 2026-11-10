@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=43).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=44).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[29].name, "bot_provider_storage");
     // The new Group migration owns SQLite version 31 (Provider storage keeps
@@ -45,7 +45,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     // human-mention migration is MySQL version 030, Group context
     // owners is 034, collaboration drafts is 035 and bot authority
     // is MySQL version 036.
-    assert_eq!(versions, (1..=43).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=44).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
@@ -89,7 +89,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        (30..=43).collect::<Vec<_>>()
+        (30..=44).collect::<Vec<_>>()
     );
 
     run_sqlite_migrations(&db).await?;

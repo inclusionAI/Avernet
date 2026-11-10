@@ -134,6 +134,35 @@ impl GroupContextApplicationServiceImpl {
     }
 }
 
+impl GroupContextApplicationServiceImpl {
+    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> Result<(), ApplicationError> {
+        validate_name(group_id)?;
+        validate_actor(actor)?;
+        match &change {
+            GroupContextSlotChange::Add { name, description } => {
+                validate_name(name)?;
+                validate_content(description)?;
+            }
+            GroupContextSlotChange::Edit { name, new_name, description } => {
+                validate_name(name)?;
+                if let Some(name) = new_name {
+                    validate_name(name)?;
+                }
+                if let Some(description) = description {
+                    validate_content(description)?;
+                }
+            }
+            GroupContextSlotChange::Delete { name } => validate_name(name)?,
+        }
+        tracing::info!(group_id, actor, operation = match &change {
+            GroupContextSlotChange::Add { .. } => "add",
+            GroupContextSlotChange::Edit { .. } => "edit",
+            GroupContextSlotChange::Delete { .. } => "delete",
+        }, "Group Context slot mutation");
+        self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
+    }
+}
+
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
     async fn inheritance_sources(
@@ -173,26 +202,16 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         self.repo.list_slots(group_id).await.map_err(map_store_error)
     }
 
-    async fn change_slot(&self, group_id: &str, actor: &str, change: GroupContextSlotChange) -> Result<(), ApplicationError> {
-        validate_name(group_id)?;
-        validate_actor(actor)?;
-        match &change {
-            GroupContextSlotChange::Add { name, description } => {
-                validate_name(name)?;
-                validate_content(description)?;
-            }
-            GroupContextSlotChange::Edit { name, new_name, description } => {
-                validate_name(name)?;
-                if let Some(name) = new_name {
-                    validate_name(name)?;
-                }
-                if let Some(description) = description {
-                    validate_content(description)?;
-                }
-            }
-            GroupContextSlotChange::Delete { name } => validate_name(name)?,
-        }
-        self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
+    async fn add_slot(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        self.change_slot(group_id, actor, GroupContextSlotChange::Add { name, description }).await
+    }
+
+    async fn edit_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        self.change_slot(group_id, actor, GroupContextSlotChange::Edit { name, new_name, description }).await
+    }
+
+    async fn delete_slot(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        self.change_slot(group_id, actor, GroupContextSlotChange::Delete { name }).await
     }
 
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {

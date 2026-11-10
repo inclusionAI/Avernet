@@ -175,6 +175,10 @@ pub struct GroupContextSlot {
     pub description: String,
     pub creator: String,
     pub modifier: String,
+    #[serde(rename = "gmtCreate")]
+    pub gmt_create: GroupContextTime,
+    #[serde(rename = "gmtModified")]
+    pub gmt_modified: GroupContextTime,
 }
 
 #[derive(Debug, Clone)]

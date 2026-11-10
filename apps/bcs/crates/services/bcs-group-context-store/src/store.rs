@@ -286,19 +286,21 @@ impl SqlGroupContextStore {
 #[async_trait]
 impl GroupContextRepo for SqlGroupContextStore {
     async fn inheritance_sources(&self, scope: &str, names: Option<&[String]>) -> StoreResult<Vec<GroupContextEntry>> {
-        let mut sql = format!(
-            "SELECT {} FROM bcs_group_contexts WHERE scope = ? AND scope_level = 'session' AND is_superseded = FALSE",
-            self.select_cols(),
-        );
-        let mut params = vec![scope.into()];
-        if let Some(names) = names {
-            if names.is_empty() {
-                return Ok(Vec::new());
+        let columns = self.select_cols();
+        let (sql, params) = match names {
+            None => (
+                format!("SELECT {columns} FROM bcs_group_contexts WHERE scope = ? AND is_superseded = FALSE AND scope_level = 'session'"),
+                vec![scope.into()],
+            ),
+            Some([]) => return Ok(Vec::new()),
+            Some(names) => {
+                let placeholders = vec!["?"; names.len()].join(", ");
+                let sql = format!("SELECT {columns} FROM bcs_group_contexts WHERE name IN ({placeholders}) AND scope = ? AND is_superseded = FALSE AND scope_level = 'session'");
+                let params = names.iter().map(|name| DbValue::from(name.as_str()))
+                    .chain(std::iter::once(scope.into())).collect();
+                (sql, params)
             }
-            let placeholders = vec!["?"; names.len()].join(", ");
-            sql.push_str(&format!(" AND name IN ({placeholders})"));
-            params.extend(names.iter().map(|name| DbValue::from(name.as_str())));
-        }
+        };
         let rows = self.db.query(DbStatement::with_params(sql, params)).await.map_err(GroupContextStoreError::backend)?;
         rows.iter().map(|row| self.row_to_entry(row)).collect()
     }
@@ -647,6 +649,7 @@ mod tests {
             include_str!("../../../../migrations/sqlite/034_group_context.sql"),
             include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
             include_str!("../../../../migrations/sqlite/043_group_context_slot.sql"),
+            include_str!("../../../../migrations/sqlite/044_group_context_slot_audit.sql"),
         ] {
             for sql in migration
                 .split(';')

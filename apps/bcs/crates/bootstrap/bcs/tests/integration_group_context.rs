@@ -589,13 +589,12 @@ async fn owner_lifecycle_walkthrough_transfers_immediate_management_rights() {
 async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     let repo = Arc::new(MemoryGroupContextRepo::new());
     let app = app_with_repo(repo.clone()).await;
-    let management = "/groupcontext/change-slot?groupId=slot-group";
     let list = "/groupcontext/list-slot?groupId=slot-group";
     let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
     for operation in ["add", "edit", "delete"] {
         let (status, _) = post_json(
-            &app, management, token_for("admin"),
-            json!({"operation":operation,"name":"timeline"}),
+            &app, &format!("/groupcontext/{operation}-slot?groupId=slot-group"), token_for("admin"),
+            json!({"name":"timeline"}),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
@@ -754,20 +753,21 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
         app.clone().oneshot(request)
     };
 
-    let endpoint = "/groupcontext/change-slot?groupId=slot-group";
-    let add = json!({"operation":"add","name":"timeline"});
+    let add = "/groupcontext/add-slot?groupId=slot-group";
+    let edit = "/groupcontext/edit-slot?groupId=slot-group";
+    let delete = "/groupcontext/delete-slot?groupId=slot-group";
     for (uri, body) in [
-        ("/groupcontext/change-slot", add.clone()),
-        (endpoint, json!({"operation":"unknown"})),
+        ("/groupcontext/add-slot", json!({"name":"timeline"})),
+        (add, json!({})),
     ] {
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
     }
 
-    for body in [
-        add,
-        json!({"operation":"edit","name":"timeline","new_name":"events","description":"Key events"}),
+    for (uri, body) in [
+        (add, json!({"name":"timeline"})),
+        (edit, json!({"name":"timeline","new_name":"events","description":"Key events"})),
     ] {
-        let response = post(endpoint, body).await.unwrap();
+        let response = post(uri, body).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["status"], "ok");
     }
@@ -777,9 +777,10 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
     assert_eq!(slots[0].description, "Key events");
     assert_eq!(slots[0].creator, "human_slot-owner");
     assert_eq!(slots[0].modifier, "human_slot-owner");
+    assert!(slots[0].gmt_modified >= slots[0].gmt_create);
 
-    let delete = json!({"operation":"delete","name":"events"});
-    assert_eq!(post(endpoint, delete.clone()).await.unwrap().status(), StatusCode::OK);
+    let body = json!({"name":"events"});
+    assert_eq!(post(delete, body.clone()).await.unwrap().status(), StatusCode::OK);
     assert!(repo.list_slots("slot-group").await.unwrap().is_empty());
-    assert_eq!(post(endpoint, delete).await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(post(delete, body).await.unwrap().status(), StatusCode::NOT_FOUND);
 }

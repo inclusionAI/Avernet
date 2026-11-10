@@ -134,10 +134,24 @@ mod mysql_chain;
 async fn mysql_commits_contexts_with_session() {
     let db = mysql_chain::MysqlConformanceDb::open_empty().await;
     let versions = db.apply_full_migration_chain().await;
-    assert_eq!(versions.last(), Some(&43));
+    assert_eq!(versions.last(), Some(&44));
     let contexts = SqlGroupContextStore::oceanbase(db.plugin.clone());
     let sessions = MySqlSessionStore::new(db.plugin.clone(), "dev".into());
     assert_atomic_inheritance(&sessions, &contexts).await;
+    use bcs_domain::group_context::GroupContextSlotChange;
+    contexts.change_slot(GROUP, "owner", GroupContextSlotChange::Add {
+        name: "timeline".into(), description: String::new(),
+    }).await.unwrap();
+    let before = contexts.list_slots(GROUP).await.unwrap().remove(0);
+    contexts.change_slot(GROUP, "admin", GroupContextSlotChange::Edit {
+        name: "timeline".into(), new_name: Some("events".into()), description: None,
+    }).await.unwrap();
+    let after = contexts.list_slots(GROUP).await.unwrap().remove(0);
+    assert_eq!(after.name, "events");
+    assert_eq!(after.creator, "owner");
+    assert_eq!(after.modifier, "admin");
+    assert_eq!(before.gmt_create, after.gmt_create);
+    assert!(after.gmt_modified >= before.gmt_modified);
     db.close().await;
 }
 

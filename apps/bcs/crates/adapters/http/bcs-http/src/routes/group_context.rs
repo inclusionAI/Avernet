@@ -6,7 +6,6 @@
 //! resolves the effective actor from trusted headers/server-side token lookup.
 //! The actor is never trusted from the JSON body or URL query.
 
-use bcs_service_api::application::v1::GroupContextSlotChange;
 
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Json, Query, State};
@@ -129,14 +128,6 @@ pub(crate) async fn add(
     Ok(json_ok(result))
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-pub(crate) enum SlotRequest {
-    Add { name: String, #[serde(default)] description: String },
-    Edit { name: String, new_name: Option<String>, description: Option<String> },
-    Delete { name: String },
-}
-
 pub(crate) async fn list_slot(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -150,30 +141,70 @@ pub(crate) async fn list_slot(
     Ok(json_ok(serde_json::json!({ "slots": slots })))
 }
 
-pub(crate) async fn change_slot(
+#[derive(Deserialize)]
+pub(crate) struct AddSlotRequest { name: String, #[serde(default)] description: String }
+
+pub(crate) async fn add_slot(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<SlotRequest>, JsonRejection>,
+    body: Result<Json<AddSlotRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
+    let Json(AddSlotRequest { name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.add_slot(&group_id, &actor, name, description).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct EditSlotRequest { name: String, new_name: Option<String>, description: Option<String> }
+
+pub(crate) async fn edit_slot(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<EditSlotRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
+    let Json(EditSlotRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.edit_slot(&group_id, &actor, name, new_name, description).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeleteSlotRequest { name: String }
+
+pub(crate) async fn delete_slot(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<DeleteSlotRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
+    let Json(DeleteSlotRequest { name }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.delete_slot(&group_id, &actor, name).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+async fn slot_write_context(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+) -> Result<(String, String), GroupContextHttpError> {
     use super::group_messages::{GroupChatCaller, resolve_group_chat_caller};
 
-    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+    let caller = resolve_group_chat_caller(state, headers, uri).await
         .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
     let GroupChatCaller::Human(human) = caller else {
         return Err(ApplicationError::forbidden_code("permission_denied", "slot management requires a Human caller").into());
     };
     let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
-    let Json(body) = body.map_err(GroupContextHttpError::from_json_rejection)?;
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
-    let change = match body {
-        SlotRequest::Add { name, description } => GroupContextSlotChange::Add { name, description },
-        SlotRequest::Edit { name, new_name, description } => GroupContextSlotChange::Edit { name, new_name, description },
-        SlotRequest::Delete { name } => GroupContextSlotChange::Delete { name },
-    };
-    state.services.group_context.change_slot(&group_id, &human.actor_id, change).await?;
-    Ok(json_ok(GroupContextAck::ok()))
+    Ok((human.actor_id, group_id))
 }
 
 pub(crate) async fn update(

@@ -160,6 +160,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 41, name: "group_agent_cards" },
     SqliteMigration { version: 42, name: "auth_session_version" },
     SqliteMigration { version: 43, name: "group_context_slot" },
+    SqliteMigration { version: 44, name: "group_context_slot_audit" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -566,6 +567,20 @@ async fn apply_sqlite_migration_body(
                 }
                 db.execute(DbStatement::new(sql)).await?;
             }
+            Ok(())
+        }
+        44 => {
+            let columns = sqlite_table_columns(db, "bcs_group_context_slots").await?;
+            if columns.iter().any(|column| column == "id") {
+                return Ok(());
+            }
+            let steps = include_str!("../../../../migrations/sqlite/044_group_context_slot_audit.sql")
+                .split(';')
+                .map(str::trim)
+                .filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+                .collect();
+            db.transaction(steps).await?;
             Ok(())
         }
         _ => Ok(()),
