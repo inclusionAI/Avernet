@@ -32,5 +32,7 @@ pub trait A2aBotRepoPort: Send + Sync {
     /// Bounded keyset page of URL-backed Cards, at most 16 full snapshots.
     /// Inline Cards are excluded; callers keep their refresh-round cursor.
     async fn get_by_name(&self, provider_id:&str, name:&str)->ServiceResult<Option<A2aBotRecord>>;
+    /// Exact, case-sensitive source extension agentId in one Provider; never a global lookup.
+    async fn get_by_source_agent_id(&self, provider_id:&str, source_agent_id:&str)->ServiceResult<Option<A2aBotRecord>>;
     async fn refreshable(&self, after_bot_uuid: Option<&str>, limit: u32) -> ServiceResult<Vec<A2aBotRecord>>;
 }

@@ -14,6 +14,7 @@ pub struct ConfigureA2aBotCommand {
 
 #[derive(Clone,Debug)]
 pub struct NamedA2aCard {
+    pub bot_id:String,
     pub provider_name:String,
     pub bot_name:String,
     pub agent_card_url:Option<String>,
@@ -48,17 +49,22 @@ pub trait A2aBotManagementService: Send + Sync {
     async fn register_agent(&self,_command:RegisterAgentCommand)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
-    async fn get_agent(&self,_token:&str,_name:&str)->ServiceResult<ManagedA2aCard> {
+    /// Exact source key recovery, scoped by authenticated Provider; zero or one result.
+    async fn find_agents_by_source_id(&self,_token:&str,_source_agent_id:&str)->ServiceResult<Vec<ManagedA2aCard>> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
-    async fn update_agent(&self,_token:&str,_name:&str,_source:crate::types::a2a_bot::A2aCardSource)->ServiceResult<ManagedA2aCard> {
+    /// Provider-scoped management uses the stable ID returned by registration, never Card.name.
+    async fn get_agent_by_id(&self,_token:&str,_bot_id:&str)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
-    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<crate::types::a2a_bot::A2aCardSource>,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
-        if visibility.is_none() { if let Some(source)=source { return self.update_agent(token,name,source).await; } }
+    async fn update_agent_by_id(&self,_token:&str,_bot_id:&str,_source:crate::types::a2a_bot::A2aCardSource)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    async fn update_agent_by_id_with_visibility(&self,token:&str,bot_id:&str,source:Option<crate::types::a2a_bot::A2aCardSource>,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
+        if visibility.is_none() { if let Some(source)=source { return self.update_agent_by_id(token,bot_id,source).await; } }
         Err(crate::ServiceError::InternalError("visibility update unavailable".into()))
     }
-    async fn refresh_agent(&self,_token:&str,_name:&str)->ServiceResult<ManagedA2aCard> {
+    async fn refresh_agent_by_id(&self,_token:&str,_bot_id:&str)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
     }
 
@@ -69,15 +75,6 @@ pub trait A2aBotManagementService: Send + Sync {
     }
     async fn register_named(&self,_command:RegisterNamedA2aBotCommand)->ServiceResult<NamedA2aRegistration> {
         Err(crate::ServiceError::InternalError("named A2A registration is not configured".into()))
-    }
-    async fn get_named(&self,_provider:&str,_token:&str,_bot:&str)->ServiceResult<NamedA2aCard> {
-        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
-    }
-    async fn configure_named(&self,_provider:&str,_token:&str,_bot:&str,_source:crate::types::a2a_bot::A2aCardSource,_now_ms:i64)->ServiceResult<NamedA2aCard> {
-        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
-    }
-    async fn refresh_named(&self,_provider:&str,_token:&str,_bot:&str,_now_ms:i64)->ServiceResult<NamedA2aCard> {
-        Err(crate::ServiceError::InternalError("named A2A management is not configured".into()))
     }
     /// Provider-admin admission: fetch before the atomic Bot/ownership/Card
     /// create. Existing Provider/ref conflicts; this never updates a Bot.

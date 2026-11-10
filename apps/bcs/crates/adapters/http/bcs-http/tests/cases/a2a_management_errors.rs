@@ -55,9 +55,9 @@ impl A2aBotManagementService for Management {
         self.result()?;
         Ok("target-bot".into())
     }
-    async fn get_agent(&self, token: &str, name: &str) -> ServiceResult<ManagedA2aCard> {
+    async fn get_agent_by_id(&self, token: &str, name: &str) -> ServiceResult<ManagedA2aCard> {
         assert_eq!(token, "test-admin");
-        assert_eq!(name, "订单助手");
+        assert_eq!(name, "bot");
         self.result()?;
         Ok(card())
     }
@@ -83,6 +83,7 @@ impl A2aBotManagementService for Management {
         self.result()?;
         Ok(NamedA2aRegistration {
             card: NamedA2aCard {
+                bot_id: "bot".into(),
                 provider_name: "orders".into(),
                 bot_name: "订单助手".into(),
                 agent_card_url: None,
@@ -94,16 +95,16 @@ impl A2aBotManagementService for Management {
     async fn get(&self, _: &str, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> {
         panic!("legacy ID path")
     }
-    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
+    async fn update_agent_by_id_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
         if let Some(visibility)=visibility {
             assert_eq!(token,"test-admin");
-            assert_eq!(name,"订单助手");
+            assert_eq!(name,"bot");
             assert!(source.is_none());
             *self.visibility.lock().unwrap()=Some(visibility);
             self.result()?;
             return Ok(card());
         }
-        self.update_agent(token,name,source.unwrap()).await
+        self.update_agent_by_id(token,name,source.unwrap()).await
     }
     async fn configure(&self, _: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord> {
         panic!("legacy ID path")
@@ -142,7 +143,7 @@ fn request(method: &str, path: &str, body: impl Into<Body>) -> Request<Body> {
 async fn read(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap()
 }
-const QUERY: &str = "/a2a/agent-card?agent_name=%E8%AE%A2%E5%8D%95%E5%8A%A9%E6%89%8B";
+const QUERY: &str = "/a2a/agents/bot/agent-card";
 
 #[tokio::test]
 async fn application_failures_have_stable_status_codes_and_safe_details() {
@@ -273,7 +274,7 @@ async fn management_codes_preserve_actionable_fields_and_retry_headers() {
 struct CodeFailure(Code);
 #[async_trait]
 impl A2aBotManagementService for CodeFailure {
-    async fn get_agent(&self, _: &str, _: &str) -> ServiceResult<ManagedA2aCard> {
+    async fn get_agent_by_id(&self, _: &str, _: &str) -> ServiceResult<ManagedA2aCard> {
         Err(ManagementError::new(self.0, "agent_card", "CONTRACT_FAILURE").into())
     }
     async fn get(&self, _: &str, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> {
@@ -378,7 +379,7 @@ async fn url_registration_and_legacy_named_registration_keep_distinct_response_c
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
     let location = response.headers()["location"].to_str().unwrap();
-    assert!(location.starts_with("/a2a/agent-card?agent_name=%"));
+    assert_eq!(location, "/a2a/agents/bot/agent-card");
     let value = read(response).await;
     assert_eq!(value["agent_card"]["custom"]["unchanged"], true);
     assert!(value.get("bot_runtime_token").is_none());
@@ -518,13 +519,13 @@ async fn legacy_service_implementations_cannot_silently_admit_new_public_methods
         ("GET", QUERY, String::new()),
         (
             "PUT",
-            "/a2a/agent-card",
-            json!({"agent_name":"订单助手","agent_card":{}}).to_string(),
+            "/a2a/agents/bot/agent-card",
+            json!({"agent_card":{}}).to_string(),
         ),
         (
             "POST",
-            "/a2a/agent-card/refresh",
-            json!({"agent_name":"订单助手"}).to_string(),
+            "/a2a/agents/bot/agent-card:refresh",
+            json!({}).to_string(),
         ),
         (
             "POST",
@@ -553,30 +554,7 @@ async fn legacy_service_implementations_cannot_silently_admit_new_public_methods
             .await
             .is_err()
     );
-    assert!(
-        LegacyOnly
-            .get_named("orders", "token", "agent")
-            .await
-            .is_err()
-    );
-    assert!(
-        LegacyOnly
-            .configure_named(
-                "orders",
-                "token",
-                "agent",
-                A2aCardSource::Inline(json!({})),
-                1
-            )
-            .await
-            .is_err()
-    );
-    assert!(
-        LegacyOnly
-            .refresh_named("orders", "token", "agent", 1)
-            .await
-            .is_err()
-    );
+
 }
 
 #[tokio::test]
@@ -763,11 +741,11 @@ async fn registration_visibility_defaults_and_invalid_values_fail_before_admissi
 async fn visibility_only_update_is_routed_and_empty_or_invalid_updates_are_rejected() {
     use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Public;
     let (app,service)=app(None);
-    let response=app.clone().oneshot(request("PUT","/a2a/agent-card",json!({"agent_name":"订单助手","visibility":"public"}).to_string())).await.unwrap();
+    let response=app.clone().oneshot(request("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"public"}).to_string())).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
     assert_eq!(*service.visibility.lock().unwrap(),Some(Public));
-    for body in [json!({"agent_name":"订单助手"}),json!({"agent_name":"订单助手","visibility":"private"})] {
-        let response=app.clone().oneshot(request("PUT","/a2a/agent-card",body.to_string())).await.unwrap();
+    for body in [json!({}),json!({"visibility":"private"})] {
+        let response=app.clone().oneshot(request("PUT","/a2a/agents/bot/agent-card",body.to_string())).await.unwrap();
         assert_eq!(response.status(),StatusCode::BAD_REQUEST);
     }
     assert_eq!(service.calls.load(Ordering::SeqCst),1);

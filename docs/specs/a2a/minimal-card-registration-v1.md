@@ -170,11 +170,15 @@ column shortening are deferred until existing data is corrected. The undeployed
 Development databases that already applied an earlier 040 must use a fresh disposable
 schema or an explicit reviewed repair, never silently rewrite migration history.
 
-Name-only management routes are `/a2a/providers/{provider_name}/bots` and
-`/a2a/agent-card` (GET query / PUT body), plus `/a2a/agent-card/refresh` (POST body).
-The management responses use names and omit internal identity/revision fields.
-The legacy ID routes remain compatible. New behavior requires
-fresh validation; the historical evidence file above does not validate them.
+Public management uses GET/PUT `/a2a/agents/{bot_id}/agent-card` and POST
+`/a2a/agents/{bot_id}/agent-card:refresh`. POST `/a2a/agents` returns the stable
+`bot_id` and Location points to the ID resource. PUT body contains only Card
+source and/or visibility; refresh body is empty or {}. Old name-management routes
+are removed, not aliased. GET `/a2a/agents?source_agent_id=...` recovers zero or
+one Provider-scoped result by exact immutable source extension agentId. No version
+history or PATCH is introduced. Existing Provider-ID management remains ID-based;
+Provider-name registration also exposes bot_id. Named chat is a separate contract.
+Fresh validation is required; historical evidence above does not validate these changes.
 
 ### Anonymous-policy rollout
 

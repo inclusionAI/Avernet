@@ -155,6 +155,32 @@ async fn availability_is_bounded_scope_local_and_retains_invalid_a2a_markers() {
     assert!(store.availability_many(&vec!["bot".into(); 257]).await.is_err());
 }
 
+#[tokio::test]
+async fn source_key_lookup_is_exact_bounded_and_propagates_read_failures() {
+    use std::sync::atomic::{AtomicBool,AtomicUsize,Ordering};
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+    let inner=database().await;
+    let setup=DbA2aBotStore::sqlite(inner.clone(),"test".into());
+    let mut value=record();
+    value.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001Ab"}}]});
+    setup.compare_and_set(&value,0).await.unwrap();
+    let db=Arc::new(CountedDb {inner:inner.clone(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    assert_eq!(store.get_by_source_agent_id("provider","001Ab").await.unwrap(),Some(value.clone()));
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    for source in ["001ab","1Ab","001Ab' OR 1=1 --"] {
+        assert!(store.get_by_source_agent_id("provider",source).await.unwrap().is_none());
+        assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    }
+    assert!(store.get_by_source_agent_id("other-provider","001Ab").await.unwrap().is_none());
+    assert!(DbA2aBotStore::sqlite(db.clone(),"other".into()).get_by_source_agent_id("provider","001Ab").await.unwrap().is_none());
+    // Corrupt legacy duplicates must fail rather than choosing an arbitrary identity.
+    inner.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_revision) VALUES ('duplicate','test','provider','dup','gateway',?,1)",vec![value.agent_card.to_string().into()])).await.unwrap();
+    assert!(store.get_by_source_agent_id("provider","001Ab").await.is_err());
+    db.fail.store(true,Ordering::SeqCst);
+    assert!(store.get_by_source_agent_id("provider","001Ab").await.is_err());
+}
+
 struct CountedDb {
     inner:Arc<LocalSqliteDbPlugin>,
     queries:std::sync::atomic::AtomicUsize,
@@ -271,6 +297,8 @@ async fn source_identity_constraints_apply_to_direct_store_writes_and_are_scoped
     assert!(store.get("second").await.unwrap().is_none());
     let mut foreign=second.clone();foreign.bot_uuid="foreign".into();foreign.provider_id="other-provider".into();foreign.provider_bot_ref="foreign".into();
     assert!(store.compare_and_set(&foreign,0).await.unwrap());
+    assert_eq!(store.get_by_source_agent_id("provider","001Ab").await.unwrap().unwrap().bot_uuid,first.bot_uuid);
+    assert_eq!(store.get_by_source_agent_id("other-provider","001Ab").await.unwrap().unwrap().bot_uuid,foreign.bot_uuid);
     for replacement in [json!([]),json!([{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001ab"}}])] {
         let mut changed=first.clone();changed.agent_card["name"]=json!("Must not rename");changed.agent_card["capabilities"]["extensions"]=replacement;
         assert!(matches!(store.replace(&changed).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentChangeNotAllowed));
