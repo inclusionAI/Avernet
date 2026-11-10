@@ -34,6 +34,7 @@
       "deploy_runtime": "managed"
     },
     "bot_config_manifest": {
+      "content_store_backend": "fs",
       "content_store_dir": "./data/manifest_content",
       "fetch_transport_allowlist": [],
       "teclaw_platform_managed": false
