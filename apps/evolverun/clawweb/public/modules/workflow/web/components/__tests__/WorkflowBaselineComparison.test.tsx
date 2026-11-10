@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 import WorkflowBaselineComparison from '../WorkflowBaselineComparison'
@@ -9,22 +9,35 @@ import type { ReconciliationContext } from '../../api/workflowSnapshotReconcilia
 const db = { id: 'wf', title: 'database', version: '1', nodes: [{ id: 'start', title: 'Start', executor: { type: 'done' } }] }
 const git = { ...db, title: 'git' }
 const base64 = (text: string) => Buffer.from(text, 'utf8').toString('base64')
-function fixture(gitYaml = stringify(git)) {
+function fixture(gitYaml = stringify(git), candidateSpecJson = JSON.stringify({ ...db, title: 'local edit' })) {
   const file = { path: 'workflow.yaml', mode: '100644' as const, contentBase64: base64(gitYaml) }
   const context: ReconciliationContext = { workflowId: 'wf', packId: 'pack', sourceVersion: 'draft', sourceCommit: 'a'.repeat(40),
     expectedSavedHead: 'a'.repeat(40), expectedDraftToken: 'b'.repeat(64), workflowPath: 'workflow.yaml',
-    dbSpecJson: JSON.stringify(db), candidateSpecJson: JSON.stringify({ ...db, title: 'local edit' }), gitYaml,
+    dbSpecJson: JSON.stringify(db), candidateSpecJson, gitYaml,
     filesBefore: [file], filesAfter: [file], changes: [], revision: '1' }
   return { context, review: createWorkflowReconciliationOwner().open(context) }
 }
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+function expectTitleHighlight(container: HTMLElement, title: string) {
+  const key = Array.from(container.querySelectorAll('[data-syntax-kind="key"]')).find(token => token.textContent === 'title')
+  const value = Array.from(container.querySelectorAll('[data-syntax-kind="string"]')).find(token => token.textContent?.includes(title))
+  expect(key).toHaveClass('text-primary')
+  expect(value).toHaveClass('text-success')
+}
+
+function expectDiffTextAndLineNumbers(container: HTMLElement, text: string) {
+  const numbers = Array.from(container.querySelectorAll<HTMLElement>('[aria-hidden="true"]')).filter(number => number.textContent)
+  expect(numbers.map(number => number.textContent)).toEqual(text.split('\n').map((_, index) => String(index + 1)))
+  expect(numbers.map(number => number.nextElementSibling?.textContent).join('\n')).toBe(text)
+}
 
 it('defaults to the database/editor candidate and never writes on comparison', () => {
   const { context, review } = fixture(), database = vi.fn(), gitSelected = vi.fn()
   render(<WorkflowBaselineComparison review={review} current={context} onUseDatabase={database} onUseGit={gitSelected} onCancel={() => {}} />)
   expect(screen.getByRole('radio', { name: /使用数据库工作流/ })).toBeChecked()
-  expect(within(screen.getByRole('region', { name: '数据库工作流 + 当前编辑内容' })).getByText(/local edit/)).toBeVisible()
-  expect(within(screen.getByRole('region', { name: 'Git 原始 YAML内容' })).getByText(/title: git/)).toBeVisible()
+  expect(screen.getByRole('region', { name: '数据库工作流 + 当前编辑内容' })).toHaveTextContent('local edit')
+  expect(screen.getByRole('region', { name: 'Git 原始 YAML内容' })).toHaveTextContent('title: git')
   fireEvent.click(screen.getByRole('button', { name: '保留当前内容' }))
   expect(database).toHaveBeenCalledOnce(); expect(gitSelected).not.toHaveBeenCalled()
 })
@@ -98,4 +111,78 @@ it.each(['\\u202e', '\\u200b'])('rejects escaped invisible character %s after YA
   render(<WorkflowBaselineComparison review={review} current={context} onUseDatabase={() => {}} onUseGit={() => {}} onCancel={() => {}} />)
   expect(screen.getByRole('radio', { name: /使用 Git YAML/ })).toBeDisabled()
   expect(screen.getByText(/Git YAML 无法安全解析/)).toBeVisible()
+})
+
+it('highlights keys and strings on both diff sides without losing change backgrounds, line numbers, or literal HTML', () => {
+  const html = '<img src=x onerror="window.alert(1)"><script>window.alert(2)</script>'
+  const candidate = { ...db, title: 'database: "quoted"', description: html }
+  const leftText = stringify(candidate, { lineWidth: 0 })
+  const rightText = `# Git comment stays verbatim
+id: wf
+title: "git: quoted"
+
+description: '${html}'
+nodes: []
+`
+  const { context, review } = fixture(rightText, JSON.stringify(candidate))
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+  const { container } = render(<WorkflowBaselineComparison review={review} current={context} onUseDatabase={() => {}} onUseGit={() => {}} onCancel={() => {}} />)
+  const left = screen.getByRole('region', { name: '数据库工作流 + 当前编辑内容' })
+  const right = screen.getByRole('region', { name: 'Git 原始 YAML内容' })
+
+  expect(container.querySelector('pre')).toBeNull()
+  expectDiffTextAndLineNumbers(left, leftText)
+  expectDiffTextAndLineNumbers(right, rightText)
+  for (const [region, text, background] of [[left, leftText, 'bg-destructive/10'], [right, rightText, 'bg-success/10']] as const) {
+    const title = text.split('\n').find(line => line.startsWith('title:'))!
+    const titleCell = Array.from(region.querySelectorAll('.whitespace-pre')).find(cell => cell.textContent === title)
+    expect(titleCell?.parentElement).toHaveClass(background)
+    expect(titleCell?.previousElementSibling).toHaveTextContent(String(text.split('\n').indexOf(title) + 1))
+    expect(region).toHaveTextContent(html)
+  }
+  expect(container.querySelector('img, script, [onerror]')).toBeNull()
+  expect(alert).not.toHaveBeenCalled()
+  expectTitleHighlight(left, 'database: "quoted"')
+  expectTitleHighlight(right, 'git: quoted')
+})
+
+it('highlights both full-document fallbacks above the LCS limit while preserving the tail, comments, blank lines, quotes, and HTML', () => {
+  const html = '<img src=x onerror="window.alert(1)"><script>window.alert(2)</script>'
+  const candidate = { ...db, title: 'database: "quoted"',
+    nodes: Array.from({ length: 130 }, (_, index) => ({ id: `node-${index}`, title: 'Start', executor: { type: 'done' } })),
+    description: `# database note
+
+"quoted text"
+${html}
+DATABASE-END
+` }
+  const leftText = stringify(candidate, { lineWidth: 0 })
+  const rightText = [
+    '# Git comment stays verbatim', 'id: wf', 'title: "git: quoted"', '', 'nodes: []',
+    ...Array.from({ length: 510 }, (_, index) => `# unchanged comment ${index}`),
+    '', `description: '${html}'`, '# trailing "quoted" comment', '', 'tail: "GIT-END"', '', '',
+  ].join('\n')
+  expect(leftText.split('\n').length * rightText.split('\n').length).toBeGreaterThan(250_000)
+  const { context, review } = fixture(rightText, JSON.stringify(candidate))
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+  const { container } = render(<WorkflowBaselineComparison review={review} current={context} onUseDatabase={() => {}} onUseGit={() => {}} onCancel={() => {}} />)
+  const left = screen.getByRole('region', { name: '数据库工作流 + 当前编辑内容' })
+  const right = screen.getByRole('region', { name: 'Git 原始 YAML内容' })
+
+  expect(screen.getByText('文档较大，展示完整原文，不计算行级差异。')).toBeVisible()
+  expect(container.querySelectorAll('pre')).toHaveLength(2)
+  expect(left.querySelector('pre')?.textContent).toBe(leftText)
+  expect(right.querySelector('pre')?.textContent).toBe(rightText)
+  expect(left.textContent).toContain('DATABASE-END\n')
+  expect(right.textContent).toContain('tail: "GIT-END"\n\n')
+  for (const region of [left, right]) {
+    expect(region.querySelector('pre')).toHaveClass('whitespace-pre')
+    expect(region.querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(region.textContent).toContain(html)
+  }
+  expect(container.querySelector('img, script, [onerror]')).toBeNull()
+  expect(alert).not.toHaveBeenCalled()
+  expectTitleHighlight(left, 'database: "quoted"')
+  expectTitleHighlight(right, 'git: quoted')
+  expect(right.querySelector('[data-syntax-kind="comment"]')).toHaveClass('text-muted-foreground')
 })
