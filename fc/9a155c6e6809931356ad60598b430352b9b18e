@@ -1,0 +1,39 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 2,294,299
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackFileCodeEditor.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 1-2,4-65,67-69,71-87,89-93,95-118,147-156
+  s_0d747a1d195070::t_2c94c412efc3ea 3,66,70,88,94,119-146
+apps/evolverun/clawweb/public/modules/workflow/web/components/SyntaxHighlightedText.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 1-38
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 20-49,53,61
+  s_0d747a1d195070::t_19a352abeb59bf 50-52,54-60
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackFileCodeEditor.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 1-116
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  s_0d747a1d195070::t_d832b36e6c8713 12,110,112
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowBaselineComparison.test.tsx
+  s_0d747a1d195070::t_5f5cbdb4e7d428 152
+  s_0d747a1d195070::t_2c94c412efc3ea 115-151,153-188
+  s_0d747a1d195070::t_93e443c6ac0438 2,12,16,20-33,39-40
+apps/evolverun/clawweb/public/modules/workflow/web/components/syntaxHighlighting.ts
+  s_0d747a1d195070::t_3ec77d2bd74143 1-113
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/SyntaxHighlightedText.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fc9a155c6e6809931356ad60598b430352b9b18e",
+  "prompts": {},
+  "sessions": {
+    "s_0d747a1d195070": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c32e-6f54-7660-9574-1c7f1e0f2b2e",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

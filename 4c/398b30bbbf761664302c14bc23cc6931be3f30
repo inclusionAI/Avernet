@@ -1,0 +1,18 @@
+apps/bcs/crates/services/bcn-session-runner/src/lib.rs
+  h_f4a73db4ad12be 387-394,829-835
+apps/bcs/crates/services/bcn-session-runner/tests/direct.rs
+  h_f4a73db4ad12be 646-684
+apps/bcs/crates/services/bcn-session-runner/tests/structured.rs
+  h_f4a73db4ad12be 627-672
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c398b30bbbf761664302c14bc23cc6931be3f30",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

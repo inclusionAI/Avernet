@@ -1,0 +1,66 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 355
+apps/bcs/crates/adapters/http/bcn-api-http/Cargo.toml
+  h_f4a73db4ad12be 14
+apps/bcs/crates/adapters/http/bcn-api-http/README.md
+  h_f4a73db4ad12be 24-31,56-65
+apps/bcs/crates/adapters/http/bcn-api-http/src/jsonrpc.rs
+  h_f4a73db4ad12be 65,68-69
+apps/bcs/crates/adapters/http/bcn-api-http/src/mapping.rs
+  h_f4a73db4ad12be 76
+apps/bcs/crates/adapters/http/bcn-api-http/src/sse.rs
+  h_f4a73db4ad12be 66-67
+apps/bcs/crates/adapters/http/bcn-api-http/tests/actual.rs
+  h_f4a73db4ad12be 84-95
+apps/bcs/crates/adapters/http/bcn-api-http/tests/common/mod.rs
+  h_f4a73db4ad12be 26
+apps/bcs/crates/adapters/http/bcn-api-http/tests/protocol.rs
+  h_f4a73db4ad12be 63,72,103-114
+apps/bcs/crates/application/bcn-runtime-app/src/gateway.rs
+  h_f4a73db4ad12be 314,323-324
+apps/bcs/crates/application/bcn-runtime-app/tests/common/mod.rs
+  h_f4a73db4ad12be 124,163
+apps/bcs/crates/application/bcn-runtime-app/tests/list_access.rs
+  h_f4a73db4ad12be 1-43
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 79-84
+apps/bcs/crates/contracts/bcn-runtime-model/src/task.rs
+  h_f4a73db4ad12be 50-51
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 69-76
+apps/bcs/crates/service-api/bcn-runtime-api/src/application.rs
+  h_f4a73db4ad12be 24
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/mod.rs
+  h_f4a73db4ad12be 39-46
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 113,122
+apps/bcs/crates/services/bcn-runtime-store/README.md
+  h_f4a73db4ad12be 138,141,159-160,236-262
+apps/bcs/crates/services/bcn-runtime-store/src/admission.rs
+  h_f4a73db4ad12be 15-16,58-59
+apps/bcs/crates/services/bcn-runtime-store/src/events.rs
+  h_f4a73db4ad12be 47,83-84,90,92-94,127,150-151,155,157-159
+apps/bcs/crates/services/bcn-runtime-store/src/lib.rs
+  h_f4a73db4ad12be 25-26
+apps/bcs/crates/services/bcn-runtime-store/src/query.rs
+  h_f4a73db4ad12be 3-6,19,21-36
+apps/bcs/crates/services/bcn-runtime-store/src/results.rs
+  h_f4a73db4ad12be 38
+apps/bcs/crates/services/bcn-runtime-store/src/task_index.rs
+  h_f4a73db4ad12be 1-41
+apps/bcs/crates/services/bcn-runtime-store/tests/bounds.rs
+  h_f4a73db4ad12be 18,20,24,65
+apps/bcs/crates/services/bcn-runtime-store/tests/task_listing.rs
+  h_f4a73db4ad12be 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94b9db1642a0f0bc31d463808d40303cfc3e0315",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

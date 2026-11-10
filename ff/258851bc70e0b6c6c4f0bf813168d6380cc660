@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime.rs
+  s_875e3f9d4d0db3::t_e6fa798f816ede 61
+  s_875e3f9d4d0db3::t_f3a10ab5e14412 505-513,516
+  s_875e3f9d4d0db3::t_252e9ccb27d7ca 537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff258851bc70e0b6c6c4f0bf813168d6380cc660",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/backend/specs/caller-refresh-owner-isolation/001-spec-output.md
+  s_0973af6fbd2b40::t_aa7f58628002e6 13-17
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_0973af6fbd2b40::t_5b3f7f62cee244 182
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_0973af6fbd2b40::t_1cb76d364e0e13 106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5743c47620bc3407055d170b6bfedd8800ecee7a",
+  "prompts": {},
+  "sessions": {
+    "s_0973af6fbd2b40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0383d-905d-79f2-911d-ef58e355eebd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

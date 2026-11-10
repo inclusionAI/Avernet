@@ -1,0 +1,100 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 339-386
+apps/bcs/Cargo.toml
+  h_f4a73db4ad12be 3-4,158-159
+apps/bcs/crates/adapters/http/bcn-api-http/Cargo.toml
+  h_f4a73db4ad12be 1-31
+apps/bcs/crates/adapters/http/bcn-api-http/README.md
+  h_f4a73db4ad12be 1-49
+apps/bcs/crates/adapters/http/bcn-api-http/src/jsonrpc.rs
+  h_f4a73db4ad12be 1-93
+apps/bcs/crates/adapters/http/bcn-api-http/src/lib.rs
+  h_f4a73db4ad12be 1-40
+apps/bcs/crates/adapters/http/bcn-api-http/src/mapping.rs
+  h_f4a73db4ad12be 1-80
+apps/bcs/crates/adapters/http/bcn-api-http/src/sse.rs
+  h_f4a73db4ad12be 1-73
+apps/bcs/crates/adapters/http/bcn-api-http/tests/actual.rs
+  h_f4a73db4ad12be 1-83
+apps/bcs/crates/adapters/http/bcn-api-http/tests/common/mod.rs
+  h_f4a73db4ad12be 1-48
+apps/bcs/crates/adapters/http/bcn-api-http/tests/protocol.rs
+  h_f4a73db4ad12be 1-102
+apps/bcs/crates/application/bcn-runtime-app/README.md
+  h_f4a73db4ad12be 130-137
+apps/bcs/crates/application/bcn-runtime-app/src/gateway.rs
+  h_f4a73db4ad12be 184-186,272
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  h_f4a73db4ad12be 525-530
+apps/bcs/crates/application/bcn-runtime-app/tests/admission_access.rs
+  h_f4a73db4ad12be 160-181
+apps/bcs/crates/application/bcn-runtime-app/tests/common/group.rs
+  h_f4a73db4ad12be 24
+apps/bcs/crates/application/bcn-runtime-app/tests/common/mod.rs
+  h_f4a73db4ad12be 104
+apps/bcs/crates/application/bcn-runtime-app/tests/interactions.rs
+  h_f4a73db4ad12be 1-83
+apps/bcs/crates/bootstrap/bcn-runtime/Cargo.toml
+  h_f4a73db4ad12be 1-30
+apps/bcs/crates/bootstrap/bcn-runtime/README.md
+  h_f4a73db4ad12be 1-54
+apps/bcs/crates/bootstrap/bcn-runtime/examples/local.rs
+  h_f4a73db4ad12be 1-53
+apps/bcs/crates/bootstrap/bcn-runtime/src/builder.rs
+  h_f4a73db4ad12be 1-74
+apps/bcs/crates/bootstrap/bcn-runtime/src/config.rs
+  h_f4a73db4ad12be 1-37
+apps/bcs/crates/bootstrap/bcn-runtime/src/connectors.rs
+  h_f4a73db4ad12be 1-22
+apps/bcs/crates/bootstrap/bcn-runtime/src/lib.rs
+  h_f4a73db4ad12be 1-6
+apps/bcs/crates/bootstrap/bcn-runtime/tests/common/mod.rs
+  h_f4a73db4ad12be 1-35
+apps/bcs/crates/bootstrap/bcn-runtime/tests/config.rs
+  h_f4a73db4ad12be 1-29
+apps/bcs/crates/bootstrap/bcn-runtime/tests/local_flow.rs
+  h_f4a73db4ad12be 1-49
+apps/bcs/crates/bootstrap/bcn-runtime/tests/stream_selection.rs
+  h_f4a73db4ad12be 1-52
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 54-78
+apps/bcs/crates/contracts/bcn-runtime-model/src/runner.rs
+  h_f4a73db4ad12be 13-16,88-90,151
+apps/bcs/crates/contracts/bcn-runtime-model/src/storage.rs
+  h_f4a73db4ad12be 148
+apps/bcs/crates/contracts/bcn-runtime-model/src/task.rs
+  h_f4a73db4ad12be 30-31,33-35
+apps/bcs/crates/services/bcn-runtime-store/README.md
+  h_f4a73db4ad12be 160,208-235
+apps/bcs/crates/services/bcn-runtime-store/src/admission.rs
+  h_f4a73db4ad12be 15-22
+apps/bcs/crates/services/bcn-runtime-store/src/events.rs
+  h_f4a73db4ad12be 73-78,128,133-140
+apps/bcs/crates/services/bcn-runtime-store/tests/admission.rs
+  h_f4a73db4ad12be 50-82
+apps/bcs/crates/services/bcn-runtime-store/tests/common/mod.rs
+  h_f4a73db4ad12be 23-24
+apps/bcs/crates/services/bcn-session-runner/src/failure.rs
+  h_f4a73db4ad12be 2,40
+apps/bcs/crates/services/bcn-session-runner/src/lib.rs
+  h_f4a73db4ad12be 94,258,651-658,674,718,865
+apps/bcs/crates/services/bcn-session-runner/src/validation.rs
+  h_f4a73db4ad12be 11-13,53-59
+apps/bcs/crates/services/bcn-session-runner/tests/direct.rs
+  h_f4a73db4ad12be 20
+apps/bcs/crates/services/bcn-session-runner/tests/structured.rs
+  h_f4a73db4ad12be 14,674-687
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 332-348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a32d26c8b78344dde7ba679c4afd7239177abbac",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

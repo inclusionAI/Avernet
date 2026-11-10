@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/service_bot/services/test_baas_service_http_methods.py
+  s_6f610611e205ad::t_5e9f1aacf0a977 359,369-388,418-428,449-455,457-459,473
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "56593ef7e3894db18c4baf12c8ae786ebbaabed1",
+  "prompts": {},
+  "sessions": {
+    "s_6f610611e205ad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-4aa7-70f3-84de-a07af6295b52",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

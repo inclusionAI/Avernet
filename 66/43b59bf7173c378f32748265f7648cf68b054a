@@ -1,0 +1,23 @@
+apps/bcs/crates/plugins/bcs-db-local/tests/transaction_commit.rs
+  s_4510c0a8802d3e::t_9653ec17216724 79,83-85
+apps/bcs/crates/services/bcs-group-store/src/store_tests.rs
+  s_4510c0a8802d3e::t_d140e12283286c 124,141-148
+apps/bcs/crates/test-support/bcs-test-support/src/lib.rs
+  s_4510c0a8802d3e::t_0bb856239bf387 544-593
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6643b59bf7173c378f32748265f7648cf68b054a",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

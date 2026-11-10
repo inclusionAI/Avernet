@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/route_bindings.py
+  s_cecdc98e721f4b::t_77ef8aafe15ea3 530-538
+apps/bcs/scripts/e2e-runner/tests/test_remote_structured_core_adapter.py
+  s_cecdc98e721f4b::t_b1b995264480c3 94-95,97,143,146-149,439-450
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_structured_core_adapter.py
+  s_cecdc98e721f4b::t_0d3f8a807234c7 195-196,200-201,211-212
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_core_contract.py
+  s_cecdc98e721f4b::t_b3f763cd7929a9 259,261-270,306-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f0ddb6dee5064a1dfa0003a1198ad6c7bc9ec6b2",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

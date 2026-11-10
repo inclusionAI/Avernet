@@ -1,0 +1,27 @@
+apps/bcs/crates/plugins/bcs-db-local/src/lib.rs
+  s_4510c0a8802d3e::t_456593ea3a4b04 270
+apps/bcs/crates/plugins/bcs-db-local/tests/transaction_commit.rs
+  s_4510c0a8802d3e::t_9bc55274945565 23-97
+apps/bcs/crates/plugins/bcs-db-mysql/src/lib.rs
+  s_4510c0a8802d3e::t_44f67394620e4a 115-132,202,213-215
+apps/bcs/crates/services/bcs-group-store/tests/group_card_templates.rs
+  s_4510c0a8802d3e::t_9f4de9752a476f 165
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_registration_chain.rs
+  s_4510c0a8802d3e::t_32d14d495fce0c 209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fd584394ef13b25f2710e9d9b3acf4b35af0326b",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
