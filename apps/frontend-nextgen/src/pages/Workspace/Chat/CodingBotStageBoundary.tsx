@@ -116,6 +116,7 @@ export function CodingBotStageBoundary({
   return (
     <section className="flex min-h-0 min-w-0 flex-1" data-coding-bot-stage="true">
       <Stage
+        conversationBotId={bot.botId}
         botId={bot.realBotId}
         sessionId={session?.sessionId}
         ownerId={bot.ownerId}
