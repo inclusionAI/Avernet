@@ -126,6 +126,18 @@ sync_caller_configuration(bot_id, env, incoming: CallerIdentitySnapshot)
 复用 `bcs_bots.bot_info` 的 `$.caller` 保存上述完整快照，无 schema migration。
 只保存非敏感配置；不保存 Human 身份、token、grant 或执行引用。整个 bot_info 为 SQL NULL 是合法旧数据；非法 JSON、非对象根、`caller:null` 或非法快照均报错。
 
+### 有界兼容：双重编码的 bot_info（2026-11-10）
+
+存量线上数据中存在历史写入方把 `bot_info` 双重 JSON 编码的行——列内容是
+一个 JSON *字符串*，其文本才是 JSON 对象（`JSON_TYPE(bot_info)='STRING'`）。
+对这种形状，同步读路径做**恰好一层**的解开（有界，永不递归、永不对非对象
+内层解开），并打 `WARN`；随后的 Apply 写入以解开后的对象为根重建整条
+`bot_info`，从而把该行**自愈**回普通对象（CAS 仍与原始交付文本比对）。
+解开内层后的 `caller:null`、非法快照与一切更深的编码（串包串）仍然按
+存储损坏 fail-closed 报错。投影读取（`$.caller`）维持既有语义：字符串根
+下的路径缺失即"从未配置"，不报错。身份语义不变——解开后仍由 §10.7.2 的
+revision 矩阵与权威快照 Apply 决定写入，兼容层只影响"如何读出根对象"。
+
 ```text
 Core → Repo → 按 bot_id + env 读取非删除 Bot 的 bot_info
                 ├─ Unchanged / Stale：返回权威快照，不写
