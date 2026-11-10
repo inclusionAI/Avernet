@@ -6,7 +6,7 @@ import pytest
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientError, BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter,
-    BcsServerError,
+    BcsServerError, BcsTimeoutError,
 )
 
 
@@ -201,8 +201,9 @@ def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
     class _FakeClient:
         instances = []
 
-        def __init__(self, *, base_url):
+        def __init__(self, *, base_url, timeout):
             self.base_url = base_url
+            self.timeout = timeout
             self.closed = False
             self.__class__.instances.append(self)
 
@@ -220,6 +221,18 @@ def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
 
     assert len(_FakeClient.instances) == 2
     assert _FakeClient.instances[1].closed is True
+    assert _FakeClient.instances[0].timeout == module._DEFAULT_HTTP_TIMEOUT_SECONDS
+    assert _FakeClient.instances[1].timeout == module._DEFAULT_HTTP_TIMEOUT_SECONDS
+
+
+def test_request_timeout_is_mapped_to_bcs_timeout_error():
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
+
+    def h(request):
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    with pytest.raises(BcsTimeoutError):
+        _run(_adapter(h).create_group(req))
 
 
 # ===== BCS A2A 单 bot 异步消息:POST /bots/{bot}:{owner}/chat-async =====
