@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/task/test_relay_report_trajectory_e2e.py
+  s_7d8e6acd12a072::t_1cc293a8035bc3 23,71,594-606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7239683c857cef5a585f3730b4590ef1e583b285",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
