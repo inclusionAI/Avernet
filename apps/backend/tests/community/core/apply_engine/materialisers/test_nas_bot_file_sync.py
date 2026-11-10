@@ -247,81 +247,34 @@ def test_a_cross_env_source_is_refused(tmp_path):
     assert seen == []
 
 
-def test_a_missing_source_workspace_is_refused_without_rsync(tmp_path):
+def test_a_missing_source_workspace_runs_rsync_and_returns_a_composed_reason(tmp_path):
     seen = []
-    # The NAS dir is never created, so source_path.exists() is False.
-    port = _port(tmp_path, _recording_runner(seen))
+    # The NAS dir is never created, so the source workspace does not exist on
+    # disk. There is no pre-flight ``exists()`` anymore (a root-owned
+    # ``.merge_nas`` path cannot be stat'd by the backend's admin user — see the
+    # port's docstring), so the port invokes ``sudo rsync``; a missing source is
+    # a non-zero rsync exit, caught and composed as the single sync-failed
+    # reason rather than surfaced as raw stderr.
+    port = _port(tmp_path, _recording_runner(seen, raises=subprocess.CalledProcessError(
+        1, ["sudo", "rsync"], "No such file or directory",
+    )))
     result = _ok(port)
     assert result.ok is False
-    assert "source workspace not found" in result.reason
-    assert seen == []
-
-
-def test_an_mkdir_failure_is_a_composed_reason(tmp_path):
-    seen = []
-    # Force target_path.mkdir to raise: make the *resolvable* target render a
-    # path whose parent (the storage_id dir) is a regular file. The source path
-    # resolves to a different storage id on disk, and exists; the target path
-    # is get_bot_nas_dir(...) / ".openclaw" — with the parent a file, mkdir
-    # raises NotADirectoryError, which the port composes.
-    storage_dir = tmp_path / "real_storage"
-    (storage_dir / ".openclaw").mkdir(parents=True)
-    port = _port(tmp_path / "elsewhere", _recording_runner(seen), source={
-        "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
-    })
-    # Make the source workspace exist (the port's existence check passes).
-    # The fake factory always returns the same storage id, so source and target
-    # share it; mkdir is the call we want to fail. Plant a *file* at the
-    # resolved dir to break the .openclaw subdir mkdir.
-    resolved = storage_dir  # both source and target resolve here via the fake
-    # Recreate the source workspace and then make the engine root a *file*
-    # so the target's mkdir(parents=True) on a path under a file fails.
-    # Easiest: a separate factory that returns a path whose .openclaw parent
-    # is the source workspace itself, and the port already mkdir'd it. To keep
-    # this deterministic, point the factory at a dir whose `.openclaw` is a file.
-    file_root = tmp_path / "file_storage"
-    file_root.mkdir()
-    (file_root / ".openclaw").write_text("not a dir")  # a file, not a directory
-
-    port._path_factory.get_bot_nas_dir = lambda *a, **k: file_root
-    # But the source existence check runs first on the same path and sees a
-    # file (not a dir) — the port's `source_path.exists()` returns True for a
-    # file. To exercise mkdir-failure distinctly, route source to a real dir
-    # and target to the file_root. Override path_factory per-call by splitting.
-    real_source_root = tmp_path / "src_storage"
-    (real_source_root / ".openclaw").mkdir(parents=True)
-
-    calls = {"n": 0}
-
-    def split_factory(entity_id, bot_id, engine_type, entity_type="staff"):
-        # First (and only source) call resolves to the real source root.
-        calls["n"] += 1
-        return real_source_root if calls["n"] == 1 else file_root
-
-    bot_repo = MagicMock(get_by_id=MagicMock(return_value={
-        "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
-    }))
-    port2 = NasBotFileSyncPort(
-        bot_repo=bot_repo,
-        sandbox_registry=_Registry(_build_plan()),
-        path_factory=SimpleNamespace(get_bot_nas_dir=split_factory),
-        run_command=_recording_runner(seen),
-        env="dev",
-    )
-    import asyncio
-
-    target = BotFileSyncTarget(
-        bot_id="b_dst", owner_id="o", entity_id="owner", env="dev",
-        engine_type="openclaw", entity_type="staff",
-    )
-    result = asyncio.run(port2.sync(
-        target=target, source_bot_id="src_1", path="workspace/", excludes=()
-    ))
-    assert result.ok is False
     assert result.reason == "bot workspace sync failed"
-    assert seen == []
+    assert len(seen) == 1  # rsync was invoked — no pre-flight refusal
+
+
+def test_a_missing_target_directory_is_handled_by_rsync_not_a_preflight_mkdir(tmp_path):
+    seen = []
+    # The target dir does not exist and the port does not pre-create it: rsync
+    # runs under ``sudo`` and makes the directory on demand. A pre-flight mkdir
+    # would have raised ``PermissionError`` on a root-owned ``.merge_nas``; the
+    # port no longer has one, so rsync is invoked directly and, on success, the
+    # sync is reported ok.
+    port = _port(tmp_path, _recording_runner(seen))
+    result = _ok(port)
+    assert result.ok is True
+    assert len(seen) == 1  # rsync ran; no mkdir pre-flight short-circuit
 
 
 def test_a_raising_run_command_is_a_composed_reason_never_raw_text(tmp_path):

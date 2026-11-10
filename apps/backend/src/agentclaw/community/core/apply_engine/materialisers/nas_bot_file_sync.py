@@ -144,18 +144,15 @@ class NasBotFileSyncPort(BotFileSyncPort):
             target.entity_id, target.bot_id, engine_type, target.entity_type
         ) / build_plan.source_root_name
 
-        if not source_path.exists():
-            return BotFileSyncResult(ok=False, reason="source workspace not found")
-
-        try:
-            target_path.mkdir(parents=True, exist_ok=True)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "bot_file_sync.mkdir_failed target=%s error_type=%s",
-                target_path, "OSError",
-            )
-            return BotFileSyncResult(ok=False, reason=_SYNC_FAILED_REASON)
-
+        # No pre-flight ``exists()`` / ``mkdir()`` here: ``.merge_nas`` workspaces
+        # are root-owned (the sandbox's own mount), so an ``os.stat`` /
+        # ``mkdir`` from the backend's admin user raises ``PermissionError``
+        # *before* rsync runs — the same paths publish's
+        # ``_migrate_bot_instance`` reads, and the reason it skips the stat too.
+        # rsync runs under ``sudo`` and reads/writes through the root-owned tree;
+        # it creates the target directory on demand, and a missing source is a
+        # clean non-zero rsync exit caught below — translated to
+        # ``_SYNC_FAILED_REASON``, never a raw exception in the report.
         argv = [
             "sudo", "rsync", "-av",
             "--no-devices", "--no-specials",
