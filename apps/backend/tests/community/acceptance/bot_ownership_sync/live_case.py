@@ -86,10 +86,31 @@ class OwnershipCase:
         assert len(rows) == 1 and rows[0]["bot_type"] == "service"
         self.bot_pk = rows[0]["id"]
         assert rows[0]["entity_id"] == self.entity_id
+        self.seed_runtime_binding()
         files = self.sql("SELECT file FROM pragma_database_list WHERE name='main'")
         assert len(files) == 1
         self.database = Path(files[0]["file"]).resolve()
         assert self.database.is_file() and self.database.is_relative_to((_REPO_ROOT / "singlebox/.dependencies").resolve())
+
+    def seed_runtime_binding(self):
+        # Bootstrap metadata for the explicitly controlled runtime boundary.
+        # Keep the real preflight/repository reads enabled. This is not evidence
+        # of a physical device or a real Passport update (see FixtureRuntime).
+        device_id = f"{PREFIX}device_{self.suffix}"
+        self.sql(
+            "INSERT INTO ac_entity_device_binding "
+            "(entity_id, entity_type, device_id, device_provider, env, device_props, "
+            "status, apply_reason, applied_by, gmt_create, gmt_modified) "
+            "VALUES (:entity, 'staff', :device, 'local', 'dev', '{}', 'ACTIVE', "
+            "'ownership acceptance runtime metadata', :owner, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            entity=self.entity_id, device=device_id, owner=self.old_owner,
+        )
+        self.sql(
+            "UPDATE ac_bots SET binding_id=(SELECT id FROM ac_entity_device_binding "
+            "WHERE device_id=:device AND entity_id=:entity AND env='dev'), "
+            "device_id=:device WHERE id=:pk AND entity_id=:entity",
+            device=device_id, entity=self.entity_id, pk=self.bot_pk,
+        )
 
     def register_recipient(self):
         _ensure_human(self.bcs, self.new_owner)
