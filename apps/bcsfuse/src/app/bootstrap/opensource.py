@@ -83,7 +83,7 @@ def register_runtime_service_providers(
         RealEmbeddingProvider(
             settings=EmbeddingSettings(
                 base_url=embedding_base_url,
-                auth_token=os.environ.get("EMBEDDING_AUTH_TOKEN")
+                auth_token=os.getenv("EMBEDDING_AUTH_TOKEN")
                 or config.get("embedding.auth_token"),
                 model=embedding_model,
                 dimension=embedding_dimension,
@@ -96,7 +96,7 @@ def register_runtime_service_providers(
         AnthropicCompatibleProvider(
             settings=LLMSettings(
                 base_url=os.getenv("LLM_BASE_URL") or config.get("llm.base_url"),
-                auth_token=os.environ.get("LLM_AUTH_TOKEN") or config.get("llm.auth_token"),
+                auth_token=os.getenv("LLM_AUTH_TOKEN") or config.get("llm.auth_token"),
                 fast_model=(
                     os.getenv("LLM_FAST_MODEL")
                     or config.get("llm.fast_model")

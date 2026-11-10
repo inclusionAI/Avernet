@@ -86,7 +86,7 @@ def main(argv=None) -> int:
             )
             repository = None
             if args.url:
-                token = os.environ.get("BCSFUSE_AUTH_TOKEN")
+                token = os.getenv("BCSFUSE_AUTH_TOKEN")
                 if not token:
                     raise ValueError("BCSFUSE_AUTH_TOKEN is required for API migration")
                 client = stack.enter_context(

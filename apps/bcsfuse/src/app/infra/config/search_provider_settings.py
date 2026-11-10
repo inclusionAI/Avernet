@@ -21,7 +21,7 @@ def embedding_options(max_retries, base_delay_ms, request_interval_ms):
 def reranker_options(model):
     return dict(
         base_url=os.getenv("RERANKER_BASE_URL", os.getenv("EMBEDDING_BASE_URL", "")),
-        api_key=os.environ.get("RERANKER_API_KEY", os.environ.get("EMBEDDING_AUTH_TOKEN", "")),
+        api_key=os.getenv("RERANKER_API_KEY", os.getenv("EMBEDDING_AUTH_TOKEN", "")),
         model=model
         if model is not None
         else os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B"),
