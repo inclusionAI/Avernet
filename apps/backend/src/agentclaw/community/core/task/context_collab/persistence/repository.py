@@ -5,20 +5,31 @@
 行 → 领域对象一律显式构造,JSON 列(context_spec / current_snapshot /
 actor_ref / payload)用 L4 ``to_dict`` / ``from_dict`` 编解码。读查询过滤
 ``env == get_current_env()``,tenant 由 ORM guard 自动追加,不在此手写。
-``AppendEventRecordRequest`` / ``EventAppendedRecord`` 在追加任务补充定义,
-``append_event`` 本文件先留桩(Task 9 实现并测试)。
+``append_event`` 在持锁事务内完成幂等重放 → 版本检查 → parent 校验 →
+sequence 分配 → 主干判定 → 事件落库 → Collet CAS 更新(spec §9.4 规则 2/4/5)。
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 from uuid import uuid4
 
 from injector import inject
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabVersionConflict,
+)
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    compute_is_trunk,
+    ensure_expected_version,
+)
 
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -82,6 +93,37 @@ class ContextStatusRecord:
 
     collet: Collet
     events: list[EventRecord]
+
+
+@dataclass
+class AppendEventRecordRequest:
+    """``append_event`` 请求;``request_id`` 是 G2 幂等键
+    ``(collab_context_id, request_id)`` 的本地一半。
+
+    ``snapshot_updater`` 由 Service(Task 10)构建,是 G4 求解出的
+    "当前快照 → 新快照" 纯函数;仓储在持锁事务内执行它,保证其输入
+    不会在计算与应用之间变陈旧。
+    """
+
+    request_id: str
+    expected_version: int
+    event_kind: str
+    primitive_type: str
+    actor_ref: PrincipalRef
+    parent_event: str | None
+    visibility: str
+    payload: dict
+    snapshot_updater: Callable[[CurrentSnapshot], CurrentSnapshot]
+
+
+@dataclass
+class EventAppendedRecord:
+    """``append_event`` 返回;``created=False`` 表示 ``request_id`` 幂等重放
+    (返回原事件),``collet`` 是重放/追加后落库行的解码。"""
+
+    event: EventRecord
+    collet: Collet
+    created: bool
 
 
 @runtime_checkable
@@ -167,6 +209,48 @@ def _is_collet_request_idempotency_conflict(exc: IntegrityError) -> bool:
     )
 
 
+def _event_replay(db, collab_context_id: str, request_id: str) -> EventRecord | None:
+    """按 ``(collab_context_id, request_id)`` 查幂等重放;未命中返回 ``None``。"""
+    row = (
+        db.query(ContextCollabEventModel)
+        .filter(
+            ContextCollabEventModel.collab_context_id == collab_context_id,
+            ContextCollabEventModel.request_id == request_id,
+            ContextCollabEventModel.env == get_current_env(),
+        )
+        .one_or_none()
+    )
+    return None if row is None else _event_from_row(row)
+
+
+def _parent_event_exists(db, collab_context_id: str, parent_event: str) -> bool:
+    """parent 必须命中同一上下文内已存在事件(spec §9.4 规则 4)。"""
+    return (
+        db.query(ContextCollabEventModel.id)
+        .filter(
+            ContextCollabEventModel.collab_context_id == collab_context_id,
+            ContextCollabEventModel.event_id == parent_event,
+            ContextCollabEventModel.env == get_current_env(),
+        )
+        .one_or_none()
+        is not None
+    )
+
+
+def _next_sequence_no(db, collab_context_id: str) -> int:
+    """持锁事务内分配 ``MAX(sequence_no)+1``;
+    唯一键 ``uk_context_collab_event_seq`` 兜底。"""
+    current = (
+        db.query(func.max(ContextCollabEventModel.sequence_no))
+        .filter(
+            ContextCollabEventModel.collab_context_id == collab_context_id,
+            ContextCollabEventModel.env == get_current_env(),
+        )
+        .scalar()
+    )
+    return int(current or 0) + 1
+
+
 class ContextCollabRepository(ContextCollabRepositoryProtocol):
     """两行一事务的 Collet/Event ORM 存取(``@inject db: DatabasePlugin``)。"""
 
@@ -249,7 +333,100 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
     def append_event(
         self, collab_context_id: str, request: "AppendEventRecordRequest"
     ) -> "EventAppendedRecord":
-        raise NotImplementedError("append_event lands in the next repository task")
+        """追加事件并推进 Collet 快照(spec §9.4 规则 2/4/5)。
+
+        持锁事务内的固定顺序:行锁读 collet → 幂等重放(先于版本检查,
+        命中即返回原事件,不写任何行)→ ``expected_version`` 检查 →
+        ``parent_event`` 存在性检查 → sequence 分配 → 主干判定 → 插事件 →
+        CAS 更新 collet。``with_for_update()`` 在 MySQL/OceanBase 上是行锁,
+        SQLite 测试驱动上优雅降级为普通读,由 CAS WHERE +
+        ``uk_context_collab_event_seq`` 唯一键兜底。任何写失败原样上抛,
+        异常路径靠事务回滚保证不落半态。
+        """
+        with self._transaction() as db:
+            row = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.collab_context_id == collab_context_id,
+                    ContextCollabColletModel.env == get_current_env(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                raise ContextCollabNotFoundError(
+                    f"collaboration context {collab_context_id!r} not found"
+                )
+            replay = _event_replay(db, collab_context_id, request.request_id)
+            if replay is not None:
+                return EventAppendedRecord(
+                    event=replay, collet=_collet_from_row(row), created=False
+                )
+            ensure_expected_version(request.expected_version, int(row.context_version))
+            if request.parent_event is not None and not _parent_event_exists(
+                db, collab_context_id, request.parent_event
+            ):
+                raise ContextCollabParentEventError(
+                    f"parent_event {request.parent_event!r} does not exist in "
+                    f"collaboration context {collab_context_id!r}"
+                )
+
+            previous = _collet_from_row(row)
+            context_version = request.expected_version + 1
+            now = datetime.now(timezone.utc)
+            event = EventRecord(
+                collab_context_id=collab_context_id,
+                event_id="evt_" + uuid4().hex,
+                request_id=request.request_id,
+                sequence_no=_next_sequence_no(db, collab_context_id),
+                parent_event=request.parent_event,
+                is_trunk=compute_is_trunk(
+                    request.parent_event, row.current_event_id
+                ),
+                event_kind=request.event_kind,
+                primitive_type=request.primitive_type,
+                actor_ref=request.actor_ref,
+                visibility=request.visibility,
+                payload=dict(request.payload),
+                context_version_after=context_version,
+                occurred_at=now,
+            )
+            # snapshot_updater 在行锁内对持锁读出的快照执行,其视图不可能变陈旧。
+            new_snapshot = request.snapshot_updater(previous.current_snapshot)
+            db.add(self._event_row(event, now=now))
+            updated_rows = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.id == row.id,
+                    ContextCollabColletModel.context_version
+                    == request.expected_version,
+                )
+                .update(
+                    {
+                        "current_snapshot": _dump_json(new_snapshot.to_dict()),
+                        "current_event_id": event.event_id,
+                        "context_version": context_version,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated_rows != 1:
+                raise ContextCollabVersionConflict(
+                    f"cas update on collet {collab_context_id!r} affected "
+                    f"{updated_rows} rows for expected_version "
+                    f"{request.expected_version}"
+                )
+            db.flush()
+            return EventAppendedRecord(
+                event=event,
+                collet=replace(
+                    previous,
+                    current_snapshot=new_snapshot,
+                    current_event_id=event.event_id,
+                    context_version=context_version,
+                ),
+                created=True,
+            )
 
     def get_current_status(
         self, collab_context_id: str, *, trunk_events: bool
