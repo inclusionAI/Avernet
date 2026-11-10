@@ -17,9 +17,15 @@ pub struct BotControlPlaneCore {
     providers: Arc<dyn ProviderRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
     bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl BotControlPlaneCore {
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
     pub fn new(
         control_plane: Arc<dyn BotControlPlaneRepoPort>,
         providers: Arc<dyn ProviderRepoPort>,
@@ -30,6 +36,7 @@ impl BotControlPlaneCore {
             providers,
             provider_bindings,
             bot_providers: None,
+            catalog_changes: None,
         }
     }
 
@@ -274,6 +281,7 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         else {
             return Ok(None);
         };
+        if let Some(port) = &self.catalog_changes { port.agent_changed(bot_id); }
         Ok(self.hydrate(vec![record]).await?.into_iter().next())
     }
 }

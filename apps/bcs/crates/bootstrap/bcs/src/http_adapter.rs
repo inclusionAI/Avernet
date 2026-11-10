@@ -394,6 +394,10 @@ async fn bot_is_active(registry: &dyn BotRegistryCoreService, bot_id: &str) -> b
 #[async_trait]
 impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
     async fn sync_visibility(&self, request: VisibilitySyncRequest) {
+        if self.bcsfuse_config.api_version == bcs_fuse_client::BcsFuseApiVersion::V2 {
+            // V2 publication is driven by committed core mutations and the Card lifecycle.
+            return;
+        }
         if request.actor_kind == bcs_service_api::ActorKind::Human {
             return;
         }

@@ -3,12 +3,25 @@
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
+/// The remote catalog protocol. Registration and discovery use the same version.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BcsFuseApiVersion {
+    #[default]
+    V1,
+    V2,
+}
+
 /// bcsfuse integration configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BcsFuseConfig {
     /// Enable bcsfuse integration.
     #[serde(default)]
     pub enabled: bool,
+
+    /// Select the worker catalog (v1) or Card catalog (v2).
+    #[serde(default)]
+    pub api_version: BcsFuseApiVersion,
 
     /// bcsfuse service URL (e.g., "http://127.0.0.1:8765").
     #[serde(default = "default_url")]
@@ -31,11 +44,9 @@ pub struct BcsFuseConfig {
     #[serde(default = "default_sync_timeout")]
     pub sync_timeout_ms: u64,
 
-    /// Base backoff between worker-sync retry attempts, in milliseconds.
-    ///
-    /// Attempt N waits `sync_retry_base_ms * 2^(N-1)` before the next attempt,
-    /// so the default 1000 gives 1s + 2s between the three attempts. Tests that
-    /// point at a dead bcsfuse set this near zero to avoid paying the backoff.
+    /// Base backoff between catalog sync retries, in milliseconds.
+    /// Both versions attempt each change at most 10 times, with exponential
+    /// backoff capped at eight seconds. A later change starts a new attempt budget.
     #[serde(default = "default_sync_retry_base")]
     pub sync_retry_base_ms: u64,
 
@@ -84,6 +95,7 @@ impl Default for BcsFuseConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            api_version: BcsFuseApiVersion::V1,
             url: default_url(),
             authorization_ref: None,
             resolved_authorization: None,
