@@ -160,7 +160,7 @@ it('matches configuration panel typography without changing the collaboration fo
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('grid-cols-1', 'sm:grid-cols-3', 'gap-5');
 });
 
-it('places free-chat settings in three equal responsive columns and wraps helper text below the switch', async () => {
+it('places free-chat settings in three equal responsive columns with wrapping helper text beside the switch', async () => {
   const longName = '很长的群主 Bot 名称'.repeat(8);
   renderModal({ activeIdentity: { ...botIdentity, displayName: longName } });
   await screen.findByRole('button', { name: /Alpha/ });
@@ -184,9 +184,12 @@ it('places free-chat settings in three equal responsive columns and wraps helper
 
   const assertHelper = (text: string) => {
     const helper = screen.getByText(text);
-    expect(helper).toHaveClass('min-w-0', 'break-words', 'whitespace-normal');
-    expect(helper.parentElement).toBe(grid.children[2]);
-    expect(helper.parentElement).not.toBe(controls[2].parentElement);
+    expect(helper).toHaveClass('min-w-0', 'flex-1', 'break-words', 'whitespace-normal', 'text-xs', 'leading-4');
+    expect(helper).not.toHaveClass('mt-2');
+    expect(helper.parentElement).toBe(controls[2].parentElement);
+    expect(helper.parentElement).toHaveClass('flex', 'min-w-0', 'items-center', 'gap-2');
+    expect(helper.previousElementSibling).toBe(controls[2]);
+    expect(controls[2]).toHaveClass('shrink-0');
   };
   assertHelper('群主 Bot 将默认回复每一条消息');
   fireEvent.click(controls[2]);

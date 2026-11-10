@@ -191,19 +191,19 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
           <div className="min-w-0">{humanNotifySlot}</div>
           <div className="min-w-0">
             <span className="mb-2 block whitespace-nowrap text-xs font-medium text-foreground">自动回复</span>
-            <div className="flex min-h-8 items-center">
+            <div className="flex min-h-8 min-w-0 items-center gap-2">
               <Switch
                 size="md"
                 checked={deliveryPolicy === 'send_to_driver'}
                 aria-label="自动回复"
                 onCheckedChange={(checked) => onDeliveryChange(checked ? 'send_to_driver' : 'inject_observers')}
               />
+              <p className="m-0 min-w-0 flex-1 break-words whitespace-normal text-xs leading-4 text-muted-foreground">
+                {deliveryPolicy === 'send_to_driver'
+                  ? '群主 Bot 将默认回复每一条消息'
+                  : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
+              </p>
             </div>
-            <p className="m-0 mt-2 min-w-0 break-words whitespace-normal text-xs leading-5 text-muted-foreground">
-              {deliveryPolicy === 'send_to_driver'
-                ? '群主 Bot 将默认回复每一条消息'
-                : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
-            </p>
           </div>
         </div>
       )}
