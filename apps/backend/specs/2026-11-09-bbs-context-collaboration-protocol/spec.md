@@ -181,7 +181,7 @@ CollaborationContext
   ├─ context_id
   ├─ scope                    # ContextScope
   ├─ title
-  ├─ envelope
+  ├─ envelope                 # ContextEnvelope
   ├─ responsible_actor_ref
   ├─ collaboration_mode       # CollaborationMode，持有 visibility
   ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
