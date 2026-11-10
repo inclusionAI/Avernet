@@ -322,7 +322,7 @@ ContextStateMachineBinding
 
 事件层把“事实”和“裁决”分开：
 
-- `ContextEvent` 是服务端已接纳的不可变事实，至少包含 `event_id`、`event_kind`、`actor_ref`、`visibility`、`payload`、`request_id`、`source_event_id`、`sequence` 和 `occurred_at`。其中 `payload` 必须按事件 schema 校验，不能携带 token、私有路径或未授权原文。
+- `ContextEvent` 是服务端已接纳的不可变事实，至少包含 `event_id`、`event_kind`、`parent_event`、`actor_ref`、`visibility`、`payload`、`request_id`、`source_event_id`、`sequence` 和 `occurred_at`。`parent_event` 表示事件 DAG 的派生关系：主事件为 `null`，子事件引用其父事件的 `event_id`。`payload` 必须按事件 schema 校验，不能携带 token、私有路径或未授权原文。 `parent_event` 只用于表达内部事件 DAG，不参与状态机裁决；`source_event_id` 仍用于外部来源幂等去重。
 - `ContextTransition` 是状态机针对某个已接纳事件产生的不可变裁决，至少包含 `transition_id`、`event_kind`、`from_state`、`to_state`、`rule_id`、`guard_results`、`effect_results` 与 `accepted_event_id`（连同迁移前后 fencing token）。`effect_results` 只记录本地效果及已提交的 outbox 引用，外部执行结果由后续事实报告，不回写不可变 Transition。它回答“为什么状态从这里到那里”，不是第二份状态。
 - `ContextStateMachineBinding.current_state` 是当前快照；`ContextTransition` 是历史证明；二者不能互相替代。
 - 一个已接纳事件产生零或一条成功的 Transition：普通贡献可仅写事实；命中一条合法规则才记录迁移。guard FAIL / BLOCKED 记入命令裁决 / 审计，不伪造成功 Transition；同一事件不得触发多条竞争规则。
@@ -447,7 +447,7 @@ ContextDeliverable
 - 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
 
 
-### 4.4.4 ContextSnapshot 与 Task Progress
+### 4.4.4 ContextSnapshot 与 Event DAG
 
 `ContextSnapshot` 是面向产品用户的只读投影，可作为 `/api/v1/collaboration/task/context_collab/{collab_context_id}` 的响应体核心。除业务状态、Mode、目标、参与者和验收结果外，它还必须暴露 `task_progress`，让用户能直接看懂三件事：当前到哪一步、哪些事情已经做完、还有哪些事情待办。
 
@@ -461,18 +461,16 @@ ContextSnapshot
   ├─ participants[]
   └─ task_progress
       ├─ percent
-      ├─ current_step
-      ├─ steps[]
-      └─ recent_events[]
+      ├─ current_event
+      └─ events[]
 ```
 
 设计约束：
 - `task_progress` 是只读展示投影，由 `ContextStateMachineBinding`、`ContextTodo[]`、`ContextEvent[]` 和 `ContextTransition[]` 派生；它不参与状态机裁决，也不能成为第二份权威状态。
-- `steps[]` 是当前阶段的任务视图，应包含可读的 `title`、`status`、`assignee`、时间线和结果摘要，供前端直接展示。
-- `current_step` 表示当前正在推进的那一步；对 `direct_assignment`、`competitive_assignment` 等单执行者模式，同一时刻至多一个 assigned / in_progress step。
-- `recent_events[]` 只展示可见范围内的近期事实摘要，完整历史仍通过 Timeline 读取。
-- `Snapshot` 可以按消费者重建，但 `task_progress` 不得引用未接纳事件或外部系统内部状态。
-
+- `events[]` 是当前阶段的任务视图，应包含可读的 `event_kind`、`summary`、`assignee_ref`、时间线和结果摘要，供前端直接展示。
+- 每条 `event` 都有 `parent_event` 属性，用于表示事件 DAG 的派生关系：`parent_event == null` 表示主事件，非空表示该事件是从某个父事件派生出来的子事件。
+- `trunk_events=true` 表示只返回事件 DAG 中的主事件；省略或 `false` 时返回全部可见事件。该参数只影响 `events[]` 的筛选结果，不改变 `task_progress` 中的整体统计和进度百分比。主事件与子事件都只能是已接纳事实，不能包含未接纳事件或外部系统内部状态。
+- 当前端只需要主干进展时，应使用 `trunk_events=true`；需要查看派生细节或完整事件链时，使用默认的 `false`。
 
 ### 4.5 跨层运行机制：一条命令如何贯穿四层
 
@@ -777,7 +775,7 @@ apps/backend/src/agentclaw/community/di/modules/task_context_collab_module.py
 | 能力 | 输入 | 输出 |
 | --- | --- | --- |
 | Create Context | 作用域、来源、目标、可见性、profile ID、mode_kind / mode_policy、幂等键 | Context 快照 |
-| Get Context | context ID、读权限上下文 | 状态、目标、参与者、输入材料、交付物、当前 Mode、`task_progress`（当前步骤、steps、recent_events）、最近已接纳执行事实、可执行 Actions 摘要 |
+| Get Context | context ID、读权限上下文、`trunk_events` | 状态、目标、参与者、输入材料、交付物、当前 Mode、`task_progress`（current_event、events、parent_event DAG）、最近已接纳执行事实、可执行 Actions 摘要 |
 | Get Timeline | context ID、游标、分页 | 事件分页与完成证据引用 |
 | Update Envelope | 目标、背景、约束、输入材料、交付物规格、验收，expected version | 新 Context version |
 | Apply Context Command | actor、Command、request ID、expected version | 接纳结果、状态变化、错误原因 |
@@ -803,6 +801,8 @@ POST   /openapi/v1/collaboration/task/context_collab
 POST   /openapi/v1/collaboration/task/context_collab/{collab_context_id}/events
 GET    /openapi/v1/collaboration/task/context_collab/{collab_context_id}
 ```
+
+查询接口支持 `?trunk_events=true`，表示只返回事件 DAG 中的主事件；省略该参数或传入 `false` 时，返回全部可见事件。
 
 #### 1. 新增协作上下文
 
@@ -957,6 +957,7 @@ POST /api/v1/collaboration/task/context_collab/{collab_context_id}/events
   "accepted": true,
   "collab_context_id": "ctx_01",
   "event_id": "evt_02",
+  "parent_event": "evt_01",
   "event_kind": "user_interaction.posted",
   "context_version": 2,
   "state": "draft",
@@ -973,8 +974,9 @@ GET /api/v1/collaboration/task/context_collab/{collab_context_id}
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
 | `collab_context_id` | path | string | 是 | Context ID |
+| `trunk_events` | query | boolean | 否 | 默认 `false`；`true` 时只返回事件 DAG 中的主事件，省略或 `false` 时返回全部可见事件 |
 
-> `task_progress` 是只读展示投影：`steps[]` 说明已做、正在做和待做的事，`current_step` 标明当前进展到哪一步；`recent_events[]` 是这些步骤背后的近期事件摘要。该字段由 `ContextStateMachineBinding`、`ContextTodo[]` 和事件日志推导，不参与状态机裁决，也不是新的权威状态。
+> `task_progress` 是只读展示投影：`events[]` 说明已做、正在做和待做的事，`current_event` 标明当前进展到哪一条事件。每条 event 都有 `parent_event` 属性，`null` 表示主事件，非空表示从父事件派生出来的子事件。该字段由 `ContextStateMachineBinding`、`ContextTodo[]`、`ContextEvent[]` 和 `ContextTransition[]` 推导，不参与状态机裁决，也不是新的权威状态。
 响应示例：
 
 ```json
@@ -995,77 +997,39 @@ GET /api/v1/collaboration/task/context_collab/{collab_context_id}
     "definition_revision": 1
   },
   "task_progress": {
-    "total": 4,
-    "assigned": 1,
+    "total": 3,
     "completed": 1,
+    "assigned": 1,
     "blocked": 0,
     "cancelled": 0,
-    "percent": 25,
-    "current_step": {
-      "step_id": "todo_002",
-      "title": "梳理评审范围与关键结论",
-      "status": "assigned",
-      "assignee_ref": {
-        "actor_kind": "bot",
-        "actor_id": "20261028_xxx:001"
-      },
-      "started_at": "2026-11-10T08:20:00Z",
-      "summary": "正在梳理评审范围、接口边界和状态演进"
+    "percent": 33,
+    "current_event": {
+      "event_id": "evt_03",
+      "parent_event": "evt_02",
+      "event_kind": "todo.completed",
+      "summary": "完成协作目标确认",
+      "occurred_at": "2026-11-10T08:30:00Z"
     },
-    "steps": [
-      {
-        "step_id": "todo_001",
-        "title": "确认协作目标",
-        "status": "completed",
-        "assignee_ref": {
-          "actor_kind": "bot",
-          "actor_id": "20261028_xxx:001"
-        },
-        "started_at": "2026-11-10T08:05:00Z",
-        "completed_at": "2026-11-10T08:10:00Z",
-        "summary": "已确认目标、验收口径和参与者边界"
-      },
-      {
-        "step_id": "todo_002",
-        "title": "梳理评审范围与关键结论",
-        "status": "assigned",
-        "assignee_ref": {
-          "actor_kind": "bot",
-          "actor_id": "20261028_xxx:001"
-        },
-        "started_at": "2026-11-10T08:20:00Z",
-        "summary": "正在梳理评审范围、接口边界和状态演进"
-      },
-      {
-        "step_id": "todo_003",
-        "title": "补充接口与状态说明",
-        "status": "pending",
-        "summary": "待补充三个核心接口的参数与进度语义"
-      },
-      {
-        "step_id": "todo_004",
-        "title": "输出最终评审结论",
-        "status": "pending",
-        "summary": "待汇总结论并交由责任人验收"
-      }
-    ],
-    "recent_events": [
+    "events": [
       {
         "event_id": "evt_01",
+        "parent_event": null,
         "event_kind": "context.created",
         "summary": "创建协作上下文",
         "occurred_at": "2026-11-10T08:00:00Z"
       },
       {
         "event_id": "evt_02",
-        "event_kind": "todo.completed",
-        "summary": "完成协作目标确认",
+        "parent_event": "evt_01",
+        "event_kind": "user_interaction.posted",
+        "summary": "补充一条用户互动消息",
         "occurred_at": "2026-11-10T08:10:00Z"
       },
       {
         "event_id": "evt_03",
-        "event_kind": "user_interaction.posted",
-        "summary": "补充一条用户互动消息",
+        "parent_event": "evt_02",
+        "event_kind": "todo.completed",
+        "summary": "完成协作目标确认",
         "occurred_at": "2026-11-10T08:30:00Z"
       }
     ]
