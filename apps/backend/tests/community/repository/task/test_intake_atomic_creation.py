@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from contextlib import contextmanager
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -77,9 +78,26 @@ def _setup(*, mode: TaskExecutionMode = TaskExecutionMode.RELAY):
     return db, graph_service, repo, task_info, result
 
 
+def _record_search_receipt(graph_service: TaskGraphService, relay_token: str) -> None:
+    graph_service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "下一棒候选",
+            "relay_token_fingerprint": hashlib.sha256(relay_token.encode()).hexdigest(),
+            "candidate_count": 1,
+            "candidates": [{"bot_id": "bot-2", "name": "bot-2", "score": 1.0}],
+        },
+    )
+
+
 def _plan_successor(graph_service: TaskGraphService) -> tuple[str, str]:
     root = graph_service.query_task_dashboard("task-1").tasks[0]
     relay_token = root.run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     graph_service.apply_relay_report(TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-helper", relay_token=relay_token,
@@ -403,6 +421,7 @@ def test_report_and_successor_delivery_intent_commit_together() -> None:
     db, graph_service, _, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
     relay_token = graph_service.query_task_dashboard("task-1").tasks[0].run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     execution = TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-1", relay_token=relay_token,
@@ -445,6 +464,7 @@ def test_bbs_claim_settles_the_durable_publish_intent() -> None:
     graph_service.initialize_intake_graph(task_info, result.session_id)
     root = graph_service.query_task_dashboard("task-1").tasks[0]
     relay_token = root.run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     graph_service.apply_relay_report(TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-1", relay_token=relay_token,
@@ -488,6 +508,7 @@ def test_bbs_claim_does_not_steal_an_active_delivery_lease() -> None:
     graph_service.initialize_intake_graph(task_info, result.session_id)
     root = graph_service.query_task_dashboard("task-1").tasks[0]
     relay_token = root.run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     graph_service.apply_relay_report(TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-1", relay_token=relay_token,
@@ -531,6 +552,7 @@ def test_stale_terminal_bbs_intent_is_settled_without_redispatch() -> None:
     graph_service.initialize_intake_graph(task_info, result.session_id)
     root = graph_service.query_task_dashboard("task-1").tasks[0]
     relay_token = root.run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     graph_service.apply_relay_report(TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-1", relay_token=relay_token,
@@ -581,6 +603,7 @@ def test_bbs_plan_registers_durable_publish_intent() -> None:
     db, graph_service, _, task_info, result = _setup()
     graph_service.initialize_intake_graph(task_info, result.session_id)
     relay_token = graph_service.query_task_dashboard("task-1").tasks[0].run_info.extend_props["relay_token"]
+    _record_search_receipt(graph_service, relay_token)
     graph_service.apply_relay_report(TaskReportCommand(
         task_id="task-1", node_id="task-1",
         event_id="execution-1", relay_token=relay_token,

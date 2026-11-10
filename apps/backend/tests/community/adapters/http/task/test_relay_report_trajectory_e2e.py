@@ -20,6 +20,7 @@ step 字段映射(2026-10-16 语义复核):``action_type`` = step 码本身(S1_C
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace as dataclasses_replace
 from types import SimpleNamespace
@@ -67,6 +68,7 @@ from agentclaw.community.core.task.domain.models import (
     Context as SpecContext,
     Goal,
     RuntimeInfo,
+    NodeAction,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
@@ -589,6 +591,19 @@ def _report_cycle(
         assert resp.json()["data"]["task_completed"] is True
         return None
 
+    graph.append_action_event(
+        TASK_ID,
+        node_id,
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "下一棒候选",
+            "relay_token_fingerprint": hashlib.sha256(token.encode()).hexdigest(),
+            "candidate_count": 1,
+            "candidates": [{"bot_id": next_assignee, "name": next_assignee, "score": 1.0}],
+        },
+    )
     resp = client.post(
         "/api/v1/collaboration/tasks/callback/report",
         json=_plan_next_body(

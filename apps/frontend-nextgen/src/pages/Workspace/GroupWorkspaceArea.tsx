@@ -9,6 +9,7 @@ import { GroupHistorySidebar } from './components/GroupChatPane/GroupHistorySide
 import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
 import { GroupWorkspaceSidebar } from './components/GroupWorkspaceSidebar';
+import { GroupWorkspaceConversation } from './components/GroupWorkspaceConversation';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
 import { ScopedWorkspaceUnavailable } from './components/ScopedWorkspaceUnavailable';
 import { WorkspaceManagePanels } from './components/WorkspaceManagePanels';
@@ -172,7 +173,7 @@ export function GroupWorkspaceArea({
           onClose={onCloseMobileList}
         />
       )}
-      <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+      <GroupWorkspaceConversation workspace={ws}>
         <GroupChatPane
           identityLocked={Boolean(scope)}
           group={selectedGroup}
@@ -285,7 +286,7 @@ export function GroupWorkspaceArea({
             />
           </>
         ) : null}
-      </div>
+      </GroupWorkspaceConversation>
       <CreateGroupModal
         open={createGroupDialog.open}
         activeIdentity={ws.activeIdentity}
