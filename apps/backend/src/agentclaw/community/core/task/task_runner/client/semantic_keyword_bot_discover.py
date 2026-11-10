@@ -11,19 +11,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Any
 import uuid
 
-from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogCaller
-from agentclaw.community.core.task.domain.search_viewer import SearchViewerType, normalize_search_viewer
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogCaller,
+    BotCatalogSearchFilters,
+)
+from agentclaw.community.core.task.domain.search_viewer import (
+    SearchViewerType,
+    normalize_search_viewer,
+)
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     CandidateSearchResult,
     KeywordHit,
 )
 from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
-    CatalogKeywordBotDiscover,
     _DISPATCH_CATALOG_FILTERS,
     _runtime_ready,
+    CatalogKeywordBotDiscover,
 )
 
 logger = logging.getLogger("task.semantic_keyword.search")
@@ -31,6 +38,20 @@ logger = logging.getLogger("task.semantic_keyword.search")
 SEMANTIC_TOP_K = 5
 SEMANTIC_MAX_ATTEMPTS = 3
 SEMANTIC_RETRY_BASE_DELAY_SECONDS = 1.0
+
+
+def _selected_visibility(visibility: str | None) -> tuple[str, ...]:
+    if not visibility:
+        return ("public",)
+    tokens = tuple(
+        token.strip().lower() for token in visibility.split(",") if token.strip()
+    )
+    unique_tokens = tuple(dict.fromkeys(tokens))
+    if not unique_tokens or any(
+        token not in {"public", "protected", "private"} for token in unique_tokens
+    ):
+        raise ValueError("visible scope must be public, protected or private")
+    return unique_tokens
 
 
 class SemanticKeywordBotDiscover:
@@ -79,6 +100,7 @@ class SemanticKeywordBotDiscover:
         filters: dict[str, Any] | None = None,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> CandidateSearchResult:
         """Search BCSFuse with the full candidate query.
 
@@ -91,7 +113,7 @@ class SemanticKeywordBotDiscover:
         Bot candidates. The keyword-port parameters remain accepted for the
         existing candidate-search call shape.
         """
-        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
+        normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         normalized = str(query or "").strip()
         if not normalized:
             return CandidateSearchResult([], [], 0, [])
@@ -101,7 +123,9 @@ class SemanticKeywordBotDiscover:
             semantic_top_k=SEMANTIC_TOP_K,
             min_score=min_score,
             filters=filters,
-            **viewer,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+            visibility=visibility,
         )
         if result is not None:
             return result
@@ -133,10 +157,7 @@ class SemanticKeywordBotDiscover:
         if not isinstance(result, dict):
             return result is None
         context = result.get("context")
-        return (
-            isinstance(context, dict)
-            and context.get("recommend_response") is None
-        )
+        return isinstance(context, dict) and context.get("recommend_response") is None
 
     async def _semantic_search(
         self,
@@ -147,14 +168,32 @@ class SemanticKeywordBotDiscover:
         filters: dict[str, Any] | None = None,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> CandidateSearchResult | None:
-        viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
+        normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         if self._semantic_discover is None:
             logger.warning(
                 "semantic_search_not_configured query=%r; returning empty candidates",
                 query[:500],
             )
             return None
+        selected_visibility = _selected_visibility(visibility)
+        recommend_filters = dict(filters or {})
+        recommend_filters["runtime_state"] = ["online"]
+        catalog_filters = BotCatalogSearchFilters(
+            visibility=_DISPATCH_CATALOG_FILTERS.visibility,
+            user_visibility=_DISPATCH_CATALOG_FILTERS.user_visibility,
+            status=_DISPATCH_CATALOG_FILTERS.status,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+        )
+        if visibility:
+            recommend_filters["availability"] = list(selected_visibility)
+            catalog_filters = replace(
+                catalog_filters,
+                visibility=selected_visibility,
+                user_visibility=selected_visibility,
+            )
         result: Any = None
         for attempt in range(1, SEMANTIC_MAX_ATTEMPTS + 1):
             request_id = f"task-semantic-{uuid.uuid4().hex[:12]}-{attempt}"
@@ -173,10 +212,8 @@ class SemanticKeywordBotDiscover:
                     user_id="",
                     top_k=semantic_top_k,
                     min_score=min_score,
-                    **({"runtime_state": "online", **viewer} if viewer else {
-                        "filters": filters if filters is not None else {"runtime_state": ["online"]},
-                        "catalog_filters": _DISPATCH_CATALOG_FILTERS,
-                    }),
+                    filters=recommend_filters,
+                    catalog_filters=catalog_filters,
                     caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
                     request_id=request_id,
                 )
@@ -213,8 +250,7 @@ class SemanticKeywordBotDiscover:
         valid_items = [
             item
             for item in (raw_items or [])
-            if isinstance(item, dict)
-            and _runtime_ready(item)
+            if isinstance(item, dict) and _runtime_ready(item)
         ]
         ready_items = _dedupe_candidates(valid_items)[:SEMANTIC_TOP_K]
         bot_ids = tuple(
