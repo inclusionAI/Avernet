@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
@@ -31,11 +31,16 @@ impl A2aBotManagementService for Management {
             bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.visibility.lock().unwrap().push(command.visibility.as_str().into());
         assert_eq!(command.owners,vec!["owner"]);
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
     async fn update_agent_by_id(&self,token:&str,bot_id:&str,_source:bcs_service_api::types::a2a_bot::A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.get_agent_by_id(token,bot_id).await}
+    async fn update_agent_by_id_with_visibility(&self,token:&str,bot_id:&str,_source:Option<bcs_service_api::types::a2a_bot::A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.visibility.lock().unwrap().push(visibility.map(|v|v.as_str()).unwrap_or("omitted").into());
+        self.get_agent_by_id(token,bot_id).await
+    }
     async fn refresh_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.get_agent_by_id(token,bot_id).await}
     async fn register_named(&self,command:RegisterNamedA2aBotCommand)->ServiceResult<NamedA2aRegistration> {
         assert_eq!(command.owners,vec!["owner"]);
@@ -252,6 +257,28 @@ async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
     for path in ["/a2a/agent-card?agent_name=x", "/a2a/agents/bot/versions"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn public_visibility_accepts_private_preserves_default_and_rejects_unknown_values() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for (method,path,body,expected) in [
+        ("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}),201),
+        ("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{},"visibility":"private"}),201),
+        ("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"private"}),200),
+        ("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"public"}),200),
+        ("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"protected"}),200),
+        ("PUT","/a2a/agents/bot/agent-card",json!({"agent_card":{}}),200),
+        ("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{},"visibility":"secret"}),400),
+        ("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"secret"}),400),
+    ] {
+        let response=app.clone().oneshot(Request::builder().method(method).uri(path)
+            .header("authorization","Bearer test-admin").header("content-type","application/json")
+            .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status().as_u16(),expected,"{method} {body}");
+    }
+    assert_eq!(*management.visibility.lock().unwrap(),vec!["protected","private","private","public","protected","omitted"]);
 }
 
 #[tokio::test]

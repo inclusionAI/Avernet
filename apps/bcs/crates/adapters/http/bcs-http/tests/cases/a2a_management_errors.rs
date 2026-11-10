@@ -721,8 +721,8 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
 
 #[tokio::test]
 async fn registration_visibility_defaults_and_invalid_values_fail_before_admission() {
-    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected, Public};
-    for (value, expected) in [(None, Protected), (Some("protected"), Protected), (Some("public"), Public)] {
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected, Public, Private};
+    for (value, expected) in [(None, Protected), (Some("protected"), Protected), (Some("public"), Public), (Some("private"), Private)] {
         let (app, service) = app(None);
         let mut body = json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card_url":"https://example.org/card"});
         if let Some(value) = value { body["visibility"] = json!(value); }
@@ -730,7 +730,7 @@ async fn registration_visibility_defaults_and_invalid_values_fail_before_admissi
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(*service.visibility.lock().unwrap(), Some(expected));
     }
-    for value in [json!("private"), json!("PUBLIC"), json!(null), json!(true)] {
+    for value in [json!("secret"), json!("PUBLIC"), json!(null), json!(true)] {
         let (app, service) = app(None);
         let body = json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card_url":"https://example.org/card","visibility":value});
         let response = app.oneshot(request("POST", "/a2a/agents", body.to_string())).await.unwrap();
@@ -746,7 +746,7 @@ async fn visibility_only_update_is_routed_and_empty_or_invalid_updates_are_rejec
     let response=app.clone().oneshot(request("PUT","/a2a/agents/bot/agent-card",json!({"visibility":"public"}).to_string())).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
     assert_eq!(*service.visibility.lock().unwrap(),Some(Public));
-    for body in [json!({}),json!({"visibility":"private"})] {
+    for body in [json!({}),json!({"visibility":"secret"})] {
         let response=app.clone().oneshot(request("PUT","/a2a/agents/bot/agent-card",body.to_string())).await.unwrap();
         assert_eq!(response.status(),StatusCode::BAD_REQUEST);
     }

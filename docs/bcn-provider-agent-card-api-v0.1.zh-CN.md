@@ -54,6 +54,12 @@ Agent 名称仅用于展示，可在同一 Provider 下重复。稳定身份是 
 
 agent_card 与 agent_card_url 二选一。URL 方式要求地址在 10 秒内直接返回 200 和 Card JSON，不支持重定向或鉴权；URL 不含用户名、密码或片段，且须符合平台网络策略。
 
+### 2.1.1 BCN 可见性
+
+注册和 PUT 更新均接受 `private`、`protected`、`public`。注册省略时默认 `protected`；更新省略时保持原值，刷新不改变可见性。可通过 PUT `/a2a/agents/{bot_id}/agent-card` 提交 `{"visibility":"private"}` 单独修改。
+
+这是 BCN Bot 的协作可见性，沿用既有权限规则；`private` 不等同于“仅 owner 可见/可调用”。Human 侧由独立的 `user_visibility` 等权限控制，本字段不会自动修改它。有权限的 Provider 仍可管理 Card；不新增聊天、发现或连接的权限绕过。
+
 ### 2.2 AgentCard 字段要求
 
 **推荐直接提交完整 agent_card**。以下按 [A2A 1.0.1](https://a2a-protocol.org/v1.0.1/specification/#441-agentcard) 列出 BCN 接入要求；可选字段不用时省略。
@@ -228,6 +234,7 @@ Content-Type: application/json
 | --- | --- | --- |
 | provider_bot_ref | 是 | 平台稳定键；重复注册不覆盖已有 Bot |
 | owners | 是 | 见公共定义 |
+| visibility | 否 | private、protected、public；默认 protected，不联动 user_visibility |
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
@@ -295,7 +302,7 @@ Content-Type: application/json
 | 更新规则 | 说明 |
 | --- | --- |
 | 提交内容 | 提交完整 agent_card 或 agent_card_url，不能同时传；若只改 visibility 则都不传。不做 Card 部分合并、不提供 PATCH |
-| 更新范围 | 更新 Card 及来源，不修改 owners、summary；可选 visibility 为 protected/public，省略保持原值，也可只提交 visibility |
+| 更新范围 | 更新 Card 及来源，不修改 owners、summary；可选 visibility 为 private/protected/public，省略保持原值，也可只提交 visibility |
 | 来源切换 | 直接提交 Card 后清除旧 URL、停止自动刷新；提交 URL 后按新地址刷新 |
 | 名称变化 | 同步更新 agent_name，后续仍使用原 bot_id；允许与其他 Bot 重名 |
 | 身份与分类 | provider_bot_ref 不属于 Card 更新范围；party 可以更新或移除 |
