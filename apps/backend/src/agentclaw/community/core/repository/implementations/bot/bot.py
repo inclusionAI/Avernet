@@ -49,6 +49,7 @@ from agentclaw.community.core.repository.implementations.bot.mutations import (
     _JSON_FIELDS as _JSON_FIELDS,
 )
 from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
+from sqlalchemy.orm import Query, Session
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.repository.implementations.bot.device_provider import (
@@ -506,19 +507,7 @@ class BotRepository(
         if not pairs:
             return 0, []
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                or_(
-                    *[
-                        and_(
-                            self.Model.bot_id == bot_id,
-                            self.Model.owner_id == owner_id,
-                        )
-                        for bot_id, owner_id in pairs
-                    ]
-                ),
-                self.Model.is_delete == 0,
-                self._env(),
-            )
+            query = self._owner_bot_pairs_query(db, pairs)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
@@ -529,6 +518,29 @@ class BotRepository(
             from .stage_catalog import attach_stage_metadata
 
             return total, attach_stage_metadata(db, bots)
+
+    def _owner_bot_pairs_query(self, db: Session, pairs: List[tuple[str, str]]) -> Query:
+        return db.query(self.Model).filter(
+            or_(*[and_(self.Model.bot_id == bot_id, self.Model.owner_id == owner_id)
+                  for bot_id, owner_id in pairs]),
+            self.Model.is_delete == 0, self._env(),
+        )
+
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """The bounded catalog join does not use the repository's COUNT."""
+        if len(pairs) > 100:
+            raise ValueError("catalog join accepts at most 100 pairs")
+        if not pairs:
+            return []
+        with self._db.orm_session() as db:
+            bots = self._owner_bot_pairs_query(db, pairs).order_by(
+                self.Model.gmt_create.desc(), self.Model.id.desc(),
+            ).limit(len(pairs)).all()
+            from .stage_catalog import attach_stage_metadata
+
+            return attach_stage_metadata(db, bots)
 
     def list_by_search(
         self,

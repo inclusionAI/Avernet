@@ -18,6 +18,10 @@ core/repository/
 ```
 
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
+read without COUNT, equivalent to the existing exact-pair first page including
+newest-first duplicate handling and stage metadata. It does not grant access;
+tenant, environment and deletion predicates remain identical to the paged read.
 `BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
 row. Its `steal` operation atomically inserts or replaces that row's holder and
 acquisition timestamps in one transaction. Both Bot and Session force-acquire

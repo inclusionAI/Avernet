@@ -5,6 +5,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from agentclaw.community.utils.avernet_tenant import (
@@ -458,11 +459,11 @@ class FriendCatalogActions:
                 request_id,
             )
             raise BotCatalogSearchUnavailableError() from exc
-        _, backend_bots = self._bot_repository.list_bots_by_owner_bot_pairs(
+        join_started = perf_counter()
+        backend_bots = self._bot_repository.list_catalog_bots_by_owner_bot_pairs(
             [(address.bot_id, address.entity_id) for address in addresses],
-            page=1,
-            page_size=max(len(addresses), 1),
         )
+        join_done = perf_counter()
         bots_by_address = {
             address: bot
             for bot in backend_bots
@@ -545,7 +546,7 @@ class FriendCatalogActions:
         logger.info(
             "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
             "result_count=%s bcs_only_count=%s description_fallback_count=%s "
-            "entity_fallback_count=%s total=%s",
+            "entity_fallback_count=%s total=%s join_ms=%.1f projection_ms=%.1f",
             request_id,
             len(addresses),
             len(items),
@@ -553,6 +554,8 @@ class FriendCatalogActions:
             description_fallback_count,
             entity_fallback_count,
             total,
+            (join_done - join_started) * 1000,
+            (perf_counter() - join_done) * 1000,
         )
         return {"total": total, "items": items}
 
