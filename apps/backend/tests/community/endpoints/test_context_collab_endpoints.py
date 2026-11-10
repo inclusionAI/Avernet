@@ -304,6 +304,40 @@ def test_get_status_without_query_param_defaults_to_all_events(client_world):
     assert response.json()["data"]["task_progress"]["total_events"] == 2
 
 
+def test_get_status_wire_shape_has_no_steps_field(client_world):
+    """spec §12.2 #5(wire 侧锚点):GET 响应 data 恰为 §6.4 三段式五键,
+    task_progress.events[] 条目恰为 7 字段投影 —— delivery 未来多加一个
+    字段(如 steps[])即红,不依赖 core 投影的 dataclass 键集。"""
+    created = create_context(client_world)
+    append_event(client_world, created["collab_context_id"],
+                created["current_event"]["event_id"])
+    response = client_world.client.get(
+        f"{PREFIX}/context_collab/{created['collab_context_id']}"
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert set(data) == {
+        "collab_context_id",
+        "context_version",
+        "current_snapshot",
+        "current_event",
+        "task_progress",
+    }
+    assert set(data["task_progress"]) == {"total_events", "events"}
+    assert "steps" not in data["current_snapshot"]
+    for entry in data["task_progress"]["events"]:
+        assert "steps" not in entry
+        assert set(entry) == {
+            "event_id",
+            "parent_event",
+            "event_kind",
+            "primitive_type",
+            "status",
+            "summary",
+            "content",
+        }
+
+
 # ── 领域错误映射(ErrorEnvelope)──────────────────────────────────────────────
 
 
