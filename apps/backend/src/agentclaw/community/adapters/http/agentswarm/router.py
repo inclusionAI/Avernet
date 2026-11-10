@@ -209,18 +209,18 @@ async def submit_run(
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="config_missing")
         raise
-    except IdentitySourceRequired as exc:
+    except IdentitySourceRequired:
         # No approval-gated path exists, so this is a caller error, not a
         # transient condition: 400 and the message names the missing field.
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="identity_source_missing")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except IdentitySourceInvalid as exc:
+        raise
+    except IdentitySourceInvalid:
         # Well-formed request naming a source it may not use: 422, matching
         # what create-with-manifest answers for the same condition.
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="identity_source_invalid")
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise
     _audit(audit_writer, tenant=tenant, actor=user.staffId,
            action=AuditAction.SUBMIT_ACCEPTED, run_id=run_id)
     return summary
@@ -387,11 +387,28 @@ async def ready() -> dict[str, bool]:
     return {"ready": True}
 
 
+def _identity_source_required_handler(
+    request: Request, exc: IdentitySourceRequired
+) -> JSONResponse:
+    # This surface answers every refusal as ``{"error": ...}``; routing these
+    # through HTTPException would answer ``{"detail": ...}`` instead, giving a
+    # caller two shapes to parse for the same class of failure.
+    return JSONResponse(status_code=400, content={"error": str(exc)})
+
+
+def _identity_source_invalid_handler(
+    request: Request, exc: IdentitySourceInvalid
+) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
 def register_exception_handlers(app: FastAPI) -> FastAPI:
     app.add_exception_handler(TenantRunLimitExceeded, _tenant_limit_handler)
     app.add_exception_handler(GlobalRunLimitExceeded, _global_limit_handler)
     app.add_exception_handler(QueueDepthExceeded, _queue_depth_handler)
     app.add_exception_handler(AgentSwarmConfigError, _config_error_handler)
+    app.add_exception_handler(IdentitySourceRequired, _identity_source_required_handler)
+    app.add_exception_handler(IdentitySourceInvalid, _identity_source_invalid_handler)
     return app
 
 
