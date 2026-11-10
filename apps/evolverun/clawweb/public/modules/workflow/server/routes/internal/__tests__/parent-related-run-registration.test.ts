@@ -4,7 +4,7 @@ import { parentRelationFixture } from './parent-relation-fixture.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture(fanout = false) { const f = await parentRelationFixture(fanout); cleanups.push(f.close); return f; }
+async function fixture(fanout = false, itemId = 'one') { const f = await parentRelationFixture(fanout, itemId); cleanups.push(f.close); return f; }
 const expectedLink = { child_flow_id: 'native-child', parent_flow_id: 'parent', parent_node_id: 'call', parent_attempt: 2, child_workflow_id: 'child-wf' };
 
 describe.each([false, true])('ordinary registration with verified parent relation (fanout: %s)', fanout => {
@@ -83,6 +83,48 @@ describe.each([false, true])('ordinary registration with verified parent relatio
     expect(results.every(r => JSON.stringify(r.body.data.parent_relation) === JSON.stringify(f.relation))).toBe(true);
     expect(f.links()).toEqual([expectedLink]);
   });
+});
+
+it('accepts composite fanout item IDs and keeps percent escapes distinct', async () => {
+  // ClawMind joins encodeURIComponent'd values with a literal `/`. That
+  // separator must remain an exact string and must not be normalized to `%2F`.
+  for (const item_id of [
+    'real_banrestrict_content_sg_b15_new/20261111-real_banrestrict_content_sg_b15_new-r1_text_20260716',
+    'scene%2Fpartition',
+    'scene/par%2Ftition',
+  ]) {
+    const f = await fixture(true, item_id);
+    const relation = { ...f.relation, fanout: { ...f.relation.fanout!, item_id } };
+    const response = await f.post({ ...f.body, parent_relation: relation });
+    expect(response).toMatchObject({ status: 201, body: { data: { parent_relation: relation } } });
+    expect(f.child()).toBeDefined();
+    expect(f.links()).toEqual([{ ...expectedLink }]);
+    const parent = await f.repo.findFullByFlowId('parent');
+    expect(JSON.parse(parent!.state_json!).subworkflowFanouts.call.children[0].itemId).toBe(item_id);
+  }
+
+  const f = await fixture(true, 'scene/partition');
+  const literal = f.relation;
+  const escaped = { ...f.relation, fanout: { ...f.relation.fanout!, item_id: 'scene%2Fpartition' } };
+  expect((await f.post({ ...f.body, parent_relation: literal })).status).toBe(201);
+  const retry = await f.post({ ...f.body, parent_relation: literal });
+  expect(retry.status).toBe(200);
+  expect((await f.post({ ...f.body, parent_relation: escaped })).status).toBe(409);
+  expect(f.links()).toEqual([expectedLink]);
+});
+
+it('rejects unsafe fanout item IDs before writing a child or link', async () => {
+  for (const item_id of ['', 'scene partition', 'scene?partition', 'bad%', 'scene#partition']) {
+    const f = await fixture(true);
+    const relation = { ...f.relation, fanout: { ...f.relation.fanout!, item_id } };
+    expect((await f.post({ ...f.body, parent_relation: relation })).status).toBe(400);
+  }
+  const f = await fixture(true);
+  expect(f.child()).toBeUndefined(); expect(f.links()).toEqual([]);
+
+  // The final unmodified request still writes exactly one child and link.
+  expect((await f.post()).status).toBe(201);
+  expect(f.links()).toEqual([expectedLink]);
 });
 
 it('requires a registered immutable snapshot rather than a mutable spec or a forged current state', async () => {

@@ -32,6 +32,7 @@ The trusted engine `POST /api/internal/runs` path accepts an optional
 `parent_relation` only when covered by the existing engine signature. The server
 locks and validates the parent run, its currently-running node execution, its
 persisted immutable workflow snapshot, and—when present—the durable fanout
+<<<<<<< HEAD
 group/item dispatch claim. On an externally provisioned database that predates
 migration v145, `flow_runs.workflow_snapshot_json` may be absent; in that
 compatibility mode only a deployment-bound run (with valid `workflow_version`
@@ -40,8 +41,11 @@ and `workflow_deploy_number`) may resolve its immutable snapshot through
 their mutable `state_json` is not a trusted registration receipt.
 
 It verifies the persisted parent bot/owner/session identity and child workflow
-before inserting the child run and `flow_run_links`
-in one transaction. The response includes the validated snake-case
+before inserting the child run and `flow_run_links` in one transaction. A fanout
+`item_id` comes from the durable dispatch claim and may contain literal `/` as
+ClawMind's composite-item separator, as well as percent escapes; the two forms
+are compared case-sensitively and are not normalized into each other. The
+response includes the validated snake-case
 `parent_relation` receipt; it is not stored in or exposed as the public run row.
 Exact retries return the same receipt and relation; changed registration
 metadata, relation, authority, or an existing conflicting child/link is
