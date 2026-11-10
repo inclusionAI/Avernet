@@ -2,7 +2,7 @@ import aiBadgeIcon from '@/assets/Images/collaborationSquare/AI.png';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import type { BotSearchMode } from '@/domain/collaborationSquare/types';
+import type { BotSearchMode, PublicBotSearchResultMode } from '@/domain/collaborationSquare/types';
 import { cn } from '@/utils/cn';
 import { Search, X } from 'lucide-react';
 
@@ -26,10 +26,18 @@ function SmartModePill() {
   );
 }
 
+/** 智能搜索降级为名称匹配时的回退标记（bcs-standalone-friend-discovery）：普通前景色文字，
+ * 明确告知用户当前批次是名称回退命中而非语义命中，不叠渐变误导。 */
+function NameFallbackPill() {
+  return <span className="inline-flex shrink-0 items-center font-normal text-muted-foreground">名称匹配</span>;
+}
+
 interface SquareSearchBarProps {
   resource: 'bot' | 'group' | 'task';
   query: string;
   mode?: BotSearchMode;
+  /** 智能搜索的 wire 结果模式：name_fallback 时触发器以「名称匹配」替代「智能」渐变胶囊。 */
+  searchResultMode?: PublicBotSearchResultMode | null;
   onQueryChange: (query: string) => void;
   onModeChange?: (mode: BotSearchMode) => void;
   className?: string;
@@ -47,6 +55,7 @@ export default function SquareSearchBar({
   resource,
   query,
   mode = 'name',
+  searchResultMode,
   onQueryChange,
   onModeChange,
   className,
@@ -75,7 +84,16 @@ export default function SquareSearchBar({
                 aria-label="Bot 搜索模式"
                 className="h-full w-auto gap-1.5 border-0 bg-transparent px-2.5 font-normal text-foreground hover:bg-accent focus-visible:ring-0 focus-visible:ring-offset-0"
               >
-                {mode === 'smart' ? <SmartModePill /> : <SelectValue />}
+                {/* name_fallback 时以「名称匹配」回退标记替代渐变胶囊，明示非语义命中。 */}
+                {mode === 'smart' ? (
+                  searchResultMode === 'name_fallback' ? (
+                    <NameFallbackPill />
+                  ) : (
+                    <SmartModePill />
+                  )
+                ) : (
+                  <SelectValue />
+                )}
               </SelectTrigger>
               <SelectContent align="start" className="min-w-28 rounded-lg p-1 shadow-lg">
                 <SelectItem value="name" className="min-h-9 font-normal text-muted-foreground focus:text-muted-foreground data-[state=checked]:bg-accent data-[state=checked]:text-muted-foreground [&>span:first-child]:text-primary">

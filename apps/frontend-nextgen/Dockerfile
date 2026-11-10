@@ -17,8 +17,13 @@ COPY apps/frontend-nextgen/ ./apps/frontend-nextgen/
 RUN cd apps/frontend-nextgen && npm run build
 
 FROM nginx:1.27-alpine
+# full 模板保持 envsubst 输入位；BCS-only profile 模板放到不同的只读配置目录，
+# 由 docker-entrypoint 按 FRONTEND_API_PROFILE 选择性拷入。
 COPY apps/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
-COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
+COPY apps/frontend-nextgen/deploy/nginx/default.bcs-only.conf.template /etc/nginx/template-profiles/default.bcs-only.conf.template
+# 校验/换面脚本必须以 10-* 前缀先于官方 20-envsubst-on-templates.sh 运行，
+# bcs-only 才能在标准变量替换前把模板放到 /etc/nginx/templates。
+COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/10-teamclaw-api-profile.sh
 COPY --from=build /repo/apps/frontend-nextgen/dist /usr/share/nginx/html
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1

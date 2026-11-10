@@ -6,9 +6,64 @@ This directory supplies a portable OCI image and same-origin Nginx routing. It d
 
 The public `@tc-chat/ui@2.0.0` package and its `@ant-design/x` dependency require `antd:^6.1.1`. `antd@6.6.1` is pinned as an approved SDK-only direct exception: do not import it from application code, and re-audit/remove it when upgrading tc-chat.
 
+## Deployment profiles
+
+`FRONTEND_API_PROFILE` selects the API surface this container serves. The
+validation script runs as `10-teamclaw-api-profile.sh`, i.e. before the official
+Nginx `20-envsubst-on-templates.sh`, so every template swaps in before the
+standard `${...}` substitution pass.
+
+### `full` (default)
+
+Keeps the existing multi-service topology. All ten variables in the table
+below are required, the image default `default.conf.template` stays in place,
+and the generated `runtime-config.js` sets the optional Public Bot backend
+integration flag `PUBLIC_BOT_BACKEND_ENABLED: true` (JS boolean).
+
+### `bcs-only`
+
+Serves standalone BCS friend discovery (public Bot list, name search, smart
+search, requests, approvals) without Backend, Gateway, Admin or Task Engine:
+
+- Only `BCS_UPSTREAM` is required (non-empty). `BCS_ENDPOINT_PRE` /
+  `BCS_ENDPOINT_PROD` become optional: when unset they are emitted as empty
+  strings and the frontend falls back to the compile-time defaults.
+- The entrypoint copies `/etc/nginx/template-profiles/default.bcs-only.conf.template`
+  (a read-only profile config directory, deliberately not the envsubst
+  templates directory) into `/etc/nginx/templates/default.conf.template`, and
+  the official Nginx entrypoint performs the standard `${BCS_UPSTREAM}`
+  substitution.
+- Same-origin routes: `/auth/*` (OAuth redirects and the
+  `/auth/callback/<provider>` browser callback), `/openapi/v1/auth/*`, the
+  collaboration subtree `/openapi/v1/collaboration/*` (`bots/mine`,
+  `bots/{actor}/candidates`, `friend-connections/**`), and the internal smart
+  search `^/api/v1/collaboration/bots/<actor>/candidates/search` all proxy to
+  `BCS_UPSTREAM`.
+- Unmatched `/api/` and `/openapi/` locations return an explicit 404. They must
+  never fall through to the SPA `index.html`, which would masquerade as a
+  working endpoint.
+- Everything else stays static SPA serving with `try_files ... /index.html` for
+  discovery deep links, plus `GET /healthz`.
+- `runtime-config.js` sets `PUBLIC_BOT_BACKEND_ENABLED: false` (JS boolean,
+  never the string `'false'`), which disables optional Backend metadata
+  enrichment, personal-space initialization and notification polling
+  (see `src/capabilities/defaultCapabilities.ts`; runtime wins over the
+  compile-time default `true`).
+
+An unknown profile value fails fast with `Unknown FRONTEND_API_PROFILE` before
+any upstream-variable validation.
+
+The dev server mirrors the same profile: `PRESET=<preset>
+FRONTEND_API_PROFILE=bcs-only BCS_UPSTREAM=<bcs-origin> npm run dev`. It compiles
+`TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false` and prioritizes the same BCS
+subtrees — the internal candidate search route is inserted before the generic
+`/api` wildcard key because the umi proxy matches keys in insertion order. No
+other preset or profile behavior changes.
+
 ## Required upstreams
 
-The container refuses to start until all variables are provided:
+With the default `full` profile the container refuses to start until all
+variables are provided:
 
 | Variable                           | Existing frontend route responsibility                                       |
 | ---------------------------------- | ---------------------------------------------------------------------------- |
@@ -62,7 +117,7 @@ docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>
 1. Install a container runtime on the ECS instance.
 2. Authenticate to the selected Alibaba Cloud Container Registry instance.
 3. Pull the immutable image tag or digest.
-4. Provide all required upstream variables through a protected environment file outside the repository.
+4. Provide all required upstream variables through a protected environment file outside the repository (`BCS_UPSTREAM` only for `FRONTEND_API_PROFILE=bcs-only`).
 5. Bind container port `8080` only to the load balancer or host reverse proxy.
 6. Terminate TLS at ALB/Nginx and expose one public origin for `/`, `/auth/*`, and API paths.
 7. Configure BCS `auth.oauth.base_url` to that exact HTTPS public origin so `/auth/callback/alipay` matches the registered callback.
@@ -71,7 +126,7 @@ docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>
 ## ACK deployment
 
 1. Push the immutable image to ACR.
-2. Create a Deployment with the seven required variables sourced from ConfigMaps or Secrets as appropriate.
+2. Create a Deployment with the required variables sourced from ConfigMaps or Secrets as appropriate (`BCS_UPSTREAM` only for `FRONTEND_API_PROFILE=bcs-only`).
 3. Add readiness and liveness probes on `GET /healthz` port `8080`.
 4. Add a ClusterIP Service targeting port `8080`.
 5. Configure ALB Ingress for a single HTTPS host and preserve `/auth/*` callback paths.

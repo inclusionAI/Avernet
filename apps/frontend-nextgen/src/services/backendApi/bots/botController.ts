@@ -177,12 +177,13 @@ export function listBots(params?: BackendUnknownRecord, signal?: AbortSignal) {
   });
 }
 
-/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。 */
-export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody) {
+/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。AbortSignal 可选透传。 */
+export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotMetadataDto>>>(BOT_ENDPOINTS.metadataQueries, {
     method: 'POST',
     params: userScopedParams(params),
     data: body,
+    signal,
   });
 }
 

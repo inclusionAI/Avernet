@@ -6,6 +6,7 @@
 // 反查无果或状态不可用 → 轻提示并清参回退对话页默认态。
 import type { HumanBotActionContext } from '@/domain/collaborationSquare/types';
 import type { PublicBot } from '@/domain/collaborationSquare/types';
+import { isPublicBotShareTargetAvailable } from '@/domain/collaborationSquare/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { collaborationSquareBotService } from '@/services/collaborationSquare/collaborationSquareService';
@@ -81,7 +82,7 @@ export function useLegacyShareLinkGuard(input: {
         .resolvePublicBotById(legacyTargetId, context)
         .catch(() => null);
       if (cancelled) return;
-      if (bot && (!bot.status || bot.status === 'ACTIVE')) {
+      if (bot && isPublicBotShareTargetAvailable(bot)) {
         setLegacyBot(bot);
         return;
       }

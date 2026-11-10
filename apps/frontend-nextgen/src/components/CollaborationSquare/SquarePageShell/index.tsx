@@ -1,4 +1,5 @@
 import { PublicBotCatalogPanel } from '@/components/CollaborationSquare/PublicBotCatalogPanel';
+import { FriendRequestsPanel } from '@/components/CollaborationSquare/FriendRequestsPanel';
 import { GroupIdentityDisplay } from '@/components/CollaborationSquare/PublicGroupSquareSection/GroupIdentityDisplay';
 import { PublicGroupSquareSection } from '@/components/CollaborationSquare/PublicGroupSquareSection';
 import {
@@ -39,6 +40,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     busyKeys: square.busyKeys,
     query: square.botQuery,
     mode: square.botSearchMode,
+    searchResultMode: square.searchResultMode,
     loading: square.loading,
     error: square.error,
     hasMore: square.hasMore,
@@ -96,6 +98,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
           resource="bot"
           query={botViewModel.query}
           mode={botViewModel.mode}
+          searchResultMode={botViewModel.searchResultMode}
           onQueryChange={botViewModel.setQuery}
           onModeChange={botViewModel.setMode}
           className="w-full min-w-0 md:w-[348px]"
@@ -129,6 +132,16 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
           <section className={resource !== 'task' ? 'space-y-4' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
             {resource === 'task' && <PageHeader title={resourceTitle} description={TASK_DESCRIPTION} />}
             {resource === 'bot' && <TrackExpo point={Points.collabSquare.heroExpo} />}
+            {resource === 'bot' && (
+              // 所选角色的「好友申请」入口（Bot 列表顶部）：申请处理编排全在
+              // useFriendConnectionRequests，本组件只注入角色与卡片刷新回调。
+              <FriendRequestsPanel
+                resource={resource}
+                actor={square.activeActor}
+                userId={square.humanBotContext?.userId}
+                onRelationshipsChanged={() => square.load()}
+              />
+            )}
             {resource === 'bot' && (
               <PublicBotCatalogPanel
                 vm={botViewModel}

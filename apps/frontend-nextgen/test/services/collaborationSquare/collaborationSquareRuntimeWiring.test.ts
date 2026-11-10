@@ -19,43 +19,70 @@ function jsonResponse(body: unknown) {
   } as unknown as Response;
 }
 
-describe('collaboration square BOT runtime wiring', () => {
-  it('uses the real Bot Catalog Search endpoint without requesting the BOT Mock route', async () => {
-    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(
-      jsonResponse({
-        code: 200000,
-        data: {
-          items: [
-            {
-              bot_id: 'bot-real-1',
-              bot_type: 'assistant',
-              description: '真实目录数据',
-              engine: 'OpenClaw',
-              entity_id: 'entity-real-1',
-              name: '真实 Bot',
-              owner_name: 'Owner',
-              status: 'online',
-            },
-          ],
-          total: 1,
-        },
-      }),
-    );
+/** 按路径前缀路由的 fetch stub：BCS 候选/搜索/Friend-connection 与 metadata 请求统一在此供给。 */
+function routeFetch(handlers: Array<[prefix: string, body: unknown]>) {
+  return jest.fn<typeof fetch>((input: RequestInfo | URL) => {
+    const url = String(input);
+    const handler = handlers.find(([prefix]) => url.startsWith(prefix));
+    return Promise.resolve(jsonResponse(handler ? handler[1] : {}));
+  });
+}
+
+const humanContext = { actorId: 'human_900003', userId: '900003' };
+
+/** BCS 候选（PhysicalBot 候选投影 + is_friend），对齐 bots.yaml list/search DTO。 */
+const BCS_CANDIDATE_ITEM = {
+  bot: {
+    bot_id: 'planner:owner-8',
+    name: '真实候选',
+    avatar_url: null,
+    created_by: '8',
+    descriptor: { summary: '擅长任务规划' },
+    visibility: 'public',
+    user_visibility: 'public',
+    status: 'online',
+  },
+  is_friend: false,
+};
+
+const BCS_CANDIDATES_ENVELOPE = {
+  code: 20000,
+  message: 'ok',
+  data: { items: [BCS_CANDIDATE_ITEM], total: 1, offset: 0, limit: 100 },
+};
+
+const EMPTY_FRIEND_CONNECTIONS_ENVELOPE = { code: 20000, data: { items: [], total: 0 } };
+
+/** 好友关系回填与 Frontend metadata 增强的真实链路完成后的公共佐断言。 */
+function expectNoCatalogOrMockFallback(fetchMock: jest.Mock) {
+  expect(
+    fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) => String(url).includes('/openapi/v1/bots/catalog')),
+  ).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+      String(url).includes('/api/mock/collaboration-square/bots'),
+    ),
+  ).toBe(false);
+}
+
+describe('collaboration square BOT runtime wiring（BCS v1）', () => {
+  it('普通列表经 BCS candidates 端点装配，不回退 Backend catalog 与 BOT Mock 路由', async () => {
+    const fetchMock = routeFetch([
+      ['/openapi/v1/collaboration/bots/human_900003/candidates', BCS_CANDIDATES_ENVELOPE],
+      ['/openapi/v1/collaboration/friend-connections', EMPTY_FRIEND_CONNECTIONS_ENVELOPE],
+      ['/openapi/v1/bots/metadata/queries', { code: 200000, data: { items: [], total: 0, offset: 0, limit: 100 } }],
+    ]);
     global.fetch = fetchMock;
 
-    await expect(collaborationSquareBotService.listBots({ search: '真实', page: 1, pageSize: 20 })).resolves.toEqual([
-      expect.objectContaining({ id: 'bot-real-1', name: '真实 Bot' }),
-    ]);
+    await expect(
+      collaborationSquareBotService.listBots({ search: '规划', offset: 0, pageSize: 20 }, humanContext),
+    ).resolves.toEqual([expect.objectContaining({ id: 'planner:owner-8', name: '真实候选', bcsStatus: 'online' })]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 首个请求即 BCS 公开候选：purpose=discovery + 名称过滤 + 整批 ≤100 的原始 offset 游标。
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/catalog/search?search=%E7%9C%9F%E5%AE%9E&page=1&page_size=20',
+      '/openapi/v1/collaboration/bots/human_900003/candidates?purpose=discovery&name=%E8%A7%84%E5%88%92&offset=0&limit=100',
     );
-    expect(
-      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
-        String(url).includes('/api/mock/collaboration-square/bots'),
-      ),
-    ).toBe(false);
+    expectNoCatalogOrMockFallback(fetchMock);
   });
 
   it('surfaces an ACE unauthenticated response and never falls back to BOT Mock data', async () => {
@@ -68,7 +95,7 @@ describe('collaboration square BOT runtime wiring', () => {
     );
     global.fetch = fetchMock;
 
-    await expect(collaborationSquareBotService.listBots()).rejects.toMatchObject({
+    await expect(collaborationSquareBotService.listBots(undefined, humanContext)).rejects.toMatchObject({
       code: 'unauthenticated',
     });
 
@@ -80,92 +107,55 @@ describe('collaboration square BOT runtime wiring', () => {
     ).toBe(false);
   });
 
-  it('uses the real Bot Catalog Discovery endpoint without requesting Search or BOT Mock routes', async () => {
-    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(
-      jsonResponse({
-        code: 200000,
-        data: {
-          items: [
-            {
-              bot_id: 'bot-smart-1',
-              bot_type: 'assistant',
-              description: '擅长会议纪要',
-              engine: 'OpenClaw',
-              entity_id: 'entity-smart-1',
-              name: '会议助手',
-              owner_name: 'Owner',
-              status: 'online',
-              recommendation: { score: 0.98, reason: 'semantic-match' },
-            },
-          ],
-          total: 1,
+  it('智能搜索经 BCS 内部 candidates/search 端点，语义附加字段保留且不下发 runtime_state', async () => {
+    const fetchMock = routeFetch([
+      [
+        '/api/v1/collaboration/bots/bot-1%3Aowner-1/candidates/search',
+        {
+          code: 20000,
+          message: 'ok',
+          data: {
+            items: [{ ...BCS_CANDIDATE_ITEM, score: 0.87, short_profile: '擅长任务规划' }],
+            search_mode: 'semantic',
+          },
         },
-      }),
-    );
-    global.fetch = fetchMock;
-
-    await expect(collaborationSquareBotService.discoverBots({ keyword: '整理会议纪要' })).resolves.toEqual([
-      expect.objectContaining({ id: 'bot-smart-1', name: '会议助手' }),
+      ],
+      ['/openapi/v1/collaboration/friend-connections', EMPTY_FRIEND_CONNECTIONS_ENVELOPE],
+      ['/openapi/v1/bots/metadata/queries', { code: 200000, data: { items: [], total: 0, offset: 0, limit: 100 } }],
     ]);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/catalog/discover?keyword=%E6%95%B4%E7%90%86%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81&top_k=20&min_score=0.01&runtime_state=online',
-    );
-    expect(
-      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
-        String(url).includes('/openapi/v1/bots/catalog/search'),
-      ),
-    ).toBe(false);
-    expect(
-      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
-        String(url).includes('/api/mock/collaboration-square/bots'),
-      ),
-    ).toBe(false);
-  });
-
-  it('omits runtime_state from Bot-view Discovery requests', async () => {
-    const fetchMock = jest
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ code: 200000, data: { items: [], total: 0 } }))
-      .mockResolvedValue(jsonResponse({ code: 20000, data: { items: [], total: 0 } }));
     global.fetch = fetchMock;
 
-    await collaborationSquareBotService.discoverBots({
-      keyword: '测试',
-      viewerActorType: 'bot',
-      viewerActorId: 'bot-1:owner-1',
+    await expect(
+      collaborationSquareBotService.discoverBots(
+        { keyword: '整理会议纪要', viewerActorType: 'bot', viewerActorId: 'bot-1:owner-1' },
+        humanContext,
+      ),
+    ).resolves.toEqual({
+      items: [expect.objectContaining({ id: 'planner:owner-8', score: 0.87, shortProfile: '擅长任务规划' })],
+      searchMode: 'semantic',
     });
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/catalog/discover?keyword=%E6%B5%8B%E8%AF%95&top_k=20&min_score=0.01&viewer_actor_type=bot&viewer_actor_id=bot-1%3Aowner-1',
+      '/api/v1/collaboration/bots/bot-1%3Aowner-1/candidates/search?q=%E6%95%B4%E7%90%86%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81&purpose=discovery',
     );
+    expectNoCatalogOrMockFallback(fetchMock);
   });
 
-  it('surfaces a Discovery protocol error and never falls back to Search or BOT Mock data', async () => {
+  it('BCS 错误信封（非 20000）按传输错误上抛，不回退 Search、catalog 或 BOT Mock 路由', async () => {
     const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
-        code: 20000,
-        data: { items: [], total: 0 },
+        code: 40000,
+        message: 'bad request',
       }),
     );
     global.fetch = fetchMock;
 
-    await expect(collaborationSquareBotService.discoverBots({ keyword: '规划' })).rejects.toMatchObject({
-      code: 'protocol_error',
+    await expect(collaborationSquareBotService.discoverBots({ keyword: '规划' }, humanContext)).rejects.toMatchObject({
+      code: 'network',
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(
-      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
-        String(url).includes('/openapi/v1/bots/catalog/search'),
-      ),
-    ).toBe(false);
-    expect(
-      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
-        String(url).includes('/api/mock/collaboration-square/bots'),
-      ),
-    ).toBe(false);
+    expectNoCatalogOrMockFallback(fetchMock);
   });
 
   it('uses the real Human to Bot friend request endpoint without requesting BOT Mock routes', async () => {

@@ -3,8 +3,9 @@
  * 从 PermissionCard 提取，供协作权限页面卡片与 BotWorkshop「通用配置」弹窗共用。
  * 提取为 DOM 等价重构——页面侧渲染结果与提取前一致，既有测试断言不受影响。
  */
+import { getCapabilities } from '@/capabilities';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
-import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
+import { botFriendApprovalSection, botVisibilitySection, friendApprovalEntry, visibilityAudience } from './botVisibilityCopy';
 import { LabelHelpTooltip } from './HelpTooltip';
 import { RelationCard, type RelationCardProps } from './RelationCard';
 import { RequestList } from './RequestList';
@@ -120,7 +121,7 @@ export function PublishApprovalSettings({
   );
 }
 
-/** Bot 好友审批分区：标题（含通知中心入口链接说明）+ 策略行。 */
+/** Bot 好友审批分区：标题（含审批处理入口链接说明——全栈为通知中心，BCS-only 为发现页入口）+ 策略行。 */
 export function FriendApprovalSettings({
   bot,
   onEditFriendApproval,
@@ -128,6 +129,8 @@ export function FriendApprovalSettings({
 }: FriendApprovalSettingsProps) {
   const joinedBcnDisabledReason = bot.joinedBcn ? undefined : '加入 BCN 后才能修改协作权限';
   const friendDisabledByScope = bot.publication.user.scope === 'none' && bot.publication.bot.scope === 'none';
+  // Backend 关闭（BCS-only）时入口指向发现页的申请处理入口，通知中心不再成为唯一审批路径。
+  const approvalEntry = friendApprovalEntry(getCapabilities().getPublicBotBackendEnabled());
   return (
     <>
       <div className="mb-3 flex items-center gap-1.5">
@@ -138,10 +141,10 @@ export function FriendApprovalSettings({
             <>
               {botFriendApprovalSection.descriptionLeading}
               <a
-                href={botFriendApprovalSection.approvalEntryPath}
+                href={approvalEntry.approvalEntryPath}
                 className="font-medium text-primary hover:opacity-80"
               >
-                {botFriendApprovalSection.approvalEntryLabel}
+                {approvalEntry.approvalEntryLabel}
               </a>
               {botFriendApprovalSection.descriptionTrailing}
             </>

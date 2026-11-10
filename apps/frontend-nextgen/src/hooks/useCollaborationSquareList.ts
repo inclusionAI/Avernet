@@ -2,38 +2,31 @@ import type {
   BotCatalogViewer,
   BotSearchMode,
   HumanBotActionContext,
+  PublicBotSearchResultMode,
   SquareResource,
 } from '@/domain/collaborationSquare/types';
+import type { CollaborationSquareState } from '@/stores/collaborationSquareStore';
 import type { HumanIdentityStatus } from '@/hooks/useHumanIdentity';
 import { collaborationSquareBotService, collaborationSquareGroupService } from '@/services/collaborationSquare';
-import type { CollaborationSquareState } from '@/stores/collaborationSquareStore';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
+import { getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export const COLLABORATION_SQUARE_PAGE_SIZE = 24;
 const COLLABORATION_SQUARE_SEARCH_DEBOUNCE_MS = 1_000;
 
-interface UseCollaborationSquareListOptions {
+interface UseCollaborationSquareListOptions
+  extends Pick<CollaborationSquareState, 'setBots' | 'appendBots' | 'setGroups' | 'appendGroups' | 'setLoading' | 'setError'> {
   resource: SquareResource;
   humanBotContext: HumanBotActionContext | null;
   humanIdentityStatus: HumanIdentityStatus;
   botQuery: string;
   groupQuery: string;
   botSearchMode: BotSearchMode;
-  /** Catalog 检索的当前身份（read-time viewer），下发给 bot-catalog 的 viewer_actor_* 参数。 */
+  /** Catalog 检索的当前身份（read-time viewer），映射为 BCS candidates 的视角 actor。 */
   viewer?: BotCatalogViewer;
   /** 透传时：智能搜索 + 空关键词不发请求、清空列表，交由调用方展示输入提示。 */
   gateSmartEmpty?: boolean;
-  setBots: CollaborationSquareState['setBots'];
-  appendBots: CollaborationSquareState['appendBots'];
-  setGroups: CollaborationSquareState['setGroups'];
-  appendGroups: CollaborationSquareState['appendGroups'];
-  setLoading: CollaborationSquareState['setLoading'];
-  setError: CollaborationSquareState['setError'];
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作失败，请稍后重试';
 }
 
 export function useCollaborationSquareList({
@@ -53,13 +46,17 @@ export function useCollaborationSquareList({
   setError,
 }: UseCollaborationSquareListOptions) {
   const latestListRequest = useRef(0);
-  const currentBotPage = useRef(1);
+  // 普通 Bot 列表保存 BCS 原始 offset 游标（上一页返回的 nextOffset）；群 offset 独立，互不复用。
+  const currentBotOffset = useRef(0);
   const currentGroupOffset = useRef(0);
   const loadMoreController = useRef<AbortController | null>(null);
   const loadingMoreRef = useRef(false);
   const [hasMore, setHasMore] = useState(false);
-  // 分页标记的同步镜像：executeLoad 里 setBots（store 同步通知）与 setHasMore（批处理）可能
-  // 分属两次渲染，深链定位与 loadMore 守卫需在同一轮次读到实时值，避免提前判定目标失效。
+  // 智能搜索的 wire 结果模式（semantic/name_fallback/empty_query 本地短路）：独立保留，
+  // 空结果也不丢失，供「名称匹配」提示与搜索栏展示。
+  const [searchResultMode, setSearchResultMode] = useState<PublicBotSearchResultMode | null>(null);
+  // 分页标记的同步镜像：setBots（store 同步通知）与 setHasMore（批处理）可能分属两次渲染，
+  // 深链定位与 loadMore 守卫需在同一轮次读到实时值，避免提前判定目标失效。
   const hasMoreRef = useRef(false);
   const applyHasMore = useCallback((value: boolean) => {
     hasMoreRef.current = value;
@@ -79,11 +76,13 @@ export function useCollaborationSquareList({
       loadingMoreRef.current = false;
       setLoadingMore(false);
       setLoadMoreError(null);
-      currentBotPage.current = 1;
+      // 搜索词/角色/模式变化即新查询：Bot 游标复位到 0，不沿用旧查询的 nextOffset。
+      currentBotOffset.current = 0;
       currentGroupOffset.current = 0;
       if (resource === 'bot' && gateSmartEmpty && mode === 'smart' && !query.trim()) {
         setBots([]);
         applyHasMore(false);
+        setSearchResultMode('empty_query');
         setLoading(false);
         setError(null);
         return;
@@ -99,29 +98,35 @@ export function useCollaborationSquareList({
       try {
         if (resource === 'bot') {
           const keyword = query.trim();
-          const isSmartSearch = mode === 'smart' && Boolean(keyword);
-          const page = isSmartSearch
-            ? {
-                items: await collaborationSquareBotService.discoverBots(
-                  { keyword, topK: 20, minScore: 0.01, runtimeState: 'online', ...viewerFields },
-                  humanBotContext ?? undefined,
-                  signal,
-                ),
-                total: 0,
-              }
-            : await collaborationSquareBotService.listBotPage(
-                {
-                  ...(mode === 'name' && keyword ? { search: keyword } : {}),
-                  page: 1,
-                  pageSize: COLLABORATION_SQUARE_PAGE_SIZE,
-                  ...viewerFields,
-                },
-                humanBotContext ?? undefined,
-                signal,
-              );
-          if (requestId === latestListRequest.current && !signal?.aborted) {
-            setBots(page.items);
-            applyHasMore(!isSmartSearch && COLLABORATION_SQUARE_PAGE_SIZE < page.total);
+          if (mode === 'smart' && keyword) {
+            // 智能搜索是一次性批次（BCS 搜索容量上限 20）：不接分页，hasMore 恒 false。
+            const result = await collaborationSquareBotService.discoverBots(
+              { keyword, ...viewerFields },
+              humanBotContext ?? undefined,
+              signal,
+            );
+            if (requestId === latestListRequest.current && !signal?.aborted) {
+              setBots(result.items);
+              applyHasMore(false);
+              setSearchResultMode(result.searchMode);
+            }
+          } else {
+            const result = await collaborationSquareBotService.listBotPage(
+              {
+                ...(mode === 'name' && keyword ? { search: keyword } : {}),
+                offset: 0,
+                pageSize: COLLABORATION_SQUARE_PAGE_SIZE,
+                ...viewerFields,
+              },
+              humanBotContext ?? undefined,
+              signal,
+            );
+            if (requestId === latestListRequest.current && !signal?.aborted) {
+              setBots(result.items);
+              currentBotOffset.current = result.nextOffset;
+              applyHasMore(result.hasMore);
+              setSearchResultMode(null);
+            }
           }
         } else if (resource === 'group') {
           const search = query.trim();
@@ -138,23 +143,14 @@ export function useCollaborationSquareList({
       } catch (error) {
         if (requestId === latestListRequest.current && (error as Error).name !== 'AbortError') {
           applyHasMore(false);
-          setError(errorMessage(error));
+          setSearchResultMode(null);
+          setError(getCollaborationSquareErrorMessage(error));
         }
       } finally {
         if (requestId === latestListRequest.current) setLoading(false);
       }
     },
-    [
-      gateSmartEmpty,
-      humanBotContext,
-      humanIdentityStatus,
-      resource,
-      setBots,
-      setError,
-      setGroups,
-      setLoading,
-      viewerFields,
-    ],
+    [gateSmartEmpty, humanBotContext, humanIdentityStatus, resource, setBots, setError, setGroups, setLoading, viewerFields],
   );
 
   const activeLoadQuery = resource === 'bot' ? botQuery : groupQuery;
@@ -180,17 +176,18 @@ export function useCollaborationSquareList({
     setLoadMoreError(null);
     try {
       if (resource === 'bot') {
-        const page = currentBotPage.current + 1;
+        const offset = currentBotOffset.current;
         const keyword = botQuery.trim();
         const result = await collaborationSquareBotService.listBotPage(
-          { ...(keyword ? { search: keyword } : {}), page, pageSize: COLLABORATION_SQUARE_PAGE_SIZE, ...viewerFields },
+          { ...(keyword ? { search: keyword } : {}), offset, pageSize: COLLABORATION_SQUARE_PAGE_SIZE, ...viewerFields },
           humanBotContext ?? undefined,
           controller.signal,
         );
         if (requestId !== latestListRequest.current || controller.signal.aborted) return;
         appendBots(result.items);
-        currentBotPage.current = page;
-        applyHasMore(page * COLLABORATION_SQUARE_PAGE_SIZE < result.total);
+        // 续读游标保存 BCS 原始 nextOffset；hasMore 来自预读记录，不由 total 计算。
+        currentBotOffset.current = result.nextOffset;
+        applyHasMore(result.hasMore);
       } else if (resource === 'group') {
         const search = groupQuery.trim();
         const offset = currentGroupOffset.current;
@@ -205,7 +202,7 @@ export function useCollaborationSquareList({
       }
     } catch (error) {
       if (requestId === latestListRequest.current && (error as Error).name !== 'AbortError') {
-        setLoadMoreError(errorMessage(error));
+        setLoadMoreError(getCollaborationSquareErrorMessage(error));
       }
     } finally {
       if (requestId === latestListRequest.current) {
@@ -246,5 +243,5 @@ export function useCollaborationSquareList({
     [],
   );
 
-  return { load, loadMore, hasMore, hasMoreRef, loadMoreRef, loadingMore, loadMoreError };
+  return { load, loadMore, hasMore, hasMoreRef, loadMoreRef, loadingMore, loadMoreError, searchResultMode };
 }

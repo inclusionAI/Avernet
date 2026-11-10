@@ -55,3 +55,22 @@ export const botFriendApprovalSection = {
   approvalEntryPath: '/ticket-center',
   descriptionTrailing: '」处理。',
 } as const;
+
+/**
+ * BCS-only（未配置可选 Backend 增强）时好友审批说明的入口：发现页自己的申请处理入口。
+ * 通知中心仍可作 Backend 开启后的增强入口，但不能成为唯一审批路径。
+ */
+export const bcsOnlyFriendApprovalEntry = {
+  approvalEntryLabel: '发现 → 公开 Bot / 好友申请',
+  approvalEntryPath: '/collaboration-square/bots',
+} as const;
+
+/** 按 Backend 可选增强开关解析审批处理入口（全栈保持通知中心，BCS-only 指向本入口）。 */
+export function friendApprovalEntry(backendEnabled: boolean) {
+  return backendEnabled
+    ? {
+        approvalEntryLabel: botFriendApprovalSection.approvalEntryLabel,
+        approvalEntryPath: botFriendApprovalSection.approvalEntryPath,
+      }
+    : bcsOnlyFriendApprovalEntry;
+}
