@@ -453,9 +453,10 @@ class GuardOutcome:
 
 
 def validate_definition(d: StateMachineDefinition) -> None:
-    """spec §4.4 第 1-7 条:initial 唯一存在;全状态可达;terminal_* 无出边;
-    引用状态都已定义;rule_id 唯一;同 state+event 多 guard 不明确即拒;未知字段上限;
-    非法为止抛 ContextCollabValidationError。"""
+    """spec §4.4 第 1-7 条:initial 唯一存在;全状态可达(豁免 governance_kind 为
+    waiting/blocked 的状态 —— 它们由外部失败事实进入,spec §4.3;blocked 无入边即此例);
+    terminal_* 无出边;引用状态都已定义;rule_id 唯一;同 state+event 多 guard 不明确即拒;
+    未知字段上限;非法为止抛 ContextCollabValidationError。"""
 
 def resolve_transition(
     d: StateMachineDefinition, current_state: str, event_kind: str,
@@ -497,7 +498,7 @@ GUARD_REGISTRY: dict[str, GuardFunction]    # 5 个守卫,语义见下
 - [ ] **Step 1: 写失败测试**(覆盖 §4.4 三类合同断言 + §4.3 PASS/FAIL 事实)
 
 要点写为具体测试:
-1. `validate_definition(TEAM_TODO_EXECUTION_MACHINE)` 不抛;构造一个 `initial_state` 未定义的副本抛 ValidationError;构造一个 rule_id 重复的副本抛;
+1. `validate_definition(TEAM_TODO_EXECUTION_MACHINE)` 不抛(blocked 无入边因 governance_kind=blocked 豁免可达性检查);构造一个 `initial_state` 未定义的副本抛 ValidationError;构造一个 rule_id 重复的副本抛;
 2. `resolve_transition`:created + `task.started` + actor 为 responsible → `"in_progress"`;created + `user_interaction.posted` → `None`(无规则,状态不变);done + 任何事件 → None 或 FAIL(终态无出边);reviewing + `task.accepted` + actor 非 responsible → ValidationError(guard FAIL 显式拒绝);
 3. `update_progress` 时 payload 含 `task_id` → FAIL;
 4. moral: "同一 state/event 多 guard 不明确" - 构造两条 [created]+task.started 冲突规则抛错。
@@ -564,10 +565,14 @@ def project_events(events: Sequence[EventRecord], *, current_event_id: str | Non
     event status:sequence 小于 current 为 "completed",等于为 "active",其后(或 current 为 None)为 "pending"。"""
 
 def build_progress(events: Sequence[EventProjection], *,
+                   current_event_id: str | None,
                    last_percent: int | None) -> ProgressSnapshot:
-    """completed_count/active_count/blocked_count 由投影 status 统计;
+    """completed_count/active_count/blocked_count 由投影 status 统计,且仅统计
+    primitive_type != "Message" 的事件(Message 是互动内容,不是进度;
+    spec §6.4 示例:completed_count=2 即 evt_001/003 两个 Task 事件)。
     percent = last_percent(最后一个 payload 带 "percent" 整数的事件)否则
-    0 if 无事件 else round(completed_count*100/len(events))。current_event_id 取最后一个事件。"""
+    0 if 无计数事件 else round(completed_count*100/计数的非 Message 事件数)。
+    current_event_id 沿用调用方传入的 collet.current_event_id,不重新推导。"""
 ```
 
 - [ ] **Step 1: 写失败测试**(钉死 Review Focus #5)
@@ -578,7 +583,7 @@ test_reliability_observation.py:
 3. 构造 5 个事件(链 evt_001..evt_005,末尾 current="evt_004",其中 evt_002 `is_trunk=True`,另造一个 `is_trunk=False` 的分支事件 evt_002b):
    - `trunk_events=True` 时投影不含 evt_002b、其余照旧;
    - `trunk_events=True/False` 两种情况下其它每个事件的 `status` 完全一致(completed×3/active/pending);
-4. `build_progress` 在 last_percent=None、5 事件 3 completed 时:`percent == 60`、`completed_count == 3`、`active_count == 1`、`blocked_count == 0`;payload 带 percent=40 (log) 时 percent 取 40。
+4. `build_progress` 在 last_percent=None、5 个非 Message 事件(3 completed / 1 active)时:`percent == 75`、`completed_count == 3`、`active_count == 1`、`blocked_count == 0`;current_event_id 返回传入值(不再重推);payload 带 percent=40 时 percent 取 40;再补一例:混入 1 条 completed 的 Message 事件时 completed_count 不变(Message 不计数)。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -955,7 +960,7 @@ class ContextCollabStatusProjection:
 - [ ] **Step 1: 写失败测试**(对照 §6.4 示例组装)
 
 构造 5 事件链(collet, current=evt_004,last_percent payload=40,末事件 pending):
-1. GET 返回 `current_snapshot["status"] == "in_progress"`、`current_snapshot["progress"]["percent"] == 40`(payload 提供)、`progress["completed_count"] == 2`、`active_count == 1`、`blocked_count == 0`,以及 `build_progress(...).current_event_id == "evt_005"`(链头为最新事件);断言值全部取自 spec §6.4 示例。
+1. GET 返回 `current_snapshot["status"] == "in_progress"`、`current_snapshot["progress"]["percent"] == 40`(payload 提供)、`progress["completed_count"] == 2`(evt_001/003 两个 Task 事件;Message evt_002 不计数)、`active_count == 1`、`blocked_count == 0`、`progress["current_event_id"] == "evt_004"`(沿用 collet 行值);断言值全部取自 spec §6.4 示例。
 2. `current_event["event_id"] == "evt_004"`、`current_event["status"] == "active"`(由 collet.current_event_id 决定);
 3. `task_progress["events"]`:5 条按 sequence_no 升序,最后一条 pending,evt_004 active,前三条 completed;Message 事件条目含 `content == "上下文做一下补充xxx"`(从 payload),无 `steps` 字(§12.2 #5 — 断言字段集合不含 "steps");
 4. Review Focus #5:同 collet 加一条 `is_trunk=False` 分支事件(`trunk_events=False` 返回 6 条,`True` 仍返回 5 条),且两次调用的 `current_snapshot`、`current_event`、`percent` 完全相等;
