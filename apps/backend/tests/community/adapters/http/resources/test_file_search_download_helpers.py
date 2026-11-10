@@ -548,3 +548,150 @@ class TestDownloadDirectoryZipMetadata:
             assert file_attr & 0o170000 == stat.S_IFREG, oct(file_attr)
             assert zf.read("memory/foo.txt") == b"FOO"
         os.unlink(resp.path)
+
+
+class TestDownloadDirectoryFailures:
+    async def _download(self, fs, tmp_path):
+        from agentclaw.community.adapters.http.resources import file_search_download_router as router
+        with patch.object(router, "_resolve_params", return_value=("u1", "b1", "openclaw")), \
+             patch.object(router, "get_bot_workspace_dir", return_value=tmp_path), \
+             patch.object(router, "_resolve_walk_device_fs", return_value=fs), \
+             patch.object(router.device_info_lookup, "get_device_info", return_value=("arca", "sbx")), \
+             patch.object(router.tempfile, "tempdir", str(tmp_path)):
+            return await download_directory.__wrapped__(
+                path="data", bot_id="b1", engine_type="openclaw", owner_id="u1",
+                publish_id=None, device_uuid=None, ctx=SimpleNamespace(user_id="u1"),
+                bot_repo=MagicMock(), path_factory=MagicMock(), publish_repo=MagicMock(),
+                baas_service=MagicMock(), resolver=MagicMock(), device_fs_dispatcher=MagicMock(),
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [None, RuntimeError("private upstream path")])
+    async def test_subdirectory_failure_returns_error(self, tmp_path, failure):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                if path == "workspace/data":
+                    return [_entry("child", is_dir=True)]
+                if isinstance(failure, Exception):
+                    raise failure
+                return failure
+        with pytest.raises(HTTPException) as result:
+            await self._download(Fs(), tmp_path)
+        assert result.value.status_code == 502
+        assert "private" not in result.value.detail
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [None, RuntimeError("private upstream path")])
+    async def test_file_failure_after_first_write_removes_archive(self, tmp_path, failure):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                return [_entry("first", size=1), _entry("second", size=1)]
+            async def read_file(self, path):
+                if path.endswith("first"):
+                    return b"a"
+                if isinstance(failure, Exception):
+                    raise failure
+                return failure
+        with pytest.raises(HTTPException) as result:
+            await self._download(Fs(), tmp_path)
+        assert result.value.status_code == 502
+        assert "private" not in result.value.detail
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.asyncio
+    async def test_scoped_missing_root_is_404(self, tmp_path):
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as result:
+            await self._download(_RecordingDeviceFs({}, {}), tmp_path)
+        assert result.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_strict_walk_rejects_only_more_than_entry_limit(self):
+        from agentclaw.community.adapters.http.resources.file_search_download_router import _DeviceWalkLimitError
+        fs = _FakeDeviceFs({"data": [_entry("a"), _entry("b")]})
+        assert len(await _walk_device_fs(fs, "data", None, max_entries=2, strict=True)) == 2
+        with pytest.raises(_DeviceWalkLimitError):
+            await _walk_device_fs(fs, "data", None, max_entries=1, strict=True)
+
+    @pytest.mark.asyncio
+    async def test_root_transport_error_is_502(self, tmp_path):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                raise RuntimeError("device unavailable")
+        with pytest.raises(HTTPException) as result:
+            await self._download(Fs(), tmp_path)
+        assert result.value.status_code == 502
+
+    @pytest.mark.asyncio
+    async def test_file_limit_rejects_5001_before_read(self, tmp_path):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                return [_entry(str(i), size=1) for i in range(5001)]
+            async def read_file(self, path):
+                pytest.fail("must reject before reading")
+        with pytest.raises(HTTPException) as result:
+            await self._download(Fs(), tmp_path)
+        assert result.value.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_20000_entry_boundary_is_not_silent_truncation(self):
+        from agentclaw.community.adapters.http.resources.file_search_download_router import _DeviceWalkLimitError
+        fs = _FakeDeviceFs({"data": [_entry(str(i)) for i in range(20001)]})
+        with pytest.raises(_DeviceWalkLimitError):
+            await _walk_device_fs(fs, "data", None, max_entries=20000, strict=True)
+        assert len(await _walk_device_fs(fs, "data", None, max_entries=20001, strict=True)) == 20001
+
+    @pytest.mark.asyncio
+    async def test_search_keeps_best_effort_for_http_exception(self):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                if path == "workspace":
+                    return [_entry("child", is_dir=True), _entry("sibling")]
+                raise HTTPException(status_code=502, detail="unavailable")
+        entries = await _walk_device_fs(Fs(), "", None)
+        assert [entry["name"] for entry in entries] == ["child", "sibling"]
+
+    def test_http_download_reports_device_error(self, tmp_path):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from fastapi_injector import attach_injector
+        from injector import Injector, InstanceProvider, Module
+        from agentclaw.community.adapters.http.dependencies import get_request_context, RequestContext
+        from agentclaw.community.adapters.http.resources import file_search_download_router as router
+        from agentclaw.community.core.bot_collaborator.interceptor import CollaboratorPermissionInterceptor
+
+        class Fs:
+            async def list_dir(self, path):
+                if path == "workspace/data":
+                    return [_entry("child", is_dir=True)]
+                raise RuntimeError("private upstream path")
+
+        class Bindings(Module):
+            def configure(self, binder):
+                for dependency in (router.BotRepository, router.WorkspacePathFactory,
+                                   router.BotPublishRepositoryProtocol, router.BaasServiceProtocol,
+                                   router.DeviceContextResolver, router.DeviceFilesystemDispatcher):
+                    binder.bind(dependency, to=InstanceProvider(MagicMock()))
+
+        async def allow(_self, ctx):
+            return ctx
+
+        app = FastAPI()
+        app.include_router(router.router)
+        app.dependency_overrides[get_request_context] = lambda: RequestContext(user_id="u1", bot_id="b1")
+        attach_injector(app, Injector([Bindings()]))
+        with patch.object(CollaboratorPermissionInterceptor, "before", allow), \
+             patch.object(router, "_resolve_params", return_value=("u1", "b1", "openclaw")), \
+             patch.object(router, "get_bot_workspace_dir", return_value=tmp_path), \
+             patch.object(router, "_resolve_walk_device_fs", return_value=Fs()), \
+             patch.object(router.device_info_lookup, "get_device_info", return_value=("arca", "sbx")):
+            response = TestClient(app).get("/files/download-dir", params={"path": "data", "bot_id": "b1"})
+        assert response.status_code == 502
+        assert response.json() == {"detail": "Directory download failed while reading the device"}
+        assert "private upstream path" not in response.text
