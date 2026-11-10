@@ -85,7 +85,7 @@ def _run(port, **kwargs):
     return asyncio.run(port.sync(**kwargs))
 
 
-def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw"):
+def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw", source_owner_id="owner"):
     import asyncio
 
     target = BotFileSyncTarget(
@@ -97,7 +97,13 @@ def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw"):
         entity_type="staff",
     )
     return asyncio.run(
-        port.sync(target=target, source_bot_id="src_1", path="workspace/", excludes=excludes)
+        port.sync(
+            target=target,
+            source_bot_id="src_1",
+            source_owner_id=source_owner_id,
+            path="workspace/",
+            excludes=excludes,
+        )
     )
 
 
@@ -113,9 +119,14 @@ def _port(nas_root, run_command, *, source=_MISSING, plan=None):
             "bot_id": "src_1",
             "active_engine": "openclaw",
             "entity_id": "owner",
+            "owner_id": "owner",
             "entity_type": "staff",
             "env": "dev",
         }
+    # The port reads the source row by (bot_id, owner_id) now — the repo's
+    # owner-scoped read is what the strategy uses; the un-scoped one stays
+    # for any caller that still resolves by bot_id alone.
+    bot_repo.get_by_id_and_owner.return_value = source
     bot_repo.get_by_id.return_value = source
     return NasBotFileSyncPort(
         bot_repo=bot_repo,
@@ -148,9 +159,8 @@ def test_a_sync_builds_the_rsync_argv_at_the_engine_root(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
+        "owner_id": "owner", "entity_type": "staff", "env": "dev",
     })
-    # The source workspace must exist (the port checks it before the rsync).
     storage_id_dir = tmp_path / "dev_staff_owner_openclaw_src_1"
     (storage_id_dir / ".openclaw").mkdir(parents=True)
 
@@ -199,9 +209,9 @@ def test_an_engine_the_sandbox_registry_cannot_resolve_is_refused(tmp_path):
             raise KeyError(engine_type)
 
     port = NasBotFileSyncPort(
-        bot_repo=MagicMock(get_by_id=MagicMock(return_value={
+        bot_repo=MagicMock(get_by_id_and_owner=MagicMock(return_value={
             "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-            "entity_type": "staff", "env": "dev",
+            "owner_id": "owner", "entity_type": "staff", "env": "dev",
         })),
         sandbox_registry=_UnresolvableRegistry(),
         path_factory=_factory(tmp_path),
@@ -227,7 +237,7 @@ def test_a_cross_engine_source_and_destination_is_refused(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "aicoding", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
+        "owner_id": "owner", "entity_type": "staff", "env": "dev",
     })
     result = _ok(port, target_engine="openclaw")
     assert result.ok is False
@@ -239,7 +249,7 @@ def test_a_cross_env_source_is_refused(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "pre",  # source in env 'pre', process is 'dev'
+        "owner_id": "owner", "entity_type": "staff", "env": "pre",  # source in env 'pre', process is 'dev'
     })
     result = _ok(port)  # target.env = 'dev'
     assert result.ok is False
@@ -304,9 +314,9 @@ def test_a_raising_build_plan_resolution_is_a_composed_reason(tmp_path):
                     raise RuntimeError("sandbox missing")
             return _P()
     port = NasBotFileSyncPort(
-        bot_repo=MagicMock(get_by_id=MagicMock(return_value={
+        bot_repo=MagicMock(get_by_id_and_owner=MagicMock(return_value={
             "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-            "entity_type": "staff", "env": "dev",
+            "owner_id": "owner", "entity_type": "staff", "env": "dev",
         })),
         sandbox_registry=_BrokenRegistry(),
         path_factory=_factory(tmp_path),

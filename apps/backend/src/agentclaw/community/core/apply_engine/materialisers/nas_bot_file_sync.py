@@ -93,6 +93,7 @@ class NasBotFileSyncPort(BotFileSyncPort):
         *,
         target: BotFileSyncTarget,
         source_bot_id: str,
+        source_owner_id: str,
         path: str,
         excludes: tuple[str, ...],
     ) -> BotFileSyncResult:
@@ -103,7 +104,15 @@ class NasBotFileSyncPort(BotFileSyncPort):
         del path
 
         engine_type = target.engine_type
-        source = self._bot_repo.get_by_id(source_bot_id)
+        # Read the source row by ``(bot_id, owner_id)`` rather than by
+        # ``bot_id`` alone: a ``bot_id`` is not globally unique (the reserved
+        # ``default`` bot has a row per account), and a ``get_by_id`` first()
+        # could return another owner's row and converge the wrong workspace.
+        # No ``env`` override: the current-env scoping is what the cross-env
+        # check below reads against (a source in another env is refused).
+        source = self._bot_repo.get_by_id_and_owner(
+            source_bot_id, source_owner_id
+        )
         if source is None:
             return BotFileSyncResult(ok=False, reason="source bot not found")
 
