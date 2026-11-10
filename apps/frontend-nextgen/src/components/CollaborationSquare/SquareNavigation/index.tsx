@@ -5,7 +5,7 @@ export type SquareNavigationResource = 'bot' | 'group' | 'expert';
 
 const ITEMS: Array<{ resource: SquareNavigationResource; label: string; path: string }> = [
   { resource: 'bot', label: '公开 Bot', path: '/collaboration-square/bots' },
-  { resource: 'expert', label: '专家 Bot', path: '/collaboration-square/experts' },
+  { resource: 'expert', label: '专家', path: '/collaboration-square/experts' },
   { resource: 'group', label: '公开协作群', path: '/collaboration-square/groups' },
 ];
 
