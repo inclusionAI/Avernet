@@ -90,7 +90,6 @@ from agentclaw.community.core.workspace.constants import (
     INTERNAL_ENGINE_TYPES,
     _get_engine_types,
 )
-from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
