@@ -88,10 +88,13 @@ provides:
   - TREE_MAGIC
   - canonical_tree_bytes
   - decode_tree_bytes
+  - BlobStore  # where the bytes live; LocalBlobStore and ObjectStorageBlobStore implement it
+  - LocalBlobStore
   - DEFAULT_CONTENT_STORE_DIR
   - content_store_root_from_config
 consumes:
   - "ContentStoreRepositoryProtocol (core.repository) — persistence for the append-only provenance log"
+  - "ObjectStoragePlugin (plugin_api.object_storage) — the medium for the blobs under the object_storage backend"
   - "FetchedObject (core.bot_config_manifest.fetch.errors) — the receipt type `store` takes; a type-only import, so the store loads without the Manifest's transport stack"
 consumed_by:
   - "core.bot_config_manifest — the entry fetch funnel files receipts and reads the copy for delivery and keep_last; materialisers store git-delivered trees in acm-tree-v1"
@@ -103,6 +106,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_manifest.fetch.errors  # FetchedObject, TYPE_CHECKING only
   - agentclaw.community.core.repository
   - agentclaw.community.log
+  - agentclaw.community.plugin_api.object_storage  # the ObjectStoragePlugin contract the object-storage blob store writes through
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```

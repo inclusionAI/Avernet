@@ -102,3 +102,15 @@ def test_unknown_backend_fails_at_startup() -> None:
             content_store_backend_from_config({"bot_config_manifest": {"content_store_backend": bad}})
     with pytest.raises(ValueError, match="mapping"):
         content_store_backend_from_config({"bot_config_manifest": "fs"})
+
+
+@pytest.mark.parametrize("overlay", ["application-test.yaml", "application-singlebox.yaml"])
+def test_profiles_whose_object_storage_is_a_mock_keep_the_local_tree(overlay) -> None:
+    """test and singlebox bind MockObjectStoragePlugin, which keeps nothing: their overlays must say fs."""
+    import yaml
+
+    import agentclaw.community.configs as configs
+    from agentclaw.community.core.content_store.settings import content_store_backend_from_config
+
+    tree = yaml.safe_load((Path(configs.__path__[0]) / overlay).read_text(encoding="utf-8"))
+    assert content_store_backend_from_config(tree["user_config"]) == "fs"

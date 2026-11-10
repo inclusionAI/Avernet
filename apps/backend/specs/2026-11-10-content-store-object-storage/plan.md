@@ -89,7 +89,8 @@ bot_config_manifest:
 ```
 
 ```yaml
-# configs/application-test.yaml — the test profile binds a MagicMock object storage
+# configs/application-test.yaml and configs/application-singlebox.yaml —
+# both profiles bind the mock object storage, which keeps nothing
 bot_config_manifest:
   content_store_backend: "fs"
 ```

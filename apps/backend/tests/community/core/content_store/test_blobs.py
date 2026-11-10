@@ -126,14 +126,6 @@ def test_object_store_write_failure_raises_fault():
         ObjectStorageBlobStore(storage).write(DIGEST, BODY)
 
 
-def test_object_store_create_and_put_failure_raises_fault(tmp_path, monkeypatch):
-    storage = _fs_storage(tmp_path)
-    monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: ObjectCreateResult.FAILED)
-    monkeypatch.setattr(storage, "put_object", lambda key, content: False)
-    with pytest.raises(ContentStoreFault):
-        ObjectStorageBlobStore(storage).write(DIGEST, BODY)
-
-
 def test_object_store_lost_create_race_is_success(tmp_path, monkeypatch):
     storage = _fs_storage(tmp_path)
     monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: ObjectCreateResult.ALREADY_EXISTS)
@@ -186,13 +178,15 @@ def test_object_store_skips_create_when_the_object_exists(tmp_path, monkeypatch)
     store.write(DIGEST, BODY)
 
 
-def test_object_store_failed_create_falls_back_to_a_plain_put(tmp_path, monkeypatch):
-    """A storage that rejects the conditional create can still store."""
+def test_object_store_failed_create_never_falls_back_to_a_plain_put(tmp_path, monkeypatch):
+    """A non-atomic put after a failed create could leave a partial object the existence check then trusts."""
     storage = _fs_storage(tmp_path)
     monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: ObjectCreateResult.FAILED)
+    monkeypatch.setattr(storage, "put_object", lambda key, content: pytest.fail("fell back to a plain put"))
     store = ObjectStorageBlobStore(storage)
-    store.write(DIGEST, BODY)
-    assert store.read(DIGEST) == BODY
+    with pytest.raises(ContentStoreFault):
+        store.write(DIGEST, BODY)
+    assert store.read(DIGEST) is None
 
 
 def test_object_store_found_without_content_is_a_fault(tmp_path, monkeypatch):

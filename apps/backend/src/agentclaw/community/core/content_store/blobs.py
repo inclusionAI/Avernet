@@ -207,18 +207,19 @@ class ObjectStorageBlobStore:
         store it is a metadata request. An existing object is not
         re-verified here: ``ContentStoreService.read`` proves every read.
 
-        A conditional create that fails is retried as a plain put — a
-        storage that does not support the condition can still store, and
-        replacing is harmless because every writer of an address writes the
-        same bytes.
+        With the immutable capability the upload is an atomic create, and a
+        failed create stays a failure: a plain put on the same key is not
+        atomic on every storage, and a partial object would then pass the
+        existence check forever. Without the capability the put is all there
+        is; replacing is harmless because every writer of an address writes
+        the same bytes.
         """
         key = object_key(digest)
         if self._storage.get_etag(key) is not None:
             return
-        stored = False
         if isinstance(self._storage, ImmutableObjectStorageCapability):
             stored = self._storage.create_object_if_absent(key, data) is not ObjectCreateResult.FAILED
-        if not stored:
+        else:
             stored = self._storage.put_object(key, data)
         if not stored:
             raise ContentStoreFault(f"the object storage did not store the blob: {digest}")

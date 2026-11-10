@@ -117,7 +117,7 @@ def _ensure_stored(content: ContentStoreProtocol, data: bytes) -> None:
     """Put back bytes a row already answers for; a store error is this entry's failure, as in ``_store_produced``."""
     try:
         content.ensure_stored(data)
-    except (ContentStoreError, ContentStoreFault) as exc:
+    except (ContentStoreError, ContentStoreFault, OSError) as exc:  # OSError: the local tree's own write failure
         raise EntryFetchError(f"the bytes could not be filed with the platform's store: {exc}") from exc
 
 

@@ -71,3 +71,16 @@ def test_a_store_fault_while_restoring_is_the_entrys_failure(tmp_path):
     content.ensure_stored = _fault
     with pytest.raises(EntryFetchError, match="could not be filed"):
         _file(content)
+
+
+def test_a_local_write_failure_while_restoring_is_the_entrys_failure(tmp_path):
+    rows = _Rows()
+    content = ContentStoreService(rows, tmp_path / "pod-a")
+    _file(content)
+
+    def _disk_full(data):
+        raise OSError(28, "No space left on device")
+
+    content.ensure_stored = _disk_full
+    with pytest.raises(EntryFetchError, match="could not be filed"):
+        _file(content)

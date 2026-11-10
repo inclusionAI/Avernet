@@ -29,6 +29,11 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # singlebox binds the test doubles' object storage (a mock that keeps nothing),
+  # so the content store keeps its bytes on the local tree (content_store_dir).
+  bot_config_manifest:
+    content_store_backend: "fs"
+
   # The same production adapter/port contract as every other deployment. The
   # local BaaS OpenAPI key is injected by the deployment just like api_key_secret
   # is injected in production.

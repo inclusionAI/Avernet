@@ -978,13 +978,9 @@ class BotConfigManifestConfig:
             endpoint resolving to an internal address stays registrable
             (exact-host matches, sorted for a stable order). The name is the
             fetch road's; the value now serves the endpoint guard alone.
-        content_store_backend: Where the content store's blobs live —
-            ``"object_storage"`` (the bound ``ObjectStoragePlugin``) or
-            ``"fs"`` (the local tree under ``content_store_dir``).
-        content_store_dir: The local blob root — relative paths resolve
-            against the process working directory, ``~`` expands. The store
-            itself under ``"fs"``; under ``"object_storage"``, the tree an
-            earlier version wrote, read through for blobs not yet copied.
+        content_store_backend: ``"object_storage"`` or ``"fs"`` — where the store's blobs live.
+        content_store_dir: The local blob root (the ``fs`` store; the read-through legacy tree
+            under ``object_storage``) — relative paths resolve against the cwd, ``~`` expands.
         teclaw_delivery_mode: The W8 delivery shape (see the field comment).
     """
 
