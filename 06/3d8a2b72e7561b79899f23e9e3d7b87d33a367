@@ -1,0 +1,26 @@
+apps/bcs-internal/crates/plugins/bcn-results-ob/tests/live_ob.rs
+  h_f4a73db4ad12be 35-39,193-215
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/Cargo.toml
+  h_f4a73db4ad12be 18
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/README.md
+  h_f4a73db4ad12be 35-66
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/heartbeat.lua
+  h_f4a73db4ad12be 1-3,5,7-12,14-18,20-31
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/liveness.rs
+  h_f4a73db4ad12be 66-73,87-96,104-105,111-123,141,167,171,212,219
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/common/fault_proxy.rs
+  h_f4a73db4ad12be 1-91
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/liveness.rs
+  h_f4a73db4ad12be 71-77,110-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "063d8a2b72e7561b79899f23e9e3d7b87d33a367",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}
