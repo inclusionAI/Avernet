@@ -91,7 +91,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
             placeholder="例如：周会协同群"
-            className="h-10 rounded-lg text-sm"
+            className="h-10 rounded-lg text-xs"
           />
         </div>
         <div className="min-w-0">
@@ -113,7 +113,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             )}
           </div>
           <Input id="create-group-context" value={context} onChange={(event) => onContextChange(event.target.value)}
-            placeholder="希望共同完成什么？" className="h-10 min-w-0 rounded-lg text-sm" />
+            placeholder="希望共同完成什么？" className="h-10 min-w-0 rounded-lg text-xs" />
         </div>
       </div>
 

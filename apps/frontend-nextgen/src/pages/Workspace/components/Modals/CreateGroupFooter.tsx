@@ -26,10 +26,10 @@ export function CreateGroupFooter({
         ) : null}
       </div>
       <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-3 sm:w-auto">
-        <Button variant="outline" size="md" className="h-10 flex-1 rounded-lg px-5 sm:flex-none" disabled={creating} onClick={onClose}>
+        <Button variant="outline" size="md" className="h-10 flex-1 rounded-lg px-5 text-xs sm:flex-none" disabled={creating} onClick={onClose}>
           取消
         </Button>
-        <Button size="md" className="h-10 flex-1 rounded-lg px-6 sm:flex-none" loading={creating} disabled={creating || !canSubmit} onClick={() => void onSubmit()}>
+        <Button size="md" className="h-10 flex-1 rounded-lg px-6 text-xs sm:flex-none" loading={creating} disabled={creating || !canSubmit} onClick={() => void onSubmit()}>
           确认创建
         </Button>
       </div>

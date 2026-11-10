@@ -125,6 +125,31 @@ it('发起协作顶栏不再展示身份 chip，仅保留标题', () => {
   expect(screen.queryByText('为')).not.toBeInTheDocument();
 });
 
+it('matches configuration panel typography without changing the collaboration form layout', async () => {
+  renderModal();
+  await screen.findByRole('button', { name: /Alpha/ });
+
+  expect(screen.getByRole('heading', { name: '发起协作' })).toHaveClass('text-sm', 'leading-7');
+  expect(screen.getByText('设置协作方式，为团队选择合适的 Bot。')).toHaveClass('text-xs', 'leading-5');
+  for (const name of ['协作群名称', '协作目标', '搜索 Bot 名称或描述']) {
+    expect(screen.getByRole('textbox', { name })).toHaveClass('text-xs', 'h-10');
+  }
+  for (const label of ['协作群名称', '协作目标', '协作群类型', '群主 Bot', '自动回复', '成员 Bot']) {
+    expect(screen.getByText(label)).toHaveClass('text-sm');
+  }
+  expect(within(screen.getByRole('button', { name: '群主 Bot' })).getByText('选择群主 Bot')).toHaveClass('text-xs');
+  expect(within(screen.getByRole('button', { name: '@Human 通知来源' })).getByText('所有成员')).toHaveClass('text-xs');
+  fireEvent.click(screen.getByRole('button', { name: /Alpha/ }));
+  await selectLeader('群主 Bot', /Alpha/);
+  expect(within(screen.getByRole('button', { name: '群主 Bot' })).getByText('Alpha')).toHaveClass('text-xs');
+  for (const name of ['取消', '确认创建']) {
+    expect(screen.getByRole('button', { name })).toHaveClass('text-xs', 'h-10');
+  }
+
+  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('gap-6', 'px-4', 'sm:px-7');
+  expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'gap-5');
+});
+
 it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', async () => {
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
   render(

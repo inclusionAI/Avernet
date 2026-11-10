@@ -50,13 +50,13 @@ export function GroupLeaderSelect({
               {selected ? (
                 <>
                   {selected.avatarUrl && <Avatar name={selected.name} src={selected.avatarUrl} size={20} />}
-                  <span className="min-w-0 truncate text-sm font-normal text-foreground">{selected.name}</span>
+                  <span className="min-w-0 truncate text-xs font-normal text-foreground">{selected.name}</span>
                   {selected.current && (
                     <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                   )}
                 </>
               ) : (
-                <span className="truncate text-sm font-normal">{placeholder}</span>
+                <span className="truncate text-xs font-normal">{placeholder}</span>
               )}
             </span>
             <ChevronDown
