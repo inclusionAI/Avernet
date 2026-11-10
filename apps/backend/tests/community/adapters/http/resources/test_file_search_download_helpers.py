@@ -644,7 +644,8 @@ class TestDownloadDirectoryFailures:
         fs = _FakeDeviceFs({"data": [_entry(str(i)) for i in range(20001)]})
         with pytest.raises(_DeviceWalkLimitError):
             await _walk_device_fs(fs, "data", None, max_entries=20000, strict=True)
-        assert len(await _walk_device_fs(fs, "data", None, max_entries=20001, strict=True)) == 20001
+        exact = _FakeDeviceFs({"data": [_entry(str(i)) for i in range(20000)]})
+        assert len(await _walk_device_fs(exact, "data", None, max_entries=20000, strict=True)) == 20000
 
     @pytest.mark.asyncio
     async def test_search_keeps_best_effort_for_http_exception(self):
@@ -695,3 +696,16 @@ class TestDownloadDirectoryFailures:
         assert response.status_code == 502
         assert response.json() == {"detail": "Directory download failed while reading the device"}
         assert "private upstream path" not in response.text
+
+    @pytest.mark.asyncio
+    async def test_strict_walk_preserves_explicit_http_error(self):
+        from fastapi import HTTPException
+        class Fs:
+            async def list_dir(self, path):
+                if path == "workspace/data":
+                    return [_entry("child", is_dir=True)]
+                raise HTTPException(status_code=403, detail="forbidden")
+        with pytest.raises(HTTPException) as result:
+            await _walk_device_fs(Fs(), "data", None, strict=True)
+        assert result.value.status_code == 403
+        assert result.value.detail == "forbidden"
