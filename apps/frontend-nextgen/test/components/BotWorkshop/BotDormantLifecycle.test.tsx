@@ -2,7 +2,7 @@
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
 import BotPrimaryActionsCell from '@/components/BotWorkshop/BotCard/BotPrimaryActionsCell';
 import BotStatusCell from '@/components/BotWorkshop/BotCard/BotStatusCell';
-import { RESTART_CATCH_UP_DELAY_MS, useBotWorkshopActions } from '@/hooks/useBotWorkshopActions';
+import { useBotWorkshopActions } from '@/hooks/useBotWorkshopActions';
 import { botManagementActionService } from '@/services/botWorkshop/botManagementActionService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
@@ -91,61 +91,67 @@ test('fresh list results win over the activation acceptance, including rollback 
   expect(useBotWorkshopStore.getState().items[0]).toEqual(bot);
 });
 
-test('a restart schedules one bounded silent catch-up inventory read', async () => {
-  jest.useFakeTimers();
-  try {
-    const runningBot = mapBotDto({
-      bot_id: 'restart-b1',
-      owner_entity_id: '149608',
-      bot_name: 'Coding Bot',
-      active_engine: 'aicoding',
-      bot_type: 'personal',
-      status: 'ACTIVE',
-      display_state: 'running',
-      actions: ['view', 'chat', 'edit', 'restart'],
-    }).item;
-    const pendingBot = mapBotDto({
-      bot_id: 'restart-b1',
-      owner_entity_id: '149608',
-      bot_name: 'Coding Bot',
-      active_engine: 'aicoding',
-      bot_type: 'personal',
-      status: 'PENDING',
-      display_state: 'pending',
-      actions: ['view'],
-    }).item;
-    useBotWorkshopStore.setState({ items: [runningBot] });
-    jest.spyOn(botManagementActionService, 'run').mockResolvedValue(undefined);
-    const load = jest.fn(async (options?: { silent?: boolean }) => {
-      useBotWorkshopStore.setState({ items: [options?.silent ? pendingBot : runningBot] });
-    });
-    const { result } = renderHook(() => useBotWorkshopActions(load, '149608'));
-    await act(async () => {
-      await result.current('restart', runningBot);
-    });
+test('a coding restart pins the card as restarting before the inventory catches up', async () => {
+  const runningBot = mapBotDto({
+    bot_id: 'restart-b1',
+    owner_entity_id: '149608',
+    bot_name: 'Coding Bot',
+    active_engine: 'aicoding',
+    bot_type: 'personal',
+    status: 'ACTIVE',
+    display_state: 'running',
+    actions: ['view', 'chat', 'edit', 'restart'],
+  }).item;
+  useBotWorkshopStore.setState({ items: [runningBot] });
+  jest.spyOn(botManagementActionService, 'run').mockResolvedValue({
+    status: 'ACTIVE',
+    ext: {
+      aicoding: {
+        restart: { operation_id: 'op-restart-1', status: 'RUNNING', phase: 'QUEUED', message: null },
+      },
+    },
+  } as never);
+  const load = jest.fn(async () => {});
+  const { result } = renderHook(() => useBotWorkshopActions(load, '149608'));
+  await act(async () => {
+    await result.current('restart', runningBot);
+  });
 
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(useBotWorkshopStore.getState().items[0]).toMatchObject({ lifecycle: 'running' });
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(useBotWorkshopStore.getState().items[0]).toMatchObject({
+    lifecycle: 'deploying',
+    rawStatus: 'PENDING',
+  });
+  expect(useBotWorkshopStore.getState().items[0].pendingRestart).toMatchObject({
+    operationId: 'op-restart-1',
+  });
+});
 
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(RESTART_CATCH_UP_DELAY_MS);
-    });
-    expect(load).toHaveBeenCalledTimes(2);
-    expect(load).toHaveBeenLastCalledWith({ silent: true });
-    expect(useBotWorkshopStore.getState().items[0]).toMatchObject({
-      lifecycle: 'deploying',
-      rawStatus: 'PENDING',
-      rawDisplayState: 'pending',
-      actions: ['view'],
-    });
+test('a synchronous restart adopts the status returned by the mutation response', async () => {
+  const runningBot = mapBotDto({
+    bot_id: 'restart-b2',
+    owner_entity_id: '149608',
+    bot_name: 'OpenClaw Bot',
+    active_engine: 'openclaw',
+    bot_type: 'personal',
+    status: 'ACTIVE',
+    display_state: 'running',
+    actions: ['view', 'chat', 'edit', 'restart'],
+  }).item;
+  useBotWorkshopStore.setState({ items: [runningBot] });
+  jest.spyOn(botManagementActionService, 'run').mockResolvedValue({ status: 'PENDING' } as never);
+  const load = jest.fn(async () => {});
+  const { result } = renderHook(() => useBotWorkshopActions(load, '149608'));
+  await act(async () => {
+    await result.current('restart', runningBot);
+  });
 
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(RESTART_CATCH_UP_DELAY_MS);
-    });
-    expect(load).toHaveBeenCalledTimes(2);
-  } finally {
-    jest.useRealTimers();
-  }
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(useBotWorkshopStore.getState().items[0]).toMatchObject({
+    lifecycle: 'deploying',
+    rawStatus: 'PENDING',
+  });
+  expect(useBotWorkshopStore.getState().items[0].pendingRestart).toBeUndefined();
 });
 
 test('accepted activation updates status immediately, suppresses duplicates and refreshes the list', async () => {
