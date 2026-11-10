@@ -75,6 +75,20 @@ it.each(['group', 'session'])('%s mode passes validated scope and the matching p
   expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('group=g&session=g%3As'));
 });
 
+it('only page hides the return bar when showReturn=false', () => {
+  mockPath = '/workspace/collaboration-only';
+  mockSearch = '?showReturn=false';
+  render(<FocusedCollaborationPage />);
+  expect(screen.getByText('完整协作区域内容')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '返回完整协作区' })).not.toBeInTheDocument();
+});
+it.each(['group', 'session'])('%s mode hides the return bar when showReturn=false', async (mode) => {
+  mockPath = `/workspace/collaboration/${mode}`;
+  mockSearch = '?current=human_test&group=g&session=g%3As&showReturn=false';
+  render(<FocusedCollaborationPage />);
+  await screen.findByText('受限协作区域内容');
+  expect(screen.queryByRole('button', { name: '返回完整协作区' })).not.toBeInTheDocument();
+});
 it('group selection updates only the scoped URL', async () => {
   mockPath = '/workspace/collaboration/group';
   mockSearch = '?current=human_test&group=g&session=g%3As';
