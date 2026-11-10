@@ -2,6 +2,7 @@
 // 组合 botSessionService / collaborationCandidateService 的既有映射,不重复协议转换。
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import { getCapabilities } from '@/capabilities';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import { codingSessionOriginOf } from '@/domain/conversation/codingSessionOwnership';
 import type {
@@ -72,6 +73,7 @@ async function listCodingSessionsByOrigin(
 ): Promise<DomainResult<BotSessionPageView>> {
   const matching: BotSessionPageView['items'] = [];
   const targetEnd = page * pageSize;
+  const isSessionHidden = getCapabilities().getCodingBotConversationHost().value?.isSessionHidden;
   let rawPage = 1;
   let exhausted = false;
 
@@ -97,7 +99,9 @@ async function listCodingSessionsByOrigin(
     if (!result.ok) return result;
 
     matching.push(
-      ...result.data.items.filter((session) => codingSessionOriginOf(session.sessionId, userId) === origin),
+      ...result.data.items.filter(
+        (session) => !isSessionHidden?.(session) && codingSessionOriginOf(session.sessionId, userId) === origin,
+      ),
     );
     exhausted =
       result.data.items.length < CODING_SESSION_SCAN_PAGE_SIZE ||
