@@ -31,3 +31,8 @@ test('switching away from a failed bot retries with the new bot URL', () => {
   rerender(<BotDisplayAvatar botId="b2" name="Beta" avatarUrl="/b2.png" />);
   expect(screen.getByRole('img', { name: 'Beta' })).toHaveAttribute('src', '/b2.png');
 });
+
+test('a collaboration ID uses the same default avatar as its Bot management ID', () => {
+  render(<BotDisplayAvatar botId="b1:owner" name="Alpha" />);
+  expect(screen.getByRole('img', { name: 'Alpha' })).toHaveAttribute('src', generateBotAvatar('b1'));
+});
