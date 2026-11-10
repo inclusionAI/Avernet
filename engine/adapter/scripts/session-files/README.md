@@ -4,7 +4,6 @@ The canonical runtime Skill, standalone CLI, Chinese installation guide and
 standalone tests are maintained in the `security_release/aiworkbench` repository:
 
 - Runtime package: `skills/infra/session-file-publish/`
-- Tests and trigger cases: `tests/infra/session-file-publish/`
 - Repository: https://code.alipay.com/security_release/aiworkbench
 
 Install and upgrade the Skill and CLI together from that repository. Start a new
