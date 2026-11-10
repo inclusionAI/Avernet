@@ -133,7 +133,7 @@ async def test_task_search_uses_product_viewer_rules_and_preserves_readiness(
         }
     )
     result = await service.search_bots(
-        query="测试发布的bot", task_id="task", node_id="node", **options
+        query="测试发布的bot", task_id="task", node_id="node", relay_token="generation-1", **options
     )
     expected = {
         None: ["public:owner", "both:owner"],
@@ -184,7 +184,7 @@ async def test_service_rejects_invalid_viewer_before_search(options):
 
     with pytest.raises(ValueError):
         await _Service(NoSearch()).search_bots(
-            query="q", task_id="t", node_id="n", **options
+            query="q", task_id="t", node_id="n", relay_token="generation-1", **options
         )
 
 
@@ -233,6 +233,7 @@ async def test_explicit_viewer_keeps_five_candidate_cap_and_runtime_filter(viewe
         query="q",
         task_id="t",
         node_id="n",
+        relay_token="generation-1",
         viewer_actor_type=viewer_type,
         viewer_actor_id="  viewer-id  ",
     )
