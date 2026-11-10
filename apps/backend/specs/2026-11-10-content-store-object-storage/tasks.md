@@ -17,12 +17,12 @@
 - **Goal:** Add `ObjectStorageBlobStore` over `ObjectStoragePlugin`, including the fallback to a pre-upgrade local tree.
 - **Files:** `core/content_store/blobs.py`, `tests/community/core/content_store/test_blobs.py`, `tests/community/core/content_store/test_content_store.py`
 - **Done when:**
-  - [ ] Keys are `content-store/blobs/<hex[:2]>/<hex>`.
-  - [ ] `write` skips the upload when the object exists, uses `create_object_if_absent` when the plugin has the immutable capability and `put_object` otherwise, and raises `ContentStoreFault` on failure.
-  - [ ] `read` returns `None` for a missing object and raises `ContentStoreFault` when a capable plugin reports `FAILED`; a plugin without the capability uses `get_object`.
-  - [ ] A blob present only in the legacy local tree is returned and copied to object storage; one that fails its digest is not copied; a failed copy does not fail the read.
-  - [ ] Two service instances over one object storage and one database, with separate local roots: content stored by the first is read by the second (spec criterion 1).
-  - [ ] A failed blob write fails `store` / `store_produced` and files no row.
+  - [x] Keys are `content-store/blobs/<hex[:2]>/<hex>`.
+  - [x] `write` skips the upload when the object exists, uses `create_object_if_absent` when the plugin has the immutable capability and `put_object` otherwise, and raises `ContentStoreFault` on failure.
+  - [x] `read` returns `None` for a missing object and raises `ContentStoreFault` when a capable plugin reports `FAILED`; a plugin without the capability uses `get_object`.
+  - [x] A blob present only in the legacy local tree is returned and copied to object storage; one that fails its digest is not copied; a failed copy does not fail the read.
+  - [x] Two service instances over one object storage and one database, with separate local roots: content stored by the first is read by the second (spec criterion 1).
+  - [x] A failed blob write fails `store` / `store_produced` and files no row.
 - **Depends on:** Task 1
 
 ## Task 3: Configuration and wiring

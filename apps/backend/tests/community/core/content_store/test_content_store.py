@@ -20,6 +20,7 @@ import yaml
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
+    ContentStoreFault,
     ContentStoreError,
 )
 from agentclaw.community.core.content_store.models import (
@@ -710,3 +711,82 @@ def test_store_produced_refuses_an_overwide_column_before_the_blob(tmp_path):
     with pytest.raises(ContentStoreError):
         service.store_produced(data, scope=SCOPE, origin="genome/capture", entry_identity="x" * 257)
     assert repo.rows == [] and not _blob_file(tmp_path, "sha256:" + hashlib.sha256(data).hexdigest()).exists()
+
+
+# --- the service over object storage ------------------------------------------
+
+
+class _RefusingStorage:
+    """An object storage that holds nothing and stores nothing."""
+
+    def get_etag(self, key):
+        return None
+
+    def put_object(self, key, content):
+        return False
+
+    def get_object(self, key):
+        return None
+
+
+def _object_service(tmp_path: Path, repo: _FakeRepository, *, local: str) -> ContentStoreService:
+    """One backend instance: the shared object storage and database, its own local tree."""
+    from agentclaw.community.core.content_store.blobs import LocalBlobStore, ObjectStorageBlobStore
+    from agentclaw.community.plugins.community.object_storage import CommunityFsObjectStorage
+
+    storage = CommunityFsObjectStorage(str(tmp_path / "objstore"))
+    return ContentStoreService(
+        repo, blobs=ObjectStorageBlobStore(storage, legacy=LocalBlobStore(tmp_path / local))
+    )
+
+
+def test_content_stored_by_one_instance_is_read_by_another(tmp_path):
+    repo = _FakeRepository()
+    first = _object_service(tmp_path, repo, local="pod-a")
+    second = _object_service(tmp_path, repo, local="pod-b")
+
+    fetched = first.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    produced = first.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+
+    assert second.is_reachable(SCOPE, produced.digest, produced_by="genome")
+    assert second.read(fetched.digest) == BODY
+    assert second.read(produced.digest) == b"captured"
+    assert not (tmp_path / "pod-a").exists() and not (tmp_path / "pod-b").exists()
+
+
+def test_a_corrupted_object_fails_its_digest_on_read(tmp_path):
+    repo = _FakeRepository()
+    service = _object_service(tmp_path, repo, local="pod-a")
+    record = service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    hex_digest = record.digest.partition(":")[2]
+    (tmp_path / "objstore" / "content-store" / "blobs" / hex_digest[:2] / hex_digest).write_bytes(b"x" * len(BODY))
+    with pytest.raises(ContentIntegrityError):
+        service.read(record.digest)
+
+
+def test_a_missing_object_is_missing_not_a_fault(tmp_path):
+    service = _object_service(tmp_path, _FakeRepository(), local="pod-a")
+    with pytest.raises(ContentMissingError):
+        service.read("sha256:" + "0" * 64)
+
+
+def test_a_blob_from_before_the_move_is_served_from_the_local_tree(tmp_path):
+    repo = _FakeRepository()
+    before = ContentStoreService(repo, tmp_path / "pod-a")
+    record = before.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+
+    assert _object_service(tmp_path, repo, local="pod-a").read(record.digest) == BODY
+    # Copied forward: an instance without that tree reads it too.
+    assert _object_service(tmp_path, repo, local="pod-b").read(record.digest) == BODY
+
+
+def test_store_fails_and_files_no_row_when_blob_write_faults(tmp_path):
+    from agentclaw.community.core.content_store.blobs import ObjectStorageBlobStore
+
+    repo = _FakeRepository()
+    service = ContentStoreService(repo, blobs=ObjectStorageBlobStore(_RefusingStorage()))
+    with pytest.raises(ContentStoreFault):
+        service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    with pytest.raises(ContentStoreFault):
+        service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+    assert repo.rows == []

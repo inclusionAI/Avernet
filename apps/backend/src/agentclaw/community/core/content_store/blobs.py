@@ -8,16 +8,29 @@ the same digest, nothing else.
 - :class:`LocalBlobStore` — a content-addressed directory tree,
   ``<root>/blobs/<hex[:2]>/<hex64>``. One process root; visible to another
   backend instance only when the root is a volume both mount.
+- :class:`ObjectStorageBlobStore` — the deployment's object storage, under
+  ``content-store/blobs/<hex[:2]>/<hex64>``. Every backend instance bound to
+  the same storage reads what any of them wrote, and a blob outlives the
+  instance that wrote it. It can read through to a :class:`LocalBlobStore`
+  holding what an earlier version stored on this instance's disk.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Protocol
 
+from agentclaw.community.core.content_store.errors import ContentStoreFault
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.object_storage import (
+    ImmutableObjectStorageCapability,
+    ObjectCreateResult,
+    ObjectReadStatus,
+    ObjectStoragePlugin,
+)
 
 logger = get_logger()
 
@@ -30,6 +43,12 @@ _TMP_SWEEP_AGE_S = 3600.0
 
 #: Where the blob tree sits under the configured root.
 _BLOBS_DIRNAME = "blobs"
+
+#: Where the blobs sit in the object storage's key space. A constant, not a
+#: setting: the keys are addresses other instances compute for themselves.
+#: Whatever lifecycle rule the bucket has must not expire this prefix — the
+#: store's retention is "never delete" (see the DDL).
+OBJECT_KEY_PREFIX = "content-store/blobs"
 
 
 class BlobStore(Protocol):
@@ -152,3 +171,84 @@ class LocalBlobStore:
                 continue
             if age >= _TMP_SWEEP_AGE_S:
                 leftover.unlink(missing_ok=True)
+
+
+def object_key(digest: str) -> str:
+    """The object key of a digest: ``content-store/blobs/<hex[:2]>/<hex64>``, the local tree's layout."""
+    hex_digest = digest.partition(":")[2]
+    return f"{OBJECT_KEY_PREFIX}/{hex_digest[:2]}/{hex_digest}"
+
+
+class ObjectStorageBlobStore:
+    """The blobs in the deployment's object storage.
+
+    Needs only the base :class:`ObjectStoragePlugin` surface (``get_etag``,
+    ``put_object``, ``get_object``). When the bound plugin also has
+    :class:`ImmutableObjectStorageCapability` it is used for an atomic
+    create and for the three-state read; without it, ``get_object`` answers
+    ``None`` for an absent object and an unreachable storage alike, so an
+    outage reads as "missing" rather than as a fault.
+
+    ``legacy`` is the local tree an earlier version of this store wrote to.
+    A blob the object storage does not hold is looked up there, and one
+    that proves its digest is copied forward, so content stored before the
+    move stays readable wherever the tree survives.
+    """
+
+    def __init__(self, storage: ObjectStoragePlugin, *, legacy: Optional[LocalBlobStore] = None) -> None:
+        self._storage = storage
+        self._legacy = legacy
+
+    def write(self, digest: str, data: bytes) -> None:
+        """Upload once. An object already under the key is left alone: same address, same bytes.
+
+        The existence check is one metadata request, so re-storing content
+        the storage holds (an unchanged re-apply) uploads nothing. An
+        existing object is not re-verified here; ``ContentStoreService.read``
+        proves every read.
+        """
+        key = object_key(digest)
+        if self._storage.get_etag(key) is not None:
+            return
+        if isinstance(self._storage, ImmutableObjectStorageCapability):
+            stored = self._storage.create_object_if_absent(key, data) is not ObjectCreateResult.FAILED
+        else:
+            # Replacing is harmless: every writer of an address writes the same bytes.
+            stored = self._storage.put_object(key, data)
+        if not stored:
+            raise ContentStoreFault(f"the object storage did not store the blob: {digest}")
+
+    def read(self, digest: str) -> Optional[bytes]:
+        data = self._read_object(digest)
+        if data is not None or self._legacy is None:
+            return data
+        data = self._legacy.read(digest)
+        if data is None:
+            return None
+        if "sha256:" + hashlib.sha256(data).hexdigest() == digest:
+            self._copy_forward(digest, data)
+        return data
+
+    def _read_object(self, digest: str) -> Optional[bytes]:
+        key = object_key(digest)
+        if not isinstance(self._storage, ImmutableObjectStorageCapability):
+            return self._storage.get_object(key)
+        result = self._storage.read_object(key)
+        if result.status is ObjectReadStatus.FAILED:
+            raise ContentStoreFault(f"the object storage could not be read for the blob: {digest}")
+        if result.status is ObjectReadStatus.NOT_FOUND:
+            return None
+        return result.content if result.content is not None else b""
+
+    def _copy_forward(self, digest: str, data: bytes) -> None:
+        """Best effort: the read in hand has its bytes either way, and the next read tries again."""
+        try:
+            self.write(digest, data)
+        except ContentStoreFault:
+            logger.warning(
+                "[manifest.content] a blob read from the local tree could not be copied "
+                "to the object storage, digest=%s",
+                digest,
+            )
+            return
+        logger.info("[manifest.content] copied a blob from the local tree to the object storage, digest=%s", digest)
