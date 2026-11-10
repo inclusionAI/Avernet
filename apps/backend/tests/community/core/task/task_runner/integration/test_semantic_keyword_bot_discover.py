@@ -11,6 +11,7 @@ from agentclaw.community.core.task.task_runner.client import (
 )
 
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
+from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogSearchFilters
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     search_candidates,
 )
@@ -130,9 +131,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         discover = SemanticKeywordBotDiscover(
             CatalogKeywordBotDiscover(keyword_bps), semantic
         )
-        with patch.object(
-            semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0
-        ):
+        with patch.object(semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0):
             result = await search_candidates(discover, "存储行业")
 
         self.assertEqual([item["bot_id"] for item in result.candidates], ["B_SEMANTIC"])
@@ -157,9 +156,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         discover = SemanticKeywordBotDiscover(
             CatalogKeywordBotDiscover(keyword_bps), semantic
         )
-        with patch.object(
-            semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0
-        ):
+        with patch.object(semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0):
             result = await search_candidates(discover, "存储行业")
 
         self.assertEqual([item["bot_id"] for item in result.candidates], ["B_SEMANTIC"])
@@ -173,9 +170,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         discover = SemanticKeywordBotDiscover(
             CatalogKeywordBotDiscover(keyword_bps), semantic
         )
-        with patch.object(
-            semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0
-        ):
+        with patch.object(semantic_module, "SEMANTIC_RETRY_BASE_DELAY_SECONDS", 0.0):
             result = await search_candidates(discover, "存储行业")
 
         self.assertEqual(result.candidates, [])
@@ -268,6 +263,67 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
                 "failed_keywords",
                 "keyword_hits",
             },
+        )
+
+    async def test_search_full_query_uses_visibility_scope_for_both_viewer_modes(
+        self,
+    ) -> None:
+        for viewer_type in (None, "bot", "human"):
+            semantic = _FakeSemantic(
+                [
+                    {
+                        "bot_id": "B_PROTECTED",
+                        "owner_id": "U1",
+                        "bot_uuid": "B_PROTECTED:U1",
+                    }
+                ]
+            )
+            discover = SemanticKeywordBotDiscover(
+                CatalogKeywordBotDiscover(_KeywordBps()), semantic
+            )
+            await search_candidates(
+                discover,
+                "test query",
+                visibility="protected",
+                viewer_actor_type=viewer_type,
+                viewer_actor_id="actor-1" if viewer_type else None,
+            )
+            self.assertEqual(
+                semantic.calls[0]["filters"],
+                {"availability": ["protected"], "runtime_state": ["online"]},
+            )
+            self.assertEqual(
+                semantic.calls[0]["catalog_filters"],
+                BotCatalogSearchFilters(
+                    visibility=("protected",),
+                    user_visibility=("protected",),
+                    status="online",
+                    viewer_actor_type=viewer_type,
+                    viewer_actor_id="actor-1" if viewer_type else None,
+                ),
+            )
+
+    async def test_search_full_query_defaults_to_dispatch_catalog_filters(self) -> None:
+        semantic = _FakeSemantic([])
+        discover = SemanticKeywordBotDiscover(
+            CatalogKeywordBotDiscover(_KeywordBps()), semantic
+        )
+        await search_candidates(discover, "test query")
+        self.assertEqual(
+            semantic.calls[0]["filters"],
+            {"runtime_state": ["online"]},
+        )
+        self.assertEqual(
+            semantic.calls[0]["catalog_filters"],
+            BotCatalogSearchFilters(
+                visibility=("public",),
+                user_visibility=(
+                    "public",
+                    "protected",
+                    "private",
+                ),
+                status="online",
+            ),
         )
 
     async def test_keyword_port_stays_compatible(self) -> None:
