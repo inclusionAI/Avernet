@@ -686,32 +686,143 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ## 10. 当前协议如何支持公开讨论、任务代办
 
-本节说明当前协议对两个基础场景的一等支持方式；其他协作模式和产品能力只作为协议能力，不在本节展开为具体场景。
+本节用两个参考 Profile 细化核心领域对象的取值。`definition_id`、`state_id`、`event_name` 是示例身份，可由产品定义；但 `mode_kind`、`visibility` 和 `governance_kind` 必须取自协议白名单。
 
 ### 10.1 公开讨论
 
-Context 可以由 BBS Topic 创建，或把已授权 Topic 作为来源引用：
+公开讨论 Profile 的核心对象取值如下：
 
-1. Topic 正文和回复不变，仍是 BBS 的权威内容。
-2. 每条 Post 通过 ForumAdapter 转换为 `discussion.posted` 事件；事件保留 `topic_id`、`post_id`、作者、引用楼层和可见范围。
-3. 普通回复只记录事实，不改变状态机；只有显式规则、系统摘要事件或人类动作才触发 Transition。
-4. Topic 自身的管理状态不隐式取消 Context，也不隐式表示业务完成。
-5. Context 进入终态后，需要关闭 Topic 的效果必须显式声明，并经过 Topic 权限校验。
-6. Topic 读者获得的是公开内容可见性，不获得参与、执行、验收或读取受保护附件的能力。
-7. Context 可以从讨论收敛出 `decision.recorded` 事实，但必须由人类责任人显式确认。
+| 领域对象 | Profile 取值 |
+| --- | --- |
+| `ContextScope` | `scope_kind=open`；`scope_id=<BBS community id>`；`environment=<runtime environment>` |
+| `ContextEnvelope` | `origin_ref=<forum topic ref>`；`input_sources[]` 引用 Topic 权威内容；`deliverable_spec=decision_summary` |
+| `responsible_actor_ref` | 讨论结论责任人，例如 Topic 发起人或社区指定的责任人 |
+| `CollaborationMode.mode_kind` | `public_discussion` |
+| `CollaborationMode.visibility` | `public`，表示仅在该 `ContextScope` 内公开，不是全互联网公开 |
+| `CollaborationMode.participants[]` | 至少包含 `responsible_user`；其它参与者由 Forum Adapter 依据社区身份合法生成 |
+| `ContextStateMachineBinding.definition` | `definition_id=public_discussion_profile`；`definition_revision=1` |
+| `ContextStateMachineBinding.current_state` | 初始为 `draft`，只演进为 `discussing` / `accepted` / `refused` |
+| `ContextTodo[]` | 本 Profile 不要求使用 Todo；可为空 |
+| `ContextEvent` | `discussion.posted`、`outcome.accepted`、`outcome.rejected` |
+| `ContextOutcome` | 以 `decision_summary` 或结论文档引用作为 `ContextDeliverable.artifact_ref` |
 
-### 10.2 任务代办
+参考状态机定义：
 
-Todo 是 `direct_assignment` 模式下的轻量任务代办，用于把工作直接指派给具体参与者；不需要升级为正式 TaskGraph。
+```text
+ContextStateMachineDefinition
+  ├─ definition_id: public_discussion_profile
+  ├─ definition_revision: 1
+  ├─ schema_version: context-state-machine/1
+  ├─ initial_state: draft
+  ├─ states[]
+  │   ├─ draft
+  │   │   ├─ governance_kind: waiting
+  │   │   └─ allowed_modes: [public_discussion]
+  │   ├─ discussing
+  │   │   ├─ governance_kind: active
+  │   │   └─ allowed_modes: [public_discussion]
+  │   ├─ accepted
+  │   │   └─ governance_kind: terminal_success
+  │   └─ refused
+  │       └─ governance_kind: terminal_failed
+  └─ transitions[]
+      ├─ transition_id: draft_to_discussing
+      │   ├─ from_states: [draft]
+      │   ├─ event_name: context.info_updated
+      │   ├─ guard_refs: [info_is_complete]
+      │   └─ to_state: discussing
+      ├─ transition_id: discussing_to_accepted
+      │   ├─ from_states: [discussing]
+      │   ├─ event_name: outcome.accepted
+      │   ├─ guard_refs: [actor_is_responsible_user]
+      │   └─ to_state: accepted
+      └─ transition_id: discussing_to_refused
+          ├─ from_states: [discussing]
+          ├─ event_name: outcome.rejected
+          ├─ guard_refs: [actor_is_responsible_user]
+          └─ to_state: refused
+```
 
-1. Context 进入 `direct_assignment` 后，责任人或授权参与者可创建、指派和更新 Todo。
-2. 每个 Todo 保存标题、指令、assignee、required、due、完成证据和版本。
-3. 人类和 Bot 都可以认领；Bot 提交完成时必须通过主体归属、能力、材料和权限校验。
-4. `todo.completed` 只证明该单条代办完成，不直接证明业务目标完成。
-5. 状态机可以使用 `required_todos_are_done` guard，将所有必需 Todo 完成作为终态验收前置条件。
-6. 当单个“待办”需要真正执行、交付文件或产生外部副作用时，可升级给外部 Task / Relay / BCS 执行；本节只定义 Todo 本身，不定义外部 Work 的完整执行协议。
-7. Todo 取消会记录事件，已完成事实不因后续编辑被覆盖。
-8. 外部系统同步必须通过可靠投递机制和来源回写，失败不能被吞掉。
+执行语义：
+1. `discussion.posted` 是普通讨论事实，不改变业务状态；它只进入 Timeline。
+2. Context 信息完备后，`context.info_updated` 使状态从 `draft` 进入 `discussing`。
+3. 责任人显式裁决通过时，`outcome.accepted` 使状态从 `discussing` 直接进入 `accepted` 终态。
+4. 责任人显式裁决拒绝时，`outcome.rejected` 使状态从 `discussing` 直接进入 `refused` 终态。
+5. 本 Profile 不引入 `reviewing` / `needs_changes` / `cancelled` 中间状态；如业务需要暂停或取消，应由状态机定义额外状态或另行扩展。
+6. Topic 的关闭或管理动作不会直接改变 Context 状态；如需关闭 Topic，必须由状态机 effect 显式声明并通过 Topic 权限校验。
+
+### 10.2 任务委托（AI Coding 场景）
+
+本节将任务委托具体化为 AI Coding 场景下的一个 direct_assignment 状态机 Profile，不新增协作模式。业务阶段固定为 design（方案设计）、coding（编码）、verification（验证）、pr（提交 PR）。
+
+任务委托 Profile 的核心对象取值如下：
+
+| 领域对象 | Profile 取值 |
+| --- | --- |
+| `ContextScope` | `scope_kind=open`；`scope_id=<workspace / repo id>`；`environment=<runtime environment>` |
+| `ContextEnvelope` | `objective=完成一次 AI Coding 变更`；`deliverable=一段可评审的 PR` |
+| `responsible_actor_ref` | 变更责任人，通常是 repo / workspace owner |
+| `CollaborationMode.mode_kind` | `direct_assignment` |
+| `CollaborationMode.visibility` | `workspace` 或 `participants` |
+| `CollaborationMode.participants[]` | 包含 `responsible_user` 和全部 assignee；Bot assignee 必须通过 Bot Owner / 服务归属验证 |
+| `ContextStateMachineBinding.definition` | `definition_id=ai_coding_assignment_profile`；`definition_revision=1` |
+| `ContextStateMachineBinding.current_state` | 初始为 `design`，只演进为 `coding` / `verification` / `pr` |
+| `ContextTodo[]` | 保存本次变更中的一至多条具体代办；`ContextTodo.status` 仍然使用 assigned / completed / blocked / cancelled，业务阶段由状态机承载 |
+| `ContextEvent` | `repo.ticket.created`、`repo.design.completed`、`repo.code.started`、`repo.code.completed`、`repo.code.blocked`、`repo.verification.failed`、`repo.pr.submitted` |
+| `ContextOutcome` | 以 `pr_ref` 作为 `ContextDeliverable.artifact_ref`，表示本次变更已产出可评审 PR |
+
+参考状态机定义：
+
+```text
+ContextStateMachineDefinition
+  ├─ definition_id: ai_coding_assignment_profile
+  ├─ definition_revision: 1
+  ├─ schema_version: context-state-machine/1
+  ├─ initial_state: design
+  ├─ states[]
+  │   ├─ design
+  │   │   ├─ governance_kind: active
+  │   │   └─ allowed_modes: [direct_assignment]
+  │   ├─ coding
+  │   │   ├─ governance_kind: active
+  │   │   └─ allowed_modes: [direct_assignment]
+  │   ├─ verification
+  │   │   ├─ governance_kind: review
+  │   │   └─ allowed_modes: [direct_assignment]
+  │   └─ pr
+  │       └─ governance_kind: terminal_success
+  └─ transitions[]
+      ├─ transition_id: design_to_coding
+      │   ├─ from_states: [design]
+      │   ├─ event_name: repo.design.completed
+      │   ├─ guard_refs: [info_is_complete]
+      │   └─ to_state: coding
+      ├─ transition_id: coding_to_verification
+      │   ├─ from_states: [coding]
+      │   ├─ event_name: repo.code.completed
+      │   ├─ guard_refs: [required_todos_are_done]
+      │   └─ to_state: verification
+      ├─ transition_id: verification_to_coding
+      │   ├─ from_states: [verification]
+      │   ├─ event_name: repo.verification.failed
+      │   ├─ guard_refs: [failed_tests_are_recorded]
+      │   └─ to_state: coding
+      └─ transition_id: verification_to_pr
+          ├─ from_states: [verification]
+          ├─ event_name: repo.pr.submitted
+          ├─ guard_refs: [actor_is_responsible_user]
+          └─ to_state: pr
+```
+
+执行语义：
+1. Context 创建后直接进入 `design`，表示责任人或 Bot 正在确认问题、方案和影响面。
+2. `repo.design.completed` 通过 `info_is_complete` 后从 `design` 进入 `coding`。
+3. `repo.code.completed` 只有在全部必需 `ContextTodo.completed` 后，才允许从 `coding` 进入 `verification`。
+4. `verification` 是自动或人工的验证评审阶段，不等同于 `pr`。
+5. 验证通过并提交 PR 时，`repo.pr.submitted` 允许从 `verification` 进入 `pr`，并将 PR 引用写入 `ContextOutcome.deliverables[]`。
+6. 验证失败时，`repo.verification.failed` 使状态回到 `coding`，必须记录失败证据后继续修改。
+7. `pr` 是本 Profile 的终态，业务目标是“产出可评审 PR”；PR 被 external review 通过与否不反向改写 Context 状态，除非产品层另行约定。
+8. `repo.code.started` / `repo.code.blocked` 是执行事实，不一定触发状态迁移；只有对应的 `ContextTransition` 才会改变 `current_state`。
 
 ## 11. 分阶段交付
 
