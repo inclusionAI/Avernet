@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, Path, Query, Request, UploadFile
+from fastapi import APIRouter, Form, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import O
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.service_bot.eval_files import read_upload_files
+from .schemas import ServiceBotEvalSubmissionForm
 from agentclaw.community.api.service_bot_eval import ServiceBotEvalServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -30,10 +31,6 @@ router = APIRouter(
 
 BotVersionPath = Annotated[str, Path(min_length=1, description="服务Bot版本号")]
 SubmissionIdPath = Annotated[str, Path(min_length=1, description="评测提交ID")]
-TriggerSourceForm = Annotated[
-    str,
-    Form(min_length=1, max_length=64, description="触发来源"),
-]
 
 
 @router.get(
@@ -93,20 +90,21 @@ async def submit(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    sample_files: Annotated[list[UploadFile], File(description="评测样本材料")],
-    report_files: Annotated[list[UploadFile], File(description="评测报告材料")],
-    trigger_source: TriggerSourceForm = "manual_simple_cert",
+    upload: Annotated[
+        ServiceBotEvalSubmissionForm,
+        Form(media_type="multipart/form-data"),
+    ],
     service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
 ) -> Envelope[dict[str, Any]]:
     """Upload the sample and report archives used for simple certification."""
-    files = await read_upload_files(sample_files, report_files)
+    files = await read_upload_files(upload.sample_files, upload.report_files)
     result = await service.submit(
         bot_id,
         bot_version,
         actor_id=actor_id,
         owner_id=owner_id,
         files=files,
-        trigger_source=trigger_source,
+        trigger_source=upload.trigger_source,
     )
     return envelope(result, request, message="评测数据已提交，等待认证结果")
 
