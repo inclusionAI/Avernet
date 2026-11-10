@@ -126,9 +126,10 @@ def test_object_store_write_failure_raises_fault():
         ObjectStorageBlobStore(storage).write(DIGEST, BODY)
 
 
-def test_object_store_create_failure_raises_fault(tmp_path, monkeypatch):
+def test_object_store_create_and_put_failure_raises_fault(tmp_path, monkeypatch):
     storage = _fs_storage(tmp_path)
     monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: ObjectCreateResult.FAILED)
+    monkeypatch.setattr(storage, "put_object", lambda key, content: False)
     with pytest.raises(ContentStoreFault):
         ObjectStorageBlobStore(storage).write(DIGEST, BODY)
 
@@ -175,3 +176,69 @@ def test_legacy_copy_forward_failure_does_not_fail_the_read(tmp_path):
 def test_legacy_miss_is_none(tmp_path):
     store = ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=LocalBlobStore(tmp_path / "old"))
     assert store.read(DIGEST) is None
+
+
+def test_object_store_skips_create_when_the_object_exists(tmp_path, monkeypatch):
+    storage = _fs_storage(tmp_path)
+    store = ObjectStorageBlobStore(storage)
+    store.write(DIGEST, BODY)
+    monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: pytest.fail("uploaded again"))
+    store.write(DIGEST, BODY)
+
+
+def test_object_store_failed_create_falls_back_to_a_plain_put(tmp_path, monkeypatch):
+    """A storage that rejects the conditional create can still store."""
+    storage = _fs_storage(tmp_path)
+    monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: ObjectCreateResult.FAILED)
+    store = ObjectStorageBlobStore(storage)
+    store.write(DIGEST, BODY)
+    assert store.read(DIGEST) == BODY
+
+
+def test_object_store_found_without_content_is_a_fault(tmp_path, monkeypatch):
+    storage = _fs_storage(tmp_path)
+    monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FOUND, None))
+    with pytest.raises(ContentStoreFault):
+        ObjectStorageBlobStore(storage).read(DIGEST)
+
+
+def test_legacy_tree_answers_through_a_storage_outage_without_copying(tmp_path, monkeypatch):
+    legacy = LocalBlobStore(tmp_path / "old")
+    legacy.write(DIGEST, BODY)
+    storage = _fs_storage(tmp_path)
+    monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FAILED))
+    monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: pytest.fail("copied during an outage"))
+    assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY
+
+
+def test_storage_outage_with_a_damaged_legacy_blob_stays_a_fault(tmp_path, monkeypatch):
+    legacy = LocalBlobStore(tmp_path / "old")
+    legacy.write(DIGEST, BODY)
+    legacy.path(DIGEST).write_bytes(b"damaged")
+    storage = _fs_storage(tmp_path)
+    monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FAILED))
+    with pytest.raises(ContentStoreFault):
+        ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST)
+
+
+def test_an_unreadable_legacy_tree_is_a_fault_not_an_oserror(tmp_path, monkeypatch):
+    legacy = LocalBlobStore(tmp_path / "old")
+
+    def _unreadable(digest):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(legacy, "read", _unreadable)
+    with pytest.raises(ContentStoreFault):
+        ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=legacy).read(DIGEST)
+
+
+def test_any_exception_while_copying_forward_does_not_fail_the_read(tmp_path, monkeypatch):
+    legacy = LocalBlobStore(tmp_path / "old")
+    legacy.write(DIGEST, BODY)
+    storage = _fs_storage(tmp_path)
+
+    def _boom(key):
+        raise RuntimeError("sdk error")
+
+    monkeypatch.setattr(storage, "get_etag", _boom)
+    assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY

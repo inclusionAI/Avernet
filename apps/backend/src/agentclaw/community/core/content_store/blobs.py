@@ -202,53 +202,82 @@ class ObjectStorageBlobStore:
     def write(self, digest: str, data: bytes) -> None:
         """Upload once. An object already under the key is left alone: same address, same bytes.
 
-        The existence check is one metadata request, so re-storing content
-        the storage holds (an unchanged re-apply) uploads nothing. An
-        existing object is not re-verified here; ``ContentStoreService.read``
-        proves every read.
+        The existence check comes first so that re-storing content the
+        storage holds (an unchanged re-apply) uploads nothing; on an object
+        store it is a metadata request. An existing object is not
+        re-verified here: ``ContentStoreService.read`` proves every read.
+
+        A conditional create that fails is retried as a plain put — a
+        storage that does not support the condition can still store, and
+        replacing is harmless because every writer of an address writes the
+        same bytes.
         """
         key = object_key(digest)
         if self._storage.get_etag(key) is not None:
             return
+        stored = False
         if isinstance(self._storage, ImmutableObjectStorageCapability):
             stored = self._storage.create_object_if_absent(key, data) is not ObjectCreateResult.FAILED
-        else:
-            # Replacing is harmless: every writer of an address writes the same bytes.
+        if not stored:
             stored = self._storage.put_object(key, data)
         if not stored:
             raise ContentStoreFault(f"the object storage did not store the blob: {digest}")
 
     def read(self, digest: str) -> Optional[bytes]:
-        data = self._read_object(digest)
-        if data is not None or self._legacy is None:
+        """The object, or else the legacy tree's copy.
+
+        The legacy tree answers both when the object is absent and when the
+        storage could not be read: a blob still on this instance's disk
+        stays readable through a storage outage. Only a blob that proves
+        its digest is copied forward, and only when the storage answered.
+        """
+        try:
+            data = self._read_object(digest)
+        except ContentStoreFault:
+            legacy = self._read_legacy(digest)
+            if legacy is None or not _hashes_to(legacy, digest):
+                raise
+            return legacy
+        if data is not None:
             return data
-        data = self._legacy.read(digest)
-        if data is None:
-            return None
-        if "sha256:" + hashlib.sha256(data).hexdigest() == digest:
+        data = self._read_legacy(digest)
+        if data is not None and _hashes_to(data, digest):
             self._copy_forward(digest, data)
         return data
+
+    def _read_legacy(self, digest: str) -> Optional[bytes]:
+        if self._legacy is None:
+            return None
+        try:
+            return self._legacy.read(digest)
+        except OSError as exc:
+            raise ContentStoreFault(f"the local blob tree could not be read for the blob: {digest}") from exc
 
     def _read_object(self, digest: str) -> Optional[bytes]:
         key = object_key(digest)
         if not isinstance(self._storage, ImmutableObjectStorageCapability):
             return self._storage.get_object(key)
         result = self._storage.read_object(key)
-        if result.status is ObjectReadStatus.FAILED:
-            raise ContentStoreFault(f"the object storage could not be read for the blob: {digest}")
         if result.status is ObjectReadStatus.NOT_FOUND:
             return None
-        return result.content if result.content is not None else b""
+        if result.status is ObjectReadStatus.FAILED or result.content is None:
+            raise ContentStoreFault(f"the object storage could not be read for the blob: {digest}")
+        return result.content
 
     def _copy_forward(self, digest: str, data: bytes) -> None:
         """Best effort: the read in hand has its bytes either way, and the next read tries again."""
         try:
             self.write(digest, data)
-        except ContentStoreFault:
+        except Exception:  # noqa: BLE001 - a plugin outside this repo may raise anything; the read must still answer
             logger.warning(
                 "[manifest.content] a blob read from the local tree could not be copied "
                 "to the object storage, digest=%s",
                 digest,
+                exc_info=True,
             )
             return
         logger.info("[manifest.content] copied a blob from the local tree to the object storage, digest=%s", digest)
+
+
+def _hashes_to(data: bytes, digest: str) -> bool:
+    return "sha256:" + hashlib.sha256(data).hexdigest() == digest
