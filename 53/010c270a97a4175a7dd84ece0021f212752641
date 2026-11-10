@@ -1,0 +1,60 @@
+apps/bcs/crates/application/bcn-runtime-app/src/gateway.rs
+  h_f4a73db4ad12be 149-164
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  h_f4a73db4ad12be 38,84,98-101,214-216,223-225
+apps/bcs/crates/application/bcn-runtime-app/tests/continuation.rs
+  h_f4a73db4ad12be 1-55
+apps/bcs/crates/application/bcn-runtime-app/tests/quarantine_observer.rs
+  h_f4a73db4ad12be 1-29
+apps/bcs/crates/application/bcn-runtime-app/tests/session_authority.rs
+  h_f4a73db4ad12be 1-56
+apps/bcs/crates/bootstrap/bcn-runtime/src/builder.rs
+  h_f4a73db4ad12be 59-62,73-74,77
+apps/bcs/crates/bootstrap/bcn-runtime/src/management.rs
+  h_f4a73db4ad12be 76-85,87-94
+apps/bcs/crates/bootstrap/bcn-runtime/tests/a2a_recovery.rs
+  h_f4a73db4ad12be 1-71
+apps/bcs/crates/bootstrap/bcn-runtime/tests/management.rs
+  h_f4a73db4ad12be 7,33-42,44-45,61
+apps/bcs/crates/bootstrap/bcn-runtime/tests/management_counts.rs
+  h_f4a73db4ad12be 1-64
+apps/bcs/crates/external-clients/bcn-agent-connectors/README.md
+  h_f4a73db4ad12be 94-104
+apps/bcs/crates/external-clients/bcn-agent-connectors/src/projection.rs
+  h_f4a73db4ad12be 72-83
+apps/bcs/crates/external-clients/bcn-agent-connectors/tests/a2a.rs
+  h_f4a73db4ad12be 74
+apps/bcs/crates/external-clients/bcn-agent-connectors/tests/stream_classification.rs
+  h_f4a73db4ad12be 1-35
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 85-100
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/mod.rs
+  h_f4a73db4ad12be 79-86
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 30-32
+apps/bcs/crates/services/bcn-runtime-store/README.md
+  h_f4a73db4ad12be 263-274
+apps/bcs/crates/services/bcn-runtime-store/src/admission.rs
+  h_f4a73db4ad12be 8-12,19,50,52
+apps/bcs/crates/services/bcn-runtime-store/tests/session_authority.rs
+  h_f4a73db4ad12be 1-36
+apps/bcs/crates/services/bcn-session-runner/src/lib.rs
+  h_f4a73db4ad12be 274-287
+apps/bcs/crates/services/bcn-session-runner/src/validation.rs
+  h_f4a73db4ad12be 29-34,38-40,56-66,87,123,126,147,195
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bcn_runtime.rs
+  h_f4a73db4ad12be 98-110
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 412-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "53010c270a97a4175a7dd84ece0021f212752641",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}
