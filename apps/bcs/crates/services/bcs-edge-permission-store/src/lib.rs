@@ -1711,6 +1711,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn insert_grant_after_revoke_returns_revoked_row_pins_known_gap() {
+        // TODO(unfriend-refriend): pins the known pre-existing gap; flip when
+        // grant reactivation lands (follow-up dima).
+        //
+        // `insert_grant` is INSERT ... ON CONFLICT DO NOTHING on the unique key
+        // (from_id, to_id, env, grant_kind, grant_ref_id), so re-adding a
+        // friendship after an unfriend returns the existing REVOKED row: the
+        // second insert neither creates a fresh edge nor reactivates the old
+        // one.
+        let store = sqlite_store().await;
+        let ref_id = seed_default(&store, "b", "dev").await;
+        let g = default_grant("a", "b", "dev", ref_id);
+        let edge_id = store.insert_grant(g.clone()).await.expect("insert");
+        store.revoke_grant(edge_id, "dev").await.expect("revoke");
+
+        let again = store.insert_grant(g).await.expect("re-insert");
+        assert_eq!(
+            again, edge_id,
+            "the conflicting insert returns the existing (revoked) row id"
+        );
+        assert!(
+            store.list_active_grants("a", "b", "dev").await.is_empty(),
+            "re-adding does not resurrect a revoked grant"
+        );
+        let status = store
+            .db
+            .query(DbStatement::with_params(
+                "SELECT status FROM edge_grants WHERE id = ?",
+                vec![DbValue::from(edge_id)],
+            ))
+            .await
+            .expect("read grant row")
+            .into_iter()
+            .next()
+            .and_then(|row| row.get_string("status").expect("status column"))
+            .expect("the revoked row still exists");
+        assert_eq!(status, "revoked", "the row is still revoked after re-insert");
+    }
+
+    #[tokio::test]
     async fn has_friend_edge_any_direction() {
         let store = sqlite_store().await;
         let ref_id = seed_default(&store, "bot_b", "dev").await;

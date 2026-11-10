@@ -176,6 +176,15 @@ impl EdgeConnectFriendService {
     }
 }
 
+/// Current wall-clock time in epoch milliseconds (the unit the friend-request
+/// rows carry).
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 /// Map the legacy direction filter onto the connect listing direction.
 fn connect_direction(direction: FriendRequestDirection) -> RequestDirection {
     match direction {
@@ -242,15 +251,18 @@ impl FriendService for EdgeConnectFriendService {
 
         // No persisted row (already friends, or a defensive empty pending):
         // synthesize the legacy response with an empty id, exactly like the
-        // legacy service did for an existing edge.
+        // legacy service did for an existing edge. The retired core stamped
+        // `now` on that synthetic row, so the envelope must not advertise
+        // epoch-zero timestamps.
         let Some(request_id) = result.request_ids.first() else {
+            let now = now_epoch_ms();
             return Ok(FriendRequest {
                 id: String::new(),
                 from_bot: command.caller_actor_id,
                 to_bot: command.to_bot,
                 status,
-                created_at: 0,
-                updated_at: 0,
+                created_at: now,
+                updated_at: now,
             });
         };
 

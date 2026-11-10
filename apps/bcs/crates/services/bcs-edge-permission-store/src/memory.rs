@@ -116,6 +116,12 @@ impl PermissionProfileRepoPort for MemoryPermissionProfileStore {
         if let Some(existing) = Self::active_default(&profiles, bot_id, env) {
             return Ok(existing.permission_profile_id);
         }
+        // The wildcard-allow seed is a compile-time constant, so its JSON
+        // parse cannot fail; allow `expect_used` at the smallest scope (F6).
+        #[allow(
+            clippy::expect_used,
+            reason = "static wildcard-allow seed is a compile-time constant"
+        )]
         let profile = PermissionProfile {
             permission_profile_id: next_id(&self.next_profile_id),
             bot_id: bot_id.to_string(),

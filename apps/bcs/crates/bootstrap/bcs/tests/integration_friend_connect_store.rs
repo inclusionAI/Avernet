@@ -246,3 +246,115 @@ async fn in_memory_v1_delete_friendship_revokes_the_connect_edge() {
         .expect("v1 list body after delete");
     assert_eq!(listed["data"]["total"], 0, "body: {listed}");
 }
+
+/// F9: the OpenAPI v1 create path reaches the same connect store as the legacy
+/// route, and the created projection is the durable pending row.
+#[tokio::test]
+async fn v1_friend_request_pending_reaches_connect_store() {
+    let temp_dir = helpers::create_temp_bots_dir();
+    let bots_dir: PathBuf = temp_dir.path().to_path_buf();
+    let (addr, _handle, state) = helpers::start_test_server_with_state(&bots_dir).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Different owners so the request stays pending (a same-owner Bot↔Bot
+    // request auto-approves).
+    let (caller_uuid, _caller_token) =
+        register_owned_bot(addr, "owner-v1-pending-a", "v1-pending-caller").await;
+    let (target_uuid, _target_token) =
+        register_owned_bot(addr, "owner-v1-pending-b", "v1-pending-target").await;
+
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{addr}/openapi/v1/collaboration/bots/{caller_uuid}/friend-requests"
+        ))
+        .header("x-avernet-principal", principal("owner-v1-pending-a"))
+        .json(&json!({ "to_bot_uuid": target_uuid }))
+        .send()
+        .await
+        .expect("v1 create friend request");
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.expect("v1 create body");
+    assert_eq!(status, reqwest::StatusCode::CREATED, "body: {body}");
+    assert_eq!(body["code"], 20_100, "body: {body}");
+    assert_eq!(body["data"]["status"], "pending", "body: {body}");
+
+    let request_id = body["data"]["request_id"]
+        .as_str()
+        .expect("v1 created request carries an id")
+        .to_string();
+    let request = state
+        .connect_service
+        .get_request(&request_id)
+        .await
+        .expect("the v1 create path must persist the connect request");
+    assert_eq!(request.request_kind, RequestKind::Connect);
+    assert_eq!(request.status, RequestStatus::Pending);
+    assert_eq!(request.from_id, caller_uuid);
+    assert_eq!(request.to_id, target_uuid);
+}
+
+/// F9: accepting through v1 answers with the decided projection rebuilt from
+/// the connect store (F4), so timestamps and status are the durable row's.
+#[tokio::test]
+async fn v1_accept_returns_decided_request_projection() {
+    let temp_dir = helpers::create_temp_bots_dir();
+    let bots_dir: PathBuf = temp_dir.path().to_path_buf();
+    let (addr, _handle, state) = helpers::start_test_server_with_state(&bots_dir).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (caller_uuid, _caller_token) =
+        register_owned_bot(addr, "owner-v1-accept-a", "v1-accept-caller").await;
+    let (target_uuid, _target_token) =
+        register_owned_bot(addr, "owner-v1-accept-b", "v1-accept-target").await;
+
+    let http = reqwest::Client::new();
+    let created = http
+        .post(format!(
+            "http://{addr}/openapi/v1/collaboration/bots/{caller_uuid}/friend-requests"
+        ))
+        .header("x-avernet-principal", principal("owner-v1-accept-a"))
+        .json(&json!({ "to_bot_uuid": target_uuid }))
+        .send()
+        .await
+        .expect("v1 create friend request");
+    let status = created.status();
+    let body: serde_json::Value = created.json().await.expect("v1 create body");
+    assert_eq!(status, reqwest::StatusCode::CREATED, "body: {body}");
+    let request_id = body["data"]["request_id"]
+        .as_str()
+        .expect("v1 created request carries an id")
+        .to_string();
+
+    let accepted = http
+        .post(format!(
+            "http://{addr}/openapi/v1/collaboration/friend-requests/{request_id}/accept"
+        ))
+        .header("x-avernet-principal", principal("owner-v1-accept-b"))
+        .send()
+        .await
+        .expect("v1 accept friend request");
+    let status = accepted.status();
+    let body: serde_json::Value = accepted.json().await.expect("v1 accept body");
+    assert_eq!(status, reqwest::StatusCode::OK, "body: {body}");
+    assert_eq!(body["code"], 20_000, "body: {body}");
+    assert_eq!(body["data"]["request_id"], request_id, "body: {body}");
+    assert_eq!(body["data"]["status"], "accepted", "body: {body}");
+    assert_eq!(body["data"]["from_bot_uuid"], caller_uuid, "body: {body}");
+    assert_eq!(body["data"]["to_bot_uuid"], target_uuid, "body: {body}");
+    let created_at = body["data"]["created_at"]
+        .as_u64()
+        .expect("created_at is a number");
+    let updated_at = body["data"]["updated_at"]
+        .as_u64()
+        .expect("updated_at is a number");
+    assert!(created_at > 0, "the decided projection carries real timestamps");
+    assert!(updated_at > 0, "the decided projection carries real timestamps");
+
+    // The mutation is durable and reflected in the connect store.
+    let request = state
+        .connect_service
+        .get_request(&request_id)
+        .await
+        .expect("the decided request stays readable");
+    assert_eq!(request.status, RequestStatus::Approved);
+}

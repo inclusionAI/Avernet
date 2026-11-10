@@ -377,6 +377,10 @@ use super::*;
         assert_eq!(again.status, FriendRequestStatus::Accepted);
         assert_eq!(again.from_bot, "botA");
         assert_eq!(again.to_bot, "botB");
+        assert!(
+            again.created_at > 0 && again.updated_at > 0,
+            "the synthetic already-friends response must carry real timestamps              (the retired core stamped `now`), got {again:?}"
+        );
     }
 
     // ---- 6) decision conflicts keep the legacy wording ----

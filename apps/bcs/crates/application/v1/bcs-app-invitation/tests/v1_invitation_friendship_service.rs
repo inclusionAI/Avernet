@@ -1391,26 +1391,30 @@ async fn create_friend_request_unknown_target_is_not_found() {
 }
 
 #[tokio::test]
-async fn create_friend_request_hidden_target_is_not_found() {
-    // The legacy facade disguises a hidden/private target as "not found"
-    // (`ServiceError::BotNotFound`); the V1 route keeps the 404 shape.
+async fn create_friend_request_hidden_target_is_forbidden() {
+    // A hidden target is an authorization failure, not an unknown target: the
+    // connect service reports `BotHidden` and the V1 mapping must surface 403.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.legacy_friend
-        .fail_create_with(ServiceError::BotNotFound("bot-hidden".to_string()));
+        .fail_create_with(ServiceError::BotHidden("bot-b".to_string()));
 
     let error = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
-            to_bot_uuid: "bot-hidden".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
             request_auth: None,
         })
         .await
-        .expect_err("hidden target is reported as unknown");
+        .expect_err("hidden target is forbidden");
 
-    assert_code(error, "bot_not_found");
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_code(error, "forbidden");
 }
 
 #[tokio::test]
