@@ -173,7 +173,7 @@ PYTHONPATH=engine/adapter/src apps/backend/.venv/bin/python -m unittest discover
 Tests execute the standalone CLI against an actual loopback fake Engine, check
 exact session propagation, safe URL handling, redirects, proxy bypass, response
 validation, error redaction and independently copied/extracted Skill operation.
-The three real Engine integration tests require Engine runtime dependencies and
+The real Engine integration tests require Engine runtime dependencies and
 its source on PYTHONPATH; they skip in a standalone stdlib-only environment.
 They verify register/list/content/delete, session isolation, stable identity
 across edits and atomic replacement, current metadata/content, independent
