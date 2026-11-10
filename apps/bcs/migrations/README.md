@@ -104,6 +104,21 @@ The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
 added after the baseline as `002_xxx.sql`, `003_xxx.sql`, and so on.
 
+## Bot authority generated columns (MySQL/OceanBase 036)
+
+The explicitly requested OceanBase compatibility correction keeps
+`authority_owner_log` and `pending_log` on column-level
+`CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`. Their CASE expressions return
+`to_id` / `bot_id` directly (or NULL), without expression-level
+`CONVERT(... USING utf8mb4) COLLATE ...`, which was reported to cause OceanBase
+schema errors. The owner/pending unique keys and their predicates are unchanged.
+
+The original 036 is archived outside migration discovery, and the runner accepts
+only its exact archived/current checksum pair without rewriting applied records.
+This does not repair an already deployed schema or retry a partial migration.
+Follow the [compatibility and repair guidance](reconciliation/bot-authority-generated-columns.md)
+before changing a retained database.
+
 ## Schema Version Table
 
 Both MySQL/OceanBase and SQLite use the same logical migration version model.

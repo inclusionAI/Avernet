@@ -1,3 +1,6 @@
+#[path = "migrate_bot_authority_contract.rs"]
+mod bot_authority_contract;
+
 #[cfg(test)]
 #[path = "migrate_task_handle_contract.rs"]
 mod task_handle_contract;
