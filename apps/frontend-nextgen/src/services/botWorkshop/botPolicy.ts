@@ -187,7 +187,12 @@ export function getInventoryActionAvailability(bot: BotDomain, action: BotInvent
   };
 }
 
-export function getBotCollaborationMode(bot: BotDomain, isOwner: boolean): 'authorize' | 'request' | undefined {
+export type BotCollaborationMode = 'authorize' | 'request';
+
+export function getBotCollaborationMode(
+  bot: BotDomain,
+  isOwner: boolean,
+): BotCollaborationMode | undefined {
   if (bot.serviceMode === 'non-service' && !bot.runtime.isAgentCodingBot) return undefined;
   if (bot.spaceKind !== 'team') return undefined;
   if (isOwner) return 'authorize';
