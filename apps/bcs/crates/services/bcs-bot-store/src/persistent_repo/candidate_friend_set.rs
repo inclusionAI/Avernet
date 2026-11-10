@@ -7,7 +7,9 @@
 //! query by the dialect capability already used by `a2a_source.rs`.
 //!
 //! This reduces statement items and placeholders only. Database scanning and
-//! set construction still cost O(F) for F friends.
+//! set construction still cost O(F) for F friends. Bot UUIDs are canonical
+//! lowercase identities; Rust de-duplicates the input before serialization, so
+//! SQL-level DISTINCT is unnecessary and must not apply a connection collation.
 
 use bcs_db_api::{DbSqlFlavor, DbValue};
 use bcs_service_api::{ServiceError, ServiceResult};
@@ -26,10 +28,10 @@ pub(super) fn friend_uuids_cte<'a>(
     })?;
     let cte = match flavor {
         DbSqlFlavor::Sqlite => {
-            "WITH friend_uuids AS (SELECT DISTINCT value AS bot_uuid FROM json_each(?)) "
+            "WITH friend_uuids AS (SELECT value AS bot_uuid FROM json_each(?)) "
         }
         DbSqlFlavor::Mysql => {
-            "WITH friend_uuids AS (SELECT DISTINCT bot_uuid FROM JSON_TABLE(?, '$[*]' \
+            "WITH friend_uuids AS (SELECT bot_uuid FROM JSON_TABLE(?, '$[*]' \
              COLUMNS(bot_uuid VARCHAR(256) PATH '$' ERROR ON ERROR)) AS friends) "
         }
     };
@@ -56,6 +58,7 @@ mod tests {
         )
         .expect("serialize friend set");
         assert!(cte.contains("json_each(?)"));
+        assert!(!cte.contains("DISTINCT"));
         assert!(!cte.contains("UNION ALL"));
         assert_eq!(
             json_of(&value),
@@ -64,6 +67,7 @@ mod tests {
         let (mysql_cte, _) = friend_uuids_cte(DbSqlFlavor::Mysql, [&longest])
             .expect("serialize mysql friend set");
         assert!(mysql_cte.contains("JSON_TABLE(?, '$[*]'"));
+        assert!(!mysql_cte.contains("DISTINCT"));
         assert!(mysql_cte.contains("VARCHAR(256)"));
     }
 
