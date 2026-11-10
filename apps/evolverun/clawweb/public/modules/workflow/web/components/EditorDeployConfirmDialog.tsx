@@ -24,7 +24,7 @@ export default function EditorDeployConfirmDialog({ candidate, activeHistory, de
   onConfirm: () => void
 }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3 sm:p-6">
-    <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
+    <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-lg bg-card p-6 shadow-xl sm:max-h-[calc(100dvh-3rem)]">
       <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
       <p className="mt-3 text-sm text-gray-600">即将部署以下已保存的草稿(wf)完整快照（含工作流 YAML、脚本与其他文件），不会使用未保存的编辑器修改。</p>
       <p className="mt-2 break-all text-xs text-gray-600">Pack：{candidate.packId}<br />保存版本 commit：{candidate.commit}<br />当前生效 tag：{candidate.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{candidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{candidate.fileCount} 个</p>
