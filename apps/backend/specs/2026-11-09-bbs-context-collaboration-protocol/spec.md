@@ -104,7 +104,7 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 | `InputSource` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，标识 Dima 项目空间、TaskDiscover 模块自动挖掘的事件集合等外部来源 | 随 envelope 事实演进 |
 | `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，稳定引用具体输入材料，不拥有内容 | 随 envelope 事实演进 |
 | `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 ContextOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
-| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作模式和参与者集合 | 随模式切换事件演进 |
+| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作形态、参与者集合与 visibility 边界 | 随模式切换事件演进 |
 | `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
 | `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + revision` | 共享状态机合同 | 注册后不可原位修改 |
 | `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
@@ -178,10 +178,12 @@ flowchart TB
 
 ```text
 CollaborationContext
-  ├─ context_id / scope / title
+  ├─ context_id
+  ├─ scope                    # ContextScope
+  ├─ title
   ├─ envelope
   ├─ responsible_actor_ref
-  ├─ collaboration_mode       # CollaborationMode
+  ├─ collaboration_mode       # CollaborationMode，持有 visibility
   ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
   ├─ outcomes[]               # ContextOutcome
   ├─ version                   # 聚合乐观锁版本
@@ -190,10 +192,26 @@ CollaborationContext
   └─ created_by / created_from / created_at / updated_at / closed_at
 ```
 
+`ContextScope` 不是可见性，而是 Context 所属的**授权与作用域边界**。
+
+```text
+ContextScope
+  ├─ scope_kind             # community / workspace / personal
+  ├─ scope_id               # 该 kind 下的稳定对象 ID
+  └─ environment            # 运行/部署环境
+```
+
+取值说明：
+- `community`：公开社区场景，例如 BBS Topic 所属社区。
+- `workspace`：项目空间、工作空间、协作空间，例如 Dima 项目空间或 TaskDiscover 事件集合所在空间。
+- `personal`：个人任务、私人待办或单个用户私有的 Context。
+
+`ContextScope` 解决的是 **归属哪儿**，不是 **谁能看见**；可见性仍由 `CollaborationMode.visibility` 与授权系统控制。
+
 聚合根不变量：
 - 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
 - 输入、交付物、协作模式、Todo、Outcome、来源引用、active_work_ref 等事实不能直接改状态，必须形成合法 `ContextEvent`。ContextTodo 属于 active state machine binding，不是根级独立字段。
-- 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `visibility` / `scope`。
+- 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `CollaborationMode.visibility` 与 `scope`。
 - 终态后可继续追加公开事件，但不能自动改变终态。
 - `responsible_actor_ref` 必须由授权主体和现有身份系统确认，不能由 Bot 自主声明。
 
@@ -208,7 +226,7 @@ ContextEnvelope
   ├─ material_refs[]           # ContextMaterialReference[]
   ├─ constraints[] / deliverable_specs[]
   ├─ acceptance[] / language / locale
-  ├─ origin_ref / visibility
+  ├─ origin_ref
   └─ envelope_revision
 ```
 
@@ -256,7 +274,7 @@ ContextDeliverable
 - 验收通过、驳回或返工都必须通过 `outcome.accepted` / `outcome.rejected` 完成。
 - `ContextOutcome` 先记录“结果是什么”，再记录“是否被验收”；二者都属于同一个判定单元。
 - `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
-- 根只保存 `outcomes[]`，交付物由对应 Outcome 持有。
+- 根只保存 `outcomes[]`，交付物由对应 Outcome 持有。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
 
 ### 4.5 子实体：ContextStateMachineBinding
 
@@ -287,15 +305,23 @@ ContextStateMachineBinding
 CollaborationMode
   ├─ mode_id / mode_kind
   ├─ participants[]            # ContextParticipant[]
+  ├─ visibility                # ContextVisibility
   ├─ mode_revision / started_at / ended_at
   └─ mode_switched_event_refs[]
 ```
+
+`visibility` 的基础取值只保留三类，作用域都在 `ContextScope` 之内：
+
+- `public`：对 scope 内所有人可见
+- `workspace`：对 scope 内某个 workspace 可见
+- `participants`：仅对当前 mode 的 participants 和责任人可见
 
 设计约束：
 - 一个 Context 同一时刻只能有一个 active `CollaborationMode`。
 - `mode_kind` 只能取 `public_discussion`、`task_relay`、`direct_assignment`。
 - mode 与 participants 变更必须通过 `context.mode_switched`、`participant.role_granted`、`participant.role_revoked` 事件进入事实日志。
 - 当前 mode 受状态机 binding 的 `allowed_modes` 约束，不能绕过 `ContextTransition` 直接修改。
+- visibility 属于当前 `CollaborationMode`，不是 `ContextEnvelope` 或 `scope`。
 - participants 是协作关系，不是权限本身。
 - `active_work_ref` 属于聚合根，不属于 `CollaborationMode`。
 
@@ -591,7 +617,7 @@ GET    /openapi/v1/collaboration/contexts/{context_id}/timeline
 
 ## 9. 安全、可见性与审计
 
-1. `visibility` 和 `authorization` 是两个独立概念：帖子可读不代表可参与、可启动执行、可验收或可读取原始附件。
+1. `CollaborationMode.visibility` 和 `authorization` 是两个独立概念：可见不代表可参与、可启动执行、可验收或可读取原始附件。
 2. 状态机不能用来提升权限；进入某个 `active` 状态不会自动授予 Bot 仓库、群、外部系统或材料访问权限。
 3. 所有提交、接龙、认领和验收操作每次重新校验身份、作用域、责任人、Bot Owner、材料授权和当前状态。
 4. 发布给 BBS 或 Bot 的 Context Snapshot 必须由服务端按来源授权重新投影，不能直接复制内部 Context 行。
