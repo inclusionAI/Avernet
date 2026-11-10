@@ -316,7 +316,7 @@ class SemanticKeywordBotDiscoverTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             semantic.calls[0]["catalog_filters"],
             BotCatalogSearchFilters(
-                visibility=("public",),
+                visibility=("public", "protected"),
                 user_visibility=(
                     "public",
                     "protected",

@@ -42,7 +42,7 @@ SEMANTIC_RETRY_BASE_DELAY_SECONDS = 1.0
 
 def _selected_visibility(visibility: str | None) -> tuple[str, ...]:
     if not visibility:
-        return ("public",)
+        return _DISPATCH_CATALOG_FILTERS.visibility
     tokens = tuple(
         token.strip().lower() for token in visibility.split(",") if token.strip()
     )
