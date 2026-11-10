@@ -3,6 +3,7 @@
 import sqlite3
 import time
 from contextlib import contextmanager
+from hashlib import sha256
 from threading import Event, Thread
 from types import SimpleNamespace
 
@@ -104,7 +105,10 @@ def test_card_preparation_indexes_generated_profile_and_reuses_current_input(
         calls.append(request)
         if '"name": "模型超时"' in request.user_prompt:
             raise TimeoutError
-        return SimpleNamespace(raw_text='{"topic":"扑克游戏"}', errors=[])
+        return SimpleNamespace(
+            raw_text='```json\n{"topic":"德州扑克","category":"游戏"}\n```',
+            errors=[],
+        )
 
     monkeypatch.setattr(
         bootstrap,
@@ -114,7 +118,7 @@ def test_card_preparation_indexes_generated_profile_and_reuses_current_input(
     start, _ = service
     key = "poker:dealer"
     name = "poker_发牌师傅"
-    summary = "扑克游戏"
+    summary = "德州扑克 · 游戏"
     with start("card") as (client, registry):
         new_card(client, key, name=name, description=name, runtime_state="online")
         catalog = registry.require("tc_catalog_repository")
@@ -155,6 +159,7 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
     service, monkeypatch
 ):
     from app.tc import bootstrap
+    from app.tc.card_profiles import _profile_input
 
     start, _ = service
     with start("card") as (client, registry):
@@ -166,13 +171,26 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
         before = documents.load_by_id("dealer")
         other = documents.load_by_id("other")
         index_key = client.get("/ready").json()["index_key"]
-
-    gateway = SimpleNamespace(
-        generate=lambda *_args, **_kwargs: SimpleNamespace(
-            raw_text='{"topic":"扑克游戏"}', errors=[]
+        repository = registry.require("tc_catalog_repository")
+        row = repository.get("dealer")
+        assert repository.save_profile(
+            "dealer",
+            row.revision,
+            {
+                "input_hash": sha256(_profile_input(row.card).encode()).hexdigest(),
+                "summary": "德州扑克",
+            },
         )
+
+    def generate(request, **_kwargs):
+        assert '"previous_topic": "德州扑克"' in request.user_prompt
+        return SimpleNamespace(
+            raw_text='{"topic":"德州扑克","category":"游戏"}', errors=[]
+        )
+
+    monkeypatch.setattr(
+        bootstrap, "_create_profile_gateway", lambda: SimpleNamespace(generate=generate)
     )
-    monkeypatch.setattr(bootstrap, "_create_profile_gateway", lambda: gateway)
     with start("card") as (client, registry):
         path = "/api/v2/agent-cards/dealer/rebuild"
         updates = registry.require("tc_card_search").updates
@@ -191,9 +209,9 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
         assert documents.load_by_id("other").version == other.version
         rebuilt = documents.load_by_id("dealer")
         assert rebuilt.version > before.version
-        assert "扑克游戏" in rebuilt.point.payload["search_text"]
+        assert "德州扑克 · 游戏" in rebuilt.point.payload["search_text"]
         catalog = registry.require("tc_catalog_repository")
-        assert catalog.get("dealer").profile["content"]["summary"] == "扑克游戏"
+        assert catalog.get("dealer").profile["content"]["summary"] == "德州扑克 · 游戏"
         updates.run_once()
         result = client.post(
             "/api/v1/recommend",
@@ -201,7 +219,62 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
         )
         assert result.status_code == 200, result.text
         assert result.json()["recommendations"][0]["worker_id"] == "dealer"
-        assert result.json()["recommendations"][0]["short_profile"] == "扑克游戏"
+        assert result.json()["recommendations"][0]["short_profile"] == "德州扑克 · 游戏"
+
+
+def test_tc_short_name_search_uses_prefix_and_explicit_domain_without_padding(service):
+    start, _ = service
+    with start("card") as (client, registry):
+        new_card(client, "uct", name="UCT技术助理Bot", runtime_state="online")
+        new_card(client, "uct20", name="UCT20值班助手", runtime_state="online")
+        new_card(
+            client,
+            "aliuct",
+            name="aliuct值班助手",
+            domains=["UCT"],
+            runtime_state="online",
+        )
+        new_card(
+            client, "deduct", name="TC_CCPOINT_DEDUCT_AND_MUL", runtime_state="online"
+        )
+        assert (
+            client.put(
+                "/api/v2/agent-cards/private-uct",
+                json={
+                    "card": {"name": "UCT私有助手", "runtime_state": "online"},
+                    "labels": {
+                        "visibility": ["private"],
+                        "user_visibility": ["private"],
+                    },
+                },
+            ).status_code
+            == 202
+        )
+        registry.require("tc_card_search").updates.run_once()
+
+    with start("card") as (client, _):
+        for enable_rerank in (False, True):
+            response = client.post(
+                "/api/v1/recommend",
+                json={"question": "UCT", "topK": 20, "enable_rerank": enable_rerank},
+            )
+            assert response.status_code == 200, response.text
+            assert {x["worker_id"] for x in response.json()["recommendations"]} == {
+                "uct",
+                "uct20",
+                "aliuct",
+            }
+
+        result = client.post(
+            "/api/v2/search",
+            json={"query": "uct", "filters": {"worker_id": ["uct20", "deduct"]}},
+        )
+        assert result.status_code == 200, result.text
+        assert [x["id"] for x in result.json()["items"]] == ["uct20"]
+
+        missing = client.post("/api/v1/recommend", json={"question": "ZZZ", "topK": 20})
+        assert missing.status_code == 200, missing.text
+        assert missing.json()["recommendations"] == []
 
 
 def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(service):
