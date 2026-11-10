@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/resources/test_file_search_download_helpers.py
+  s_3a96314c63bfb3::t_3f645840dc1da0 647-648,699-711
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ecf6b8f94d1977b79cbe35b457699553fda51615",
+  "prompts": {},
+  "sessions": {
+    "s_3a96314c63bfb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-089d-74a3-be00-2785ae2ec0ff",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

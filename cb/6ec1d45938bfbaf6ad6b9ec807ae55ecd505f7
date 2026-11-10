@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_df9e33e486a942::t_46629f590438cb 301-304,308
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_df9e33e486a942::t_46629f590438cb 327
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_df9e33e486a942::t_954867c63856ff 3,57,69
+  s_df9e33e486a942::t_46629f590438cb 38,58-68,70-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb6ec1d45938bfbaf6ad6b9ec807ae55ecd505f7",
+  "prompts": {},
+  "sessions": {
+    "s_df9e33e486a942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c461-e821-7eb2-8d5a-02b04e069135",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
