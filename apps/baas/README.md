@@ -1,5 +1,17 @@
 # secbaas-community
 
+## Knowledge navigation
+
+Public BaaS owns the community lifecycle services and provider contracts; the OCB enterprise overlay registers enterprise providers and routers.
+
+- [Architecture decisions](docs/adr/README.md)
+- [E2E architecture](docs/e2e/architecture.md)
+- [Tests](tests/README.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 **SecBaaS Community Edition** — the open-source, single-box runtime of the TeamClaw AI bot platform.
 
 This package provides the core server that manages AI bot lifecycles: creation, sandbox provisioning, runtime scheduling, session management, API gateway, billing control, and third-party integrations.

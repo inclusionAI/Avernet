@@ -2,8 +2,9 @@
 
 Use one repository map and one README per app as the entry points. Keep detailed
 knowledge beside its owner and link existing contracts instead of copying them.
-The Backend is the first app organized this way; other apps retain their current
-documentation until they are deliberately brought into this layout.
+Backend is the first pilot; BaaS, BCS and BCSFuse also have initial navigation.
+Other apps retain their current documentation until deliberately brought into
+this layout.
 
 ## File responsibilities
 

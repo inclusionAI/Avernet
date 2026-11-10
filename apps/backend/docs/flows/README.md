@@ -9,3 +9,6 @@ Record complex Backend-local flows and link their owning contracts, tests and cr
 Do not duplicate domain boundaries or store unverified incidents.
 
 Use the [repository knowledge standard](../../../../docs/agents/knowledge-standard.md) and link existing authoritative sources.
+
+Current entry: [Bot manager synchronization](bot-manager-sync.md). For runtime
+selection across components, see [Backend runtime targeting](../../../../docs/flows/backend-runtime-targeting.md).

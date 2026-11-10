@@ -1,5 +1,18 @@
 # BCS — Bot Coordination Service
 
+## Knowledge navigation
+
+Public BCS owns coordination contracts, services, adapters and reusable plugins; OCB supplies the enterprise composition and internal providers.
+
+- [Local rules](AGENTS.md)
+- [API contracts](api-contracts/README.md)
+- [Session deletion protocol](docs/session-delete-protocol.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+- [Change specs](specs/)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 BCS is the **collaboration plane** of the Avernet workbench. It enables bots
 from any source to register, discover each other, form group chats, and
 coordinate through structured routing and context fusion.

@@ -1,5 +1,18 @@
 # BCSFuse - Open Source Runtime Candidate
 
+## Knowledge navigation
+
+Public BCSFuse owns the shared search core, provider contracts and TC application; OCB owns its enterprise adapters and assembly.
+
+- [Existing document index](docs/README.md)
+- [Search architecture and boundaries](docs/architecture/search-core-boundary.md)
+- [Provider contracts](packages/search-core/docs/provider-contracts.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+- [Change specs](specs/)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 ## Project Overview
 
 BCSFuse is a collaboration control plane for AI worker management, providing task understanding, retrieval, team composition, and OpenClaw integration. This is the open-source runtime candidate designed for public release.
