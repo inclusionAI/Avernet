@@ -1,5 +1,17 @@
 # bcs-service-api Context
 
+## Version 4.0.0: Provider initial authority
+
+`OwnershipInitialization` adds required `initial_manager_user_ids`; existing Rust
+constructors must supply it (empty for Human-token registrations). Provider Core
+and the Bot Provider repo add separate fail-closed atomic multi-user admission
+methods. Fresh ordinary identity/binding/authority commits together; initialized
+replays preserve changes, and existing uninitialized multi-user targets conflict.
+Empty snapshots preserve the legacy path. Workspace consumers rebuild together;
+HTTP fields and Plugin APIs are unchanged. Shared registration/rollback tests
+cover Memory and SQLite, with native MySQL migration-chain conformance.
+
+
 ## Version 3.0.0: Bot response avatars
 
 `PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust

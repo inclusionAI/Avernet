@@ -86,7 +86,7 @@ async fn apply_mysql_group_context_migration(db: &dyn DbPlugin) {
     if db_get_column::<i64>(&columns[0], "slot_columns").expect("read slot column count") == 0 {
         execute_group_context_migration(
             db,
-            include_str!("../../../../migrations/mysql/043_group_context_slot.sql"),
+            include_str!("../../../../migrations/mysql/046_group_context_slot.sql"),
         )
         .await;
     }

@@ -13,10 +13,10 @@ Stage 1 Phase 4: Registry State → Candidate Filtering
 """
 
 import pytest
-from src.infra.config.feature_flags import FeatureFlags
+from app.infra.config.feature_flags import FeatureFlags
 
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -26,17 +26,17 @@ from src.domain.models.worker import (
     Availability,
     TrustLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.retrieval_input import RetrievalInput
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
-from src.application.services.retrieval_service import RetrievalService
-from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.retrieval_input import RetrievalInput
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
+from app.application.services.retrieval_service import RetrievalService
+from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
 
 
 @pytest.fixture(autouse=True)

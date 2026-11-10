@@ -162,6 +162,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         self.register_with_ownership(
             command,
             bcs_service_api::types::bot_authority::OwnershipInitialization {
+                initial_manager_user_ids: Vec::new(),
                 // The Provider token's verified Human IS the
                 // initiator of the legacy surface too.
                 owner_user_id: owner.clone(),

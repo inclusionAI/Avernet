@@ -1,5 +1,14 @@
 # avernet-goal-cli 到分布式接力执行：端到端设计稿
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 > Relay 单个 Target Execution 的实现合同，2026-10-12。CLI 命令、Batch Schema、一个 Goal 多目标、Intake 和 `/start` 聚合响应以 [avernet-goal-cli 发起与澄清设计](design.md) 为唯一权威；本文只描述其中一个独立 Target Execution 进入 [Bot S1–S6 函数式执行协议](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md) 后的执行链路。本文残留的单目标命令和单结果示例不构成 CLI 合同。
 
 > 实现核对（2026-10-13）：Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已完成重构；Rust `avernet-goal-cli` 已迁移至 CLI 组织下的独立同名仓库并发布，Avernet 仓库只保留 Backend 实现与跨仓协议设计。
@@ -202,7 +211,8 @@ GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context
                      accepted_execution_patch?, accepted_plan_report?}
 
 POST /api/v1/collaboration/tasks/search
-  body: {query: str, task_id: str, node_id: str, relay_token: str}
+  body: {query: str, task_id: str, node_id: str, relay_token: str,
+         viewer_actor_type?: "bot"|"human", viewer_actor_id?: str}
         # query 是由 objective + acceptances[].description 投影出的本地候选查询；标识与执行代次必须属于当前棒
   data: list[BotCandidate] → Bot Skill 本地决策 → 填充未落图 TaskNode
 
@@ -413,6 +423,8 @@ class TaskService:
 
     async def search_bots(
         self, *, query: str, task_id: str, node_id: str,
+        viewer_actor_type: Literal["bot", "human"] | None = None,
+        viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]: ...
 
     async def get_task_dashboard(
@@ -430,6 +442,15 @@ class TaskService:
 - HTTP `/start`：只收 `session_id`；Backend 应用层校验会话 owner 与 `CONFIRMED` 状态，读取已保存 Result 并构造内部 `TaskInfoRequest`，再调用唯一创建方法 `TaskService.execute(request)`。TaskInfo、根图、唯一 session 关联和根投递意图必须同提交；返回成功的 `TaskOpResult(task_id=node_id)`，重试同一 session 返回原结果。它不返回 `TaskContext`，也不等候 Runner 投递。现有 `execute` 将 TaskInfo 与图谱分步写入，实施前需增强其可靠提交能力，或提供经过故障注入验证的可恢复提交协议；HTTP Adapter 只映射协议，不承担会话业务校验或事务编排。
 - `get_node_context`：在生产内网白名单准入并通过当前节点 `relay_token` 代次校验后，委托 `TaskGraphService` 从已持久化图谱投影严格前序 `all_done_output` 与本棒已接纳的执行 patch/规划结果；首棒、后续棒、harness 恢复均调用此同一接口。现有 `get_task_context(task_id)` 只能做兼容入口，不得猜测多节点任务的当前节点。
 - `report`：统一接纳 `EXECUTION_RESULT` 与合并后的 `PLAN_RESULT`。后者一次接纳未落图节点及执行者决策，原子完成当前棒、创建下一棒并写入执行者，或收口/HUNG/BBS。图谱同事务保存当前代次、`event_id`、规范化内容指纹与原结果；同一事件重试返回原迁移结果，不重复建节点或发布 BBS。方法只收 `TaskReportCommand`，其中 `relay_token` 由 Backend 签发、`event_id` 由 Bot 调用层生成；不显式传认证调用方。
+- 2026-11-06 已审查的搜索兼容扩展：`POST /search` 及 `search_bots` 支持可选
+  `viewer_actor_type=bot|human` / `viewer_actor_id` 成对参数。全部省略/null 保持原行为；
+  部分提供、空白 ID、非法类型返回既有 422 验证错误。Bot 视角复用产品的
+  visibility=public/protected 和 online/offline 语义召回；Human 视角复用产品的
+  user_visibility=public/protected 及 online 召回。最终任务候选均保留运行就绪
+  过滤及最多 5 个限制。viewer 是查询范围，不是身份认证、不改变 assignee；
+  原四个必填字段、relay_token fence、响应及 S1–S6 不变。Backend 兼容旧请求；
+  task-loop Skill 必须显式使用当前 Bot Runtime 身份的 Bot 视角，不开放 Human
+  视角，身份不明时停止搜索，不回退到无 viewer。
 - `search_bots`：只读检索，以 S5.2 生成的下一棒 `TaskSpec.goal` 本地投影出的 `candidate_query` 为 `query`；投影只读取 `goal.objective` 与 `goal.acceptances[].description`，trim 后不超过 80 个 Unicode code points。返回 `list[BotCandidate]` 供 S5.4 Skill 决策；不另设 Bot 本地搜索包装函数，也不重复拼接 `task_gaps`。`task_id/node_id` 必填，只将轨迹归属当前棒，不要求下一棒先落图；HTTP Adapter 还校验当前棒 `relay_token`。当前实现名为 `search_task_candidates` 且返回字典；HTTP Adapter 需把候选归一化，已有 HTTP 调用方依赖的响应字段需兼容迁移。
 - S6 不增加 `TaskService.dispatch_task` 包装方法：Skill 调生产内网白名单保护的 `/dispatch` HTTP 路径，Adapter 校验起点节点的当前 `relay_token`，以 `task_id,target_node_id` 读取权威 `next_node` 并调用 `TaskDispatcher.dispatch(next_node)`；Dispatcher 核心链路校验前后节点关系、节点状态和投递意图。HTTP 请求还携带当前棒 `origin_node_id`，成功响应保持 `{ok,node_id}` 最小摘要。接力派发策略内部调用 `TaskRunner.start_run(next_node)`。根节点不走该派发分支；失败恢复消费者复用同一 Dispatcher；Skill 不传 `dispatch_id`。
 - `get_task_dashboard`：服务 `task-cli get`，只读图与节点状态；不作为 Bot S1 的业务上下文来源。

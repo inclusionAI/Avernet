@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "public_management_by_id.rs"]
+mod by_id;
 use bcs_service_api::application::a2a_bot::RegisterAgentCommand;
 use bcs_service_api::types::a2a_bot::{
     A2aCardSource,
@@ -58,7 +61,7 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(serialized.as_object().unwrap().len(), 5);
     assert_eq!(
         service
-            .get_agent("test-admin", "订单助手")
+            .get_agent_by_id("test-admin", &registered.bot_id)
             .await
             .unwrap()
             .bot_id,
@@ -67,7 +70,7 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(
         code(
             service
-                .refresh_agent("test-admin", "订单助手")
+                .refresh_agent_by_id("test-admin", &registered.bot_id)
                 .await
                 .unwrap_err()
         ),
@@ -77,30 +80,24 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     next["name"] = json!("订单助理");
     next["capabilities"]["extensions"][0]["params"]["party"] = json!("second_party");
     let updated = service
-        .update_agent(
+        .update_agent_by_id(
             "test-admin",
-            "订单助手",
+            &registered.bot_id,
             A2aCardSource::Inline(next.clone()),
         )
         .await
         .unwrap();
     assert_eq!(updated.bot_id, registered.bot_id);
     assert_eq!(updated.agent_card, next);
-    assert_eq!(
-        code(
-            service
-                .get_agent("test-admin", "订单助手")
-                .await
-                .unwrap_err()
-        ),
-        Code::BotNotFound
-    );
+    assert_eq!(service.get_agent_by_id("test-admin", &registered.bot_id).await.unwrap().agent_card, next);
     assert_delegated_owner(&chain, &registered.bot_id).await;
     // Old names are released; source IDs remain attached to the existing Bot.
-    service
-        .register_agent(request(card("订单助手", Some("different"))))
-        .await
-        .unwrap();
+    let other = service.register_agent(request(card("订单助手", Some("different")))).await.unwrap();
+    next["description"] = json!("仍然更新原 Bot");
+    let again = service.update_agent_by_id("test-admin", &registered.bot_id, A2aCardSource::Inline(next.clone())).await.unwrap();
+    assert_eq!(again.bot_id, registered.bot_id);
+    assert_eq!(again.agent_card, next);
+    assert_eq!(service.get_agent_by_id("test-admin", &other.bot_id).await.unwrap().agent_name, "订单助手");
 }
 
 #[tokio::test]
@@ -123,9 +120,9 @@ async fn source_conflicts_and_id_changes_roll_back_entire_operation() {
         assert_eq!(
             code(
                 service
-                    .update_agent(
+                    .update_agent_by_id(
                         "test-admin",
-                        "订单助手",
+                        &first.bot_id,
                         A2aCardSource::Inline(card("不应改名", id))
                     )
                     .await
@@ -135,7 +132,7 @@ async fn source_conflicts_and_id_changes_roll_back_entire_operation() {
         );
         assert_eq!(
             service
-                .get_agent("test-admin", "订单助手")
+                .get_agent_by_id("test-admin", &first.bot_id)
                 .await
                 .unwrap()
                 .agent_card,
@@ -220,7 +217,7 @@ async fn url_registration_and_refresh_preserve_the_source_and_full_card() {
         initial.agent_card_url.as_deref(),
         Some("https://example.org/card.json")
     );
-    let refreshed = service.refresh_agent("test-admin", "Remote").await.unwrap();
+    let refreshed = service.refresh_agent_by_id("test-admin", &initial.bot_id).await.unwrap();
     assert_eq!(refreshed.bot_id, initial.bot_id);
     assert_eq!(refreshed.agent_card, initial.agent_card);
 }
@@ -238,7 +235,7 @@ async fn registration_persists_visibility_atomically_and_card_updates_preserve_i
             vec![registered.bot_id.clone().into()]);
         let rows = chain.db.query(read_visibility()).await.unwrap();
         assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(), Some(visibility.as_str()));
-        service.update_agent("test-admin", "可见性测试",
+        service.update_agent_by_id("test-admin", &registered.bot_id,
             A2aCardSource::Inline(card("更新后的助手", None))).await.unwrap();
         let rows = chain.db.query(read_visibility()).await.unwrap();
         assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(), Some(visibility.as_str()));
@@ -251,13 +248,13 @@ async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on
     let (chain,service)=public_fixture().await;
     let raw=card("权限测试",None);
     let registered=service.register_agent(request(raw.clone())).await.unwrap();
-    let updated=service.update_agent_with_visibility("test-admin","权限测试",None,Some(Public)).await.unwrap();
+    let updated=service.update_agent_by_id_with_visibility("test-admin",&registered.bot_id,None,Some(Public)).await.unwrap();
     assert_eq!(updated.agent_card,raw);
     let read=|| DbStatement::with_params("SELECT visibility FROM bcs_bots WHERE bot_uuid=?",vec![registered.bot_id.clone().into()]);
     assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
     chain.db.execute(DbStatement::new("CREATE TRIGGER reject_visibility BEFORE UPDATE OF visibility ON bcs_bots BEGIN SELECT RAISE(ABORT,'visibility failure'); END")).await.unwrap();
-    assert!(service.update_agent_with_visibility("test-admin","权限测试",Some(A2aCardSource::Inline(card("改名失败",None))),Some(Protected)).await.is_err());
-    assert_eq!(service.get_agent("test-admin","权限测试").await.unwrap().agent_card,raw);
+    assert!(service.update_agent_by_id_with_visibility("test-admin",&registered.bot_id,Some(A2aCardSource::Inline(card("改名失败",None))),Some(Protected)).await.is_err());
+    assert_eq!(service.get_agent_by_id("test-admin",&registered.bot_id).await.unwrap().agent_card,raw);
     assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
-    assert!(service.update_agent_with_visibility("wrong-token","权限测试",None,Some(Protected)).await.is_err());
+    assert!(service.update_agent_by_id_with_visibility("wrong-token","权限测试",None,Some(Protected)).await.is_err());
 }

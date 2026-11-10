@@ -29,6 +29,8 @@ pub trait A2aBotCoreService: Send + Sync {
     async fn provider_binding(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<BotProviderRecord>;
     async fn get_card(&self, bot_uuid: &str) -> ServiceResult<Option<A2aBotRecord>>;
     async fn get_by_name(&self, provider_id:&str, name:&str)->ServiceResult<Option<A2aBotRecord>>;
+    /// Exact, case-sensitive source extension agentId in one Provider; never a global lookup.
+    async fn get_by_source_agent_id(&self, provider_id:&str, source_agent_id:&str)->ServiceResult<Option<A2aBotRecord>>;
     async fn refreshable_cards(&self, after_bot_uuid: Option<&str>, limit:u32) -> ServiceResult<Vec<A2aBotRecord>>;
     async fn replace_card(&self, record: A2aBotRecord) -> ServiceResult<A2aBotRecord>;
     /// Validates immutable affiliation and commits a complete validated Card.

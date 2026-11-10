@@ -1,8 +1,9 @@
 import { revalidateGitComparison } from './revalidateGitComparison'
 import { extractApiErrorMessage } from './editorErrorMessage'
-import DeploySnapshotReview, { type DeployReview } from '../components/DeploySnapshotReview'
 import WorkflowSnapshotReconciliation from '../components/WorkflowSnapshotReconciliation'
 import WorkflowBaselineComparison, { WorkflowBaselineNotice, parseGitWorkflowForImport } from '../components/WorkflowBaselineComparison'
+import EditorDeployConfirmDialog, { type EditorDeployCandidate } from '../components/EditorDeployConfirmDialog'
+import { useActiveHistoryMismatchReview } from '../components/useActiveHistoryMismatchReview'
 import { assertWorkflowReconciliation, workflowReconciliationIsCurrent } from '../api/workflowSnapshotReconciliation'
 import type { ReconciliationApproval } from '../api/workflowSnapshotReconciliation'
 import { useEditorMergeReview } from './useEditorMergeReview'
@@ -46,7 +47,6 @@ type SaveMessage = { type: 'success' | 'error'; text: string } | null
 const deploymentTokens = new WeakMap<object, string>()
 
 
-
 function hasUnsafePackEdits(id: string): boolean {
   const versions = sessionFor(id).state.versions
   return hasPackVersionEditRisk(id) || Object.values(versions).some(version => !version.snapshot && version.files.length > 0)
@@ -81,7 +81,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
   const [deploymentBaselineStatus, setDeploymentBaselineStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
-  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; expectedActiveCommit: string; activeRef: string | null; changes: DeployReview[]; draftToken: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; writeEpoch: number; freshBaseline: boolean; positions: EditorState['positions']; editorSpec: EditorState['spec']; editorPending: EditorState['pendingEdits']; baselineComparison: BaselineComparison } | null>(null)
+  const activeHistoryReview = useActiveHistoryMismatchReview(selectedWorkflowId)
+  const [deployCandidate, setDeployCandidate] = useState<EditorDeployCandidate | null>(null)
   const candidateRequest = useRef(0)
   const switchRequest = useRef(0)
   // Invalidate before passive effects or pending promises can apply an obsolete
@@ -242,10 +243,11 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     }
   }, [selectedWorkflowId, latestDeploy])
 
-  const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
+  const effectiveActiveHistoryText = activeHistoryReview.displayText(activeSnapshot?.specJson)
+  const deployedSpecText = effectiveActiveHistoryText === undefined ? '' : formatSpecForDiff(effectiveActiveHistoryText)
   const savedSpecText = databaseBaseline ? formatCurrentSpecForDiff(databaseBaseline) : ''
-  const comparisonUncertain = Boolean(activeSnapshot && databaseBaseline && historyComparisonUncertain(activeSnapshot.specJson))
-  const hasUndeployedChanges = Boolean(activeSnapshot && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
+  const comparisonUncertain = Boolean(effectiveActiveHistoryText !== undefined && databaseBaseline && historyComparisonUncertain(effectiveActiveHistoryText))
+  const hasUndeployedChanges = Boolean(effectiveActiveHistoryText !== undefined && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
   const deploymentBaselineLabel = '生效'
 
   const handleOpenSaveDialog = useCallback(async () => {
@@ -592,7 +594,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       }
       const priorFiles = active?.versionFiles ?? []
       const prior = new Map(priorFiles.map(file => [file.path, file]))
-      const changes: DeployReview[] = diff(priorFiles, snapshot.versionFiles).map(change => ({
+      const changes: EditorDeployCandidate['changes'] = diff(priorFiles, snapshot.versionFiles).map(change => ({
         path: change.path, operation: change.operation === 'delete' ? '删除' : change.operation === 'create' ? '新增' : '更新',
         before: prior.get(change.path) ?? null, after: change.operation === 'delete' ? null : change,
       }))
@@ -625,7 +627,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         && versions.current.files.length === 0 && versions.draft.files.length === 0
       if (!baseline && !freshBaseline) throw new Error(`草稿文件快照与已读取基线不一致；请先核对版本`)
       packWorkflow(snapshot.versionFiles, selectedWorkflowId, snapshot.packId)
-      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions, editorSpec, editorPending, baselineComparison: compareGitDatabase(snapshot, selectedWorkflowId, db) })
+      const activeHistoryMismatch = active?.activeHistoryMismatch === true
+      if (activeHistoryMismatch) activeHistoryReview.prepare(active, latestDeploy, activeSnapshot?.specJson)
+      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, expectedActiveCommit: active?.baseCommit ?? '', activeRef: active?.baseRef ?? null, changes, draftToken: receipt.draftToken, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, writeEpoch, freshBaseline: !baseline && freshBaseline, positions, editorSpec, editorPending, baselineComparison: compareGitDatabase(snapshot, selectedWorkflowId, db), activeHistoryMismatch })
       setShowDeployConfirm(true)
     } catch (err) {
       if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId && useEditorStore.getState().sessionId === sessionId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和草稿文件，已阻止部署：${extractApiErrorMessage(err)}。` })
@@ -977,24 +981,18 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
 
       {/* Confirm the entire saved tree, after the server checks its DB projection. */}
       {showDeployConfirm && selectedWorkflowId && deployCandidate && deployCandidate.workflowId === selectedWorkflowId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-3 text-sm text-gray-600">即将部署以下已保存的草稿(wf)完整快照（含工作流 YAML、脚本与其他文件），不会使用未保存的编辑器修改。</p>
-            <p className="mt-2 break-all text-xs text-gray-600">Pack：{deployCandidate.packId}<br />保存版本 commit：{deployCandidate.commit}<br />当前生效 tag：{deployCandidate.activeRef ?? '不存在（首次部署）'}<br />已核对生产 commit：{deployCandidate.expectedActiveCommit || '不存在（首次部署）'}<br />版本文件：{deployCandidate.fileCount} 个</p>
-            {deployCandidate.baselineComparison === 'different' && <p role="status" className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">已保存 Git 工作流与数据库草稿不同；当前运行时可能读取数据库草稿，服务端会拒绝此部署。请先保存当前内容，再重新部署。保存可能立即影响使用数据库草稿的运行端。</p>}
-            {(isDirty || hasPendingEdits) && <p role="status" className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">当前存在未保存的修改，本次部署不包含这些修改；如需部署它们，请先保存。</p>}
-            <p className="mt-2 text-xs text-gray-500">部署不会用数据库改写 YAML；未保存的编辑不会部署。Git 与数据库写入不是跨存储原子操作，结果不确定时须人工核对。</p>
-            <DeploySnapshotReview changes={deployCandidate.changes} reviewed={deployReviewed} onReviewedChange={setDeployReviewed} />
-            <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setShowDeployConfirm(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">取消</button>
-              <button disabled={!deployReviewed} onClick={() => { setShowDeployConfirm(false); void runDeploy() }} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-emerald-700">确认部署</button>
-            </div>
-          </div>
-        </div>
+        <EditorDeployConfirmDialog
+          candidate={deployCandidate}
+          activeHistory={activeHistoryReview}
+          deployNumber={latestDeploy?.deployNumber ?? null}
+          hasUnsavedEdits={isDirty || hasPendingEdits}
+          reviewed={deployReviewed}
+          onReviewedChange={setDeployReviewed}
+          onCancel={() => setShowDeployConfirm(false)}
+          onChooseActiveHistory={activeHistoryReview.choose}
+          onConfirm={() => { setShowDeployConfirm(false); void runDeploy() }}
+        />
       )}
-
-
     </div>
   )
 }

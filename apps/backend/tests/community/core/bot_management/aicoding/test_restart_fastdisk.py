@@ -1,12 +1,20 @@
 """Only backend-confirmed fastdisk backups may veto a coding restart."""
+import ast
+import base64
+from contextlib import redirect_stdout
+import io
 import json
+import logging
+import shlex
+import zlib
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
-from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import detection_command
+from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import detection_command as publish_detection_command
+from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import detection_command
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
@@ -57,6 +65,153 @@ def executor(results, detected=None):
     return Mock(side_effect=execute)
 
 
+def embedded_detector(command, tmp_path):
+    """Run the actual backend payload; replace only container filesystem paths."""
+    bootstrap = shlex.split(command)[2]
+    encoded = ast.literal_eval(bootstrap.split('b64decode(', 1)[1].split(')', 1)[0])
+    source = zlib.decompress(base64.b64decode(encoded)).decode()
+    source = source.replace('/var/run/agentclaw/persist-runtime.json', str(tmp_path / 'no-config'))
+    source = source.replace('/home/admin/.aicoding', str(tmp_path / 'home'))
+    source = source.replace('/opt/.aicoding', str(tmp_path / 'storage'))
+    source = source.replace('/proc/self/mountinfo', str(tmp_path / 'mountinfo'))
+    output = io.StringIO()
+    with redirect_stdout(output):
+        exec(compile(source, '<embedded-fastdisk-detector>', 'exec'), {'__name__': 'embedded_probe'})
+    return SimpleNamespace(exit_code=0, stdout=output.getvalue())
+
+
+@pytest.mark.parametrize('blocking', [False, True])
+def test_restart_without_live_mounts_ignores_ready_marker_and_skips_backup(tmp_path, blocking, caplog):
+    for base in ('home', 'storage'):
+        for name in ('sessions', 'workspace'):
+            (tmp_path / base / name).mkdir(parents=True)
+    (tmp_path / 'storage' / '.fastdisk.ready').touch()
+    (tmp_path / 'mountinfo').write_text('1 0 0:1 / / rw - overlay overlay rw\n')
+    calls = []
+
+    def execute(command):
+        calls.append(command)
+        return embedded_detector(command, tmp_path) if len(calls) == 1 else response('failed')
+
+    guard = Mock(return_value=blocking)
+    with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
+        check = backup._attempt_backup(execute=execute, operation_id=OPERATION,
+                                       bot_id='b', target_id='physical', blocking_enabled=guard)
+        check()
+    result = backup.parse_detection_result(embedded_detector(calls[0], tmp_path))
+    assert result['status'] == 'skip_no_fastdisk'
+    assert len(calls) == 1  # Detection must be the only command; never invoke the backup helper.
+    assert check.required is False
+    guard.assert_not_called()
+    warn.assert_not_called()
+    assert 'event=aicoding_restart_fastdisk_detect' not in caplog.text
+    assert 'event=aicoding_restart_backup' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+
+
+@pytest.fixture
+def detector_layout(tmp_path):
+    for base in ('home', 'storage'):
+        for name in ('sessions', 'workspace'):
+            (tmp_path / base / name).mkdir(parents=True)
+    (tmp_path / 'mountinfo').write_text('1 0 0:1 / / rw - overlay overlay rw\n')
+    return tmp_path
+
+
+@pytest.mark.parametrize('marker', ['.fastdisk.ready', '.fastdisk.seeded',
+                                  '.fastdisk.new-sessions-only.request'])
+def test_restart_ignores_markers_but_publication_keeps_existing_safeguards(detector_layout, marker):
+    root = detector_layout
+    (root / 'storage' / marker).write_text(f'version=1\nstorage_root={root / "storage"}\n')
+    assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'skip_no_fastdisk'
+    if marker == '.fastdisk.ready':
+        with pytest.raises(ValueError, match='ready marker conflicts'):
+            embedded_detector(publish_detection_command(), root)
+    else:
+        assert backup.parse_detection_result(embedded_detector(publish_detection_command(), root))['status'] == 'run'
+
+
+@pytest.mark.parametrize('mounted', [('sessions', 'workspace'), ('sessions',), ('workspace',)])
+def test_restart_requires_both_live_mountpoints(detector_layout, mounted):
+    root = detector_layout
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(mounted, 1)))
+    with patch('os.path.samefile', return_value=True):
+        if len(mounted) == 2:
+            assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'run'
+            assert backup.parse_detection_result(embedded_detector(publish_detection_command(), root))['status'] == 'run'
+        else:
+            with pytest.raises(ValueError, match='partial fastdisk bind mounts'):
+                embedded_detector(detection_command(), root)
+
+
+@pytest.mark.parametrize('unsafe', ['wrong_source', 'source_symlink', 'target_symlink', 'source_missing'])
+def test_restart_does_not_confirm_wrong_or_unsafe_mount_sources(detector_layout, unsafe):
+    root = detector_layout
+    source, target = root / 'storage' / 'sessions', root / 'home' / 'sessions'
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(('sessions', 'workspace'), 1)))
+    if unsafe == 'source_symlink':
+        source.rmdir()
+        source.symlink_to(target, target_is_directory=True)
+    elif unsafe == 'target_symlink':
+        target.rmdir()
+        target.symlink_to(source, target_is_directory=True)
+    elif unsafe == 'source_missing':
+        source.rmdir()
+    with patch('os.path.samefile', return_value=unsafe != 'wrong_source'):
+        with pytest.raises(ValueError, match='mount source mismatch'):
+            embedded_detector(detection_command(), root)
+
+
+@pytest.mark.parametrize('marker', [None, '.fastdisk.seeded', '.fastdisk.new-sessions-only.request'])
+def test_restart_never_infers_mounts_from_aliased_paths_or_invalid_markers(detector_layout, marker):
+    root = detector_layout
+    if marker:
+        (root / 'storage' / marker).write_text('invalid or stale marker')
+    with patch('os.path.samefile', return_value=True):
+        assert backup.parse_detection_result(embedded_detector(detection_command(), root))['status'] == 'skip_no_fastdisk'
+        with pytest.raises(ValueError):
+            embedded_detector(publish_detection_command(), root)
+
+
+def test_restart_detector_still_rejects_unreadable_mount_table(detector_layout):
+    (detector_layout / 'mountinfo').write_text('invalid mountinfo\n')
+    with pytest.raises(ValueError, match='invalid mountinfo'):
+        embedded_detector(detection_command(), detector_layout)
+
+
+def test_restart_detector_remains_self_contained_and_bounded():
+    assert len(detection_command().encode()) < 8192
+    assert detection_command() != publish_detection_command()
+
+
+@pytest.mark.parametrize('mounted', [(), ('sessions',), ('sessions', 'workspace')])
+def test_live_mount_gate_is_opt_in_and_preserves_default_publication_policy(detector_layout, mounted):
+    from agentclaw.community.core.bot_management.engines.aicoding.fastdisk_detection.persist_mount_gate import check_mounts
+
+    root = detector_layout
+    marker = root / 'storage' / '.fastdisk.ready'
+    marker.touch()
+    (root / 'mountinfo').write_text(''.join(
+        f'{i} 0 0:1 / {root / "home" / name} rw - ext4 /dev/fastdisk rw\n'
+        for i, name in enumerate(mounted, 1)))
+    args = (str(root / 'storage'), str(root / 'home'), str(marker), str(root / 'mountinfo'))
+    with patch('os.path.samefile', return_value=True):
+        if len(mounted) == 2:
+            assert check_mounts(*args, live_mounts_only=True) == check_mounts(*args) == 'run'
+        else:
+            with pytest.raises(ValueError, match='ready marker conflicts'):
+                check_mounts(*args)
+            if mounted:
+                with pytest.raises(ValueError, match='partial fastdisk bind mounts'):
+                    check_mounts(*args, live_mounts_only=True)
+            else:
+                assert check_mounts(*args, live_mounts_only=True) == 'skip_no_fastdisk'
+
+
 def attempt(execute):
     with patch.object(backup.time, 'sleep'):
         return backup._attempt_backup(execute=execute, operation_id=OPERATION,
@@ -83,21 +238,20 @@ def test_confirmed_fastdisk_failure_blocks_without_leaking_output(failure, caplo
 
 @pytest.mark.parametrize('fields', [{}, {'completeness': 'success'}])
 def test_confirmed_fastdisk_success_reuses_existing_start_status_protocol(fields):
-    execute = executor([response('running'), committed(**fields), committed(**fields)])
+    execute = executor([response('running'), committed(**fields)])
     check = attempt(execute)
     check()
     assert execute.call_args_list[0].args == (detection_command(),)
-    assert execute.call_count == 4
+    assert execute.call_count == 3
 
 
 @pytest.mark.parametrize('failure', [response('failed'), response('legacy'), response('not_mounted'),
-                                    response('partial_success'), committed(completeness='degraded'),
-                                    committed(generation_id='new'), ConnectionError('private')])
-def test_receipt_failure_after_confirmed_fastdisk_never_downgrades(failure):
-    execute = executor([committed(), failure])
-    check = attempt(execute)
+                                    response('partial_success'), committed(completeness='failed'),
+                                    committed(generation_id=''), ConnectionError('private')])
+def test_invalid_result_while_waiting_for_fastdisk_backup_never_downgrades(failure):
+    execute = executor([response('running'), failure])
     with pytest.raises(backup.RestartBackupError):
-        check()
+        attempt(execute)
 
 
 @pytest.mark.parametrize('detected', [
@@ -106,16 +260,96 @@ def test_receipt_failure_after_confirmed_fastdisk_never_downgrades(failure):
     SimpleNamespace(exit_code=0, stdout='not-json'),
     SimpleNamespace(exit_code=0, stdout=json.dumps({'status': 'run', 'storage': '../unsafe', 'home': '/home'})),
 ])
-def test_detection_failure_or_nonfastdisk_retains_best_effort(detected, caplog):
+def test_detection_failure_or_nonfastdisk_skips_backup(detected, caplog):
     execute = executor([response('failed')], detected=detected)
     with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
         attempt(execute)()
     warn.assert_not_called()
     assert execute.call_args_list[0].args == (detection_command(),)
-    assert execute.call_count == 2
-    assert 'action=continue_restart' in caplog.text
+    execute.assert_called_once_with(detection_command())
+    if detected == detection('skip_no_fastdisk'):
+        assert 'event=aicoding_restart_fastdisk_detect' not in caplog.text
+    else:
+        assert 'event=aicoding_restart_fastdisk_detect' in caplog.text
+    assert 'event=aicoding_restart_backup' not in caplog.text
     assert 'private' not in caplog.text and 'secret detector' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
+
+
+
+@pytest.mark.parametrize('blocking', [False, True])
+def test_confirmed_fastdisk_can_finish_after_the_old_timeout(blocking, caplog):
+    now = [0]
+    execute = executor([response('running')] * 303 + [committed(), committed()])
+    with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
+         patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
+        check = backup._attempt_backup(
+            execute=execute, operation_id=OPERATION, bot_id='b', target_id='ARCA-SANDBOX-p@8',
+            blocking_enabled=lambda: blocking,
+        )
+        check()
+    assert now[0] == 606
+    assert check.required is blocking
+    assert execute.call_count == 305
+    assert 'status=failed' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+
+
+@pytest.mark.parametrize(('detected', 'reason'), [
+    (ConnectionError('private detector credential'), 'transport_error'),
+    (detection('unexpected'), 'detection_failed'),
+    (SimpleNamespace(exit_code=1, stdout='private detection output'), 'detection_failed'),
+])
+def test_detection_errors_skip_helper_and_are_not_backup_failures(detected, reason, caplog):
+    failure = SimpleNamespace(exit_code=1, stdout='private helper output')
+    execute = executor([failure], detected=detected)
+    blocking = Mock(return_value=True)
+    with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
+        check = backup._attempt_backup(
+            execute=execute, operation_id=OPERATION, bot_id='b', target_id='ARCA-SANDBOX-p@8',
+            owner_id='owner', blocking_enabled=blocking,
+        )
+        check()
+    blocking.assert_not_called()
+    warn.assert_not_called()
+    execute.assert_called_once_with(detection_command())
+    assert check.required is False
+    lines = [record.getMessage() for record in caplog.records]
+    detected_logs = [line for line in lines if 'event=aicoding_restart_fastdisk_detect ' in line]
+    assert len(detected_logs) == 1
+    assert 'phase=detect status=degraded action=continue_restart' in detected_logs[0]
+    assert f'reason={reason} ' in detected_logs[0]
+    assert 'bot_id=b' in detected_logs[0] and 'arca_id=ARCA-SANDBOX-p@8' in detected_logs[0]
+    assert 'owner_id=owner' in detected_logs[0] and 'env=' in detected_logs[0]
+    assert not any('event=aicoding_restart_probe ' in line for line in lines)
+    assert not any('event=aicoding_restart_backup ' in line for line in lines)
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+    assert 'private' not in caplog.text
+
+
+@pytest.mark.parametrize('prepared', [None, 'legacy', 'not_mounted'])
+def test_nonfastdisk_never_inspects_helper_results(prepared, caplog):
+    failure = SimpleNamespace(exit_code=1, stdout='private helper output')
+    results = [failure] if prepared is None else [response(prepared), failure]
+    execute = executor(results, detected=detection('skip_no_fastdisk'))
+    check = attempt(execute)
+    check()
+    execute.assert_called_once_with(detection_command())
+    assert 'event=aicoding_restart_probe ' not in caplog.text
+    assert 'event=aicoding_restart_fastdisk_detect ' not in caplog.text
+    assert 'event=aicoding_restart_backup ' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+
+
+def test_confirmed_fastdisk_failed_backup_keeps_backup_failure_event(caplog):
+    execute = executor([response('running'), response('failed')])
+    with pytest.raises(backup.RestartBackupBlocked):
+        attempt(execute)()
+    assert execute.call_count == 3
+    assert 'event=aicoding_restart_fastdisk_detect ' not in caplog.text
+    assert 'event=aicoding_restart_backup phase=prepare status=failed' in caplog.text
+    assert 'reason=backup_failed' in caplog.text
+    assert 'AICODING_RESTART_FAILED' in caplog.text
 
 
 def test_confirmed_fastdisk_poll_timeout_blocks():
@@ -320,25 +554,26 @@ def test_mixed_replicas_cannot_hide_failed_fastdisk_behind_nonfastdisk():
         strict_strategy('aicoding')._prepare_restart(
             BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
             device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
-    assert plain.call_count == fast.call_count == 2
+    assert plain.call_count == 1
+    assert fast.call_count == 2
 
 
-def test_confirmed_fastdisk_uses_five_minute_budget_not_legacy_25_minutes():
+def test_confirmed_fastdisk_uses_1500_second_budget():
     now = [0]
-    execute = executor([response('running')] * 151)
+    execute = executor([response('running')] * 751)
     with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
          patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
         with pytest.raises(backup.RestartBackupBlocked) as raised:
             backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p', blocking_enabled=lambda: True)
     assert raised.value.reason == 'timeout'
-    assert now[0] == backup.FASTDISK_TIMEOUT == 300
+    assert now[0] == backup.FASTDISK_TIMEOUT == 1500
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('final_failure', [False, True])
-async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_failure, enabled_guard):
+@pytest.mark.parametrize('later_failure', [False, True])
+async def test_real_baas_submits_after_success_without_querying_a_later_receipt(lifecycle, later_failure, enabled_guard):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import TASK_TYPE, task_key
-    from agentclaw.community.core.task_queue.types import Fail, Reschedule
+    from agentclaw.community.core.task_queue.types import Reschedule
 
     s = lifecycle
     s.service._restart_backup_dependencies = RestartBackupDependencies.for_instance(s.platform)
@@ -348,7 +583,7 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
     op = task.payload['operation_id']
     receipt = response('committed', operation_id=op, backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': op, 'completeness': 'success'})
-    execute = executor([receipt, receipt, response('failed', operation_id=op) if final_failure else receipt])
+    execute = executor([receipt, response('failed', operation_id=op) if later_failure else receipt])
     updates = []
 
     def post(**kw):
@@ -358,17 +593,10 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
         return {'publish_id': 12}
 
     s.platform.post_bots_api.side_effect = post
-    outcome = s.handler.handle(task.payload)
-    assert execute.call_count == 4  # Detect, start, under-lock verify, final pre-POST verify.
-    if final_failure:
-        assert isinstance(outcome, Fail)
-        assert not updates
-        assert '快盘备份失败' in s.repo.bot['ext']['coding_restart']['error_message']
-        assert '提交前准备失败' not in s.repo.bot['ext']['coding_restart']['error_message']
-        assert s.repo.bot['binding_id'] == 7
-    else:
-        assert isinstance(outcome, Reschedule)
-        assert len(updates) == 1
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    assert execute.call_count == 2  # Detector and start; no under-lock or pre-POST receipt query.
+    assert len(updates) == 1
+    assert s.repo.bot['binding_id'] == 7
 
 
 @pytest.mark.parametrize('value, expected', [
@@ -411,25 +639,25 @@ def test_disabled_guard_still_backs_up_and_warns_without_failure_alarm(failure, 
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
-def test_disabled_guard_keeps_five_minute_fastdisk_budget(caplog):
+def test_disabled_guard_keeps_1500_second_fastdisk_budget(caplog):
     now = [0]
-    execute = executor([response('running')] * 151)
+    execute = executor([response('running')] * 751)
     with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
          patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
         backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
                                blocking_enabled=lambda: False)()
-    assert now[0] == backup.FASTDISK_TIMEOUT == 300
+    assert now[0] == backup.FASTDISK_TIMEOUT == 1500
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
-def test_disabled_guard_keeps_final_receipt_best_effort(caplog):
+def test_disabled_guard_does_not_warn_about_an_unqueried_later_failure(caplog):
     execute = executor([committed(), response('failed')])
     with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
         backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
                                blocking_enabled=lambda: False)()
-    warn.assert_called_once_with(OPERATION)
-    assert execute.call_count == 3
-    assert 'action=continue_restart' in caplog.text
+    warn.assert_not_called()
+    assert execute.call_count == 2
+    assert 'action=continue_restart' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
@@ -439,7 +667,7 @@ def test_nonfastdisk_never_reads_blocking_config(detected):
     execute = executor([response('failed')], detected=detected)
     backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
                            blocking_enabled=config)()
-    assert execute.call_count == 2
+    execute.assert_called_once_with(detection_command())
     config.assert_not_called()
 
 
@@ -522,9 +750,10 @@ async def test_durable_restart_accepts_nonblocking_failure_or_valid_partial(life
     s.platform.post_bots_api.side_effect = post
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     assert events == (['stop', 'start'] if provider == 'arca' else ['update'])
-    assert execute.call_count == (2 if outcome == 'failed' else 3 if provider == 'arca' else 4)
+    assert execute.call_count == 2
     if outcome == 'partial_success':
-        assert 'phase=verify status=partial_success' in caplog.text
+        assert 'phase=prepared status=partial_success' in caplog.text
+        assert 'phase=verify status=' not in caplog.text
     assert journal(s.repo.bot)['phase'] == 'WAITING_READY'
     progress = strategy.project_status_ext(ext=s.repo.bot['ext'], response_ext={})['aicoding']['restart']
     if outcome == 'failed':
@@ -623,3 +852,48 @@ def test_nonblocking_warning_write_failure_escapes_nested_baas_policy():
         assert isinstance(raised.value.__cause__, RuntimeError)
     finally:
         current_restart.reset(restart_scope)
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('provider', ['arca', 'baas'])
+@pytest.mark.parametrize('blocking', [False, True])
+@pytest.mark.parametrize('result', [committed(), partial_response()], ids=['full', 'partial'])
+def test_completed_backup_is_not_queried_again_but_binding_checks_remain(engine, provider, blocking, result, caplog):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
+    execute = executor([result, ConnectionError('unexpected receipt recheck')])
+    runtime = runtime_with(execute)
+    devices, repository = Mock(), Mock()
+    devices.get_device.return_value = SimpleNamespace(
+        device_id='old', device_provider=provider, status='ACTIVE',
+        device_props={'sandbox_id': 'old-sandbox@8'},
+    )
+    repository.get_by_id_and_owner.return_value = {'binding_id': 7}
+    dependencies = RestartBackupDependencies(
+        baas_runtime=lambda: runtime,
+        arca_transport=lambda: ArcaRestartTransport(lambda **kw: execute(kw['shell_cmd'])),
+    )
+    check = AicodingProvisioningStrategy(engine)._prepare_restart(
+        BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine=engine),
+        binding_id=7, device_service=devices, bot_repository=repository,
+        restart_dependencies=dependencies, operation_id=OPERATION,
+        blocking_enabled=lambda: blocking,
+    )
+    assert execute.call_count == 2  # Detector and the successful backup only.
+    check()
+    assert execute.call_count == 2
+    # Success remains final even if request construction/lock acquisition takes time.
+    with patch.object(backup.time, 'monotonic', return_value=backup.time.monotonic() + 1501):
+        check()
+    assert execute.call_count == 2
+    assert repository.get_by_id_and_owner.call_count == 2
+    assert 'phase=prepared status=' in caplog.text
+    assert 'phase=verify status=' not in caplog.text
+    assert 'phase=verify_receipt' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+    repository.get_by_id_and_owner.return_value = {'binding_id': 8}
+    with pytest.raises(backup.RestartBackupError) as caught:
+        check()
+    assert caught.value.reason == 'binding_changed'
+    assert execute.call_count == 2

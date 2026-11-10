@@ -1,4 +1,4 @@
-//! Token-scoped public Card admission; legacy ID management remains separate.
+//! Token-scoped Card management by stable Bot ID.
 use super::*;
 use bcs_service_api::application::a2a_bot::{ManagedA2aCard, RegisterAgentCommand};
 use bcs_service_api::types::a2a_bot::a2a_management::{
@@ -34,17 +34,21 @@ impl A2aBotManagement {
             .await?;
         Ok((provider.provider_id, name))
     }
-    async fn public_record(&self, provider: &str, name: &str) -> ServiceResult<A2aBotRecord> {
-        bcs_service_api::types::a2a_bot::card_bot_name(&serde_json::json!({"name":name}))
-            .map_err(|_| failure(Code::InvalidRequest, "agent_name", "INVALID_NAME"))?;
-        let record = self
-            .core
-            .get_by_name(provider, name)
-            .await?
-            .ok_or_else(|| failure(Code::BotNotFound, "agent_name", "NOT_FOUND"))?;
-        self.core
-            .provider_binding(provider, &record.bot_uuid)
-            .await?;
+    async fn public_record_by_id(&self, provider: &str, bot_id: &str) -> ServiceResult<A2aBotRecord> {
+        if bot_id.is_empty() || bot_id != bot_id.trim() || bot_id.chars().any(char::is_control) {
+            return Err(failure(Code::InvalidRequest, "bot_id", "INVALID_BOT_ID"));
+        }
+        let record = self.core.get_card(bot_id).await?
+            .filter(|record| record.provider_id == provider)
+            .ok_or_else(|| failure(Code::BotNotFound, "bot_id", "NOT_FOUND"))?;
+        let binding = self.core.provider_binding(provider, bot_id).await.map_err(|error| match error {
+            ServiceError::Forbidden(_) | ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_) =>
+                failure(Code::BotNotFound, "bot_id", "NOT_FOUND"),
+            other => other,
+        })?;
+        if binding.provider_bot_ref != record.provider_bot_ref {
+            return Err(failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED"));
+        }
         Ok(record)
     }
     async fn public_load(
@@ -127,27 +131,41 @@ impl A2aBotManagement {
             .ok_or_else(|| failure(Code::InternalError, "", "REGISTERED_CARD_MISSING"))?;
         view(&provider_name, record)
     }
+    pub(super) async fn public_find(&self, token:&str, source_agent_id:&str) -> ServiceResult<Vec<ManagedA2aCard>> {
+        let (provider,label)=self.public_provider(token).await?;
+        if source_agent_id.is_empty() || source_agent_id.chars().count()>256
+            || source_agent_id!=source_agent_id.trim() || source_agent_id.chars().any(char::is_control) {
+            return Err(failure(Code::InvalidRequest,"source_agent_id","INVALID_SOURCE_AGENT_ID"));
+        }
+        let Some(record)=self.core.get_by_source_agent_id(&provider,source_agent_id).await? else {return Ok(vec![])};
+        let record=self.public_record_by_id(&provider,&record.bot_uuid).await?;
+        // Re-read may race a deletion/reassignment; never return an unrelated source identity.
+        if policy::source_agent(&record.agent_card)?.is_none_or(|source|source.agent_id!=source_agent_id) {
+            return Err(failure(Code::TargetChanged,"source_agent_id","TARGET_CHANGED"));
+        }
+        Ok(vec![view(&label,record)?])
+    }
     pub(super) async fn public_get(
         &self,
         token: &str,
-        name: &str,
+        bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label) = self.public_provider(token).await?;
-        view(&label, self.public_record(&provider, name).await?)
+        view(&label, self.public_record_by_id(&provider, bot_id).await?)
     }
     pub(super) async fn public_update(
         &self,
         token: &str,
-        name: &str,
+        bot_id: &str,
         source: Option<A2aCardSource>,
         visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label) = self.public_provider(token).await?;
         if source.is_none() && visibility.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
-        let target = self.public_record(&provider, name).await?;
+        let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
         // Retry only local CAS races, never the outbound fetch. Each attempt
-        // rechecks the original identity and name, so a reused name cannot retarget.
+        // rechecks the original identity and binding, so renames cannot retarget.
         for _ in 0..3 {
             self.authorize(&provider, token).await?;
             let current = self
@@ -156,10 +174,9 @@ impl A2aBotManagement {
                 .await?
                 .filter(|v| {
                     v.provider_id == provider
-                        && v.agent_card.get("name").and_then(serde_json::Value::as_str)
-                            == Some(name)
+                        && v.provider_bot_ref == target.provider_bot_ref
                 })
-                .ok_or_else(|| failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED"))?;
+                .ok_or_else(|| failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED"))?;
             let (url,raw)=match &loaded {Some((url,card))=>(url.clone(),card.raw.clone()),None=>(current.agent_card_url.clone(),current.agent_card.clone())};
             policy::validate_source_transition(&current.agent_card, &raw)?;
             let revision = current
@@ -176,24 +193,24 @@ impl A2aBotManagement {
                 Ok(record) => return view(&label, record),
                 Err(ServiceError::Conflict(_)) => continue,
                 Err(ServiceError::Forbidden(_)) => {
-                    return Err(failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED"));
+                    return Err(failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED"));
                 }
                 Err(error) => return Err(error),
             }
         }
         Err(failure(
             Code::TargetChanged,
-            "agent_name",
+            "bot_id",
             "CONCURRENT_UPDATE",
         ))
     }
     pub(super) async fn public_refresh(
         &self,
         token: &str,
-        name: &str,
+        bot_id: &str,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label) = self.public_provider(token).await?;
-        let old = self.public_record(&provider, name).await?;
+        let old = self.public_record_by_id(&provider, bot_id).await?;
         let url = old
             .agent_card_url
             .clone()
@@ -219,7 +236,7 @@ impl A2aBotManagement {
                         failure(Code::RefreshSuperseded, "agent_card", "CONCURRENT_UPDATE")
                     }
                     ServiceError::Forbidden(_) => {
-                        failure(Code::TargetChanged, "agent_name", "TARGET_CHANGED")
+                        failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED")
                     }
                     other => other,
                 })?;

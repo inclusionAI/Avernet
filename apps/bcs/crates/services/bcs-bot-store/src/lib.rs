@@ -57,6 +57,7 @@ mod heartbeat_tests;
 /// projection's registration/profile composites' re-exports
 /// live behind the crate facade.
 pub(crate) mod ownership;
+mod ownership_managers;
 /// Atomic retirement composition (bot-authority
 /// spec §7.1): shared SQL pieces for the ordinary and
 /// Provider retire commands, plus (in the memory

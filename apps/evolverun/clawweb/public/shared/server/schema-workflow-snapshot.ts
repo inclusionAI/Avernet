@@ -20,6 +20,8 @@ export const workflowSnapshotMigrations: typeof migrations = [{
     catch (error) { if (!/duplicate column name/i.test(String(error))) throw error; }
   },
 }, {
+  // Published schema: externally provisioned tables may also have a database-managed
+  // gmt_modify column. The repository does not depend on it; do not rewrite v147.
   version: 147,
   description: 'Store trusted subworkflow run associations independently',
   sql: [

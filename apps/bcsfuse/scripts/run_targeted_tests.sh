@@ -10,47 +10,34 @@ case "${1:---isolated}" in
     if [[ "$1" == "--core-mysql" ]]; then
       export BCSFUSE_RUN_MYSQL_INTEGRATION=1
     fi
-    # Search includes /recommend, used by catalog discovery. Fuse includes
-    # its mode dispatch and shared-profile storage, not just route existence.
-    # These tests use controlled model providers; they do not certify live LLMs.
+    # Current TC contracts exercise real local Card/Doc/index persistence and
+    # controlled model providers. They do not certify a deployed service.
     exec "$test_python" -m pytest -q --tb=short \
+      packages/search-core/tests \
+      tests/contract/test_tc_catalog.py \
+      tests/contract/test_tc_same_instance_migration.py \
+      tests/contract/test_tc_legacy_transactions.py \
+      tests/contract/test_tc_sync_contract.py \
+      tests/contract/test_tc_http_compat.py \
+      tests/contract/test_tc_fuse_modes.py \
+      tests/contract/test_tc_review_regressions.py \
+      tests/contract/test_tc_migration.py \
       tests/integration/test_isolated_runtime_acceptance.py \
-      tests/integration/test_profile_activation_index_acceptance.py \
-      tests/integration/test_worker_runtime_vector_sync.py \
-      tests/contract/api/test_worker_api_contract.py \
-      tests/contract/api/test_legacy_worker_api_contract.py \
-      tests/contract/test_sync_identity_activation_contract.py \
-      tests/contract/test_profile_identifier_content.py \
-      tests/contract/test_composed_embedding_provider.py \
-      tests/contract/test_composed_trace_contract.py \
-      tests/contract/test_retrieval_logging.py \
-      tests/contract/test_retrieval_log_noise.py \
-      tests/contract/test_fragment_candidate_selection.py \
-      tests/contract/test_keyword_retrieval.py \
-      tests/contract/test_composed_log_level.py \
-      tests/contract/test_auth_provider_contract.py \
-      tests/contract/test_vector_metadata_filter_contract.py \
-      tests/contract/test_legacy_fragment_identity.py \
-      tests/contract/test_faiss_get_contract.py \
-      tests/contract/test_mysql_storage_clock_contract.py \
-      tests/integration/test_mysql_storage_timestamps.py \
-      tests/integration/test_mysql_pooled_transactions.py \
-      tests/integration/test_mysql_registry_delete.py \
-      tests/unit/application/test_worker_vector_match_service.py \
-      tests/unit/application/test_worker_candidate_recommendation_impl.py \
-      tests/integration/test_registry_aware_filtering.py \
-      tests/contract/api/test_fusion_api_contract.py \
-      tests/contract/test_fusion_profile_store_wiring.py \
-      tests/contract/test_fusion_response_projection.py \
-      tests/unit/application/test_group_fusion_service.py \
-      tests/unit/interfaces/test_run_fuse_threadpool.py \
-      tests/integration/test_group_fusion_flow.py \
       tests/integration/test_g9_core_acceptance.py \
       tests/integration/test_g2_conflict_alignment_flow.py \
       tests/integration/test_g5_expert_diagnosis_flow.py \
-      tests/integration/test_g5_vector_recommendation_flow.py \
-      tests/unit/bootstrap/test_route_mount_contract.py \
+      tests/contract/test_composed_embedding_provider.py \
+      tests/contract/test_composed_log_level.py \
+      tests/contract/test_fusion_profile_store_wiring.py \
+      tests/contract/test_fusion_response_projection.py \
+      tests/contract/test_shared_search_application.py \
+      tests/unit/bootstrap/test_app_factory.py \
       tests/unit/bootstrap/test_trust_gateway_auth.py \
+      tests/unit/application/test_profile_merge_service.py \
+      tests/unit/application/test_worker_candidate_recommendation_impl.py \
+      tests/unit/application/test_group_fusion_service.py \
+      tests/unit/utils/test_fuse_util.py \
+      tests/contract/test_mysql_storage_clock_contract.py \
       tests/contract/test_runtime_acceptance_cleanup.py \
       tests/contract/test_acceptance_runner.py
     ;;
@@ -61,9 +48,10 @@ case "${1:---isolated}" in
     fi
     exec "$test_python" -m pytest -q --tb=short \
       tests/integration/test_isolated_runtime_acceptance.py \
-      tests/integration/test_profile_activation_index_acceptance.py \
-      tests/integration/test_worker_runtime_vector_sync.py \
-      tests/contract/test_composed_embedding_provider.py \
+      tests/contract/test_tc_catalog.py \
+      tests/contract/test_tc_sync_contract.py \
+      tests/integration/test_g9_core_acceptance.py \
+      tests/contract/test_mysql_storage_clock_contract.py \
       tests/contract/test_runtime_acceptance_cleanup.py
     ;;
   --external)

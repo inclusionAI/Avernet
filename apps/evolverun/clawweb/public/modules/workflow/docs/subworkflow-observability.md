@@ -55,6 +55,16 @@ The schema must not be concurrently modified by another operator during writes.
 In externally provisioned mode no migration is run; the operator must provision
 the equivalent full-width table and indexes. The existing managed-DB path skips
 ordinary migrations if DDL is denied, so it also requires external provisioning.
+An externally provisioned MySQL/OceanBase table may additionally define
+`gmt_modify TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`.
+It is optional: the repository neither reads nor writes it, so its value and
+update behavior are controlled by the database. Existing managed and SQLite
+tables need not have the column; published migrations and their ledger entries
+are unchanged and no backfill is performed. If an operator adds an extra column,
+it must allow inserts that omit it (for example, through a database default).
+SQLite does not support the MySQL `ON UPDATE` column clause; an equivalent
+SQLite table can omit the column altogether.
+
 If the table is missing or unreadable, the read endpoint returns a generic 503.
 A schema ledger at or above v148 without the correct table requires operator
 repair. SQLite migration and SQL rendering/metadata paths for MySQL/ZDAS are

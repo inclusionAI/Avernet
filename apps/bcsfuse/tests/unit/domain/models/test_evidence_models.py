@@ -13,38 +13,38 @@ Unit Tests for Phase D: Unified Evidence Layer
 import pytest
 from datetime import datetime
 
-from src.domain.models.evidence import (
+from app.domain.models.evidence import (
     Evidence,
     EvidenceType,
     EvidenceSource,
     EvidenceProvenance,
     EvidenceSourceDistribution,
 )
-from src.domain.models.evidence_bundle import (
+from app.domain.models.evidence_bundle import (
     EvidenceBundle,
     EvidenceContribution,
 )
-from src.domain.models.fallback_reason_v2 import (
+from app.domain.models.fallback_reason_v2 import (
     FallbackReasonCode,
     FallbackChain,
     FallbackReasonV2,
     create_dense_to_sparse_fallback,
     create_llm_to_rule_fallback,
 )
-from src.domain.models.scoring_signal import ScoringSignal
-from src.domain.models.stance_signal import StanceSignal
-from src.domain.models.structured_risk_assessment import RiskFactor
-from src.domain.models.expert_risk_assessment import RiskLevel
-from src.domain.services.evidence_aggregation_service import (
+from app.domain.models.scoring_signal import ScoringSignal
+from app.domain.models.stance_signal import StanceSignal
+from app.domain.models.structured_risk_assessment import RiskFactor
+from app.domain.models.expert_risk_assessment import RiskLevel
+from app.domain.services.evidence_aggregation_service import (
     AggregationConfig,
     EvidenceAggregationService,
 )
-from src.domain.services.adapters.evidence_adapters import (
+from app.domain.services.adapters.evidence_adapters import (
     scoring_signal_to_evidence,
     stance_signal_to_evidence,
     risk_factor_to_evidence,
 )
-from src.domain.services.explanation_builder_v2 import (
+from app.domain.services.explanation_builder_v2 import (
     ExplanationBuilderV2,
     ExplanationStyle,
 )

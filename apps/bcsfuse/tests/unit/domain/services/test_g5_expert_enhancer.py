@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.services.g5_expert_enhancer import G5ExpertEnhancer
+from app.domain.models.fusion_result import Perspective
+from app.domain.services.g5_expert_enhancer import G5ExpertEnhancer
 
 
 class TestG5ExpertEnhancerInterface:

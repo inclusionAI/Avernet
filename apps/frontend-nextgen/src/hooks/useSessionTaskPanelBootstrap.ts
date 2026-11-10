@@ -12,25 +12,23 @@ import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMem
 import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle, PanelTab } from '@tc-chat/core';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 type PanelRef = React.RefObject<PanelHandle | null>;
 /**
- * 深链进入时，目标 Session 与持久副屏 owner 可异步就位。by_session 命中可能先返回；
- * 短暂等待 PanelHandle 出现，避免把此次自动恢复静默丢失。
+ * 深链进入时，GroupChatPane/PanelHandle 可能晚于 Session selection 异步就位；
+ * by_session/list 可能先返回。等待必须跟随当前 session 生命周期，而不是固定 2s，
+ * 否则冷启动深链加载群列表/会话较慢时，自动恢复会在 panel 挂载前静默丢失。
  */
-const PANEL_HANDLE_WAIT_TIMEOUT_MS = 2000;
 const PANEL_HANDLE_POLL_INTERVAL_MS = 100;
 
 async function waitForPanelHandle(
   panelRef: PanelRef,
   isCancelled: () => boolean,
 ): Promise<PanelHandle | null> {
-  const deadline = Date.now() + PANEL_HANDLE_WAIT_TIMEOUT_MS;
   while (!isCancelled()) {
     const panel = panelRef.current;
     if (panel) return panel;
-    if (Date.now() >= deadline) return null;
     await new Promise<void>((resolve) => {
       setTimeout(resolve, PANEL_HANDLE_POLL_INTERVAL_MS);
     });
@@ -134,26 +132,17 @@ export function useSessionTaskPanelBootstrap({
   panelRef: PanelRef;
   enabled?: boolean;
 }): void {
-  const bootstrapKeyRef = useRef<string | null>(null);
-
+  // effect 依赖已限定会话边界；不要额外缓存执行标记，否则已取消的恢复会阻挡
+  // selectedSession 短暂为空后重入同一会话（以及 StrictMode 的 effect 重放）。
   useEffect(() => {
     if (!enabled || !sessionId || !userId) return undefined;
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
     const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
     if (!sessionOwnerUserId) return undefined;
-    const bootstrapKey = `${sessionOwnerUserId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
-    if (bootstrapKeyRef.current === bootstrapKey) return undefined;
-    bootstrapKeyRef.current = bootstrapKey;
     let cancelled = false;
 
-    const openTaskPanel = async (
-      taskId: string,
-      records: TaskListItem[] | null,
-      waitForPanel: boolean,
-    ): Promise<void> => {
-      const panel = waitForPanel
-        ? panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled))
-        : panelRef.current;
+    const openTaskPanel = async (taskId: string, records: TaskListItem[] | null): Promise<void> => {
+      const panel = panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled));
       if (cancelled || !panel) return;
       const record = records?.find((item) => item.task_id === taskId) ?? null;
       useTaskSidePanelStore.getState().setActiveTask(taskId);
@@ -169,6 +158,19 @@ export function useSessionTaskPanelBootstrap({
     void (async () => {
       try {
         const associationStore = useTaskSessionAssociationStore.getState();
+        // 残留焦点任务只在前一会话中有效。若 clean-up 被任务导航保活或 provider
+        // 重建时序拦住，bootstrap 也要按旧会话关联清掉它，避免挡住新会话恢复。
+        const staleActiveTaskId = useTaskSidePanelStore.getState().activeTaskId;
+        const previousSessionId = associationStore.activeSessionId;
+        if (
+          staleActiveTaskId &&
+          previousSessionId &&
+          previousSessionId !== sessionId &&
+          associationStore.activeSessionTaskIds.includes(staleActiveTaskId)
+        ) {
+          useTaskSidePanelStore.getState().clearActiveTask(staleActiveTaskId);
+        }
+
         associationStore.setActiveSession(sessionId);
 
         const sessionTask = await getTaskBySession(sessionId);
@@ -184,7 +186,7 @@ export function useSessionTaskPanelBootstrap({
           associationStore.setActiveSessionTaskIds(sessionId, [requestedTaskId]);
           const requestedResult = await listMyTasks({ user_id: sessionOwnerUserId });
           if (cancelled) return;
-          await openTaskPanel(requestedTaskId, taskRecords(requestedResult), false);
+          await openTaskPanel(requestedTaskId, taskRecords(requestedResult));
           return;
         }
 
@@ -194,7 +196,7 @@ export function useSessionTaskPanelBootstrap({
           const latestResult = await listMyTasks({ user_id: sessionOwnerUserId });
           if (cancelled) return;
           const latestRef = sessionTaskRefs[0];
-          await openTaskPanel(latestRef.task_id, taskRecords(latestResult), true);
+          await openTaskPanel(latestRef.task_id, taskRecords(latestResult));
           return;
         }
 
@@ -206,7 +208,7 @@ export function useSessionTaskPanelBootstrap({
         const latestRecord = records ? findLatestTaskForSession(records, sessionId) : null;
         if (!latestRecord) return;
         associationStore.setActiveSessionTaskIds(sessionId, [latestRecord.task_id]);
-        await openTaskPanel(latestRecord.task_id, records, false);
+        await openTaskPanel(latestRecord.task_id, records);
       } catch {
         // by_session 失败不算会话错误；恢复是增强体验，不能阻断会话打开。
         if (!cancelled) {
@@ -217,7 +219,6 @@ export function useSessionTaskPanelBootstrap({
 
     return () => {
       cancelled = true;
-      if (bootstrapKeyRef.current === bootstrapKey) bootstrapKeyRef.current = null;
     };
   }, [enabled, panelRef, sessionId, userId]);
 }

@@ -29,7 +29,6 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_harness import relay_recovery_policy as recovery_policy
 from agentclaw.community.core.task.task_harness.relay_runtime_policy import (
-    active_no_progress_cycle,
     resolve_relay_resume_step,
     relay_resume_attempts,
     terminal_success_unreported_seconds,
@@ -49,9 +48,7 @@ from agentclaw.community.core.task.task_harness.runtime_probe import (
 
 logger = logging.getLogger("task.harness")
 
-_DEFAULT_SLA_TIMEOUT = (
-    900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
-)
+_DEFAULT_SLA_TIMEOUT = 900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
 _DEFAULT_COOP_GROUP_SLA_TIMEOUT = 900.0  # coop_group RUNNING:15 分钟
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0  # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
@@ -103,14 +100,10 @@ class TaskHarness:
         self._runtime_probe = runtime_probe
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
-        self._probe_unavailable_max_cycles = max(
-            1, int(probe_unavailable_max_cycles)
-        )
+        self._probe_unavailable_max_cycles = max(1, int(probe_unavailable_max_cycles))
         self._relay_recovery = relay_recovery
         self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
-        self._relay_resume_max_send_failures = max(
-            1, int(relay_resume_max_send_failures)
-        )
+        self._relay_resume_max_send_failures = max(1, int(relay_resume_max_send_failures))
         self._task_context_service = task_context_service
         self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
@@ -225,7 +218,7 @@ class TaskHarness:
                 "resume_send_failures": 0,
                 "resume_precondition_failures": 0,
                 "probe_unavailable": 0,
-                "recovery_epoch_started_at": self._clock(),
+                "terminal_success_observed_at": None,
             },
         )
         try:
@@ -249,41 +242,46 @@ class TaskHarness:
             current["cursor"] = result.heartbeat_cursor
         resume_step = resolve_relay_resume_step(task_id, node, self._graph)
         attempts = relay_resume_attempts(node, current)
-        recovery_epoch_elapsed = max(
-            0.0,
-            self._clock() - float(current.get("recovery_epoch_started_at", 0.0)),
-        )
+        now = self._clock()
+        terminal_success_elapsed = 0.0
+        if current.get("terminal_success_observed_at") is not None:
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
         detail = {
             "runtime_state": result.state,
             "runtime_status": result.status,
             "runtime_source": result.source,
             "runtime_error": result.error,
             "resume_step": resume_step,
-            "recovery_epoch_seconds": recovery_epoch_elapsed,
+            "terminal_success_elapsed_seconds": terminal_success_elapsed,
         }
         reason: str | None = None
 
         if result.state == "terminal_failed":
+            current["terminal_success_observed_at"] = None
             reason = "runtime_failed"
         elif result.state == "terminal_success":
+            if current.get("terminal_success_observed_at") is None:
+                # Start the observation clock from the first runtime success
+                # observation. Time spent earlier in the engine's active state
+                # must not silently consume the silent-success recovery window.
+                current["terminal_success_observed_at"] = now
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
             current["success_unreported"] += 1
             current["unknown"] = 0
             current["no_progress"] = 0
-            if recovery_epoch_elapsed >= terminal_success_unreported_seconds(
-                attempts
-            ):
+            if terminal_success_elapsed >= terminal_success_unreported_seconds(attempts):
                 reason = "terminal_success_unreported"
         elif result.state == "active":
             current["success_unreported"] = 0
+            current["terminal_success_observed_at"] = None
             current["unknown"] = 0
             if result.progressed:
                 current["no_progress"] = 0
             else:
+                # Active is authoritative engine-owned state. Message silence is
+                # telemetry only: Relay harness must wait for the engine's own
+                # timeout/terminal state rather than send a recovery prompt.
                 current["no_progress"] += 1
-            if current["no_progress"] >= active_no_progress_cycle(
-                attempts
-            ):
-                reason = "runtime_no_progress"
         elif result.state == "probe_unavailable":
             # Transport/app request failure is not Bot unresponsiveness. Predeploy
             # and single-server deployments can make the probe read path itself
@@ -291,6 +289,7 @@ class TaskHarness:
             # recovery attempts or advance the task's failure state.
             current["unknown"] = 0
             current["no_progress"] = 0
+            current["terminal_success_observed_at"] = None
             current["probe_unavailable"] = (
                 current.get("probe_unavailable", 0) + 1
             )
@@ -306,6 +305,7 @@ class TaskHarness:
         elif result.state == "unknown":
             current["unknown"] += 1
             current["no_progress"] = 0
+            current["terminal_success_observed_at"] = None
             current["probe_unavailable"] = 0
             if current["unknown"] >= self._runtime_retry_threshold:
                 reason = "runtime_unresponsive"
@@ -352,10 +352,10 @@ class TaskHarness:
             current["resume_attempts"] = attempts + 1
             current["resume_send_failures"] = 0
             current["resume_precondition_failures"] = 0
-            # Open a new recovery epoch after a delivered resume.  The same-node
-            # resume budget is cumulative, and the heartbeat baseline is cleared
-            # so this prompt itself cannot be counted as fresh progress.
-            current["recovery_epoch_started_at"] = self._clock()
+            # Clear the state-specific observation clock after a delivered resume.
+            # The heartbeat baseline is also cleared so the prompt itself cannot
+            # be counted as fresh progress; attempts remain cumulative.
+            current["terminal_success_observed_at"] = None
             current["cursor"] = None
             current["unknown"] = 0
             current["no_progress"] = 0

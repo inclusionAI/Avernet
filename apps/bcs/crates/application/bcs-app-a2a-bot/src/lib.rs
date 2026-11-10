@@ -75,17 +75,20 @@ impl A2aBotManagement {
 impl A2aBotManagementService for A2aBotManagement {
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)
         ->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.public_register(command).await}
-    async fn get_agent(&self,token:&str,name:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_get(token,name).await
+    async fn find_agents_by_source_id(&self,token:&str,source_agent_id:&str)->ServiceResult<Vec<bcs_service_api::application::a2a_bot::ManagedA2aCard>> {
+        self.public_find(token,source_agent_id).await
     }
-    async fn update_agent(&self,token:&str,name:&str,source:A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(token,name,Some(source),None).await
+    async fn get_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_get(token,bot_id).await
     }
-    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(token,name,source,visibility).await
+    async fn update_agent_by_id(&self,token:&str,bot_id:&str,source:A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_update(token,bot_id,Some(source),None).await
     }
-    async fn refresh_agent(&self,token:&str,name:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_refresh(token,name).await
+    async fn update_agent_by_id_with_visibility(&self,token:&str,bot_id:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_update(token,bot_id,source,visibility).await
+    }
+    async fn refresh_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_refresh(token,bot_id).await
     }
 
     async fn resolve_named_target(&self,provider:&str,bot:&str)->ServiceResult<String> {
@@ -104,18 +107,6 @@ impl A2aBotManagementService for A2aBotManagement {
     }
     async fn register_named(&self,command:bcs_service_api::application::a2a_bot::RegisterNamedA2aBotCommand)
         ->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aRegistration> {self.register_by_name(command).await}
-    async fn get_named(&self,provider:&str,token:&str,bot:&str)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
-        let record=self.named_record(provider,token,bot).await?;self.named_projection(provider,record)
-    }
-    async fn configure_named(&self,provider:&str,token:&str,bot:&str,source:A2aCardSource,now_ms:i64)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
-        let old=self.named_record(provider,token,bot).await?;
-        let record=self.configure(ConfigureA2aBotCommand {provider_id:old.provider_id,provider_admin_token:token.into(),bot_uuid:old.bot_uuid,source,expected_revision:None,now_ms}).await?;
-        self.named_projection(provider,record)
-    }
-    async fn refresh_named(&self,provider:&str,token:&str,bot:&str,now_ms:i64)->ServiceResult<bcs_service_api::application::a2a_bot::NamedA2aCard> {
-        let old=self.named_record(provider,token,bot).await?;
-        let record=self.refresh(&old.provider_id,token,&old.bot_uuid,now_ms).await?;self.named_projection(provider,record)
-    }
 
     async fn register_provider_bot(&self,command:bcs_service_api::RegisterProviderBotCommand,source:A2aCardSource,now_ms:i64)
         ->ServiceResult<bcs_service_api::RegisterProviderBotOutcome> {self.register_admin(command,source,now_ms).await}

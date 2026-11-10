@@ -289,17 +289,17 @@ class A2aStory(Story):
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] == self.peer.base + "/agent-card.json"
         assert record["revision"] == 1
-        names = {"agent_name": record["agent_card"]["name"]}
-        named = self.request("GET", "/a2a/agent-card?" + urlencode(names), token=admin)
+        card_path = "/a2a/agents/" + bot_id + "/agent-card"
+        named = self.request("GET", card_path, token=admin)
         assert named["agent_card"] == record["agent_card"]
         assert not ({"provider_id", "bot_uuid", "provider_bot_ref", "revision"} & named.keys())
-        self.request("GET", "/a2a/agent-card?" + urlencode(names), token="wrong-admin", status=401)
+        self.request("GET", card_path, token="wrong-admin", status=401)
         self.request("GET", control, status=401)
         card = self.request("GET", "/bots/" + bot_id + "/agent-card")
         assert card["skills"][0]["description"] == "Full skill description"
         assert card["skills"][0]["futureField"] == {"keep": True}
         assert not self.peer.requests, "Registration must not submit a probe task"
-        named_refresh = self.request("POST", "/a2a/agent-card/refresh", names, token=admin)
+        named_refresh = self.request("POST", card_path + ":refresh", {}, token=admin)
         assert named_refresh["agent_card"] == record["agent_card"]
         record = self.request("GET", control, token=admin)
         unchanged = self.request("POST", control + "/card:refresh", {}, token=admin)
@@ -311,11 +311,11 @@ class A2aStory(Story):
         revision = record["revision"]
         inline = copy.deepcopy(record["agent_card"])
         inline["description"] = "Inline replacement"
-        named = self.request("PUT", "/a2a/agent-card", {**names, "agent_card": inline}, token=admin)
+        named = self.request("PUT", card_path, {"agent_card": inline}, token=admin)
         assert named["agent_card"] == inline and named["agent_card_url"] is None
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] is None
-        missing_url = self.request("POST", "/a2a/agent-card/refresh", names, token=admin, status=409)
+        missing_url = self.request("POST", card_path + ":refresh", {}, token=admin, status=409)
         assert missing_url["error"]["code"] == "CARD_URL_REQUIRED"
         assert record["revision"] == revision + 1
         self.request("PUT", control, {"agent_card": inline, "expected_revision": revision}, token=admin, status=409)

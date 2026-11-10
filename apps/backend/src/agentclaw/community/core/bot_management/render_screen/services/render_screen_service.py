@@ -3,6 +3,8 @@
 只负责 CRUD 语义，不含 HTTP 相关逻辑。
 """
 from dataclasses import replace
+from typing import Sequence
+
 from injector import inject
 
 from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
@@ -14,7 +16,12 @@ from agentclaw.community.core.repository.protocols.bot import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.bot_management.render_screen_service_protocol import RenderScreenServiceProtocol
+from agentclaw.community.core.bot_management.render_screen_service_protocol import (
+    RenderScreenCopyResult,
+    RenderScreenCopyRow,
+    RenderScreenRow,
+    RenderScreenServiceProtocol,
+)
 
 
 logger = get_logger()
@@ -242,3 +249,83 @@ class RenderScreenService(RenderScreenServiceProtocol):
     def get_render_screen(self, record_id: int) -> RenderScreenRecord | None:
         """查询单条记录。"""
         return self._repo.get_by_id(record_id)
+
+    def copy_render_screens(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        rows: Sequence[RenderScreenRow],
+    ) -> RenderScreenCopyResult:
+        """Converge a copy-serialised render-screen set onto one bot.
+
+        Overwrite converge: the ``rows`` replace the destination's set. A row
+        whose ``name`` already exists → ``update`` in place (only when
+        ``cdn_url`` differs); a new name → ``create``; a name present on the
+        destination but not in ``rows`` → soft ``delete``. Re-applying an
+        unchanged set writes nothing — the idempotent retry the apply-engine
+        convergence criterion rests on.
+
+        Ownership is taken from the bot row (``owner_id`` from the apply
+        context), not the per-row field, and the destination's owner is
+        re-read here so a copy onto a bot whose owner was just written lands
+        the rows under that owner. The duplicate-name/collaborator checks of
+        the user-facing create path are skipped: the rows are the source bot's
+        already-valid set, and there is no second author to authorize.
+        """
+        bot = self._bot_repo.get_by_id(bot_id)
+        record_owner_id = (
+            str(bot.get("owner_id") or "") if bot else ""
+        ) or owner_id
+        existing = {r.name: r for r in self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)}
+
+        results: list[RenderScreenCopyRow] = []
+        for row in rows:
+            at = f"render_screen[{row.name}]"
+            current = existing.pop(row.name, None)
+            if current is None:
+                try:
+                    self._repo.insert(
+                        bot_id=bot_id,
+                        owner_id=record_owner_id,
+                        name=row.name,
+                        cdn_url=row.cdn_url,
+                        creator_id=actor_id,
+                    )
+                    results.append(RenderScreenCopyRow(name=row.name, outcome="created"))
+                except Exception as exc:  # noqa: BLE001 — composed, never raw in the report
+                    logger.warning("[RenderScreen] copy create failed bot_id=%s name=%s err=%s", bot_id, row.name, exc)
+                    results.append(RenderScreenCopyRow(
+                        name=row.name, outcome="failed",
+                        reason=f"render_screen '{row.name}' could not be created",
+                    ))
+            elif current.cdn_url == row.cdn_url:
+                results.append(RenderScreenCopyRow(name=row.name, outcome="unchanged"))
+            else:
+                try:
+                    self._repo.update_by_id(record_id=current.id, name=row.name, cdn_url=row.cdn_url)
+                    results.append(RenderScreenCopyRow(name=row.name, outcome="updated"))
+                except Exception as exc:  # noqa: BLE001 — composed, never raw in the report
+                    logger.warning("[RenderScreen] copy update failed id=%s err=%s", current.id, exc)
+                    results.append(RenderScreenCopyRow(
+                        name=row.name, outcome="failed",
+                        reason=f"render_screen '{row.name}' could not be updated",
+                    ))
+
+        # Names present on the destination but no longer declared are removed.
+        # ``existing`` was drained of every declared name above, so what
+        # remains is exactly the removal set.
+        for name, record in existing.items():
+            try:
+                self._repo.delete_by_id(record_id=record.id)
+                results.append(RenderScreenCopyRow(name=name, outcome="removed"))
+            except Exception as exc:  # noqa: BLE001 — composed, never raw in the report
+                logger.warning("[RenderScreen] copy delete failed id=%s err=%s", record.id, exc)
+                results.append(RenderScreenCopyRow(
+                    name=name, outcome="failed",
+                    reason=f"render_screen '{name}' could not be removed",
+                ))
+
+        return RenderScreenCopyResult(rows=tuple(results))
+

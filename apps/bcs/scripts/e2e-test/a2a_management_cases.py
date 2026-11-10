@@ -29,24 +29,27 @@ def exercise(story, provider, original):
     duplicate = copy.deepcopy(card)
     duplicate["name"] += "-duplicate"
     assert register(duplicate, 409)["error"]["code"] == "SOURCE_AGENT_CONFLICT"
-    names = {"agent_name": card["name"]}
+    control = "/a2a/agents/" + created["bot_id"] + "/agent-card"
     for change in ("remove", "replace"):
         changed = copy.deepcopy(card)
         if change == "remove":
             changed["capabilities"]["extensions"] = []
         else:
             changed["capabilities"]["extensions"][0]["params"]["agentId"] = uuid.uuid4().hex
-        response = story.request("PUT", "/a2a/agent-card", {**names, "agent_card": changed}, token=admin, status=409)
+        response = story.request("PUT", control, {"agent_card": changed}, token=admin, status=409)
         assert response["error"]["code"] == "SOURCE_AGENT_CHANGE_NOT_ALLOWED"
     changed = copy.deepcopy(card)
     changed["name"] += "-renamed"
     changed["capabilities"]["extensions"][0]["params"]["party"] = "third_party"
-    updated = story.request("PUT", "/a2a/agent-card", {**names, "agent_card": changed}, token=admin)
+    updated = story.request("PUT", control, {"agent_card": changed}, token=admin)
     assert updated["bot_id"] == created["bot_id"] and updated["agent_card"] == changed
-    story.request("GET", "/a2a/agent-card?" + urlencode(names), token=admin, status=404)
-    fetched = story.request("GET", "/a2a/agent-card?" + urlencode({"agent_name": changed["name"]}), token=admin)
+    fetched = story.request("GET", control, token=admin)
     assert fetched == updated
-    story.request("GET", "/a2a/agent-card?bot_name=legacy", token=admin, status=400)
+    source_id = card["capabilities"]["extensions"][0]["params"]["agentId"]
+    found = story.request("GET", "/a2a/agents?" + urlencode({"source_agent_id": source_id}), token=admin)
+    assert len(found["items"]) == 1 and found["items"][0]["bot_id"] == created["bot_id"]
+    story.request("PUT", control, {"agent_name": changed["name"], "agent_card": changed}, token=admin, status=400)
+    story.request("GET", control + "?bot_name=legacy", token=admin, status=400)
 
     # Each case isolates one invalid declaration; none may create a Bot.
     for key, value, code in [

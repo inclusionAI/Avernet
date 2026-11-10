@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.domain.models.context_fragment import ContextFragment
-from src.domain.models.worker_profile import WorkerProfile
-from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
+from app.domain.models.context_fragment import ContextFragment
+from app.domain.models.worker_profile import WorkerProfile
+from app.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 
 
 @pytest.mark.parametrize("content", ["名称: Example Bot\nPython development", "名称: Example Bot\n" + "x" * 6000], ids=["short", "long"])

@@ -116,6 +116,22 @@ impl A2aBotRepoPort for DbA2aBotStore {
         if rows.first().is_some_and(|row| matches!(row.get_string("agent_card"), Ok(None))) { return Ok(None); }
         Ok(rows.first().map(decode).transpose()?.filter(|record|record.agent_card.get("name").and_then(serde_json::Value::as_str)==Some(name)))
     }
+    async fn get_by_source_agent_id(&self, provider_id:&str, source_agent_id:&str)->ServiceResult<Option<A2aBotRecord>> {
+        use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+        let (join,predicate)=match self.flavor {
+            DbSqlFlavor::Sqlite=>(
+                "json_each(CASE WHEN JSON_VALID(b.agent_card) THEN b.agent_card ELSE '{}' END,'$.capabilities.extensions') AS ext",
+                "json_extract(ext.value,'$.uri')=? COLLATE BINARY AND json_extract(ext.value,'$.params.agentId')=? COLLATE BINARY"),
+            DbSqlFlavor::Mysql=>(
+                "JSON_TABLE(COALESCE(b.agent_card,JSON_OBJECT()), '$.capabilities.extensions[*]' COLUMNS(uri VARCHAR(1024) PATH '$.uri', agent_id VARCHAR(256) PATH '$.params.agentId')) AS ext",
+                "CAST(ext.uri AS BINARY)=CAST(? AS BINARY) AND CAST(ext.agent_id AS BINARY)=CAST(? AS BINARY)"),
+        };
+        let rows=self.db.query(DbStatement::with_params(format!(
+            "SELECT b.bot_uuid,b.provider_id,b.provider_bot_ref,b.agent_card,b.agent_card_url,b.agent_card_revision FROM bcs_bots b WHERE b.env=? AND b.provider_id=? AND b.is_deleted=0 AND b.connection_mode='gateway' AND b.agent_card IS NOT NULL AND EXISTS(SELECT 1 FROM {join} WHERE {predicate}) LIMIT 2"),
+            vec![self.env.clone().into(),provider_id.into(),SOURCE_AGENT_EXTENSION.into(),source_agent_id.into()])).await.map_err(error)?;
+        if rows.len()>1 {return Err(error("multiple Bots use the same Provider source Agent ID"));}
+        rows.first().map(decode).transpose()
+    }
     async fn refreshable(&self, after:Option<&str>, limit:u32)->ServiceResult<Vec<A2aBotRecord>> {
         let rows=self.db.query(DbStatement::with_params("SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND is_deleted=0 AND agent_card_url IS NOT NULL AND agent_card IS NOT NULL AND bot_uuid>? ORDER BY bot_uuid LIMIT ?",
             vec![self.env.clone().into(),after.unwrap_or("").into(),i64::from(limit.clamp(1,16)).into()])).await.map_err(error)?;

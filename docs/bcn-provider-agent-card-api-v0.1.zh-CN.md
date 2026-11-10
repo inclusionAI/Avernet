@@ -5,6 +5,7 @@
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | 0.1 | 2026-11-03 | 初始对接合同：Provider token 定位归属、注册、AgentCard 查询/更新/刷新、统一错误定义 |
+| 0.2 | 本次变更 | 管理路径统一 Bot ID；Location 使用 ID；支持 source_agent_id 找回 ID；无 name 兼容、无版本历史 |
 
 状态：对接评审稿
 
@@ -15,9 +16,9 @@
 | 操作 | 方法与路径 | 成功状态 |
 | --- | --- | --- |
 | 注册 | POST /a2a/agents | 201 Created |
-| 查询 | GET /a2a/agent-card | 200 OK |
-| 更新 AgentCard | PUT /a2a/agent-card | 200 OK |
-| 刷新 Card | POST /a2a/agent-card/refresh | 200 OK |
+| 查询 | GET /a2a/agents/{bot_id}/agent-card | 200 OK |
+| 更新 AgentCard | PUT /a2a/agents/{bot_id}/agent-card | 200 OK |
+| 刷新 Card | POST /a2a/agents/{bot_id}/agent-card:refresh | 200 OK |
 
 ### 1.1 请求头
 
@@ -41,7 +42,7 @@
 | 字段 | 类型 | 定义 |
 | --- | --- | --- |
 | provider_name | string | 仅作为响应中的 BCN Provider 标识；`^[a-z][a-z0-9_-]{0,63}$`，环境内唯一 |
-| bot_id | string | BCN 分配的稳定 Bot 标识，四个管理接口均返回；管理请求仍使用 agent_name |
+| bot_id | string | BCN 分配的稳定 Bot 标识，管理对象的稳定身份；从注册响应保存，并用于资源路径 |
 | agent_name | string | 等于已保存 Card.name；2～64 个 Unicode 码点，支持中文、区分大小写，无首尾空白或控制字符 |
 | agent_card_url | string 或响应中的 null | Card 的绝对 HTTP(S) URL；不是 Agent 调用接口地址；最长 2048 个字符 |
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |
@@ -241,32 +242,31 @@ Content-Type: application/json
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
 
-名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为查询地址。同一 Provider 下名称或已登记来源 agentId 重复时返回 409。
+名称从 Card.name 获取，无需另传 agent_name。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下名称或已登记来源 agentId 重复时返回 409。
 
 ## 4. 查询 AgentCard
 
 ```http
-GET /a2a/agent-card?agent_name=%E8%AE%A2%E5%8D%95%E5%8A%A9%E6%89%8B
+GET /a2a/agents/{bot_id}/agent-card
 Authorization: Bearer <provider_admin_token>
 ```
 
-query 仅接受必填的 agent_name，不发送请求体。查询的是 BCN 已保存的 Card，不实时访问远端 URL，不触发刷新。
+路径填写注册返回的 bot_id，不接受 query 或请求体。查询的是 BCN 已保存的 Card，不实时访问远端 URL，不触发刷新。
 
-成功返回 200 及 2.3 的对象。名称不存在或不属于 token 的 Provider 时返回 404 / BOT_NOT_FOUND。
+成功返回 200 及 2.3 的对象。Bot ID 不存在或不属于 token 的 Provider 时返回 404 / BOT_NOT_FOUND。
 
 ## 5. 更新 AgentCard
 
 ```http
-PUT /a2a/agent-card
+PUT /a2a/agents/{bot_id}/agent-card
 Authorization: Bearer <provider_admin_token>
 Content-Type: application/json
 ```
 
-推荐直接提交完整 `agent_card`，与注册方式保持一致：
+推荐直接提交完整 `agent_card`，与注册方式保持一致。bot_id 仅放在路径中，不放进请求体或 Card：
 
 ```json
 {
-  "agent_name": "订单助手",
   "agent_card": {
     "name": "订单助手",
     "description": "查询订单状态",
@@ -296,7 +296,7 @@ Content-Type: application/json
 
 | 请求字段 | 必填 | 规则 |
 | --- | --- | --- |
-| agent_name | 是 | 更新前的当前名称，在 token 所属 Provider 内匹配 |
+| bot_id（路径参数） | 是 | 注册返回的稳定 Bot ID；请求体不重复填写 |
 | agent_card_url | 二选一，可选方式 | 更新来源 URL，并立即拉取、校验其 Card |
 | agent_card | 二选一，推荐 | 提交完整 Card 覆盖原内容，切换为内联来源 |
 
@@ -304,10 +304,10 @@ Content-Type: application/json
 
 | 更新规则 | 说明 |
 | --- | --- |
-| 提交内容 | 推荐完整 agent_card，也可提交 agent_card_url；两者二选一，不做部分合并 |
-| 更新范围 | 更新 Card 及来源，不修改 owners、summary |
+| 提交内容 | 提交完整 agent_card 或 agent_card_url，不能同时传；若只改 visibility 则都不传。不做 Card 部分合并、不提供 PATCH |
+| 更新范围 | 更新 Card 及来源，不修改 owners、summary；可选 visibility 为 protected/public，省略保持原值，也可只提交 visibility |
 | 来源切换 | 直接提交 Card 后清除旧 URL、停止自动刷新；提交 URL 后按新地址刷新 |
-| 名称变化 | 同步更新 agent_name，后续使用新名称；重名则更新失败 |
+| 名称变化 | 同步更新 agent_name，后续仍使用原 bot_id；重名则更新失败 |
 | 来源标识 | 已登记的 agentId 不允许修改或移除 |
 | 并发更新 | 无需先查询版本；以最后成功写入为准，失败不部分更新 |
 | 已有任务 | 保持原任务关联，不切换到新接口地址 |
@@ -317,24 +317,27 @@ Content-Type: application/json
 ## 6. 刷新 AgentCard
 
 ```http
-POST /a2a/agent-card/refresh
+POST /a2a/agents/{bot_id}/agent-card:refresh
 Authorization: Bearer <provider_admin_token>
 Content-Type: application/json
 ```
 
-```json
-{
-  "agent_name": "订单助手"
-}
-```
-
-| 请求字段 | 必填 | 说明 |
-| --- | --- | --- |
-| agent_name | 是 | 当前 Agent 名称 |
+请求体可省略；也可以提交空 JSON 对象 `{}`。Bot ID 仅在路径中传递。请求体不接受 bot_id、agent_name 或其他字段。
 
 从已保存的 URL 重新读取 Card，更新规则与 PUT 相同。成功返回 **200 OK**，响应见 2.3。
 
 直接提交 Card 的 Agent 没有来源 URL，应使用 PUT 更新。刷新结果若被其他更新取代，返回 409 / REFRESH_SUPERSEDED。
+
+## 6.1 按来源稳定键找回 Bot ID
+
+```http
+GET /a2a/agents?source_agent_id=order-agent-001
+Authorization: Bearer <provider_admin_token>
+```
+
+source_agent_id 对应来源扩展 params.agentId：必填、1～256 字符、无首尾空白或控制字符，精确匹配，保留大小写与前导零。仅搜索 token 所属 Provider 下有效 gateway Agent。响应为 `{"items": [...]}`，包含 0 或 1 个 2.3 所示的管理对象；无结果返回 200 和空 items。省略筛选不支持全量列举。无需重新注册即可恢复 bot_id；此接口不是 upsert，也不提供注册幂等。未声明来源 agentId 的 Agent 无法按此条件找回。
+
+本期不提供 versions 或历史快照接口；Card.version 是接入方软件版本，不是 BCS 历史版本号。
 
 ## 7. 错误响应
 
@@ -370,13 +373,13 @@ details.field 指出错误字段，例如 agent_card.name；reason 为原因标�
 | 400 | INVALID_REQUEST | 非法 JSON、未知/重复字段、缺失或类型错误；修正请求 |
 | 401 | UNAUTHENTICATED | 凭据缺失、无效、用途不匹配或失效；响应含 WWW-Authenticate: Bearer |
 | 403 | PERMISSION_DENIED | Provider 已禁用，或当前 Provider 身份模式不支持此注册入口 |
-| 404 | BOT_NOT_FOUND | 当前管理范围内未找到该名称 |
+| 404 | BOT_NOT_FOUND | 当前管理范围内未找到该 Bot ID |
 | 405 | METHOD_NOT_ALLOWED | 方法不支持；响应含 Allow |
 | 406 | NOT_ACCEPTABLE | Accept 不接受 JSON |
 | 409 | BOT_NAME_CONFLICT | 当前有效名称已占用 |
 | 409 | SOURCE_AGENT_CONFLICT | 同 Provider 下来源 agentId 重复 |
 | 409 | SOURCE_AGENT_CHANGE_NOT_ALLOWED | 试图修改或移除已登记来源标识 |
-| 409 | TARGET_CHANGED | 请求处理期间目标被改名或移除；核实目标后操作 |
+| 409 | TARGET_CHANGED | 请求期间目标被移除、绑定变化或持续并发冲突；按原 ID 查询后重试 |
 | 409 | CARD_URL_REQUIRED | 内联 Card 无法通过 URL 刷新 |
 | 409 | REFRESH_SUPERSEDED | 刷新结果已过期，没有应用；先查询最新配置 |
 | 413 | REQUEST_TOO_LARGE | 管理请求体超限 |

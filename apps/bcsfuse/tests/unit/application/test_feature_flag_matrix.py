@@ -16,11 +16,11 @@ import pytest
 from unittest.mock import patch, MagicMock
 import os
 
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.expert_risk_assessment import RiskLevel
-from src.infra.config.feature_flags import FeatureFlags
-from src.domain.taxonomy import reset_taxonomy_registry
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.expert_risk_assessment import RiskLevel
+from app.infra.config.feature_flags import FeatureFlags
+from app.domain.taxonomy import reset_taxonomy_registry
 
 
 class TestFeatureFlagMatrix:

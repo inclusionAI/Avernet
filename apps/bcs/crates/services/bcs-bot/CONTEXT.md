@@ -180,3 +180,26 @@ The transaction is the existing composite; no migration or second partial Bot
 write is introduced. Admission adds bounded per-request reads, no registry scan.
 
 Custom AgentCard bindings use the deployment-installed bcs-a2a-binding-api registry for pure route selection. No transport or plugin implementation is imported by core.
+
+
+## Provider identity versus authority initialization
+
+Ordinary `ProviderBotCoreService::register_provider_bot_with_bot_uuid` registers
+identity/delivery metadata only and requires exactly one owner. Multi-user input
+returns `InvalidOperation` before any Bot write instead of silently ignoring
+managers. `ProviderManagement` validates/splits the public `owners` snapshot,
+passes only the first owner to that Core, then uses the separate
+`register_provider_bot_with_initial_managers` Core entry for a nonempty snapshot.
+Fresh multi-user admissions commit Bot/binding/authority together through the
+existing ownership repository composite. Existing version-0 multi-user
+attachments conflict before writes; they need explicit reconciliation. Empty
+snapshots retain the legacy identity-plus-Registry initialization path. A2A's separate registration Core continues to consume the
+entire snapshot because its store composite commits identity/Card/authority
+atomically. Re-registration never synchronizes existing manager/owner authority.
+
+The fresh multi-user path adds one indexed Bot lookup, not a scan. It reuses the
+bounded ownership transaction (maximum 100 managers, no network within it).
+Provider authentication, endpoint checks and Plugin MOCK/subbot credential rules
+remain unchanged. Initialized replays never synchronize managers. The new Core
+entry fails closed on unsupported nonempty snapshots; its empty default delegates
+the legacy method for source-compatible implementations.

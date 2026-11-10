@@ -153,6 +153,7 @@ impl ProviderCore {
         provider_id: &str,
         provider_admin_token: &str,
         params: RegisterProviderBotParams,
+        initial_managers: Vec<String>,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
         let RegisterProviderBotParams {
             webhook_url,
@@ -175,12 +176,27 @@ impl ProviderCore {
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         let provider_bot_ref = identity.provider_bot_ref;
         let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
-        let owner = owners.first().map(|owner| owner.trim()).unwrap_or_default();
-        if owners.len() != 1 || owner.is_empty() {
+        // This Core creates identity/delivery metadata, not authority. The
+        // application must split its owner/manager snapshot before calling it.
+        if owners.len() != 1 {
             return Err(ServiceError::InvalidOperation {
-                message: "owners must contain exactly one non-empty staff_no".to_string(),
+                message: "identity registration requires exactly one owner; use ProviderManagement for initial managers".into(),
                 request_id: None,
             });
+        }
+        let (owner, _) = bcs_service_api::types::bot_authority::normalize_provider_owners(&owners)?;
+        let owner = owner.as_str();
+        let initialization = bcs_service_api::types::bot_authority::OwnershipInitialization {
+            owner_user_id: owner.into(), initial_manager_user_ids: initial_managers,
+            mutation: bcs_service_api::types::bot_authority::AuthorityMutation {
+                mutation_id: uuid::Uuid::new_v4().to_string(),
+                actor: bcs_service_api::types::bot_authority::AuthorityActor::Provider { provider_id: provider.provider_id.clone() },
+            },
+        };
+        bcs_service_api::types::bot_authority::validate_initial_managers(&initialization)?;
+        let atomic_authority = !initialization.initial_manager_user_ids.is_empty();
+        if atomic_authority && initial_caller.is_some() {
+            return Err(ServiceError::InvalidOperation { message: "initial caller configuration requires a separate configuration write".into(), request_id: None });
         }
         if let Some(url) = webhook_url.as_deref() {
             if matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
@@ -207,6 +223,7 @@ impl ProviderCore {
                         "webhook_url differs from the registered Bot; use PATCH to update it".to_string(),
                     ));
                 }
+                if atomic_authority { self.require_initialized_snapshot_replay(&existing_binding.bot_uuid).await?; }
                 info!(
                     provider_id = %provider.provider_id,
                     bot_uuid = %existing_binding.bot_uuid,
@@ -266,6 +283,16 @@ impl ProviderCore {
             }
             None => new_bot_uuid(),
         };
+
+        if atomic_authority {
+            if self.registry.try_get(&bot_uuid).await?.is_none() {
+                return self.create_with_initial_authority(BotProviderRecord {
+                    bot_uuid, provider_id: provider.provider_id, provider_bot_ref,
+                    connection_mode, webhook_url, is_deleted: false,
+                }, capabilities, provider_auth_mode, initialization).await;
+            }
+            self.require_initialized_snapshot_replay(&bot_uuid).await?;
+        }
 
         if provider_auth_mode == ProviderAuthMode::AgentPassSubbots {
             let metadata = self.bot_providers.as_ref().ok_or_else(|| ServiceError::InternalError("atomic Provider Bot registration is not configured".into()))?;
@@ -822,3 +849,6 @@ fn ensure_provider_owner(provider: &ProviderRecord, staff_no: &str) -> ServiceRe
 
 mod management;
 mod bots;
+
+#[path = "provider_core/initial_authority.rs"]
+mod initial_authority;

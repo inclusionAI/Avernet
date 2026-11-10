@@ -204,3 +204,128 @@ def test_the_shape_the_mode_did_not_name_never_reaches_an_apply(
 
     assert not isinstance(strategies[EngineFamily.TECLAW], unnamed)
     assert isinstance(test_injector.get(unnamed), unnamed)
+
+
+# ── bot file sync: per-engine dispatch wired once, both bundles ────────────
+
+
+def test_both_port_bundles_carry_the_delegating_file_sync(test_injector) -> None:
+    """One ``file_sync`` on both bundles: the delegating port, which resolves
+    the destination's engine and dispatches. The delegation, not a per-bundle
+    instance, is what keeps a teclaw dst and an ARCA dst on the same answer
+    (teclaw → noop refusal, openclaw → NAS-rsync)."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+
+    for bundle in (DevicePorts, PlatformPorts):
+        ports = test_injector.get(bundle)()
+        assert isinstance(ports.file_sync, DelegatingBotFileSyncPort), bundle
+
+
+def test_both_port_bundles_carry_the_bot_config_kind_registry(test_injector) -> None:
+    """One ``bot_config`` registry on both bundles: engine-agnostic, so the same
+    registry answers on a device-backed ARCA bot and a platform-managed teclaw
+    one. The registry, not a per-bundle instance, is what keeps the kind set
+    the validator accepts and the handlers apply dispatches in lockstep — one
+    binding, one surface."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        BotConfigKindRegistry,
+    )
+
+    for bundle in (DevicePorts, PlatformPorts):
+        ports = test_injector.get(bundle)()
+        assert isinstance(ports.bot_config, BotConfigKindRegistry), bundle
+
+
+def test_the_kind_registry_routes_render_screen_to_the_real_handler(
+    test_injector,
+) -> None:
+    """``render_screen`` is the v1 kind and resolves to the real handler backed
+    by ``RenderScreenService``; any other kind lands on the noop refusal, so a
+    kind the validator accepts but no DI-bound handler resolves surfaces as a
+    failed row in the apply report rather than a silent success."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        NoopBotConfigSyncHandler,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
+        RenderScreenSyncHandler,
+    )
+
+    ports = test_injector.get(DevicePorts)()
+    registry = ports.bot_config
+    assert isinstance(registry.resolve("render_screen"), RenderScreenSyncHandler)
+    assert isinstance(registry.resolve("task_nav"), NoopBotConfigSyncHandler)
+
+
+
+def test_the_delegating_port_routes_openclaw_to_nas_rsync_and_others_to_noop(
+    test_injector,
+) -> None:
+    """The registry the delegate holds is the one source of which engines run a
+    real strategy: openclaw reaches the NAS-rsync port, every other engine the
+    noop refusal (the capabilities table already refuses BOT_FILE_SYNC on teclaw
+    at PUT; this is the apply path's same verdict)."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_noop import (
+        NoopBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
+        NasBotFileSyncPort,
+    )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+
+    delegate = test_injector.get(BotFileSyncPort)
+    assert isinstance(delegate, DelegatingBotFileSyncPort)
+    registry = delegate._registry  # noqa: SLF001 — the test's seam on the bound singleton
+    assert isinstance(registry.resolve("openclaw"), NasBotFileSyncPort)
+    # An engine the root did not register (teclaw, aicoding) → noop refusal.
+    assert isinstance(registry.resolve("teclaw"), NoopBotFileSyncPort)
+    assert isinstance(registry.resolve("aicoding"), NoopBotFileSyncPort)
+    assert isinstance(registry.resolve(""), NoopBotFileSyncPort)
+
+
+def test_the_file_sync_runner_wraps_subprocess_success_and_failures(
+    test_injector,
+) -> None:
+    """The runner binds ``subprocess`` for the NAS strategy and composes each
+    failure into a ``RuntimeError`` (the strategy catches it and stamps a single
+    reason on the entry). Exercised with real, side-effect-free commands so the
+    wrapper's logging + error path is the thing under test, not a mock."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
+        NasBotFileSyncPort,
+    )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+
+    delegate = test_injector.get(BotFileSyncPort)
+    assert isinstance(delegate, DelegatingBotFileSyncPort)
+    nas = delegate._registry.resolve("openclaw")  # noqa: SLF001
+    assert isinstance(nas, NasBotFileSyncPort)
+    runner = nas._run_command  # noqa: SLF001 — the test's seam on the bound port
+
+    # success
+    result = runner(cmd=["true"], command_name="ok", error_message="boom")
+    assert result.returncode == 0
+
+    # nonzero
+    with pytest.raises(RuntimeError, match="boom"):
+        runner(cmd=["false"], command_name="bad", error_message="boom")
+
+    # missing command
+    with pytest.raises(RuntimeError, match="not found"):
+        runner(
+            cmd=["definitely-not-a-real-command-xyz"],
+            command_name="missing", error_message="boom",
+        )
+
+    # timeout
+    with pytest.raises(RuntimeError, match="timed out"):
+        runner(
+            cmd=["sleep", "10"], command_name="slow", error_message="boom",
+            timeout_seconds=0.5,
+        )

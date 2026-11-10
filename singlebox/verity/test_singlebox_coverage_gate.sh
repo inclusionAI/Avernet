@@ -85,6 +85,17 @@ assert args.mock_url == "http://127.0.0.1:39090"
 args.fixture.write_text(json.dumps({"provider_id": "prv_fixture", "provider_admin_token": "test-token"}))
 args.fixture.chmod(0o600)
 PYTEST
+  mkdir -p "${tmp}/apps/bcs/scripts/ci"
+  cat > "${tmp}/apps/bcs/scripts/ci/companion_coverage.py" <<'PYTEST'
+import argparse
+from pathlib import Path
+parser = argparse.ArgumentParser()
+parser.add_argument("--bcs-dir")
+parser.add_argument("--report-dir", type=Path)
+args = parser.parse_args()
+args.report_dir.mkdir(parents=True, exist_ok=True)
+(args.report_dir / "companion-timings.json").write_text('{"status":"passed"}')
+PYTEST
   cat > "${tmp}/apps/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
 #!/usr/bin/env bash
 bcs_e2e_mock_start() {
@@ -110,11 +121,11 @@ if [ "${BCS_E2E_MOCK_BASE_URL:-}" != "http://127.0.0.1:39090" ]; then
   exit 16
 fi
 case "${STANDALONE_OPENCLAW_ROOT:-}" in
-  "${PWD}/singlebox/.dependencies/coverage/singlebox/standalone-openclaw") ;;
+  "${SINGLEBOX_EXPECTED_COVERAGE_ROOT:-${PWD}/singlebox/.dependencies/coverage/singlebox}/standalone-openclaw") ;;
   *) echo "singlebox coverage should use an isolated standalone OpenClaw root" >&2; exit 13 ;;
 esac
 case "${STANDALONE_RUNTIME_DIR:-}" in
-  "${PWD}/singlebox/.dependencies/coverage/singlebox/standalone-runtime") ;;
+  "${SINGLEBOX_EXPECTED_COVERAGE_ROOT:-${PWD}/singlebox/.dependencies/coverage/singlebox}/standalone-runtime") ;;
   *) echo "singlebox coverage should use an isolated standalone runtime dir" >&2; exit 14 ;;
 esac
 printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
@@ -159,7 +170,7 @@ SH
 cat > "${tmp}/apps/bcs/scripts/e2e_coverage.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-expected_bot_data_dir="${PWD}/singlebox/.dependencies/coverage/singlebox/standalone-openclaw/profiles"
+expected_bot_data_dir="${SINGLEBOX_EXPECTED_COVERAGE_ROOT:-${PWD}/singlebox/.dependencies/coverage/singlebox}/standalone-openclaw/profiles"
 if [[ "${BCS_E2E_CHANGED_LINE_MIN:-}" != "65" ]]; then
   echo "BCS E2E should enforce changed-line coverage above 65%" >&2
   exit 17
@@ -169,6 +180,12 @@ if [[ "${BCS_BOTS_DATA_DIR:-}" != "$expected_bot_data_dir" ]]; then
   exit 15
 fi
 printf '%s\n' "$*" >> "${PWD}/bcs-e2e.log"
+if [[ "$*" == *--shared-tests-only* ]]; then
+  [[ ! -f "${PWD}/fail-bcs-e2e" ]] || exit 7
+  [[ ! -f "${PWD}/fail-bcs-e2e-without-artifacts" ]] || exit 9
+  [[ ! -f "${PWD}/fail-bcs-e2e-with-malformed-artifacts" ]] || exit 8
+  exit 0
+fi
 cov_dir="${PWD}/apps/bcs/target/cov-e2e"
 [[ -f "${PWD}/fail-bcs-e2e-without-artifacts" ]] && exit 9
 mkdir -p "$cov_dir"
@@ -291,7 +308,7 @@ test_default_mode_runs_real_singlebox() {
     fail "default coverage mode should run every manifest acceptance target"
   [ "$(grep -Fc -- '--standalone --with-bcs-coverage start all' "$log")" -eq 1 ] || \
     fail "all modules should share one singlebox startup"
-  grep -Fx -- "--skip-start --bcs-line-min 54 --bcs-method-min 48" "$bcs_log" >/dev/null || \
+  grep -Fx -- "--skip-start --shared-tests-only --bcs-line-min 54 --bcs-method-min 48" "$bcs_log" >/dev/null || \
     fail "default coverage mode should run BCS E2E against the shared stack"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"
@@ -524,7 +541,7 @@ test_relative_coverage_root_is_absolutized() {
 
   (
     cd "$tmp"
-    PATH="${tmp}/fake-bin:$PATH"       PYTHON="${ROOT}/apps/backend/.venv/bin/python"       SINGLEBOX_STUB_LOG="${tmp}/singlebox.log"       UV_STUB_LOG="${tmp}/uv.log"       "${tmp}/singlebox/ci/singlebox_coverage.sh"         --coverage-root relative-cov >"${tmp}/run.log"
+    SINGLEBOX_EXPECTED_COVERAGE_ROOT="${tmp}/relative-cov" PATH="${tmp}/fake-bin:$PATH"       PYTHON="${ROOT}/apps/backend/.venv/bin/python"       SINGLEBOX_STUB_LOG="${tmp}/singlebox.log"       UV_STUB_LOG="${tmp}/uv.log"       "${tmp}/singlebox/ci/singlebox_coverage.sh"         --coverage-root relative-cov >"${tmp}/run.log"
   )
   output="$(cat "${tmp}/run.log")"
 

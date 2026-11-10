@@ -18,12 +18,12 @@ class TestFusionConflictModule:
         """测试 fusion_conflict 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.domain.models.fusion_conflict")
+        module = importlib.import_module("app.domain.models.fusion_conflict")
         assert module is not None
 
     def test_conflict_class_exists(self):
         """测试 FusionConflict 类存在"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
 
         assert FusionConflict is not None
 
@@ -33,7 +33,7 @@ class TestFusionConflictCreation:
 
     def test_conflict_creation_with_required_fields(self):
         """测试使用必填字段创建冲突"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
 
         conflict = FusionConflict(
             parties=["zhangsan", "lisi"],
@@ -49,7 +49,7 @@ class TestFusionConflictCreation:
 
     def test_conflict_with_multiple_parties(self):
         """测试多方冲突创建"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
 
         conflict = FusionConflict(
             parties=["zhangsan", "lisi", "anquan"],
@@ -63,7 +63,7 @@ class TestFusionConflictCreation:
 
     def test_conflict_all_severity_levels(self):
         """测试所有严重级别"""
-        from src.domain.models.fusion_conflict import FusionConflict, Severity
+        from app.domain.models.fusion_conflict import FusionConflict, Severity
 
         for severity in ["low", "medium", "high", "critical"]:
             conflict = FusionConflict(
@@ -80,7 +80,7 @@ class TestFusionConflictValidation:
 
     def test_conflict_parties_min_length(self):
         """测试 parties 最少需要 2 个"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -93,7 +93,7 @@ class TestFusionConflictValidation:
 
     def test_conflict_positions_match_parties(self):
         """测试 positions 数量与 parties 匹配或更多上下文"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
 
         # positions 可以直接描述各方立场
         conflict = FusionConflict(
@@ -106,7 +106,7 @@ class TestFusionConflictValidation:
 
     def test_conflict_invalid_severity_rejected(self):
         """测试无效严重级别被拒绝"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -119,7 +119,7 @@ class TestFusionConflictValidation:
 
     def test_conflict_empty_issue_rejected(self):
         """测试空 issue 被拒绝"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -136,7 +136,7 @@ class TestFusionConflictSerialization:
 
     def test_conflict_model_dump(self):
         """测试 model_dump 序列化"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
 
         conflict = FusionConflict(
             parties=["zhangsan", "lisi"],
@@ -154,7 +154,7 @@ class TestFusionConflictSerialization:
 
     def test_conflict_json_serialization(self):
         """测试 JSON 序列化"""
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_conflict import FusionConflict
         import json
 
         conflict = FusionConflict(
@@ -177,13 +177,13 @@ class TestSeverityEnum:
 
     def test_severity_enum_exists(self):
         """测试 Severity 枚举存在"""
-        from src.domain.models.fusion_conflict import Severity
+        from app.domain.models.fusion_conflict import Severity
 
         assert Severity is not None
 
     def test_severity_enum_values(self):
         """测试 Severity 枚举值"""
-        from src.domain.models.fusion_conflict import Severity
+        from app.domain.models.fusion_conflict import Severity
 
         assert Severity.LOW.value == "low"
         assert Severity.MEDIUM.value == "medium"

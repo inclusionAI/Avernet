@@ -38,6 +38,12 @@ pub enum DeliveryLookup {
     /// At most one live context: expiration filtering must precede LIMIT.
     LanePendingContextCarrier { bot: String, session: String, now_ms: i64 },
     Message(String),
+    /// Unfinished Sends (Queued/Dispatching/Running/Unknown) of one Session,
+    /// whoever the target Bot is, in `(source_message_id, delivery_id)` order
+    /// after the `after` cursor. Keyset pages follow
+    /// `idx_delivery_session_message`, so a full sweep walks the Session's
+    /// index entries once. Bounded by `limit` (at most 500).
+    SessionUnfinished { session: String, after: Option<(String, String)>, limit: usize },
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }
 
@@ -135,6 +141,34 @@ pub enum MessageDeliveryRepoError {
     Storage(String),
 }
 
+impl MessageDeliveryRepoError {
+    /// Group Session row is gone (deleted while deliveries were pending).
+    pub const CANONICAL_SESSION_MISSING: &'static str = "canonical_session_missing";
+    /// Direct A2A Session registry row is gone.
+    pub const SESSION_REGISTRY_MISSING: &'static str = "session_registry_missing";
+
+    /// The Session an admission targets no longer exists. Deterministic:
+    /// retrying the same admission can never succeed.
+    pub fn is_session_missing(&self) -> bool {
+        matches!(self, Self::Invalid(code)
+            if code == Self::CANONICAL_SESSION_MISSING || code == Self::SESSION_REGISTRY_MISSING)
+    }
+}
+
+#[cfg(test)]
+mod repo_error_tests {
+    use super::MessageDeliveryRepoError as E;
+
+    #[test]
+    fn session_missing_is_only_the_two_missing_codes() {
+        assert!(E::Invalid(E::CANONICAL_SESSION_MISSING.into()).is_session_missing());
+        assert!(E::Invalid(E::SESSION_REGISTRY_MISSING.into()).is_session_missing());
+        assert!(!E::Invalid("other".into()).is_session_missing());
+        assert!(!E::Storage(E::CANONICAL_SESSION_MISSING.into()).is_session_missing());
+        assert!(!E::Conflict.is_session_missing());
+    }
+}
+
 #[async_trait]
 pub trait MessageDeliveryRepoPort: Send + Sync {
     /// Atomically admit a same-session initialization batch. Implementations
@@ -160,6 +194,13 @@ pub trait MessageDeliveryRepoPort: Send + Sync {
     /// lends unused capacity. Total <= min(limit, 200); deadlines sort before IDs
     /// within timeout classes. No global ordering across control classes.
     async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError>;
+    /// `work_batch` that leaves out `exclude` (rows the scheduler has isolated),
+    /// so they cannot keep occupying the slots of an ordered page. At most a
+    /// few hundred ids. Stores without support ignore the exclusions.
+    async fn work_batch_excluding(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+        let _ = exclude;
+        self.work_batch(kind, now_ms, after, limit).await
+    }
     /// Low-frequency SQL aggregation; scrape callers must cache the result.
     async fn queue_statistics(&self) -> Result<Vec<DeliveryQueueStatistic>, MessageDeliveryRepoError>;
     /// Environment-scoped business policy; absence means disabled version zero.

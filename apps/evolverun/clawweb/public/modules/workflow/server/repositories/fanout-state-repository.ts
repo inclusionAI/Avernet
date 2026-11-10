@@ -7,6 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { IDatabase, FlowControlAppConfig } from '@avernet/clawweb-shared/server/db';
+import { FlowRunLinkRepository } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
 
 type ObjectValue = Record<string, unknown>;
 type Child = ObjectValue & {
@@ -157,7 +158,6 @@ function validateGroup(value: unknown, parentFlowId: string, nodeId: string): as
     && Number.isFinite(config.cancelGraceSeconds) && config.cancelGraceSeconds > 0)), 'Invalid fanout limits');
   valid(value.childPublishedVersion === undefined || integer(value.childPublishedVersion, 1), 'Invalid child published version');
   valid(object(value.childWorkflow) && text(value.childWorkflow.id)
-    && (value.childWorkflow.version === undefined || integer(value.childWorkflow.version, -1))
     && Array.isArray(value.childWorkflow.nodes) && value.childWorkflow.nodes.every(node => object(node) && text(node.id) && object(node.executor)), 'Invalid child workflow snapshot');
   if (value.childResolved !== undefined) {
     const resolved = value.childResolved;
@@ -509,10 +509,23 @@ export class FanoutStateRepository {
         workflowTitle: input.workflowTitle ?? null, originBotId: input.originBotId ?? null, userId: input.userId ?? null,
       };
       this.validateChildState(initial, identity);
+      // Persist the trusted child->parent link in the same transaction as the child run.
+      const links = new FlowRunLinkRepository(tx);
+      // The start contract does not know the parent node's execution attempt.
+      const existingLink = await links.findByChild(childFlowId);
+      const link = {
+        childFlowId,
+        parentFlowId,
+        parentNodeId: input.parentNodeId,
+        parentAttempt: null,
+        childWorkflowId: input.workflowId,
+      };
+      conflict(existingLink === null || equal(existingLink, link), 'Child link already has a different parent');
       const existing = await this.read(childFlowId, tx, true);
       if (existing) {
         const run = this.childRecord(existing, parentFlowId);
         conflict(equal(run.stateJson._fanoutIdentity, identity), 'Child ID already has a different launch identity');
+        if (existingLink === null) await links.insert(link);
         return { created: false, run };
       }
       // A dispatch claim belongs to the ordinary launcher, never this legacy
@@ -541,6 +554,7 @@ export class FanoutStateRepository {
         }
         throw error;
       }
+      if (existingLink === null) await links.insert(link);
       return { created: true, run: this.childRecord(await this.require(childFlowId, tx), parentFlowId) };
     });
   }

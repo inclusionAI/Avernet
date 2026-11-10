@@ -16,8 +16,8 @@ async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
     for migration in [
         include_str!("../../../../migrations/sqlite/034_group_context.sql"),
         include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
-        include_str!("../../../../migrations/sqlite/043_group_context_slot.sql"),
-        include_str!("../../../../migrations/sqlite/044_group_context_slot_audit.sql"),
+        include_str!("../../../../migrations/sqlite/044_group_context_slot.sql"),
+        include_str!("../../../../migrations/sqlite/045_group_context_slot_audit.sql"),
     ] {
         for sql in migration
             .split(';')

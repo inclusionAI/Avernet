@@ -59,6 +59,10 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.ports.activation_port import (
         ActivationPort,
     )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        BotConfigKindRegistry,
+    )
     from agentclaw.community.core.ports.identity_file_port import (
         IdentityFilePort,
     )
@@ -388,6 +392,8 @@ def build_materialisers(
     resource_rows: Callable[[str], ResourceRowsPort],
     cli_tool_service: CliToolService,
     shared_skills: SharedSkillPort,
+    file_sync: BotFileSyncPort | None = None,
+    bot_config: "BotConfigKindRegistry | None" = None,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services::
 
@@ -397,10 +403,11 @@ def build_materialisers(
             Category.IDENTITY:       IdentityMaterialiser(...),
             Category.SKILLS:         SkillsMaterialiser(...),
             Category.RESOURCES:      ResourcesMaterialiser(...),
+            Section.BOT_FILE_SYNC:   BotFileSyncMaterialiser(...),
             Category.CLI_TOOLS:      CliToolsMaterialiser(...),
         }
 
-    Six keys, and ``Category.ENGINE_CONFIG`` deliberately absent: a
+    Seven keys, and ``Category.ENGINE_CONFIG`` deliberately absent: a
     document declaring it takes the orchestrator's no-materialiser path, which
     is an expected state rather than a gap.
 
@@ -424,6 +431,9 @@ def build_materialisers(
     from agentclaw.community.core.apply_engine.materialisers.cli_tools import (
         CliToolsMaterialiser,
     )
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync import (
+        BotFileSyncMaterialiser,
+    )
     from agentclaw.community.core.apply_engine.materialisers.identity import (
         IdentityMaterialiser,
     )
@@ -440,7 +450,7 @@ def build_materialisers(
         SkillsMaterialiser,
     )
 
-    materialisers: tuple[Materialiser, ...] = (
+    materialisers: list[Materialiser] = [
         ScriptMaterialiser(script_service),
         McpMaterialiser(
             activation_service,
@@ -459,7 +469,26 @@ def build_materialisers(
         ),
         ResourcesMaterialiser(resource_service, content, resource_rows),
         CliToolsMaterialiser(cli_tool_service),
-    )
+    ]
+    # BOT_FILE_SYNC is registered only when a real (or noop) port is wired.
+    # ``None`` — what an older deployment or test rig passes when it has no
+    # bot-copy concern at all — leaves the construct unregistered, the same
+    # expected-no-materialiser state ``ENGINE_CONFIG`` keeps: a bot that
+    # declares no ``bot_file_sync`` never reaches it.
+    if file_sync is not None:
+        materialisers.append(BotFileSyncMaterialiser(file_sync))
+    # BOT_CONFIG is registered only when the composition root bound a kind
+    # registry — ``None`` (an older deployment or a test rig that exercises no
+    # bot copy) leaves the construct unregistered, the same
+    # expected-no-materialiser state ``ENGINE_CONFIG`` keeps: a bot that
+    # declares no ``bot_config`` never reaches it, and one that does gets the
+    # orchestrator's readable no-materialiser refusal rather than an
+    # ``ImportError`` at apply time.
+    if bot_config is not None:
+        from agentclaw.community.core.apply_engine.materialisers.bot_config import (
+            BotConfigMaterialiser,
+        )
+        materialisers.append(BotConfigMaterialiser(bot_config))
     return {m.construct: m for m in materialisers}
 
 
