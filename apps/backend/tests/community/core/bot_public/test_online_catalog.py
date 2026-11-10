@@ -23,10 +23,10 @@ def _catalog(rows):
 
     def join(pairs, **kwargs):
         matching = [row.copy() for row in rows if (row["bot_id"], row["owner_id"]) in pairs]
-        return len(matching), matching
+        return matching
 
     metadata.search_public_bot_metadata.side_effect = search
-    repository.list_bots_by_owner_bot_pairs.side_effect = join
+    repository.list_catalog_bots_by_owner_bot_pairs.side_effect = join
     return _make_service(bot_repository=repository, catalog_metadata_service=metadata), metadata, repository
 
 
@@ -63,9 +63,9 @@ def test_filtering_fills_pages_and_counts_across_bounded_bcs_batches(page):
     assert result["total"] == len(eligible)
     assert [row["bot_id"] for row in result["items"]] == eligible[(page - 1) * 24:page * 24]
     assert metadata.search_public_bot_metadata.call_count == 3
-    assert repository.list_bots_by_owner_bot_pairs.call_count == 3
+    assert repository.list_catalog_bots_by_owner_bot_pairs.call_count == 3
     assert all(call.kwargs["page_size"] == 100 for call in metadata.search_public_bot_metadata.call_args_list)
-    assert all(len(call.args[0]) <= 100 for call in repository.list_bots_by_owner_bot_pairs.call_args_list)
+    assert all(len(call.args[0]) <= 100 for call in repository.list_catalog_bots_by_owner_bot_pairs.call_args_list)
 
 
 def test_same_bot_id_under_other_owner_cannot_supply_online_availability():
