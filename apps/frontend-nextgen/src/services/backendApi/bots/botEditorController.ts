@@ -253,21 +253,21 @@ export const botEditorController = {
         page_size: pageSize,
       },
     ),
-  createSkillCenterReferences: (botId: string, setId: string, skillCodes: string[]) =>
+  createSkillCenterReferences: (botId: string, setId: string, skillCodes: string[], ownerId?: string) =>
     backendRequest<BackendApiEnvelope<{ request_id: string; reference_ids: string[] }>>(
       path(botId, `skill-sets/${setId}/skill-center-references`),
       {
         method: 'POST',
-        params: userScopedParams(),
+        params: { ...userScopedParams(), owner_id: ownerId },
         data: { skill_codes: skillCodes },
         headers: { 'Idempotency-Key': globalThis.crypto?.randomUUID?.() ?? `${botId}-${setId}-${Date.now()}` },
       },
     ),
-  listSkillCenterReferences: (botId: string, setId: string, requestId: string) =>
+  listSkillCenterReferences: (botId: string, setId: string, requestId: string, ownerId?: string) =>
     request<BackendApiPage<SkillCenterReferenceDto>>(
       path(botId, `skill-sets/${setId}/skill-center-references`),
       'GET',
-      { request_id: requestId, page: 1, page_size: 20 },
+      { request_id: requestId, page: 1, page_size: 20, owner_id: ownerId },
     ),
   setMcpActive: (botId: string, serverCode: string, active: boolean) =>
     request<BotMcpDto>(
@@ -277,32 +277,32 @@ export const botEditorController = {
   listSkillSets: (botId: string) => request<SkillSetDto[]>(path(botId, 'skill-sets')),
   listSkillSetResources: (botId: string, ownerId?: string) =>
     request<SkillSetResourceDto[]>(path(botId, 'skill-sets/resources'), 'GET', { owner_id: ownerId }),
-  createSkillSet: (botId: string, body: { name: string; description?: string }) =>
+  createSkillSet: (botId: string, body: { name: string; description?: string }, ownerId?: string) =>
     backendRequest<BackendApiEnvelope<SkillSetDto>>(path(botId, 'skill-sets'), {
       method: 'POST',
-      params: userScopedParams(),
+      params: { ...userScopedParams(), owner_id: ownerId },
       data: body,
       headers: { 'Idempotency-Key': `${botId}-${Date.now()}-${Math.random().toString(36).slice(2)}` },
     }),
-  updateSkillSet: (botId: string, setId: string, body: { name?: string; description?: string }) =>
-    request<SkillSetDto>(path(botId, `skill-sets/${setId}`), 'PUT', {}, body),
-  deleteSkillSet: (botId: string, setId: string) => request(path(botId, `skill-sets/${setId}`), 'DELETE'),
-  setSkillSetActive: (botId: string, setId: string, active: boolean) =>
-    request<SkillSetDto>(path(botId, `skill-sets/${setId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
+  updateSkillSet: (botId: string, setId: string, body: { name?: string; description?: string }, ownerId?: string) =>
+    request<SkillSetDto>(path(botId, `skill-sets/${setId}`), 'PUT', { owner_id: ownerId }, body),
+  deleteSkillSet: (botId: string, setId: string, ownerId?: string) => request(path(botId, `skill-sets/${setId}`), 'DELETE', { owner_id: ownerId }),
+  setSkillSetActive: (botId: string, setId: string, active: boolean, ownerId?: string) =>
+    request<SkillSetDto>(path(botId, `skill-sets/${setId}/${active ? 'activate' : 'deactivate'}`), 'POST', { owner_id: ownerId }),
   listSkillSetSkills: (botId: string, setId: string, ownerId?: string) =>
     request<Array<{ skill_id: string; name: string; description?: string }>>(
       path(botId, `skill-sets/${setId}/skills`),
       'GET',
       { owner_id: ownerId },
     ),
-  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
-    request(path(botId, `skill-sets/${setId}/skills/${skillId}`), active ? 'PUT' : 'DELETE'),
+  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skill-sets/${setId}/skills/${skillId}`), active ? 'PUT' : 'DELETE', { owner_id: ownerId }),
   listSkillSetMcps: (botId: string, setId: string) =>
     request<Array<{ server_code: string; name: string; description?: string }>>(
       path(botId, `skill-sets/${setId}/mcps`),
     ),
-  setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean) =>
-    request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE'),
+  setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE', { owner_id: ownerId }),
   listResources: (botId: string, directory = '', ownerId?: string) =>
     request<BackendApiPage<ResourceDto>>(path(botId, 'resources'), 'GET', {
       path: directory,
