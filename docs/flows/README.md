@@ -9,3 +9,5 @@ Record cross-app participants, triggers, calls, state transitions, failure branc
 Do not copy app-local internals or incident transcripts.
 
 Use the [repository knowledge standard](../agents/knowledge-standard.md) and link existing authoritative sources.
+
+Current entry: [Backend runtime targeting](backend-runtime-targeting.md).

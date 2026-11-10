@@ -9,3 +9,5 @@ Record symptom-led investigation paths, competing hypotheses, distinguishing evi
 Do not store raw production data, credentials or assumed root causes.
 
 Use the [repository knowledge standard](../../../../docs/agents/knowledge-standard.md) and link existing authoritative sources.
+
+Current entry: [Runtime target diagnostics](runtime-targeting.md).
