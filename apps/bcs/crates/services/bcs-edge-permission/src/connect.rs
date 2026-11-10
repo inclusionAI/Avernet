@@ -1213,6 +1213,9 @@ impl DbConnectService {
                 created_by: caller.to_string(),
                 decided_by: None,
                 decided_at: None,
+                // DB-managed timestamps; the store reads back gmt_* values.
+                created_at: 0,
+                updated_at: 0,
             })
             .await?;
         ids.push(fwd_request_id);
@@ -1236,6 +1239,8 @@ impl DbConnectService {
                     created_by: caller.to_string(),
                     decided_by: None,
                     decided_at: None,
+                    created_at: 0,
+                    updated_at: 0,
                 })
                 .await?;
             ids.push(rev_request_id);
@@ -1406,6 +1411,9 @@ impl DbConnectService {
                 decided_by: Some(decider.to_string()),
                 // decided_at is DB-managed (CURRENT_TIMESTAMP on an approved insert).
                 decided_at: None,
+                // created_at/updated_at are DB-managed too; placeholders only.
+                created_at: 0,
+                updated_at: 0,
             })
             .await?;
         request_ids.push(fwd_request_id);
@@ -1432,6 +1440,8 @@ impl DbConnectService {
                     created_by: caller.to_string(),
                     decided_by: Some(decider.to_string()),
                     decided_at: None,
+                    created_at: 0,
+                    updated_at: 0,
                 })
                 .await?;
             request_ids.push(rev_request_id);

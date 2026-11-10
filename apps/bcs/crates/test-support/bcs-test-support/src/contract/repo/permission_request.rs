@@ -33,6 +33,9 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         created_by: "human_1".into(),
         decided_by: None,
         decided_at: None,
+        // DB-managed on insert; conformance only reads the DB-projected values.
+        created_at: 0,
+        updated_at: 0,
     };
     repo.insert(req).await.expect("insert request");
 

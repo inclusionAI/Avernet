@@ -727,32 +727,32 @@ impl DbPermissionRequestStore {
     const SELECT_REQUEST_SQL: &'static str =
         "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                decided_at \
+                decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE request_id = ? AND env = ? LIMIT 1";
 
     const LIST_INBOX_ALL_SQL: &'static str =
         "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                decided_at \
+                decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE to_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_INBOX_STATUS_SQL: &'static str =
         "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                decided_at \
+                decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE to_id = ? AND env = ? AND status = ? \
          ORDER BY gmt_modified DESC";
 
     const LIST_SENT_ALL_SQL: &'static str =
         "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                decided_at \
+                decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE from_id = ? AND env = ? ORDER BY gmt_modified DESC";
 
     const LIST_SENT_STATUS_SQL: &'static str =
         "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
                 requested_rules, message, status, decision_reason, created_by, decided_by, \
-                decided_at \
+                decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
          ORDER BY gmt_modified DESC";
 }
@@ -775,6 +775,10 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
             created_by,
             decided_by,
             decided_at: _,
+            // DB-managed timestamps: gmt_create/gmt_modified defaults apply on
+            // insert, so caller-supplied values are ignored here.
+            created_at: _,
+            updated_at: _,
         } = request;
         self
             .execute_result(
@@ -1106,6 +1110,8 @@ fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
         created_by: required_string(row, "created_by")?,
         decided_by: optional_string(row, "decided_by")?,
         decided_at,
+        created_at: required_timestamp_epoch_ms(row, "gmt_create")?,
+        updated_at: required_timestamp_epoch_ms(row, "gmt_modified")?,
     })
 }
 
@@ -1283,6 +1289,21 @@ fn optional_timestamp_text(row: &DbRow, column: &'static str) -> ServiceResult<O
             .map_err(|err| service_db_error(column, DbError::Conversion(format!("column '{}' is not valid UTF-8: {}", column, err)))),
         Some(other) => Err(service_db_error(column, DbError::Conversion(format!("column '{}' is not a timestamp string: {:?}", column, other)))),
     }
+}
+
+/// Parse a required, DB-managed timestamp column to epoch milliseconds.
+///
+/// `gmt_create`/`gmt_modified` are NOT NULL in the schema; a missing or
+/// unparseable value is an internal data error, not an absent optional field.
+fn required_timestamp_epoch_ms(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
+    let text = optional_timestamp_text(row, column)?
+        .ok_or_else(|| ServiceError::InternalError(format!("missing edge_permission column {}", column)))?;
+    parse_timestamp_epoch_ms(&text).ok_or_else(|| {
+        ServiceError::InternalError(format!(
+            "invalid edge_permission timestamp {}: {}",
+            column, text
+        ))
+    })
 }
 
 fn required_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
@@ -1560,10 +1581,14 @@ mod tests {
             "decided_at".to_string(),
             DbValue::from(b"2026-09-02 13:41:55".to_vec()),
         );
+        columns.insert("gmt_create".to_string(), DbValue::from("2026-09-02 13:41:55"));
+        columns.insert("gmt_modified".to_string(), DbValue::from("2026-09-02 13:41:55"));
         let row = DbRow::new(columns);
 
         let request = row_to_permission_request(&row).expect("permission request row");
         assert_eq!(request.decided_at, Some(1_788_356_515_000));
+        assert_eq!(request.created_at, 1_788_356_515_000);
+        assert_eq!(request.updated_at, 1_788_356_515_000);
     }
 
     async fn sqlite_store() -> DbEdgeGrantStore {
@@ -2054,6 +2079,9 @@ mod tests {
             created_by: "human_a".to_string(),
             decided_by: None,
             decided_at: None,
+            // DB-managed on insert; the store reads back gmt_create/gmt_modified.
+            created_at: 0,
+            updated_at: 0,
         }
     }
 
@@ -2102,6 +2130,45 @@ mod tests {
             approved[0].decided_at.is_some(),
             "decided_at set to decision time"
         );
+    }
+
+    #[tokio::test]
+    async fn permission_request_roundtrip_carries_created_and_updated_at() {
+        let store = request_store().await;
+        let mut req = sample_request("dev");
+        req.request_id = format!("ts-{}", next_test_request_id());
+        let request_id = req.request_id.clone();
+        store.insert(req).await.expect("insert");
+
+        let got = store.get(&request_id, "dev").await.expect("found");
+        assert!(got.created_at > 0, "created_at comes from DB gmt_create");
+        assert!(got.updated_at > 0, "updated_at comes from DB gmt_modified");
+        // DB CURRENT_TIMESTAMP has second resolution, so creation and first
+        // modification may land in the same second; creation never exceeds it.
+        assert!(
+            got.created_at <= got.updated_at,
+            "created_at {} must not exceed updated_at {}",
+            got.created_at,
+            got.updated_at
+        );
+        let first_updated_at = got.updated_at;
+
+        store
+            .decide(&request_id, "dev", RequestStatus::Approved, "decider", None)
+            .await
+            .expect("decide");
+        let decided = store
+            .get(&request_id, "dev")
+            .await
+            .expect("found after decide");
+        assert_eq!(decided.status, RequestStatus::Approved);
+        assert!(
+            decided.updated_at >= first_updated_at,
+            "updated_at {} must not regress from {}",
+            decided.updated_at,
+            first_updated_at
+        );
+        assert!(decided.decided_at.is_some(), "decide sets decided_at");
     }
 
     #[tokio::test]
