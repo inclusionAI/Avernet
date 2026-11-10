@@ -169,7 +169,8 @@ def test_terminal_outgoing_edge_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (reopen,),
     )
-    with pytest.raises(ContextCollabValidationError):
+    with pytest.raises(ContextCollabValidationError,
+                       match="must not have outgoing edges"):
         validate_definition(bad)
 
 
