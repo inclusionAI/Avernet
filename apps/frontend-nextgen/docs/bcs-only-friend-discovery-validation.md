@@ -16,6 +16,8 @@
   `/openapi/v1/collaboration/friend-connections/**` 与内部
   `GET /api/v1/collaboration/bots/{actor}/candidates/search`。
 - BCS-only 形态不部署 Backend/Gateway/Admin/Task Engine；full 形态按现网配置部署。
+  前端 bcs-only 代理将整棵 `/openapi/v1/collaboration/` 子树（含 WS Upgrade 头）与内部
+  candidates/search 转发至 BCS；未匹配 `/api`、`/openapi` 返回 404（详见 `docs/deployment.md`）。
 
 ## 环境准备
 

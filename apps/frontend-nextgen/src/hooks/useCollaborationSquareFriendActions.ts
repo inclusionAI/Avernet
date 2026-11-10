@@ -11,10 +11,8 @@ import {
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
 import { CollaborationSquareError, collaborationSquareBotService } from '@/services/collaborationSquare';
-import {
-  getCollaborationBotConversationUrl,
-  getCollaborationSquareErrorMessage,
-} from '@/utils/collaborationSquare';
+import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
+import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import {
@@ -83,7 +81,10 @@ export function useCollaborationSquareFriendActions({
         if (!isCurrent()) return;
         if (error instanceof CollaborationSquareError && error.code === 'target_invalid') {
           handleTargetInvalid('bot', invalidTargetId);
-        } else notifyError(getCollaborationSquareErrorMessage(error));
+        } else if (error instanceof CollaborationSquareError && error.code === 'duplicate_action') {
+          // A→B→A 后旧代次申请仍在途：service 的 inFlight 去重不是真实失败，提示仍在处理即可。
+          notifyError('上一次提交仍在处理中，请稍候');
+        } else safeReportError(error);
       } finally {
         if (isCurrent()) {
           scopedBusyOwnersRef.current.delete(busyKey);

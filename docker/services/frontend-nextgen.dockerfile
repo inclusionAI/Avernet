@@ -38,8 +38,14 @@ FROM nginx:1.27-alpine
 # distro's full-featured package.
 RUN apk add --no-cache iputils
 
+# full 模板保持 envsubst 输入位；BCS-only profile 模板放到不同的只读配置目录，
+# 由 docker-entrypoint 按 FRONTEND_API_PROFILE 选择性拷入（与
+# apps/frontend-nextgen/Dockerfile 的 COPY 三件套保持一致）。
 COPY apps/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
-COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
+COPY apps/frontend-nextgen/deploy/nginx/default.bcs-only.conf.template /etc/nginx/template-profiles/default.bcs-only.conf.template
+# 校验/换面脚本必须以 10-* 前缀先于官方 20-envsubst-on-templates.sh 运行，
+# 否则 bcs-only 无法在标准变量替换前把 profile 模板放到 /etc/nginx/templates。
+COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/10-teamclaw-api-profile.sh
 COPY --from=build /repo/apps/frontend-nextgen/dist /usr/share/nginx/html
 
 EXPOSE 8080

@@ -100,8 +100,9 @@ async function flush(times = 6) {
 
 function renderPanel({
   actor = ownerBot,
-}: { actor?: { type: 'human' | 'bot'; id: string } | null } = {}) {
-  return render(<FriendRequestsPanel resource="bot" actor={actor} userId="900003" />);
+  defaultOpen,
+}: { actor?: { type: 'human' | 'bot'; id: string } | null; defaultOpen?: boolean } = {}) {
+  return render(<FriendRequestsPanel resource="bot" actor={actor} userId="900003" defaultOpen={defaultOpen} />);
 }
 
 beforeEach(() => {
@@ -150,6 +151,24 @@ describe('FriendRequestsPanel 入口与列表', () => {
     expect(screen_.container.firstChild).toBeInTheDocument();
     expect(mockedCreateBotSession).not.toHaveBeenCalled();
     screen_.unmount();
+  });
+
+  it('defaultOpen 只决定初始展开态：默认展开，收起后仍可由用户重新打开', async () => {
+    const { unmount } = renderPanel({ actor: ownerBot, defaultOpen: true });
+    expect(screen.getByText('收到的申请')).toBeInTheDocument();
+    expect(mockedList).toHaveBeenCalledWith(
+      expect.objectContaining({ actor_type: 'bot', actor_id: 'bot-7', direction: 'received', status: 'pending' }),
+      expect.anything(),
+    );
+    await resolveDirectionRead('received', pageEnvelope([inboxRequest]));
+    await resolveDirectionRead('sent', pageEnvelope([outboxRequest]));
+
+    fireEvent.click(screen.getByRole('button', { name: '收起好友申请' }));
+    expect(screen.queryByText('收到的申请')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '好友申请' }));
+    expect(screen.getByText('收到的申请')).toBeInTheDocument();
+    unmount();
   });
 
   it('收到的申请可通过／拒绝：调用现有 BCS Controller，成功后刷新申请列表', async () => {
@@ -296,7 +315,7 @@ describe('友审批入口文案（BCS-only / 全栈）', () => {
   it('Backend 关闭时好友审批说明指向发现页申请处理入口', () => {
     expect(friendApprovalEntry(false)).toEqual({
       approvalEntryLabel: '发现 → 公开 Bot / 好友申请',
-      approvalEntryPath: '/collaboration-square/bots',
+      approvalEntryPath: '/collaboration-square/bots?panel=friend-requests',
     });
   });
 

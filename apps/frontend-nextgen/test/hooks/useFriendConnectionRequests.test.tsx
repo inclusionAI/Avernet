@@ -8,6 +8,7 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { useFriendConnectionRequests } from '@/hooks/useFriendConnectionRequests';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type {
   FriendConnectionRequestDto,
   ListFriendConnectionRequestsParams,
@@ -71,6 +72,12 @@ function enqueueListRead(params: ListFriendConnectionRequestsParams, signal?: Ab
   return new Promise<unknown>((resolve, reject) => {
     pendingReads.push({ params, signal, resolve, reject });
   });
+}
+
+function countReads(direction: 'sent' | 'received') {
+  return mockedList.mock.calls.filter(
+    ([params]) => (params as ListFriendConnectionRequestsParams).direction === direction,
+  ).length;
 }
 
 function resolveRead(direction: 'sent' | 'received', envelope: unknown) {
@@ -228,6 +235,21 @@ describe('useFriendConnectionRequests 读取编排', () => {
     expect(result.current.received.items.map((item) => item.requestId)).toEqual(['request-1']);
     unmount();
   });
+
+  it('当前代次读取收到 AbortError 时 loading 收敛为 false，且不进入错误态', async () => {
+    const { result, unmount } = renderRequestsHook({ actor: ownerBot });
+    await flush();
+    expect(result.current.received.loading).toBe(true);
+
+    const abortError = Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
+    await resolveRead('received', abortError);
+    await resolveRead('sent', pageEnvelope([]));
+
+    expect(result.current.received.loading).toBe(false);
+    expect(result.current.received.error).toBeNull();
+    expect(result.current.received.items).toEqual([]);
+    unmount();
+  });
 });
 
 describe('useFriendConnectionRequests 写操作', () => {
@@ -316,7 +338,7 @@ describe('useFriendConnectionRequests 写操作', () => {
     unmount();
   });
 
-  it('通过失败只报真实错误，不提示成功、不刷新、不清掉申请项', async () => {
+  it('通过失败只报真实错误，不提示成功，并刷新两个方向的列表', async () => {
     let failAccept!: (reason?: unknown) => void;
     mockedAccept.mockImplementation(
       () =>
@@ -328,9 +350,8 @@ describe('useFriendConnectionRequests 写操作', () => {
     await flush();
     await resolveRead('received', pageEnvelope([inboxRequest]));
     await resolveRead('sent', pageEnvelope([]));
-    const receivedReadsBefore = mockedList.mock.calls.filter(
-      ([params]) => (params as ListFriendConnectionRequestsParams).direction === 'received',
-    ).length;
+    const receivedReadsBefore = countReads('received');
+    const sentReadsBefore = countReads('sent');
 
     act(() => {
       result.current.accept('request-1');
@@ -341,13 +362,131 @@ describe('useFriendConnectionRequests 写操作', () => {
     });
     await flush();
 
-    expect(mockedNotifyError).toHaveBeenCalledWith('目标 Bot 已撤回申请');
+    expect(mockedNotifyError).toHaveBeenCalledWith('目标 Bot 已撤回申请', { title: undefined });
     expect(mockedNotifySuccess).not.toHaveBeenCalled();
     expect(onRelationshipsChanged).not.toHaveBeenCalled();
-    expect(
-      mockedList.mock.calls.filter(([params]) => (params as ListFriendConnectionRequestsParams).direction === 'received'),
-    ).toHaveLength(receivedReadsBefore);
-    expect(result.current.received.items.map((item) => item.requestId)).toEqual(['request-1']);
+    // 失败同样以服务端为准刷新两向列表，避免已失效的申请永久停留「待处理」。
+    expect(countReads('received')).toBe(receivedReadsBefore + 1);
+    expect(countReads('sent')).toBe(sentReadsBefore + 1);
+    await resolveRead('received', pageEnvelope([]));
+    await resolveRead('sent', pageEnvelope([]));
+    expect(result.current.received.items).toEqual([]);
+    expect(result.current.busyRequestIds).toEqual([]);
+    unmount();
+  });
+
+  it('业务码失败时保留后端 message，不替换为「无法识别的业务码」', async () => {
+    mockedAccept.mockResolvedValue({ code: 409, message: '该申请已被其他人处理', data: null });
+    const { result, unmount } = renderRequestsHook({ actor: ownerBot });
+    await flush();
+    await resolveRead('received', pageEnvelope([inboxRequest]));
+    await resolveRead('sent', pageEnvelope([]));
+    const receivedReadsBefore = countReads('received');
+    const sentReadsBefore = countReads('sent');
+
+    act(() => {
+      result.current.accept('request-1');
+    });
+    await flush();
+
+    expect(mockedNotifyError).toHaveBeenCalledWith('该申请已被其他人处理', { title: undefined });
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(countReads('received')).toBe(receivedReadsBefore + 1);
+    expect(countReads('sent')).toBe(sentReadsBefore + 1);
+    await resolveRead('received', pageEnvelope([]));
+    await resolveRead('sent', pageEnvelope([]));
+    unmount();
+  });
+
+  it.each([
+    [409, '该申请已被处理或已失效'],
+    [404, '该申请已被撤回或不存在'],
+  ] as const)('写操作 HTTP %d 映射为友好文案并触发两方向刷新', async (status, friendlyMessage) => {
+    const toastKey = `notify:friend-request-write-${status}`;
+    mockedAccept.mockRejectedValue(
+      new BackendRequestError('后端原始错误', {
+        status,
+        apiPath: '/openapi/v1/collaboration/friend-connections/requests/request-1/accept',
+        toastKey,
+        alreadyHandled: true,
+      }),
+    );
+    const { result, unmount } = renderRequestsHook({ actor: ownerBot });
+    await flush();
+    await resolveRead('received', pageEnvelope([inboxRequest]));
+    await resolveRead('sent', pageEnvelope([outboxRequest]));
+    const receivedReadsBefore = countReads('received');
+    const sentReadsBefore = countReads('sent');
+
+    act(() => {
+      result.current.accept('request-1');
+    });
+    await flush();
+
+    // 用协议层同一 toastKey 覆盖默认提示，避免映射文案之外再叠一条原始错误。
+    expect(mockedNotifyError).toHaveBeenCalledWith(friendlyMessage, { id: toastKey, title: undefined });
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(countReads('received')).toBe(receivedReadsBefore + 1);
+    expect(countReads('sent')).toBe(sentReadsBefore + 1);
+
+    await resolveRead('received', pageEnvelope([]));
+    await resolveRead('sent', pageEnvelope([]));
+    expect(result.current.received.items).toEqual([]);
+    expect(result.current.busyRequestIds).toEqual([]);
+    unmount();
+  });
+
+  it('协议层已提示的写失败不再重复 toast，但仍刷新两向列表', async () => {
+    mockedAccept.mockRejectedValue(
+      new BackendRequestError('后端失败', {
+        status: 500,
+        apiPath: '/openapi/v1/collaboration/friend-connections/requests/request-1/accept',
+        toastKey: 'notify:friend-request-write-500',
+        alreadyHandled: true,
+      }),
+    );
+    const { result, unmount } = renderRequestsHook({ actor: ownerBot });
+    await flush();
+    await resolveRead('received', pageEnvelope([inboxRequest]));
+    await resolveRead('sent', pageEnvelope([]));
+    const receivedReadsBefore = countReads('received');
+    const sentReadsBefore = countReads('sent');
+
+    act(() => {
+      result.current.accept('request-1');
+    });
+    await flush();
+
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(countReads('received')).toBe(receivedReadsBefore + 1);
+    expect(countReads('sent')).toBe(sentReadsBefore + 1);
+    await resolveRead('received', pageEnvelope([]));
+    await resolveRead('sent', pageEnvelope([]));
+    unmount();
+  });
+
+  it('20000 但返回记录仍为 pending 时不报成功，提示操作未生效并刷新', async () => {
+    mockedAccept.mockResolvedValue(writeEnvelope({ ...inboxRequest, status: 'pending' }));
+    const { result, unmount } = renderRequestsHook({ actor: ownerBot });
+    await flush();
+    await resolveRead('received', pageEnvelope([inboxRequest]));
+    await resolveRead('sent', pageEnvelope([]));
+    const receivedReadsBefore = countReads('received');
+    const sentReadsBefore = countReads('sent');
+
+    act(() => {
+      result.current.accept('request-1');
+    });
+    await flush();
+
+    expect(mockedNotifyError).toHaveBeenCalledWith('操作未生效，列表已刷新', { title: undefined });
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(onRelationshipsChanged).not.toHaveBeenCalled();
+    expect(countReads('received')).toBe(receivedReadsBefore + 1);
+    expect(countReads('sent')).toBe(sentReadsBefore + 1);
+    await resolveRead('received', pageEnvelope([inboxRequest]));
+    await resolveRead('sent', pageEnvelope([]));
     expect(result.current.busyRequestIds).toEqual([]);
     unmount();
   });
@@ -400,11 +539,11 @@ describe('useFriendConnectionRequests 角色代次隔离', () => {
   });
 
   it('切换角色后旧拒绝的迟到失败不弹过期错误', async () => {
-    let failAccept!: (reason?: unknown) => void;
-    mockedAccept.mockImplementation(
+    let failReject!: (reason?: unknown) => void;
+    mockedReject.mockImplementation(
       () =>
         new Promise((_resolve, reject) => {
-          failAccept = reject;
+          failReject = reject;
         }),
     );
     const { result, rerender, unmount } = renderRequestsHook({ actor: ownerBot });
@@ -412,15 +551,16 @@ describe('useFriendConnectionRequests 角色代次隔离', () => {
     await resolveRead('received', pageEnvelope([inboxRequest]));
     await resolveRead('sent', pageEnvelope([]));
     act(() => {
-      result.current.accept('request-1');
+      result.current.reject('request-1');
     });
+    expect(mockedReject).toHaveBeenCalledWith('request-1', expect.anything());
 
     rerender({ actor: otherBot, enabled: true });
     await resolveRead('received', pageEnvelope([]));
     await resolveRead('sent', pageEnvelope([]));
 
     await act(async () => {
-      failAccept(new Error('过期失败'));
+      failReject(new Error('过期失败'));
       await Promise.resolve();
     });
     await flush();

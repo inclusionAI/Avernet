@@ -1,4 +1,5 @@
 import { isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import {
   acceptFriendConnectionRequest,
   cancelFriendConnectionRequest,
@@ -25,6 +26,24 @@ export interface FriendConnectionRequestRecord {
 }
 
 export type FriendConnectionOperation = 'accept' | 'reject' | 'cancel';
+
+/**
+ * 写失败按 BCS 状态码映射友好文案；沿用协议层 toastKey，让提示以同 id 覆盖默认投递，
+ * 而不是在原始错误之上再叠一条。放在 Service 层：Hook 不得直接依赖 httpClient。
+ */
+export function mapFriendRequestWriteError(error: unknown): unknown {
+  if (!(error instanceof BackendRequestError)) return error;
+  const message =
+    error.status === 409
+      ? '该申请已被处理或已失效'
+      : error.status === 404
+        ? '该申请已被撤回或不存在'
+        : undefined;
+  if (!message) return error;
+  const mapped = new Error(message) as Error & { toastKey?: string };
+  mapped.toastKey = error.toastKey;
+  return mapped;
+}
 
 const isFriendConnectionActor = (actor: unknown): actor is FriendConnectionActor => {
   if (typeof actor !== 'object' || actor === null) return false;
@@ -58,8 +77,11 @@ function mapFriendConnectionRequestDto(dto: FriendConnectionRequestDto): FriendC
 function assertSuccessEnvelope(response: unknown, failureMessage: string): void {
   if (isAceLoginResponse(response))
     throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
-  const code = (response as { code?: unknown } | null | undefined)?.code;
-  if (code !== 20000) throw new CollaborationSquareError('protocol_error', failureMessage);
+  const envelope = response as { code?: unknown; message?: unknown } | null | undefined;
+  if (envelope?.code === 20000) return;
+  // HTTP 200 + 非 20000 业务码：优先保留后端 message（如 conflict 的具体原因），不吞成通用文案。
+  const backendMessage = typeof envelope?.message === 'string' ? envelope.message.trim() : '';
+  throw new CollaborationSquareError('protocol_error', backendMessage || failureMessage);
 }
 
 /**
@@ -88,7 +110,13 @@ export async function listPendingFriendConnectionRequests(
   if (!Array.isArray(items)) throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的数据');
   const mapped = (items as FriendConnectionRequestDto[]).map(mapFriendConnectionRequestDto);
   const total = (response as { data?: { total?: unknown } }).data?.total;
-  return { items: mapped, total: typeof total === 'number' ? total : mapped.length };
+  if (typeof total === 'number') return { items: mapped, total };
+  // envelope 缺 total 时按页推算：满页视为可能还有下一页，避免恰好 20 条时第 21 条不可达。
+  const estimatedTotal =
+    (page - 1) * FRIEND_CONNECTION_REQUESTS_PAGE_SIZE +
+    mapped.length +
+    (mapped.length === FRIEND_CONNECTION_REQUESTS_PAGE_SIZE ? 1 : 0);
+  return { items: mapped, total: estimatedTotal };
 }
 
 /** 好友申请写操作（accept/reject/cancel）：返回处理后的申请记录；撤销等失败按错误上抛。 */

@@ -82,7 +82,12 @@ interface EntrypointResult {
 /** 透传干净环境：剥离部署变量，避免宿主环境污染 profile 断言。 */
 function runEntrypoint(scriptPath: string, env: Record<string, string>): EntrypointResult {
   const inherited = { ...process.env };
-  for (const name of [...FULL_PROFILE_REQUIRED_VARS, 'BCS_UPSTREAM', 'FRONTEND_API_PROFILE']) {
+  for (const name of [
+    ...FULL_PROFILE_REQUIRED_VARS,
+    'BCS_UPSTREAM',
+    'FRONTEND_API_PROFILE',
+    'PUBLIC_BOT_BACKEND_ENABLED',
+  ]) {
     delete inherited[name];
   }
   try {
@@ -151,8 +156,12 @@ it('bcs-only profile only requires BCS_UPSTREAM and swaps in the BCS-only templa
       // Backend/Gateway/Admin/Task 等变量一概缺失，不得阻塞启动。
     });
     expect(result).toEqual({ failed: false, stderr: '' });
-    // 缺省 envsubst 模板位已换成 bcs-only profile 模板（cp 发生在官方模板替换之前）。
-    expect(readFileSync(sandbox.activeTemplatePath, 'utf8')).toBe(readFileSync(bcsOnlyTemplatePath, 'utf8'));
+    // 缺省 envsubst 模板位已换成 bcs-only profile 模板（cp 发生在官方模板替换之前），
+    // 且 BCS_UPSTREAM 归一值已写进 proxy_pass 本体。
+    const rendered = readFileSync(sandbox.activeTemplatePath, 'utf8');
+    expect(rendered).toContain('# BCS-only 同源代理 profile');
+    expect(rendered).not.toContain('BCS_AUTH_UPSTREAM');
+    expect(rendered).toContain('proxy_pass http://127.0.0.1:21000;');
     const runtimeConfig = readRuntimeConfig(sandbox.runtimeConfigPath);
     // 生成运行时 PUBLIC_BOT_BACKEND_ENABLED:false —— JS 布尔量，绝不能写字符串 'false'。
     expect(runtimeConfig.PUBLIC_BOT_BACKEND_ENABLED).toBe(false);
@@ -171,6 +180,114 @@ it('bcs-only profile without BCS_UPSTREAM refuses to start', () => {
     const result = runEntrypoint(sandbox.scriptPath, { FRONTEND_API_PROFILE: 'bcs-only' });
     expect(result.failed).toBe(true);
     expect(result.stderr).toContain('Missing required deployment variable: BCS_UPSTREAM');
+  } finally {
+    sandbox.cleanup();
+  }
+});
+
+it.each(['http://127.0.0.1:21000/', 'http://127.0.0.1:21000//'])(
+  'normalizes trailing slashes on BCS_UPSTREAM into the rendered nginx template: %s',
+  (upstream) => {
+    const sandbox = createEntrypointSandbox();
+    try {
+      const host = upstream.replace(/\/+$/, '');
+      const result = runEntrypoint(sandbox.scriptPath, {
+        FRONTEND_API_PROFILE: 'bcs-only',
+        BCS_UPSTREAM: upstream,
+      });
+      expect(result).toEqual({ failed: false, stderr: '' });
+
+      // 归一化必须落在最终 nginx 配置：前缀 location 的 proxy_pass 带尾斜杠会替换
+      // 掉匹配路径，反向代理语义被静默改写。
+      const rendered = readFileSync(sandbox.activeTemplatePath, 'utf8');
+      expect(rendered).toContain(`proxy_pass ${host};`);
+      expect(rendered).not.toContain(`proxy_pass ${host}/;`);
+      // 所有 proxy_pass 都拿到归一值，没有残留占位符（官方 envsubst 不会看到归一值）。
+      expect(rendered).not.toContain('${BCS_UPSTREAM};');
+    } finally {
+      sandbox.cleanup();
+    }
+  },
+);
+
+it.each(['http://bcs:21000/api', 'http://bcs:21000/api/', 'https://bcs:21000/openapi'])(
+  'refuses a BCS_UPSTREAM carrying a path part: %s',
+  (upstream) => {
+    const sandbox = createEntrypointSandbox();
+    try {
+      // 带 URI 的 proxy_pass 会改写转发路径；正则 location 下 nginx 甚至拒绝启动。
+      const result = runEntrypoint(sandbox.scriptPath, {
+        FRONTEND_API_PROFILE: 'bcs-only',
+        BCS_UPSTREAM: upstream,
+      });
+      expect(result.failed).toBe(true);
+      expect(result.stderr).toContain('BCS_UPSTREAM must be an origin without a path');
+      expect(result.stderr).toContain(upstream);
+    } finally {
+      sandbox.cleanup();
+    }
+  },
+);
+
+it.each(['bcs:21000', 'ftp://bcs:21000', '//bcs:21000'])(
+  'refuses a non-http(s) BCS_UPSTREAM: %s',
+  (upstream) => {
+    const sandbox = createEntrypointSandbox();
+    try {
+      const result = runEntrypoint(sandbox.scriptPath, {
+        FRONTEND_API_PROFILE: 'bcs-only',
+        BCS_UPSTREAM: upstream,
+      });
+      expect(result.failed).toBe(true);
+      expect(result.stderr).toContain('BCS_UPSTREAM must start with http:// or https://');
+    } finally {
+      sandbox.cleanup();
+    }
+  },
+);
+
+it.each(['true', 'false'] as const)(
+  'lets the full profile override PUBLIC_BOT_BACKEND_ENABLED=%s',
+  (value) => {
+    const sandbox = createEntrypointSandbox();
+    try {
+      const result = runEntrypoint(sandbox.scriptPath, {
+        ...FULL_PROFILE_REQUIRED_ENV,
+        PUBLIC_BOT_BACKEND_ENABLED: value,
+      });
+      expect(result).toEqual({ failed: false, stderr: '' });
+      expect(readRuntimeConfig(sandbox.runtimeConfigPath).PUBLIC_BOT_BACKEND_ENABLED).toBe(value === 'true');
+    } finally {
+      sandbox.cleanup();
+    }
+  },
+);
+
+it('refuses an invalid PUBLIC_BOT_BACKEND_ENABLED in the full profile', () => {
+  const sandbox = createEntrypointSandbox();
+  try {
+    const result = runEntrypoint(sandbox.scriptPath, {
+      ...FULL_PROFILE_REQUIRED_ENV,
+      PUBLIC_BOT_BACKEND_ENABLED: 'yes',
+    });
+    expect(result.failed).toBe(true);
+    expect(result.stderr).toContain('PUBLIC_BOT_BACKEND_ENABLED must be true or false');
+  } finally {
+    sandbox.cleanup();
+  }
+});
+
+it('keeps bcs-only PUBLIC_BOT_BACKEND_ENABLED fixed to false', () => {
+  const sandbox = createEntrypointSandbox();
+  try {
+    const result = runEntrypoint(sandbox.scriptPath, {
+      FRONTEND_API_PROFILE: 'bcs-only',
+      BCS_UPSTREAM: 'http://127.0.0.1:21000',
+      PUBLIC_BOT_BACKEND_ENABLED: 'true',
+    });
+    expect(result).toEqual({ failed: false, stderr: '' });
+    // bcs-only 没有 Backend：外部覆盖不生效，仍必须写 JS 布尔量 false。
+    expect(readRuntimeConfig(sandbox.runtimeConfigPath).PUBLIC_BOT_BACKEND_ENABLED).toBe(false);
   } finally {
     sandbox.cleanup();
   }

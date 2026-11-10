@@ -12,6 +12,8 @@ export interface FriendRequestsPanelProps {
   actor: FriendRequestActor | null;
   /** 登录用户 userId，参与操作代次 scopeKey。 */
   userId?: string;
+  /** 仅决定初始展开态（审批深链直达时使用）；之后开合仍由用户交互控制。 */
+  defaultOpen?: boolean;
   /** 审批／撤销成功后刷新广场卡片关系（由页面层注入，发起前经代次守卫核验）。 */
   onRelationshipsChanged?: () => void;
 }
@@ -135,8 +137,14 @@ function RequestsSection({
  * 列表读取与通过／拒绝／撤销由 {@link useFriendConnectionRequests} 完成，
  * 这里只呈现发出／收到两向分页列表及其操作按钮。
  */
-export function FriendRequestsPanel({ resource, actor, userId, onRelationshipsChanged }: FriendRequestsPanelProps) {
-  const [open, setOpen] = useState(false);
+export function FriendRequestsPanel({
+  resource,
+  actor,
+  userId,
+  defaultOpen = false,
+  onRelationshipsChanged,
+}: FriendRequestsPanelProps) {
+  const [open, setOpen] = useState(defaultOpen);
   const model = useFriendConnectionRequests({ resource, actor, userId, enabled: open, onRelationshipsChanged });
   if (!actor) return null;
   const handleWrite = (action: RequestWriteAction, requestId: string) => {

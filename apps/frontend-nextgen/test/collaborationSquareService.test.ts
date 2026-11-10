@@ -456,6 +456,21 @@ describe('Mock Adapter 任务方法（留作 dev/测试兜底，不再被 wired 
     },
   ];
 
+  it('discoverBots 本地子串过滤返回 name_fallback（不伪装成语义搜索）', async () => {
+    global.fetch = () =>
+      Promise.resolve(
+        jsonResponse([
+          { bot_id: 'bot-1', bot_name: '规划助手', owner_name: 'Owner' },
+          { bot_id: 'bot-2', bot_name: '研究助手', owner_name: 'Owner' },
+        ]),
+      );
+
+    const result = await mockService.discoverBots({ keyword: '规划' });
+
+    expect(result.searchMode).toBe('name_fallback');
+    expect(result.items.map((bot) => bot.id)).toEqual(['bot-1']);
+  });
+
   it('listPublicTasks 经 Mock Adapter 返回过滤后页', async () => {
     global.fetch = () => Promise.resolve(jsonResponse(taskDtos));
 

@@ -62,7 +62,8 @@ export const botFriendApprovalSection = {
  */
 export const bcsOnlyFriendApprovalEntry = {
   approvalEntryLabel: '发现 → 公开 Bot / 好友申请',
-  approvalEntryPath: '/collaboration-square/bots',
+  // panel 参数让发现页把好友申请面板直接展开，审批人无需再手点一次入口。
+  approvalEntryPath: '/collaboration-square/bots?panel=friend-requests',
 } as const;
 
 /** 按 Backend 可选增强开关解析审批处理入口（全栈保持通知中心，BCS-only 指向本入口）。 */

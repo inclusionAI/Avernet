@@ -60,7 +60,7 @@ describe('BCS-only development profile (FRONTEND_API_PROFILE=bcs-only)', () => {
     jest.resetModules();
   });
 
-  test('compiles the backend switch off and routes BCS subtrees ahead of generic wildcard keys', () => {
+  test('compiles the backend switch off and routes the whole BCS collaboration subtree', () => {
     process.env.FRONTEND_API_PROFILE = 'bcs-only';
     const bcsUpstream = 'http://127.0.0.1:22100';
     process.env.BCS_UPSTREAM = bcsUpstream;
@@ -68,15 +68,16 @@ describe('BCS-only development profile (FRONTEND_API_PROFILE=bcs-only)', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const config = require('../../config/config.local').default;
-    const proxy = config.proxy as Record<string, { target: string }>;
+    const proxy = config.proxy as Record<string, { target: string; ws?: boolean }>;
     const keys = Object.keys(proxy);
 
     // 与部署 runtime-config.js 同语义：bcs-only 编译关闭可选 Backend 增强。
     expect(config.define.TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED).toBe(false);
-    // 已定义的 BCS 子树优先代理到 BCS_UPSTREAM。
-    expect(proxy['/openapi/v1/collaboration/bots/mine'].target).toBe(bcsUpstream);
-    expect(proxy['/openapi/v1/collaboration/bots/*/candidates'].target).toBe(bcsUpstream);
-    expect(proxy['/openapi/v1/collaboration/friend-connections'].target).toBe(bcsUpstream);
+    // 与 prod 模板对齐：整棵 /openapi/v1/collaboration 子树去 BCS（含 tasks 等
+    // 该子树下的一切路径），而不是只覆写好友发现用到的三个窄前缀。
+    expect(proxy['/openapi/v1/collaboration'].target).toBe(bcsUpstream);
+    // 同源群聊 WS（messages/ws、group/ws）在 dev 也必须带 ws:true。
+    expect(proxy['/openapi/v1/collaboration'].ws).toBe(true);
     // 内部候选搜索必须先于 /api 通配与 /api/v1/collaboration（umi 按 key 插入顺序匹配）。
     expect(proxy['/api/v1/collaboration/bots/*/candidates/search'].target).toBe(bcsUpstream);
     const searchIndex = keys.indexOf('/api/v1/collaboration/bots/*/candidates/search');
@@ -84,9 +85,10 @@ describe('BCS-only development profile (FRONTEND_API_PROFILE=bcs-only)', () => {
     expect(searchIndex).toBeLessThan(keys.indexOf('/api/v1/collaboration'));
     expect(searchIndex).toBeLessThan(keys.indexOf('/api'));
     // openapi 侧 BCS 子树同样先于通用 /openapi gateway 键。
-    expect(keys.indexOf('/openapi/v1/collaboration/bots/*/candidates')).toBeLessThan(
-      keys.indexOf('/openapi'),
-    );
+    expect(keys.indexOf('/openapi/v1/collaboration')).toBeLessThan(keys.indexOf('/openapi'));
+    // 反向：Admin 面的 bots / bots/spaces 在 dev 也不落到 BCS（与 prod 的 /openapi/ 404 对齐）。
+    expect(proxy['/openapi/v1/bots/spaces'].target).not.toBe(bcsUpstream);
+    expect(proxy['/openapi/v1/bots/work-orders'].target).not.toBe(bcsUpstream);
   });
 
   test('full profile leaves the compile-time switch and proxy map untouched', () => {
@@ -98,6 +100,7 @@ describe('BCS-only development profile (FRONTEND_API_PROFILE=bcs-only)', () => {
     const config = require('../../config/config.local').default;
     const proxy = config.proxy as Record<string, { target: string }>;
 
+    expect(proxy['/openapi/v1/collaboration']).toBeUndefined();
     expect(proxy['/openapi/v1/collaboration/bots/*/candidates']).toBeUndefined();
     expect(proxy['/api/v1/collaboration/bots/*/candidates/search']).toBeUndefined();
     expect(config.define.TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED).toBeUndefined();

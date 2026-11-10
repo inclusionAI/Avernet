@@ -1,12 +1,14 @@
-import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { notifySuccess } from '@/components/ui/notify';
 import type { FriendRequestActor, SquareResource } from '@/domain/collaborationSquare/types';
 import {
   listPendingFriendConnectionRequests,
+  mapFriendRequestWriteError,
   resolveFriendConnectionRequest,
   type FriendConnectionDirection,
   type FriendConnectionRequestRecord,
 } from '@/services/collaborationSquare/friendConnectionRequestService';
 import { getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
+import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCollaborationActorOperationScope, type CollaborationOperationGuard } from './useCollaborationActorOperationScope';
 
@@ -58,6 +60,13 @@ interface DirectionViewState {
 }
 
 const EMPTY_VIEW: DirectionViewState = { items: [], loading: false, error: null, page: 1, total: 0 };
+
+/** 写操作成功时应落到的申请终态；20000 但状态未变说明操作未生效。 */
+const EXPECTED_WRITE_STATUS: Record<WriteAction, FriendConnectionRequestRecord['status']> = {
+  accept: 'approved',
+  reject: 'rejected',
+  cancel: 'cancelled',
+};
 
 /**
  * 所选角色的「发出／收到」好友申请编排（bcs-standalone-friend-discovery Task 4）：
@@ -122,7 +131,11 @@ export function useFriendConnectionRequests({
         setDirectionView(direction, { loading: false, error: null, items: result.items, page, total: result.total });
       } catch (error) {
         if (!isCurrent() || seq !== requestSeqRef.current[direction]) return;
-        if ((error as Error).name === 'AbortError') return;
+        if ((error as Error).name === 'AbortError') {
+          // 当前代次被 AbortSignal 取消也要收敛 loading，否则面板会一直停在加载态。
+          setDirectionView(direction, { loading: false });
+          return;
+        }
         setDirectionView(direction, { loading: false, error: getCollaborationSquareErrorMessage(error) });
       }
     },
@@ -152,23 +165,35 @@ export function useFriendConnectionRequests({
       if (busyRequestIds.includes(busyKey)) return;
       const isCurrent = captureOperation();
       const writeActor = actor;
+      // 失败同样以服务端为准刷新两向列表：并发审批／对方撤回后服务端已变更，本地行不能永久停留「待处理」。
+      const reloadDirections = () => {
+        const signal = loadControllerRef.current?.signal;
+        void loadDirection('received', writeActor, 1, signal);
+        void loadDirection('sent', writeActor, 1, signal);
+      };
       setBusyRequestIds((keys) => [...new Set([...keys, busyKey])]);
       busyOwnersRef.current.set(busyKey, isCurrent);
       try {
         // 写操作不因角色切换取消（abort 不是服务端回滚）：独立 signal 只透传取消形状。
         const controller = new AbortController();
-        await resolveFriendConnectionRequest(action, requestId, controller.signal);
+        const record = await resolveFriendConnectionRequest(action, requestId, controller.signal);
         if (!isCurrent()) return;
+        if (record.status !== EXPECTED_WRITE_STATUS[action]) {
+          // 20000 但记录未落到对应终态：不报假成功，刷新后由服务端状态决定展示。
+          safeReportError(new Error('操作未生效，列表已刷新'));
+          reloadDirections();
+          return;
+        }
         notifySuccess(successMessage);
         // 发起卡片关系刷新与申请列表刷新前核验同一 guard；读取结果的应用由 loadDirection
         // 的代次/序列守卫复验。
         if (!isCurrent()) return;
         onRelationshipsChanged?.();
-        const signal = loadControllerRef.current?.signal;
-        void loadDirection('received', writeActor, 1, signal);
-        void loadDirection('sent', writeActor, 1, signal);
+        reloadDirections();
       } catch (error) {
-        if (isCurrent()) notifyError(getCollaborationSquareErrorMessage(error));
+        if (!isCurrent()) return;
+        safeReportError(mapFriendRequestWriteError(error));
+        reloadDirections();
       } finally {
         if (isCurrent()) {
           busyOwnersRef.current.delete(busyKey);

@@ -139,6 +139,92 @@ describe('useCollaborationSquareList（BCS 游标与智能搜索模式）', () =
     expect(result.current.hasMore).toBe(false);
   });
 
+  it('翻页后改搜索词、防抖未触发时 loadMore 不得用新关键词 + 旧游标发请求', async () => {
+    const pending: PendingCall[] = [];
+    jest
+      .spyOn(collaborationSquareBotService, 'listBotPage')
+      .mockImplementation(
+        (query, _context, signal) =>
+          new Promise((resolve) => {
+            pending.push({ query: (query ?? {}) as Record<string, unknown>, signal, resolve });
+          }),
+      );
+    const { result, rerender } = renderList();
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      pending[0].resolve(cursorPage(Array.from({ length: 24 }, (_, index) => resultBot(`a-${index}`)), { nextOffset: 24, hasMore: true }));
+      await Promise.resolve();
+    });
+    act(() => {
+      void result.current.loadMore();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      pending[1].resolve(cursorPage([resultBot('a-24')], { nextOffset: 25, hasMore: true }));
+      await Promise.resolve();
+    });
+    expect(useCollaborationSquareStore.getState().bots).toHaveLength(25);
+
+    // 搜索词已变但防抖窗口尚未结束：旧游标 + 新关键词的组合请求必须被拦截。
+    rerender({ viewer: humanViewer, query: '规划' });
+    act(() => {
+      void result.current.loadMore();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(pending).toHaveLength(2);
+  });
+
+  it('新查询首屏在途期间 loadMore 不得用 offset=0 重复请求并追加首屏', async () => {
+    const pending: PendingCall[] = [];
+    jest
+      .spyOn(collaborationSquareBotService, 'listBotPage')
+      .mockImplementation(
+        (query, _context, signal) =>
+          new Promise((resolve) => {
+            pending.push({ query: (query ?? {}) as Record<string, unknown>, signal, resolve });
+          }),
+      );
+    const { result, rerender } = renderList();
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      pending[0].resolve(cursorPage(Array.from({ length: 24 }, (_, index) => resultBot(`a-${index}`)), { nextOffset: 30, hasMore: true }));
+      await Promise.resolve();
+    });
+
+    rerender({ viewer: humanViewer, query: '规划' });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(pending).toHaveLength(2);
+    expect(pending[1].query).toMatchObject({ offset: 0, search: '规划' });
+
+    // 首屏响应仍未返回：此时续读必须被拦截，不能再次以 offset=0 追加一页。
+    act(() => {
+      void result.current.loadMore();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(pending).toHaveLength(2);
+
+    await act(async () => {
+      pending[1].resolve(cursorPage([resultBot('new-1')], { nextOffset: 1, hasMore: false }));
+      await Promise.resolve();
+    });
+    expect(useCollaborationSquareStore.getState().bots.map((bot) => bot.id)).toEqual(['new-1']);
+  });
+
   it('搜索词或所选角色变化时游标复位为 0，旧 AbortSignal 被取消，迟到结果不能覆盖新角色', async () => {
     const pending: PendingCall[] = [];
     jest

@@ -48,13 +48,12 @@ export default defineConfig({
   proxy: {
     '/auth': proxy(auth),
     '/openapi/v1/auth': proxy(auth),
-    // BCS-only 开发 profile：好友发现 BCS 子树优先于其余通用键
-    // （umi proxy 按 key 插入顺序匹配），内部候选搜索必须先于 /api 通配键。
+    // BCS-only 开发 profile：好友发现整棵 collaboration 子树优先于其余通用键
+    // （umi proxy 按 key 插入顺序匹配），与部署 bcs-only 模板的整棵转发一致；
+    // 内部候选搜索必须先于 /api 通配键。群聊 WS 需要 ws:true。
     ...(bcsOnlyProfile
       ? {
-          '/openapi/v1/collaboration/bots/mine': proxy(bcsUpstream),
-          '/openapi/v1/collaboration/bots/*/candidates': proxy(bcsUpstream),
-          '/openapi/v1/collaboration/friend-connections': proxy(bcsUpstream),
+          '/openapi/v1/collaboration': proxy(bcsUpstream, true),
           '/api/v1/collaboration/bots/*/candidates/search': proxy(bcsUpstream),
         }
       : {}),

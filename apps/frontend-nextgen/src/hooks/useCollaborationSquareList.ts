@@ -11,6 +11,7 @@ import { collaborationSquareBotService, collaborationSquareGroupService } from '
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCollaborationSquarePagination } from './useCollaborationSquarePagination';
 
 export const COLLABORATION_SQUARE_PAGE_SIZE = 24;
 const COLLABORATION_SQUARE_SEARCH_DEBOUNCE_MS = 1_000;
@@ -46,22 +47,13 @@ export function useCollaborationSquareList({
   setError,
 }: UseCollaborationSquareListOptions) {
   const latestListRequest = useRef(0);
-  // 普通 Bot 列表保存 BCS 原始 offset 游标（上一页返回的 nextOffset）；群 offset 独立，互不复用。
-  const currentBotOffset = useRef(0);
-  const currentGroupOffset = useRef(0);
   const loadMoreController = useRef<AbortController | null>(null);
   const loadingMoreRef = useRef(false);
-  const [hasMore, setHasMore] = useState(false);
+  const { currentBotOffset, currentGroupOffset, reloadPendingRef, hasMore, hasMoreRef, applyHasMore } =
+    useCollaborationSquarePagination();
   // 智能搜索的 wire 结果模式（semantic/name_fallback/empty_query 本地短路）：独立保留，
   // 空结果也不丢失，供「名称匹配」提示与搜索栏展示。
   const [searchResultMode, setSearchResultMode] = useState<PublicBotSearchResultMode | null>(null);
-  // 分页标记的同步镜像：setBots（store 同步通知）与 setHasMore（批处理）可能分属两次渲染，
-  // 深链定位与 loadMore 守卫需在同一轮次读到实时值，避免提前判定目标失效。
-  const hasMoreRef = useRef(false);
-  const applyHasMore = useCallback((value: boolean) => {
-    hasMoreRef.current = value;
-    setHasMore(value);
-  }, []);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
@@ -72,6 +64,7 @@ export function useCollaborationSquareList({
 
   const executeLoad = useCallback(
     async (requestId: number, query: string, mode: BotSearchMode, signal?: AbortSignal) => {
+      reloadPendingRef.current = false;
       loadMoreController.current?.abort();
       loadingMoreRef.current = false;
       setLoadingMore(false);
@@ -164,7 +157,7 @@ export function useCollaborationSquareList({
   );
 
   const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current || hasMoreRef.current === false) return;
+    if (reloadPendingRef.current || loadingMoreRef.current || hasMoreRef.current === false) return;
     if (resource === 'bot' && botSearchMode !== 'name') return;
 
     const requestId = latestListRequest.current;
@@ -220,6 +213,12 @@ export function useCollaborationSquareList({
   useEffect(() => {
     // 任务广场由 useCollaborationSquareTask 独立加载，本 hook 仅服务 bot/group。
     if (resource === 'task') return;
+    // 新查询立即失效旧游标与分页标记：防抖窗口内 IntersectionObserver 触发的续读不得沿用
+    // 上一次查询的 nextOffset，也不得在首屏未返回时以 offset=0 重复追加。
+    reloadPendingRef.current = true;
+    currentBotOffset.current = 0;
+    currentGroupOffset.current = 0;
+    applyHasMore(false);
     const controller = new AbortController();
     const requestId = ++latestListRequest.current;
     const delay = activeLoadQuery.trim() ? COLLABORATION_SQUARE_SEARCH_DEBOUNCE_MS : 0;
@@ -231,7 +230,7 @@ export function useCollaborationSquareList({
       controller.abort();
       loadMoreController.current?.abort();
     };
-  }, [activeLoadQuery, botSearchMode, executeLoad, resource]);
+  }, [activeLoadQuery, applyHasMore, botSearchMode, executeLoad, resource]);
 
   useEffect(
     () => () => {

@@ -1,11 +1,11 @@
 # BCS-only 同源代理 profile（FRONTEND_API_PROFILE=bcs-only，docs/deployment.md）。
 # 由 docker-entrypoint（10-teamclaw-api-profile.sh）在启动早期拷贝到
-# /etc/nginx/templates/default.conf.template，再由官方 Nginx entrypoint
-# 20-envsubst-on-templates.sh 做标准 ${BCS_UPSTREAM} 变量替换。
+# /etc/nginx/templates/default.conf.template，并把归一化后的 BCS_UPSTREAM 直接写入
+# 各 proxy_pass（官方 20-envsubst-on-templates.sh 在其自身进程读取原始环境变量，
+# 看不到脚本内的归一结果）；其余 ${...} 仍由该官方脚本做标准替换。
 # 好友发现所需端点（bcs-standalone-friend-discovery）：
-#   /openapi/v1/auth/**、GET /openapi/v1/collaboration/bots/mine、
-#   GET /openapi/v1/collaboration/bots/{actor}/candidates、
-#   /openapi/v1/collaboration/friend-connections/**、
+#   /openapi/v1/auth/**、整棵 /openapi/v1/collaboration/**（bots/mine、
+#   bots/{actor}/candidates、friend-connections/**、同源群聊 WS）、
 #   内部 GET /api/v1/collaboration/bots/{actor}/candidates/search。
 server {
   listen 8080;
@@ -21,8 +21,11 @@ server {
   # BCS OAuth：浏览器登录跳转与 /auth/callback/<provider> 回调必须同源可达。
   location /auth/ { proxy_pass ${BCS_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
   location /openapi/v1/auth/ { proxy_pass ${BCS_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
-  # 好友发现协作子树：bots/mine、bots/{actor}/candidates、friend-connections/**。
-  location /openapi/v1/collaboration/ { proxy_pass ${BCS_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
+  # 协作子树（好友发现 + 同源群聊 WS）整体归 BCS：BCS-only 下 BCS 是唯一业务 API。
+  # 群聊 WS（messages/ws、group/ws）需要 Upgrade/Connection 头才能完成 101 握手；
+  # 写法与 full 模板的 WS location 一致，$http_upgrade 为空时 nginx 不下发 Upgrade，
+  # 普通 HTTP 请求不受影响。
+  location /openapi/v1/collaboration/ { proxy_pass ${BCS_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; }
   # BCS 内部语义候选搜索（智能搜索）：正则 location 精确匹配合法搜索子路径
   # （nginx 正则 location 优先于前缀 location，与书写顺序无关），其余 /api/ 一律 404。
   location ~ ^/api/v1/collaboration/bots/[^/]+/candidates/search(?:/|$) { proxy_pass ${BCS_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }

@@ -5,6 +5,7 @@ import { resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/type
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import * as privateBotSessionController from '@/services/backendApi/bots/privateBotSessionController';
 import {
   CollaborationSquareError,
@@ -1486,6 +1487,35 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
+  test('好友申请失败已由协议层提示时不再重复 toast', async () => {
+    const bot = resultBot('bot-already-handled');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockRejectedValue(
+      new BackendRequestError('网络异常', {
+        status: 500,
+        apiPath: '/openapi/v1/collaboration/friend-connections/requests',
+        toastKey: 'notify:friend-request-500',
+        alreadyHandled: true,
+      }),
+    );
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      result.current.primaryBotAction(bot);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+
+    unmount();
+  });
+
   test('好友申请直接返回 friend 时继续创建真实会话后导航', async () => {
     const bot = resultBot('bot-direct-friend');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
@@ -2113,6 +2143,26 @@ describe('useCollaborationSquare 好友申请代次与 Human 建聊开关（Task
     });
     await flush();
     expect(mockedNotifySuccess).toHaveBeenCalledWith('好友申请已提交');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('A→B→A 切回后重复提交命中去重时提示仍在处理中，不当作真实失败', async () => {
+    const bot = resultBot('bot-duplicate-action');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest
+      .spyOn(collaborationSquareBotService, 'requestBotFriendship')
+      .mockRejectedValue(new CollaborationSquareError('duplicate_action', '该操作正在提交，请勿重复操作'));
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    await flush();
+
+    expect(mockedNotifyError).toHaveBeenCalledWith('上一次提交仍在处理中，请稍候');
+    expect(mockedNotifySuccess).not.toHaveBeenCalledWith('好友申请已提交');
     expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
     unmount();
   });

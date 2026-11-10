@@ -74,13 +74,13 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     context?: HumanBotActionContext,
     signal?: AbortSignal,
   ): Promise<PublicBotDiscoveryResult> {
-    // dev Mock 只做本地关键词近似（与历史 smart 行为一致），结果模式按关键词有无合成；
-    // 真实语义/名称回退模式由 BCS ApiAdapter 提供。
+    // dev Mock 只做本地关键词近似（与历史 smart 行为一致），本质是名称/描述子串匹配，
+    // 结果模式必须如实标记为 name_fallback；真实语义模式由 BCS ApiAdapter 提供。
     const keyword = query.keyword.trim();
     if (!keyword) return { items: [], searchMode: 'empty_query' };
     return {
       items: filterPublicBots(await this.listBots(undefined, context, signal), keyword, 'smart'),
-      searchMode: 'semantic',
+      searchMode: 'name_fallback',
     };
   }
 

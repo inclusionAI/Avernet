@@ -59,6 +59,78 @@ describe('botRegistrationService', () => {
     }
   });
 
+  it('falls back to the browser same origin when deployment emits empty runtime endpoints', () => {
+    // bcs-only 部署入口脚本把未配置的 BCS_ENDPOINT_PRE/PROD 写成空串（键存在）：
+    // 此时必须回退浏览器同源，绝不能落回编译期常量 http://127.0.0.1:21000
+    // （那会让真实部署生成指向访问者本机的 Bot 接入命令）。
+    const runtimeWindow = {
+      AVERNET_RUNTIME_CONFIG: { BCS_ENDPOINT_PRE: '', BCS_ENDPOINT_PROD: '' },
+      location: { hostname: 'discovery.example.com', origin: 'https://discovery.example.com' },
+    };
+    const globalWithOptionalWindow = globalThis as unknown as { window?: unknown };
+    globalWithOptionalWindow.window = runtimeWindow;
+
+    try {
+      expect(resolveBcsEndpoint()).toBe('https://discovery.example.com');
+      expect(resolveBcsEndpoint()).not.toBe('http://127.0.0.1:21000');
+    } finally {
+      Reflect.deleteProperty(globalWithOptionalWindow, 'window');
+    }
+  });
+
+  it('resolves each environment endpoint independently from its own runtime key', () => {
+    const runtimeWindow = {
+      AVERNET_RUNTIME_CONFIG: { BCS_ENDPOINT_PRE: '', BCS_ENDPOINT_PROD: 'https://bcs.example.com' },
+      location: { hostname: 'teamclaw.example.com', origin: 'https://teamclaw.example.com' },
+    };
+    const globalWithOptionalWindow = globalThis as unknown as { window?: unknown };
+    globalWithOptionalWindow.window = runtimeWindow;
+
+    try {
+      // 生产环境取到非空 runtime 值就原样使用，不被同源回退干扰。
+      expect(resolveBcsEndpoint()).toBe('https://bcs.example.com');
+    } finally {
+      Reflect.deleteProperty(globalWithOptionalWindow, 'window');
+    }
+  });
+
+  it('keeps the compile-time endpoint when the runtime key is absent', () => {
+    const runtimeWindow = {
+      AVERNET_RUNTIME_CONFIG: {},
+      location: { hostname: 'localhost', origin: 'http://localhost:8000' },
+    };
+    const globalWithOptionalWindow = globalThis as unknown as { window?: unknown };
+    const globalWithBuildTime = globalThis as unknown as Record<string, unknown>;
+    globalWithOptionalWindow.window = runtimeWindow;
+    // jest 无 umi define：用全局变量模拟编译期常量注入（typeof 判定的同一解析路径）。
+    globalWithBuildTime.BCS_ENDPOINT_PRE = 'https://build-pre.example.com';
+    globalWithBuildTime.BCS_ENDPOINT_PROD = 'https://build-prod.example.com';
+
+    try {
+      expect(resolveBcsEndpoint()).toBe('https://build-pre.example.com');
+    } finally {
+      Reflect.deleteProperty(globalWithOptionalWindow, 'window');
+      Reflect.deleteProperty(globalWithBuildTime, 'BCS_ENDPOINT_PRE');
+      Reflect.deleteProperty(globalWithBuildTime, 'BCS_ENDPOINT_PROD');
+    }
+  });
+
+  it('returns null for empty runtime endpoints without a browser origin', () => {
+    // 非浏览器环境安全处理：没有 origin 可用时不得抛错，也不得泄漏编译期回环地址。
+    const runtimeWindow = {
+      AVERNET_RUNTIME_CONFIG: { BCS_ENDPOINT_PRE: '', BCS_ENDPOINT_PROD: '' },
+      location: { hostname: 'localhost' },
+    };
+    const globalWithOptionalWindow = globalThis as unknown as { window?: unknown };
+    globalWithOptionalWindow.window = runtimeWindow;
+
+    try {
+      expect(resolveBcsEndpoint()).toBeNull();
+    } finally {
+      Reflect.deleteProperty(globalWithOptionalWindow, 'window');
+    }
+  });
+
   it('maps token response to domain view', async () => {
     getBotRegistrationTokenMock.mockResolvedValue(
       successResponse({

@@ -5,7 +5,7 @@ import { useLegacyShareLinkGuard } from '@/pages/Workspace/Chat/hooks/useLegacyS
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { collaborationSquareBotService } from '@/services/collaborationSquare/collaborationSquareService';
 import { useConversationStore } from '@/stores/conversationStore';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/components/ui/notify', () => ({ notifyError: jest.fn(), notifySuccess: jest.fn() }));
 jest.mock('@/services/collaborationSquare/collaborationSquareService', () => ({
@@ -256,6 +256,56 @@ describe('useLegacyShareLinkGuard', () => {
     expect(createSessionMock).not.toHaveBeenCalled();
     expect(result.current.legacyBot).toBeNull();
     expect(mockedResolve).not.toHaveBeenCalled();
+  });
+
+  it('确认请求在组件卸载后才成功返回：不弹过期提示，也不重置全局会话选择', async () => {
+    window.history.replaceState(null, '', `/workspace/chat?id=${encodeURIComponent(legacyId)}`);
+    mockedResolve.mockResolvedValue(publicBotFixture);
+    let finishRequest!: (value: { status: 'applying' }) => void;
+    mockedRequestFriendship.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRequest = resolve;
+        }),
+    );
+    const { result, unmount } = renderGuard();
+    await waitFor(() => expect(result.current.legacyBot).toEqual(publicBotFixture));
+    result.current.onConfirm();
+    await waitFor(() => expect(mockedRequestFriendship).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      finishRequest({ status: 'applying' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    expect(selectConversation).not.toHaveBeenCalled();
+  });
+
+  it('确认请求在组件卸载后才失败返回：不弹错误提示，也不重置全局会话选择', async () => {
+    window.history.replaceState(null, '', `/workspace/chat?id=${encodeURIComponent(legacyId)}`);
+    mockedResolve.mockResolvedValue(publicBotFixture);
+    let failRequest!: (reason: Error) => void;
+    mockedRequestFriendship.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failRequest = reject;
+        }),
+    );
+    const { result, unmount } = renderGuard();
+    await waitFor(() => expect(result.current.legacyBot).toEqual(publicBotFixture));
+    result.current.onConfirm();
+    await waitFor(() => expect(mockedRequestFriendship).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      failRequest(new Error('发送申请失败'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    expect(selectConversation).not.toHaveBeenCalled();
   });
 
   it('取消时不发申请并清参回退', async () => {

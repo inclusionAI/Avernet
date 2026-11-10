@@ -269,4 +269,53 @@ describe('filterPublicBotsByMetadata', () => {
     ).rejects.toBe(abortError);
     expect(onEnhancementUnavailable).not.toHaveBeenCalled();
   });
+
+  it('bcn_bot_id ≠ bot_id:owner_id 时按 bcn_bot_id 优先匹配并过滤复合候选', async () => {
+    const candidate = { ...compoundBot(0), id: 'botA:provider-ref' };
+    fetchMetadata.mockResolvedValue([
+      {
+        bcn_bot_id: 'botA:provider-ref',
+        bot_id: 'botA',
+        owner_id: '900003',
+        bot_name: '候选Bot',
+        bot_type: 'service',
+        online_available: false,
+      },
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [candidate],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    // 只按 bot_id:owner_id 匹配会把它当作「无记录」误保留。
+    expect(kept).toEqual([]);
+  });
+
+  it('owner 交接后的旧复合引用（bcn_bot_id 不同）不误伤当前候选', async () => {
+    const candidate = { ...compoundBot(0), id: 'botA:900003' };
+    fetchMetadata.mockResolvedValue([
+      {
+        bcn_bot_id: 'botA:old-owner',
+        bot_id: 'botA',
+        owner_id: '900003',
+        bot_name: '候选Bot',
+        bot_type: 'service',
+        online_available: false,
+      },
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [candidate],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    expect(kept).toEqual([candidate]);
+  });
 });
