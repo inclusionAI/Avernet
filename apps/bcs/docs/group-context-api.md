@@ -539,7 +539,7 @@ Slot management uses three Human-only POST endpoints with the `groupId` query pa
 | Operation | Request fields |
 | --- | --- |
 | `/groupcontext/add-slot` | `name` and optional `description` |
-| `/groupcontext/edit-slot` | Current `name`, optional `new_name`, and optional `description` |
+| `/groupcontext/update-slot` | Current `name`, optional `new_name`, and optional `description` |
 | `/groupcontext/delete-slot` | `name` |
 
 Each route requires an

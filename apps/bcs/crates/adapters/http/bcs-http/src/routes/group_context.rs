@@ -158,18 +158,18 @@ pub(crate) async fn add_slot(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct EditSlotRequest { name: String, new_name: Option<String>, description: Option<String> }
+pub(crate) struct UpdateSlotRequest { name: String, new_name: Option<String>, description: Option<String> }
 
-pub(crate) async fn edit_slot(
+pub(crate) async fn update_slot(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
     query: Result<Query<GroupContextQuery>, QueryRejection>,
-    body: Result<Json<EditSlotRequest>, JsonRejection>,
+    body: Result<Json<UpdateSlotRequest>, JsonRejection>,
 ) -> Result<Response, GroupContextHttpError> {
     let (actor, group_id) = slot_write_context(&state, &headers, &uri, query).await?;
-    let Json(EditSlotRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
-    state.services.group_context.edit_slot(&group_id, &actor, name, new_name, description).await?;
+    let Json(UpdateSlotRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.update_slot(&group_id, &actor, name, new_name, description).await?;
     Ok(json_ok(GroupContextAck::ok()))
 }
 

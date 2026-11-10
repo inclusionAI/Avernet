@@ -184,9 +184,9 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
         self.inner.add_slot(&group.id, actor, name, description).await
     }
 
-    async fn edit_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+    async fn update_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
         let group = self.authorize_slot_write(group_id, actor).await?;
-        self.inner.edit_slot(&group.id, actor, name, new_name, description).await
+        self.inner.update_slot(&group.id, actor, name, new_name, description).await
     }
 
     async fn delete_slot(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {

@@ -591,7 +591,7 @@ async fn bot_cannot_manage_slots_but_can_use_a_defined_slot() {
     let app = app_with_repo(repo.clone()).await;
     let list = "/groupcontext/list-slot?groupId=slot-group";
     let add = "/groupcontext/add?groupId=slot-group&sessionId=slot-group:12345678";
-    for operation in ["add", "edit", "delete"] {
+    for operation in ["add", "update", "delete"] {
         let (status, _) = post_json(
             &app, &format!("/groupcontext/{operation}-slot?groupId=slot-group"), token_for("admin"),
             json!({"name":"timeline"}),
@@ -681,7 +681,7 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
     };
 
     let add = "/groupcontext/add-slot?groupId=slot-group";
-    let edit = "/groupcontext/edit-slot?groupId=slot-group";
+    let update = "/groupcontext/update-slot?groupId=slot-group";
     let delete = "/groupcontext/delete-slot?groupId=slot-group";
     for (uri, body) in [
         ("/groupcontext/add-slot", json!({"name":"timeline"})),
@@ -692,7 +692,7 @@ async fn human_slot_management_routes_persist_changes_and_report_validation_erro
 
     for (uri, body) in [
         (add, json!({"name":"timeline"})),
-        (edit, json!({"name":"timeline","new_name":"events","description":"Key events"})),
+        (update, json!({"name":"timeline","new_name":"events","description":"Key events"})),
     ] {
         let response = post(uri, body).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);

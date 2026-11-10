@@ -154,7 +154,7 @@ impl GroupContextApplicationServiceImpl {
         }
         tracing::info!(group_id, actor, operation = match &change {
             GroupContextSlotChange::Add { .. } => "add",
-            GroupContextSlotChange::Edit { .. } => "edit",
+            GroupContextSlotChange::Edit { .. } => "update",
             GroupContextSlotChange::Delete { .. } => "delete",
         }, "Group Context slot mutation");
         self.repo.change_slot(group_id, actor, change).await.map_err(map_store_error)
@@ -172,7 +172,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         self.change_slot(group_id, actor, GroupContextSlotChange::Add { name, description }).await
     }
 
-    async fn edit_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+    async fn update_slot(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
         self.change_slot(group_id, actor, GroupContextSlotChange::Edit { name, new_name, description }).await
     }
 

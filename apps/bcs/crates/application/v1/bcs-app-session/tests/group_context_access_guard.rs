@@ -36,7 +36,7 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(())
     }
 
-    async fn edit_slot(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
+    async fn update_slot(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
         self.slot_actors.lock().unwrap().push(actor.to_owned());
         Ok(())
     }
@@ -395,7 +395,7 @@ async fn slot_writes_require_live_authority_on_the_group_driver() {
     for actor in ["human_other", "driver", "human_owner", "human_admin"] {
         let results = [
             guard.add_slot(GROUP_ID, actor, "timeline".into(), String::new()).await,
-            guard.edit_slot(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
+            guard.update_slot(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
             guard.delete_slot(GROUP_ID, actor, "timeline".into()).await,
         ];
         for result in results {

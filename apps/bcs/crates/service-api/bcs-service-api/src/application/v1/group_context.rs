@@ -205,7 +205,7 @@ pub trait GroupContextApplicationService: Send + Sync {
         Err(ApplicationError::internal("slots unavailable"))
     }
 
-    async fn edit_slot(&self, _group_id: &str, _actor: &str, _name: String, _new_name: Option<String>, _description: Option<String>) -> Result<(), ApplicationError> {
+    async fn update_slot(&self, _group_id: &str, _actor: &str, _name: String, _new_name: Option<String>, _description: Option<String>) -> Result<(), ApplicationError> {
         Err(ApplicationError::internal("slots unavailable"))
     }
 

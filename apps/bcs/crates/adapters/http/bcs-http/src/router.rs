@@ -267,7 +267,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route("/groupcontext/list-slot", post(routes::group_context::list_slot))
         .route("/groupcontext/add-slot", post(routes::group_context::add_slot))
-        .route("/groupcontext/edit-slot", post(routes::group_context::edit_slot))
+        .route("/groupcontext/update-slot", post(routes::group_context::update_slot))
         .route("/groupcontext/delete-slot", post(routes::group_context::delete_slot))
         .route("/groupcontext/add", post(routes::group_context::add))
         .route("/groupcontext/update", post(routes::group_context::update))
