@@ -27,6 +27,52 @@ Create a directory only when it has useful content. Existing ADRs, API docs and
 machine-parsed Context Boundaries keep their formats and authoritative locations.
 Tool-specific instruction files point to shared guidance rather than repeating it.
 
+## Existing docs and change specs
+
+`docs/` holds reusable knowledge; `specs/` records the intent, decisions, execution
+and verification of a particular change. Keep existing API, subsystem and runbook
+documents in place when they already have a clear owner. Link them from the app
+README rather than copying them into a new tree.
+
+Location alone does not establish authority: a design proposal or research note
+under `docs/` can still be provisional. Before using it, check its status, scope,
+relevant accepted decisions and the target-version contract/source. Retain old
+documents as historical references or provide a link to their replacement.
+
+Read only the spec for the task or historical question being investigated. Keep
+its existing path and format; a completed spec is not mandatory startup context.
+Older specs without reliable status remain unverified history until checked;
+neither their date nor a checked task list proves merge, integration or deployment.
+
+Some existing `specs/.../contract.md` files are explicitly referenced as current
+contracts. Preserve that authority until a reviewed replacement is adopted and
+its consumers/links are updated. Do not classify all specs as historical merely
+because of their directory name.
+
+At delivery, promote only the verified reusable result:
+
+| Result of the change | Update its owning knowledge |
+| --- | --- |
+| Stable term or semantic distinction | `CONTEXT.md` or the relevant domain context. |
+| Interface, invariant or responsibility | Owning contract/schema and domain README; update tests as required. |
+| Durable architectural decision | The appropriate ADR, preserving its decision lifecycle. |
+| Reusable flow or diagnostic finding | Existing flow/runbook/diagnostic page, or a new topic when needed. |
+| New navigation or module ownership | App README and, when cross-app, `CONTEXT-MAP.md`. |
+
+Then append the actual outcome to the spec or its existing delivery report:
+PR/commit, verification performed and gaps, and links to the knowledge updated
+(or why no durable knowledge changed). Preserve prior evidence and rejected
+alternatives; append supersession links instead of rewriting history. A delivery
+record must distinguish implementation, merge, host integration and deployment.
+There is no requirement to copy or relocate the entire spec into `docs/`.
+
+## Agent entry points
+
+Keep root AGENTS.md a short task-triggered index with a few shared invariants.
+Each pointer states when its target must be read. Put detailed development, PR
+and validation rules in their owning pages; do not preload all of them at task
+startup. The context map locates knowledge, while AGENTS locates working rules.
+
 ## App README
 
 Cover these six concerns, grouping them to suit the existing document:

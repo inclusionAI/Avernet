@@ -110,6 +110,22 @@ The [repository map](../../CONTEXT-MAP.md) selects the app; this README is its
 knowledge entry point. Detailed contracts, domain READMEs and existing runbooks
 remain the authoritative topic sources.
 
+### Existing documentation and change specifications
+
+| Need | Existing source |
+| --- | --- |
+| API behavior | [OpenAPI v1 guide](docs/openapi-v1/README.md), [session-lock errors](docs/session-lock-api.md), and the owning contract/schema. |
+| Subsystem knowledge | [Manifest](docs/bot-config-manifest/README.zh-CN.md), [Bot evolution](docs/bot-evolution/README.md), and the relevant core boundary. |
+| Operations and failure handling | The flow/diagnostic links above and their referenced runbooks. |
+| A change's intent, tradeoffs or verification history | The relevant topic under `specs/`, selected by issue or source history. |
+
+Specs retain their own baselines and evidence; they are not the default guide to
+today's architecture. An explicitly adopted contract inside `specs/` remains
+authoritative until deliberately replaced. At delivery, update the owning reusable documentation and
+link it from the spec/report using the [promotion rules](../../docs/agents/knowledge-standard.md#existing-docs-and-change-specs).
+For example, the [manager-sync spec](specs/2026-10-27-bcs-manager-sync/spec.md)
+records change history while the linked runbook describes operation.
+
 ## Develop and verify
 
 Run these from **`apps/backend/`** using the Python version in `pyproject.toml`:
