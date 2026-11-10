@@ -49,6 +49,10 @@ beforeEach(() => {
   useWorkspaceStore.setState({ activeIdentityId: 'me', identities: [userIdentity] });
   groups.getVisibleGroups.mockImplementation((items: GroupView[]) => items);
   groups.loadGroupParticipants.mockResolvedValue(null);
+  groups.loadGroupDetailOrBcs.mockResolvedValue({
+    ok: false,
+    error: { code: 'GROUP_MISSING', friendlyMessage: '指定协作群不存在', canRetry: false },
+  });
   groups.canManageGroup.mockReturnValue({ allowed: true });
   groups.canDissolveGroup.mockReturnValue({ allowed: true });
 });
