@@ -45,12 +45,12 @@ ContextEvent 记录被接受的协作事实并驱动状态迁移。
 
 1. 业务身份与作用域。
 2. 目标、背景、约束、交付物和验收口径。
-3. 参与者、可见性、授权和责任人。
+3. 责任人，以及 active `CollaborationMode` 中的参与者与可见性；授权本身仍由授权系统校验。
 4. 可引用的工作材料，不保存字节。
-5. 业务状态与状态机定义版本。
+5. 通过 active `ContextStateMachineBinding` 关联的业务状态与状态机定义版本。
 6. 事件日志与版本号。
 7. 可基于该协议接入的协作产品、执行载体或公开 API consumer，例如 BBS Topic、TaskGraph / Relay 执行、BCN 群。
-8. 轻量代办清单和可升级为正式 Work 的事项。
+8. 由 active `ContextStateMachineBinding` 持有的轻量代办清单和可升级为正式 Work 的事项。
 
 ### 2.2 Command / Event / State / Transition
 
@@ -104,11 +104,12 @@ Context 只有唯一聚合级状态。该状态描述业务阶段和下一步协
 - 不把 Context 状态用于授权本身，也不因帖子可见就隐含执行、外部仓库、Bot 访问或数据披露权限。
 - 不预测所有业务状态名；协议只规定状态机结构、合法字段、事件和治理规则。
 
-## 4. 领域对象
+## 4. 四层架构设计
 
-### 4.0 四层职责与处理链路
 
 本方案按“协作—状态—事件—表示”四层组织协议对象。四层不是四套并行模型，而是同一个 `CollaborationContext` 在不同治理关注点上的分解：
+
+配套可视化图见同目录 [architecture.html](architecture.html)。图中四层、对象卡片与连线只作为结构视图；协议语义、字段和不变量以本节文字为准。
 
 | 层次 | 核心对象 | 回答的问题 | 允许承担的职责 | 明确不承担的职责 |
 | --- | --- | --- | --- | --- |
@@ -137,171 +138,112 @@ CollaborationContext / Snapshot（表示层：权威聚合与投影）
 
 协作层的 `CollaborationModePolicy` 是“参与与执行规则”，状态层的 `ContextStateMachineDefinition` 是“阶段与迁移规则”；二者必须分离。状态机可以限制某个阶段允许哪些 `mode_kind`，但不能把参与规则、竞价规则或完成策略复制进每条状态迁移。`ContextEvent` 是唯一事实推进入口，`ContextTransition` 是合法状态或模式迁移的证明；任何适配器都不能直接写 `current_state`、`mode_kind` 或 `outcome`。
 
-### 4.1 建模总览
 
-`CollaborationContext` 是本协议唯一的聚合根。其它对象一律不是新的聚合根，而是聚合内的子实体、值对象、版本化协议资源或只读投影。子实体 ID 都必须带 `context_id` 语义，不能脱离 Context 被单独共享；值对象没有独立生命周期，只能随所属 Context 或命令事实变更。
+### 4.1 协作层：模式、参与者与策略
 
-| 对象 | 类型 | 主要身份 / 相等性 | 权威关系 | 生命周期 |
-| --- | --- | --- | --- | --- |
-| `CollaborationContext` | 聚合根 | `context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
-| `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有，统一承载目标、输入来源与输入材料引用 | 随 `context.info_updated` 事实演进 |
-| `InputSource` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，标识 Dima 项目空间、TaskDiscover 模块自动挖掘的事件集合等外部来源 | 随 envelope 事实演进 |
-| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，稳定引用具体输入材料，不拥有内容 | 随 envelope 事实演进 |
-| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 CollaborationOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
-| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作形态、参与者集合、visibility 与策略快照 | 随模式切换事件演进 |
-| `CollaborationModePolicy` | 值对象 | 四项策略内容相等；随 mode_revision 冻结 | 由 Mode 持有，定义参与、协调、执行者和完成规则 | 无独立生命周期；随合法模式切换替换 |
-| `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
-| `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + definition_revision + content_digest` | 共享状态机合同 | 注册后不可原位修改 |
-| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
-| `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
-| `ContextTransition` | 子实体 | `context_id + transition_id`；`accepted_event_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
-| `ContextTodo` | 子实体 | `context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
-| `CollaborationOutcome` | 子实体 | `context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
-| `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
+协作层对应架构图最上方的三块内容：`CollaborationMode` 描述当前采用什么协作方式，`CollaborationModePolicy` 描述该方式的规则，五种标准模式是 Policy 的受治理组合。它只回答参与、组织、执行和完成规则，不直接改写业务阶段。
 
-整体对象关系按给定层次图展开如下；实线表示持有，虚线表示定义绑定或事件关联，不代表数据库表、服务调用或代码依赖。可独立打开同目录 [architecture.html](architecture.html) 查看配套图。
+### 4.1.1 CollaborationMode
 
-```mermaid
-flowchart TB
-  subgraph Coordination["协作层：谁参与、如何组织、谁执行、如何完成"]
-    mode["CollaborationMode<br/>mode_kind · participants · visibility · mode_policy"]
-    policy["CollaborationModePolicy<br/>participation_policy<br/>coordination_policy<br/>executor_policy<br/>completion_policy"]
-    kinds["公开讨论：全员贡献 / 无独占执行者<br/>自主接力：部分参与 / 顺序交接 / 每阶段一人<br/>规划执行：部分参与 / 先规划 / 按计划分工<br/>竞价上岗：多人竞价 / 单人中标执行<br/>直接指派：直接选定 / 单人执行"]
-    mode --> policy
-    policy -. 标准组合 .-> kinds
-  end
-  subgraph StateLayer["状态层：定义与运行态分离"]
-    definition["ContextStateMachineDefinition<br/>definition_id · definition_revision<br/>initial_state · states · transitions"]
-    binding["ContextStateMachineBinding<br/>definition_id · definition_revision<br/>current_state · transition_cursor<br/>state_fencing_token · todos"]
-    definition -. 冻结 revision .-> binding
-  end
-  subgraph EventLayer["事件层：事实与迁移证明分离"]
-    event["ContextEvent<br/>event_kind · actor_ref · visibility"]
-    transition["ContextTransition<br/>event_kind · from_state · to_state<br/>accepted_event_id · rule_id"]
-    transition -. 触发事件 .-> event
-  end
-  subgraph Representation["表示层：唯一聚合根与业务输入输出"]
-    envelope["ContextEnvelope<br/>objective · background<br/>input_sources · material_refs · constraints"]
-    root["CollaborationContext<br/>scope · envelope · responsible_actor_ref<br/>collaboration_mode · state_machine_binding<br/>outcome · version"]
-    outcome["CollaborationOutcome<br/>outcome_id · decision<br/>judged_by · judged_at<br/>reason_ref · deliverables · visibility"]
-    root --> envelope
-    root --> outcome
-  end
-  root --> mode
-  root --> binding
-  binding -. 迁移证明 .-> transition
-```
-
-### 4.2 聚合根：CollaborationContext
-
-`CollaborationContext` 是唯一业务权威，负责回答：
-
-1. 这个目标是什么、边界和验收口径是什么。
-2. 谁是责任人，当前协作模式里的参与者和可见范围是什么。
-3. 哪些材料是协作输入，哪些交付物是协作结果。
-4. 当前业务阶段为什么合法、下一步允许什么。
-5. 当前协作模式是什么，以及有哪些产品或执行能力可以继续推进任务。
+`CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
 
 ```text
-CollaborationContext
-  ├─ context_id
-  ├─ scope                    # ContextScope
-  ├─ title
-  ├─ envelope                 # ContextEnvelope
-  ├─ responsible_actor_ref
-  ├─ collaboration_mode       # CollaborationMode，持有 visibility 与 mode_policy
-  ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
-  ├─ outcome                  # 最近一次 CollaborationOutcome；首次裁决前允许缺失
-  ├─ version                  # 聚合乐观锁版本
-  ├─ event_cursor             # Context 事件日志位置：最近接纳事件的 sequence
-  └─ created_by / created_from / created_at / updated_at / closed_at
+CollaborationMode
+  ├─ mode_id / mode_kind
+  ├─ participants[]            # ContextParticipant[]
+  ├─ visibility                # ContextVisibility
+  ├─ mode_policy               # CollaborationModePolicy，随 mode_revision 冻结的策略值对象
+  ├─ mode_revision / started_at / ended_at
+  └─ mode_switched_event_refs[]
 ```
 
-`ContextScope` 不是可见性，而是 Context 所属的**授权与作用域边界**。
+`visibility` 的基础取值只保留三类，作用域都在 `ContextScope` 之内：
 
-```text
-ContextScope
-  ├─ scope_kind             # open / workspace / personal
-  ├─ scope_id               # 该 kind 下的稳定对象 ID
-  └─ environment            # 运行/部署环境
-```
-
-取值说明：
-- `open`：开放工作空间。
-- `workspace`：项目空间、工作空间、协作空间，例如 Dima 项目空间或 TaskDiscover 事件集合所在空间。
-- `personal`：个人任务、私人待办或单个用户私有的 Context。
-
-`ContextScope` 解决的是 **归属哪儿**，不是 **谁能看见**；可见性仍由 `CollaborationMode.visibility` 与授权系统控制。
-
-聚合根不变量：
-- 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
-- 输入、交付物、协作模式、Todo、Outcome 和来源引用等事实不能直接改状态，必须形成合法 `ContextEvent`。ContextTodo 属于 active state machine binding，不是根级独立字段。
-- 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `CollaborationMode.visibility` 与 `scope`。
-- 终态后可继续追加公开事件，但不能自动改变终态。
-- `responsible_actor_ref` 必须由授权主体和现有身份系统确认，不能由 Bot 自主声明。
-
-### 4.3 值对象：ContextEnvelope
-
-`ContextEnvelope` 是业务意图、约束、验收口径、协作输入来源和输入材料引用的统一权威值对象。`InputSource` 与 `ContextMaterialReference` 都从这里持有，不再独立建 `ContextInput` 实体。
-
-```text
-ContextEnvelope
-  ├─ objective / background
-  ├─ input_sources[]          # InputSource[]
-  ├─ material_refs[]           # ContextMaterialReference[]
-  ├─ constraints[] / deliverable_specs[]
-  ├─ acceptance[] / language / locale
-  ├─ origin_ref
-  └─ envelope_revision
-```
-
-`InputSource` 用 `source_kind + source_id + revision` 标识一个外部来源版本，例如：
-
-- Dima 项目空间
-- TaskDiscover 模块自动挖掘的事件集合
-
-`ContextMaterialReference` 用 `source_kind + source_id + revision / digest` 稳定引用一份具体材料；它只保存引用、版本和可见范围，不保存材料正文、token、cookie 或私有路径。
+- `public`：对 scope 内所有人可见
+- `workspace`：对 scope 内某个 workspace 可见
+- `participants`：仅对当前 mode 的 participants 和责任人可见
 
 设计约束：
-- `input_sources[]` 和 `material_refs[]` 共同表达“协作输入”。
-- 输入信息属于 envelope revision，没有独立生命周期，也不作为新的子实体存在。
-- 每次可审计变更必须产生 `context.info_updated` 事实。
-- 它是业务意图和输入边界，不是 prompt，也不是授权边界。
-- 字段必须经过 schema 校验，不允许无限开放 JSON。
+- 一个 Context 同一时刻只能有一个 active `CollaborationMode`。
+- `mode_kind` 只能取 `public_discussion`、`autonomous_relay`、`planning_execution`、`competitive_assignment`、`direct_assignment`。
+- `public_discussion` 允许 `ContextScope` 内所有已授权参与者参与。
+- `autonomous_relay` 与 `planning_execution` 只允许显式加入该 mode 的部分参与者参与。
+- `competitive_assignment` 与 `direct_assignment` 同时至多有一个 active executor；其余 actor 可承担发起、授权、竞价、观察或验收角色，但不能并行执行。
+- mode 与 participants 变更必须通过 `context.mode_switched`、`participant.role_granted`、`participant.role_revoked` 事件进入事实日志。
+- 当前 mode 受状态机 binding 的 `allowed_modes` 约束，不能绕过 `ContextTransition` 直接修改。
+- visibility 属于当前 `CollaborationMode`，不是 `ContextEnvelope` 或 `scope`。
+- participants 是协作关系，不是权限本身。
 
-### 4.4 子实体：CollaborationOutcome
 
-`CollaborationOutcome` 是本轮协作的验收裁决对象；`ContextDeliverable` 从这里持有，不再由 `CollaborationContext` 根直接保存。
+### 4.1.2 CollaborationModePolicy
 
-```text
-CollaborationOutcome
-  ├─ outcome_id
-  ├─ decision                     # accepted / rejected
-  ├─ judged_by / judged_at
-  ├─ reason_ref
-  ├─ deliverables[]              # ContextDeliverable[]
-  └─ visibility
-```
-
-`ContextDeliverable` 是 `CollaborationOutcome` 内的产出事实，字段可以精简为：
+`CollaborationModePolicy` 把协作形态展开为四个明确的策略维度，由当前 Mode 通过 `mode_policy` 持有。它不是权限系统、运行时调度器或独立策略中心；首版不新增 Policy ID、策略注册 API 或任意组合 DSL，策略快照随 `mode_revision` 冻结，避免形成另一套工作流。
 
 ```text
-ContextDeliverable
-  ├─ deliverable_id / spec_ref
-  ├─ artifact_ref
-  ├─ produced_by / produced_at
-  ├─ producing_event_refs[] / evidence_refs[]
-  └─ acceptance_ref
+CollaborationModePolicy
+  ├─ participation_policy     # 谁可以参与：scope 内开放 / 选定参与者 / 竞价者 / 被指派者
+  ├─ coordination_policy      # 如何组织：开放贡献 / 顺序移交 / 先规划后执行 / 竞价择一 / 直接选定
+  ├─ executor_policy          # 执行基数：无独占者 / 每阶段一人 / 按计划分工 / 单一中标者 / 单一受派者
+  └─ completion_policy        # 完成条件：结论 / 阶段证据 / 计划交付物 / 单人交付，再经责任人裁决
 ```
+
+五种 Mode 与策略的标准组合以第 6.1 节为准，不能只修改某一维而保留不相容的 `mode_kind`。例如竞价模式允许多个 bidder，但中标前没有 executor，中标后至多一个 active executor；不能把“单人执行”误解成“只有一人可以参与”。
 
 设计约束：
-- 一个 Context 同一时刻只有一个 active `CollaborationOutcome`；一个 `CollaborationOutcome` 通过 `deliverables[]` 表达多个协作产物，不需要在根上再保存 `outcomes[]`。
-- 验收通过、驳回或返工都必须通过 `outcome.accepted` / `outcome.rejected` 完成。
-- 尚未裁决时 `outcome` 可以缺失，这是合法领域状态；候选产物通过 `artifact.submitted` 事件和投影展示。裁决时将所选产物引用、证据与 accepted / rejected 一并冻结进 Outcome，不伪造 judged_by / judged_at。
-- `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
-- 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
+- `participation_policy` 只定义协作准入条件；身份、scope、材料访问和执行授权仍由已注册的授权 hook 独立校验。
+- `coordination_policy` 表达移交或分工规则，具体规划、派发、恢复与运行事实继续由 Task / Relay / BCS 拥有。
+- `executor_policy` 约束当前阶段或计划分工的 executor 基数，不等于整个 Mode 的 participant 总数；只读观察者和验收人不计入执行者。
+- `completion_policy` 规定可交付 / 可验收的证据条件，不自动产生 `outcome.accepted`；最终裁决仍需责任人命令和状态机合法迁移。
+- 切换 Mode 时原子校验目标状态 `allowed_modes`、目标 Policy、参与者角色与未结束外部 Work；旧 Work 未完成交接或停止前，不得按新 Policy 启动冲突执行。
 
-### 4.5 版本化协议资源：ContextStateMachineDefinition
+
+### 4.1.3 ContextParticipant
+
+`ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。它不是权限模型，而是“谁在这个 Mode 中，何时被授权/撤销，以及承担哪些协作角色”的事实载体。
+
+```text
+ContextParticipant
+  ├─ participant_id / actor_kind / actor_id
+  ├─ roles[] / scope
+  ├─ granted_by / granted_at
+  ├─ revoked_by / revoked_at
+  ├─ membership_events[]
+  └─ visited_at
+```
+
+各字段语义如下：
+
+| 属性 | 具体含义 |
+| --- | --- |
+| `participant_id` | 当前 `CollaborationMode` 内的**成员记录 ID**，不是全局用户 ID；用于定位这条参与关系 |
+| `actor_kind` | 参与者身份类型，例如 `human` / `bot` / `system`；决定后续用哪套身份系统验证 |
+| `actor_id` | 在对应身份系统中的稳定 actor ID，例如用户 ID、已验证 Bot ID、系统服务 ID |
+| `roles[]` | 该参与者在当前 Mode 内承担的协作角色，例如 `owner`、`responsible_user`、`info_editor`、`executor`、`observer` |
+| `scope` | 该参与关系的**业务作用域**，通常与当前 `ContextScope` / `CollaborationMode` 对齐；不是可见性，也不是权限本身 |
+| `granted_by` | 授权该参与者的 actor |
+| `granted_at` | 参与关系被授权的时间 |
+| `revoked_by` | 撤销该参与者的 actor |
+| `revoked_at` | 参与关系被撤销的时间 |
+| `membership_events[]` | 对应的 `ContextEvent` 引用列表，例如 `participant.role_granted` / `participant.role_revoked`，用于审计与回放 |
+| `visited_at` | 最近一次读取或操作时间，仅服务于未读、活跃度、在线状态等投影，不作为参与事实 |
+
+补充说明：
+- `revoked_at` 为空且当前 mode 仍有效时，该 participant 视为 active。
+- `roles[]` 是协作角色，不是权限清单；它用于状态机 guard、可用动作和展示分组。
+- `membership_events[]` 只保存事件引用，不直接保存可变 JSON 明细。
+- `visited_at` 不参与裁决，不能作为参与权的证明。
+- 每次 command 仍须独立校验身份、作用域、材料授权和执行能力，不能只依赖 participant 记录放行。
+
+- 同一作用域内一个 actor 只有一个 active participant。
+- Bot 参与者必须记录可验证的 Bot ID、Owner 或服务归属，不能由 Bot 自称。
+- 参与关系不是权限本身，每次命令执行前仍须重新校验身份、材料和执行能力。
+
+
+### 4.2 状态层：定义、绑定与阶段 Todo
+
+状态层对应架构图中的 `ContextStateMachineDefinition` 和 `ContextStateMachineBinding`。前者是不可变的状态机合同，后者是某个 `CollaborationContext` 对该合同的运行绑定。状态层负责回答当前处于哪个业务阶段、下一步是否合法；它不负责决定谁有权限参与。
+
+### 4.2.1 ContextStateMachineDefinition
 
 `ContextStateMachineDefinition` 是可共享、声明式、可版本化的状态机合同。它是 Context 绑定的静态定义，不是运行态，也不是新的聚合根。
 
@@ -349,7 +291,8 @@ TransitionDefinition
 - `compatibility_policy` 声明该 revision 是否允许已有 Context 显式迁移，以及迁移时必须满足的校验。
 - 第 5.1 节的 YAML 可以视为该对象的声明式序列化形式；字段名可在实现前细化，但语义不变。
 
-### 4.6 子实体：ContextStateMachineBinding
+
+### 4.2.2 ContextStateMachineBinding
 
 `ContextStateMachineBinding` 是 Context 与某个 frozen state machine revision 的状态裁决绑定。它负责状态阶段、迁移并发及当前阶段的 Todo，不重复持有目标、参与者或外部 Work 的运行事实。
 
@@ -370,100 +313,12 @@ ContextStateMachineBinding
 - `state_fencing_token` 只属于 Binding，在业务状态 / 模式切换（含同状态模式切换）时递增，防止旧阶段或旧 Mode 的执行回报推进新阶段。Todo 绑定创建时的 state/token；迁移时完成、取消或显式结转，不能把未完成必需 Todo 静默丢弃。
 - 变更状态必须由服务端状态机基于 ContextEvent 与本 binding 的 frozen revision 裁决。
 
-### 4.7 子实体：CollaborationMode
 
-`CollaborationMode` 把当前协作模式和参与者收敛成同一个子实体。`CollaborationContext` 根只持有一个 active `collaboration_mode`，不再直接持有 `current_mode` 或 `participants[]`。
+### 4.3 事件层：事实与迁移证明
 
-```text
-CollaborationMode
-  ├─ mode_id / mode_kind
-  ├─ participants[]            # ContextParticipant[]
-  ├─ visibility                # ContextVisibility
-  ├─ mode_policy               # CollaborationModePolicy，随 mode_revision 冻结的策略值对象
-  ├─ mode_revision / started_at / ended_at
-  └─ mode_switched_event_refs[]
-```
+事件层对应架构图中的 `ContextEvent` 和 `ContextTransition`。`ContextEvent` 记录已经被服务端接纳的事实；`ContextTransition` 记录状态机基于事实作出的迁移证明。图中从 `ContextTransition` 指向 `ContextEvent`，表示迁移证明引用触发它的事实，而不是事件被迁移对象拥有。
 
-`visibility` 的基础取值只保留三类，作用域都在 `ContextScope` 之内：
-
-- `public`：对 scope 内所有人可见
-- `workspace`：对 scope 内某个 workspace 可见
-- `participants`：仅对当前 mode 的 participants 和责任人可见
-
-设计约束：
-- 一个 Context 同一时刻只能有一个 active `CollaborationMode`。
-- `mode_kind` 只能取 `public_discussion`、`autonomous_relay`、`planning_execution`、`competitive_assignment`、`direct_assignment`。
-- `public_discussion` 允许 `ContextScope` 内所有已授权参与者参与。
-- `autonomous_relay` 与 `planning_execution` 只允许显式加入该 mode 的部分参与者参与。
-- `competitive_assignment` 与 `direct_assignment` 同时至多有一个 active executor；其余 actor 可承担发起、授权、竞价、观察或验收角色，但不能并行执行。
-- mode 与 participants 变更必须通过 `context.mode_switched`、`participant.role_granted`、`participant.role_revoked` 事件进入事实日志。
-- 当前 mode 受状态机 binding 的 `allowed_modes` 约束，不能绕过 `ContextTransition` 直接修改。
-- visibility 属于当前 `CollaborationMode`，不是 `ContextEnvelope` 或 `scope`。
-- participants 是协作关系，不是权限本身。
-
-### 4.8 值对象：CollaborationModePolicy
-
-`CollaborationModePolicy` 把协作形态展开为四个明确的策略维度，由当前 Mode 通过 `mode_policy` 持有。它不是权限系统、运行时调度器或独立策略中心；首版不新增 Policy ID、策略注册 API 或任意组合 DSL，策略快照随 `mode_revision` 冻结，避免形成另一套工作流。
-
-```text
-CollaborationModePolicy
-  ├─ participation_policy     # 谁可以参与：scope 内开放 / 选定参与者 / 竞价者 / 被指派者
-  ├─ coordination_policy      # 如何组织：开放贡献 / 顺序移交 / 先规划后执行 / 竞价择一 / 直接选定
-  ├─ executor_policy          # 执行基数：无独占者 / 每阶段一人 / 按计划分工 / 单一中标者 / 单一受派者
-  └─ completion_policy        # 完成条件：结论 / 阶段证据 / 计划交付物 / 单人交付，再经责任人裁决
-```
-
-五种 Mode 与策略的标准组合以第 6.1 节为准，不能只修改某一维而保留不相容的 `mode_kind`。例如竞价模式允许多个 bidder，但中标前没有 executor，中标后至多一个 active executor；不能把“单人执行”误解成“只有一人可以参与”。
-
-设计约束：
-- `participation_policy` 只定义协作准入条件；身份、scope、材料访问和执行授权仍由已注册的授权 hook 独立校验。
-- `coordination_policy` 表达移交或分工规则，具体规划、派发、恢复与运行事实继续由 Task / Relay / BCS 拥有。
-- `executor_policy` 约束当前阶段或计划分工的 executor 基数，不等于整个 Mode 的 participant 总数；只读观察者和验收人不计入执行者。
-- `completion_policy` 规定可交付 / 可验收的证据条件，不自动产生 `outcome.accepted`；最终裁决仍需责任人命令和状态机合法迁移。
-- 切换 Mode 时原子校验目标状态 `allowed_modes`、目标 Policy、参与者角色与未结束外部 Work；旧 Work 未完成交接或停止前，不得按新 Policy 启动冲突执行。
-
-### 4.9 子实体：ContextParticipant
-
-`ContextParticipant` 记录人类、Bot 或系统服务在当前 `CollaborationMode` 中的参与身份和角色。它不是权限模型，而是“谁在这个 Mode 中，何时被授权/撤销，以及承担哪些协作角色”的事实载体。
-
-```text
-ContextParticipant
-  ├─ participant_id / actor_kind / actor_id
-  ├─ roles[] / scope
-  ├─ granted_by / granted_at
-  ├─ revoked_by / revoked_at
-  ├─ membership_events[]
-  └─ visited_at
-```
-
-各字段语义如下：
-
-| 属性 | 具体含义 |
-| --- | --- |
-| `participant_id` | 当前 `CollaborationMode` 内的**成员记录 ID**，不是全局用户 ID；用于定位这条参与关系 |
-| `actor_kind` | 参与者身份类型，例如 `human` / `bot` / `system`；决定后续用哪套身份系统验证 |
-| `actor_id` | 在对应身份系统中的稳定 actor ID，例如用户 ID、已验证 Bot ID、系统服务 ID |
-| `roles[]` | 该参与者在当前 Mode 内承担的协作角色，例如 `owner`、`responsible_user`、`info_editor`、`executor`、`observer` |
-| `scope` | 该参与关系的**业务作用域**，通常与当前 `ContextScope` / `CollaborationMode` 对齐；不是可见性，也不是权限本身 |
-| `granted_by` | 授权该参与者的 actor |
-| `granted_at` | 参与关系被授权的时间 |
-| `revoked_by` | 撤销该参与者的 actor |
-| `revoked_at` | 参与关系被撤销的时间 |
-| `membership_events[]` | 对应的 `ContextEvent` 引用列表，例如 `participant.role_granted` / `participant.role_revoked`，用于审计与回放 |
-| `visited_at` | 最近一次读取或操作时间，仅服务于未读、活跃度、在线状态等投影，不作为参与事实 |
-
-补充说明：
-- `revoked_at` 为空且当前 mode 仍有效时，该 participant 视为 active。
-- `roles[]` 是协作角色，不是权限清单；它用于状态机 guard、可用动作和展示分组。
-- `membership_events[]` 只保存事件引用，不直接保存可变 JSON 明细。
-- `visited_at` 不参与裁决，不能作为参与权的证明。
-- 每次 command 仍须独立校验身份、作用域、材料授权和执行能力，不能只依赖 participant 记录放行。
-
-- 同一作用域内一个 actor 只有一个 active participant。
-- Bot 参与者必须记录可验证的 Bot ID、Owner 或服务归属，不能由 Bot 自称。
-- 参与关系不是权限本身，每次命令执行前仍须重新校验身份、材料和执行能力。
-
-### 4.10 事件层：ContextEvent 与 ContextTransition
+### 4.3.1 ContextEvent 与 ContextTransition
 
 事件层把“事实”和“裁决”分开：
 
@@ -475,11 +330,181 @@ ContextParticipant
 
 回放时按 `ContextEvent.sequence` 应用已保存的事实与迁移裁决（包括没有 Transition 的事件），不得重新授权或执行外部效果；对外读取则从 `CollaborationContext` 生成按可见性过滤的 Snapshot / Timeline。
 
+
+### 4.4 表示层：输入、聚合根与结果
+
+表示层对应架构图底部的三块内容：`ContextEnvelope` 表达协作目标和输入，`CollaborationContext` 是唯一聚合根，`CollaborationOutcome` 保存责任人的结果裁决。这里的“表示”不是前端展示层；`CollaborationContext` 仍然是领域权威对象，`ContextSnapshot` 才是面向消费者的只读投影。
+
+### 4.4.1 CollaborationContext
+
+`CollaborationContext` 是唯一业务权威，负责回答：
+
+1. 这个目标是什么、边界和验收口径是什么。
+2. 谁是责任人，当前协作模式里的参与者和可见范围是什么。
+3. 哪些材料是协作输入，哪些交付物是协作结果。
+4. 当前业务阶段为什么合法、下一步允许什么。
+5. 当前协作模式是什么，以及有哪些产品或执行能力可以继续推进任务。
+
+```text
+CollaborationContext
+  ├─ context_id
+  ├─ scope                    # ContextScope
+  ├─ title
+  ├─ envelope                 # ContextEnvelope
+  ├─ responsible_actor_ref
+  ├─ collaboration_mode       # CollaborationMode，持有 visibility 与 mode_policy
+  ├─ state_machine_binding    # ContextStateMachineBinding，持有 transition_cursor / state_fencing_token / ContextTodo[]
+  ├─ outcome                  # 最近一次 CollaborationOutcome；首次裁决前允许缺失
+  ├─ version                  # 聚合乐观锁版本
+  ├─ event_cursor             # Context 事件日志位置：最近接纳事件的 sequence
+  └─ created_by / created_from / created_at / updated_at / closed_at
+```
+
+`ContextScope` 不是可见性，而是 Context 所属的**授权与作用域边界**。
+
+```text
+ContextScope
+  ├─ scope_kind             # open / workspace / personal
+  ├─ scope_id               # 该 kind 下的稳定对象 ID
+  └─ environment            # 运行/部署环境
+```
+
+取值说明：
+- `open`：开放工作空间。
+- `workspace`：项目空间、工作空间、协作空间，例如 Dima 项目空间或 TaskDiscover 事件集合所在空间。
+- `personal`：个人任务、私人待办或单个用户私有的 Context。
+
+`ContextScope` 解决的是 **归属哪儿**，不是 **谁能看见**；可见性仍由 `CollaborationMode.visibility` 与授权系统控制。
+
+聚合根不变量：
+- 一个 Context 只有一个聚合级业务状态；该状态只能由已接纳事件和状态机裁决。
+- 输入、交付物、协作模式、Todo、Outcome 和来源引用等事实不能直接改状态，必须形成合法 `ContextEvent`。ContextTodo 属于 active state machine binding，不是根级独立字段。
+- 子实体和值对象不能跨 Context 隐式共享，也不能绕过 `CollaborationMode.visibility` 与 `scope`。
+- 终态后可继续追加公开事件，但不能自动改变终态。
+- `responsible_actor_ref` 必须由授权主体和现有身份系统确认，不能由 Bot 自主声明。
+
+
+### 4.4.2 ContextEnvelope
+
+`ContextEnvelope` 是业务意图、约束、验收口径、协作输入来源和输入材料引用的统一权威值对象。`InputSource` 与 `ContextMaterialReference` 都从这里持有，不再独立建 `ContextInput` 实体。
+
+```text
+ContextEnvelope
+  ├─ objective / background
+  ├─ input_sources[]          # InputSource[]
+  ├─ material_refs[]           # ContextMaterialReference[]
+  ├─ constraints[] / deliverable_specs[]
+  ├─ acceptance[] / language / locale
+  ├─ origin_ref
+  └─ envelope_revision
+```
+
+`InputSource` 用 `source_kind + source_id + revision` 标识一个外部来源版本，例如：
+
+- Dima 项目空间
+- TaskDiscover 模块自动挖掘的事件集合
+
+`ContextMaterialReference` 用 `source_kind + source_id + revision / digest` 稳定引用一份具体材料；它只保存引用、版本和可见范围，不保存材料正文、token、cookie 或私有路径。
+
+设计约束：
+- `input_sources[]` 和 `material_refs[]` 共同表达“协作输入”。
+- 输入信息属于 envelope revision，没有独立生命周期，也不作为新的子实体存在。
+- 每次可审计变更必须产生 `context.info_updated` 事实。
+- 它是业务意图和输入边界，不是 prompt，也不是授权边界。
+- 字段必须经过 schema 校验，不允许无限开放 JSON。
+
+
+### 4.4.3 CollaborationOutcome
+
+`CollaborationOutcome` 是本轮协作的验收裁决对象；`ContextDeliverable` 从这里持有，不再由 `CollaborationContext` 根直接保存。
+
+```text
+CollaborationOutcome
+  ├─ outcome_id
+  ├─ decision                     # accepted / rejected
+  ├─ judged_by / judged_at
+  ├─ reason_ref
+  ├─ deliverables[]              # ContextDeliverable[]
+  └─ visibility
+```
+
+`ContextDeliverable` 是 `CollaborationOutcome` 内的产出事实，字段可以精简为：
+
+```text
+ContextDeliverable
+  ├─ deliverable_id / spec_ref
+  ├─ artifact_ref
+  ├─ produced_by / produced_at
+  ├─ producing_event_refs[] / evidence_refs[]
+  └─ acceptance_ref
+```
+
+设计约束：
+- 一个 Context 同一时刻只有一个 active `CollaborationOutcome`；一个 `CollaborationOutcome` 通过 `deliverables[]` 表达多个协作产物，不需要在根上再保存 `outcomes[]`。
+- 验收通过、驳回或返工都必须通过 `outcome.accepted` / `outcome.rejected` 完成。
+- 尚未裁决时 `outcome` 可以缺失，这是合法领域状态；候选产物通过 `artifact.submitted` 事件和投影展示。裁决时将所选产物引用、证据与 accepted / rejected 一并冻结进 Outcome，不伪造 judged_by / judged_at。
+- `ContextDeliverable` 不再直接挂在根上，也不单独驱动状态机。
+- 根只持有一个 active `outcome`，交付物由该 Outcome 持有；历史或驳回后的 Outcome 通过 append-only `ContextEvent` 与迁移/裁决事实审计，不作为根上的活跃集合。Outcome 的 visibility 只能在 CollaborationMode.visibility 基础上收窄，不能扩大。
+
+
+### 4.5 跨层运行机制：一条命令如何贯穿四层
+
+四层是领域职责的横向分解，不是“协作层调用状态层、状态层调用事件层、表示层最后被动接收”的代码调用栈。一次命令会同时受到身份、协作 Policy、状态 Definition、当前 Binding 和材料授权的约束；通过裁决后，事实、迁移、运行态和聚合快照在同一事务内形成一致结果。
+
+一次典型的运行链路如下：
+
+1. **表示层接收目标与输入**：`ContextEnvelope` 提供 objective、背景、材料引用和验收口径；`CollaborationContext` 记录责任人和当前聚合版本。
+2. **协作层确定参与方式**：服务端校验当前 `CollaborationMode`、participants、visibility 和冻结的 `CollaborationModePolicy`，确认谁可以提交该命令、谁可以执行或验收。
+3. **事件层接纳事实**：Adapter / Service API 将命令转换为结构化 `ContextEvent`。适配器不能直接写 `current_state`、`mode_kind` 或 `outcome`。
+4. **状态层进行裁决**：服务端使用当前 Binding 引用的 frozen Definition，按 `current_state`、`allowed_modes`、guard 和 fencing token 判断是否产生零或一条 `ContextTransition`。普通贡献可以只有事件而没有迁移。
+5. **表示层更新权威快照**：合法结果原子更新 Binding、Mode、Todo、Outcome 和聚合 `version / event_cursor`，再生成对外 Snapshot / Timeline 投影。
+6. **外部系统异步承接**：Task / Relay / BCS 等系统只拥有自己的 Work 生命周期；外部事实经 Adapter 转换为后续 `ContextEvent`，不能反向直接修改 Context。
+
+架构图中的关系因此可以这样理解：
+
+- `CollaborationMode → CollaborationModePolicy`：当前 Mode 持有冻结的策略值对象；五种模式是标准 Policy 组合。
+- `ContextStateMachineDefinition → ContextStateMachineBinding`：运行 Context 绑定某个不可变 Definition revision。
+- `ContextTransition → ContextEvent`：迁移证明引用触发它的已接纳事实；一个事件可以没有迁移证明。
+- `CollaborationContext → ContextEnvelope / CollaborationOutcome`：聚合根持有输入边界和当前结果裁决。
+
+跨层不变量：
+
+- Policy 不能复制状态迁移规则；Definition 不能复制参与者和执行授权规则。
+- State 不能提升权限，Mode visibility 不能替代 authorization。
+- Event 是事实唯一入口；任何状态、模式和结果变化都必须能回溯到事件。
+- Snapshot 可按消费者重建，不能反过来成为 Context、Binding 或 Outcome 的权威来源。
+
+
+### 4.6 对象清单与权威归属
+
+前面按架构层解释职责，下面保留按领域对象查询的清单，方便实现和评审时快速定位身份、权威关系与生命周期。该清单是四层设计的索引，不是第五层，也不改变前述对象归属。
+
+`CollaborationContext` 是本协议唯一的聚合根。其它对象一律不是新的聚合根，而是聚合内的子实体、值对象、版本化协议资源或只读投影。子实体 ID 都必须带 `context_id` 语义，不能脱离 Context 被单独共享；值对象没有独立生命周期，只能随所属 Context 或命令事实变更。
+
+| 对象 | 类型 | 主要身份 / 相等性 | 权威关系 | 生命周期 |
+| --- | --- | --- | --- | --- |
+| `CollaborationContext` | 聚合根 | `context_id` | 唯一业务权威 | 显式创建、推进、取消或验收 |
+| `ContextEnvelope` | 值对象 | 当前 envelope revision，内容相等 | 由 Context 拥有，统一承载目标、输入来源与输入材料引用 | 随 `context.info_updated` 事实演进 |
+| `InputSource` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，标识 Dima 项目空间、TaskDiscover 模块自动挖掘的事件集合等外部来源 | 随 envelope 事实演进 |
+| `ContextMaterialReference` | 值对象 | `source_kind + source_id + revision` | 由 ContextEnvelope 持有，稳定引用具体输入材料，不拥有内容 | 随 envelope 事实演进 |
+| `ContextDeliverable` | 子实体 | `context_id + deliverable_id + spec_ref` | 由 CollaborationOutcome 持有，记录这一轮协作结果，与输入材料分离 | 由产出事件建立，随验收事实归档 |
+| `CollaborationMode` | 子实体 | `context_id + mode_id` | 承载当前协作形态、参与者集合、visibility 与策略快照 | 随模式切换事件演进 |
+| `CollaborationModePolicy` | 值对象 | 四项策略内容相等；随 mode_revision 冻结 | 由 Mode 持有，定义参与、协调、执行者和完成规则 | 无独立生命周期；随合法模式切换替换 |
+| `ContextParticipant` | 子实体 | `participant_id`，作用域内 actor 唯一 | 记录参与关系，不替代权限系统 | 授权、撤销、重新授权 |
+| `ContextStateMachineDefinition` | 版本化协议资源 | `definition_id + definition_revision + content_digest` | 共享状态机合同 | 注册后不可原位修改 |
+| `ContextStateMachineBinding` | 子实体 | `context_id + binding_id` | 绑定 Context 与 definition revision，管理 current_state、transition_cursor、state_fencing_token，并持有当前状态下的 ContextTodo[] | 创建时绑定，显式迁移 revision |
+| `ContextEvent` | 子实体 | `event_id`；来源幂等键唯一 | append-only 事实 | 永不修改，可用补偿事件 |
+| `ContextTransition` | 子实体 | `context_id + transition_id`；`accepted_event_id` 唯一 | 一次状态迁移裁决证明 | 由服务端确定性生成，永不变更 |
+| `ContextTodo` | 子实体 | `context_id + binding_id + todo_id` | 由 ContextStateMachineBinding 持有，表达当前状态下的轻量代办事实 | 创建、完成、阻塞或取消事件 |
+| `CollaborationOutcome` | 子实体 | `context_id + outcome_id` | 保存验收裁决与该轮 deliverables[] | 责任人显式裁决 |
+| `ContextSnapshot` | 只读投影 | `snapshot_id + snapshot_revision` | 非权威快照 | 按目标重新生成，可过期 |
+
+
 ## 5. 可扩展状态机
 
 ### 5.1 状态机合同
 
-`ContextStateMachineDefinition` 的声明式序列化 schema 采用 `context-state-machine/1`；目标合同通过第 4.5 节定义的对象承载。以下示例将 `states[]` 编码为以 state_id 为键的映射；省略展示字段，`content_digest`、注册人和注册时间由注册服务生成。`new_contexts_only` 表示仅供新 Context 绑定，不隐式升级既有 Binding。
+`ContextStateMachineDefinition` 的声明式序列化 schema 采用 `context-state-machine/1`；状态机运行绑定通过第 4.2 节定义的对象承载。以下示例将 `states[]` 编码为以 state_id 为键的映射；省略展示字段，`content_digest`、注册人和注册时间由注册服务生成。`new_contexts_only` 表示仅供新 Context 绑定，不隐式升级既有 Binding。
 
 ```yaml
 schema_version: context-state-machine/1
