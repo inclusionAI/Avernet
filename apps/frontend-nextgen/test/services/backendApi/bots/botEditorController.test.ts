@@ -263,14 +263,22 @@ describe('botEditorController', () => {
   });
   test('creates a SkillSet with the required idempotency header', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
-    await botEditorController.createSkillSet('bot-1', { name: '研发能力' });
+    await botEditorController.createSkillSet('bot-1', { name: '研发能力' }, 'owner-1');
     expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/skill-sets',
+      '/openapi/v1/bots/bot-1/skill-sets?owner_id=owner-1',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ name: '研发能力' }),
         headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
       }),
+    );
+  });
+  test('uses the addressed owner when activating a skill set', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await botEditorController.setSkillSetActive('bot-1', '7', true, 'owner-1');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/skill-sets/7/activate?owner_id=owner-1',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
   test('adds an MCP to a SkillSet with PUT', async () => {
