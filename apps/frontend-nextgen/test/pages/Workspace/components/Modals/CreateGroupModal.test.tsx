@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
@@ -190,6 +191,31 @@ it('places free-chat settings in three equal responsive columns and wraps helper
   assertHelper('群主 Bot 将默认回复每一条消息');
   fireEvent.click(controls[2]);
   assertHelper('群主 Bot 仅在被 @ 时或上下文语境高度关联时答复');
+});
+
+it.each(['/avatars/actor.svg', undefined])('keeps Bot avatars in leader options and selected members (%p)', async (avatarUrl) => {
+  cs.listFriends.mockResolvedValue({
+    ok: true,
+    data: { items: [{ ...bots[0], avatarUrl: '/avatars/alpha.svg' }], total: 1, offset: 0, limit: 50, hasMore: false },
+  });
+  renderModal({ activeIdentity: { ...botIdentity, avatarUrl } });
+  const driver = screen.getByRole('button', { name: '群主 Bot' });
+  const expected = avatarUrl || generateBotAvatar(botIdentity.id);
+  await waitFor(() => expect(within(driver).getByRole('img', { name: '我 Bot' })).toHaveAttribute('src', expected));
+  expect(screen.getByTestId('group-participant-selected').querySelector('img')).toHaveAttribute('src', expected);
+  fireEvent.click(await within(screen.getByTestId('group-participant-list')).findByRole('button', { name: /Alpha/ }));
+  await selectLeader('群主 Bot', /Alpha/);
+  expect(within(driver).getByRole('img', { name: 'Alpha' })).toHaveAttribute('src', '/avatars/alpha.svg');
+});
+
+it('retains the catalog avatar when the active identity has no avatar', async () => {
+  cs.listFriends.mockResolvedValue({
+    ok: true,
+    data: { items: [{ ...bots[0], id: botIdentity.id, avatarUrl: '/avatars/catalog.svg' }], total: 1, offset: 0, limit: 50, hasMore: false },
+  });
+  renderModal({ activeIdentity: botIdentity });
+  await waitFor(() => expect(within(screen.getByRole('button', { name: '群主 Bot' }))
+    .getByRole('img', { name: '我 Bot' })).toHaveAttribute('src', '/avatars/catalog.svg'));
 });
 
 it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', async () => {

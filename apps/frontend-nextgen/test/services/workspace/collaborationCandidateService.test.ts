@@ -39,6 +39,32 @@ beforeEach(() => {
 });
 
 describe('collaborationCandidateService', () => {
+  it.each(['/avatars/saved.svg', undefined, null, '', '  '])(
+    'preserves query/candidates avatar_url and shares management defaults for missing avatars (%p)',
+    async (avatarUrl) => {
+      const dto = {
+        kind: 'bot', bot_id: 'b1:owner', name: 'Alpha', avatar_url: avatarUrl,
+        status: 'online', reachability: 'reachable', visibility: 'public',
+      };
+      connections.listFriendConnections.mockResolvedValue({
+        code: 20000, data: { items: [{ actor: { type: 'bot', id: dto.bot_id } }], total: 1 },
+      });
+      bc.queryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [dto], total: 1 } });
+      bc.listBotCandidates.mockResolvedValue({
+        code: 20000, data: { items: [{ bot: dto, is_friend: true }], total: 1 },
+      });
+
+      const friends = await collaborationCandidateService.listFriends('actor:owner', { detailSource: 'collaboration' });
+      const candidates = await collaborationCandidateService.listCandidates('actor:owner');
+      const expected = avatarUrl?.trim() || generateBotAvatar('b1');
+      for (const result of [friends, candidates]) {
+        expect(result).toMatchObject({ ok: true, data: { items: [{ id: dto.bot_id, avatarUrl: expected }] } });
+      }
+      expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: [dto.bot_id] });
+      expect(bots.listBotMetadata).not.toHaveBeenCalled();
+    },
+  );
+
   it('listMine filters human identities and returns bots only', async () => {
     bc.listMyBots.mockResolvedValue({
       code: 20000,

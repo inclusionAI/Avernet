@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type { IdentityView } from '@/domain/collaboration';
 import { useMemo } from 'react';
 import type { UseGroupCollaborationPickerResult } from './useGroupCollaborationPicker';
@@ -10,13 +11,13 @@ export function useAllAvailableBots(
   return useMemo(() => {
     const map = new Map<string, { id: string; name: string; avatarUrl?: string }>();
     [...picker.friends, ...picker.mine, ...picker.candidates].forEach((bot) => {
-      map.set(bot.id, { id: bot.id, name: bot.name, avatarUrl: bot.avatarUrl });
+      map.set(bot.id, { id: bot.id, name: bot.name, avatarUrl: resolveBotAvatarUrl(bot.avatarUrl, bot.id) });
     });
     if (activeIdentity?.kind === 'bot') {
       map.set(activeIdentity.id, {
         id: activeIdentity.id,
         name: activeIdentity.displayName,
-        avatarUrl: activeIdentity.avatarUrl,
+        avatarUrl: resolveBotAvatarUrl(activeIdentity.avatarUrl?.trim() || map.get(activeIdentity.id)?.avatarUrl, activeIdentity.id),
       });
     }
     return Array.from(map.values());

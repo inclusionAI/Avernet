@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { Button } from '@/components/ui';
 import { Modal, ModalContent } from '@/components/ui/Modal';
 import type { IdentityView } from '@/domain/collaboration';
@@ -60,7 +61,7 @@ function LoadedDraftDialog({ draft, bots }: { draft: CollaborationDraft; bots: I
                 options={bots.map((bot) => ({
                   id: bot.id,
                   name: bot.displayName,
-                  avatarUrl: bot.avatarUrl,
+                  avatarUrl: resolveBotAvatarUrl(bot.avatarUrl, bot.id),
                   current: bot.id === activeId,
                   description: `${bot.online ? '在线' : '离线'} · ${bot.id}`,
                 }))}

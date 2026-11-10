@@ -1,11 +1,12 @@
 /** @jest-environment jsdom */
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { GroupParticipantPicker } from '@/pages/Workspace/components/Modals/GroupParticipantPicker';
 import type { UseGroupCollaborationPickerResult } from '@/pages/Workspace/hooks/useGroupCollaborationPicker';
 import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const unknownBot = {
   id: 'b2:900003',
@@ -276,4 +277,46 @@ it('shows the recommendation error with a retry action', () => {
   expect(screen.getByText('推荐可协作 Bot 失败，请稍后重试。')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   expect(retryRecommend).toHaveBeenCalled();
+});
+
+it.each((['friends', 'candidates', 'mine'] as const).flatMap((tab) =>
+  ['/avatars/saved.svg', undefined, '  '].map((avatarUrl) => ({ tab, avatarUrl })),
+))('renders $tab Bot avatars consistently in the list and selected chips ($avatarUrl)', ({ tab, avatarUrl }) => {
+  const bot: CollaborationBotView = {
+    id: 'b1:owner', name: 'Alpha', avatarUrl, online: true,
+    status: 'online', reachability: 'reachable', visibility: 'public',
+  };
+  const props = {
+    picker: makePicker([bot], { tab, candidates: [bot], mine: [bot] }),
+    selectedIds: [bot.id], selectedOptions: [bot], showMineTab: true, onToggle: jest.fn(),
+  };
+  const expected = avatarUrl?.trim() || generateBotAvatar('b1');
+  const { rerender } = render(<GroupParticipantPicker {...props} />);
+  const list = screen.getByTestId('group-participant-list');
+  expect(within(list).getByRole('img', { name: 'Alpha' })).toHaveAttribute('src', expected);
+  expect(within(list).getByRole('img', { name: 'Alpha' })).toHaveStyle({ width: '36px', height: '36px' });
+  expect(screen.getByTestId('group-participant-selected').querySelector('img')).toHaveAttribute('src', expected);
+
+  const renamed = { ...bot, name: 'Renamed Bot' };
+  rerender(<GroupParticipantPicker {...props}
+    picker={makePicker([renamed], { tab, candidates: [renamed], mine: [renamed] })}
+    selectedOptions={[renamed]} />);
+  expect(within(list).getByRole('img', { name: 'Renamed Bot' })).toHaveAttribute('src', expected);
+});
+
+it('preserves the avatar of a prepended originator Bot', () => {
+  render(<GroupParticipantPicker picker={makePicker([])} selectedIds={[]} selectedOptions={[]}
+    showMineTab={false} onToggle={jest.fn()}
+    prependBot={{ id: 'originator:owner', name: '发起 Bot', avatarUrl: '/avatars/originator.svg' }} />);
+  expect(screen.getByRole('img', { name: '发起 Bot' })).toHaveAttribute('src', '/avatars/originator.svg');
+});
+
+it('keeps the catalog avatar when prepending an originator without an explicit avatar', () => {
+  const bot: CollaborationBotView = {
+    id: 'originator:owner', name: '发起 Bot', avatarUrl: '/avatars/catalog.svg', online: true,
+    status: 'online', reachability: 'reachable', visibility: 'public',
+  };
+  render(<GroupParticipantPicker picker={makePicker([bot])} selectedIds={[]} selectedOptions={[]}
+    showMineTab={false} onToggle={jest.fn()} prependBot={{ id: bot.id, name: bot.name }} />);
+  expect(screen.getByRole('img', { name: '发起 Bot' })).toHaveAttribute('src', '/avatars/catalog.svg');
 });

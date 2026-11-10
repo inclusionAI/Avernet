@@ -131,7 +131,7 @@ export function DraftGroupForm({
               showMineTab={false}
               routing={routing}
               additionalRoutingOptions={boundOptions}
-              prependBot={{ id: originator.id, name: originator.displayName }}
+              prependBot={{ id: originator.id, name: originator.displayName, avatarUrl: originator.avatarUrl }}
               onToggle={(id) => {
                 if (locked || !binding.activeParticipantKey) return;
                 if (activeBot === id) binding.handleUnbind(binding.activeParticipantKey);

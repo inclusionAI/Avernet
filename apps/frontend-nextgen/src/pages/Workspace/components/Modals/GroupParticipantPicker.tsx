@@ -18,7 +18,7 @@ export interface GroupParticipantPickerProps {
   onToggle: (id: string) => void;
   excludeId?: string | null;
   /** 置顶 Bot（如发起方 bot）；在 task_dag 模式下将此 Bot 放到列表首位。 */
-  prependBot?: { id: string; name: string } | null;
+  prependBot?: { id: string; name: string; avatarUrl?: string } | null;
   /** 候选列表滚动视口的局部高度覆盖。 */
   listViewportClassName?: string;
   /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
@@ -69,6 +69,7 @@ export function GroupParticipantPicker({
     const originatorView: CollaborationBotView = {
       id: prependBot.id,
       name: prependBot.name,
+      avatarUrl: prependBot.avatarUrl?.trim() || source.find((bot) => bot.id === prependBot.id)?.avatarUrl,
       summary: '',
       online: true,
       status: 'online',
