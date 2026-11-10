@@ -102,6 +102,29 @@ def test_status_includes_cancelled():
     assert Status.CANCELLED.value == "CANCELLED"
 
 
+def test_manual_stop_cancelled_transition_is_allowed():
+    service = TaskGraphService()
+    graph = service.initialize_graph(_task_info("manual-stop"))
+    service.update_task_node_info(
+        _patch("manual-stop", "manual-stop", status=Status.RUNNING)
+    )
+
+    result = service.update_task_node_info(
+        _patch(
+            "manual-stop",
+            "manual-stop",
+            status=Status.CANCELLED,
+            failure_reason="manual_stop",
+        )
+    )
+
+    node = service._get_node(graph, "manual-stop")
+    assert result.success is True
+    assert result.new_status == Status.CANCELLED
+    assert node.status == Status.CANCELLED
+    assert node.run_info.failure_reason == "manual_stop"
+
+
 @pytest.fixture
 def svc() -> TaskGraphService:
     return TaskGraphService()
