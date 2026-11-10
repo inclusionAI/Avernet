@@ -141,7 +141,7 @@ export function DraftGroupForm({
           )}
         </fieldset>
         {error && (
-          <p role="alert" className="mt-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+          <p role="alert" className="mt-3 rounded-md bg-destructive/10 p-3 text-xs text-destructive">
             {error}
           </p>
         )}

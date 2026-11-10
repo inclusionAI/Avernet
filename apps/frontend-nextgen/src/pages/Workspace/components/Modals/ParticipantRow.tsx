@@ -31,7 +31,7 @@ export function ParticipantRow({ bot, selected, recommendActive, isOriginator, c
     <Button
       type="button"
       variant="ghost"
-      size="md"
+      size="sm"
       disabled={unavailable}
       aria-pressed={selected}
       className={cn(
@@ -49,12 +49,12 @@ export function ParticipantRow({ bot, selected, recommendActive, isOriginator, c
       )}
       onClick={() => onToggle(bot.id)}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-sm font-medium text-muted-foreground">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-xs font-medium text-muted-foreground">
         {avatarText(bot.name)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-foreground">{bot.name}</span>
+          <span className="truncate text-xs font-medium text-foreground">{bot.name}</span>
           {isOriginator && (
             <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
               发起方

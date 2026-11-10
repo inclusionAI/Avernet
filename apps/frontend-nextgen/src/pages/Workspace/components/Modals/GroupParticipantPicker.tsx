@@ -96,7 +96,7 @@ export function GroupParticipantPicker({
       className={cn('w-full min-w-0 max-w-full', fillAvailableHeight && 'flex min-h-0 flex-1 flex-col')}
     >
       <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-xs font-medium text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
         <span className="text-xs text-muted-foreground">
@@ -154,7 +154,7 @@ export function GroupParticipantPicker({
       <div className="relative mb-3 shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          className="h-10 rounded-lg pl-9 text-xs"
+          className="h-8 rounded-lg pl-9 text-xs"
           value={picker.search}
           onChange={(event) => picker.setSearch(event.target.value)}
           placeholder={
@@ -171,14 +171,14 @@ export function GroupParticipantPicker({
       </div>
 
       {recommendActive && picker.recommendError ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.recommendError}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retryRecommend}>
             重试
           </Button>
         </div>
       ) : picker.error ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.error}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retry}>
             重试

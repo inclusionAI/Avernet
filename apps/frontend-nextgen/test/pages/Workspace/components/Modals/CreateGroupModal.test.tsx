@@ -129,21 +129,30 @@ it('matches configuration panel typography without changing the collaboration fo
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
 
-  expect(screen.getByRole('heading', { name: '发起协作' })).toHaveClass('text-sm', 'leading-7');
+  expect(screen.getByRole('heading', { name: '发起协作' })).toHaveClass('text-sm');
   expect(screen.getByText('设置协作方式，为团队选择合适的 Bot。')).toHaveClass('text-xs', 'leading-5');
   for (const name of ['协作群名称', '协作目标', '搜索 Bot 名称或描述']) {
-    expect(screen.getByRole('textbox', { name })).toHaveClass('text-xs', 'h-10');
+    expect(screen.getByRole('textbox', { name })).toHaveClass('text-xs', 'h-8');
   }
   for (const label of ['协作群名称', '协作目标', '协作群类型', '群主 Bot', '自动回复', '成员 Bot']) {
-    expect(screen.getByText(label)).toHaveClass('text-sm');
+    expect(screen.getByText(label)).toHaveClass('text-xs');
   }
+  for (const label of ['自由聊天', '任务协作', '自定义协作']) {
+    expect(within(screen.getByRole('radio', { name: label })).getByText(label)).toHaveClass('text-xs');
+  }
+  for (const name of ['群主 Bot', '@Human 通知来源', '消息视角']) {
+    expect(screen.getByRole('button', { name })).toHaveClass('text-xs', 'h-8');
+  }
+  expect(screen.getByText('开放交流、灵活讨论和日常协作')).toHaveClass('text-xs');
+  expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('text-xs');
+  expect(screen.getByRole('switch', { name: '自动回复' })).toHaveClass('h-6', 'w-11');
   expect(within(screen.getByRole('button', { name: '群主 Bot' })).getByText('选择群主 Bot')).toHaveClass('text-xs');
   expect(within(screen.getByRole('button', { name: '@Human 通知来源' })).getByText('所有成员')).toHaveClass('text-xs');
   fireEvent.click(screen.getByRole('button', { name: /Alpha/ }));
   await selectLeader('群主 Bot', /Alpha/);
   expect(within(screen.getByRole('button', { name: '群主 Bot' })).getByText('Alpha')).toHaveClass('text-xs');
   for (const name of ['取消', '确认创建']) {
-    expect(screen.getByRole('button', { name })).toHaveClass('text-xs', 'h-10');
+    expect(screen.getByRole('button', { name })).toHaveClass('text-xs', 'h-8', 'px-3');
   }
 
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('gap-6', 'px-4', 'sm:px-7');
@@ -350,7 +359,7 @@ it('state_machine submits definitionYaml as content_yaml body', async () => {
   renderModal({ activeIdentity: botIdentity });
 
   fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
-  expect(screen.getByText('是否以任务执行')).toHaveClass('text-sm', 'font-medium');
+  expect(screen.getByText('是否以任务执行')).toHaveClass('text-xs', 'font-medium');
   fireEvent.change(screen.getByLabelText('协作定义 YAML'), {
     target: { value: 'participants:\n  - alpha\nroles:\n  - driver' },
   });
@@ -426,10 +435,10 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
   expect(screen.getByTestId('collaboration-flow-content')).not.toHaveClass('items-center');
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('overflow-y-auto');
   expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-none', 'overflow-visible', 'pb-2');
-  expect(screen.getByText('协同剧本')).toHaveClass('text-sm', 'font-medium');
+  expect(screen.getByText('协同剧本')).toHaveClass('text-xs', 'font-medium');
   const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
   const scriptFrame = screen.getByText('协同剧本').parentElement;
-  expect(scriptFrame?.querySelector('.h-10')).toHaveClass('border');
+  expect(scriptFrame?.querySelector('.h-8')).toHaveClass('border');
   expect(scriptFrame).not.toContainElement(notifyField);
   expect(scriptFrame).toContainElement(screen.getByRole('button', { name: '重新编辑' }));
   expect(scriptFrame?.parentElement).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');

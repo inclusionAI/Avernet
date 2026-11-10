@@ -34,7 +34,7 @@ export function GroupLeaderSelect({
 
   return (
     <div className="min-w-0">
-      <label className="mb-2 block text-sm font-medium text-foreground" htmlFor={id}>
+      <label className="mb-2 block text-xs font-medium text-foreground" htmlFor={id}>
         {label}
       </label>
       <Popover open={open} onOpenChange={setOpen}>
@@ -43,8 +43,9 @@ export function GroupLeaderSelect({
             id={id}
             type="button"
             variant="secondary"
+            size="sm"
             aria-label={label}
-            className="h-10 w-full min-w-0 justify-between rounded-lg border-input bg-background px-3 text-left"
+            className="h-8 w-full min-w-0 justify-between rounded-lg border-input bg-background px-3 text-left"
           >
             <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-muted-foreground')}>
               {selected ? (
