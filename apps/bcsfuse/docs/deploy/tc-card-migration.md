@@ -23,8 +23,8 @@ card 模式两套 API 共用一套新服务和索引加工任务，不再初始�
 复用现有公共 `/api/v2/agent-cards/{id}` 的 PUT/GET/DELETE 和 index-status，显式绑定 TC 新服务。
 单卡重建使用 `POST /api/v2/agent-cards/{id}/rebuild`，请求体为 `{"index_key":"<当前 Card 的 index-status 返回值>"}`。
 接口发布该 Card 的新 Doc，Qdrant 由现有索引同步更新。Card 资料和版本保持原值。
-TC Card 搜索对 3–6 个英文字母的查询优先匹配名称词首和 `domains` 中明确提供的缩写；命中后只返回符合请求过滤条件的名称或缩写匹配。
-例如业务可在 `domains` 中提供 `UCT` 作为搜索别名。全大写查询没有名称或别名匹配时使用关键词召回。
+TC Card 生成 Doc 时，关键词索引保留原有文本词项，并追加名称中英文及字母数字词的 3–6 字符词首和 `domains` 中明确提供的别名。
+例如 `UCT20` 可用 `UCT` 查到，业务也可在 `domains` 中提供 `UCT`。查询继续并行执行关键词和向量召回。已有 Card 可用同一 `index_key` 重建以应用此规则。
 `/api/v2/search`、`/api/v2/recommend` 固定查询 TC 新索引。
 TC 仅补 GET/PUT `/api/v2/workers/{id}/config`，沿用已有配置请求/响应并固定保存新配置。
 状态和 availability 通过新 Card 字段更新，不复制整套 v2 sync/online/Fuse 路由。

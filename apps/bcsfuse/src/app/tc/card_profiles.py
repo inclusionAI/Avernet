@@ -7,6 +7,7 @@ import re
 from dataclasses import replace
 
 from search_core.catalog.updates import CardUpdates
+from search_core.providers.keyword import normalize
 
 from app.domain.models.llm_request import LLMRequest
 from app.domain.models.llm_task_spec import Complexity, LLMTaskSpec, TaskType
@@ -88,27 +89,26 @@ def _profile_summary(raw_text):
     )
 
 
+def _keyword_text(card, search_text):
+    words = re.findall(r"[a-z0-9]+", normalize(card.get("name") or ""))
+    prefixes = {
+        word[:length]
+        for word in words
+        if not word.isdigit()
+        for length in range(3, min(6, len(word)) + 1)
+    }
+    aliases = {normalize(domain) for domain in card.get("domains") or ()}
+    indexed_words = set(re.findall(r"[a-z0-9_]+", normalize(search_text)))
+    extra = sorted((prefixes | aliases) - indexed_words - {""})
+    return " ".join([search_text, *extra])
+
+
 class TcCardUpdates(CardUpdates):
     """Extend only TC's existing leased document preparation."""
 
     def __init__(self, *args, profile_gateway=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.profile_gateway = profile_gateway
-        self.search_names = {}
-
-    def _observe_pending(self, row):
-        # Existing Cards populate name lookup during Doc restore as well as updates.
-        key = row.card.agent_id
-        if row.revision >= self._operations_observed.get(key, 0):
-            card = row.card.source_card
-            if row.card.deleted or not card.get("name"):
-                self.search_names.pop(key, None)
-            else:
-                self.search_names[key] = (
-                    card["name"],
-                    tuple(card.get("domains") or ()),
-                )
-        super()._observe_pending(row)
 
     def _prepare_documents(self, row, previous):
         summary = "" if row.card.deleted else self._prepare_profile(row)
@@ -118,7 +118,22 @@ class TcCardUpdates(CardUpdates):
                 update={"source_card": {**row.card.source_card, "description": summary}}
             )
             row = replace(row, card=card)
-        return super()._prepare_documents(row, previous)
+        documents = super()._prepare_documents(row, previous)
+        if row.card.deleted:
+            return documents
+        # Name prefixes and aliases belong on the main sparse document once.
+        main = documents[0]
+        payload = main.point.payload
+        text = payload["search_text"]
+        keyword_text = _keyword_text(row.card.source_card, text)
+        if keyword_text != text:
+            documents[0] = replace(
+                main,
+                point=main.point.model_copy(
+                    update={"payload": {**payload, "_keyword_text": keyword_text}}
+                ),
+            )
+        return documents
 
     def _prepare_profile(self, row):
         profile_input = _profile_input(row.card)

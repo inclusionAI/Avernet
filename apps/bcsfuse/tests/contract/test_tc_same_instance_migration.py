@@ -222,10 +222,10 @@ def test_rebuild_prepares_only_the_requested_tc_card_in_current_index(
         assert result.json()["recommendations"][0]["short_profile"] == "德州扑克 · 游戏"
 
 
-def test_tc_short_name_search_uses_prefix_and_explicit_domain_without_padding(service):
+def test_tc_keyword_index_adds_name_prefixes_and_domains_alongside_vectors(service):
     start, _ = service
     with start("card") as (client, registry):
-        new_card(client, "uct", name="UCT技术助理Bot", runtime_state="online")
+        new_card(client, "uct-assistant", name="UCT技术助理Bot", runtime_state="online")
         new_card(client, "uct20", name="UCT20值班助手", runtime_state="online")
         new_card(
             client,
@@ -253,28 +253,41 @@ def test_tc_short_name_search_uses_prefix_and_explicit_domain_without_padding(se
         registry.require("tc_card_search").updates.run_once()
 
     with start("card") as (client, _):
-        for enable_rerank in (False, True):
-            response = client.post(
-                "/api/v1/recommend",
-                json={"question": "UCT", "topK": 20, "enable_rerank": enable_rerank},
+
+        def scores(query):
+            result = client.post(
+                "/api/v2/search",
+                json={"query": query, "filters": {"labels.visibility": ["public"]}},
             )
-            assert response.status_code == 200, response.text
-            assert {x["worker_id"] for x in response.json()["recommendations"]} == {
-                "uct",
+            assert result.status_code == 200, result.text
+            return {
+                item["id"]: item.get("scoreDetails", {})
+                for item in result.json()["items"]
+            }
+
+        for query in ("UCT", "uct"):
+            hits = scores(query)
+            assert {key for key, stages in hits.items() if stages.get("keyword")} == {
+                "uct-assistant",
                 "uct20",
                 "aliuct",
             }
+            assert hits["deduct"]["vector"]
+            assert "private-uct" not in hits
 
-        result = client.post(
-            "/api/v2/search",
-            json={"query": "uct", "filters": {"worker_id": ["uct20", "deduct"]}},
+        assert scores("UCT20")["uct20"]["keyword"]
+        assert not any(stages.get("keyword") for stages in scores("UC").values())
+
+        response = client.post(
+            "/api/v1/recommend", json={"question": "UCT", "topK": 20}
         )
-        assert result.status_code == 200, result.text
-        assert [x["id"] for x in result.json()["items"]] == ["uct20"]
-
-        missing = client.post("/api/v1/recommend", json={"question": "ZZZ", "topK": 20})
-        assert missing.status_code == 200, missing.text
-        assert missing.json()["recommendations"] == []
+        assert response.status_code == 200, response.text
+        assert {x["worker_id"] for x in response.json()["recommendations"]} == {
+            "uct-assistant",
+            "uct20",
+            "aliuct",
+            "deduct",
+        }
 
 
 def test_same_new_instance_switches_all_v1_reads_and_writes_and_keeps_v2_new(service):
