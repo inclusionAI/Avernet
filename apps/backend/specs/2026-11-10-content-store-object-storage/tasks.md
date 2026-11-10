@@ -6,11 +6,11 @@
 - **Goal:** Move today's blob IO out of `ContentStoreService` into `LocalBlobStore` with no behaviour change, and make the service delegate to a `BlobStore`.
 - **Files:** `src/agentclaw/community/core/content_store/blobs.py` (new), `core/content_store/service.py`, `core/content_store/__init__.py`, `tests/community/core/content_store/test_blobs.py` (new), `tests/community/di/test_content_store_module_wiring.py`
 - **Done when:**
-  - [ ] `BlobStore` protocol (`write`, `read`) and `LocalBlobStore(root)` exist; the atomic write, size shortcut and stale-tmp sweep are moved unchanged.
-  - [ ] `ContentStoreService(repository, root)` still works; `ContentStoreService(repository, blobs=...)` is accepted; passing both or neither raises.
-  - [ ] `read` verifies the digest in the service for any `BlobStore`; missing → `ContentMissingError`, mismatch → `ContentIntegrityError`.
-  - [ ] Existing `tests/community/core/content_store`, `bot_genome`, `bot_config_manifest`, `apply_engine` suites pass, with only the assertions that reached into moved internals updated.
-  - [ ] `service.py` and `blobs.py` are each under 1,000 lines.
+  - [x] `BlobStore` protocol (`write`, `read`) and `LocalBlobStore(root)` exist; the atomic write, size shortcut and stale-tmp sweep are moved unchanged.
+  - [x] `ContentStoreService(repository, root)` still works; `ContentStoreService(repository, blobs=...)` is accepted; passing both or neither raises.
+  - [x] `read` verifies the digest in the service for any `BlobStore`; missing → `ContentMissingError`, mismatch → `ContentIntegrityError`.
+  - [x] Existing `tests/community/core/content_store`, `bot_genome`, `bot_config_manifest`, `apply_engine` suites pass, with only the assertions that reached into moved internals updated.
+  - [x] `service.py` and `blobs.py` are each under 1,000 lines.
 - **Depends on:** —
 
 ## Task 2: Object-storage blob store with legacy read-through

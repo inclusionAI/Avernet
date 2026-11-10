@@ -18,7 +18,7 @@ def test_the_store_resolves_over_the_repository_and_the_configured_root() -> Non
     assert isinstance(store, ContentStoreService)
     assert isinstance(injector.get(ContentStoreRepositoryProtocol), ContentStoreRepository)
     root = Path(injector.get(cfg.BotConfigManifestConfig).content_store_dir).expanduser()
-    assert store._blobs == (root if root.is_absolute() else Path.cwd() / root) / "blobs"
+    assert store._blobs.root == (root if root.is_absolute() else Path.cwd() / root) / "blobs"
 
 
 def test_the_store_is_a_singleton_the_genome_registry_shares() -> None:
