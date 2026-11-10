@@ -134,6 +134,10 @@ pub struct ControlledBotCandidate {
     pub kind: ActorKind,
     pub status: ActorStatus,
     pub access_relation: BotAccessRelation,
+    /// The source row's persisted creation time in
+    /// epoch milliseconds (`gmt_create`): the mine
+    /// page's `created_at`-descending order key.
+    pub created_at: u64,
 }
 
 /// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.

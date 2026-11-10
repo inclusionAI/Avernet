@@ -387,7 +387,7 @@ def test_mine_filters_both_kinds_without_an_all_enum_value() -> None:
         "owner_value": "current_staff_no",
         "omitted_kind": "all",
         "reachability_applies_to": "bot",
-        "ordering": ["created_at_desc", "bot_id_asc"],
+        "ordering": ["human_self_first", "reachable_first", "created_at_desc", "bot_id_asc"],
     }
 
     data = _success_data(operation)

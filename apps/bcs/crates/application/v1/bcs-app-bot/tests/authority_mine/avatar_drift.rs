@@ -4,6 +4,12 @@ async fn seed(fixture: &Fixture) {
     for id in ["bot-a", "bot-b", "bot-c"] {
         fixture.add_controlled_bot(id, "mine-owner", ActorStatus::Online).await;
     }
+    // Created-desc pins the page compositions
+    // (a 3000 > b 2000 > c 1000) regardless of the
+    // registration clock resolution.
+    fixture.set_created_at("bot-a", 3_000).await;
+    fixture.set_created_at("bot-b", 2_000).await;
+    fixture.set_created_at("bot-c", 1_000).await;
 }
 
 fn corrupt_avatar(fixture: &Fixture, id: &str) {
