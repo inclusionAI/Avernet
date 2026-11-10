@@ -22,7 +22,6 @@ const VIEWS: { value: WorkOrderView; label: string }[] = [
 ];
 
 const CATEGORIES: { value: WorkOrderCategory; label: string }[] = [
-  { value: 'ALL', label: '全部' },
   { value: 'APPROVAL', label: '审批类' },
   { value: 'NOTIFICATION', label: '通知类' },
 ];
@@ -161,7 +160,7 @@ export function WorkOrderTabs() {
               setPageNo(1);
             }}
             options={CATEGORIES}
-            className="h-8 w-[186px] shrink-0 [&>button]:flex-1"
+            className="h-8 w-[132px] shrink-0 [&>button]:flex-1"
           />
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             {view === 'pending_mine' ? (
@@ -212,18 +211,6 @@ export function WorkOrderTabs() {
             <div className="flex flex-col items-center gap-6">
               <img src={notificationEmpty} width={150} height={107} alt="" aria-hidden="true" />
               <p className="m-0 text-sm text-muted-foreground">{EMPTY_TEXT[view]}</p>
-              {category !== 'ALL' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setCategory('ALL');
-                    setPageNo(1);
-                  }}
-                >
-                  清除筛选
-                </Button>
-              )}
             </div>
           </div>
         ) : (

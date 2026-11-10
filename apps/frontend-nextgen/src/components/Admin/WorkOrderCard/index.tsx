@@ -4,8 +4,6 @@
 // 视觉对齐 admin 视觉交互指南 §7.3：无外框列表行，底分割线 border-border，hover bg-muted/50，次行 content+内联时间。
 // 类型 Tag 颜色取自 domain 单一映射（wo.typeTone/typeLabel），禁止硬编码。
 // 驳回走 Modal+Textarea 收集 review_remark（后端 reject 要求非空，否则 422）。
-import approvalIcon from '@/assets/notification-center/approval.png';
-import noticeIcon from '@/assets/notification-center/notice.png';
 import { Button, Card, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
 import { workOrderService } from '@/services/admin/workOrderService';
@@ -90,18 +88,6 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
         <Tag className="mt-0.5 h-6 shrink-0 rounded-full px-2 text-[11px] font-normal">
           {isApproval ? '审批' : '通知'}
         </Tag>
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
-          aria-hidden
-        >
-          <img
-            src={isApproval ? approvalIcon : noticeIcon}
-            alt=""
-            className="h-7 w-7 rounded-full object-contain"
-            width={28}
-            height={28}
-          />
-        </span>
         <div className="min-w-0 flex-1">
           <span className="block break-words text-[13px] font-medium text-foreground">{wo.title}</span>
           {wo.content ? (

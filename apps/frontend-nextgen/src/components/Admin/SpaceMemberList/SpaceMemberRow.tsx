@@ -2,7 +2,7 @@
 // 角色列始终渲染下拉（对齐 PRD：borderless 纯文字下拉），disabled 态用提示文案(Tooltip)说明原因。
 // 5 种禁用场景：个人空间 / 未加入团队 / 非管理员 / 创建者 / 最后一位管理员（§7.6）。
 // 角色变更直接执行（PRD 交互），无降级二次确认；降级由「最后一位管理员不可改」前置 disabled 防护。
-// 管理员色 warning 橙 / 成员色 muted-foreground 灰（对齐 PRD：color r==='admin'?'--warning':'--muted-foreground'）。
+// 身份列与权限列独立，保留创建者和最后管理员保护。
 import { getCapabilities } from '@/capabilities';
 import {
   Avatar,
@@ -20,7 +20,6 @@ import {
 } from '@/components/ui';
 import type { Space, SpaceMember } from '@/domain/admin/models';
 import { cn } from '@/utils/cn';
-import { Trash2 } from 'lucide-react';
 
 export type RoleCellValue = 'ADMIN' | 'MEMBER';
 
@@ -74,17 +73,26 @@ export function SpaceMemberRow({
   const name = member.userName || member.displayName || member.userId;
   const { disabled: roleDisabled, reason } = getRoleState(space, member, manageable, lastOwner);
   const isAdmin = member.role === 'ADMIN';
-  // PRD：角色色 admin=warning 橙 / member=muted-foreground 灰；用语义 text-* 类覆盖 trigger base 的 text-foreground。
   // 成员头像经 capability 解析：internal overlay 按 user_id(工号) 拼 antwork 照片 URL；
   // Open Core/null/加载失败时 <Avatar> 回退首字母占位（不硬编码内网 URL，保持 Open Core 纯净）。
   const avatarUrl = getCapabilities().getMemberAvatarUrl(member.userId).value ?? undefined;
 
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_160px_80px] items-center px-4 py-2.5 transition-colors hover:bg-muted/40">
+    <li
+      className={cn(
+        'grid min-h-[72px] items-center px-4 py-4 transition-colors hover:bg-muted/40',
+        manageable
+          ? 'grid-cols-[minmax(0,1.35fr)_minmax(84px,1fr)_minmax(64px,0.96fr)_80px]'
+          : 'grid-cols-[minmax(0,1.35fr)_minmax(84px,1fr)_minmax(64px,0.96fr)]',
+      )}
+    >
       {/* 成员 */}
       <div className="flex min-w-0 items-center gap-2">
-        <Avatar name={name} src={avatarUrl} size={28} />
-        <span className="truncate font-medium">{name}</span>
+        <Avatar name={name} src={avatarUrl} size={40} />
+        <div className="min-w-0">
+          <span className="block truncate text-sm font-medium">{name}</span>
+          <span className="block truncate text-xs text-muted-foreground">{member.userId}</span>
+        </div>
       </div>
 
       {/* 角色：始终渲染下拉（borderless），disabled 时 Tooltip 提示原因 */}
@@ -103,7 +111,7 @@ export function SpaceMemberRow({
                   className={cn(
                     'h-8 w-[90px] border-0 bg-transparent px-2 text-xs font-medium shadow-none',
                     roleDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent/60',
-                    isAdmin ? 'text-warning' : 'text-muted-foreground',
+                    isAdmin ? 'text-foreground' : 'text-muted-foreground',
                   )}
                 >
                   <SelectValue />
@@ -119,29 +127,53 @@ export function SpaceMemberRow({
         </Tooltip>
       </TooltipProvider>
 
-      {/* 操作：删除（创建者不删） */}
-      <div className="flex items-center justify-end">
-        {manageable && !member.isCreator && (
-          <ConfirmDialog
-            title="确认移除该成员？"
-            description={`${name} 将不再属于「${space.spaceName}」`}
-            confirmText="移除"
-            confirmVariant="destructive"
-            onConfirm={() => onRemoveMember(member.userId)}
-          >
-            <span>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label={`移除成员 ${name}`}
-                className="h-7 w-7 text-destructive hover:bg-destructive/10"
+      <span className="text-[13px] text-muted-foreground">
+        {typeof member.botPermissionCount !== 'number' ? '—' : `${member.botPermissionCount}个Bot`}
+      </span>
+
+      {/* 创建者不删；最后管理员只展示禁用入口，不能打开确认框。 */}
+      {manageable && (
+        <div className="flex items-center justify-end">
+          {!member.isCreator &&
+            (isAdmin && lastOwner ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`移除成员 ${name}`}
+                        className="h-7 px-0 text-[13px] text-primary"
+                        disabled
+                      >
+                        删除
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>至少需保留一位管理员</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              <ConfirmDialog
+                title="确认移除该成员？"
+                description={`${name} 将不再属于「${space.spaceName}」`}
+                confirmText="移除"
+                confirmVariant="destructive"
+                onConfirm={() => onRemoveMember(member.userId)}
               >
-                <Trash2 size={14} />
-              </Button>
-            </span>
-          </ConfirmDialog>
-        )}
-      </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`移除成员 ${name}`}
+                  className="h-7 px-0 text-[13px] text-primary hover:bg-primary/5"
+                >
+                  删除
+                </Button>
+              </ConfirmDialog>
+            ))}
+        </div>
+      )}
     </li>
   );
 }

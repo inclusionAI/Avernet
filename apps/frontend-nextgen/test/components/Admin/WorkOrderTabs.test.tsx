@@ -9,7 +9,7 @@ const mockMarkOneRead = jest.fn().mockResolvedValue(true);
 const mockRefreshUnread = jest.fn().mockResolvedValue(undefined);
 let mockWorkOrder: WorkOrder;
 let mockEmpty = false;
-let mockCategory = 'ALL';
+let mockCategory = 'APPROVAL';
 let mockError: { message: string } | null = null;
 const mockSetView = jest.fn();
 const mockSetCategory = jest.fn();
@@ -18,7 +18,7 @@ const mockFetchList = jest.fn().mockResolvedValue(undefined);
 const mockMarkAllRead = jest.fn().mockResolvedValue(undefined);
 beforeEach(() => {
   mockEmpty = false;
-  mockCategory = 'ALL';
+  mockCategory = 'APPROVAL';
   mockError = null;
   jest.clearAllMocks();
 });
@@ -113,6 +113,7 @@ describe('通知中心设计交互', () => {
   it('纵向视图切换并重置页码', () => {
     render(<WorkOrderTabs />);
     expect(screen.getByRole('navigation', { name: '通知视图' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '全部' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '待我处理' })).toHaveAttribute('aria-current', 'page');
     fireEvent.click(screen.getByRole('button', { name: /^已处理$/ }));
     expect(mockSetView).toHaveBeenCalledWith('processed');
@@ -121,8 +122,8 @@ describe('通知中心设计交互', () => {
 
   it('分类切换并重置页码', () => {
     render(<WorkOrderTabs />);
-    fireEvent.click(screen.getByRole('tab', { name: '审批类' }));
-    expect(mockSetCategory).toHaveBeenCalledWith('APPROVAL');
+    fireEvent.click(screen.getByRole('tab', { name: '通知类' }));
+    expect(mockSetCategory).toHaveBeenCalledWith('NOTIFICATION');
     expect(mockSetPageNo).toHaveBeenCalledWith(1);
   });
 
@@ -133,14 +134,13 @@ describe('通知中心设计交互', () => {
     expect(mockMarkAllRead).toHaveBeenCalledTimes(1);
   });
 
-  it('空态保留插图和清除筛选入口', () => {
+  it('空态保留插图，不再提供返回全部的筛选入口', () => {
     mockEmpty = true;
     mockCategory = 'APPROVAL';
     render(<WorkOrderTabs />);
     expect(screen.getByText('暂无通知')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
-    expect(mockSetCategory).toHaveBeenCalledWith('ALL');
-    expect(mockSetPageNo).toHaveBeenCalledWith(1);
+    expect(screen.queryByRole('button', { name: '清除筛选' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '全部' })).not.toBeInTheDocument();
   });
 
   it('请求失败仍提供重试入口', () => {

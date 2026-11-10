@@ -20,6 +20,13 @@ jest.mock('@umijs/max', () => ({
   },
 }));
 
+// 页面壳测试只验证路由到 store 的映射，不触发真实列表请求。
+jest.mock('@/hooks/useWorkOrders', () => {
+  const { useWorkOrderStore: store } =
+    jest.requireActual<typeof import('@/stores/workOrderStore')>('@/stores/workOrderStore');
+  return { useWorkOrders: () => ({ setCategory: store.getState().setCategory }) };
+});
+
 jest.mock('@/pages/Admin/WorkOrders', () => ({
   AdminWorkOrdersView: () => <div data-testid="admin-work-orders" />,
 }));
@@ -54,8 +61,13 @@ describe('TicketCenter 页', () => {
     await waitFor(() => expect(useWorkOrderStore.getState().category).toBe('APPROVAL'));
   });
 
-  it('非法/缺省 category 不覆写 store 默认（ALL）', () => {
-    renderTicketCenter('category=INVALID');
-    expect(useWorkOrderStore.getState().category).toBe('ALL');
+  it.each(['', 'category=INVALID', 'category=ALL'])('非法/缺省或旧全部分类 %s 保留默认审批类', (search) => {
+    renderTicketCenter(search);
+    expect(useWorkOrderStore.getState().category).toBe('APPROVAL');
+  });
+
+  it('?category=NOTIFICATION 深链：挂载即写入通知类', async () => {
+    renderTicketCenter('category=NOTIFICATION');
+    await waitFor(() => expect(useWorkOrderStore.getState().category).toBe('NOTIFICATION'));
   });
 });

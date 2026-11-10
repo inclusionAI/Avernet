@@ -25,17 +25,20 @@ export function SpaceJoinForm({ space, open, onOpenChange, onSubmit }: SpaceJoin
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
+    if (submitting) return;
     setSubmitting(true);
-    const ok = await onSubmit(reason.trim());
-    setSubmitting(false);
-    if (ok) {
-      setReason('');
-      onOpenChange(false);
+    try {
+      if (await onSubmit(reason.trim())) {
+        setReason('');
+        onOpenChange(false);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange}>
+    <Modal open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
       <ModalContent size="md" className="max-w-[480px]">
         <ModalHeader>
           <ModalTitle>申请加入团队空间</ModalTitle>
