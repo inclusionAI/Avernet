@@ -1,0 +1,28 @@
+apps/frontend-nextgen/src/assets/TaskPanel/taskPanelMapper.ts
+  h_059e888e5e4e82 288
+apps/frontend-nextgen/src/assets/TaskPanel/types.ts
+  h_059e888e5e4e82 35-38
+apps/frontend-nextgen/src/assets/TaskPanel/v2/ArtifactsSection.tsx
+  h_059e888e5e4e82 118-119,129-130,133,135-138,142-175
+apps/frontend-nextgen/src/assets/TaskPanel/v2/NodeListViewV2.tsx
+  h_059e888e5e4e82 43,53,63,108
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactsList.tsx
+  h_059e888e5e4e82 21-32,34,37-38
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskNodePanelV2.tsx
+  h_059e888e5e4e82 92-98,179
+apps/frontend-nextgen/test/assets/TaskPanel/taskArtifactStage.test.ts
+  h_059e888e5e4e82 1-75
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 12,157-158,167,175,180,195,207-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "440c0c9ae02e5d974e75054c0b794238a251afca",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

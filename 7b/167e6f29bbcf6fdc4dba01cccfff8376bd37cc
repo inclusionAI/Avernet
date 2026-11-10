@@ -1,0 +1,40 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 349-359
+apps/bcs/Cargo.toml
+  h_f4a73db4ad12be 3,153
+apps/bcs/crates/contracts/bcn-runtime-model/src/runner.rs
+  h_f4a73db4ad12be 60-67,117-120
+apps/bcs/crates/contracts/bcn-runtime-model/tests/effect_recovery.rs
+  h_f4a73db4ad12be 1-35
+apps/bcs/crates/services/bcn-session-runner/Cargo.toml
+  h_f4a73db4ad12be 1-18
+apps/bcs/crates/services/bcn-session-runner/README.md
+  h_f4a73db4ad12be 1-109
+apps/bcs/crates/services/bcn-session-runner/src/direct.rs
+  h_f4a73db4ad12be 1-224
+apps/bcs/crates/services/bcn-session-runner/src/graph.rs
+  h_f4a73db4ad12be 1-145
+apps/bcs/crates/services/bcn-session-runner/src/lib.rs
+  h_f4a73db4ad12be 1-899
+apps/bcs/crates/services/bcn-session-runner/src/structured.rs
+  h_f4a73db4ad12be 1-21
+apps/bcs/crates/services/bcn-session-runner/src/validation.rs
+  h_f4a73db4ad12be 1-222
+apps/bcs/crates/services/bcn-session-runner/tests/direct.rs
+  h_f4a73db4ad12be 1-645
+apps/bcs/crates/services/bcn-session-runner/tests/structured.rs
+  h_f4a73db4ad12be 1-626
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 199-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b167e6f29bbcf6fdc4dba01cccfff8376bd37cc",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

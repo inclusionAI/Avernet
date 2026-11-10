@@ -1,0 +1,19 @@
+apps/bcs/scripts/error_path_coverage.sh
+  s_8538143de29560::t_b95f9ace1b8e91 12-16,30-35,44,61-65,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a7d516840379793d3f6b3600babf5363b575d16",
+  "prompts": {},
+  "sessions": {
+    "s_8538143de29560": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abe4-191f-7a70-af7d-c9a7cb8741b5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

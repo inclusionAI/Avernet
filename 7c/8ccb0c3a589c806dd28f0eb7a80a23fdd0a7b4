@@ -1,0 +1,23 @@
+apps/bcsfuse/docs/README.md
+  s_ce84d91f3d35be::t_cd11b968e008ef 4,18
+apps/bcsfuse/specs/2026-11-04-tc-bcsfuse-card-migration/spec.md
+  s_ce84d91f3d35be::t_cd11b968e008ef 1-615
+apps/bcsfuse/docs/architecture/tc-card-migration.md
+  s_ce84d91f3d35be::t_cd11b968e008ef 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c8ccb0c3a589c806dd28f0eb7a80a23fdd0a7b4",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
