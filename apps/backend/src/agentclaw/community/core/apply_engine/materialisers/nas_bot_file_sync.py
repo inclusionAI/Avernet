@@ -103,7 +103,20 @@ class NasBotFileSyncPort(BotFileSyncPort):
         del path
 
         engine_type = target.engine_type
-        source = self._bot_repo.get_by_id(source_bot_id)
+        try:
+            source = self._bot_repo.get_by_id(source_bot_id)
+        except Exception:  # noqa: BLE001 — composed, never raw in the report
+            # ``get_by_id`` is read before the converge's own try block, so an
+            # exception here (DB/MOSN transient, session failure) would unwind
+            # straight into ``BotFileSyncMaterialiser.write``'s ``except`` and
+            # surface as the catch-all ``"bot file sync failed"`` with no log
+            # trail. Wrap it so the lookup failure is named in the apply report
+            # and its traceback is on the log, not swallowed.
+            logger.exception(
+                "bot_file_sync.source_lookup_failed source_bot_id=%s engine=%s",
+                source_bot_id, engine_type,
+            )
+            return BotFileSyncResult(ok=False, reason=_SYNC_FAILED_REASON)
         if source is None:
             return BotFileSyncResult(ok=False, reason="source bot not found")
 
@@ -174,6 +187,9 @@ class NasBotFileSyncPort(BotFileSyncPort):
         logger.info(
             "bot_file_sync.sync source=%s target=%s excludes=%s",
             source_path, target_path, len(excludes),
+        )
+        logger.info(
+            "bot_file_sync.rsync_argv cmd=%s", argv,
         )
         try:
             self._run_command(
