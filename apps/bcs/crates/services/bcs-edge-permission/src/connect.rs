@@ -416,16 +416,29 @@ impl ConnectService for DbConnectService {
                     let request_ids = self
                         .insert_pending_connect(caller, to_bot, caller_kind, target_kind, message.clone())
                         .await?;
-                    self.emit_friend_connect_notification(
-                        FriendConnectNotificationKind::ApprovalRequested,
-                        request_ids.clone(),
-                        caller,
-                        to_bot,
-                        self.target_notification_recipients(&cfg),
-                        message.as_deref(),
-                        request_auth.clone(),
-                    )
-                    .await?;
+                    // Spec §12.3: the pending rows are already written and the
+                    // friend request must stay runnable, so a notification
+                    // transport failure (e.g. backend intake rejects the call)
+                    // degrades to warn+skip instead of failing the create.
+                    if let Err(error) = self
+                        .emit_friend_connect_notification(
+                            FriendConnectNotificationKind::ApprovalRequested,
+                            request_ids.clone(),
+                            caller,
+                            to_bot,
+                            self.target_notification_recipients(&cfg),
+                            message.as_deref(),
+                            request_auth.clone(),
+                        )
+                        .await
+                    {
+                        warn!(
+                            error = %error,
+                            request_ids = ?request_ids,
+                            target_bot_id = %to_bot,
+                            "friend connect notification failed; continuing without it"
+                        );
+                    }
                     Ok(ConnectResult {
                         request_ids,
                         edge_ids: vec![],

@@ -40,7 +40,8 @@ use bcs_service_api::{
 };
 use bcs_service_api::{
     FriendRequest as DomainFriendRequest,
-    FriendRequestDirection as DomainFriendRequestDirection, ServiceError, ServiceResult,
+    FriendRequestDirection as DomainFriendRequestDirection, RequestAuthHeaders, ServiceError,
+    ServiceResult,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -1293,6 +1294,7 @@ async fn create_friend_request_forwards_facade_command_and_projects_result() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1325,6 +1327,7 @@ async fn create_friend_request_cannot_add_self() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-a".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("cannot add self");
@@ -1350,6 +1353,7 @@ async fn create_friend_request_duplicate_is_conflict() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("duplicate pending request");
@@ -1374,6 +1378,7 @@ async fn create_friend_request_unknown_target_is_not_found() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-ghost".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("unknown target bot");
@@ -1400,6 +1405,7 @@ async fn create_friend_request_hidden_target_is_not_found() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-hidden".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("hidden target is reported as unknown");
@@ -1421,6 +1427,7 @@ async fn create_maps_private_bot_cannot_collaborate_to_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("private caller cannot collaborate");
@@ -1449,6 +1456,7 @@ async fn create_maps_facade_forbidden_to_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("facade-level Forbidden");
@@ -1659,6 +1667,7 @@ async fn accept_friend_request_receiver_ok() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1668,6 +1677,7 @@ async fn accept_friend_request_receiver_ok() {
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("receiver accepts");
@@ -1711,6 +1721,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1720,6 +1731,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-c"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect_err("non-receiver forbidden");
@@ -1750,6 +1762,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1758,6 +1771,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("reject first");
@@ -1767,6 +1781,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect_err("cannot accept a rejected request");
@@ -1792,6 +1807,7 @@ async fn accept_friend_request_unknown_id_is_not_found() {
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: "req-missing".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("unknown request id");
@@ -1815,6 +1831,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1825,6 +1842,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-a"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect_err("sender cannot reject");
@@ -1835,6 +1853,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("receiver rejects");
@@ -1905,12 +1924,12 @@ struct FriendListConnect {
 
 #[async_trait]
 impl bcs_service_api::application::connect::ConnectService for FriendListConnect {
-    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
-    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
+    async fn approve(&self, _: &str, _: &str, _: Option<RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { unreachable!() }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { unreachable!() }
     async fn get_request(&self, _: &str) -> ServiceResult<bcs_domain::edge_permission::PermissionRequest> { unreachable!() }
-    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn list_requests(&self, _: &str, _: bcs_service_api::application::connect::RequestDirection, _: Option<bcs_domain::edge_permission::RequestStatus>, _: u32, _: u32) -> ServiceResult<bcs_service_api::application::connect::RequestsPage> { unreachable!() }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
         panic!("V1 must not fetch the full friend list")
@@ -1990,4 +2009,83 @@ async fn friend_connections_propagate_read_errors_and_count_overflow() {
         }).await.unwrap_err();
         assert_eq!(error.code(), "internal_error");
     }
+}
+
+/// F2: the V1 friendship commands forward the caller's inbound principal to
+/// the legacy `FriendService` facade (and from there to the connect use case),
+/// so downstream owner notifications authenticate as the acting human. It is
+/// transport context only — the wire contract is unchanged.
+#[tokio::test]
+async fn friendship_commands_forward_the_inbound_request_auth() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    let create_auth = RequestAuthHeaders {
+        authorization: Some("Bearer user-token".to_string()),
+        cookie: Some("session=abc".to_string()),
+        forwarded_headers: vec![(
+            "x-avernet-principal".to_string(),
+            "principal-token".to_string(),
+        )],
+    };
+    let created = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: Some(create_auth.clone()),
+        })
+        .await
+        .expect("create request");
+
+    let accept_auth = RequestAuthHeaders {
+        authorization: Some("Bearer owner-token".to_string()),
+        cookie: None,
+        forwarded_headers: Vec::new(),
+    };
+    fx.service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: created.request_id.clone(),
+            request_auth: Some(accept_auth.clone()),
+        })
+        .await
+        .expect("receiver accepts");
+
+    let second = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("second create request");
+    let reject_auth = RequestAuthHeaders {
+        authorization: Some("Bearer another-owner-token".to_string()),
+        cookie: None,
+        forwarded_headers: Vec::new(),
+    };
+    fx.service
+        .reject_friend_request(RejectFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: second.request_id.clone(),
+            request_auth: Some(reject_auth.clone()),
+        })
+        .await
+        .expect("receiver rejects");
+
+    assert_eq!(
+        fx.legacy_friend.request_auths(),
+        vec![
+            ("create", Some(create_auth)),
+            ("accept", Some(accept_auth)),
+            ("create", None),
+            ("reject", Some(reject_auth)),
+        ],
+        "the V1 commands must forward request_auth verbatim to the facade"
+    );
 }

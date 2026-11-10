@@ -170,6 +170,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await
         .err(); // self-add may be rejected by the core; the
@@ -182,6 +183,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("stranger"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await
         .expect_err("X is denied");
@@ -202,6 +204,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await;
     assert!(
@@ -217,6 +220,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("bob"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await;
     let _ = b; // the entry's own core rules now decide for B
@@ -372,6 +376,7 @@ async fn friend_request_asset_creator_leg_is_preserved() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-b".into(),
+            request_auth: None,
         })
         .await
         .expect("alice's Bot requests bob's Bot");

@@ -594,6 +594,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
             .create_friend_request(CreateFriendRequestCommand {
                 caller_actor_id: command.bot_uuid,
                 to_bot: command.to_bot_uuid,
+                request_auth: command.request_auth.clone(),
             })
             .await
             .map_err(map_friend_use_case_error)?;
@@ -669,6 +670,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
                 caller_actor_id: to_bot.clone(),
                 request_id: command.request_id.clone(),
                 request_to_bot: Some(to_bot.clone()),
+                request_auth: command.request_auth.clone(),
             })
             .await
             .map_err(map_friend_use_case_error)?;
@@ -691,6 +693,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
                 caller_actor_id: to_bot.clone(),
                 request_id: command.request_id.clone(),
                 request_to_bot: Some(to_bot.clone()),
+                request_auth: command.request_auth.clone(),
             })
             .await
             .map_err(map_friend_use_case_error)?;

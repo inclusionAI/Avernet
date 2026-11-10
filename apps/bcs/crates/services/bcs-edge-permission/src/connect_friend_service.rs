@@ -15,6 +15,12 @@
 //! - receiver-only accept/reject with the legacy wording,
 //! - `approved` projects back as `accepted`.
 //!
+//! The inbound `RequestAuthHeaders` carried by the commands are forwarded to
+//! `ConnectService` so downstream owner notifications and friend-auth-sync
+//! calls authenticate as the acting human. `ConnectService::reject` takes no
+//! auth context (it has no downstream auth-consuming call), so reject ignores
+//! it.
+//!
 //! `list_friends` is the one exception: the legacy name list still comes from
 //! the injected legacy delegate (bot→`bcs_friendships`, human→relation) until
 //! the group gate stops reading the legacy tables.
@@ -211,12 +217,17 @@ impl FriendService for EdgeConnectFriendService {
         self.ensure_no_pending_request(&command.caller_actor_id, &command.to_bot)
             .await?;
 
-        // `request_auth` stays `None`: the legacy bot↔bot path carries no
-        // inbound principal for friend-auth-sync, and human→bot never used the
-        // sync hook on this route.
+        // The inbound principal (if any) is forwarded so the downstream
+        // owner notification / friend-auth-sync call can authenticate as the
+        // acting human; Bot↔Bot callers have no principal and send `None`.
         let result = self
             .connect
-            .create_connect(&command.caller_actor_id, &command.to_bot, None, None)
+            .create_connect(
+                &command.caller_actor_id,
+                &command.to_bot,
+                None,
+                command.request_auth.clone(),
+            )
             .await
             .map_err(FriendUseCaseError::service)?;
 
@@ -304,7 +315,11 @@ impl FriendService for EdgeConnectFriendService {
     ) -> Result<(), FriendUseCaseError> {
         self.authorize_request_receiver(&command, "accept").await?;
         self.connect
-            .approve(&command.request_id, &command.caller_actor_id, None)
+            .approve(
+                &command.request_id,
+                &command.caller_actor_id,
+                command.request_auth.clone(),
+            )
             .await
             .map_err(FriendUseCaseError::service)?;
         Ok(())
@@ -315,6 +330,9 @@ impl FriendService for EdgeConnectFriendService {
         command: FriendRequestDecisionCommand,
     ) -> Result<(), FriendUseCaseError> {
         self.authorize_request_receiver(&command, "reject").await?;
+        // `ConnectService::reject` has no downstream auth-consuming call (no
+        // notification, no friend-auth-sync), so the inbound principal has
+        // nowhere to go on this leg and the reason slot stays `None`.
         self.connect
             .reject(&command.request_id, &command.caller_actor_id, None)
             .await

@@ -166,6 +166,7 @@ use super::*;
         CreateFriendRequestCommand {
             caller_actor_id: caller.to_string(),
             to_bot: to_bot.to_string(),
+            request_auth: None,
         }
     }
 
@@ -174,6 +175,7 @@ use super::*;
             caller_actor_id: caller.to_string(),
             request_id: request_id.to_string(),
             request_to_bot: None,
+            request_auth: None,
         }
     }
 
@@ -675,4 +677,219 @@ use super::*;
             vec![("botA".to_string(), "botA".to_string())],
             "the facade must not re-implement friend-list logic"
         );
+    }
+    // ---- 12) inbound principal threading (F2) ----
+
+    use bcs_service_api::application::connect::{ConnectResult, FriendEntriesPage, RequestsPage};
+
+    /// `ConnectService` stub that records the `request_auth` it receives, so
+    /// the facade's pass-through is observable (the real store-backed service
+    /// only forwards it onward to ports these tests do not wire).
+    #[derive(Default)]
+    struct RecordingAuthConnect {
+        creates: tokio::sync::Mutex<Vec<Option<RequestAuthHeaders>>>,
+        approvals: tokio::sync::Mutex<Vec<Option<RequestAuthHeaders>>>,
+        rejections: tokio::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait]
+    impl ConnectService for RecordingAuthConnect {
+        async fn create_connect(
+            &self,
+            _caller: &str,
+            _to_bot: &str,
+            _message: Option<String>,
+            request_auth: Option<RequestAuthHeaders>,
+        ) -> ServiceResult<ConnectResult> {
+            self.creates.lock().await.push(request_auth);
+            Ok(ConnectResult {
+                request_ids: vec!["req-1".to_string()],
+                edge_ids: Vec::new(),
+                status: ConnectStatus::Pending,
+                auto_accepted: false,
+            })
+        }
+
+        async fn approve(
+            &self,
+            _request_id: &str,
+            _decider: &str,
+            request_auth: Option<RequestAuthHeaders>,
+        ) -> ServiceResult<Vec<u64>> {
+            self.approvals.lock().await.push(request_auth);
+            Ok(vec![1])
+        }
+
+        async fn reject(
+            &self,
+            request_id: &str,
+            decider: &str,
+            _reason: Option<String>,
+        ) -> ServiceResult<()> {
+            self.rejections
+                .lock()
+                .await
+                .push((request_id.to_string(), decider.to_string()));
+            Ok(())
+        }
+
+        async fn cancel(&self, _request_id: &str) -> ServiceResult<()> {
+            unreachable!("facade auth forwarding never cancels")
+        }
+
+        async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
+            Ok(PermissionRequest {
+                request_id: request_id.to_string(),
+                edge_id: None,
+                env: "dev".to_string(),
+                from_id: "botA".to_string(),
+                to_id: "botB".to_string(),
+                request_kind: RequestKind::Connect,
+                requested_ref_id: None,
+                requested_rules: None,
+                message: None,
+                status: RequestStatus::Pending,
+                decision_reason: None,
+                created_by: "botA".to_string(),
+                decided_by: None,
+                decided_at: None,
+                created_at: 111,
+                updated_at: 222,
+            })
+        }
+
+        async fn revoke_friend(
+            &self,
+            _caller: &str,
+            _target: &str,
+            _request_auth: Option<RequestAuthHeaders>,
+        ) -> ServiceResult<Vec<u64>> {
+            unreachable!("facade auth forwarding never revokes")
+        }
+
+        async fn list_friends(
+            &self,
+            _actor: &str,
+        ) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
+            unreachable!("facade auth forwarding never lists friends")
+        }
+
+        async fn list_friends_paginated(
+            &self,
+            _actor: &str,
+            _query: FriendListQuery,
+        ) -> ServiceResult<FriendEntriesPage> {
+            unreachable!("facade auth forwarding never pages friends")
+        }
+
+        async fn list_requests(
+            &self,
+            _actor: &str,
+            _direction: RequestDirection,
+            _status: Option<RequestStatus>,
+            _page: u32,
+            _page_size: u32,
+        ) -> ServiceResult<RequestsPage> {
+            Ok(RequestsPage {
+                items: Vec::new(),
+                total: 0,
+                page: 1,
+                page_size: u32::MAX,
+            })
+        }
+    }
+
+    /// The inbound principal carried by the commands must reach the connect use
+    /// case verbatim, so the owner notification / friend-auth-sync call can
+    /// authenticate as the acting human.
+    #[tokio::test]
+    async fn command_request_auth_is_forwarded_to_the_connect_service() {
+        let registry = BotCore::memory();
+        for id in ["botA", "botB"] {
+            registry
+                .register(
+                    id.to_string(),
+                    BotCapabilities {
+                        name: Some(id.to_string()),
+                        visibility: "protected".to_string(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("register bot in registry");
+        }
+        let connect = Arc::new(RecordingAuthConnect::default());
+        let facade = EdgeConnectFriendService::new(
+            connect.clone(),
+            Arc::new(registry),
+            Arc::new(RecordingLegacyFriendList::default()),
+        );
+        let create_auth = RequestAuthHeaders {
+            authorization: Some("Bearer user-token".to_string()),
+            cookie: Some("session=abc".to_string()),
+            forwarded_headers: vec![(
+                "x-avernet-principal".to_string(),
+                "principal-token".to_string(),
+            )],
+        };
+        let accept_auth = RequestAuthHeaders {
+            authorization: Some("Bearer owner-token".to_string()),
+            cookie: None,
+            forwarded_headers: Vec::new(),
+        };
+
+        facade
+            .create_friend_request(CreateFriendRequestCommand {
+                caller_actor_id: "botA".to_string(),
+                to_bot: "botB".to_string(),
+                request_auth: Some(create_auth.clone()),
+            })
+            .await
+            .expect("create");
+        assert_eq!(
+            connect.creates.lock().await.as_slice(),
+            &[Some(create_auth)],
+            "create_connect must receive the command's request_auth"
+        );
+
+        facade
+            .accept_friend_request(FriendRequestDecisionCommand {
+                caller_actor_id: "botB".to_string(),
+                request_id: "req-1".to_string(),
+                request_to_bot: Some("botB".to_string()),
+                request_auth: Some(accept_auth.clone()),
+            })
+            .await
+            .expect("accept");
+        assert_eq!(
+            connect.approvals.lock().await.as_slice(),
+            &[Some(accept_auth)],
+            "approve must receive the command's request_auth"
+        );
+
+        // `ConnectService::reject` takes no auth context (there is no
+        // downstream auth-consuming call on that leg), so the command is still
+        // carried through the facade's receiver authorization and reaches the
+        // connect service with the resolved caller.
+        facade
+            .reject_friend_request(FriendRequestDecisionCommand {
+                caller_actor_id: "botB".to_string(),
+                request_id: "req-1".to_string(),
+                request_to_bot: Some("botB".to_string()),
+                request_auth: Some(create_auth_clone_for_reject()),
+            })
+            .await
+            .expect("reject");
+        assert_eq!(
+            connect.rejections.lock().await.as_slice(),
+            &[("req-1".to_string(), "botB".to_string())]
+        );
+    }
+
+    fn create_auth_clone_for_reject() -> RequestAuthHeaders {
+        RequestAuthHeaders {
+            authorization: Some("Bearer user-token".to_string()),
+            cookie: None,
+            forwarded_headers: Vec::new(),
+        }
     }

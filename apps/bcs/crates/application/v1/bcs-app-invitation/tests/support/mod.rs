@@ -20,7 +20,7 @@ use bcs_service_api::application::connect::{
 use bcs_service_api::{
     CreateFriendRequestCommand, FriendListEntry, FriendRequest, FriendRequestDecisionCommand,
     FriendRequestDirection, FriendRequestStatus, FriendService, FriendUseCaseError,
-    ListFriendRequestsCommand, ListFriendsCommand, ServiceError, ServiceResult,
+    ListFriendRequestsCommand, ListFriendsCommand, RequestAuthHeaders, ServiceError, ServiceResult,
 };
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -68,6 +68,8 @@ pub struct FakeFriendService {
     create_forbidden: Mutex<Option<String>>,
     create_error: Mutex<Option<ServiceError>>,
     list_error: Mutex<Option<ServiceError>>,
+    /// Inbound auth context each mutating command carried, in call order.
+    request_auths: Mutex<Vec<(&'static str, Option<RequestAuthHeaders>)>>,
 }
 
 impl FakeFriendService {
@@ -80,6 +82,11 @@ impl FakeFriendService {
     /// Every call the facade forwarded, in order.
     pub fn calls(&self) -> Vec<FriendCall> {
         lock(&self.calls).clone()
+    }
+
+    /// Inbound auth context carried by each mutating command, in call order.
+    pub fn request_auths(&self) -> Vec<(&'static str, Option<RequestAuthHeaders>)> {
+        lock(&self.request_auths).clone()
     }
 
     /// Seed a request row exactly as the legacy store would hold it.
@@ -154,6 +161,7 @@ impl FriendService for FakeFriendService {
             caller_actor_id: command.caller_actor_id.clone(),
             to_bot: command.to_bot.clone(),
         });
+        lock(&self.request_auths).push(("create", command.request_auth.clone()));
         if let Some(message) = lock(&self.create_forbidden).take() {
             return Err(FriendUseCaseError::Forbidden(message));
         }
@@ -219,6 +227,7 @@ impl FriendService for FakeFriendService {
             request_id: command.request_id.clone(),
             request_to_bot: command.request_to_bot.clone(),
         });
+        lock(&self.request_auths).push(("accept", command.request_auth.clone()));
         self.update_status(&command.request_id, FriendRequestStatus::Accepted)
     }
 
@@ -231,6 +240,7 @@ impl FriendService for FakeFriendService {
             request_id: command.request_id.clone(),
             request_to_bot: command.request_to_bot.clone(),
         });
+        lock(&self.request_auths).push(("reject", command.request_auth.clone()));
         self.update_status(&command.request_id, FriendRequestStatus::Rejected)
     }
 
@@ -300,7 +310,7 @@ impl ConnectService for FakeConnectService {
         _caller: &str,
         _to_bot: &str,
         _message: Option<String>,
-        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+        _request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<ConnectResult> {
         unreachable!("the V1 friendship facade must not call create_connect")
     }
@@ -309,7 +319,7 @@ impl ConnectService for FakeConnectService {
         &self,
         _request_id: &str,
         _decider: &str,
-        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+        _request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("the V1 friendship facade must not call approve")
     }
@@ -335,7 +345,7 @@ impl ConnectService for FakeConnectService {
         &self,
         caller: &str,
         target: &str,
-        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+        _request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<Vec<u64>> {
         lock(&self.revoke_calls).push((caller.to_string(), target.to_string()));
         if let Some(error) = lock(&self.revoke_error).take() {

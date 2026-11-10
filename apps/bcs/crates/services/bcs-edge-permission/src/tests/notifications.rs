@@ -136,6 +136,55 @@ use super::*;
         // Approver/recipient = the target bot's owner.
         assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
     }
+    /// Notification transport that always fails, standing in for a backend
+    /// work-order API rejection (for example a 401 from the intake endpoint).
+    struct FailingFriendConnectNotificationPort;
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for FailingFriendConnectNotificationPort {
+        async fn notify(&self, _command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            Err(ServiceError::InternalError(
+                "work-order notification rejected".to_string(),
+            ))
+        }
+    }
+
+    /// Spec §12.3: the adapter may degrade to a no-op on backend rejection —
+    /// the friend request itself must stay runnable. A notification failure
+    /// after the pending rows are written must not turn the create into a 500.
+    #[tokio::test]
+    async fn notification_port_failure_does_not_fail_create_connect() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:notify_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingFriendConnectNotificationPort),
+        );
+        let res = svc
+            .create_connect("human_1", "x:notify_fail", Some("hi".into()), None)
+            .await
+            .expect("a notification failure must not fail the pending connect");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        assert!(
+            !res.request_ids.is_empty(),
+            "the pending request ids are still returned"
+        );
+        // The pending rows were written before the notification attempt and
+        // must survive its failure.
+        let pending = rq
+            .list_inbox("x:notify_fail", "dev", Some(RequestStatus::Pending))
+            .await;
+        assert!(
+            pending
+                .iter()
+                .any(|request| request.request_id == res.request_ids[0]),
+            "pending row must survive the notification failure: {pending:?}"
+        );
+    }
+
     #[tokio::test]
     async fn pending_notification_is_not_duplicated_on_idempotent_create() {
         let (eg, pp, rq, bc, db) = assemble().await;

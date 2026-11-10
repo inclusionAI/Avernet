@@ -13,6 +13,7 @@ use bcs_service_api::{
 use serde_json::Value;
 
 use crate::state::HttpAppState;
+use super::friend_connections::request_auth_headers;
 
 
 pub async fn create_friend_request(
@@ -60,6 +61,7 @@ pub async fn create_friend_request(
         .create_friend_request(CreateFriendRequestCommand {
             caller_actor_id,
             to_bot: req.to_bot,
+            request_auth: Some(request_auth_headers(&headers)),
         })
         .await
     {
@@ -189,6 +191,7 @@ pub async fn accept_friend_request(
             caller_actor_id: caller.actor_id,
             request_id,
             request_to_bot: caller.request_to_bot,
+            request_auth: Some(request_auth_headers(&headers)),
         })
         .await
     {
@@ -223,6 +226,7 @@ pub async fn reject_friend_request(
             caller_actor_id: caller.actor_id,
             request_id,
             request_to_bot: caller.request_to_bot,
+            request_auth: Some(request_auth_headers(&headers)),
         })
         .await
     {
