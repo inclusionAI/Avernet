@@ -127,7 +127,21 @@ the configured conversion version; the host binds model, dimension and collectio
 at startup and uses existing restoration/readiness before accepting traffic.
 Source updates after completion are reconciled by normal background sync.
 No task, HTTP route, cleanup or background thread starts merely by importing these
-modules. The host starts build polling explicitly. Old artifacts are not deleted.
+modules. The catalog host owns an `IndexBuildRunner` for HTTP-triggered execution.
+After a successful PUT commits the task, the route wakes that runner with the
+specific build ID. Idle instances never scan the build table. Request completion
+or disconnection does not own the runner's lifetime. Shutdown signals the existing
+stop flag and waits for in-flight execution before closing providers.
+
+An explicitly requested task waits for an existing owner's lease or a source
+revision conflict, using the existing fenced claim. Failed tasks require another
+PUT with the same configuration. After a process crash, resubmit the same ID;
+another instance can take over after the old lease expires. GET observes state
+and does not trigger work. Completed IDs remain idempotent. Existing pending or
+interrupted tasks from before this deployment must be explicitly resubmitted or
+continued with the existing rebuild command. Startup does not automatically
+launch model work. The standalone router without a trigger remains an enqueue-only
+adapter for hosts that supply their own worker. Old artifacts are not deleted.
 
 When applying a Card Doc to Qdrant, the shared synchronizer adds `index_key` to
 the point payload. Dense and keyword collections receive the same value on both
