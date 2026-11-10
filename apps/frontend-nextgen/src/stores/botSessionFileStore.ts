@@ -8,6 +8,7 @@ export interface BotSessionFileView {
   status: BotSessionFileStatus;
   sizeBytes: number | null;
   errorCode: string | null;
+  createdAt?: string | null;
 }
 
 /** 上传任务进程态(不等于后端 status)。 */

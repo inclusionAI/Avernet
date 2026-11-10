@@ -1,7 +1,7 @@
 import { Button, ConfirmDialog, IconButton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import { formatFileSize, getPreviewKind } from '@/services/workspace/sessionFileUtils';
+import { formatBotSessionFileTime, formatFileSize, getPreviewKind } from '@/services/workspace/sessionFileUtils';
 import { cn } from '@/utils/cn';
 import { Download, Eye, Reply, Trash2 } from 'lucide-react';
 import { SessionFileTypeIcon } from '../SessionFileTypeIcon';
@@ -25,6 +25,7 @@ interface BotSessionFilesRowProps {
  * 原生 disabled button 不派发 pointer 事件会让提示失效。
  */
 export function BotSessionFilesRow({ file, onOpenPreview, onReference, onDownload, onDelete }: BotSessionFilesRowProps) {
+  const createdAt = formatBotSessionFileTime(file.createdAt);
   const previewable = getPreviewKind(file.displayName) !== 'other';
   const rowContent = (
     <>
@@ -36,10 +37,8 @@ export function BotSessionFilesRow({ file, onOpenPreview, onReference, onDownloa
           </TooltipTrigger>
           <TooltipContent>{file.displayName}</TooltipContent>
         </Tooltip>
-        {/* 元数据模型统一（2026-09-20 用户拍板）：两行结构与群聊侧同构；
-            单聊文件接口暂不返回上传者/时间，次行仅展示大小，
-            后端补齐字段后本行自动扩充（设计稿为「风太 · 09/15 14:22 · 7.0KB」）。 */}
         <span className="mt-0.5 block truncate text-[11px] leading-[18px] text-muted-foreground">
+          {createdAt ? `${createdAt} · ` : ''}
           {file.sizeBytes ? formatFileSize(file.sizeBytes) : '--'}
         </span>
       </div>

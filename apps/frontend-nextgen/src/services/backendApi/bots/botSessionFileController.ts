@@ -25,6 +25,8 @@ export interface BotSessionFileDto {
   content_hash: string | null;
   task_version: number | null;
   error_code: string | null;
+  /** 首次创建时间：UTC ISO 8601；旧资源可能未知。 */
+  created_at?: string | null;
 }
 
 /** upload-intents 请求体单文件描述(文档 §4.1)。 */

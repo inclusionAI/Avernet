@@ -306,3 +306,20 @@ export function getPreviewKind(name: string, mimeType?: string): SessionFilePrev
   if ((PREVIEW_TEXT_EXT as readonly string[]).includes(ext) || mime.startsWith('text/')) return 'text';
   return 'other';
 }
+
+/** 仅 Bot 会话文件列表：UTC instant 按北京时间显示，不使用浏览器本地时区。 */
+export function formatBotSessionFileTime(value?: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get('month')}/${values.get('day')} ${values.get('hour')}:${values.get('minute')}`;
+}
