@@ -27,6 +27,10 @@ from agentclaw.community.core.bot_management.owner_handoff.guard import (
 from agentclaw.community.core.bot_management.owner_handoff.service import (
     OwnerHandoffService,
 )
+from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
+from agentclaw.community.core.service_bot.repository.config_artifact_offload import ConfigArtifactOffloader
 from agentclaw.community.core.repository.implementations.bot.owner_handoff import (
     OwnerHandoffRepository,
 )
@@ -123,6 +127,15 @@ class Staff:
 @pytest.fixture
 def world(persisted):
     db, bots, bot = persisted
+    devices = DeviceRepository(db)
+    publishes = BotPublishRepository(db, ConfigArtifactOffloader(MagicMock()))
+    binding_id = devices.insert_binding(
+        entity_id="A", entity_type="staff", device_id="draft-device",
+        device_provider="arca", env="dev", device_props={}, status="ACTIVE",
+        apply_reason="test handoff", applied_by="A",
+    )
+    bots.update_by_owner(bot["bot_id"], "A", {"binding_id": binding_id})
+    bot = bots.get_by_pk(bot["id"])
     repo, passport, runtime, queue = (
         OwnerHandoffRepository(db),
         Passport(),
@@ -158,6 +171,7 @@ def world(persisted):
             spaces,
             space_access,
             ownership_sync=ownership_sync,
+            preflight=OwnerHandoffPreflight(passport, devices, publishes),
         )
 
     return SimpleNamespace(
@@ -175,6 +189,8 @@ def world(persisted):
         space_access=space_access,
         space_client=space_client,
         service=service,
+        devices=devices,
+        publishes=publishes,
     )
 
 
@@ -445,6 +461,146 @@ def test_generation_drift_does_not_inject_or_commit(world):
     assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
 
 
+def _reach_phase(world, op, phase):
+    for _ in range(8):
+        if world.repo.get(op)["phase"] == phase:
+            return
+        world.service().step(op)
+    pytest.fail(str(world.repo.get(op)))
+
+
+def _verified_renewal(world, credential_id):
+    previous = world.passport.current
+    world.passport.current = {
+        **previous,
+        "entity_id": "A",
+        "credential_id": credential_id,
+        "handoff_ancestor_credential_ids": [
+            previous["credential_id"],
+            *previous.get("handoff_ancestor_credential_ids", []),
+        ],
+    }
+
+
+@pytest.mark.parametrize("phase", [
+    "WAITING_AUTHORIZATION", "UPDATING_RUNTIME",
+    "RETIRING_OLD_CREDENTIALS", "COMMITTING_OWNER",
+])
+def test_verified_renewal_always_replays_authorization_and_runtime(world, phase):
+    op = begin(world)
+    _reach_phase(world, op, phase)
+    old_runtime_calls = len(world.runtime.calls)
+    _verified_renewal(world, "renewed-twice")
+    _verified_renewal(world, "latest-renewal")
+    world.passport.query_auth_status = lambda *args, **kwargs: {
+        "status": "ISSUED", "token": "renewal-test-token",
+    }
+    assert not world.service().step(op)
+    row = world.repo.get(op)
+    assert row["credential_id"] == "latest-renewal"
+    assert row["phase"] == "WAITING_AUTHORIZATION"
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
+    drain(world, op)
+    assert len(world.runtime.calls) == old_runtime_calls + 1
+    assert world.runtime.calls[-1]["token"] == "renewal-test-token"
+    assert world.passport.retired[-1]["keep_credential_id"] == "latest-renewal"
+    assert len(world.passport.issues) == 1
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "B"
+    assert_bot_mutable(world.bots.get_by_pk(world.bot["id"]))
+
+
+def test_runtime_failure_then_daily_renewal_recovers_without_reissuing(world):
+    op = begin(world)
+    _reach_phase(world, op, "UPDATING_RUNTIME")
+    world.runtime.fail = True
+    world.service().step(op)
+    assert world.repo.get(op)["error_code"] == "HANDOFF_EXTERNAL_ERROR"
+    _verified_renewal(world, "daily-renewal")
+    world.runtime.fail = False
+    drain(world, op)
+    assert world.repo.get(op)["credential_id"] == "daily-renewal"
+    assert len(world.passport.issues) == 1
+
+
+def test_adopted_renewal_waits_for_its_own_authorization(world):
+    op = begin(world)
+    _reach_phase(world, op, "UPDATING_RUNTIME")
+    _verified_renewal(world, "pending-renewal")
+    world.passport.status = "PENDING"
+    world.service().step(op)
+    world.service().step(op)
+    assert world.repo.get(op)["phase"] == "WAITING_AUTHORIZATION"
+    assert world.repo.get(op)["error_code"] == "PASSPORT_AUTHORIZATION_PENDING"
+    assert not world.runtime.calls
+    assert not world.passport.retired
+    world.passport.status = "ISSUED"
+    drain(world, op)
+
+
+def test_failed_renewal_selection_write_cannot_update_runtime_or_owner(world, monkeypatch):
+    op = begin(world)
+    _reach_phase(world, op, "UPDATING_RUNTIME")
+    _verified_renewal(world, "new-selection")
+    advance = world.repo.advance
+
+    def reject_selection(*args, **kwargs):
+        if kwargs.get("credential_id") == "new-selection":
+            raise RuntimeError("journal unavailable")
+        return advance(*args, **kwargs)
+
+    monkeypatch.setattr(world.repo, "advance", reject_selection)
+    assert not world.service().step(op)
+    assert world.repo.get(op)["credential_id"] == "selected"
+    assert world.repo.get(op)["error_code"] == "HANDOFF_EXTERNAL_ERROR"
+    assert not world.runtime.calls
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
+    monkeypatch.setattr(world.repo, "advance", advance)
+    drain(world, op)
+
+
+@pytest.mark.parametrize("invalid", [
+    {"handoff_operation_id": "other-operation"},
+    {"execution_workno": "other-person"},
+    {"agent_id": "other-agent"},
+    {"entity_id": "other-entity"},
+    {"handoff_ancestor_credential_ids": None},
+    {"handoff_ancestor_credential_ids": []},
+    {"handoff_ancestor_credential_ids": ["unrelated"]},
+    {"handoff_ancestor_credential_ids": "selected"},
+    {"handoff_ancestor_credential_ids": ["selected", None]},
+])
+def test_same_executor_without_valid_provenance_cannot_be_adopted(world, invalid):
+    op = begin(world)
+    _reach_phase(world, op, "UPDATING_RUNTIME")
+    _verified_renewal(world, "unproven-renewal")
+    world.passport.current.update(invalid)
+    assert not world.service().step(op)
+    row = world.repo.get(op)
+    assert row["credential_id"] == "selected"
+    assert row["error_code"] == "PASSPORT_GENERATION_CONFLICT"
+    assert not world.runtime.calls
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
+
+
+def test_renewal_during_runtime_update_cannot_reuse_previous_ack(world):
+    op = begin(world)
+    _reach_phase(world, op, "UPDATING_RUNTIME")
+    update = world.runtime.hot_update_passport_token_to_device
+
+    def renew_during_update(**kwargs):
+        result = update(**kwargs)
+        _verified_renewal(world, "concurrent-renewal")
+        return result
+
+    world.runtime.hot_update_passport_token_to_device = renew_during_update
+    assert not world.service().step(op)
+    assert world.repo.get(op)["phase"] == "UPDATING_RUNTIME"
+    assert not world.passport.retired
+    world.runtime.hot_update_passport_token_to_device = update
+    drain(world, op)
+    assert len(world.runtime.calls) == 2
+
+
 def test_final_transaction_failure_does_not_report_success(world, monkeypatch):
     op = begin(world)
     for _ in range(5):
@@ -688,15 +844,16 @@ def test_handoff_with_expired_history_preserves_existing_flow(world, monkeypatch
     assert len(world.passport.issues) == 1
     assert world.passport.issues[0]["expected_credential_id"] == "old"
     if expired:
-        snapshot.assert_called_once_with(bot_id="service", owner_workno="A", entity_id="A")
+        assert snapshot.call_count == 2  # Read-only preflight and worker revalidation.
+        snapshot.assert_called_with(bot_id="service", owner_workno="A", entity_id="A")
     else:
         snapshot.assert_not_called()
 
 
 def test_missing_history_stays_queued_without_issuing_or_changing_owner(world, monkeypatch):
+    op = begin(world)  # History can disappear after preflight or on an old task.
     monkeypatch.setattr(world.passport, "query_agent_passport", lambda *a, **k: None)
     monkeypatch.setattr(world.passport, "query_handoff_passport", lambda **k: None)
-    op = begin(world)
     assert not world.service().step(op)
     row = world.repo.get(op)
     assert row["phase"] == "QUEUED"
@@ -706,11 +863,11 @@ def test_missing_history_stays_queued_without_issuing_or_changing_owner(world, m
 
 
 def test_expired_snapshot_failure_does_not_issue_credentials(world, monkeypatch):
+    op = begin(world)
     monkeypatch.setattr(world.passport, "query_agent_passport", lambda *a, **k: None)
     def fail(**kwargs):
         raise RuntimeError("snapshot unavailable")
     monkeypatch.setattr(world.passport, "query_handoff_passport", fail)
-    op = begin(world)
     assert not world.service().step(op)
     assert world.repo.get(op)["error_code"] == "HANDOFF_EXTERNAL_ERROR"
     assert not world.passport.issues
@@ -723,13 +880,19 @@ def test_real_runtime_arca_receipt_completes_handoff_and_releases_lock(
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.service_bot.repository.models import PublishStatus
 
-    with world.db.orm_session() as db:
-        db.get(BotModel, world.bot["id"]).binding_id = 11
-    devices = MagicMock()
-    devices.get_device.return_value = SimpleNamespace(
-        id=11, device_id="draft-device", device_provider="arca",
-        device_props={"sandbox_id": "ARCA-SANDBOX-test@0"},
+    online = world.devices.insert_binding(
+        entity_id="A", entity_type="staff", device_id="BOT-online",
+        device_provider="baas", env="dev", device_props={}, status="ACTIVE",
+        apply_reason="published service", applied_by="A",
     )
+    world.publishes.insert({
+        "source_bot_pk": world.bot["id"], "source_bot_id": "service",
+        "publish_bot_id": "service", "owner_id": "A", "name": "service",
+        "env": "dev", "status": PublishStatus.SUCCESS.value, "version": 1,
+        "permission_owner": "owner", "ext": {"binding": {"online": online}},
+    })
+    devices = MagicMock()
+    devices.get_device.side_effect = lambda **kwargs: world.devices.get_by_id(kwargs["binding_id"])
     receipts = {"arca": initial_arca_ack}
     devices.update_device_headers.side_effect = lambda **kw: (
         receipts["arca"] if kw["device"].device_provider == "arca"
@@ -740,17 +903,10 @@ def test_real_runtime_arca_receipt_completes_handoff_and_releases_lock(
     runtime._repository = world.bots
     runtime._passport_plugin = world.passport
     runtime._device_service_provider = lambda: devices
-    runtime._device_binding_repo = MagicMock()
-    runtime._device_binding_repo.list_active_caller_instance_bindings.return_value = []
-    runtime._bot_publish_repo = MagicMock()
-    runtime._bot_publish_repo.get_by_publish_bot_id.side_effect = lambda **kw: (
-        SimpleNamespace(id=21, ext={"binding": {"online": 22}})
-        if kw["publish_status"] == PublishStatus.SUCCESS.value else None
-    )
+    runtime._device_binding_repo = world.devices
+    runtime._bot_publish_repo = world.publishes
     publication = MagicMock()
-    publication.get_device_binding_by_id.return_value = SimpleNamespace(
-        id=22, device_id="BOT-online", device_provider="baas",
-    )
+    publication.get_device_binding_by_id.side_effect = world.devices.get_by_id
     runtime._bot_publish_provider = lambda: publication
     monkeypatch.setattr(
         world.runtime, "hot_update_passport_token_to_device",
