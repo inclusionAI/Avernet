@@ -156,7 +156,40 @@ it('matches configuration panel typography without changing the collaboration fo
   }
 
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('gap-6', 'px-4', 'sm:px-7');
-  expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'gap-5');
+  expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('grid-cols-1', 'sm:grid-cols-3', 'gap-5');
+});
+
+it('places free-chat settings in three equal responsive columns and wraps helper text below the switch', async () => {
+  const longName = '很长的群主 Bot 名称'.repeat(8);
+  renderModal({ activeIdentity: { ...botIdentity, displayName: longName } });
+  await screen.findByRole('button', { name: /Alpha/ });
+
+  const grid = screen.getByTestId('free-chat-settings-grid');
+  expect(grid).toHaveClass('grid-cols-1', 'sm:grid-cols-3', 'items-start');
+  expect(grid.children).toHaveLength(3);
+  const controls = [
+    screen.getByRole('button', { name: '群主 Bot' }),
+    screen.getByRole('button', { name: '@Human 通知来源' }),
+    screen.getByRole('switch', { name: '自动回复' }),
+  ];
+  controls.forEach((control, index) => {
+    expect(grid.children[index]).toHaveClass('min-w-0');
+    expect(grid.children[index]).toContainElement(control);
+    expect(grid.children[index]).not.toHaveClass('sm:col-span-2', 'sm:row-start-2');
+  });
+  expect(within(controls[0]).getByText(longName)).toHaveClass('min-w-0', 'truncate');
+  expect(within(controls[0]).getByText('当前')).toHaveClass('shrink-0', 'whitespace-nowrap');
+  expect(screen.getByText('@Human 通知来源')).toHaveClass('whitespace-nowrap');
+
+  const assertHelper = (text: string) => {
+    const helper = screen.getByText(text);
+    expect(helper).toHaveClass('min-w-0', 'break-words', 'whitespace-normal');
+    expect(helper.parentElement).toBe(grid.children[2]);
+    expect(helper.parentElement).not.toBe(controls[2].parentElement);
+  };
+  assertHelper('群主 Bot 将默认回复每一条消息');
+  fireEvent.click(controls[2]);
+  assertHelper('群主 Bot 仅在被 @ 时或上下文语境高度关联时答复');
 });
 
 it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', async () => {
@@ -219,11 +252,11 @@ it('maps the auto-reply switch to the delivery policy and updates its helper tex
   const autoReply = screen.getByRole('switch', { name: '自动回复' });
   const notifyField = screen.getByRole('button', { name: '@Human 通知来源' });
   expect(screen.getByTestId('free-chat-settings-grid')).toContainElement(notifyField);
-  expect(autoReply.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(autoReply.compareDocumentPosition(notifyField)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
   expect(autoReply).toBeChecked();
   expect(screen.getByText('群主 Bot 将默认回复每一条消息')).toHaveClass('text-muted-foreground');
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass(
-    'grid-cols-1', 'sm:grid-cols-2',
+    'grid-cols-1', 'sm:grid-cols-3',
   );
 
   fireEvent.click(autoReply);

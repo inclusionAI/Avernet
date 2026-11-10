@@ -176,7 +176,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       {kind === 'free_chat' && (
         <div
           data-testid="free-chat-settings-grid"
-          className="grid min-w-0 grid-cols-1 gap-5 rounded-xl bg-muted/40 p-4 sm:grid-cols-2 sm:gap-4"
+          className="grid min-w-0 grid-cols-1 items-start gap-5 rounded-xl bg-muted/40 p-4 sm:grid-cols-3 sm:gap-4"
         >
           <div className="min-w-0">
             <GroupLeaderSelect
@@ -188,23 +188,23 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
               onChange={onDriverChange}
             />
           </div>
-          <div className="min-w-0 sm:col-span-2 sm:row-start-2">
-            <span className="mb-2 block text-xs font-medium text-foreground">自动回复</span>
-            <div className="flex min-h-8 items-center gap-3">
+          <div className="min-w-0">{humanNotifySlot}</div>
+          <div className="min-w-0">
+            <span className="mb-2 block whitespace-nowrap text-xs font-medium text-foreground">自动回复</span>
+            <div className="flex min-h-8 items-center">
               <Switch
                 size="md"
                 checked={deliveryPolicy === 'send_to_driver'}
                 aria-label="自动回复"
                 onCheckedChange={(checked) => onDeliveryChange(checked ? 'send_to_driver' : 'inject_observers')}
               />
-              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground">
-                {deliveryPolicy === 'send_to_driver'
-                  ? '群主 Bot 将默认回复每一条消息'
-                  : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
-              </p>
             </div>
+            <p className="m-0 mt-2 min-w-0 break-words whitespace-normal text-xs leading-5 text-muted-foreground">
+              {deliveryPolicy === 'send_to_driver'
+                ? '群主 Bot 将默认回复每一条消息'
+                : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
+            </p>
           </div>
-          <div className="min-w-0">{humanNotifySlot}</div>
         </div>
       )}
 

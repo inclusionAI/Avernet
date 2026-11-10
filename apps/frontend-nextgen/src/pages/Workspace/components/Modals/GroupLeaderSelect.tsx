@@ -34,7 +34,7 @@ export function GroupLeaderSelect({
 
   return (
     <div className="min-w-0">
-      <label className="mb-2 block text-xs font-medium text-foreground" htmlFor={id}>
+      <label className="mb-2 block whitespace-nowrap text-xs font-medium text-foreground" htmlFor={id}>
         {label}
       </label>
       <Popover open={open} onOpenChange={setOpen}>
@@ -53,7 +53,7 @@ export function GroupLeaderSelect({
                   {selected.avatarUrl && <Avatar name={selected.name} src={selected.avatarUrl} size={20} />}
                   <span className="min-w-0 truncate text-xs font-normal text-foreground">{selected.name}</span>
                   {selected.current && (
-                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
+                    <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                   )}
                 </>
               ) : (
@@ -99,7 +99,7 @@ export function GroupLeaderSelect({
                       ) : null}
                     </span>
                     {option.current && (
-                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                     )}
                     {optionSelected && <Check className="ml-auto h-3.5 w-3.5" aria-hidden />}
                   </Button>
