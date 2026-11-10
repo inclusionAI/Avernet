@@ -111,6 +111,18 @@ class ContentStoreProtocol(ContentReader, Protocol):
         ...
 
     @abstractmethod
+    def ensure_stored(self, data: bytes) -> str:
+        """Make ``data`` readable under its digest and return the digest; files no provenance row.
+
+        For a caller that holds bytes a row already answers for: a row can
+        outlive its blob (a store moved, an instance's disk replaced), and
+        the caller with the bytes in hand is the one that can put them
+        back. A no-op when the store already holds the blob. Raises
+        ``ContentStoreFault`` when the bytes could not be stored.
+        """
+        ...
+
+    @abstractmethod
     def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
         """Whether this bot holds a provenance row for the digest.
 

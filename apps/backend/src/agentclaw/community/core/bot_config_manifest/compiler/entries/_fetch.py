@@ -104,9 +104,21 @@ async def file_produced(
                 category=category,
                 entry_identity=identity,
             )
+        else:
+            # A row answers for the digest; make sure the bytes do too. A row can outlive its blob,
+            # and the materialiser reads the blob.
+            _ensure_stored(content, data)
 
     await asyncio.to_thread(_file)
     return digest
+
+
+def _ensure_stored(content: ContentStoreProtocol, data: bytes) -> None:
+    """Put back bytes a row already answers for; a store error is this entry's failure, as in ``_store_produced``."""
+    try:
+        content.ensure_stored(data)
+    except (ContentStoreError, ContentStoreFault) as exc:
+        raise EntryFetchError(f"the bytes could not be filed with the platform's store: {exc}") from exc
 
 
 def _store_produced(content: ContentStoreProtocol, data: bytes, **kwargs: Any) -> None:

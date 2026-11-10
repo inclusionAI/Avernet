@@ -790,3 +790,36 @@ def test_store_fails_and_files_no_row_when_blob_write_faults(tmp_path):
     with pytest.raises(ContentStoreFault):
         service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
     assert repo.rows == []
+
+
+def test_ensure_stored_writes_bytes_and_files_no_row(tmp_path):
+    service, repo = _service(tmp_path)
+    digest = service.ensure_stored(b"inline")
+    assert digest == "sha256:" + hashlib.sha256(b"inline").hexdigest()
+    assert service.read(digest) == b"inline"
+    assert repo.rows == []
+
+
+def test_ensure_stored_restores_a_blob_whose_row_outlived_it(tmp_path):
+    service, repo = _service(tmp_path)
+    record = service.store_produced(b"inline", scope=SCOPE, origin="manifest/inline")
+    _blob_file(tmp_path, record.digest).unlink()
+    with pytest.raises(ContentMissingError):
+        service.read(record.digest)
+
+    service.ensure_stored(b"inline")
+
+    assert service.read(record.digest) == b"inline"
+    assert len(repo.rows) == 1
+
+
+def test_re_recording_produced_bytes_restores_a_missing_blob(tmp_path):
+    """What a genome re-capture relies on: ``store_produced`` writes the bytes before it dedupes the row."""
+    service, repo = _service(tmp_path)
+    record = service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+    _blob_file(tmp_path, record.digest).unlink()
+
+    service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+
+    assert service.read(record.digest) == b"captured"
+    assert len(repo.rows) == 1

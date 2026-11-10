@@ -39,10 +39,10 @@
 - **Goal:** A row whose bytes are missing is repaired by the next apply.
 - **Files:** `core/content_store/service_protocol.py`, `core/content_store/service.py`, `core/bot_config_manifest/compiler/entries/_fetch.py`, `tests/community/core/apply_engine/_fakes.py` (and any other `ContentStoreProtocol` fake), `tests/community/core/content_store/test_content_store.py`, `tests/community/core/bot_config_manifest/compiler/` (file_produced test)
 - **Done when:**
-  - [ ] `ContentStoreProtocol.ensure_stored(data) -> digest` writes bytes only and files no provenance row.
-  - [ ] `file_produced` calls it when the row already exists; a store fault surfaces as that entry's `EntryFetchError`.
-  - [ ] Test: file inline content, delete its blob, compile again → the materialiser's read succeeds and the row count is unchanged.
-  - [ ] Test: re-recording a genome capture whose blob was deleted restores the bytes (pins the existing behaviour the spec relies on).
+  - [x] `ContentStoreProtocol.ensure_stored(data) -> digest` writes bytes only and files no provenance row.
+  - [x] `file_produced` calls it when the row already exists; a store fault surfaces as that entry's `EntryFetchError`.
+  - [x] Test: file inline content, delete its blob, compile again → the materialiser's read succeeds and the row count is unchanged.
+  - [x] Test: re-recording a genome capture whose blob was deleted restores the bytes (pins the existing behaviour the spec relies on).
 - **Depends on:** Task 1
 
 ## Task 5: Documentation

@@ -341,6 +341,12 @@ class ContentStoreService(ContentStoreProtocol):
             return record
         return self._repository.add(record)
 
+    def ensure_stored(self, data: bytes) -> str:
+        """The blob write alone: the same idempotent write ``store_produced`` makes, with no row."""
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        self._blobs.write(digest, data)
+        return digest
+
     def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
         """A provenance row for this bot and digest exists (filed by ``produced_by`` when given)."""
         return self._repository.has_digest(
