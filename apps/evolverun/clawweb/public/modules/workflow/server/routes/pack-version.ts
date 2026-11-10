@@ -70,12 +70,13 @@ export function createPackVersionRouter(deps: Dependencies): Router {
           || !oid(snapshot.baseCommit) || !(snapshot.draftHead === null || oid(snapshot.draftHead)) || !Array.isArray(snapshot.versionFiles)) throw new Error('Invalid snapshot');
         // Never reflect active-history evidence from the ordinary draft-backed
         // reader, even if a host accidentally returns an identically named field.
-        const { activeHistory, ...response } = snapshot as PackScriptSnapshot & { activeHistory?: unknown };
+        const { activeHistory, activeHistoryMismatch, ...response } = snapshot as PackScriptSnapshot & { activeHistory?: unknown };
         const evidence = !row && version === 'current' && object(activeHistory)
           && Object.keys(activeHistory).length === 2 && activeHistory.protocol === 'active-history-v1'
           && typeof activeHistory.activeToken === 'string' && /^[a-f0-9]{64}$/.test(activeHistory.activeToken)
           ? { activeHistory } : {};
-        res.json({ ...response, ...evidence, canWrite: !!deps.saveCandidate }); return;
+        const warning = version === 'current' && activeHistoryMismatch === true ? { activeHistoryMismatch: true } : {};
+        res.json({ ...response, ...evidence, ...warning, canWrite: !!deps.saveCandidate }); return;
       }
       if (!deps.saveCandidate) { res.status(503).json({ error: 'Version saving unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       if (Object.keys(req.query).length) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }

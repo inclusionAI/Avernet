@@ -3,7 +3,7 @@ import type { AutoHealDeployRequest, WorkflowSpec } from '@avernet/clawweb-share
 import type { PackVersionFile } from '../components/PackVersionEditor'
 
 export type Version = 'current' | 'draft'
-export type Snapshot = { workflowId: string; packId: string; packPath?: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[] }
+export type Snapshot = { workflowId: string; packId: string; packPath?: string; baseRef: string; baseCommit: string; draftHead: string | null; canWrite?: boolean; versionFiles: PackVersionFile[]; activeHistoryMismatch?: true }
 export type Change = { path: string; operation: 'delete' } | ({ operation: 'create' | 'replace' } & PackVersionFile)
 type VersionState = { snapshot: Snapshot | null; files: PackVersionFile[]; loading: boolean; error: string | null; readFailure?: string; blocked: boolean; notice: string | null }
 export type SaveInput = { sourceVersion: Version; sourceCommit: string; expectedSavedHead: string | null; changes: Change[]; requestId?: string }
@@ -239,7 +239,10 @@ export function validateSnapshot(value: unknown, id: string, version: Version): 
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) if (paths.has(parts.slice(0, i).join('/'))) throw new Error('Conflicting paths')
   }
-  return { ...data, ...(packPath === undefined ? {} : { packPath }), versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) }
+  const activeHistoryMismatch = version === 'current' && data.activeHistoryMismatch === true ? { activeHistoryMismatch: true as const } : {};
+  const result: Snapshot = { ...data, ...(packPath === undefined ? {} : { packPath }), ...activeHistoryMismatch, versionFiles: data.versionFiles.map(file => ({ path: file.path, contentBase64: file.contentBase64, mode: file.mode })) };
+  if (!(version === 'current' && data.activeHistoryMismatch === true)) delete result.activeHistoryMismatch;
+  return result
 }
 function readError(error: unknown): string {
   const value = error as { status?: unknown; body?: unknown } | null
