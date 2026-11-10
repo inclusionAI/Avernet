@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_7d8e6acd12a072::t_2468a315e74683 91
+  s_7d8e6acd12a072::t_df55a192367dde 90,95
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_control.py
+  s_7d8e6acd12a072::t_e4882f74a6385e 1-151
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py
+  s_7d8e6acd12a072::t_971379f6623e7d 871-873
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_support.py
+  s_7d8e6acd12a072::t_89a48a79658d69 831-889
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32bf93666976654cf9cb2a19825ebebffddee71e",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
