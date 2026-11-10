@@ -85,8 +85,9 @@ const COPY_FEEDBACK_MS = 1600;
 
 /**
  * 消息末尾的操作入口。默认直接展示编辑与复制，避免依赖 hover 才能发现；
- * revealOnHover 时改为悬停消息行 / 键盘聚焦 / 触屏才显（协作群聊口径：仅最后
- * 一条回复默认展示，其余回复与用户消息 hover 展示）；withinContentColumn 时
+ * revealOnHover 时改为悬停消息行 / 键盘聚焦 / 触屏才显（当前无调用方启用：
+ * 会话详情消息操作行 2026-11 起全量常显，推翻旧的 dmore「仅末条回复常显」
+ * 口径）；withinContentColumn 时
  * 渲染在消息内容列内（气泡紧下方），justify 方向即与正文左右缘对齐（dmore 实测：
  * 操作图标组 x=36 与正文同起排）；渲染在行布局外时以 44px inset 补偿兄弟头像列
  * （群聊现状）。每个 IconButton 继续通过统一 Tooltip 提供 Codex 风格的悬停文案。

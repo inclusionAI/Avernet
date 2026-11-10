@@ -67,3 +67,21 @@ it.each([
   expect(badge.previousElementSibling).toHaveTextContent(senderName);
   expect(badge.nextElementSibling).toHaveTextContent('10:31');
 });
+
+// 2026-11 推翻 dmore「仅末条回复常显」口径：会话详情每条消息的操作行（复制/编辑）
+// 一律常显，不再依赖悬停/键盘聚焦才显现；断言不携带 hover 显隐类作为守护。
+it.each([
+  ['非末条 Bot 回复', 'assistant', false],
+  ['用户消息', 'user', false],
+] as const)('%s 的操作行常显（不携带 opacity-0 显隐类）', (_label, role, _isLast) => {
+  const { unmount } = render(<GroupChatBubble
+    message={{ id: 'reveal', role, content: '你好', status: 'history',
+      extra: { senderId: 'b1', senderName: '发送者', displayTime: '10:31' } }}
+    group={group} participants={[]} isLastMessage={false} isRequesting={false}
+    userIdentityId="123" onCopy={jest.fn()} onEdit={jest.fn()} isEditable
+  />);
+  const action = screen.getByTestId('message-copy-action-reveal');
+  expect(action).not.toHaveClass('opacity-0');
+  expect(action).not.toHaveClass('group-hover:opacity-100');
+  unmount();
+});
