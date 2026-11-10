@@ -2,9 +2,12 @@
 
 Use one repository map and one README per app as the entry points. Keep detailed
 knowledge beside its owner and link existing contracts instead of copying them.
-Backend is the first pilot; BaaS, BCS and BCSFuse also have initial navigation.
-Other apps retain their current documentation until deliberately brought into
-this layout.
+Backend, BaaS, BCS and BCSFuse initialize the same app-level entry points:
+`README.md`, `AGENTS.md`, `docs/flows/README.md`,
+`docs/diagnostics/README.md`, and `specs/README.md`. Populate them with
+verified existing knowledge and links; add topic pages when supported content
+exists. Other apps retain their current documentation until deliberately brought
+into this layout.
 
 ## File responsibilities
 
@@ -17,7 +20,7 @@ this layout.
 | `docs/adr/` | Durable decisions, their rationale and consequences. |
 | `docs/flows/` | Important business flows spanning apps: participants, contracts, state changes and failure branches. |
 | App `README.md` | The app's purpose, interfaces, source layout, assembly, knowledge navigation and verification. |
-| App `AGENTS.md` | Additional working rules that apply only to that app, when needed. |
+| App `AGENTS.md` | Additional working rules and applicable knowledge entry points. |
 | App `docs/flows/` | Complex internal flows, when they need their own page. |
 | App `docs/diagnostics/` | Symptoms, candidate causes, distinguishing evidence, next actions and limitations. |
 | Domain `README.md` or `CONTEXT.md` | Local responsibilities, provided/consumed contracts, dependency boundaries and change impact. |

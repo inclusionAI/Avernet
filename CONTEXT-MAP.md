@@ -31,8 +31,9 @@ that is not already defined here. Add it to this map in the same change.
 ## Knowledge framework
 
 Use this shared layout to navigate and contribute knowledge. Backend is the
-first pilot; BaaS, BCS and BCSFuse also use it. Optional paths are created when
-there is material to maintain, and existing authoritative docs stay in place.
+first pilot; Backend, BaaS, BCS and BCSFuse initialize the same app entry,
+agent rules, flow, diagnostic and spec indexes. Existing authoritative docs stay
+in place; add topic pages where supported knowledge exists.
 
 ```text
 <repo>/
@@ -48,18 +49,18 @@ there is material to maintain, and existing authoritative docs stay in place.
 │   └── flows/                    # Cross-app flows
 └── apps/<app>/
     ├── README.md                 # App entry and knowledge navigation
-    ├── AGENTS.md                 # App-specific rules, when needed
+    ├── AGENTS.md                 # App-specific rules
     ├── docs/
-    │   ├── flows/                # App-local flows, when needed
-    │   └── diagnostics/          # App-local diagnostics, when needed
-    ├── specs/                    # Change intent, decisions and evidence
+    │   ├── flows/README.md       # App-local flow index
+    │   └── diagnostics/README.md # App-local diagnostic index
+    ├── specs/README.md           # Change intent, decisions and evidence
     └── <domain>/
         └── README.md or CONTEXT.md # Domain boundaries and contracts
 ```
 
 The [knowledge standard](docs/agents/knowledge-standard.md) defines the
 responsibilities and exclusions for each location; this tree is a navigation
-overview, not a requirement to create empty directories or move existing docs.
+overview; it does not require moving existing docs or inventing topic content.
 
 - [Knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md): what each document records and excludes.
 - [Architecture](docs/arch/README.md), [decisions](docs/adr/README.md), and [cross-app flows](docs/flows/README.md).

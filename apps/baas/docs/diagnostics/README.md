@@ -1,6 +1,6 @@
 # Diagnostic navigation
 
-Start with the symptom and preserve the target revision, environment and evidence. These routes identify investigation starting points, not proven root causes.
+Start with [Publish Failures](publish-failures.md) when applicable. Start with the symptom and preserve the target revision, environment and evidence. These routes identify investigation starting points, not proven root causes.
 
 | Symptom | First evidence to distinguish | Existing guidance |
 | --- | --- | --- |
@@ -9,3 +9,7 @@ Start with the symptom and preserve the target revision, environment and evidenc
 | BCN interaction or SSE fails | Identify the request, interaction and transport stage before inspecting the associated source and tests. | [Reference](../adr/0012-sse-bcn-downlink-interactions.md) |
 
 Keep credentials, private runtime data and raw sessions out of repository knowledge. Add a topic page only when a supported, reusable diagnosis is missing.
+
+## Record and exclude
+
+Record symptoms, competing causes, distinguishing evidence, next actions and limits. Do not store secrets, raw private incident records or unverified conclusions.

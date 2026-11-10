@@ -9,7 +9,8 @@ Public BCSFuse owns the shared search core, provider contracts and TC applicatio
 - [Provider contracts](packages/search-core/docs/provider-contracts.md)
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)
-- [Change specs](specs/)
+
+- [Change specs](specs/README.md)
 
 Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
 

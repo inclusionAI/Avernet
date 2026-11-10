@@ -9,7 +9,8 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)
-- [Change specs](specs/)
+
+- [Change specs](specs/README.md)
 
 Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
 

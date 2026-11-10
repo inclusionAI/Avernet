@@ -10,6 +10,8 @@ Public BaaS owns the community lifecycle services and provider contracts; the OC
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)
 
+- [Change specs](specs/README.md)
+
 Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
 
 **SecBaaS Community Edition** — the open-source, single-box runtime of the TeamClaw AI bot platform.
@@ -170,6 +172,6 @@ test pipeline without the coverage gate.
 ## Project Conventions
 
 - **Python**: 3.12+, strict static typing (mypy + pyright)
-- **Imports**: Private modules (`_module`) never imported cross-package from public `__init__.py` files — see [src/secbaas/CLAUDE.md](src/secbaas/CLAUDE.md)
+- **Imports**: Consult the [architecture tests](tests/architecture/) for enforced import and export boundaries.
 - **Tests**: pytest with markers for `unit`, `integration`, `e2e`, `architecture`
 - **Config**: YAML-based with env-specific overlays
