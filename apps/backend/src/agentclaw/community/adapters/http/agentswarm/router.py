@@ -531,6 +531,9 @@ def _to_detail_dto(detail) -> RunDetailDTO:
         ended_at=detail.ended_at,
         tenant=detail.tenant,
         goal=detail.goal,
+        # Inherited from RunSummaryDTO; the detail carries the full goal, so the
+        # excerpt here only keeps the field populated for shared consumers.
+        goal_excerpt=_goal_excerpt(detail.goal),
         provider=detail.provider,
         agent_catalog=[
             AgentCatalogSpecDTO(
