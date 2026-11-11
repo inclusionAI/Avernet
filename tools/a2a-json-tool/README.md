@@ -91,6 +91,8 @@ metadata={"scene":"chat"}
 
 示例中的 `localhost:8080/a2a` 只是占位地址，本工具没有启动该 Agent 服务。生产 HTTP 接口使用绝对 HTTPS 地址；本地测试允许 localhost、127.0.0.1 和 IPv6 回环的 HTTP 地址。
 
+接口 URL 与 `provider.url` 都会先检查原始 URI 的字符及 `%HH` 编码；例如 `https://agent.example/a b` 必须写成 `https://agent.example/a%20b`，不会自动修改后继续输出非法原文。合法大小写、默认端口、路径规范化等差异不因此被拒绝。`provider.url` 仅校验绝对 URI 语法，不套用接口的生产 HTTPS、本机 HTTP 或禁止片段限制；公网 HTTP 网站、文档锚点和合法其他协议文档地址可保留，不验证资源是否可访问。
+
 ## 消息输入
 
 输入可以是对象、数组、字符串、数字、布尔值或 `null`。例如：
@@ -206,6 +208,7 @@ npm test
 | `web/converter.js`、`web/message-mapper.js` | AgentCard、普通数据与结构化消息转换 |
 | `web/input-parser.js`、`web/convert-input.js` | 片段解析与网页/CLI 共享入口 |
 | `web/field-links.js` | 原始字段到输出字段的路径关联 |
+| `web/uri.js` | 接口、提供方及消息 URI 的原文语法校验 |
 | `web/app.js`、`web/index.html`、`web/style.css` | 网页交互与展示 |
 | `editor/json-editor.js`、`scripts/build-editor.mjs` | 编辑器适配源码和本地资源构建 |
 | `web/json-editor.js`、`web/EDITOR-LICENSES.txt` | 已打包编辑器及依赖许可证 |

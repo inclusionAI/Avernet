@@ -26,7 +26,7 @@ test('本地页面与脚本可读取，使用正确类型与安全响应头', as
   assert.match(page.headers.get('cache-control'), /no-store/);
   assert.match(page.headers.get('content-security-policy'), /connect-src 'none'/);
   assert.match(await page.text(), /A2A/);
-  for (const file of ['converter.js', 'input-parser.js', 'message-mapper.js', 'convert-input.js', 'field-links.js', 'json-editor.js']) {
+  for (const file of ['converter.js', 'uri.js', 'input-parser.js', 'message-mapper.js', 'convert-input.js', 'field-links.js', 'json-editor.js']) {
     const script = await fetch(`${origin}/${file}`);
     assert.equal(script.status, 200, file);
     assert.match(script.headers.get('content-type'), /javascript/);

@@ -11,6 +11,7 @@ const routes = new Map([
   ['/app.js', ['app.js', 'text/javascript']],
   ['/json-editor.js', ['json-editor.js', 'text/javascript']],
   ['/converter.js', ['converter.js', 'text/javascript']],
+  ['/uri.js', ['uri.js', 'text/javascript']],
   ['/examples.js', ['examples.js', 'text/javascript']],
   ['/input-parser.js', ['input-parser.js', 'text/javascript']],
   ['/message-mapper.js', ['message-mapper.js', 'text/javascript']],

@@ -1,5 +1,6 @@
 // 契约依据：https://github.com/a2aproject/A2A/blob/v1.0.0/specification/a2a.proto
 // 这里只校验转换所需字段；复杂可选字段的验证范围通过 notes 明确告知。
+import { validUri } from './uri.js';
 
 export class ConversionError extends Error {
   constructor(issues) {
@@ -64,7 +65,7 @@ function validEndpoint(value, binding) {
     try { new URL(`http://${value}`); } catch { return false; }
     return port > 0 && port <= 65535;
   }
-  if (!/^https?:\/\//i.test(value)) return false;
+  if (!/^https?:\/\//i.test(value) || !validUri(value)) return false;
   try {
     const url = new URL(value);
     if (url.username || url.password || url.hash) return false;
@@ -150,13 +151,15 @@ export function convertAgentCard(input) {
     if (!object(iface, path)) return;
     if (!bindings.includes(iface.protocolBinding)) issues.push(`${path}.protocolBinding：本工具仅支持 JSONRPC、HTTP+JSON、GRPC。`);
     if (iface.protocolVersion !== '1.0') issues.push(`${path}.protocolVersion：必须是字符串 "1.0"。`);
-    if (!validEndpoint(iface.url, iface.protocolBinding)) issues.push(`${path}.url：请输入绝对 HTTPS 地址、本机 HTTP 地址，或 GRPC 主机:端口。`);
+    if (!validEndpoint(iface.url, iface.protocolBinding)) issues.push(`${path}.url：请输入原文合法的绝对 HTTPS 地址、本机 HTTP 地址或 GRPC 主机:端口；空格等字符需编码。`);
     optionalStrings(iface, ['tenant'], `${path}.`);
     unknown(iface, ['url', 'protocolBinding', 'protocolVersion', 'tenant'], `${path}.`);
   });
 
   if (own(output, 'provider') && object(output.provider, 'provider')) {
-    text(output.provider.url, 'provider.url');
+    if (!validUri(output.provider.url)) {
+      issues.push('provider.url：请输入带协议且原文合法的网站或文档 URI；空格等字符需编码。');
+    }
     text(output.provider.organization, 'provider.organization');
     unknown(output.provider, ['url', 'organization'], 'provider.');
   }
