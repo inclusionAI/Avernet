@@ -24,6 +24,7 @@ provides:
   - "EmptyBotProcess"
   - "BotProcessRegistry"
   - "BotPublishService"
+  - "ServiceBotEvalService"
   - "BaasService"
   - "BaasServiceError"
   - "BaasNoActiveDevicesError"
@@ -152,6 +153,33 @@ The existing oversized central Bot/Publish services remain under the repository'
 pre-existing architecture allowlist; this compatibility fix does not extend it.
 Their remaining decomposition is a separate lifecycle/service refactor so this
 fix can be reviewed without moving unrelated creation and restart behavior.
+
+## Service-Bot evaluation gate
+
+`ServiceBotEvalService` authorizes and dispatches the unified service-Bot
+certification surface through the `ServiceBotEvalPlugin` Protocol. Caller-supplied
+owner and version inputs are never authoritative: it resolves the tenant-scoped
+Bot through `BotAddressResolver`, checks the actor's operable collaborator level,
+requires `bot_type=service`, and binds the addressed publish record from the
+Bot's current environment. `precheck` additionally requires a draft record;
+submission status may fall back to the latest record. A missing Bot and
+insufficient permission both report not found. Submit requires OWNER; detail,
+history, precheck, sync and submission status require MEMBER.
+
+The same service backs the bot-first public routes under
+`/openapi/v1/bots/{bot_id}/eval/...` (authorization rules in
+`adapters/http/openapi_v1/authorization_rules_service_eval.py`) and the legacy
+`/api/service-bot/eval/...` routes. Public profiles bind skip implementations
+that allow the release trigger; an enterprise composition supplies the real
+evaluator. The Protocol carries the server-derived context and already-read
+upload material, keeping transport and private provider details out of the
+community domain.
+
+Draft-to-staging publication also runs the gate's `precheck` after the draft
+lock check. A result whose `allowed` is not `True` raises
+`ServicePublicationGateBlockedError`; a `PENDING` gate status raises
+`ServicePublicationGatePendingError`. Both errors expose only the plugin's
+`gate_result` projection and map to HTTP 403/403210 and 409/409210.
 
 ## Publish operation ledger (#197)
 
