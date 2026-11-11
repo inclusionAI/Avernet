@@ -27,7 +27,14 @@ class _Graph:
 
 
 class _Search:
-    async def search_catalog(self, query):
+    async def search_catalog(
+        self,
+        query,
+        *,
+        viewer_actor_type=None,
+        viewer_actor_id=None,
+        visibility=None,
+    ):
         return {
             "candidates": [
                 {
