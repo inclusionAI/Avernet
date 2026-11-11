@@ -1,6 +1,5 @@
 import type { BotTemplateField } from '@/services/botWorkshop/agentCodingTemplateService';
 import { isTemplateFieldRequired } from './fields/fieldUtils';
-import { findDuplicateCodeRepoUrls } from './legacy/aicoding/configFields';
 import {
   getSemanticTemplateFieldInitialValue,
   isImageTemplateField,
@@ -90,19 +89,6 @@ export function sanitizeDynamicTemplateFieldValues(
   return next;
 }
 
-function validateDuplicateCodeRepoFields(
-  fields: BotTemplateField[] = [],
-  values: FieldValues = {},
-): string | null {
-  const codeRepoFields = fields.filter((field) => fieldTypeOf(field) === 'antcode');
-  if (codeRepoFields.length < 2) return null;
-  const duplicateUrls = findDuplicateCodeRepoUrls(
-    ...codeRepoFields.map((field) => (Array.isArray(values[field.field_key]) ? values[field.field_key] : [])),
-  );
-  if (!duplicateUrls.size) return null;
-  return `代码仓库字段存在重复的仓库地址：${Array.from(duplicateUrls).join('、')}，同一 Bot 内不可配置重复仓库`;
-}
-
 export function validateDynamicTemplateFields(
   fields: BotTemplateField[] = [],
   values: FieldValues = {},
@@ -128,7 +114,7 @@ export function validateDynamicTemplateFields(
       }
     }
   }
-  return validateDuplicateCodeRepoFields(fields, values);
+  return null;
 }
 
 export interface DynamicTemplateFieldBindingValidationResult {

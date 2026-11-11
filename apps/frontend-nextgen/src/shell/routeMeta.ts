@@ -84,7 +84,7 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/collaboration-square/experts',
-    title: '专家',
+    title: '专家 Bot',
     section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,

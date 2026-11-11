@@ -20,11 +20,10 @@ import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import { Star } from 'lucide-react';
+import { Loader2, Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
-import { ConversationSessionStatus } from './ConversationSessionStatus';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
@@ -72,15 +71,18 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
-      {/* 会话左侧活动状态槽(#2990 语义保留 + Coding Bot 2026-11-06 视觉收敛):
-          外层固定 40-54px 缩进区且恒为 14px,标题起点 60px 不随状态切换；
-          AIXCoding 状态在其中渲染 14px DevFlow 图标，默认 13px 对话占位
-          使用更弱的 content-icon，普通 Bot 回复 loading 仍保留原 14px 语义。 */}
-      <ConversationSessionStatus
-        botId={session.botId}
-        sessionId={session.sessionId}
-        showReplying={!readOnly && replyingSessionId === session.sessionId}
-      />
+      {/* Bot 正在回复中(#2990 还原,2026-10-26 适配 52px 行几何):仅命中行渲染,
+          标题左侧缩进区(40-54px,标题起点 60px)绝对定位旋转指示,不占 flex 流,
+          标题起点不随 loading 出现跳动;只读行不渲染。 */}
+      {!readOnly && replyingSessionId === session.sessionId && (
+        <span
+          role="status"
+          aria-label="Bot 正在回复"
+          className="absolute left-[40px] top-1/2 z-10 -translate-y-1/2"
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
+        </span>
+      )}
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}

@@ -35,6 +35,7 @@ function taskStatusLabel(task: SessionRecoveryTask): string {
   if (unrecoveredOutcome(task)) return '处理结束';
   if (isOwnerHandoff(task) && task.judgment?.effect === 'recovered') return ownerNotificationSent(task) ? '已恢复，已通知 Owner' : '已恢复，有后续建议';
   if (isOwnerHandoff(task)) return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
+  if (task.completionReason === 'no_recovery_needed') return '无需自愈';
   return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status];
 }
 
@@ -76,6 +77,7 @@ const decisionLabels: Record<string, string> = {
 
 const simulationDecisionLabels: Record<string, string> = {
   observe: '无需干预', message: '提出消息干预建议', environment: '制定拟议修复方案',
+  no_recovery_needed: '无需自愈',
   insufficient_evidence: '历史证据不足', user_continued: '历史用户续聊，建议让路', owner_handoff: '建议直接转交 Owner（未通知）',
 };
 
@@ -650,7 +652,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     { key: 'effect', label: '效果', ...recoveryEffectView(task) },
   ];
   const stageSummary = task ? {
-    completed: isOwnerHandoff(task) ? (effect === 'recovered' ? (ownerNotificationSent(task) ? '原任务已恢复，已通知 Owner 后续建议，本次自愈已结束。' : '原任务已恢复，本次自愈已结束；Owner 通知未确认，请查看后续建议。') : ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    completed: task.completionReason === 'no_recovery_needed' ? '评估已完成，本次无需自愈。可查看下方判断依据。' : isOwnerHandoff(task) ? (effect === 'recovered' ? (ownerNotificationSent(task) ? '原任务已恢复，已通知 Owner 后续建议，本次自愈已结束。' : '原任务已恢复，本次自愈已结束；Owner 通知未确认，请查看后续建议。') : ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: task && unrecoveredOutcome(task) ? '自愈处理已结束，原任务仍受阻，需继续处理。' : '本次自愈未完成，请查看失败说明和相关操作记录。',
     canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: task.ownerRequest?.status === 'pending' ? (task.ownerRequest.reason === 'configuration' ? '等待 Owner 补齐配置，处理反馈后 Agent 将重新核验。' : '等待 Owner 完成权限授权，处理反馈后 Agent 将重新核验。') : !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',

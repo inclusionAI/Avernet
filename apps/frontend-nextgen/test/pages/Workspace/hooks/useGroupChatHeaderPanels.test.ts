@@ -46,17 +46,12 @@ function makePanelMessages(): ChatMessage[] {
   return [...makeMessages(), PANEL_MESSAGE] as never;
 }
 
-/** 构造带头部副屏 handle 的 panelRef（openTab/closePanel/openPanel 以独立 mock 暴露便于断言）。 */
+/** 构造带头部副屏 handle 的 panelRef（openTab/closePanel 以独立 mock 暴露便于断言）。 */
 function makePanelHandle() {
   const openTab = jest.fn();
   const closePanel = jest.fn();
-  const handle = {
-    openTab,
-    closePanel,
-    openPanel: jest.fn(),
-    closePanelForce: jest.fn(),
-  } as unknown as PanelHandle;
-  return { ref: { current: handle } as React.RefObject<PanelHandle | null>, openTab, closePanel, openPanel: handle.openPanel as jest.Mock };
+  const handle = { openTab, closePanel, openPanel: jest.fn(), closePanelForce: jest.fn() } as unknown as PanelHandle;
+  return { ref: { current: handle } as React.RefObject<PanelHandle | null>, openTab, closePanel };
 }
 
 beforeEach(() => {
@@ -302,85 +297,4 @@ it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即�
   act(() => result.current.toggleSidePane());
   expect(closePanel).toHaveBeenCalledTimes(1);
   expect(result.current.sidePaneOpen).toBe(false);
-});
-
-// ---- 右缘域面板 × 副屏互斥（GroupWorkspaceArea 注入 panelsOpen/closePanels 装配）----
-
-/**
- * 渲染群侧头部编排 Hook，并按 GroupWorkspaceArea 的真实时序驱动 panelsOpen：
- * openPanelKind 打开面板前置让位（dismissSidePaneForPanels）→ activePanel 置位
- * （panelsOpen=true）→ 关面板（panelsOpen=false，让位回开窗口）。
- */
-function renderGroupMutexHarness(panelRef: React.RefObject<PanelHandle | null>, messages: ChatMessage[]) {
-  const closePanels = jest.fn();
-  const { result, rerender } = renderHook(
-    ({ panelsOpen, session }: { panelsOpen: boolean; session: SessionView }) =>
-      useGroupChatHeaderPanels({
-        userId: null,
-        session,
-        messages,
-        panelRef,
-        toggleFavorite: jest.fn().mockResolvedValue(undefined),
-        panelsOpen,
-        closePanels,
-      }),
-    { initialProps: { panelsOpen: false, session: makeSession() } },
-  );
-  return { result, rerender, closePanels };
-}
-
-it('副屏让位互斥：面板展开时收副屏（保留 tabs 可回开），面板全收后自动回开副屏', () => {
-  // 场景回放：群侧面板改内联右缘 aside 后与 chat 同构——副屏（AppShell 悬浮层）展开时
-  // 整条盖住面板让位区；打开面板（侧栏「…」菜单/头部图标）先让位收副屏，全收后回开。
-  const { ref: panelRef, closePanel, openPanel: handleOpenPanel } = makePanelHandle();
-  const { result, rerender } = renderGroupMutexHarness(panelRef, makePanelMessages());
-
-  // 副屏展开（真实态同步）→ 面板打开（openPanelKind 让位 + activePanel 置位）。
-  act(() => result.current.onSidePaneIsOpenChange(true));
-  act(() => result.current.dismissSidePaneForPanels());
-  rerender({ panelsOpen: true, session: makeSession() });
-  expect(closePanel).toHaveBeenCalledTimes(1);
-  expect(handleOpenPanel).not.toHaveBeenCalled();
-
-  // 副屏收起真实态事件同步（closePanel 的 SDK 回声）→ 面板全收：自动回开副屏。
-  act(() => result.current.onSidePaneIsOpenChange(false));
-  rerender({ panelsOpen: false, session: makeSession() });
-  expect(handleOpenPanel).toHaveBeenCalledTimes(1);
-});
-
-it('副屏真实展开时收右缘域面板（GroupWorkspaceArea closePanels 注入 setActivePanel(none)）', () => {
-  const { ref: panelRef } = makePanelHandle();
-  const { result, closePanels } = renderGroupMutexHarness(panelRef, makeMessages());
-
-  act(() => result.current.onSidePaneIsOpenChange(true));
-  expect(result.current.sidePaneOpen).toBe(true);
-  expect(closePanels).toHaveBeenCalledTimes(1);
-
-  // 关态回声不误触收面板。
-  act(() => result.current.onSidePaneIsOpenChange(false));
-  expect(closePanels).toHaveBeenCalledTimes(1);
-});
-
-it('副屏未开时打开面板不触发让位：closePanel 无空调用', () => {
-  const { ref: panelRef, closePanel } = makePanelHandle();
-  const { result } = renderGroupMutexHarness(panelRef, makeMessages());
-
-  act(() => result.current.dismissSidePaneForPanels());
-  expect(closePanel).not.toHaveBeenCalled();
-});
-
-it('让位后切会话不回开副屏：副屏已 closePanelForce 清 tabs，回开会空弹', () => {
-  const { ref: panelRef, openPanel: handleOpenPanel } = makePanelHandle();
-  const { result, rerender } = renderGroupMutexHarness(panelRef, makePanelMessages());
-
-  // 副屏开 → 面板让位收起 → 副屏关态回声；随后未关面板即切会话。
-  act(() => result.current.onSidePaneIsOpenChange(true));
-  act(() => result.current.dismissSidePaneForPanels());
-  rerender({ panelsOpen: true, session: makeSession() });
-  act(() => result.current.onSidePaneIsOpenChange(false));
-
-  // 切会话（让位标记同边界作废）→ 面板随后全收：不回开（回开会空弹 autoCloseWhenEmpty）。
-  rerender({ panelsOpen: true, session: makeSession({ sessionId: 'sess-2', groupId: 'g2' }) });
-  rerender({ panelsOpen: false, session: makeSession({ sessionId: 'sess-2', groupId: 'g2' }) });
-  expect(handleOpenPanel).not.toHaveBeenCalled();
 });

@@ -64,9 +64,6 @@ it.each<[CollaborationBotDto['visibility'], Record<string, unknown>, string]>([
     expect(screen.queryByText(hidden)).not.toBeInTheDocument();
   }
   expect(screen.getAllByRole('switch')).toHaveLength(1);
-  // 外部 Bot 只有一个能力项时也沿用内部 Bot 的整行布局，开关应位于行末而非第二个网格列。
-  expect(screen.getByText('参与协作群聊').closest('div.grid.grid-cols-1.gap-x-8')).not.toBeInTheDocument();
-  expect(screen.getByText('参与协作群聊').closest('div.flex.items-start')).toHaveClass('justify-between');
   expect(screen.getByText(`当前可见性：${label}`)).toBeInTheDocument();
   expect(screen.getByText('好友审批策略')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '修改可见性' }));

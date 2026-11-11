@@ -7,6 +7,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CandidateFilterMode, CandidateTab } from './useGroupCollaborationPicker.types';
 
+const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 
 export interface RecommendCandidatesController {
@@ -32,8 +33,10 @@ interface UseRecommendCandidatesInput {
   tab: CandidateTab;
   filterMode: CandidateFilterMode;
   search: string;
-  /** 已加载候选仅用于补充历史 discover 响应未提供的元数据。 */
+  /** 推荐交集输入：当前已加载的可协作列表（ref 提供最新值）。 */
   candidatesRef: MutableRefObject<CollaborationBotView[]>;
+  /** 候选列表为空时的首屏落地回调（兜底拉取后写入列表/分页状态）。 */
+  applyCandidatesSnapshot: (items: CollaborationBotView[], hasMore: boolean, offset: number) => void;
   setTab: Dispatch<SetStateAction<CandidateTab>>;
   setFilterMode: Dispatch<SetStateAction<CandidateFilterMode>>;
   setSearch: Dispatch<SetStateAction<string>>;
@@ -41,7 +44,7 @@ interface UseRecommendCandidatesInput {
 
 /**
  * 发起协作弹窗的语义推荐链路：画像关键词搜索与协作目标智能推荐共用。
- * Discover 独立于普通候选列表加载；350ms 防抖，失败可重试。
+ * 与可协作列表求交集（推荐即可选）；350ms 防抖，失败可重试。
  */
 export function useRecommendCandidates(input: UseRecommendCandidatesInput): RecommendCandidatesController {
   const {
@@ -52,6 +55,7 @@ export function useRecommendCandidates(input: UseRecommendCandidatesInput): Reco
     filterMode,
     search,
     candidatesRef,
+    applyCandidatesSnapshot,
     setTab,
     setFilterMode,
     setSearch,
@@ -78,11 +82,22 @@ export function useRecommendCandidates(input: UseRecommendCandidatesInput): Reco
         setIsLoadingRecommend(true);
         setRecommendError(undefined);
         try {
+          let base = candidatesRef.current;
+          if (base.length === 0) {
+            const firstPage = await collaborationCandidateService.listCandidates(actorId, {
+              offset: 0,
+              limit: PAGE_SIZE,
+            });
+            if (cancelled) return;
+            if (!firstPage.ok) throw new Error(firstPage.error.friendlyMessage);
+            base = firstPage.data.items;
+            applyCandidatesSnapshot(base, firstPage.data.hasMore, base.length);
+          }
           const res = await collaborationCandidateService.recommendCandidates({
             actorId,
             actorKind,
             keyword,
-            candidates: candidatesRef.current,
+            candidates: base,
           });
           if (cancelled) return;
           if (!res.ok) throw new Error(res.error.friendlyMessage);
@@ -103,6 +118,7 @@ export function useRecommendCandidates(input: UseRecommendCandidatesInput): Reco
   }, [
     actorId,
     actorKind,
+    applyCandidatesSnapshot,
     candidatesRef,
     enabled,
     filterMode,

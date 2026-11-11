@@ -13,10 +13,7 @@ import type { CodeRepositoryTenant } from '@/services/botWorkshop/agentCodingLeg
 import { AgentCodingTemplateGrid } from './AgentCodingTemplateGrid';
 import { ApplicationCodingConfigForm } from './ApplicationCodingConfigForm';
 import { DynamicTemplateFields } from './DynamicTemplateFields';
-import {
-  validateDynamicTemplateFieldBindingsDetailed,
-  validateDynamicTemplateFields,
-} from './DynamicTemplateFieldLogic';
+import { validateDynamicTemplateFieldBindingsDetailed } from './DynamicTemplateFieldLogic';
 import type { AppCodingConfigFormRef } from './legacy/appcoding/AppCodingConfigForm';
 
 interface Props {
@@ -110,8 +107,6 @@ export function AgentCodingSection({
     if (value.kind === 'applicationCoding') {
       return (await applicationFormRef.current?.validate?.()) ?? undefined;
     }
-    const dynamicFieldError = validateDynamicTemplateFields(selected.fields as BotTemplateField[], value.values);
-    if (dynamicFieldError) return dynamicFieldError;
     const result = await validateDynamicTemplateFieldBindingsDetailed(
       selected.fields as BotTemplateField[],
       value.values,

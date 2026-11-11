@@ -35,9 +35,4 @@ export interface BotEngineRuntimeRequestOptions {
   deviceUuid?: string;
   stage?: 'draft';
   signal?: AbortSignal;
-  /**
-   * Engine-agnostic restart extensions. The controller serializes them as the
-   * optional JSON body's `extra_configs`; ordinary restarts stay bodyless.
-   */
-  extraConfigs?: Record<string, unknown>;
 }

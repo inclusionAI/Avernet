@@ -179,7 +179,6 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.models    # EngineResult / BotFacts / ConnectionResult — typed in engine_runtime_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.quality.models          # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
-  - agentclaw.community.plugin_api.service_bot_eval  # ServiceBotEvalFile accepts already-read upload material in the transport-independent Protocol
   - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
   - agentclaw.community.core.service_bot.service_edit_lock_service_protocol
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
@@ -240,6 +239,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_config_manifest.inline_backfill_protocol  # ManifestInlineBackfillProtocol (transitional) — defined in its owning core module, re-exported here
   - agentclaw.community.core.apply_engine.compiler  # StateRef — the (kind, reference) pair apply_run_service's start_apply takes, re-exported beside the Protocol; each producer declares its own (MANIFEST_STATE via bot_config_manifest_service, genome_state in core.bot_genome.compile)
   - agentclaw.community.core.apply_engine.run.service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_genome.genome_registry_protocol  # Protocol defined in its owning core module, re-exported here

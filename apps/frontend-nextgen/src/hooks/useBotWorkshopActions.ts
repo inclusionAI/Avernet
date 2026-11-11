@@ -1,17 +1,36 @@
 import type { BotDomain, BotManagementVerb } from '@/domain/botWorkshop';
 import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
 import { botManagementActionService } from '@/services/botWorkshop/botManagementActionService';
-import { applyRestartOutcome, type BotRestartResponse } from '@/services/botWorkshop/botRestartTracking';
 import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+
+export const RESTART_CATCH_UP_DELAY_MS = 3_000;
 
 const RESTART_ACTIONS = new Set<BotManagementVerb>(['restart', 'engine_restart', 'restart_publish']);
 
-export function useBotWorkshopActions(load: () => Promise<void>, userId?: string) {
+type BotWorkshopLoad = (options?: { silent?: boolean }) => Promise<void>;
+
+export function useBotWorkshopActions(load: BotWorkshopLoad, userId?: string) {
   const pending = useRef(new Set<string>());
+  const restartCatchUpTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(
+    () => () => {
+      if (restartCatchUpTimer.current) clearTimeout(restartCatchUpTimer.current);
+    },
+    [],
+  );
+
+  const scheduleRestartCatchUp = useCallback(() => {
+    if (restartCatchUpTimer.current) clearTimeout(restartCatchUpTimer.current);
+    restartCatchUpTimer.current = setTimeout(() => {
+      restartCatchUpTimer.current = undefined;
+      void load({ silent: true });
+    }, RESTART_CATCH_UP_DELAY_MS);
+  }, [load]);
 
   return useCallback(
     async (action: BotManagementVerb, bot: BotDomain) => {
@@ -28,8 +47,6 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
             : await botManagementActionService.run(action, bot);
         const updateActivation = () => {
           if (!result) return;
-          const status = typeof result.status === 'string' ? result.status : '';
-          if (!status) return;
           useBotWorkshopStore.setState((state) => ({
             items: state.items.map((item) =>
               item.id === bot.id &&
@@ -37,9 +54,9 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
               (isDormantPersonalBot(item) || item.rawStatus?.toUpperCase() === 'REACTIVATING')
                 ? {
                     ...item,
-                    rawStatus: status,
+                    rawStatus: result.status,
                     rawDisplayState: undefined,
-                    lifecycle: status.toUpperCase() === 'ACTIVE' ? 'running' : 'deploying',
+                    lifecycle: result.status.toUpperCase() === 'ACTIVE' ? 'running' : 'deploying',
                     actions: item.actions.filter((verb) => verb !== 'activate'),
                   }
                 : item,
@@ -47,11 +64,6 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
           }));
         };
         updateActivation();
-        if (action === 'restart') {
-          // 重启响应已携带落库后的真值：同步引擎（openclaw）直接修正展示；
-          // coding 引擎返回 ext.aicoding.restart journal，改为本地 pin + 库存轮询收敛。
-          applyRestartOutcome(bot, result as BotRestartResponse | undefined);
-        }
         if (action === 'delete' && bot.deployment === 'local') {
           useWorkspaceStore.setState((workspace) => {
             const expandedBotIds = { ...workspace.expandedBotIds };
@@ -75,6 +87,10 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
         }
         toast.success(botManagementActionService.successMessage(action));
         await load();
+        // Mutation success only means the restart was accepted. The first
+        // inventory read can still observe the previous runtime status, so issue
+        // one bounded silent follow-up and let that response stay authoritative.
+        if (RESTART_ACTIONS.has(action)) scheduleRestartCatchUp();
       } catch (error) {
         const fallback = action === 'delete' ? 'Bot 删除失败，请稍后重试' : '操作失败';
         toast.error(getBotManagementErrorMessage(action, error, fallback));
@@ -83,6 +99,6 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
         pending.current.delete(key);
       }
     },
-    [load, userId],
+    [load, scheduleRestartCatchUp, userId],
   );
 }

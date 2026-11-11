@@ -177,7 +177,6 @@ const BotWorkshopDetailPage: React.FC = () => {
               className={cn('h-full min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}
             >
               <DetailPanelContent
-                authenticatedUserId={requestIdentity.ready ? requestIdentity.userId : undefined}
                 bot={bot}
                 editor={editor}
                 advanced={advanced}

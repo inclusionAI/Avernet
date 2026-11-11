@@ -31,12 +31,15 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onOpenLogs,
     onOpenTaskInstances,
     canOpenTaskInstances,
-    onOpenContainers, canViewContainers,
+    onOpenContainers,
+    canViewContainers,
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onPublicationChanged, onPublicationGateBlocked, onOpenEvaluation, onOpenEvalHistory,
-    onAction, onClaimLock, onReleaseLock,
+    onManagePublication,
+    onAction,
+    onClaimLock,
+    onReleaseLock,
     getInventoryActions,
     getHealthCheckAvailability,
     getLogAction,
@@ -81,8 +84,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
-            onPublicationChanged={onAction ? onPublicationChanged : undefined}
-            onPublicationGateBlocked={onPublicationGateBlocked}
+            onManagePublication={onAction ? onManagePublication : undefined}
           />
         ),
       },
@@ -151,8 +153,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
               onView={onView}
               onEdit={onEdit}
               onConversation={onConversation}
-              onRequestAccess={onAuthorize}
-              collaborationMode={getCollaborationMode?.(bot)}
               conversationAllowed={collaborationAllowsConversation && entry.enabled}
               conversationDisabledReason={
                 entry.enabled
@@ -193,8 +193,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
-                onOpenEvaluation={onOpenEvaluation}
-                onOpenEvalHistory={onOpenEvalHistory}
                 copyAvailability={copyAvailability}
                 onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
@@ -221,10 +219,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
-      onPublicationChanged,
-      onPublicationGateBlocked,
-      onOpenEvaluation,
-      onOpenEvalHistory,
+      onManagePublication,
       onAction,
       onClaimLock,
       onReleaseLock,

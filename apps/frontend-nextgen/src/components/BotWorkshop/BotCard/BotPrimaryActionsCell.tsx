@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import type { BotCollaborationMode } from '@/services/botWorkshop/botPolicy';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
 import React from 'react';
 import { Points } from '@/tracking/points';
@@ -10,8 +9,6 @@ import { Tracert } from '@/utils/tracert';
 export interface BotPrimaryActionsCellProps {
   bot: BotDomain;
   onConversation?: (bot: BotDomain) => void;
-  onRequestAccess?: (bot: BotDomain) => void;
-  collaborationMode?: BotCollaborationMode;
   conversationAllowed?: boolean;
   conversationDisabledReason?: string;
   onView: (bot: BotDomain) => void;
@@ -57,8 +54,6 @@ const linkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary ho
 const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   bot,
   onConversation,
-  onRequestAccess,
-  collaborationMode,
   conversationAllowed = true,
   conversationDisabledReason,
   onView,
@@ -70,17 +65,13 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const editLabel = isServiceVerification(bot) ? '预发验证' : '编辑';
-  // Coding Bot 在 Bot 管理页展示「去使用」；任务实例随管理类操作
+  // Coding Bot 在 Bot 管理页固定展示「去使用」；任务实例随管理类操作
   // 收口在「三个点」气泡菜单，普通库存操作（查看/编辑/日志）不展示。
   const showInventoryActions = !isAgentCodingBot;
 
-  // 团队空间里的普通空间成员不能使用 Coding Bot。此时不复用「去使用」
-  // 降级查看，而是直接提供已有的操作权限申请入口。
-  const shouldRequestAccess =
-    isAgentCodingBot && bot.spaceKind === 'team' && collaborationMode === 'request' && Boolean(onRequestAccess);
-  // 未命中团队空间申请态时保留原有降级策略，避免影响个人空间和普通 Bot。
-  const codingBotBasicInfoFallback =
-    isAgentCodingBot && !shouldRequestAccess && !conversationAllowed && !conversationDisabledReason;
+  // Agent Coding Bot 的「去使用」固定展示。显式协作者/Owner 进入 Coding Chat;
+  // 普通空间成员仅有 view/chat 时保持可点击，但降级为基础信息抽屉。
+  const codingBotBasicInfoFallback = isAgentCodingBot && !conversationAllowed && !conversationDisabledReason;
   const chatDisabled = codingBotBasicInfoFallback
     ? false
     : !conversationAllowed || (isAgentCodingBot ? false : !inventoryActions.chat?.enabled);
@@ -92,18 +83,13 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
     ? undefined
     : inventoryActions.chat?.disabledReason;
 
-  const primaryChatLabel = shouldRequestAccess ? '去申请' : isAgentCodingBot ? '去使用' : '对话';
   const chatButton = (
     <Button
       variant="ghost"
       className={linkClass}
-      aria-label={isAgentCodingBot ? `${primaryChatLabel} ${bot.name}` : `与 ${bot.name} 对话`}
-      disabled={shouldRequestAccess ? false : chatDisabled}
+      aria-label={isAgentCodingBot ? `去使用 ${bot.name}` : `与 ${bot.name} 对话`}
+      disabled={chatDisabled}
       onClick={() => {
-        if (shouldRequestAccess) {
-          onRequestAccess?.(bot);
-          return;
-        }
         if (codingBotBasicInfoFallback) {
           onView(bot);
           return;
@@ -111,7 +97,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
         onConversation?.(bot);
       }}
     >
-      {primaryChatLabel}
+      {isAgentCodingBot ? '去使用' : '对话'}
     </Button>
   );
 
@@ -155,7 +141,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   );
 
   const showChat = isAgentCodingBot
-    ? Boolean(onConversation || onRequestAccess)
+    ? Boolean(onConversation)
     : Boolean(inventoryActions.chat?.visible && onConversation);
   // 编辑与日志仍按后端 actions / disabled_actions 渲染；任务实例/健康检查
   // 已随管理类操作收口至「三个点」气泡菜单。
@@ -172,8 +158,8 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
     >
       {showChat ? (
         <IconAction
-          label={primaryChatLabel}
-          disabled={shouldRequestAccess ? false : chatDisabled}
+          label={isAgentCodingBot ? '去使用' : '对话'}
+          disabled={chatDisabled}
           disabledReason={chatDisabledReason}
         >
           {chatButton}

@@ -114,6 +114,16 @@ class FakeManifestContent:
         )
         return record
 
+    def ensure_stored(self, data: bytes) -> str:
+        """The blob write alone: restores the bytes, files no receipt."""
+        if self.store_fault is not None:
+            raise self.store_fault
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        self.missing_blobs.discard(digest)
+        self.corrupt_blobs.discard(digest)
+        self.blobs[digest] = data
+        return digest
+
     def store_produced(
         self,
         data: bytes,

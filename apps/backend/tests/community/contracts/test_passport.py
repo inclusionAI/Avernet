@@ -160,18 +160,15 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
 
     monkeypatch.setattr(plugin, "owner_handoff_supported", capability)
     bots, repository, staff = Mock(), Mock(), Mock()
-    repository.find_by_request.return_value = None
     bots.get_by_pk.return_value = {
         "id": 1,
         "bot_id": "service",
         "owner_id": "A",
         "entity_id": "A",
-        "bot_type": "service",
     }
     staff.get_user_by_work_no.return_value = SimpleNamespace(
         work_no="B", display_name="B", full_name=None, username=None
     )
-    from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
     consumer = OwnerHandoffService(
         repository,
         plugin,
@@ -184,7 +181,6 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         Mock(),
         Mock(),
         ownership_sync=DisabledBotOwnershipSync(),
-        preflight=OwnerHandoffPreflight(plugin, Mock(), Mock()),
     )
     with pytest.raises(HandoffError, match="UNSUPPORTED"):
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")
