@@ -154,15 +154,6 @@ impl BcsServer {
             Arc::new(FriendCore::with_repo(friend_repo.clone()).with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             ));
-        let friend_request_repo = Arc::new(MemoryFriendRequestRepo::with_data_dir(
-            config.bots_base_dir.clone(),
-        ));
-        let friend_request_store: Arc<FriendRequestCore> = Arc::new(FriendRequestCore::with_repo(
-            friend_request_repo,
-            friend_store.clone(),
-            bot_registry.clone(),
-        ));
-
         // Edge-permission stores for the in-memory path. The in-memory server
         // runs the same `DbConnectService` as the durable paths, over
         // process-local repo ports, so the legacy `/friends/*` facade and the
@@ -436,7 +427,6 @@ impl BcsServer {
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             friend_store.clone(),
-            friend_request_store.clone(),
             relation_store.clone(),
             provider_control_plane.clone(),
             None,

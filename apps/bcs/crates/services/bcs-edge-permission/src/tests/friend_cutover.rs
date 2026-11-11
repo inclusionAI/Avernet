@@ -6,7 +6,6 @@ async fn db_failure_must_not_be_an_empty_success() {
     let facade = EdgeConnectFriendService::new(
         connect,
         Arc::new(BotCore::memory()),
-        Arc::new(RecordingLegacyFriendList::default()),
     );
     db.execute(DbStatement::new("DROP TABLE permission_requests"))
         .await.unwrap();
@@ -40,12 +39,9 @@ async fn accepted_human_friend_must_remain_in_legacy_list() {
         seed_bot(&db, "botB", "protected", "protected", strategy, "online", Some("owner1")).await;
         let friend_repo = Arc::new(bcs_friend::MemoryFriendRepo::new());
         let relation = Arc::new(bcs_relation::RelationCore::memory());
-        let friends = Arc::new(bcs_friend::FriendCore::with_repo(friend_repo.clone()).with_relation(relation.clone()));
-        let old_requests = Arc::new(bcs_friend::FriendRequestCore::memory(friends.clone(), registry.clone()));
-        let old_service = Arc::new(bcs_friend::Friend::new(registry.clone(), friends, old_requests, relation.clone()));
         let writeback = Arc::new(bcs_friend::FriendshipWritebackService::new(friend_repo, relation));
         let connect = Arc::new(service_with_writeback(&eg, &pp, &rq, &bc, writeback));
-        let facade = EdgeConnectFriendService::new(connect.clone(), registry, old_service);
+        let facade = EdgeConnectFriendService::new(connect.clone(), registry);
         let pending = facade.create_friend_request(create("human_alice", "botB")).await.unwrap();
         facade.accept_friend_request(decision("botB", &pending.id)).await.unwrap();
         assert_eq!(connect.list_friends("human_alice").await.unwrap().len(), 1, "new store has friendship");
@@ -118,7 +114,7 @@ async fn human_mirror_failure_is_reported_and_idempotent_create_repairs_it() {
 }
 
 #[tokio::test]
-async fn migrated_legacy_id_can_be_listed_and_approved_by_the_same_receiver() {
+async fn legacy_request_ids_are_invalid_and_do_not_block_new_requests() {
     let (eg, pp, rq, bc, db) = assemble().await;
     let registry = Arc::new(BotCore::memory());
     for id in ["botA", "botB"] {
@@ -134,17 +130,26 @@ async fn migrated_legacy_id_can_be_listed_and_approved_by_the_same_receiver() {
         "INSERT INTO bcs_friend_requests VALUES ('legacy-external-id', 'dev', 'botA', 'botB', \
          'pending', '2026-11-01 00:00:00', '2026-11-02 00:00:00')"
     )).await.unwrap();
-    let facade = EdgeConnectFriendService::new(Arc::new(service(&eg, &pp, &rq, &bc)), registry,
-        Arc::new(RecordingLegacyFriendList::default()));
-    assert!(facade.friend_request_receiver("legacy-external-id").await.is_err());
-    db.execute(DbStatement::new(include_str!(concat!(env!("CARGO_MANIFEST_DIR"),
-        "/../../../migrations/sqlite/044_legacy_friend_request_cutover.sql"))))
-        .await.unwrap();
-    assert_eq!(facade.friend_request_receiver("legacy-external-id").await.unwrap(), "botB");
-    let inbox = list(&facade, "botB", FriendRequestDirection::Received, Some(FriendRequestStatus::Pending)).await;
-    assert_eq!(inbox.len(), 1);
-    assert_eq!(inbox[0].id, "legacy-external-id");
-    facade.accept_friend_request(decision("botB", "legacy-external-id")).await.unwrap();
-    assert_eq!(rq.get("legacy-external-id", "dev").await.unwrap().status, RequestStatus::Approved);
+    let facade = EdgeConnectFriendService::new(Arc::new(service(&eg, &pp, &rq, &bc)), registry);
+    assert!(matches!(facade.friend_request_receiver("legacy-external-id").await,
+        Err(FriendUseCaseError::Service(ServiceError::FriendRequestNotFound(_)))));
+    for hint in [None, Some("botB".to_string())] {
+        let mut command = decision("botB", "legacy-external-id");
+        command.request_to_bot = hint;
+        assert!(matches!(facade.accept_friend_request(command.clone()).await,
+            Err(FriendUseCaseError::Service(ServiceError::FriendRequestNotFound(_)))));
+        assert!(matches!(facade.reject_friend_request(command).await,
+            Err(FriendUseCaseError::Service(ServiceError::FriendRequestNotFound(_)))));
+    }
+    for direction in [FriendRequestDirection::Received, FriendRequestDirection::Sent, FriendRequestDirection::All] {
+        assert!(list(&facade, "botB", direction, None).await.is_empty());
+    }
+    let fresh = facade.create_friend_request(create("botA", "botB")).await.unwrap();
+    assert_ne!(fresh.id, "legacy-external-id");
+    facade.accept_friend_request(decision("botB", &fresh.id)).await.unwrap();
+    assert_eq!(rq.get(&fresh.id, "dev").await.unwrap().status, RequestStatus::Approved);
+    assert!(rq.get("legacy-external-id", "dev").await.is_none());
     assert!(eg.has_friend_edge("botA", "botB", "dev").await);
+    let old = db.query(DbStatement::new("SELECT status FROM bcs_friend_requests")).await.unwrap();
+    assert_eq!(old[0].get_string("status").unwrap().as_deref(), Some("pending"));
 }

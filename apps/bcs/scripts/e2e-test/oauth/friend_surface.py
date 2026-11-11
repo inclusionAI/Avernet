@@ -16,6 +16,12 @@ Run standalone against a locally built companion for quick iteration:
 """
 from urllib.parse import urlencode
 
+# Public fixture names; credentials are returned by live registration.
+BOT_NAMES = {
+    'alpha': 'friend-alpha', 'beta': 'friend-beta', 'gamma': 'friend-gamma',
+    'delta': 'friend-delta', 'epsilon': 'friend-epsilon',
+}
+
 def gateway_headers(env, user):
     return {'x-avernet-principal': env.gateway(user)}
 
@@ -85,11 +91,11 @@ def friend_connect_surface(env, base):
     owner2_browser, owner2_id = login_user(env, base, 'friend-owner-2')
     _stranger_browser, stranger_id = login_user(env, base, 'friend-stranger')
 
-    alpha, alpha_token = register_bot(owner1_browser, base, 'friend-alpha')
-    beta, beta_token = register_bot(owner2_browser, base, 'friend-beta')
-    gamma, gamma_token = register_bot(owner2_browser, base, 'friend-gamma')
-    delta, delta_token = register_bot(owner2_browser, base, 'friend-delta')
-    epsilon, _epsilon_token = register_bot(owner2_browser, base, 'friend-epsilon')
+    alpha, alpha_token = register_bot(owner1_browser, base, BOT_NAMES['alpha'])
+    beta, beta_token = register_bot(owner2_browser, base, BOT_NAMES['beta'])
+    gamma, gamma_token = register_bot(owner2_browser, base, BOT_NAMES['gamma'])
+    delta, delta_token = register_bot(owner2_browser, base, BOT_NAMES['delta'])
+    epsilon, _epsilon_token = register_bot(owner2_browser, base, BOT_NAMES['epsilon'])
 
     http = env.browser()
     legacy_accept_link(http, base, alpha, alpha_token, beta, beta_token)

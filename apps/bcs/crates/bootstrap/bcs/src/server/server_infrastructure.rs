@@ -60,8 +60,6 @@ impl BcsServer {
                 "LocalSqlite storage selected but DbPlugin handle is unavailable".to_string(),
             )
         })?;
-        bcs_db_migrations::ensure_friend_request_cutover(db_plugin.as_ref()).await
-            .map_err(|err| crate::BcsError::StorageInitError(format!("friend request cutover: {err}")))?;
         let db_kind = infrastructure_plugins.db_kind();
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);
@@ -177,41 +175,14 @@ impl BcsServer {
             bot_registry.clone(),
         );
 
-        // Create DB-backed legacy friend repositories. The FriendCore service is
-        // built after edge-permission wiring so legacy friendship mutations can
-        // dual-write both coexistence paths.
-        let (friend_repo, friend_request_repo): (
-            Arc<dyn bcs_service_api::FriendRepoPort>,
-            Arc<dyn bcs_service_api::FriendRequestRepoPort>,
-        ) = {
-            info!(
-                db_plugin = %db_kind,
-                "Initializing DB-backed friend storage with relation and edge-permission dual-write"
-            );
-            let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
-                DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend store wiring",
-                        provider
-                    )
-                }
-            };
-            let friend_request_repo: Arc<dyn bcs_service_api::FriendRequestRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => {
-                    Arc::new(DbFriendRequestStore::sqlite(db_plugin.clone()))
-                }
-                DbPluginKind::Mysql => Arc::new(DbFriendRequestStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend request store wiring",
-                        provider
-                    )
-                }
-            };
-
-            (friend_repo, friend_request_repo)
+        // Retain only the friendship mirror required by collaboration consumers.
+        // Friend requests are exclusively owned by permission_requests.
+        let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
+            DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
+            DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
+            DbPluginKind::External(provider) => {
+                panic!("external database plugin '{}' has no friend store wiring", provider)
+            }
         };
 
         // Edge-permission stores + services (T16): real DB-backed impls back
@@ -359,12 +330,6 @@ impl BcsServer {
                 .with_relation(relation_svc.clone())
                 .with_edge_permission_sync(edge_permission_friend_sync),
         );
-        let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
-            Arc::new(FriendRequestCore::with_repo(
-                friend_request_repo,
-                friend_svc.clone(),
-                bot_registry.clone(),
-            ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
             Arc::new(bcs_edge_permission::DbAdmissionService::new(
                 edge_grant_store.clone(),
@@ -628,7 +593,6 @@ impl BcsServer {
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             friend_svc.clone(),
-            friend_request_svc.clone(),
             relation_svc.clone(),
             provider_control_plane.clone(),
             Some(edge_grant_store.clone()),

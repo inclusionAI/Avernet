@@ -113,47 +113,52 @@ added after the baseline as `002_xxx.sql`, `003_xxx.sql`, and so on.
 
 ## Legacy friend request cutover
 
-MySQL `046_legacy_friend_request_cutover.sql` and SQLite
-`044_legacy_friend_request_cutover.sql` copy legacy `bcs_friend_requests` into
-`permission_requests` **with the original external request IDs**. They retain
-environment, sender/receiver, creation/modification times, and history;
-`accepted` becomes `approved`. Existing new-store rows are not overwritten,
-so a newer approval/rejection/cancellation survives a rerun. No historical
-migration is edited. MySQL 046 first widens request `env` to 32 and author/decider
-IDs to 256 characters (NO PAD identity collation), preventing truncation of
-values allowed in the legacy table. SQLite text columns need no widening.
-This complements, rather than replaces, the existing
-friendship-edge ETL: that older ETL generates new request UUIDs and alone does
-not preserve legacy request URLs.
+The friend HTTP compatibility facade and V1 routes use the same edge-permission
+ConnectService. Friend membership comes from active default-profile grants in
+`edge_grants`; request reads and decisions use `permission_requests`. There is
+no legacy-table fallback and no automatic friendship/request ETL at startup.
+Legacy-only friendships do not appear in these lists; existing edge friendships
+and new-store request history are unchanged.
+
+Legacy `bcs_friend_requests` rows are left untouched but are no longer visible
+or actionable. Old pending request IDs return not-found on lookup/accept/reject;
+users must send new requests. An old pending row does not block a fresh request
+between the same actors. Old notifications/links must not be advertised as
+resumable requests after cutover.
+
+This switch requires **no additional schema migration or field widening** on
+the existing chain (MySQL through 045; SQLite through 043). The requester
+confirmed the existing env/creator/decider lengths suffice and explicitly
+confirmed the PR's proposed MySQL 046 / SQLite 044 had not been executed on
+retained databases, authorizing their removal. Only those two PR migrations
+are withdrawn; earlier bodies, names and checksums remain unchanged. There is
+no startup scan requiring legacy request coverage.
 
 Rollout order:
 
-1. Back up the database and stop **all legacy friend-request writers**.
-2. Apply the complete MySQL chain through 046 before starting the new server.
-   SQLite applies its versioned chain through 044 automatically on startup.
-3. The durable bootstrap runs an ID/environment/direction/kind coverage check
-   before wiring HTTP services. Missing or conflicting request identities, or
-   a DB failure, abort startup instead of silently stranding old requests.
-4. Verify old pending IDs can be listed and decided through legacy and V1
-   routes. Keep legacy writers stopped. Rolling back to an old writer requires
-   a separate reconciliation plan; neither deleting migration history nor
-   replaying an old ETL is a safe rollback.
+1. Stop/drain every old friend-request writer before switching the instances.
+2. Deploy the new binary on the existing current schema. No feature flag,
+   additional cutover SQL or manual legacy ETL is required.
+3. Verify old request IDs fail, new requests can be created/decided, and both
+   route families list the same edge-owned relationships.
+4. Do not roll back to an old request writer without a separate reconciliation
+   plan: it could expose abandoned old pending requests and miss new decisions.
 
-Cost: the offline INSERT SELECT scans N legacy rows and writes up to N missing
-rows, retaining the new request-ID unique index. It is a bulk statement, not a
-bounded online worker: schedule a maintenance window with space and transaction
-log capacity for the full history; validate production-scale duration/locking
-before rollout. The startup anti-join performs up to N indexed ID lookups and
-returns at most one row. Normal request/list operations do not run the backfill
-or readiness scan. The in-memory dev/test server has no DB migration lifecycle.
+If a retained database unexpectedly already records either withdrawn migration,
+stop and review a database-specific recovery plan; do not erase history, reuse
+records or automatically narrow columns. Disposable draft/test databases may be
+rebuilt. This source change executes no cleanup against any existing database.
 
-SQLite upgrade, rerun, collision and history-preservation evidence lives in
-`crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs`.
-The ignored `friend_cutover_mysql_upgrade_preserves_ids_widths_and_history`
-admin test exercises the full 001–046 chain, the populated 045→046 upgrade,
-255-character actors, a 32-character environment and preserved migration history
-on a disposable real MySQL database. Real MySQL migration-chain validation is
-a separate deployment gate, not implied by passing SQLite tests.
+The remaining collaboration consumers still use friendship/relation mirrors;
+Connect continues its existing reverse writeback for those consumers, not as a
+list source or a way to resume legacy requests. Retiring every legacy consumer
+is outside this cutover.
+
+Evidence: `crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs`
+checks unchanged history and no request import; the real SQLite bootstrap/HTTP
+case in `crates/bootstrap/bcs/tests/integration_friend_cutover.rs` covers old
+requests, new decisions, mirror-independent lists, revocation and restart.
+See the [change specification](../specs/2026-11-11-edge-friend-cutover/spec.md).
 
 ## Bot authority generated columns (MySQL/OceanBase 036)
 

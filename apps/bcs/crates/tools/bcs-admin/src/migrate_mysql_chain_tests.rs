@@ -1,6 +1,3 @@
-#[path = "migrate_friend_cutover_contract.rs"]
-mod friend_cutover_contract;
-
 #[path = "migrate_bot_authority_contract.rs"]
 mod bot_authority_contract;
 
@@ -57,16 +54,15 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
     let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
     assert_eq!(before.current_version, Some(20));
-    assert_eq!(before.target_version, Some(46));
+    assert_eq!(before.target_version, Some(45));
     assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
-        (21..=46).collect::<Vec<_>>());
+        (21..=45).collect::<Vec<_>>());
 
     let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
     let report = format_mysql_apply_report(&after, &before.pending_versions);
-    assert!(report.contains("applied_versions=26\npending_versions=0"), "{report}");
+    assert!(report.contains("applied_versions=25\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
     assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
-    assert!(report.contains("- 046 legacy_friend_request_cutover checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())
@@ -182,15 +178,10 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let args = chain_args();
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
-        let mut prefix = chain_args();
-        prefix.to = Some(45);
-        apply_mysql_migrations(&prefix, global).await?;
-        friend_cutover_contract::seed_legacy(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=1\npending_versions=0"), "{report}");
-        friend_cutover_contract::verify(db).await?;
+        assert!(report.contains("applied_versions=45\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=46).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=45).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -452,69 +443,5 @@ async fn verify_original_043_history_upgrade(db: &dyn DbPlugin, global: &Migrate
     let rows = db.query(DbStatement::new("SELECT name FROM bcs_bots WHERE bot_uuid='human_existing' AND env='dev'")).await?;
     assert_eq!(rows.len(), 1);
     assert_eq!(db_get_column::<String>(&rows[0], "name")?, "Existing");
-    Ok(())
-}
-
-#[test]
-fn mysql_cutover_widens_legacy_identity_columns_before_backfill() -> Result<()> {
-    let sql = fs::read_to_string(bcs_root().join("migrations/mysql/046_legacy_friend_request_cutover.sql"))?;
-    let alter = sql.find("ALTER TABLE `permission_requests`").expect("widen before copying valid legacy values");
-    let insert = sql.find("INSERT INTO permission_requests").unwrap();
-    assert!(alter < insert);
-    assert!(sql.contains("`env` VARCHAR(32)"));
-    assert!(sql.contains("`created_by` VARCHAR(256)"));
-    assert!(sql.contains("`decided_by` VARCHAR(256)"));
-    Ok(())
-}
-
-#[tokio::test]
-#[ignore = "requires BCS_TEST_MYSQL_URL pointing to an empty disposable MySQL database"]
-async fn friend_cutover_mysql_upgrade_preserves_ids_widths_and_history() -> Result<()> {
-    let url = std::env::var("BCS_TEST_MYSQL_URL").context("BCS_TEST_MYSQL_URL is required")?;
-    let opts = Opts::from_url(&url).context("valid MySQL test URL")?;
-    let mut config = MysqlDbConfig::new().with_database(opts.db_name().context("test database")?)
-        .with_connection(MysqlConnectionConfig {
-            connection_type: "direct".into(), host: Some(opts.ip_or_hostname().to_string()),
-            port: Some(opts.tcp_port()), user: opts.user().map(str::to_string),
-            password: opts.pass().map(str::to_string), extra: BTreeMap::new(),
-        }).with_statement_protocol(StatementProtocol::Text);
-    config.pool_size = 2;
-    config.min_pool_size = 1;
-    let temp = tempfile::tempdir()?;
-    let config_file = temp.path().join("bcs-config.json");
-    let mut bcs_config = BcsConfig::default();
-    bcs_config.database.database_type = DatabaseType::Mysql;
-    bcs_config.database.mysql = config.clone();
-    fs::write(&config_file, serde_json::to_vec(&bcs_config)?)?;
-    let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
-    let manager = MysqlDbManager::new(config).await?;
-    let db = MysqlDbPlugin::new(manager.clone(), "bcs");
-    // Refuse any retained database before entering the cleanup scope.
-    anyhow::ensure!(chain_table_names(&db).await?.is_empty(), "cutover test requires an empty disposable database");
-    let result: Result<()> = async {
-        let mut prefix = chain_args();
-        prefix.to = Some(45);
-        apply_mysql_migrations(&prefix, &global).await?;
-        friend_cutover_contract::seed_legacy(&db).await?;
-        assert!(bcs_db_migrations::ensure_friend_request_cutover(&db).await.is_err());
-        let history = chain_history(&db).await?;
-        let report = apply_mysql_migrations(&chain_args(), &global).await?;
-        assert!(report.contains("applied_versions=1\npending_versions=0"), "{report}");
-        friend_cutover_contract::verify(&db).await?;
-        assert_eq!(chain_history(&db).await?.into_iter().filter(|(v, _)| *v <= 45).collect::<Vec<_>>(), history);
-        // Reapplying the entire chain must preserve the migrated decision.
-        db.execute(DbStatement::new("UPDATE permission_requests SET status='rejected' WHERE request_id='cutover-long-legacy-id'")).await?;
-        let history = chain_history(&db).await?;
-        let report = apply_mysql_migrations(&chain_args(), &global).await?;
-        assert!(report.contains("applied_versions=0\npending_versions=0"), "{report}");
-        assert_eq!(chain_history(&db).await?, history);
-        let row = db.query(DbStatement::new("SELECT status FROM permission_requests WHERE request_id='cutover-long-legacy-id'")).await?.remove(0);
-        assert_eq!(row.get_string("status")?.as_deref(), Some("rejected"));
-        Ok(())
-    }.await;
-    let cleanup = drop_chain_tables(&db).await;
-    manager.close().await;
-    result?;
-    cleanup?;
     Ok(())
 }

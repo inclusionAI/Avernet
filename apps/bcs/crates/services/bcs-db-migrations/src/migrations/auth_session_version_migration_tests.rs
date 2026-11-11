@@ -83,7 +83,7 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
             .iter()
             .map(|migration| (migration.version, migration.name.as_str()))
             .collect::<Vec<_>>(),
-        vec![(42, "auth_session_version"), (43, "delivery_session_lookup"), (44, "legacy_friend_request_cutover")],
+        vec![(42, "auth_session_version"), (43, "delivery_session_lookup")],
         "only versions after 41 are pending on the upgrade path"
     );
 

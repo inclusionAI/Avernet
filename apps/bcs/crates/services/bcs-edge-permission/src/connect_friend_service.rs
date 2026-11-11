@@ -21,9 +21,9 @@
 //! auth context (it has no downstream auth-consuming call), so reject ignores
 //! it.
 //!
-//! `list_friends` is the one exception: the legacy name list still comes from
-//! the injected legacy delegate (bot→`bcs_friendships`, human→relation) until
-//! the group gate stops reading the legacy tables.
+//! Friendship membership and requests come exclusively from edge permission.
+//! Legacy request IDs are not migrated or read as a fallback. Friend names and
+//! presence are enriched from the registry while preserving the wire contract.
 //!
 //! COMPATIBILITY SHIM: delete this module together with the legacy
 //! `/friends/*` routes once they are retired.
@@ -42,25 +42,21 @@ use bcs_service_api::{
 
 /// `FriendService` adapter backed by the edge-permission `ConnectService`.
 ///
-/// All request mutations and reads are delegated to `connect`; `registry` only
-/// answers the legacy target-visibility gate; `legacy_list_delegate` serves the
-/// (still legacy-owned) friend name list.
+/// All friendship/request reads and mutations use `connect`; `registry` serves
+/// the target-visibility gate and friend name/presence enrichment.
 pub struct EdgeConnectFriendService {
     connect: Arc<dyn ConnectService>,
     registry: Arc<dyn BotRegistryCoreService>,
-    legacy_list_delegate: Arc<dyn FriendService>,
 }
 
 impl EdgeConnectFriendService {
     pub fn new(
         connect: Arc<dyn ConnectService>,
         registry: Arc<dyn BotRegistryCoreService>,
-        legacy_list_delegate: Arc<dyn FriendService>,
     ) -> Self {
         Self {
             connect,
             registry,
-            legacy_list_delegate,
         }
     }
 
@@ -353,9 +349,9 @@ impl FriendService for EdgeConnectFriendService {
         &self,
         command: ListFriendsCommand,
     ) -> Result<Vec<FriendListEntry>, FriendUseCaseError> {
-        // The legacy name list (bot→bcs_friendships, human→relation) stays with
-        // the legacy service; its consistency with connect edges is maintained
-        // by `DbConnectService`'s friendship writeback.
-        self.legacy_list_delegate.list_friends(command).await
+        self.list_edge_friends(command).await
     }
 }
+
+#[path = "connect_friend_list.rs"]
+mod friend_list;

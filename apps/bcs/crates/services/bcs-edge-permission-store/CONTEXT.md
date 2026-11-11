@@ -100,3 +100,13 @@ coverage for both SQL and memory stores. The result-type change does not add
 queries or change ordering: one SELECT per inbox/outbox, two for All. Pending
 connect checks still scan the target's pending inbox (existing behavior), so
 this change does not claim bounded pagination or improved high-fan-in cost.
+
+## Friendship cutover read authority
+
+Both legacy and V1 friend facades read edge-owned friendship membership and
+`permission_requests`. Legacy friend-request rows are not backfilled, read as
+a fallback or required for bootstrap readiness. The current schema/field widths
+are sufficient; no cutover migration is required. The legacy unpaged list
+reuses the existing fallible, Bot-filtered edge-page query in batches of 100,
+not the older unpaged N+1 profile reader. See [list access cost and semantics](../bcs-friend/CONTEXT.md#edge-owned-compatibility-list-access-cost)
+and [rollout](../../../migrations/README.md#legacy-friend-request-cutover).

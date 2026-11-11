@@ -1,5 +1,16 @@
 # Legacy friend cutover compatibility fixes
 
+## Superseded cutover decisions
+
+The requester subsequently chose to invalidate legacy requests instead of
+migrating them, confirmed the original field widths suffice, and explicitly
+authorized removing the unexecuted MySQL 046 / SQLite 044 from this PR.
+[The edge-owned cutover](../2026-11-11-edge-friend-cutover/spec.md) supersedes
+this document's history-preserving migration and legacy-list decisions.
+The original evidence below is retained as history, not current rollout advice;
+error propagation, kind/receiver authorization and collaboration writeback
+repairs remain applicable.
+
 ## Record
 
 Owner: BCS. Baseline: PR #3846, `b5dabaab2cc9f0628eec23152cc3869e385d337d`.

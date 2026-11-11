@@ -35,7 +35,6 @@ pub(super) fn build_use_case_bundle(
     bot_connection_control: Arc<dyn bcs_service_api::BotConnectionControlPort>,
     group: Arc<dyn GroupCoreService>,
     friend: Arc<dyn bcs_service_api::FriendCoreService>,
-    friend_request: Arc<dyn bcs_service_api::FriendRequestCoreService>,
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
     provider_control_plane: Arc<dyn BotControlPlaneCoreService>,
     edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
@@ -157,25 +156,12 @@ pub(super) fn build_use_case_bundle(
     UseCaseBundle {
         actor_directory: Arc::new(actor_directory),
         candidate_search: candidate_search.openapi_v1,
-        friend_use_cases: {
-            // Legacy vocabulary/wire contract stays intact, but every mutation
-            // and read goes through the edge-permission connect use case. The
-            // legacy `bcs_friend::Friend` is retained only as the friend-name
-            // list delegate until the collaboration group gate stops reading
-            // the legacy friendship tables.
-            let legacy_delegate: Arc<dyn bcs_service_api::FriendService> =
-                Arc::new(bcs_friend::Friend::new(
-                    bot_registry.clone(),
-                    friend,
-                    friend_request,
-                    relation.clone(),
-                ));
-            Arc::new(bcs_edge_permission::EdgeConnectFriendService::new(
-                connect,
-                bot_registry.clone(),
-                legacy_delegate,
-            ))
-        },
+        // Both legacy and V1 routes read/write the same edge-owned friendships
+        // and requests. Legacy stores are not a list or request fallback.
+        friend_use_cases: Arc::new(bcs_edge_permission::EdgeConnectFriendService::new(
+            connect,
+            bot_registry.clone(),
+        )),
         human_actors: Arc::new(bcs_bot::HumanActor::new(
             bot_registry.clone(),
             relation.clone(),

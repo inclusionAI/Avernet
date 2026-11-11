@@ -3,8 +3,8 @@ use super::*;
     use bcs_bot::BotCore;
     use bcs_domain::edge_permission::RequestKind;
     use bcs_service_api::{
-        BotCapabilities, BotRegistryCoreService, CreateFriendRequestCommand, DynamicStatusResponse,
-        FriendListEntry, FriendRequest, FriendRequestDecisionCommand, FriendRequestDirection,
+        BotCapabilities, BotRegistryCoreService, CreateFriendRequestCommand,
+        FriendRequest, FriendRequestDecisionCommand, FriendRequestDirection,
         FriendRequestStatus, FriendService, FriendUseCaseError, ListFriendRequestsCommand,
         ListFriendsCommand,
     };
@@ -36,81 +36,10 @@ use super::*;
         }
     }
 
-    /// The legacy list delegate is not under test here (Task 3/4 wires the real
-    /// `bcs_friend::Friend`); the facade must delegate to it unchanged.
-    #[derive(Default)]
-    struct RecordingLegacyFriendList {
-        calls: std::sync::Mutex<Vec<(String, String)>>,
-    }
-
-    impl RecordingLegacyFriendList {
-        fn calls(&self) -> Vec<(String, String)> {
-            self.calls.lock().expect("calls lock").clone()
-        }
-    }
-
-    #[async_trait]
-    impl FriendService for RecordingLegacyFriendList {
-        async fn create_friend_request(
-            &self,
-            _command: CreateFriendRequestCommand,
-        ) -> Result<FriendRequest, FriendUseCaseError> {
-            unreachable!("list delegate must only serve list_friends")
-        }
-
-        async fn list_friend_requests(
-            &self,
-            _command: ListFriendRequestsCommand,
-        ) -> Result<Vec<FriendRequest>, FriendUseCaseError> {
-            unreachable!("list delegate must only serve list_friends")
-        }
-
-        async fn accept_friend_request(
-            &self,
-            _command: FriendRequestDecisionCommand,
-        ) -> Result<(), FriendUseCaseError> {
-            unreachable!("list delegate must only serve list_friends")
-        }
-
-        async fn reject_friend_request(
-            &self,
-            _command: FriendRequestDecisionCommand,
-        ) -> Result<(), FriendUseCaseError> {
-            unreachable!("list delegate must only serve list_friends")
-        }
-
-        async fn friend_request_receiver(
-            &self,
-            _request_id: &str,
-        ) -> Result<String, FriendUseCaseError> {
-            unreachable!("list delegate must only serve list_friends")
-        }
-
-        async fn list_friends(
-            &self,
-            command: ListFriendsCommand,
-        ) -> Result<Vec<FriendListEntry>, FriendUseCaseError> {
-            self.calls.lock().expect("calls lock").push((
-                command.caller_actor_id,
-                command.target_actor_id,
-            ));
-            Ok(vec![FriendListEntry {
-                bot_uuid: "legacy:friend".to_string(),
-                name: Some("Legacy Friend".to_string()),
-                summary: None,
-                is_online: true,
-                dynamic_status: DynamicStatusResponse {
-                    status: "active".to_string(),
-                },
-            }])
-        }
-    }
-
     struct Fixture {
         facade: EdgeConnectFriendService,
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
         writeback: Arc<RecordingWriteback>,
-        delegate: Arc<RecordingLegacyFriendList>,
         requests: Arc<dyn PermissionRequestRepoPort>,
     }
 
@@ -150,14 +79,12 @@ use super::*;
                 .with_friendship_writeback(Some(writeback.clone())),
         );
         let registry: Arc<dyn BotRegistryCoreService> = Arc::new(registry);
-        let delegate = Arc::new(RecordingLegacyFriendList::default());
-        let facade = EdgeConnectFriendService::new(connect, registry, delegate.clone());
+        let facade = EdgeConnectFriendService::new(connect, registry);
 
         Fixture {
             facade,
             events,
             writeback,
-            delegate,
             requests: rq,
         }
     }
@@ -659,29 +586,6 @@ use super::*;
         assert_eq!(listed[0].id, created.id);
     }
 
-    // ---- 11) list_friends is a pure delegation to the legacy service ----
-
-    #[tokio::test]
-    async fn list_friends_delegates_to_the_legacy_service() {
-        let fx = fixture(&[TestBot::bot("botA")]).await;
-
-        let entries = fx
-            .facade
-            .list_friends(ListFriendsCommand {
-                caller_actor_id: "botA".to_string(),
-                target_actor_id: "botA".to_string(),
-            })
-            .await
-            .expect("legacy list");
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].bot_uuid, "legacy:friend");
-        assert_eq!(
-            fx.delegate.calls(),
-            vec![("botA".to_string(), "botA".to_string())],
-            "the facade must not re-implement friend-list logic"
-        );
-    }
     // ---- 12) inbound principal threading (F2) ----
 
     use bcs_service_api::application::connect::{ConnectResult, FriendEntriesPage, RequestsPage};
@@ -826,7 +730,6 @@ use super::*;
         let facade = EdgeConnectFriendService::new(
             connect.clone(),
             Arc::new(registry),
-            Arc::new(RecordingLegacyFriendList::default()),
         );
         let create_auth = RequestAuthHeaders {
             authorization: Some("Bearer user-token".to_string()),
@@ -901,3 +804,6 @@ use super::*;
 
 #[path = "friend_cutover.rs"]
 mod friend_cutover;
+
+#[path = "edge_friend_list.rs"]
+mod edge_friend_list;
