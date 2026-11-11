@@ -201,6 +201,18 @@ When a real user continues the original conversation after the fault, the worker
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Ordinary blocked reports describe inability to continue the recovery workflow, not an unrecovered business task. For live non-Debug tasks, an accepted or unknown initial delivery in `assess` requires an `assessment` result before observation; `observe` and `verify` require an `observation` result with the actual effect. An ordinary blocked report at these boundaries is rejected with HTTP 422 for correction, without changing state, resending guidance, or synthesizing an effect. Known failed delivery, pre-delivery blockers and an unrepairable outcome after plan analysis retain failure semantics. Explicit user continuation, proven target loss and handbook-directed Owner handoff remain available. Unknown reasons and unsupported read evidence are rejected. Deploy result validation before the updated worker package. No task-status enum or database schema change is required.
 
+### Assessment concludes that recovery is unnecessary
+
+During `assess`, successful controlled reads can establish that the original
+task is in a normal business wait or is subject to an explicit business
+exclusion. Report `kind=assessment`, `decision=no_recovery_needed`, the
+decision summary and its evidence IDs. The service requires a complete audit
+confirming no intervention and no accepted or unknown message delivery. It
+completes the assessment with `status=completed` and
+`completion_reason=no_recovery_needed` and releases the execution. The result
+reports `intervention_status=none` and preserves the available business effect.
+An accepted or unknown delivery continues through observation.
+
 ### Cron delivery identity
 
 A direct OpenClaw Cron execution key can differ from its persisted conversation key.
