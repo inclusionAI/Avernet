@@ -99,13 +99,36 @@ metadata={"scene":"chat"}
 
 ## 命令行
 
+CLI 可独立运行，无需启动网页。需要 Node.js 22 或更高版本，共用网页的解析和转换规则，不调用大模型。
+
+在工具目录注册命令：
+
 ```bash
+npm link
+a2a-json --help
+```
+
+随后可在任意目录执行，输入文件路径相对于当前工作目录：
+
+```bash
+a2a-json message business.json > request.json
+a2a-json card agent.json > agent-card.json
+echo '{"question":"你好"}' | a2a-json message
+echo 'message=Message(role=USER,parts=[TextPart(content=你好)])' | a2a-json message -
+```
+
+不注册命令时，也可在工具目录直接运行：
+
+```bash
+node cli.mjs --help
 node cli.mjs card agent.json > agent-card.json
 node cli.mjs message business.json > request.json
 echo '{"question":"你好"}' | node cli.mjs message
 ```
 
-省略文件参数或传入 `-` 时读取标准输入。标准输出只有转换结果 JSON，补全说明和错误写入标准错误；失败时非零退出。
+省略文件参数或传入 `-` 时读取标准输入，文件也可以是 `.txt`/`.log` 中的 JSON 片段或对象打印文本。转换时标准输出只有结果 JSON，补全说明和错误写入标准错误；失败时非零退出。`--help`/`-h` 将帮助写入标准输出并成功退出，也支持 `a2a-json message --help` 和 `a2a-json card --help`。
+
+`npm link` 将命令链接到当前检出目录，更新代码后可直接使用新版本。若不再需要该命令，运行 `npm unlink --global json-to-a2a-local`；删除或移动检出目录后需要重新注册。
 
 ## JavaScript 复用
 
