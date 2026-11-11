@@ -1,0 +1,30 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  h_43af82e14600e4 116-119
+apps/evolverun/clawweb/public/modules/workflow/docs/subworkflow-observability.md
+  h_43af82e14600e4 30-52
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  h_43af82e14600e4 20-21,150-151,158-162,165-174,247,304-305
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_43af82e14600e4 11,145-148
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-related-run-registration.test.ts
+  h_43af82e14600e4 1-162
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-relation-fixture.ts
+  h_43af82e14600e4 1-56
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_43af82e14600e4 3,133,155,220-233,239-253,266
+apps/evolverun/clawweb/public/modules/workflow/server/services/parent-related-run-registration.ts
+  h_43af82e14600e4 1-239
+apps/evolverun/clawweb/public/modules/workflow/vitest.run-registration.config.ts
+  h_43af82e14600e4 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1669b2daa029c3e20e0d41298f6aaabcff9efc92",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

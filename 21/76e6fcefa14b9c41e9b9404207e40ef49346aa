@@ -1,0 +1,25 @@
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/plan.md
+  s_e0cb98366a65ad::t_e12764bff8d678 63
+  s_e0cb98366a65ad::t_5a872261d47031 38-41
+  s_e0cb98366a65ad::t_243a4c8c041e87 1-37,42-62,64-405,407-453,455-469,480-489,491-649,651,656-678,680-708,710-735,737-747,749-750,752,754,756-945,947-957,959-960,962-997,999-1131,1133-1202
+  s_e0cb98366a65ad::t_be3f0eb0d66731 454,679,736,753
+  s_e0cb98366a65ad::t_78852875f93435 406,490,650,652-655,748,751,755,946,958,961,998,1132
+  s_e0cb98366a65ad::t_990b2812f50d91 470-479
+  s_e0cb98366a65ad::t_219aceff2c3c42 709
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2176e6fcefa14b9c41e9b9404207e40ef49346aa",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

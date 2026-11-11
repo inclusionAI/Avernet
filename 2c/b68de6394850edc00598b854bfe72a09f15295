@@ -1,0 +1,20 @@
+apps/bcs/crates/services/bcs-message-flow/tests/support/native_owner_task.rs
+  h_7ecb107b24dd7d 187
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  h_7ecb107b24dd7d 74,77,200
+devops/hook/check_secrets.py
+  h_7ecb107b24dd7d 329-335
+devops/hook/test_check_secrets.py
+  h_7ecb107b24dd7d 132-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2cb68de6394850edc00598b854bfe72a09f15295",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

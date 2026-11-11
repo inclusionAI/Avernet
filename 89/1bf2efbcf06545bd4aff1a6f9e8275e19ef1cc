@@ -1,0 +1,21 @@
+engine/adapter/src/engine/community/core/acli/operations.py
+  s_46e98dd3c2b7fc::t_cd79b810213fe9 332-347
+engine/adapter/src/engine/community/core/acli/tests/test_operations.py
+  s_46e98dd3c2b7fc::t_03ee4bc26c9aa8 129-130,459-497
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "891bf2efbcf06545bd4aff1a6f9e8275e19ef1cc",
+  "prompts": {},
+  "sessions": {
+    "s_46e98dd3c2b7fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a1a8-6993-7cd2-aed8-5e4b29ebf247",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

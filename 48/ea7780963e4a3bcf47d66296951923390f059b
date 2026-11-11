@@ -1,0 +1,21 @@
+apps/backend/docs/bot-manager-sync-operations.md
+  s_47ed8e91e4b8af::t_eeba798d33e374 4-52
+apps/backend/docs/bot-ownership-sync-operations.md
+  s_47ed8e91e4b8af::t_abdec6f6e524fe 3,189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "48ea7780963e4a3bcf47d66296951923390f059b",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

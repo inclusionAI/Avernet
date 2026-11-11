@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_ba17e2359630bb 83,108
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/__init__.py
+  s_cecdc98e721f4b::t_bc382b37e78394 2-43
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/build_density_contract.py
+  s_cecdc98e721f4b::t_20d5cf09bfb895 1-992
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/density.py
+  s_cecdc98e721f4b::t_957b6db250a1fd 1-827
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/provider-subbots-density-obligations.json
+  s_cecdc98e721f4b::t_2588a0b2fa0682 1-8596
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots_case_run.py
+  s_cecdc98e721f4b::t_7e5a5bb27f9616 8-11,50-58,223-226,257-262,615,625-632,701-703,732,757-758
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_a0f83de50c0561 358-360
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_d2f96d72cc807d 665
+apps/bcs/scripts/e2e-runner/tests/test_provider_subbots_density.py
+  s_cecdc98e721f4b::t_509e2c26b50a2b 1-683
+apps/bcs/scripts/e2e-runner/tests/test_provider_subbots_dual_case_run.py
+  s_cecdc98e721f4b::t_0205fe987b3bc6 334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e2d7dff44c51ce0074c9f0387d06120ec58b7bc9",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
