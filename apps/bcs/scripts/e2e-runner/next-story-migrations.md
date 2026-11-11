@@ -4250,3 +4250,73 @@ Live preprod execution evidence for the acct2 five-Bot roster lands under
 legacy `/friends` CLI faces rejecting Bot-token identity contexts (and the
 401 on `/friends/requests`) are product defects disclosed separately and are
 re-checked every regression instead of being waived silently.
+
+## 2026-11-11 acct2 preprod regression closeout: incident error_detail, fuse `:default` normalization, channel divergence evidence
+
+Incident core (WORKSPACE.incident-* family):
+- The preprod station deployed a participant-mode authorization tightening
+  between 02:03Z and 03:09Z on 2026-11-11: the bearer owner must equal the
+  path actor. The QA leg reclaiming a member-fallback token
+  (`WriteTransportError: operation workspace_group.participant_mode
+  returned HTTP 403`) was runner wiring leftover from the two-Bot r5 era,
+  not a product regression; the contract `relationships` entry
+  `self-muted-by-owned-bot` was already correct. The acct2 wrapper now
+  defaults `BCS_E2E_QA_BOT_TOKEN` to the owned QA Bot token, and the
+  rerun (`incident-core-a2r10`) returned PASS 3/3. Probe evidence:
+  `~/.codex/bcs-e2e/acct2/probes/20261111-channel-binda2r5/`
+  (`incident_qa_identity_probe_summary.json`).
+- `execute_workspace_incident_core_case` now carries `error_detail` on the
+  failing step and on the case summary; the receipt previously showed
+  `error_detail=null` because the case run dropped it. Parity with the
+  collaboration-team case run.
+- Fixture hygiene: four incident rooms leaked by the a2r6-a2r9
+  authorization BLOCKED runs plus two probe-created groups were finalized
+  (exact delete + 404 verification) and removed.
+
+Workspace CLI fusion (WORKSPACE.cli-fuse):
+- The station returns default-profile perspective owners as the
+  three-segment `"<bot>:default"` participant id (bcs-fuse
+  src/core/fuse_backed.rs builds `f"{bot_id}:{profile_id}"` with the
+  profile id defaulting to `"default"`), so every warm fusion failed the
+  runner's two-segment exact compare. The comparator now admits exactly
+  the `:default` suffix via `_station_perspective_owner` and still fails
+  closed on any other suffix. Member fusion profile registration on the
+  station remains a user action; a missing member profile still blocks
+  the case honestly.
+
+Channel CLI story #11 (registered product divergence, wire-level closure):
+- Preprod legacy `channel bind` returns rc=0 and persists an active
+  binding (probe account `cli-channel-probe-a2r5`, binding
+  `934ed310-50f3-4b09-934a-26148be37767`, config e2e-client/e2e-robot
+  synthetic, unbound rc=0), while the local sim contract requires a
+  nonzero bind failure. The runner's `_parse_bind_output` nonzero
+  assertion is correct for the reviewed contract; the divergence is
+  registered as a preprod legacy-face product gap (no disabled-bridge
+  guard), not waived.
+- Blocked channel runs leaked one phantom binding each on the bind leg
+  (create without cleanup); the acct2 phantoms (`f09bd9b6...`,
+  `fbd65af5...`) were unbound (rc=0). Runner gap on record:
+  bind-assertion failures retain no transcript (state dir holds three
+  JSON files only).
+
+acct2 roster sweep receipts (2026-11-11):
+- collab r8 PASS 8/8: story #15 first acct2 full-green under the owned
+  per-role token contract `human_cookie_with_owned_role_bot_token`;
+  friend request/reject/list legs pass in the correct dual context (the
+  earlier "legacy /friends bot-token rejection" was a probe shape issue).
+- register r8 PASS (`dual-network-register-run`): story #2 register leaf
+  closed; the earlier register-a2 NO_VERDICT was a batchA worker passing
+  the unsupported `--case register` (wiring error, not a product defect).
+- operator flap: r8/r9 health leg BLOCKED during the ~03:02Z-03:05Z
+  `bcs-pre.alipay.com` unhealthy blip (CLI `health` rc=1 body
+  `{"status":"unhealthy"}`), operator r10 PASS 13/13 after recovery -
+  non-regression.
+- Coverage matrix: 17 stories all-green, 1 partially green, 13 blocked
+  (structural harness owner-id regex `^\d{8}_[a-z0-9]+:\d+$` vs
+  ANT_WORK owners; on-record product defects M6/M11/M12 and the ACE
+  gate; owned-local design gates), 3 never executed (#20 subbots, #27
+  webhook, #28 slow-judge), #37/#38 not ported for acct2.
+
+`remote_validation=NOT_RUN` and `grants_release_credit=false` stay in
+force; the live preprod evidence above is disclosed as receipts, not as
+release credit.
