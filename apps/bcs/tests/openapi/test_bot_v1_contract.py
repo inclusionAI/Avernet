@@ -461,6 +461,7 @@ def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
         "missing_created_by": "forbidden",
         "descriptor_kind": "bot_only",
         "descriptor_arrays": "replace",
+        "open_friend_check_in_visibility_derivation": "protected_without_agent_view_scope_to_public",
     }
     assert _success_data(operation)["discriminator"]["propertyName"] == "kind"
 

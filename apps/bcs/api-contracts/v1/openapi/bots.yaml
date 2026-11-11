@@ -513,6 +513,13 @@ BotPath:
       only for a physical Bot. Descriptor arrays replace their complete stored
       arrays. bot_id, kind, env, created_by, timestamps, reachability, provider,
       and agent_code are immutable through this operation.
+      A patch carrying friend_check_in_strategy=Open without an explicit
+      visibility additionally derives visibility=public when the effective
+      visibility is protected and the effective
+      friend_ext.view_scope_agent_friend_deps is empty — the display-side
+      all-visible equivalent state; a non-empty scope keeps protected, private
+      and already-public rows are untouched, and a patch that carries an
+      explicit visibility field keeps the explicit value.
     x-avernet-security:
       user: required
       app: required
@@ -521,6 +528,7 @@ BotPath:
       missing_created_by: forbidden
       descriptor_kind: bot_only
       descriptor_arrays: replace
+      open_friend_check_in_visibility_derivation: protected_without_agent_view_scope_to_public
     parameters:
       - $ref: ../shared.yaml#/BotIdPath
     requestBody:

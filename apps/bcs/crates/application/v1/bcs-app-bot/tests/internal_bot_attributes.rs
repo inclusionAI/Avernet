@@ -231,3 +231,199 @@ async fn internal_attributes_map_core_errors_to_internal_application_errors() {
         "internal_error"
     );
 }
+
+const AGENT_VIEW_SCOPE_DEPS_KEY: &str = "view_scope_agent_friend_deps";
+
+fn scoped_agent_friend_ext() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::Map::from_iter([(
+        AGENT_VIEW_SCOPE_DEPS_KEY.to_string(),
+        serde_json::json!([{ "deptNo": "D1", "deptName": "工程" }]),
+    )])
+}
+
+async fn control_plane_service_with_bot(
+    bot_id: &str,
+) -> (InternalBotAttributesServiceImpl, tempfile::TempDir) {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    repo.register_with_owner_and_token(
+        bot_id.to_string(),
+        BotCapabilities {
+            name: Some("Bot One".to_string()),
+            ..Default::default()
+        },
+        "staff-1",
+        "token-1",
+    )
+    .await
+    .expect("register bot");
+    let service = InternalBotAttributesServiceImpl::new(
+        Arc::new(BotControlPlaneCore::new(
+            repo,
+            Arc::new(bcs_bot_store::MemoryProviderStore::new()),
+            Arc::new(bcs_bot_store::MemoryProviderStore::new()),
+        )),
+        BotServiceConfig {
+            env: bcs_config::resolve_env_str(),
+        },
+    );
+    (service, temp)
+}
+
+#[tokio::test]
+async fn open_strategy_promotes_protected_without_agent_view_scope_to_public() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-1").await;
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-1".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        })
+        .await
+        .expect("open friend check-in");
+
+    assert_eq!(attributes.visibility, "public");
+    assert_eq!(
+        attributes.friend_check_in_strategy,
+        FriendCheckInStrategy::Open
+    );
+}
+
+#[tokio::test]
+async fn open_strategy_keeps_protected_with_agent_view_scope() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-2").await;
+    service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-2".to_string(),
+            friend_ext: Some(scoped_agent_friend_ext()),
+            ..Default::default()
+        })
+        .await
+        .expect("pin department scope");
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-2".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        })
+        .await
+        .expect("open friend check-in");
+
+    assert_eq!(attributes.visibility, "protected");
+    assert_eq!(attributes.friend_ext, scoped_agent_friend_ext());
+}
+
+#[tokio::test]
+async fn open_strategy_reads_the_agent_view_scope_from_the_patch_friend_ext() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-3").await;
+
+    // 同一次 patch 自带组织范围 → 目标态仍是限定可见 → 不升
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-3".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            friend_ext: Some(scoped_agent_friend_ext()),
+            ..Default::default()
+        })
+        .await
+        .expect("open with scoped friend_ext");
+    assert_eq!(attributes.visibility, "protected");
+
+    // 先回到 APPROVAL 再同 patch 清范围 + OPEN → 目标态无范围 → 升
+    service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-3".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Approval),
+            ..Default::default()
+        })
+        .await
+        .expect("back to approval");
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-3".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            friend_ext: Some(serde_json::Map::new()),
+            ..Default::default()
+        })
+        .await
+        .expect("open with cleared friend_ext");
+    assert_eq!(attributes.visibility, "public");
+}
+
+#[tokio::test]
+async fn open_strategy_leaves_private_and_public_visibility_untouched() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-4").await;
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-4".to_string(),
+            visibility: Some("private".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("pin private");
+    assert_eq!(attributes.visibility, "private");
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-4".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        })
+        .await
+        .expect("open friend check-in on private bot");
+    assert_eq!(attributes.visibility, "private");
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-4".to_string(),
+            visibility: Some("public".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("pin public");
+    assert_eq!(attributes.visibility, "public");
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-4".to_string(),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        })
+        .await
+        .expect("re-open strategy on public bot");
+    assert_eq!(attributes.visibility, "public");
+}
+
+#[tokio::test]
+async fn explicit_visibility_wins_over_open_strategy_promotion() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-5").await;
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-5".to_string(),
+            visibility: Some("protected".to_string()),
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+            ..Default::default()
+        })
+        .await
+        .expect("explicit protected with open strategy");
+
+    assert_eq!(attributes.visibility, "protected");
+}
+
+#[tokio::test]
+async fn patches_without_strategy_change_never_touch_visibility() {
+    let (service, _temp) = control_plane_service_with_bot("bot-open-6").await;
+
+    let attributes = service
+        .patch(PatchBotInternalAttributes {
+            bot_id: "bot-open-6".to_string(),
+            user_visibility: Some(UserVisibility::Public),
+            ..Default::default()
+        })
+        .await
+        .expect("non-strategy patch");
+
+    assert_eq!(attributes.visibility, "protected");
+}

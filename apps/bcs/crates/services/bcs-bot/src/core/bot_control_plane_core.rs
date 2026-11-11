@@ -9,7 +9,7 @@ use bcs_service_api::{
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
     ControllableCandidateQuery, ControlledBotCandidate,
-    ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
+    FriendCheckInStrategy, ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
 pub struct BotControlPlaneCore {
@@ -272,8 +272,24 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         &self,
         bot_id: &str,
         env: &str,
-        patch: BotControlPlanePatch,
+        mut patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
+        // 「全部可见」一致性回填:打开好友审批(OPEN)的这一次写里,目标态是
+        // 旧有 protected 且无组织范围(deps 空)时,visibility 一并升 public
+        // —— 这正是前端展示的「全部可见」等价态,也让群公开门槛
+        // (visibility == "public")不再被审批策略卡死。显式携带的
+        // visibility、限定组织(deps 非空)、private/public 一律不动;
+        // 反向(OPEN → 非 OPEN)不降级。
+        if patch.friend_check_in_strategy == Some(FriendCheckInStrategy::Open)
+            && patch.visibility.is_none()
+            && let Some(current) = self.control_plane.get_control_plane(bot_id, env).await?
+            && current.visibility == "protected"
+        {
+            let scope_source = patch.friend_ext.as_ref().unwrap_or(&current.friend_ext);
+            if agent_view_scope_is_empty(scope_source) {
+                patch.visibility = Some("public".to_string());
+            }
+        }
         let Some(record) = self
             .control_plane
             .patch_control_plane(bot_id, env, patch)
@@ -285,3 +301,15 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         Ok(self.hydrate(vec![record]).await?.into_iter().next())
     }
 }
+
+/// 目标态的组织范围是否为空:键缺失 / null / 空数组都视为无范围(「全部可见」
+/// 等价态);非数组值无法判定为空,保守视为带范围、不触发升级。
+fn agent_view_scope_is_empty(friend_ext: &serde_json::Map<String, serde_json::Value>) -> bool {
+    match friend_ext.get(AGENT_VIEW_SCOPE_DEPS_KEY) {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::Array(deps)) => deps.is_empty(),
+        Some(_) => false,
+    }
+}
+
+const AGENT_VIEW_SCOPE_DEPS_KEY: &str = "view_scope_agent_friend_deps";
