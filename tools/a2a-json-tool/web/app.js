@@ -73,7 +73,7 @@ const content = {
     binding: 'JSON-RPC 2.0', inputFile: 'payload.json', outputFile: 'send-message.json',
     help: '支持 JSON 片段、key=value 和 Message(...)。',
     guideTitle: '也可以粘贴对象打印文本',
-    guide: '识别到 Message / TextPart 时，content 映射为 text，内外层 sessionId 映射为 contextId，其余业务字段保留到 metadata。普通 JSON 放入 data。解析修复会逐项说明，可展开查看解析后的 JSON。'
+    guide: 'TextPart.content 映射为 text。Message.content 在没有 parts 时映射为 data；同时提供时优先 parts，content 保留到 metadata.sourceFields.content。sessionId 映射为 contextId，其他业务字段保留到 metadata。解析修复和字段去向见转换说明。'
   }
 };
 
@@ -172,7 +172,7 @@ function convert() {
     $('output-count').textContent = `${output.value.length.toLocaleString()} 字符`;
     const feedback = $('feedback');
     feedback.textContent = mode === 'card' ? '核心字段检查通过。请确认接口地址、技能和能力与实际 Agent 一致。'
-      : result.mapping === 'structured-message' ? '已提取消息：content → text，sessionId → contextId，其余业务字段保留到 metadata。未发送网络请求。'
+      : result.mapping === 'structured-message' ? '消息请求已生成，字段去向见转换说明。未发送网络请求。'
       : 'SendMessage 请求已生成。解析后的业务数据已放入 data，未发送网络请求。';
     feedback.className = 'feedback success';
     feedback.hidden = false;
