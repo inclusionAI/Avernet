@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.7</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.8</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -415,14 +415,14 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <p>Profile 现在就定义它的语义，否则各业务会按各自的理解实现。实现放在后续阶段。</p>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
-<tr><td><span class="tag p">P-150</span></td><td>推送通知是可选能力，通过 Card 的 <code>capabilities.pushNotifications: true</code> 声明。未声明的 Agent 收到推送配置时必须返回 <code>PUSH_NOTIFICATION_NOT_SUPPORTED</code>，不得静默忽略。</td></tr>
-<tr><td><span class="tag p">P-151</span></td><td>调用方通过初始提交的 <code>configuration.taskPushNotificationConfig</code> 为该 Task 设置一个推送地址和一个 <code>token</code>。配置随 Task 保存。独立的推送配置管理方法是否要求实现，见 <span class="tag q">Q19</span>。</td></tr>
-<tr><td><span class="tag p">P-152</span></td><td>只在 Task 进入终态或中断态（<code>INPUT_REQUIRED</code>）时发送，每次状态变化一条。文本增量、过程事件（E4）、内容块更新不发推送。</td></tr>
-<tr><td><span class="tag p">P-153</span></td><td>推送是提示，不是事实。负载只包含 <code>taskId</code>、<code>contextId</code> 和当前状态，不包含 Artifact 内容和扩展数据。调用方收到后必须用 GetTask 取得结果。</td></tr>
-<tr><td><span class="tag p">P-154</span></td><td>至少投递一次：失败时有限次退避重试。调用方必须能处理重复和乱序，按 <code>taskId</code> 加状态去重。投递失败不影响 Task 的状态。</td></tr>
+<tr><td><span class="tag p">P-150</span></td><td>推送通知是可选能力，通过 Card 的 <code>capabilities.pushNotifications: true</code> 声明。未声明的 Agent，四个推送配置方法必须返回 <code>PushNotificationNotSupportedError</code>（标准要求；GRPC 为 FAILED_PRECONDITION，HTTP 为 400）。未声明的 Agent 在 SendMessage 中收到推送配置时返回同一错误，不得静默忽略（标准未规定，这是 Profile 的收紧）。</td></tr>
+<tr><td><span class="tag p">P-151</span></td><td>声明了推送能力的 Agent 必须同时支持两种设置方式：初始提交时的 <code>configuration.taskPushNotificationConfig</code>；以及标准的四个配置方法 <code>CreateTaskPushNotificationConfig</code>、<code>GetTaskPushNotificationConfig</code>、<code>ListTaskPushNotificationConfigs</code>、<code>DeleteTaskPushNotificationConfig</code>。配置随 Task 保存，到 Task 结束或被删除为止。一个 Task 可以有多个配置，Profile 限制为最多 4 个。</td></tr>
+<tr><td><span class="tag p">P-152</span></td><td>只在 Task 进入终态或中断态（<code>INPUT_REQUIRED</code>）时发送，每次状态变化一条。文本增量、过程事件（E4）、内容块更新不发推送。标准只说“Task 状态变化时发送”，没有列出触发事件，这是 Profile 的收紧。</td></tr>
+<tr><td><span class="tag p">P-153</span></td><td>推送是提示，不是事实。负载按标准使用 StreamResponse 格式，<code>Content-Type</code> 为 <code>application/a2a+json</code>；Profile 限定其中只放 <code>statusUpdate</code>（<code>taskId</code>、<code>contextId</code>、当前状态），不放 Artifact 内容和扩展数据。调用方收到后必须用 GetTask 取得结果。</td></tr>
+<tr><td><span class="tag p">P-154</span></td><td>对每个配置至少尝试投递一次（标准要求）。失败时有限次退避重试，单次请求超时 10 到 30 秒（标准的建议值）。接收方以 2xx 确认、校验 Task 标识是自己预期的（标准要求），并能处理重复和乱序。标准不保证推送的顺序。投递失败不影响 Task 的状态。</td></tr>
 <tr><td><span class="tag p">P-155</span></td><td>调用方不得只依赖推送。必须保留低频查询兜底，因为推送可能永远不到。</td></tr>
-<tr><td><span class="tag p">P-156</span></td><td>Agent 必须限制推送地址：只向配置允许的内部域名发送，其他地址在提交时拒绝。这是为了防止调用方利用 Agent 去访问任意内部地址。</td></tr>
-<tr><td><span class="tag p">P-157</span></td><td>Agent 必须把调用方给的 <code>token</code> 原样带回。接收方校验 <code>token</code> 与 Task 的对应关系。这用于关联和防止误投，不是鉴权（<span class="tag d">D1</span>）。<code>token</code> 不得写入日志。</td></tr>
+<tr><td><span class="tag p">P-156</span></td><td>Agent 必须限制推送地址：只向配置允许的内部域名发送，其他地址在设置时拒绝。这是为了防止调用方利用 Agent 去访问任意内部地址。标准的安全建议是拒绝内网地址，这在公司内网场景不适用，所以改为域名白名单。</td></tr>
+<tr><td><span class="tag p">P-157</span></td><td>调用方在配置的 <code>authentication</code> 中给出 <code>scheme: "Bearer"</code> 和一个每个 Task 随机生成的 <code>credentials</code>。Agent 必须在推送请求的 <code>Authorization</code> 头中原样带回（标准要求）。接收方校验它与 Task 的对应关系。它用于关联和防止误投，不改变“调用 Agent 不鉴权”的决定（<span class="tag d">D1</span>）。配置中的 <code>token</code> 字段在 1.0 中没有对应的请求头定义，Profile 不使用。凭据不得写入日志，Get 和 List 返回时必须隐去。</td></tr>
 </table></div>
 <h4>与多实例设计的关系</h4>
 <p>推送由写入该状态的实例发出：正常情况是执行实例，在状态写入存储成功之后发送；执行实例宕机后，由回收该 Task 的实例发送 <code>FAILED</code>。推送配置在 Task 记录中，任何实例都能读到。这与“只提供跨实例存储”（<span class="tag d">D3</span>）一致，不需要实例之间通信。由于回收是惰性的（9.5），宕机后如果没有任何请求读到这个 Task，就不会有推送，这正是 P-155 要求查询兜底的原因。</p>
@@ -955,7 +955,7 @@ sink.complete();</code></pre>
 <tr><td><code>ownerInstance</code></td><td>string，可空</td><td>执行实例</td><td>执行实例标识；<code>INPUT_REQUIRED</code> 和终态时为空</td></tr>
 <tr><td><code>leaseExpiresAtMs</code></td><td>long</td><td>执行实例</td><td>租约到期时间</td></tr>
 <tr><td><code>cancelRequested</code></td><td>boolean</td><td>任意实例</td><td>取消标记，只能从 false 变为 true</td></tr>
-<tr><td><code>pushConfig</code></td><td>对象，可空</td><td>创建时</td><td>推送地址和 <code>token</code>（6.12）。本期预留，始终为空</td></tr>
+<tr><td><code>pushConfig</code></td><td>对象，可空</td><td>创建时</td><td>推送配置列表（地址、关联凭据），最多 4 个（6.12）。本期预留，始终为空</td></tr>
 <tr><td><code>deadlineMs</code></td><td>long</td><td>创建时；审批时</td><td>执行或审批等待的截止时间</td></tr>
 <tr><td><code>createdAtMs</code>、<code>updatedAtMs</code></td><td>long</td><td>每次写入</td><td>用于清理和排查</td></tr>
 </table></div>
@@ -1220,7 +1220,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；JDBC 参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
 <tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
 <tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；提交去重；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
-<tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；BCS 推送接收端点；TCK 推送分组。按需求排期，不阻塞 P5</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
+<tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
 <tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
 </table></div>
 
@@ -1245,7 +1245,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td><span class="tag q">Q16</span></td><td>业务扩展的登记流程：在哪里登记、谁评审、规范文档放在哪里</td><td>规范文档放仓库 <code>docs/specs/a2a/extensions/</code>，以合并请求方式登记，BCN 团队评审是否满足 P-120 到 P-125 和扩展点规则</td><td>7.6、7.7</td></tr>
 <tr><td><span class="tag q">Q17</span></td><td>平台 UI 扩展的组件集：自行设计，还是采用已有的开放规范（例如面向 Agent 生成界面的 A2UI，需要先评估其成熟度和与内容块模型的匹配）</td><td>先确定内容块模型（7.5），组件集单独立项；在此之前工作台只渲染文本和降级文本</td><td>7.5</td></tr>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
-<tr><td><span class="tag q">Q19</span></td><td>推送通知：是否有明确的长任务场景需要它提前实现；声明推送能力时是否必须实现标准的推送配置管理方法（需对照 A2A 1.0.1 规范确认）</td><td>本期只定语义和预留；只支持提交时随请求设置，管理方法按规范要求决定</td><td>6.12</td></tr>
+<tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
