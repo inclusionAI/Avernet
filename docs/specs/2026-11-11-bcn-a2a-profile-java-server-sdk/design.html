@@ -159,7 +159,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </svg>
 <figcaption>绿色为 SDK 提供，黄色为平台实现，蓝色为已有或共享的基础设施。实例之间不直接通信。</figcaption>
 </figure>
-<p>调用方向只有一个：BCS 调 Agent。Agent 不需要回调 BCS，也不需要知道 BCS 的 Run、Session。</p>
+<p>本期的调用方向只有一个：BCS 调 Agent。Agent 不需要回调 BCS，也不需要知道 BCS 的 Run、Session。BCS 对外提供 A2A 服务后，Agent 也可以作为调用方，届时由 client SDK 支持，不在本设计范围内。</p>
 
 <h2 id="s5"><span class="n">5</span>已确认的决策</h2>
 <div class="tw"><table>
