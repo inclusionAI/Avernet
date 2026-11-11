@@ -187,6 +187,38 @@ test('完整 URI 可保留，不能将不完整地址或容错修正的地址作
   }
 });
 
+test('URI 原文中的非法字符不进入协议字段，非法扩展保持原值', () => {
+  const invalid = [
+    'urn:example:<ext>', 'urn:example:[ext]', 'urn:example:ext#one#two',
+    'https://example.com/file[0]', 'https://example.com/?key=[0]',
+    'https://user[0]@example.com', 'https://a@b@example.com',
+    'urn:example:ext\n', 'urn:example:ext#fragment\n', 'https://example.com/\n'
+  ];
+  for (const char of ['<', '>', '"', '{', '}', '|', '\\', '^', '`', '\u0000', '\u001f', '\u007f', ' ', '中']) {
+    invalid.push(`urn:example:a${char}b`, `https://example.com/a${char}b`, `https://example.com/?a=${char}`, `https://example.com/#a${char}`);
+  }
+  for (const url of invalid) {
+    rejects(() => convertStructuredMessage({ ...minimal(), parts: [{ url }] }), 'parts[0].url');
+    const extensions = ['urn:example:valid', url];
+    const { output } = convertStructuredMessage({ ...minimal(), extensions });
+    assert.equal(Object.hasOwn(output.params.message, 'extensions'), false, url);
+    assert.deepEqual(output.params.message.metadata.sourceFields.extensions, extensions);
+  }
+});
+
+test('合法 URI 的保留字符、编码与 IPv6 原样保留，不要求 URL 序列化结果完全相同', () => {
+  for (const url of [
+    'urn:example:ext', 'urn:example:%3Cext%3E', 'https://example.com', 'HTTPS://EXAMPLE.COM:443/abc',
+    'https://[2001:db8::1]:8443/file?name=a%20b#section', 'https://demo@example.com/file',
+    "https://example.com/a!$&'()*+,;=:@-._~/%41?x=/?y#frag/?",
+    'file:///tmp/%E4%B8%AD.txt', 'mailto:user+label@example.com'
+  ]) {
+    const { output } = convertStructuredMessage({ ...minimal(), parts: [{ url }], extensions: [url] });
+    assert.equal(output.params.message.parts[0].url, url);
+    assert.deepEqual(output.params.message.extensions, [url]);
+  }
+});
+
 test('根 Message 的 parts 优先于同名 message 业务字段', () => {
   const input = { ...minimal(), message: '业务提示文本' };
   const { output } = convertStructuredMessage(input);

@@ -67,6 +67,21 @@ test('命令行同样接受对象打印片段，映射文本且说明不包含�
   assert.equal(result.stderr.includes('private-fixture-only'), false);
 });
 
+test('CLI 不将含非法字符的 URI 声明为协议扩展或文件地址', () => {
+  const dumped = run(['message'], 'message=Message(role=USER, parts=[TextPart(content=你好)], extensions=[urn:example:<ext>])');
+  assert.equal(dumped.status, 0, dumped.stderr);
+  const message = JSON.parse(dumped.stdout).params.message;
+  assert.equal(Object.hasOwn(message, 'extensions'), false);
+  assert.deepEqual(message.metadata.sourceFields.extensions, ['urn:example:<ext>']);
+  const file = run(['message'], JSON.stringify({ role: 'USER', parts: [{ url: 'urn:example:<ext>' }] }));
+  assert.notEqual(file.status, 0);
+  assert.equal(file.stdout, '');
+  assert.match(file.stderr, /parts\[0\]\.url/);
+  const encoded = run(['message'], 'message=Message(role=USER, parts=[TextPart(content=你好)], extensions=[urn:example:%3Cext%3E])');
+  assert.equal(encoded.status, 0, encoded.stderr);
+  assert.deepEqual(JSON.parse(encoded.stdout).params.message.extensions, ['urn:example:%3Cext%3E']);
+});
+
 test('错误输入、缺失文件与错误用法均非零退出且不输出伪成功结果', () => {
   for (const [args, input] of [
     [['message'], '{bad'],

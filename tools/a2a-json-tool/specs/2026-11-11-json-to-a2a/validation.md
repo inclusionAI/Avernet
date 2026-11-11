@@ -57,3 +57,13 @@ README 补充注册、文件/管道调用、直接 Node 调用和解除链接方
 新增 7 项回归：消息选择/URI 相关 4 项在旧实现失败后通过，根消息优先通过；解析器 URN 相关回归先失败后通过，边界拒绝回归通过。完成 14.1、14.2、14.3 后，完整 `node --test --test-reporter=tap` 为 **95/95 通过**（Node v26.4.0），覆盖所有 Demo、CLI、HTTP 和字段联动。测试仅保留 PATH/TMPDIR 环境变量，使用临时目录和临时回环端口；4 个实际 CLI 场景通过。工具源码没有第三方运行时依赖或外部网络调用。
 
 本轮没有执行实际浏览器双击交互，字段名/值选择与输出路径由回归测试验证；未验证 URI 资源可访问性、远端 Agent 或完整协议认证。原 4173 页面及用户输入未操作。没有新增 GitHub 工作流、改动仓库最外层 README 或调用大模型。
+
+## URI 非法字符追加修复
+
+2026-11-12：完成 15.1，核对评论 [4540755869](https://github.com/inclusionAI/Avernet/pull/3906#discussion_r4540755869)。审查 head 为 `fb2a0a0d0d8c257a0e31514326c1529a5727daf9`、base 为 `9a61798cb7752308aaa01f8e59d78a46809066cb`；merge ref `cc0da875a35d62adf634b0d8a2b8cc9c3afea3dd` 双亲与之对应，工具目录与 head 一致。
+
+根因：`new URL()` 会接受或规范化部分非法原文；例如 `urn:example:<ext>` 会作为扩展输出。现在先依据 [RFC 3986 Appendix A](https://www.rfc-editor.org/rfc/rfc3986.html#appendix-A) 检查 URI 原文的 authority、path、query、fragment 字符及 `%HH` 编码，再保留原有地址解析与非空检查。非法文件 URI 仍报错，非法扩展整组原样保留在 metadata。未编码的非 ASCII 字符须先编码；不以序列化后的 URL 与原文相等为条件，避免误拒绝合法大小写、默认端口或空 HTTP 路径。
+
+新增 3 项回归：原评论非法字符场景与 CLI 场景先失败后通过；合法编码/IPv6/保留字符兼容性通过。覆盖尖括号、控制字符（含末尾换行）、非法组件方括号、多重 `#`/`@`、百分号编码、合法 URN、HTTP/file、userinfo、query/fragment。实际 CLI 对象打印中的非法扩展保真回退、非法文件地址非零退出且 stdout 为空、编码后的 URI 正常保留。
+
+完整 `node --test --test-reporter=tap` 为 **98/98 通过**（Node v26.4.0）。测试仅保留 PATH/TMPDIR 环境变量，使用临时目录和回环端口。语法、源码行数、文档链接与 diff 空白检查通过。本轮未执行实际浏览器交互或远端 URI 访问，不代表完整 scheme 语义认证；没有操作原网页输入、改动仓库最外层 README 或新增工作流。
