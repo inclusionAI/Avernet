@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from search_core.api.models import SearchItem, SearchResult
 from search_core.application.cache import SearchCaches
 from search_core.application.card_metadata import CardMetadataRetrieval
@@ -70,7 +69,7 @@ async def test_expired_overlapping_cards_do_not_exhaust_ten_connection_pool(
     now = 0.0
     monkeypatch.setattr(cache, "_clock", lambda: now)
     cache.put("shared", {"name": "old", "description": "", "deleted": False})
-    now = 61.0
+    now = 66.0
 
     leader = asyncio.create_task(first.retrieve(("shared", "a")))
     await repository.entered.wait()

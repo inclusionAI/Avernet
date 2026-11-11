@@ -61,19 +61,22 @@ class SearchCaches:
                 enabled=policy.enabled and p.enabled,
                 # MemoryCache requires a positive TTL, even when disabled.
                 ttl_ms=p.ttl_ms or 1,
+                stale_ttl_ms=min(5000, p.ttl_ms) if i == 2 else 0,
                 max_entries=p.max_entries if p.max_entries is not None else n,
                 max_bytes=(
                     p.max_size_mb * 1024 * 1024 if p.max_size_mb is not None else b
                 ),
             )
-            for p, (n, b) in zip(
-                (
-                    policy.result,
-                    policy.query_embedding,
-                    policy.card_metadata,
-                    policy.default_candidates,
-                ),
-                self._limits,
+            for i, (p, (n, b)) in enumerate(
+                zip(
+                    (
+                        policy.result,
+                        policy.query_embedding,
+                        policy.card_metadata,
+                        policy.default_candidates,
+                    ),
+                    self._limits,
+                )
             )
         )
         with self._lock:
@@ -91,35 +94,49 @@ class SearchCaches:
     def candidate_ids(self):
         return self._caches[3]
 
-    def _clear_catalog_caches(self):
+    def _clear_catalog_caches(self, card_ids):
         if self._caches:
             self._caches[0].clear()
             self._caches[3].clear()
         if self._metadata_cache is not None:
-            self._metadata_cache.clear()
+            if card_ids is None:
+                self._metadata_cache.clear()
+            else:
+                self._metadata_cache.invalidate(card_ids)
 
     def revision(self):
         with self._lock:
             return None if self._mutations else self._revision
 
+    def metadata_revision(self):
+        # Unchanged Cards stay readable while another Card is being updated.
+        with self._lock:
+            return self._revision
+
     @contextmanager
-    def changing(self):
+    def changing(self, card_ids=None):
+        card_ids = None if card_ids is None else tuple(card_ids)
         with self._lock:
             self._mutations += 1
             self._revision += 1
-            self._clear_catalog_caches()
+            self._clear_catalog_caches(card_ids)
         try:
             yield
         finally:
             with self._lock:
                 self._mutations -= 1
                 self._revision += 1
-                self._clear_catalog_caches()
+                self._clear_catalog_caches(card_ids)
 
-    def put_result(self, cache, revision, key, value):
+    def put_result(self, cache, revision, key, value, *, dependencies=()):
         with self._lock:
             if not self._mutations and self._revision == revision:
-                cache.put(key, value)
+                cache.put(key, value, dependencies=dependencies)
+
+    def discard_metadata(self, cache, revision, key):
+        with self._lock:
+            if not self._mutations and self._revision == revision:
+                cache.discard(key)
 
     def log_stats(self):
         with self._lock:
@@ -134,7 +151,6 @@ class SearchCaches:
                     continue
                 self._logged_stats[name] = stats
             logger.info(json.dumps({"event": "search_cache", "cache": name, **stats}))
-
 
 
 class CachedRetrieval:

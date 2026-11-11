@@ -64,14 +64,24 @@ class MemoryCache:
     """
 
     def __init__(
-        self, *, enabled, ttl_ms, max_entries, max_bytes, clock=time.monotonic
+        self,
+        *,
+        enabled,
+        ttl_ms,
+        max_entries,
+        max_bytes,
+        clock=time.monotonic,
+        stale_ttl_ms=0,
     ):
         if not math.isfinite(ttl_ms) or ttl_ms <= 0:
             raise ValueError("cache TTL must be finite and positive")
+        if not math.isfinite(stale_ttl_ms) or stale_ttl_ms < 0:
+            raise ValueError("stale TTL must be finite and nonnegative")
         if max_entries <= 0 or max_bytes <= 0:
             raise ValueError("cache capacity must be positive")
         self._enabled = enabled
         self._ttl = ttl_ms / 1000
+        self._stale_ttl = stale_ttl_ms / 1000
         self._max_entries, self._max_bytes = max_entries, max_bytes
         self._clock, self._lock = clock, Lock()
         self._entries = OrderedDict()
@@ -83,31 +93,58 @@ class MemoryCache:
         return self._enabled
 
     def _remove(self, key):
-        _, _, weight = self._entries.pop(key)
+        _, _, weight, _ = self._entries.pop(key)
         self._bytes -= weight
 
     def get(self, key):
+        return self._get(key, allow_stale=False)[0]
+
+    def get_with_stale(self, key):
+        """Return (copy, stale); reads never extend either expiry deadline."""
+        return self._get(key, allow_stale=True)
+
+    def _get(self, key, *, allow_stale):
         with self._lock:
             if not self._enabled:
-                return None
+                return None, False
+            now = self._clock()
             entry = self._entries.get(key)
-            if entry is not None and entry[0] <= self._clock():
+            if entry is not None and entry[0] + self._stale_ttl <= now:
                 self._remove(key)
                 self._counts["expired"] += 1
                 entry = None
-            if entry is None:
+            stale = entry is not None and entry[0] <= now
+            if entry is None or (stale and not allow_stale):
                 self._counts["misses"] += 1
-                return None
+                return None, False
             self._entries.move_to_end(key)
-            self._counts["hits"] += 1
+            self._counts["stale_hits" if stale else "hits"] += 1
             value = entry[1]
-        return _copy_value(value)
+        return _copy_value(value), stale
 
-    def put(self, key, value):
+    def invalidate(self, keys):
+        """Drop changed entries and their dependents, including stale copies."""
+        keys = frozenset(keys)
+        with self._lock:
+            affected = [
+                key
+                for key, entry in self._entries.items()
+                if key in keys or not entry[3].isdisjoint(keys)
+            ]
+            for key in affected:
+                self._remove(key)
+
+    def discard(self, key):
+        with self._lock:
+            if key in self._entries:
+                self._remove(key)
+
+    def put(self, key, value, *, dependencies=()):
         if not self._enabled:
             return
         saved = _copy_value(value)
-        weight = _weight(key) + _weight(saved) + 128
+        dependencies = frozenset(dependencies)
+        weight = _weight(key) + _weight(saved) + _weight(dependencies) + 128
         with self._lock:
             if not self._enabled:
                 return
@@ -122,7 +159,12 @@ class MemoryCache:
             ):
                 self._remove(next(iter(self._entries)))
                 self._counts["evicted"] += 1
-            self._entries[key] = (self._clock() + self._ttl, saved, weight)
+            self._entries[key] = (
+                self._clock() + self._ttl,
+                saved,
+                weight,
+                dependencies,
+            )
             self._bytes += weight
 
     def clear(self):
@@ -139,7 +181,9 @@ class MemoryCache:
     def stats(self):
         with self._lock:
             now = self._clock()
-            for key in [k for k, v in self._entries.items() if v[0] <= now]:
+            for key in [
+                k for k, v in self._entries.items() if v[0] + self._stale_ttl <= now
+            ]:
                 self._remove(key)
                 self._counts["expired"] += 1
             return {
@@ -148,6 +192,13 @@ class MemoryCache:
                 "estimated_bytes": self._bytes,
                 **{
                     k: self._counts[k]
-                    for k in ("hits", "misses", "expired", "evicted", "oversized")
+                    for k in (
+                        "hits",
+                        "stale_hits",
+                        "misses",
+                        "expired",
+                        "evicted",
+                        "oversized",
+                    )
                 },
             }
