@@ -16,7 +16,6 @@ from search_core.plugin_api.vector_point import VectorPoint
 from search_core.plugin_api.vector_search_hit import VectorSearchHit
 from search_core.providers.qdrant_server import remote_client
 
-
 _FIELDS = ("_bm25_name", "_bm25_text", "_bm25_name_grams")
 _NAME_ANALYZER = (
     RegexTokenizer(r"[^\W_]+") | LowercaseFilter() | NgramFilter(minsize=3, maxsize=3)
@@ -41,6 +40,7 @@ class QdrantKeywordIndex:
         exact_match_field: str | None = None,
         connection: QdrantConnection = LOCAL_QDRANT,
         collection_name: str = "keywords",
+        hit_payload_fields: tuple[str, ...] | None = None,
     ):
         if connection.mode != "server":
             raise ValueError(
@@ -48,6 +48,11 @@ class QdrantKeywordIndex:
                 "is unsupported. Set QDRANT_MODE=server and QDRANT_URL explicitly."
             )
         self._exact_match_field = exact_match_field
+        self._hit_payload = (
+            True
+            if hit_payload_fields is None
+            else ["_keyword_external_id", *hit_payload_fields]
+        )
         self.connection = connection
         self.collection_name = collection_name
         self._client = None
@@ -186,6 +191,7 @@ class QdrantKeywordIndex:
                     ]
                 ),
                 limit=top_k,
+                with_payload=self._hit_payload,
                 with_vectors=False,
             )
         query_filter = models.Filter(must=conditions) if conditions else None
@@ -209,6 +215,7 @@ class QdrantKeywordIndex:
                 )
             ),
             limit=top_k,
+            with_payload=self._hit_payload,
             query_filter=query_filter,
             **({"timeout": timeout} if timeout is not None else {}),
         ).points
