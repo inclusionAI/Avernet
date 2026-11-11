@@ -1,3 +1,5 @@
+import { getCapabilities } from '@/capabilities';
+import { FriendRequestsButton } from '@/components/CollaborationSquare/FriendRequestsButton';
 import { PublicBotCatalogPanel } from '@/components/CollaborationSquare/PublicBotCatalogPanel';
 import { GroupIdentityDisplay } from '@/components/CollaborationSquare/PublicGroupSquareSection/GroupIdentityDisplay';
 import { PublicGroupSquareSection } from '@/components/CollaborationSquare/PublicGroupSquareSection';
@@ -18,6 +20,8 @@ export interface SquarePageShellProps {
 }
 
 export function PublicDiscoveryPageContent({ resource, square }: SquarePageShellProps & { square: ReturnType<typeof usePublicDiscovery> }) {
+  const human = getCapabilities().getHumanIdentity().value;
+  const friendRequestsEnabled = getCapabilities().getCollabFriendRequestsEnabled().value;
   const scrollRootRef = useRef<HTMLElement>(null);
   const canLoadMore = square.hasMore && !square.loading && !square.loadingMore && !square.error;
   // 稳定引用：面板把 loadMore 写进 IntersectionObserver effect 依赖，逐帧新建箭头函数会反复重建 observer。
@@ -84,6 +88,11 @@ export function PublicDiscoveryPageContent({ resource, square }: SquarePageShell
         <div className="w-full min-w-0 md:w-[338px]">
           <SquareIdentityPicker />
         </div>
+        {friendRequestsEnabled ? (
+          <FriendRequestsButton key={JSON.stringify([human?.userId, square.activeActor?.type, square.activeActor?.id])}
+            actor={square.activeActor} actorName={square.activeActorName} human={human}
+            onChanged={() => { void square.load(); }} />
+        ) : null}
       </>
     ) : resource === 'group' ? (
       <>

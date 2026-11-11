@@ -26,6 +26,8 @@ describe('collab 装配', () => {
     expect(appExtension.capabilities.getPublicBotBackendEnabled()).toBe(false);
     expect(appExtension.capabilities.getDiscoveryExpertsEnabled().value).toBe(false);
     expect(defaultCapabilities.getDiscoveryExpertsEnabled().value).toBe(true);
+    expect(appExtension.capabilities.getCollabFriendRequestsEnabled().value).toBe(true);
+    expect(defaultCapabilities.getCollabFriendRequestsEnabled().value).toBe(false);
   });
 
   it('壳层可见性覆盖：隐藏空间切换/通知中心/全局搜索', () => {

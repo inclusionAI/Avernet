@@ -163,3 +163,13 @@ allows only the two explicit discovery page files and rejects the legacy
 full/task shell, hook, adapter and BBS transport. OCB export/overlay tests must
 consume this public assembly and update their navigation expectations; private
 artifact/image verification must be run separately in that repository.
+
+### Collab friend requests
+
+The public Bot header adds **好友申请** after the identity picker only in collab
+(`getCollabFriendRequestsEnabled`: default false, collab true). The modal loads
+sent/received pending requests for the selected identity, batches BCS `bots/query`
+for Bot names/avatars, and allows accepting/rejecting received requests. It does
+not use the Backend message center or open private chat. See the
+[friend-request flow, contracts and failure behavior](docs/collab-friend-requests.md)
+and [change spec](specs/2026-11-11-collab-friend-requests/spec.md).

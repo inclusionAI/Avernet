@@ -767,6 +767,8 @@ export interface AppCapabilities {
   getPublicBotBackendEnabled: () => boolean;
   /** 发现页专家 Tab 可见性；Open/internal 默认开启，collab 关闭且不注册专家路由。 */
   getDiscoveryExpertsEnabled: () => CapabilityResult<boolean>;
+  /** 公开 Bot 页头好友申请入口；仅 collab 开启，Open 消息中心保持原状。 */
+  getCollabFriendRequestsEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（空间切换器 / 通知中心 / 搜索入口，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`、`globalSearch=true`

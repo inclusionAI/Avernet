@@ -367,6 +367,7 @@ export const defaultCapabilities: AppCapabilities = {
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getPublicBotBackendEnabled: publicBotBackendEnabled,
   getDiscoveryExpertsEnabled: () => ({ status: 'available', value: true }),
+  getCollabFriendRequestsEnabled: () => ({ status: 'available', value: false }),
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
     value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled(), globalSearch: true },

@@ -47,6 +47,7 @@ const collabCapabilities: AppCapabilities = {
   // collab 无 Backend 增强与单聊页：运行时部署配置不能重新开放会话按钮/自动建聊。
   getPublicBotBackendEnabled: () => false,
   getDiscoveryExpertsEnabled: () => ({ status: 'available', value: false }),
+  getCollabFriendRequestsEnabled: () => ({ status: 'available', value: true }),
   // BCN-only 不接入组织目录（继承默认 false），也不查询引擎资产目录补充标签。
   getCollaborationBotEngineLabelEnabled: () => ({ status: 'available', value: false }),
   getSpaceContextInitializationEnabled: () => ({ status: 'available', value: false }),
