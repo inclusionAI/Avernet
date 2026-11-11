@@ -14,4 +14,6 @@
 
 - [x] 15.1 校验 URI 原文的组件字符，拒绝 URL 解析器容错放行的非法值。验证：原评论 URN 场景先失败后通过，非法字符的文件拒绝/扩展保真回退，以及合法编码、IPv6、URL 规范化兼容性回归和 CLI 验证通过。
 
+- [x] 16.1 支持 role + content 消息并明确 parts 优先规则。验证：根/嵌套任意 JSON 内容保真，双字段保留到 sourceFields.content，非法 parts 与 metadata 冲突拒绝，字段名/值联动与 CLI 回归通过；完整 104 项通过。
+
 交付验证的版本、命令及边界见 [validation.md](validation.md)。分支推送、PR 创建和远端 CI 属于交付记录，不等同于合并或部署。

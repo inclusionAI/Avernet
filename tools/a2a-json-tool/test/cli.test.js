@@ -82,6 +82,31 @@ test('CLI 不将含非法字符的 URI 声明为协议扩展或文件地址', ()
   assert.deepEqual(JSON.parse(encoded.stdout).params.message.extensions, ['urn:example:%3Cext%3E']);
 });
 
+test('CLI 将消息 content 转为 data，parts 优先且非法 parts 不回退', () => {
+  for (const wrap of [message => message, message => ({ message })]) {
+    const contentOnly = run(['message'], JSON.stringify(wrap({ role: 'user', content: 'hello' })));
+    assert.equal(contentOnly.status, 0, contentOnly.stderr);
+    const message = JSON.parse(contentOnly.stdout).params.message;
+    assert.equal(message.role, 'ROLE_USER');
+    assert.deepEqual(message.parts, [{ data: 'hello', mediaType: 'application/json' }]);
+
+    const parts = [{ text: '优先使用 parts' }];
+    const content = { preserved: [null, false, 'hello'] };
+    const both = run(['message'], JSON.stringify(wrap({ role: 'USER', parts, content })));
+    assert.equal(both.status, 0, both.stderr);
+    const preferred = JSON.parse(both.stdout).params.message;
+    assert.deepEqual(preferred.parts, parts);
+    assert.deepEqual(preferred.metadata.sourceFields.content, content);
+
+    for (const invalidParts of [[], null, [{ text: '不能丢弃', data: {} }]]) {
+      const invalid = run(['message'], JSON.stringify(wrap({ role: 'USER', parts: invalidParts, content: '不可用于回退' })));
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, '');
+      assert.match(invalid.stderr, /parts/);
+    }
+  }
+});
+
 test('错误输入、缺失文件与错误用法均非零退出且不输出伪成功结果', () => {
   for (const [args, input] of [
     [['message'], '{bad'],

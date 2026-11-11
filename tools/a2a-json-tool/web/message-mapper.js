@@ -31,11 +31,15 @@ function uri(value) {
 }
 
 // 转换分派、消息提取与字段联动共用同一选择规则；明确的根消息优先。
+const isMessage = value => objectLike(value) && (
+  ((own(value, 'parts') || own(value, 'messageId')) && (own(value, 'role') || value.kind === 'message'))
+  || (own(value, 'content') && (roles.has(value.role) || value.kind === 'message'))
+);
+
 export function getMessageSourcePath(input) {
   if (!objectLike(input)) return null;
-  if ((own(input, 'parts') || own(input, 'messageId')) && (own(input, 'role') || input.kind === 'message')) return [];
-  const nested = input.message;
-  return objectLike(nested) && (own(nested, 'parts') || own(nested, 'role')) ? ['message'] : null;
+  if (isMessage(input)) return [];
+  return isMessage(input.message) ? ['message'] : null;
 }
 
 function metadataWithFields(value, sourceFields, path) {
@@ -99,7 +103,10 @@ export function convertStructuredMessage(input, options = {}) {
   const path = wrapped ? '$.message' : '$';
   if (!objectLike(source)) fail(path, '必须是消息对象。');
   if (!roles.has(source.role)) fail(`${path}.role`, '仅支持 USER、AGENT、user、agent、ROLE_USER 或 ROLE_AGENT。');
-  if (!Array.isArray(source.parts) || !source.parts.length) fail(`${path}.parts`, '必须是非空消息片段数组。');
+  const hasParts = own(source, 'parts');
+  if (hasParts ? !Array.isArray(source.parts) || !source.parts.length : !own(source, 'content')) {
+    fail(`${path}.parts`, '必须是非空消息片段数组；未提供 parts 时可提供 content。');
+  }
 
   const notes = [];
   const noteRows = [];
@@ -139,9 +146,13 @@ export function convertStructuredMessage(input, options = {}) {
     note(session.path, '$.params.message.contextId', `${session.path} → $.params.message.contextId；作为会话标识沿用。`, '作为 A2A 会话标识沿用。');
   }
   if (!source.messageId && !options.messageId) note('未提供', '$.params.message.messageId', 'messageId 未提供，已生成新标识；未使用业务 queryId。', '生成新标识；未使用业务 queryId。');
-  message.parts = source.parts.map((part, index) => mapPart(part, `${path}.parts[${index}]`, `$.params.message.parts[${index}]`, note));
+  message.parts = hasParts
+    ? source.parts.map((part, index) => mapPart(part, `${path}.parts[${index}]`, `$.params.message.parts[${index}]`, note))
+    : [{ data: source.content, mediaType: 'application/json' }];
+  if (!hasParts) note(`${path}.content`, '$.params.message.parts[0].data', `${path}.content → $.params.message.parts[0].data；原样保留 JSON 内容。`, '原样保留 JSON 内容，不改写为文本。');
+  else if (own(source, 'content')) note(`${path}.content`, '$.params.message.metadata.sourceFields.content', `${path}.content → $.params.message.metadata.sourceFields.content；优先使用 parts。`, '优先转换 parts，content 原样保留为业务字段。');
 
-  const sourceFields = fieldsExcept(source, ['role', 'parts', 'messageId', 'taskId', 'contextId', 'sessionId', 'metadata', 'extensions', 'referenceTaskIds']);
+  const sourceFields = fieldsExcept(source, ['role', 'parts', 'messageId', 'taskId', 'contextId', 'sessionId', 'metadata', 'extensions', 'referenceTaskIds', ...(!hasParts ? ['content'] : [])]);
   if (own(source, 'referenceTaskIds')) {
     stringArray(source.referenceTaskIds, `${path}.referenceTaskIds`);
     message.referenceTaskIds = source.referenceTaskIds;

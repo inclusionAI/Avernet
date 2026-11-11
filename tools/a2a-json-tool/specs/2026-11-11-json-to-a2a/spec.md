@@ -13,7 +13,7 @@
 调试 A2A 时，需要从简化 Agent 配置、业务 JSON、消息字段片段或对象打印文本生成可检查的协议 JSON，并知道源字段对应到哪里。本工具提供网页、CLI 和可复用函数，无第三方运行时依赖。
 
 1. AgentCard 模式将简化 `url` 转为 `supportedInterfaces`，也接受完整卡片；检查名称、版本、接口、技能及其非空 `tags`，不虚构必需业务数据。
-2. 消息模式将一般业务 JSON 完整放入 `params.message.parts[0].data`；识别结构化消息时，将 `content` 转为 `text`，按明确业务约定将根/包装内外层 `sessionId` 转为 `params.message.contextId`。多个来源或显式 contextId 冲突时拒绝转换，其余业务字段保留到 metadata。
+2. 消息模式将一般业务 JSON 完整放入 `params.message.parts[0].data`；识别结构化消息时，将 Part 的 `content` 转为 `text`；Message 的 `content` 在未提供 `parts` 时原样放入 `parts[0].data`，同时提供时由 `parts` 优先并将 `content` 保留到 `metadata.sourceFields.content`，按明确业务约定将根/包装内外层 `sessionId` 转为 `params.message.contextId`。多个来源或显式 contextId 冲突时拒绝转换，其余业务字段保留到 metadata。
 3. 支持缺外层括号的字段片段、`key=value` 与 `Message(...)`/`TextPart(...)`；只作可解释的有限修复，不执行文本或猜测缺失字段值。
 4. 网页默认消息请求页，提供 4 个消息 Demo 和 3 个 AgentCard Demo、导入、格式化、复制下载、解析预览、映射表，以及双击字段名/值后的输出高亮；切换 tab 保留各自草稿。
 5. 服务只监听回环地址并提供白名单静态文件，输入仅在浏览器处理。CLI 的 stdout 只输出 JSON，说明和错误使用 stderr，失败返回非零状态。

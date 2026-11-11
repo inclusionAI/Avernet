@@ -67,3 +67,13 @@ README 补充注册、文件/管道调用、直接 Node 调用和解除链接方
 新增 3 项回归：原评论非法字符场景与 CLI 场景先失败后通过；合法编码/IPv6/保留字符兼容性通过。覆盖尖括号、控制字符（含末尾换行）、非法组件方括号、多重 `#`/`@`、百分号编码、合法 URN、HTTP/file、userinfo、query/fragment。实际 CLI 对象打印中的非法扩展保真回退、非法文件地址非零退出且 stdout 为空、编码后的 URI 正常保留。
 
 完整 `node --test --test-reporter=tap` 为 **98/98 通过**（Node v26.4.0）。测试仅保留 PATH/TMPDIR 环境变量，使用临时目录和回环端口。语法、源码行数、文档链接与 diff 空白检查通过。本轮未执行实际浏览器交互或远端 URI 访问，不代表完整 scheme 语义认证；没有操作原网页输入、改动仓库最外层 README 或新增工作流。
+
+## Message content 适配与优先级
+
+2026-11-12：完成 16.1，处理评论 [4541122141](https://github.com/inclusionAI/Avernet/pull/3906#discussion_r4541122141)，实现基于 head `0323737f7378a951007ba174217d458c0360f331`。用户明确选择：有效 role + content 的根/嵌套消息在未提供 parts 时将 content 原值放入 `params.message.parts[0].data`；同时提供时 parts 优先，content 进入 `params.message.metadata.sourceFields.content`。这是工具的业务适配规则，沿用现有 sourceFields 容器。
+
+根/嵌套共用相同识别条件；仅业务 role、parts 或未知 role + content 等不足以识别消息的输入，继续整体 data 封装。已提供的非法 parts、明确消息的非法角色以及 metadata 保留键冲突仍报错，不通过 fallback 隐藏错误。转换表格和字段联动根据实际输出位置定位 content，Part.content 的 text 映射保留。
+
+新增 6 项回归：5 项解析/转换/字段联动场景中 4 项在旧实现失败，1 项验证既有 parts 优先规则；新增 CLI 回归也先失败后通过。覆盖字符串、空串、0、false、null、数组、对象，根/嵌套对称性、外层业务 parts、标识沿用、metadata 保真/冲突及非法 parts 不回退。CLI 实际覆盖原评论输入、双字段输入及非法 parts，全部通过。
+
+完整 `node --test --test-reporter=tap` **104/104 通过**（Node v26.4.0），在只保留 PATH/TMPDIR 环境变量的临时目录中执行，HTTP 测试使用临时回环端口。语法、文件行数、文档链接与 diff 空白检查通过。未重新执行浏览器双击交互，字段名/值与目标路径通过回归验证；未操作原网页输入、改动仓库最外层 README、新增工作流或调用大模型。

@@ -27,6 +27,9 @@ function structuredPath(sourcePath, input, output) {
   const path = wrapped ? sourcePath.slice(1) : sourcePath;
   if (!path.length) return messageBase;
   const [field, index, partField, ...tail] = path;
+  if (field === 'content' && !Object.hasOwn(wrapped ? input.message : input, 'parts')) {
+    return [...messageBase, 'parts', 0, 'data', ...path.slice(1)];
+  }
   if (field === 'parts' && path.length >= 3) {
     const base = [...messageBase, 'parts', index];
     if (partField === 'content') return [...base, 'text', ...tail];

@@ -40,6 +40,8 @@ metadata={"scene":"chat"}
 | 输入内容 | 输出位置 |
 | --- | --- |
 | `TextPart.content` | `params.message.parts[].text` |
+| 未提供 `parts` 时的 Message `content` | `params.message.parts[0].data`（保留任意 JSON 值） |
+| 同时提供 `parts` 和 Message `content` | 优先转换 `parts`；`content` 保留到 `params.message.metadata.sourceFields.content` |
 | `USER` / `AGENT` | `ROLE_USER` / `ROLE_AGENT` |
 | `messageId`、`taskId`、明确的 `contextId` | 对应 A2A Message 字段 |
 | 根 Message 的 `sessionId`，或包装消息的外层 `sessionId` / `message.sessionId` | `params.message.contextId` |
@@ -48,7 +50,7 @@ metadata={"scene":"chat"}
 | Message 的其余非协议字段 | `params.message.metadata.sourceFields` |
 | 外层除 `message` 和已映射 `sessionId` 之外的业务字段（包括外层 metadata） | `params.metadata.sourceEnvelope` |
 
-当根对象本身是明确消息时，优先转换根消息；否则提取嵌套 `message`。外层同名业务 `parts` 保留在 `params.metadata.sourceEnvelope.parts`，不会干扰嵌套消息转换，字段联动使用相同规则。
+根对象和嵌套 `message` 使用相同的消息识别规则，根消息优先。支持有效 `role + content`：未提供 `parts` 时，`content` 原值放入 `parts[0].data`，并使用 `application/json`；字符串、对象、数组、数字、布尔值和 null 均保留。两者同时提供时优先转换 `parts`，`content` 保留到 `metadata.sourceFields.content`。已提供但非法的 `parts` 仍报错，不回退到 content；已有 metadata 的保留键冲突也会报错。只有普通业务 role 或 parts 等不足以识别消息的对象继续整体放入 data。外层同名业务 `parts` 保留在 `params.metadata.sourceEnvelope.parts`，字段联动使用相同规则。
 
 本工具采用以下业务映射规则：结构化消息中的 `sessionId` 转成 `contextId`，不再重复存入业务 metadata。内外层同时提供时必须相同，并与已提供的 `contextId`、网页选项中的 Context ID 一致；冲突或非字符串、空值会报错。Part 或已有 metadata 内的同名业务字段保持原位置；普通业务 JSON 的 data 封装规则不变。这是工具的业务适配约定，不是 A2A 定义的同名字段转换。
 
