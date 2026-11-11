@@ -513,6 +513,28 @@ BotPath:
       only for a physical Bot. Descriptor arrays replace their complete stored
       arrays. bot_id, kind, env, created_by, timestamps, reachability, provider,
       and agent_code are immutable through this operation.
+      Patches containing visibility or friend_check_in_strategy atomically
+      normalize Bot-facing visibility from the effective configuration: private
+      stays private; otherwise visibility is public only when the effective
+      friend_check_in_strategy is OPEN and the active top-level
+      friend_ext.view_scope_agent_friend_deps is missing, null or an empty array.
+      All other visible configurations become protected, including non-empty or
+      malformed scopes and APPROVAL/DEPT_FREE strategies. A friend_ext-only
+      patch normalizes only when its target and the live row change between
+      empty and non-empty scope categories; approval metadata updates and
+      same-category scope replacements leave visibility unchanged. For legacy
+      all-visible requests, explicit visibility=public without friend_ext or
+      an explicit strategy derives OPEN and clears only the active top-level
+      agent scope in the same write, preserving all other extension fields.
+      Explicit visibility=public together with OPEN also clears that scope;
+      explicit APPROVAL/DEPT_FREE keeps it and produces protected. Explicit friend_ext takes precedence over
+      this compatibility rule. Changing only strategy or setting private never
+      implicitly clears scope. Other supplied fields replace stored values
+      before normalization; omitted fields use the live row, not a prior
+      snapshot. Approval draft sub-blocks do not count as an effective scope.
+      Other attribute-only patches do not normalize visibility. Apart from
+      the legacy all-visible scope clearing, derivation does not modify
+      friend_ext.
     x-avernet-security:
       user: required
       app: required
@@ -521,6 +543,9 @@ BotPath:
       missing_created_by: forbidden
       descriptor_kind: bot_only
       descriptor_arrays: replace
+      visibility_normalization: private_else_public_iff_open_and_unscoped_else_protected
+      public_without_friend_ext: derive_open_and_clear_active_agent_scope
+      friend_ext_only_normalization: empty_nonempty_scope_transitions_only
     parameters:
       - $ref: ../shared.yaml#/BotIdPath
     requestBody:

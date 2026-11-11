@@ -51,6 +51,9 @@ impl PersistentBotRepo {
         bot_id: &str,
         update: ExistingProfileUpdate,
     ) -> ServiceResult<ProfileWrite> {
+        let publication_guard = self
+            .begin_privacy_publication(&resolve_env(), bot_id)
+            .await;
         let columns = project_profile_columns(bot_id, &update.capabilities)?;
         let mut sql = format!(
             "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, \
@@ -90,6 +93,7 @@ impl PersistentBotRepo {
             self.publish_profile_capabilities(bot_id, &update.capabilities)
                 .await;
         }
+        publication_guard.complete();
         Ok(write)
     }
 

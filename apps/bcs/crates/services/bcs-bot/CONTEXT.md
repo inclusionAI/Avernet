@@ -219,3 +219,18 @@ Provider authentication, endpoint checks and Plugin MOCK/subbot credential rules
 remain unchanged. Initialized replays never synchronize managers. The new Core
 entry fails closed on unsupported nonempty snapshots; its empty default delegates
 the legacy method for source-compatible implementations.
+
+## Effective Bot visibility
+
+Control-plane explicit visibility/strategy patches delegate visibility
+normalization to the repository's atomic write boundary. Private stays private;
+otherwise only Open strategy plus an empty active organization scope becomes
+public. All other visible configurations are protected, including when
+restrictions are introduced on a formerly public Bot. A friend_ext-only write
+normalizes only on an empty/non-empty active-scope transition; approval
+metadata and same-category replacements preserve visibility. The repository
+supports legacy public-only requests as all-visible intent by atomically
+deriving Open and clearing active agent scope while preserving other extension
+fields. Explicit visibility=public together with Open also clears scope;
+explicit non-Open strategies preserve it, and supplied friend_ext still wins. Core must not synthesize unconditional
+visibility from a pre-read. Catalog notification follows successful writes as before.

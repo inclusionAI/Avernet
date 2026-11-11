@@ -21,6 +21,9 @@ mod a2a_store_contract;
 #[path = "../../../services/bcs-bot-store/tests/support/bot_profile_contract.rs"]
 mod avatar_store_contract;
 
+#[path = "../../../services/bcs-bot-store/tests/support/open_check_in_contract.rs"]
+mod open_check_in_contract;
+
 // The shared candidate viewer-visibility + friend-set store contract: the
 // ignored full-chain MySQL gate and the bot-store Memory/SQLite conformance
 // run the same verification body.
@@ -220,6 +223,11 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         // The SAME candidate viewer-visibility and JSON friend-set contract
         // the Memory/SQLite conformance runs use, on the fully migrated MySQL
         // schema (real JSON_TABLE expansion and MySQL collation).
+        open_check_in_contract::verify(
+            &bcs_bot_store::PersistentBotRepo::with_sql_flavor(
+                migrated_db.clone(), bcs_db_api::DbSqlFlavor::Mysql,
+            ),
+        ).await;
         let candidate_repo = bcs_bot_store::PersistentBotRepo::with_sql_flavor(
             migrated_db.clone(),
             bcs_db_api::DbSqlFlavor::Mysql,

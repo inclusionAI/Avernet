@@ -274,6 +274,8 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
+        // The repository normalizes effective visibility, strategy and active
+        // scope inside one write; a core pre-read would introduce a TOCTOU race.
         let Some(record) = self
             .control_plane
             .patch_control_plane(bot_id, env, patch)

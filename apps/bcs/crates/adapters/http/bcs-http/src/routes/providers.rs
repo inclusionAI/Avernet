@@ -233,7 +233,11 @@ pub async fn patch_provider_bot_attributes(
         has_friend_check_in_strategy = body.friend_check_in_strategy.is_some(),
         "Provider Bot attributes patch accepted"
     );
-    let sync_visibility = body.visibility.is_some();
+    // Any privacy field can change normalized visibility, including whole-object
+    // friend_ext replacement. Sync the service result, never approval drafts.
+    let sync_visibility = body.visibility.is_some()
+        || body.friend_check_in_strategy.is_some()
+        || body.friend_ext.is_some();
     let attributes = internal_bot_attributes_service(&state)?
         .patch(body.into_command(bot_uuid.clone()))
         .await

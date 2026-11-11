@@ -23,6 +23,9 @@ impl PersistentBotRepo {
     pub(super) async fn register_impl(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         info!(bot_id = %bot_id, name = ?capabilities.name, "register: received registration request");
 
+        let publication_guard = self
+            .begin_privacy_publication(&resolve_env(), &bot_id)
+            .await;
         // Sync binding channel index
         self.sync_binding_channel_index(&bot_id, &capabilities)
             .await;
@@ -95,7 +98,8 @@ impl PersistentBotRepo {
             );
             info!(bot_id = %bot_id, "register: inserted new bot");
         }
-
+        drop(bots);
+        publication_guard.complete();
         Ok(())
     }
 
@@ -108,6 +112,9 @@ impl PersistentBotRepo {
     ) -> ServiceResult<()> {
         info!(bot_id = %bot_id, name = ?capabilities.name, "register_with_owner_and_token: received registration request");
 
+        let publication_guard = self
+            .begin_privacy_publication(&resolve_env(), &bot_id)
+            .await;
         self.save_to_db(&bot_id, &capabilities, Some(token), Some(created_by))
             .await
             .map_err(|e| {
@@ -181,6 +188,8 @@ impl PersistentBotRepo {
             token_to_bot.remove(&previous_token);
         }
         token_to_bot.insert(token.to_string(), bot_id.clone());
+        drop(token_to_bot);
+        publication_guard.complete();
 
         info!(bot_id = %bot_id, "register_with_owner_and_token: completed");
         Ok(())

@@ -46,6 +46,7 @@ pub mod a2a;
 mod a2a_search;
 pub mod provider_cache;
 mod caller_config_cache;
+mod control_plane_visibility;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
