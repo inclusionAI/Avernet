@@ -20,7 +20,16 @@ jest.mock('@/services/workspace/botSessionFileService', () => ({
 jest.mock('sonner', () => ({ toast: { error: mockToastError } }));
 
 function makeFile(resourceId: string, displayName: string): BotSessionFileView {
-  return { resourceId, displayName, status: 'ready', sizeBytes: 1, errorCode: null };
+  return {
+    resourceId,
+    displayName,
+    status: 'ready',
+    sizeBytes: 1,
+    errorCode: null,
+    creatorType: null,
+    creatorName: null,
+    createdAt: null,
+  };
 }
 
 function readyFiles(): string[] {
@@ -42,7 +51,9 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     mockLoadReady.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
     const { result } = renderHook(() => useBotSessionFiles('bot-1', 's1', 'u1', 'owner-1', 'u1'));
     expect(mockLoadReady).not.toHaveBeenCalled();
-    await act(async () => { await result.current.refresh(); });
+    await act(async () => {
+      await result.current.refresh();
+    });
     expect(mockLoadReady).toHaveBeenCalledWith('bot-1', 's1', 'u1', 'owner-1', 'u1');
   });
 
@@ -131,9 +142,12 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
         }),
     );
 
-    const { result, rerender } = renderHook(({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'), {
-      initialProps: { sid: 's1' as string | null },
-    });
+    const { result, rerender } = renderHook(
+      ({ sid }: { sid: string | null }) => useBotSessionFiles('bot-1', sid, 'u1'),
+      {
+        initialProps: { sid: 's1' as string | null },
+      },
+    );
 
     // 懒加载(2026-10-21):手动 refresh 发起慢请求;退出会话自动作废在途请求并收尾加载态。
     act(() => {

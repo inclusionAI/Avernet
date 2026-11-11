@@ -26,6 +26,17 @@ export interface BotRuntimeDomain extends BotRuntime {
   visibleInOpenCore: boolean;
 }
 
+export interface BotRestartTracking {
+  /** Coding 重启 journal 的 operation_id；仅前端追踪使用，不来自库存接口。 */
+  operationId: string;
+  startedAt: number;
+  deadlineAt: number;
+  /** 库存已读到过渡态（PENDING 等）后置位；此后再读到 ACTIVE 视为重启完成。 */
+  sawProgress?: boolean;
+  /** 超时后经详情接口确认仍在执行时的延长次数；当前最多延长一次。 */
+  extensions?: number;
+}
+
 export interface BotDomain {
   id: string;
   cardId?: string;
@@ -57,10 +68,14 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
+  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
+  evalGateVisible?: boolean;
   /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
   needsEditLock?: boolean;
   /** Bot 级协作关系；运行态不要求编辑锁，但仍允许管理已有协作锁。 */
   hasCollaborators?: boolean;
+  /** 客户端重启追踪标记：coding 重启为异步 journal，在库存读到过渡态前保持「重启中」展示。 */
+  pendingRestart?: BotRestartTracking;
   completeness: BotCompleteness;
   warnings: string[];
   actions: string[];

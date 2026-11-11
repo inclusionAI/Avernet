@@ -171,7 +171,9 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
     def pause_before_guard(_conn, _cursor, statement, _parameters, _context, _many):
         if statement.lstrip().upper().startswith("BEGIN IMMEDIATE"):
             before_guard.set()
-            assert release.wait(timeout=5)
+            # Full-suite CI can starve thread scheduling. These waits coordinate
+            # one tiny local SQLite transaction; they are not production timeouts.
+            assert release.wait(timeout=60)
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     other = CommunitySqliteDatabase(database._url)
@@ -181,14 +183,14 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
                 sync.ensure_synced, space_id=space_id, environment="pre"
             )
             try:
-                assert before_guard.wait(timeout=5)
+                assert before_guard.wait(timeout=30)
                 SpaceManagementRepository(other, effects=KnowledgeSpacePersistenceEffects()).delete_team(
                     space_id=space_id, with_members=True, env="pre"
                 )
             finally:
                 release.set()
             with pytest.raises(SpaceKnowledgeError, match="RESOURCE_NOT_FOUND"):
-                activation.result(timeout=5)
+                activation.result(timeout=60)
     finally:
         release.set()
         other._engine.dispose()
