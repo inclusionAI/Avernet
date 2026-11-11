@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  s_d23d2dd74fff18::t_6b4930d7170a12 739
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_d23d2dd74fff18::t_6b4930d7170a12 20-21,309-310,515,564
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67aa664a253e2b69e648561ba19aeeba638a79dd",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
