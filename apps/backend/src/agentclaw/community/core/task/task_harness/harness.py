@@ -77,6 +77,7 @@ class TaskHarness:
         runtime_probe_threshold: float = 120.0,
         runtime_retry_threshold: int = 3,
         probe_unavailable_max_cycles: int = 30,
+        active_no_progress_max_cycles: int = 15,
         relay_recovery: RelaySessionRecovery | None = None,
         relay_resume_max_attempts: int = 2,
         relay_resume_max_send_failures: int = 10,
@@ -101,6 +102,7 @@ class TaskHarness:
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
         self._probe_unavailable_max_cycles = max(1, int(probe_unavailable_max_cycles))
+        self._active_no_progress_max_cycles = max(1, int(active_no_progress_max_cycles))
         self._relay_recovery = relay_recovery
         self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
         self._relay_resume_max_send_failures = max(1, int(relay_resume_max_send_failures))
@@ -278,10 +280,10 @@ class TaskHarness:
             if result.progressed:
                 current["no_progress"] = 0
             else:
-                # Active is authoritative engine-owned state. Message silence is
-                # telemetry only: Relay harness must wait for the engine's own
-                # timeout/terminal state rather than send a recovery prompt.
+                # Repeated silence means the runtime turn cannot self-advance.
                 current["no_progress"] += 1
+                if current["no_progress"] >= self._active_no_progress_max_cycles:
+                    reason = "runtime_no_progress"
         elif result.state == "probe_unavailable":
             # Transport/app request failure is not Bot unresponsiveness. Predeploy
             # and single-server deployments can make the probe read path itself
