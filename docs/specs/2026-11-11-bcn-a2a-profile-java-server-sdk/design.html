@@ -73,7 +73,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <nav class="toc" aria-label="目录">
 <b>目录</b>
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
-<a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a>
+<a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 扩展登记</a><a class="sub" href="#s7-7">7.7 扩展治理</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.8</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.9</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -121,7 +121,8 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>跨实例事件转发、执行迁移、宕机后自动重跑</td><td>见决策 <span class="tag d">D3</span></td></tr>
 <tr><td>A2A 0.3 兼容、ListTasks、GetExtendedAgentCard</td><td>BCS 下行不使用</td></tr>
 <tr><td>推送通知的实现</td><td>Profile 本期定义其语义（6.12），SDK 预留字段和 SPI；实现和 BCS 侧的使用放在后续阶段</td></tr>
-<tr><td>文件、多模态、通用结构化输出、通用 ask_user</td><td>BCS 当前只处理文本和已登记的扩展</td></tr>
+<tr><td>通用 ask_user、实时音视频流</td><td>BCS 当前不支持；标准本期不定义</td></tr>
+<tr><td>多模态在 BCS 和工作台侧的实现</td><td>Profile 本期定义多模态规则（6.13），SDK 支持；BCS 目前只请求文本，其中转和工作台展示放在后续阶段</td></tr>
 <tr><td>非 Java 技术栈的 SDK</td><td>可按 Profile 自行实现，用 TCK 验证</td></tr>
 </table></div>
 
@@ -183,7 +184,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-02</span></td><td>必须提供 <code>GRPC</code>、<code>HTTP+JSON</code>、<code>JSONRPC</code> 三种绑定中的至少一种，可以同时提供多种。三种绑定地位相同，BCS 按 Card 中的声明顺序选择。<code>GRPC</code> 的服务为 <code>lf.a2a.v1.A2AService</code>，通过 SOFARPC Triple 暴露，经 MOSN 寻址；普通 Bolt/Hessian 接口不能替代。<code>HTTP+JSON</code> 和 <code>JSONRPC</code> 通过内部域名访问，流式使用 SSE。</td></tr>
 <tr><td><span class="tag p">P-03</span></td><td>三种绑定的对象语义和行为必须一致，都不要求应用层凭据。同一 Task 可以通过任一已声明的绑定查询、订阅和取消。所有端点只能在公司内部网络可达。</td></tr>
 <tr><td><span class="tag p">P-04</span></td><td>必须实现的方法由一致性等级决定（6.3）。Profile 之外的标准方法可以实现，BCS 不调用。</td></tr>
-<tr><td><span class="tag p">P-05</span></td><td>输入输出必须支持 <code>text/plain</code>。不协商任何扩展时，请求只包含文本 Part，响应的用户可见内容全部以文本 Artifact 提供。结构化内容只能通过已协商的扩展、按内容块规则（7.5）提供。</td></tr>
+<tr><td><span class="tag p">P-05</span></td><td><code>text/plain</code> 是所有 Agent 都必须支持的基线：必须接受纯文本输入，必须能只用文本给出完整结果。其他模态是可选能力，按 6.13 声明和协商。结构化 UI 内容通过已协商的扩展、按内容块规则（7.5）提供。</td></tr>
 <tr><td><span class="tag p">P-06</span></td><td>JSON 使用 A2A 1.0 的 lowerCamelCase（ProtoJSON）。枚举使用全名，例如 <code>ROLE_USER</code>、<code>TASK_STATE_WORKING</code>。</td></tr>
 </table></div>
 
@@ -202,6 +203,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>exec 审批扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
 <tr><td>提交去重扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
 <tr><td>推送通知（6.12）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
+<tr><td>文本以外的模态（6.13）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>多实例正确性（第 9 节）</td><td colspan="4">所有等级都必须满足，除非 Agent 明确以单实例部署</td></tr>
 </table></div>
 <p>L3 的三项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商工具观察和 exec 审批，因此这两项要求 L1 以上。</p>
@@ -356,7 +358,8 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>对终态 Task 订阅；未实现的方法</td><td><code>UNSUPPORTED_OPERATION</code></td><td>UNIMPLEMENTED 或 FAILED_PRECONDITION</td><td>400</td></tr>
 <tr><td>必需扩展未协商</td><td><code>EXTENSION_SUPPORT_REQUIRED</code></td><td>FAILED_PRECONDITION</td><td>400</td></tr>
 <tr><td>协议版本不支持</td><td><code>VERSION_NOT_SUPPORTED</code></td><td>UNIMPLEMENTED</td><td>400</td></tr>
-<tr><td>请求不合法（缺字段、非文本 Part、续交不匹配）</td><td>参数错误</td><td>INVALID_ARGUMENT</td><td>400 或 422</td></tr>
+<tr><td>输入包含 Agent 未声明支持的媒体类型</td><td><code>CONTENT_TYPE_NOT_SUPPORTED</code></td><td>按 A2A 标准映射</td><td>415</td></tr>
+<tr><td>请求不合法（缺字段、续交不匹配、文件超过内联上限）</td><td>参数错误</td><td>INVALID_ARGUMENT</td><td>400 或 422</td></tr>
 <tr><td>存储不可用等内部错误</td><td>内部错误</td><td>UNAVAILABLE 或 INTERNAL</td><td>503 或 500</td></tr>
 </table></div>
 <div class="tw"><table>
@@ -426,6 +429,46 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <h4>与多实例设计的关系</h4>
 <p>推送由写入该状态的实例发出：正常情况是执行实例，在状态写入存储成功之后发送；执行实例宕机后，由回收该 Task 的实例发送 <code>FAILED</code>。推送配置在 Task 记录中，任何实例都能读到。这与“只提供跨实例存储”（<span class="tag d">D3</span>）一致，不需要实例之间通信。由于回收是惰性的（9.5），宕机后如果没有任何请求读到这个 Task，就不会有推送，这正是 P-155 要求查询兜底的原因。</p>
+
+<h3 id="s6-13"><span class="n">6.13</span>多模态输入输出（可选能力）</h3>
+<p>A2A 标准本身已经定义了多模态：Part 可以是文本、文件字节（<code>raw</code>）、文件地址（<code>url</code>）或结构化数据（<code>data</code>），并带 <code>mediaType</code> 和 <code>filename</code>；Card 和每个技能可以声明支持的输入输出类型；调用方用 <code>acceptedOutputModes</code> 声明能接收的类型。这些不需要扩展。</p>
+<p>BCS 目前只处理文本，但标准不应该因此只定义文本，否则各业务的图片、文件能力会各自实现。Profile 沿用标准的多模态定义，只补充企业场景下标准没有规定的部分：文件怎么传、多大、对方不支持时怎么办。</p>
+<h4>与扩展的分工</h4>
+<div class="tw"><table>
+<tr><th>内容</th><th>用什么</th><th>怎么协商</th></tr>
+<tr><td>图片、音频、视频、文档等文件</td><td>标准的文件 Part（本节）</td><td>Card 的输入输出类型声明；请求的 <code>acceptedOutputModes</code></td></tr>
+<tr><td>通用的结构化结果（<code>application/json</code>）</td><td>标准的数据 Part（本节）</td><td>同上</td></tr>
+<tr><td>有特定语义、需要调用方专门渲染的 UI 数据</td><td>扩展点 E5（7.5）</td><td>扩展 URI</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-160</span></td><td>Agent 通过 Card 的 <code>defaultInputModes</code>、<code>defaultOutputModes</code> 和技能级的 <code>inputModes</code>、<code>outputModes</code> 声明支持的媒体类型。使用具体类型（例如 <code>image/png</code>），不使用通配。声明的类型必须真实支持。</td></tr>
+<tr><td><span class="tag p">P-161</span></td><td>输入中包含 Agent 未声明的媒体类型时，必须在创建 Task 之前返回 <code>CONTENT_TYPE_NOT_SUPPORTED</code>，不得忽略该 Part 后继续执行。</td></tr>
+<tr><td><span class="tag p">P-162</span></td><td>Agent 只能输出请求的 <code>acceptedOutputModes</code> 中列出的类型。调用方未列出某类型时，Agent 必须用文本给出等价说明（例如文件的名称和摘要），保证纯文本结果完整可读。省略 <code>acceptedOutputModes</code> 等同于只接受 <code>text/plain</code>。</td></tr>
+<tr><td><span class="tag p">P-163</span></td><td>文件默认按引用传递：使用 <code>url</code>，并给出 <code>mediaType</code> 和 <code>filename</code>。内联字节（<code>raw</code>）只用于小文件，单个不超过 256 KB，且整个请求不超过 1 MiB。超过时返回参数错误。</td></tr>
+<tr><td><span class="tag p">P-164</span></td><td>文件地址必须是接收方在公司内部网络内可以直接读取的地址。输出文件的地址有效期不短于 Task 的保留期。地址来源见 <span class="tag q">Q20</span>。</td></tr>
+<tr><td><span class="tag p">P-165</span></td><td>Agent 读取输入文件地址前必须检查域名在允许范围内，理由同推送地址（P-156）。不得根据 <code>filename</code> 或地址后缀判断类型，以 <code>mediaType</code> 为准。</td></tr>
+<tr><td><span class="tag p">P-166</span></td><td>输出的文件和数据作为独立的内容块，遵循 7.5 的顺序、整块替换、数量上限和 GetTask 规则（P-140、P-141、P-146、P-147）。不对文件块使用 <code>append: true</code>。</td></tr>
+<tr><td><span class="tag p">P-167</span></td><td>每个文件块必须有 <code>name</code> 或 <code>description</code>，供不能展示该类型的调用方显示。</td></tr>
+<tr><td><span class="tag p">P-168</span></td><td>实时音视频流不在 Profile 范围内。音频和视频只能作为完整文件传递。</td></tr>
+</table></div>
+<h4>一次带图片输入、返回文件的调用</h4>
+<pre><code>// 请求
+{"message": {"messageId": "run-91ab", "role": "ROLE_USER", "parts": [
+    {"text": "这张发票有什么问题？把核对结果导出成表格"},
+    {"url": "https://files.example.internal/u/8f2c/invoice.png", "mediaType": "image/png", "filename": "invoice.png"}]},
+ "configuration": {"acceptedOutputModes": ["text/plain",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]}}
+
+// 响应中的文件块
+{"artifactUpdate": {"taskId": "t-002", "contextId": "c-002",
+   "artifact": {"artifactId": "b2", "name": "发票核对结果.xlsx", "description": "3 处不一致，详见表格",
+     "parts": [{"url": "https://files.example.internal/a/41d0/result.xlsx",
+                "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "filename": "发票核对结果.xlsx"}]},
+   "append": false, "lastChunk": true}}</code></pre>
+<h4>对现有链路的影响</h4>
+<p>BCS 目前只在 <code>acceptedOutputModes</code> 中列出 <code>text/plain</code>，也只发送文本。按 P-162，合规的 Agent 对 BCS 只会输出文本，因此加入多模态规则不改变现有行为。BCS 和工作台支持某种类型后，把它加入请求的列表即可逐步打开。</p>
 
 <h2 id="s7"><span class="n">7</span>扩展目录</h2>
 <div class="tw"><table>
@@ -784,6 +827,29 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <tr><td>把工具记录编码成 <code>tools/v1</code> 格式；未协商时静默丢弃</td><td>提供稳定的 <code>toolCallId</code></td></tr>
 <tr><td>生成审批 Schema、参数快照和摘要；校验回复；持久化已接受的决定；处理分批回复和过期</td><td>在 <code>requestApproval</code> 前保存好可恢复的引擎状态</td></tr>
 <tr><td>全部工具都有决定后，通过 CAS 接管执行权并调用 <code>resume</code></td><td><code>resume</code> 必须能在任意实例上从存储恢复；做不到则在 <code>AgentDescriptor</code> 中声明，SDK 会在跨实例续交时返回错误</td></tr>
+</table></div>
+
+<h4>多模态：附件与文件块</h4>
+<p>简易层和完整层都可以使用。对应 6.13。</p>
+<pre><code>// AgentDescriptor：声明支持的类型，写入 Card
+AgentDescriptor.builder()
+    .inputModes("text/plain", "image/png", "image/jpeg")
+    .outputModes("text/plain", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+// AgentRequest：读取输入中的非文本内容
+List&lt;Attachment&gt; attachments();      // mediaType、filename，以及 url 或 bytes
+boolean accepts(String mediaType);   // 调用方是否接收该输出类型
+
+// AgentResponseSink：输出文件块
+void putFile(String blockId, String mediaType, String filename,
+             URI url, String description, String fallbackText);</code></pre>
+<div class="tw"><table>
+<tr><th>情况</th><th>SDK 的处理</th></tr>
+<tr><td>输入包含未声明的类型</td><td>返回 <code>CONTENT_TYPE_NOT_SUPPORTED</code>，不创建 Task，不调用 Agent</td></tr>
+<tr><td>调用方不接收该输出类型</td><td><code>putFile</code> 不发出文件块，把 <code>fallbackText</code> 作为文本输出</td></tr>
+<tr><td>输入文件地址不在允许的域名内</td><td>返回参数错误。SDK 不替 Agent 下载文件，只做检查</td></tr>
+<tr><td>文件内容的存储</td><td>Task 记录只保存地址和元信息，不保存文件内容。内联字节计入单 Task 的大小上限</td></tr>
+<tr><td>输出文件的上传</td><td>由 Agent 上传到文件服务并拿到地址。SDK 不内置文件存储，见 <span class="tag q">Q20</span></td></tr>
 </table></div>
 
 <h4>业务扩展：扩展通道</h4>
@@ -1181,6 +1247,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.11，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
 <tr><td>扩展目录：登记业务扩展的描述；按扩展点中转 E2 到 E5 的数据；Task 关联中保存 E3、E5</td><td>7.6，取决于 <span class="tag q">Q15</span></td><td>P4 之后</td></tr>
 <tr><td>工作台前端：按内容块序列渲染；实现平台 UI 扩展；对不认识的块显示降级文本</td><td>7.5，取决于 <span class="tag q">Q17</span></td><td>P4 之后</td></tr>
+<tr><td>多模态：工作台上传文件并以地址下发；中转输出的文件块；按已支持的类型填写 <code>acceptedOutputModes</code>；注册时不再只看 <code>text/plain</code></td><td>6.13，取决于 <span class="tag q">Q20</span></td><td>P4 之后</td></tr>
 </table></div>
 <p>以下不在本设计范围内，但会影响整体可用性：BCS 的运行跟踪目前按单实例部署使用；兼容入口保留的 Bearer 下行链路不属于 Profile，继续按原约定工作。</p>
 
@@ -1219,7 +1286,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的 L0、L1；内存存储；starter 的 GRPC 端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>示例 Agent 单实例通过 TCK L1；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
 <tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；JDBC 参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
 <tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
-<tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；提交去重；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
+<tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；多模态的附件与文件块（6.13）；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；提交去重；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
 <tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
 <tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
 </table></div>
@@ -1246,6 +1313,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td><span class="tag q">Q17</span></td><td>平台 UI 扩展的组件集：自行设计，还是采用已有的开放规范（例如面向 Agent 生成界面的 A2UI，需要先评估其成熟度和与内容块模型的匹配）</td><td>先确定内容块模型（7.5），组件集单独立项；在此之前工作台只渲染文本和降级文本</td><td>7.5</td></tr>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
+<tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
