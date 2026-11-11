@@ -98,6 +98,7 @@ class TodoRepository(TodoRepositoryProtocol):
         status: TodoStatus | None,
         offset: int,
         limit: int,
+        bot_id: str | None = None,
     ) -> TodoPage:
         with self._db.orm_session() as db:
             query = db.query(TodoModel).filter(
@@ -116,6 +117,8 @@ class TodoRepository(TodoRepositoryProtocol):
                 )
             if status is not None:
                 query = query.filter(TodoModel.status == status.value)
+            if bot_id is not None:
+                query = query.filter(TodoModel.bot_id == bot_id)
             total = query.count()
             rows = (
                 query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id))

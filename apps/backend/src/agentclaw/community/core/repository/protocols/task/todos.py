@@ -40,6 +40,7 @@ class TodoRepositoryProtocol(Protocol):
         status: TodoStatus | None,
         offset: int,
         limit: int,
+        bot_id: str | None = None,
     ) -> TodoPage: ...
 
     @abstractmethod

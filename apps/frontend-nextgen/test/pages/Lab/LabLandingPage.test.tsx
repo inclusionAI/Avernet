@@ -32,7 +32,7 @@ describe('LabLandingPage(实验室落地页)', () => {
     render(<LabLandingPage />);
     const todoCard = within(screen.getByRole('article', { name: '待办' }));
     expect(todoCard.getByText(/让 Bot 服务团队、帮助完成团队工作/)).toBeTruthy();
-    expect(todoCard.getByText(/结案沉淀进团队知识库让它越来越懂团队/)).toBeTruthy();
+    expect(todoCard.queryByText(/团队知识库/)).toBeNull();
 
     fireEvent.click(todoCard.getByRole('button', { name: /开始体验/ }));
     expect(pushMock).toHaveBeenCalledWith('/lab/todos');

@@ -17,6 +17,7 @@ export function useTodos() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeywordState] = useState('');
   const [status, setStatusState] = useState<TodoStatus | undefined>();
+  const [botId, setBotIdState] = useState<string | undefined>();
   const requestId = useRef(0);
 
   const todos = useTodoStore((state) => state.todos);
@@ -42,6 +43,7 @@ export function useTodos() {
         spaceId: currentSpaceId,
         keyword: keyword.trim() || undefined,
         status,
+        botId,
         page,
         pageSize,
       });
@@ -54,7 +56,7 @@ export function useTodos() {
     } finally {
       if (currentRequestId === requestId.current) setLoading(false);
     }
-  }, [currentSpaceId, keyword, page, pageSize, setError, setLoading, setTodos, status]);
+  }, [botId, currentSpaceId, keyword, page, pageSize, setError, setLoading, setTodos, status]);
 
   useEffect(() => {
     if (!initialized || currentSpaceId === undefined) return;
@@ -68,6 +70,11 @@ export function useTodos() {
 
   const setStatus = useCallback((value: TodoStatus | undefined) => {
     setStatusState(value);
+    setPage(DEFAULT_PAGE);
+  }, []);
+
+  const setBotId = useCallback((value: string | undefined) => {
+    setBotIdState(value);
     setPage(DEFAULT_PAGE);
   }, []);
 
@@ -120,6 +127,7 @@ export function useTodos() {
     pageSize,
     keyword,
     status,
+    botId,
     loading,
     mutationLoading,
     error,
@@ -130,6 +138,7 @@ export function useTodos() {
     },
     setKeyword,
     setStatus,
+    setBotId,
     refresh,
     create,
     update,

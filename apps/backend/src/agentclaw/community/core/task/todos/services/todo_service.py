@@ -80,6 +80,7 @@ class TodoService(TodoServiceProtocol):
         status: TodoStatus | str | None,
         page: int,
         page_size: int,
+        bot_id: str | None = None,
         env: str | None = None,
     ) -> TodoPage:
         normalized_space_id = self._space_id(space_id)
@@ -88,6 +89,9 @@ class TodoService(TodoServiceProtocol):
         )
         normalized_keyword = self._search_text(keyword)
         normalized_status = self._status(status)
+        normalized_bot_id = self._optional_text(
+            bot_id, "bot_id", MAX_BOT_ID_LENGTH
+        )
         self._pagination(page, page_size)
         self._space_access.require_space_member(
             space_id=normalized_space_id,
@@ -98,6 +102,7 @@ class TodoService(TodoServiceProtocol):
             space_id=normalized_space_id,
             keyword=normalized_keyword,
             status=normalized_status,
+            bot_id=normalized_bot_id,
             offset=(page - 1) * page_size,
             limit=page_size,
         )

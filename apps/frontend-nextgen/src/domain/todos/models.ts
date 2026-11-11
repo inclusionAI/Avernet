@@ -42,6 +42,7 @@ export interface TodoListQuery {
   spaceId: number;
   keyword?: string;
   status?: TodoStatus;
+  botId?: string;
   page: number;
   pageSize: number;
 }

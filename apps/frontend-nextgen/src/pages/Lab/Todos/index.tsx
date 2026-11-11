@@ -1,5 +1,4 @@
 import { PageHeader } from '@/components/Common/PageHeader';
-import { Button } from '@/components/ui/Button';
 import type { TodoBotOption } from '@/domain/todos/models';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext, useSpaceContextActions } from '@/hooks/useSpaceContext';
@@ -7,7 +6,6 @@ import { useTodos } from '@/hooks/useTodos';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
-import { history } from '@umijs/max';
 import { useEffect, useState } from 'react';
 import { eligibleTodoBots } from './botScope';
 import { TodoCreateModal } from './components/TodoCreateModal';
@@ -82,19 +80,18 @@ export default function LabTodosPage() {
         <PageHeader
           title="待办"
           description="当前空间的 Bot 待办。启动后查看事件过程，待验收时互动并提交验收结果。"
-          actions={
-            <Button variant="link" className="h-auto px-0 text-xs" onClick={() => history.push('/workspace/chat')}>
-              去对话中发起
-            </Button>
-          }
         />
 
         <TodoToolbar
           space={currentSpace}
+          bots={bots}
+          botsLoading={botsLoading}
           keyword={todos.keyword}
           status={todos.status}
+          botId={todos.botId}
           onKeywordChange={todos.setKeyword}
           onStatusChange={todos.setStatus}
+          onBotIdChange={todos.setBotId}
           onCreate={() => setCreateOpen(true)}
         />
 

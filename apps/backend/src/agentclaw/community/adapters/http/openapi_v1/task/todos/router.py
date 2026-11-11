@@ -31,7 +31,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
-from agentclaw.community.core.task.todos.models import MAX_TITLE_LENGTH
+from agentclaw.community.core.task.todos.models import (
+    MAX_BOT_ID_LENGTH,
+    MAX_TITLE_LENGTH,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import (
@@ -89,6 +92,11 @@ async def list_todos(
         default=None,
         description="Only return Todos in this A-owned product state.",
     ),
+    bot_id: str | None = Query(
+        default=None,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Only return Todos assigned to this Bot.",
+    ),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[Page[TodoResponse]]:
     """List the caller's Todos in the selected product Space."""
@@ -99,6 +107,7 @@ async def list_todos(
         actor_id=actor_id,
         keyword=keyword,
         status=status,
+        bot_id=bot_id,
         page=page_params.page,
         page_size=page_params.page_size,
     )

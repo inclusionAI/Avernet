@@ -26,6 +26,7 @@ class TodoServiceProtocol(Protocol):
         status: TodoStatus | str | None,
         page: int,
         page_size: int,
+        bot_id: str | None = None,
         env: str | None = None,
     ) -> TodoPage: ...
 

@@ -72,18 +72,26 @@ def test_start_if_draft_sets_context_and_running_once(db):
 def test_list_todos_filters_searches_and_paginates(db):
     repo = TodoRepository(db)
     _create(repo, title="Alpha", description="first", bot_name="Research Bot")
-    second = _create(repo, title="Beta", description="alpha in description", bot_name="Writer")
+    second = _create(
+        repo,
+        title="Beta",
+        description="alpha in description",
+        bot_id="bot_2",
+        bot_name="Writer",
+    )
+    _create(repo, title="Gamma", description="alpha in description", bot_id="bot_3")
     _create(repo, space_id=8, title="Alpha elsewhere")
 
     page = repo.list_todos(
         space_id=7,
         keyword="alpha",
         status=TodoStatus.DRAFT,
-        offset=1,
+        bot_id="bot_2",
+        offset=0,
         limit=1,
     )
 
-    assert page.total == 2
+    assert page.total == 1
     assert page.items == (repo.get_todo(todo_id=second.todo_id),)
 
 

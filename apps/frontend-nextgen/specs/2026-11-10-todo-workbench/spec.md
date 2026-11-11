@@ -22,7 +22,7 @@ Status: **approved**
 
 ## A 对前端 API
 
-- `GET /openapi/v1/todos`：当前空间、关键词、状态分页查询。
+- `GET /openapi/v1/todos`：按当前空间分页查询，支持关键词、状态和负责人（Bot）筛选。
 - `POST /openapi/v1/todos`：创建草稿。
 - `GET /openapi/v1/todos/{todoId}`：详情。
 - `PATCH /openapi/v1/todos/{todoId}`：修改草稿。

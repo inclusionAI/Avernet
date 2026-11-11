@@ -419,6 +419,7 @@ def test_list_todos_checks_membership_normalizes_filters_and_paginates():
         actor_id="user_1",
         keyword="  feature  ",
         status="draft",
+        bot_id="  bot_1  ",
         page=3,
         page_size=20,
         env=None,
@@ -431,6 +432,7 @@ def test_list_todos_checks_membership_normalizes_filters_and_paginates():
         "space_id": 7,
         "keyword": "feature",
         "status": TodoStatus.DRAFT,
+        "bot_id": "bot_1",
         "offset": 40,
         "limit": 20,
     }

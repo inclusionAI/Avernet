@@ -35,8 +35,7 @@ const FEATURES: LabFeature[] = [
   {
     id: 'todos',
     title: '待办',
-    description:
-      '让 Bot 服务团队、帮助完成团队工作,并跟进待办进度。支持手动或 AI 创建,过程对空间内成员公开,结案沉淀进团队知识库让它越来越懂团队。',
+    description: '让 Bot 服务团队、帮助完成团队工作，并跟进待办进度。支持手动或 AI 创建，过程对空间内成员公开。',
     icon: ClipboardCheck,
     href: '/lab/todos',
   },

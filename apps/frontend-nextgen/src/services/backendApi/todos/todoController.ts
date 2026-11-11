@@ -64,6 +64,7 @@ export function listTodos(query: TodoListQuery) {
       space_id: query.spaceId,
       keyword: query.keyword || undefined,
       status: query.status,
+      bot_id: query.botId,
       page: query.page,
       page_size: query.pageSize,
     },

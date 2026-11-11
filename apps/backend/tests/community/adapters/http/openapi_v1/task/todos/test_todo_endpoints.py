@@ -175,6 +175,7 @@ async def test_list_todos_maps_product_page_without_internal_fields():
         user_id="human_1",
         keyword="release",
         status=TodoStatus.IN_PROGRESS,
+        bot_id="bot_2",
         service=service,
     )
 
@@ -193,6 +194,7 @@ async def test_list_todos_maps_product_page_without_internal_fields():
             "actor_id": "human_1",
             "keyword": "release",
             "status": TodoStatus.IN_PROGRESS,
+            "bot_id": "bot_2",
             "page": 2,
             "page_size": 25,
         }

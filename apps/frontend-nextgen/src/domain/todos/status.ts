@@ -2,16 +2,16 @@ import type { TodoStatus } from './models';
 
 export const TODO_STATUS_OPTIONS: Array<{ value: 'all' | TodoStatus; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'draft', label: '草稿' },
-  { value: 'in_progress', label: '执行中' },
-  { value: 'pending_acceptance', label: '待验收' },
+  { value: 'pending_acceptance', label: '待处理' },
+  { value: 'in_progress', label: '进行中' },
   { value: 'completed', label: '已完成' },
+  { value: 'draft', label: '草稿' },
 ];
 
 export const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
   draft: '草稿',
-  in_progress: '执行中',
-  pending_acceptance: '待验收',
+  in_progress: '进行中',
+  pending_acceptance: '待处理',
   completed: '已完成',
 };
 

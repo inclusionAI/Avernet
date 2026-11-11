@@ -7,7 +7,6 @@ import { useTodoStore } from '@/stores/todoStore';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
@@ -174,13 +173,52 @@ describe('LabTodosPage（待办工作台）', () => {
     expect(screen.getByText(/当前空间的 Bot 待办/)).toBeInTheDocument();
     expect(screen.getByText('测试用户的个人空间')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '去对话中发起' }));
-    expect(history.push).toHaveBeenCalledWith('/workspace/chat');
     await waitFor(() =>
       expect(mockedService.loadTodos).toHaveBeenCalledWith({
         spaceId: 10,
         keyword: undefined,
         status: undefined,
+        botId: undefined,
+        page: 1,
+        pageSize: 10,
+      }),
+    );
+  });
+
+  it('按原型顺序展示状态 Tab、负责人和搜索，并按负责人查询', async () => {
+    render(<LabTodosPage />);
+    await screen.findByText('编写实施方案');
+
+    const toolbar = screen.getByRole('region', { name: '待办筛选' });
+    const tabs = within(toolbar).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['全部', '待处理', '进行中', '已完成', '草稿']);
+
+    const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
+    const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
+    expect(owner.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(search).toHaveAttribute('placeholder', '搜索待办标题');
+    expect(within(toolbar).queryByText('团队知识库')).not.toBeInTheDocument();
+
+    fireEvent.click(tabs[1]);
+    await waitFor(() =>
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith({
+        spaceId: 10,
+        keyword: undefined,
+        status: 'pending_acceptance',
+        botId: undefined,
+        page: 1,
+        pageSize: 10,
+      }),
+    );
+
+    fireEvent.click(owner);
+    fireEvent.click(await screen.findByRole('option', { name: '写作助手' }));
+    await waitFor(() =>
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith({
+        spaceId: 10,
+        keyword: undefined,
+        status: 'pending_acceptance',
+        botId: 'bot-owned:u-1',
         page: 1,
         pageSize: 10,
       }),
@@ -191,7 +229,7 @@ describe('LabTodosPage（待办工作台）', () => {
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');
 
-    fireEvent.click(screen.getByRole('button', { name: '创建待办' }));
+    fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('combobox', { name: '选择 Bot' })).toHaveTextContent('写作助手');
 
@@ -221,7 +259,7 @@ describe('LabTodosPage（待办工作台）', () => {
 
     const row = screen.getByText('编写实施方案').closest('tr');
     expect(within(row!).getByText('写作助手')).toBeInTheDocument();
-    expect(within(row!).getByText('待验收')).toBeInTheDocument();
+    expect(within(row!).getByText('待处理')).toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: '查看' })).toBeInTheDocument();
   });
 
