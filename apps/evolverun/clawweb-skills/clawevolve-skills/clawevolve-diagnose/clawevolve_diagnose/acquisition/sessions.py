@@ -853,7 +853,6 @@ def _discover_sessions_from_session_stores(
         logger.debug(
             "session transcript parse start",
             session_id=candidate.session_id,
-        session_key=candidate.store_key,
             path=candidate.path,
             started_at=candidate.started_at.isoformat(),
         )
