@@ -43,3 +43,17 @@ README 补充注册、文件/管道调用、直接 Node 调用和解除链接方
 使用临时 npm 前缀离线安装，从另一目录验证 `a2a --help`、含空格的相对文件、管道消息片段与 AgentCard 转换；全新安装仅注册 `a2a`。模拟旧版安装后重新 `npm link`，新命令可用，但 npm 保留旧 `a2a-json` 链接，已在 README 说明。临时安装已清理，未修改用户全局 npm 安装。
 
 语法、改动源文件行数与 diff 空白检查通过。本轮仅修改命令名及相关说明，运行最接近的 CLI 测试与安装验证；此前完整 88 项和网页验证保留为历史结果，本轮未重复执行，也未验证 Windows 命令包装器。
+
+## PR 评论修复验证
+
+2026-11-12：核对 PR #3906 的 3 条行内评论，审查 head 为 `7cb5bdb7de24426762b6666790f2f0bb97e9b321`、base 为 `9a61798cb7752308aaa01f8e59d78a46809066cb`；刷新 merge ref `dbef0ffa326f28e38cc6dda538bf2fa9e6f68460` 并核对双亲，其工具目录与 head 一致。审查范围为评论涉及的解析、消息映射与字段联动链路。
+
+| 评论 | 原问题及修复 | 验证 |
+| --- | --- | --- |
+| [4539579844](https://github.com/inclusionAI/Avernet/pull/3906#discussion_r4539579844) | 外层业务 parts 阻止嵌套消息转换；分派、提取和字段联动现共用消息选择规则 | 带外层 parts 的消息经 CLI 成功提取 text，外层数据留在 sourceEnvelope；根消息优先与字段名/值联动回归通过 |
+| [4539724403](https://github.com/inclusionAI/Avernet/pull/3906#discussion_r4539724403) | https:// 被误当有效 URI；增加解析与结构检查 | 非法 Part.url 经 CLI 非零退出且 stdout 为空；非法扩展整组留在 metadata；有效 HTTPS、URN、文件 URI 与字段联动回归通过 |
+| [4540342975](https://github.com/inclusionAI/Avernet/pull/3906#discussion_r4540342975) | 对象打印中的 urn:example:ext 被误拒绝；解析器支持一般 scheme: 值 | CLI 对象打印成功保留标准 extensions；URN 等值及字段区间保真，缺逗号/空白歧义继续拒绝 |
+
+新增 7 项回归：消息选择/URI 相关 4 项在旧实现失败后通过，根消息优先通过；解析器 URN 相关回归先失败后通过，边界拒绝回归通过。完成 14.1、14.2、14.3 后，完整 `node --test --test-reporter=tap` 为 **95/95 通过**（Node v26.4.0），覆盖所有 Demo、CLI、HTTP 和字段联动。测试仅保留 PATH/TMPDIR 环境变量，使用临时目录和临时回环端口；4 个实际 CLI 场景通过。工具源码没有第三方运行时依赖或外部网络调用。
+
+本轮没有执行实际浏览器双击交互，字段名/值选择与输出路径由回归测试验证；未验证 URI 资源可访问性、远端 Agent 或完整协议认证。原 4173 页面及用户输入未操作。没有新增 GitHub 工作流、改动仓库最外层 README 或调用大模型。

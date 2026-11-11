@@ -1,17 +1,12 @@
 import { ConversionError, convertAgentCard, convertMessage } from './converter.js';
 import { parseInput } from './input-parser.js';
-import { convertStructuredMessage } from './message-mapper.js';
-
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const isMessage = value => isObject(value) && (Object.hasOwn(value, 'parts') || Object.hasOwn(value, 'messageId'))
-  && (Object.hasOwn(value, 'role') || value.kind === 'message');
+import { convertStructuredMessage, getMessageSourcePath } from './message-mapper.js';
 
 export function convertInput(text, mode, options = {}) {
   if (!['card', 'message'].includes(mode)) throw new ConversionError(['转换模式必须是 card 或 message。']);
   const parsed = parseInput(text, { includeFields: true });
   const parsedNoteRows = parsed.notes.map(description => ({ source: '输入文本', target: '—', description }));
-  const nested = isObject(parsed.value) ? parsed.value.message : undefined;
-  const structured = isMessage(parsed.value) || (isObject(nested) && (Object.hasOwn(nested, 'parts') || Object.hasOwn(nested, 'role')));
+  const structured = getMessageSourcePath(parsed.value) !== null;
   try {
     const result = mode === 'card' ? convertAgentCard(parsed.value)
       : structured ? convertStructuredMessage(parsed.value, options) : convertMessage(parsed.value, options);

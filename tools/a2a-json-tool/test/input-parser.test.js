@@ -54,6 +54,26 @@ test('明显的无空格 scheme:// URL 可作为裸字符串，缺逗号仍报�
   rejects('a=x b:y');
 });
 
+test('对象打印中的非层级 URI 保留为字符串，记录字段值位置', () => {
+  const input = 'message=Message(role=USER, parts=[TextPart(content=你好)], extensions=[urn:example:ext]), contact=mailto:agent@example.com, phone=tel:+123456789, identifier=custom+test:item:v1';
+  const result = parseInput(input, { includeFields: true });
+  assert.equal(result.source, 'object-dump');
+  assert.deepEqual(result.value.message.extensions, ['urn:example:ext']);
+  assert.equal(result.value.contact, 'mailto:agent@example.com');
+  assert.equal(result.value.phone, 'tel:+123456789');
+  assert.equal(result.value.identifier, 'custom+test:item:v1');
+  const extensions = result.fields.find(field => field.path.join('.') === 'message.extensions');
+  assert.equal(input.slice(extensions.valueStart, extensions.valueEnd), '[urn:example:ext]');
+  assert.ok(result.notes.some(note => note.includes('URI')));
+  assert.ok(result.notes.every(note => !note.includes('urn:example:ext')));
+});
+
+test('非层级 URI 不吞掉缺失分隔符或未引用的空白内容', () => {
+  for (const input of ['identifier=urn:example:ext next=value', 'identifier=urn:example:ext next:value', 'a=name:foo bar:bad', 'extensions=[urn:example:one urn:example:two]']) {
+    rejects(input, /边界不明确/);
+  }
+});
+
 test('完整代码围栏、尾逗号和完整值之后缺少的结束括号可明确修复', () => {
   const fenced = parseInput('```json\n{"a":[1,2,],}\n```');
   assert.deepEqual(fenced.value, { a: [1, 2] });

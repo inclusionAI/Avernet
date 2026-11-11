@@ -172,6 +172,21 @@ test('有效扩展 URI 与引用任务 ID 作为标准字段保留', () => {
   assert.deepEqual(output.params.message.referenceTaskIds, []);
 });
 
+test('完整 URI 可保留，不能将不完整地址或容错修正的地址作为协议字段输出', () => {
+  for (const url of ['https://example.com/file?name=a%20b', 'urn:example:extension', 'file:///tmp/example.txt']) {
+    const { output } = convertStructuredMessage({ ...minimal(), parts: [{ url }], extensions: [url] });
+    assert.equal(output.params.message.parts[0].url, url);
+    assert.deepEqual(output.params.message.extensions, [url]);
+  }
+  for (const url of ['https://', 'https://?x', 'https:example.com', 'https:///example.com', 'urn:', 'custom://', '/relative/file', 'https://example.com/%ZZ', 'https://example.com/has space', 'https://example.com/\\path']) {
+    rejects(() => convertStructuredMessage({ ...minimal(), parts: [{ url }] }), 'parts[0].url');
+    const extensions = ['urn:example:valid', url];
+    const { output } = convertStructuredMessage({ ...minimal(), extensions });
+    assert.equal(Object.hasOwn(output.params.message, 'extensions'), false);
+    assert.deepEqual(output.params.message.metadata.sourceFields.extensions, extensions);
+  }
+});
+
 test('根 Message 的 parts 优先于同名 message 业务字段', () => {
   const input = { ...minimal(), message: '业务提示文本' };
   const { output } = convertStructuredMessage(input);

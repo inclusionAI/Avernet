@@ -162,8 +162,8 @@ export function parseInput(text, options = {}) {
       const start = position;
       while (position < sourceText.length && !',[]{}()'.includes(sourceText[position])) position++;
       const raw = sourceText.slice(start, position).trim();
-      if (/^[a-z][a-z0-9+.-]*:\/\/[^\s"'\\]+$/i.test(raw)) {
-        notes.add('已将未加引号的完整 URI 解析为字符串。');
+      if (/^[a-z][a-z0-9+.-]*:[^\s"'\\]+$/i.test(raw)) {
+        notes.add('已将未加引号的 URI 值解析为字符串。');
         return raw;
       }
       if (!raw || /[:="'\\]|\/\*|(?:^|\s)\/\//.test(raw)) fail('裸值边界不明确，请补齐逗号或给字符串加引号。');

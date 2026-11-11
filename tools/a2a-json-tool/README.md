@@ -48,11 +48,13 @@ metadata={"scene":"chat"}
 | Message 的其余非协议字段 | `params.message.metadata.sourceFields` |
 | 外层除 `message` 和已映射 `sessionId` 之外的业务字段（包括外层 metadata） | `params.metadata.sourceEnvelope` |
 
+当根对象本身是明确消息时，优先转换根消息；否则提取嵌套 `message`。外层同名业务 `parts` 保留在 `params.metadata.sourceEnvelope.parts`，不会干扰嵌套消息转换，字段联动使用相同规则。
+
 本工具采用以下业务映射规则：结构化消息中的 `sessionId` 转成 `contextId`，不再重复存入业务 metadata。内外层同时提供时必须相同，并与已提供的 `contextId`、网页选项中的 Context ID 一致；冲突或非字符串、空值会报错。Part 或已有 metadata 内的同名业务字段保持原位置；普通业务 JSON 的 data 封装规则不变。这是工具的业务适配约定，不是 A2A 定义的同名字段转换。
 
-实际发送时，目标 Agent 需接受该 `contextId`；若同时提供 `taskId`，它必须属于同一上下文。本工具不连接 Agent，不能验证远端任务归属。`queryId` 不推断为 JSON-RPC 请求 ID。合法 `referenceTaskIds` 沿用；非 URI 的业务 `extensions` 保留到 `metadata.sourceFields`。已有 metadata 与保留字段命名冲突时会报错，避免覆盖。
+实际发送时，目标 Agent 需接受该 `contextId`；若同时提供 `taskId`，它必须属于同一上下文。本工具不连接 Agent，不能验证远端任务归属。`queryId` 不推断为 JSON-RPC 请求 ID。合法 `referenceTaskIds` 沿用；非 URI 或不完整 URI（如 `https://`）的业务 `extensions` 整组保留到 `metadata.sourceFields`，不声明为协议扩展。Part 的 `url` 不合法时会报错；URI 语法检查不代表资源可访问或远端支持该扩展。已有 metadata 与保留字段命名冲突时会报错，避免覆盖。
 
-片段解析支持 `key:value`、`key=value`、嵌套 `Name(...)`、数组、嵌入 JSON、尾逗号、完整 Markdown 代码围栏；当值完整且仅缺末尾闭括号时可补齐。网页会显示解析和字段映射说明，并提供“解析后的 JSON”预览，转换时保留原始输入。点击“格式化”会将输入替换为解析后的标准 JSON。
+片段解析支持 `key:value`、`key=value`、嵌套 `Name(...)`、数组、嵌入 JSON、尾逗号、完整 Markdown 代码围栏；当值完整且仅缺末尾闭括号时可补齐。对象打印中可使用未加引号的 `urn:example:ext` 等 URI 值；含逗号或结构括号的值仍需加引号。网页会显示解析和字段映射说明，并提供“解析后的 JSON”预览，转换时保留原始输入。点击“格式化”会将输入替换为解析后的标准 JSON。
 
 截断字符串、缺少值、错配括号或无法确定边界的片段仍会报错；不会执行输入代码或编造缺失内容。AgentCard 的必需字段要求仍然适用。
 

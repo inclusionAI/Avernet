@@ -69,6 +69,33 @@ test('根 Message 与其同名业务 message 字段保持独立', () => {
   assert.deepEqual(resolveFieldPath(['parts', 1, 'mediaType'], result), messagePath('parts', 1, 'mediaType'));
 });
 
+test('外层 parts 与嵌套消息 parts 的字段和值联动到不同输出位置', () => {
+  const text = JSON.stringify({
+    parts: [{ content: '外层业务文本' }], sessionId: 'session_demo',
+    message: { role: 'USER', parts: [{ content: '嵌套消息文本' }] }
+  });
+  const result = convertInput(text, 'message');
+  for (const [path, expected] of [
+    [['parts', 0, 'content'], ['params', 'metadata', 'sourceEnvelope', 'parts', 0, 'content']],
+    [['message', 'parts', 0, 'content'], messagePath('parts', 0, 'text')],
+    [['sessionId'], messagePath('contextId')]
+  ]) {
+    const field = result.inputFields.find(item => JSON.stringify(item.path) === JSON.stringify(path));
+    for (const [start, end] of [[field.start + 1, field.end - 1], [field.valueStart + 1, field.valueEnd - 1]]) {
+      const selected = findFieldAtSelection(result.inputFields, start, end);
+      assert.deepEqual(resolveFieldPath(selected.path, result), expected);
+    }
+  }
+});
+
+test('不完整 URI 扩展原样保留到业务 metadata，字段联动同步', () => {
+  const extensions = ['urn:example:extension', 'https://'];
+  const result = convert({ role: 'USER', parts: [{ text: 'hello' }], extensions });
+  assert.equal(Object.hasOwn(result.output.params.message, 'extensions'), false);
+  assert.deepEqual(result.output.params.message.metadata.sourceFields.extensions, extensions);
+  assert.deepEqual(resolveFieldPath(['extensions', 1], result), messagePath('metadata', 'sourceFields', 'extensions', 1));
+});
+
 test('根、包装内外层 sessionId 的字段名和值均定位 contextId，其他层同名字段不改变', () => {
   for (const input of [
     { role: 'USER', sessionId: 'same_session', parts: [{ text: 'hello', sessionId: 'part_business' }] },

@@ -32,6 +32,31 @@ test('标准 JSON 中明确的消息结构同样提取，非消息字段不触�
   assert.equal(convertInput('{"parts":["business-part"],"count":1}', 'message').mapping, 'data');
 });
 
+test('外层业务 parts 不阻止提取嵌套消息，保留外层字段与映射说明', () => {
+  const input = {
+    parts: ['business-part'], sessionId: 'session_demo',
+    message: { role: 'USER', parts: [{ content: '嵌套文本' }], messageId: 'nested_message' }
+  };
+  const result = convertInput(JSON.stringify(input), 'message');
+  assert.equal(result.mapping, 'structured-message');
+  assert.equal(result.output.params.message.messageId, 'nested_message');
+  assert.equal(result.output.params.message.contextId, 'session_demo');
+  assert.deepEqual(result.output.params.message.parts, [{ text: '嵌套文本' }]);
+  assert.deepEqual(result.output.params.metadata.sourceEnvelope, { parts: ['business-part'] });
+  assert.ok(result.noteRows.some(row => row.source === '$.message.parts[0].content'
+    && row.target === '$.params.message.parts[0].text'));
+});
+
+test('根和嵌套都像消息时保持根消息优先，嵌套业务 message 完整保留', () => {
+  const nested = { role: 'AGENT', parts: [{ text: '嵌套业务数据' }] };
+  const input = { role: 'USER', messageId: 'root_message', parts: [{ text: '根消息' }], message: nested };
+  const result = convertInput(JSON.stringify(input), 'message');
+  assert.equal(result.output.params.message.messageId, 'root_message');
+  assert.deepEqual(result.output.params.message.parts, [{ text: '根消息' }]);
+  assert.deepEqual(result.output.params.message.metadata.sourceFields.message, nested);
+  assert.equal(Object.hasOwn(result.output.params, 'metadata'), false);
+});
+
 test('AgentCard 字段片段可转换，语法修复不填补缺失的身份或技能', () => {
   const input = '"name":"助手", "description":"分析 JSON", "version":"1.0.0", "url":"http://localhost:8080/a2a", "skills":[{"id":"analyze","name":"分析","description":"分析数据","tags":["data"]}],';
   const result = convertInput(input, 'card');

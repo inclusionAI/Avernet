@@ -1,3 +1,5 @@
+import { getMessageSourcePath } from './message-mapper.js';
+
 const isObject = value => value !== null && typeof value === 'object';
 const validPath = path => Array.isArray(path) && path.length > 0 && path.every(segment =>
   typeof segment === 'string' || (Number.isSafeInteger(segment) && segment >= 0));
@@ -14,7 +16,7 @@ function hasPath(value, path) {
 
 function structuredPath(sourcePath, input, output) {
   const messageBase = ['params', 'message'];
-  const wrapped = !Object.hasOwn(input, 'parts') && Object.hasOwn(input, 'message');
+  const wrapped = getMessageSourcePath(input)?.[0] === 'message';
   if ((sourcePath.length === 1 && sourcePath[0] === 'sessionId')
     || (wrapped && sourcePath.length === 2 && sourcePath[0] === 'message' && sourcePath[1] === 'sessionId')) {
     return [...messageBase, 'contextId'];

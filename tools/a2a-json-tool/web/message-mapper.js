@@ -7,8 +7,28 @@ const roles = new Map([
   ['USER', 'ROLE_USER'], ['user', 'ROLE_USER'], ['ROLE_USER', 'ROLE_USER'],
   ['AGENT', 'ROLE_AGENT'], ['agent', 'ROLE_AGENT'], ['ROLE_AGENT', 'ROLE_AGENT']
 ]);
-const uri = value => /^[a-z][a-z0-9+.-]*:[^\s]+$/i.test(value);
 const fieldsExcept = (value, known) => Object.fromEntries(Object.entries(value).filter(([key]) => !known.includes(key)));
+
+function uri(value) {
+  if (!/^[a-z][a-z0-9+.-]*:[^\s\\]+$/i.test(value) || /%(?![0-9a-f]{2})/i.test(value)) return false;
+  try {
+    const parsed = new URL(value);
+    if (['http:', 'https:', 'ftp:', 'ws:', 'wss:'].includes(parsed.protocol)) {
+      return /^[a-z]+:\/\/[^/?#]/i.test(value) && Boolean(parsed.hostname);
+    }
+    return Boolean(parsed.hostname || parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+// 转换分派、消息提取与字段联动共用同一选择规则；明确的根消息优先。
+export function getMessageSourcePath(input) {
+  if (!objectLike(input)) return null;
+  if ((own(input, 'parts') || own(input, 'messageId')) && (own(input, 'role') || input.kind === 'message')) return [];
+  const nested = input.message;
+  return objectLike(nested) && (own(nested, 'parts') || own(nested, 'role')) ? ['message'] : null;
+}
 
 function metadataWithFields(value, sourceFields, path) {
   if (value !== undefined && !objectLike(value)) fail(`${path}.metadata`, '必须是 JSON 对象。');
@@ -66,7 +86,7 @@ export function convertStructuredMessage(input, options = {}) {
   const { output } = convertMessage(input, options);
   const cloned = output.params.message.parts[0].data;
   if (!objectLike(cloned)) fail('$', '结构化消息输入必须是对象。');
-  const wrapped = !own(cloned, 'parts') && own(cloned, 'message');
+  const wrapped = getMessageSourcePath(cloned)?.[0] === 'message';
   const source = wrapped ? cloned.message : cloned;
   const path = wrapped ? '$.message' : '$';
   if (!objectLike(source)) fail(path, '必须是消息对象。');
