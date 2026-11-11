@@ -255,6 +255,18 @@ def test_edit_domain_refuses_space_member_and_admits_explicit_editor(live_backen
                 owner_id=owner_id,
                 member_id=member_id,
             )
+            explicit_inventory = member_client.get(
+                "/openapi/v1/bots/all",
+                params={"user_id": member_id, "owner_id": member_id},
+                headers=_principal_headers(member_id) | {"X-Space-Id": str(space_id)},
+            )
+            assert explicit_inventory.status_code == 200, explicit_inventory.text
+            explicit_card = {
+                item["bot_id"]: item
+                for item in explicit_inventory.json()["data"]["items"]
+            }[bot_id]
+            assert "view_config" in explicit_card["actions"]
+
             beyond_bar = member_client.post(
                 f"/openapi/v1/bots/{bot_id}/skill-sets",
                 params={"user_id": member_id, "owner_id": owner_id},

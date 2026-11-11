@@ -119,3 +119,21 @@ it.each([false, true])(
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
   },
 );
+
+it.each([
+  ['managed', 'OFFLINE', '已下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['managed', 'RELEASED', '已回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+  ['team', 'OFFLINE', '协作下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['team', 'RELEASED', '协作回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
+] as const)('收起侧栏的 %s/%s Bot 保持置灰且不能快捷打开', async (section, status, name, reason) => {
+  const unavailable = botOf(`${section}-${status}:1`, name, { status });
+  unavailable.section = section;
+  const props = renderRail({ sections: [{ id: section, label: 'Bot', items: [unavailable] }] });
+
+  expect(screen.queryByRole('button', { name: `打开 ${name}` })).not.toBeInTheDocument();
+  const tile = screen.getByLabelText(`${name}（不可发起会话）`);
+  fireEvent.click(tile);
+  expect(props.onQuickOpen).not.toHaveBeenCalled();
+  fireEvent.pointerMove(tile, { pointerType: 'mouse' });
+  await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(reason));
+});
