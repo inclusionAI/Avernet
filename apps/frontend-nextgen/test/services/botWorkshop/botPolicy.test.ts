@@ -27,6 +27,21 @@ describe('botPolicy', () => {
     expect(canEnterBotDetail(viewer, 'visitor')).toBe(false);
     expect(getInventoryActionAvailability(bot, 'chat').enabled).toBe(false);
   });
+  test('运行态服务 Bot 的明确协作者可进入只读配置页，但不获得编辑入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'online-collaborated-bot',
+      owner_entity_id: 'owner',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      publish: { id: 1, status: 'SUCCESS', version: 1 },
+      actions: ['view', 'view_config', 'chat'],
+    }).item;
+
+    expect(canEnterBotDetail(bot, 'collaborator')).toBe(true);
+    expect(getInventoryActionAvailability(bot, 'edit')).toMatchObject({ visible: false, enabled: false });
+  });
   test('部署中禁止进入、编辑和对话，但保留日志排障', () => {
     const bot = mapBotDto({ bot_id: 'b-1', status: 'PENDING', bot_type: 'service' }).item;
     const actions = getBotActionAvailability(bot, { canEdit: true });
