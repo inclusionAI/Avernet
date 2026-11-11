@@ -75,7 +75,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a>
-<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a>
+<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.1</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.2</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -168,6 +168,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D2</span></td><td>多实例是一等约束</td><td>SDK 的默认行为必须在多实例下正确；单实例只是特例。</td><td>要求粘性路由。MOSN 负载均衡下不现实。</td></tr>
 <tr><td><span class="tag d">D3</span></td><td>多实例只提供跨实例存储的 SPI 和参考实现</td><td>Task 始终在接收它的实例上执行。其他实例只读写共享存储。</td><td>基于消息队列的事件复制（a2a-java 的 replicated queue manager）。引入额外中间件依赖。</td></tr>
 <tr><td><span class="tag d">D4</span></td><td>接受 D3 带来的三项降级</td><td>跨实例订阅为轮询合成，粒度约 1 秒；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复。</td><td>—</td></tr>
+<tr><td><span class="tag d">D5</span></td><td>以进程内 SDK（API + SPI）作为本期唯一的交付形态</td><td>公司 90% 以上技术栈是 Java。业务引入 starter、实现 SPI、自己运维存储。标准靠窄 SPI、TCK 准入和版本治理保证（8.11）。</td><td>BCN 托管的协议适配层。多一跳，所有流式流量经过一个中心服务；本期不做，但核心保持可托管。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -655,6 +656,29 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <tr><td>排查标识</td><td>BCS 侧排查使用 <code>run_id</code>，Agent 侧使用 <code>taskId</code>。BCS 把 <code>run_id</code> 作为初始消息的 <code>messageId</code>，SDK 在日志中同时记录两者。</td></tr>
 </table></div>
 
+<h3 id="s8-11"><span class="n">8.11</span>交付形态与标准的保证</h3>
+<p>API + SPI 是接口形态：API 是业务调用的部分（<code>AgentResponseSink</code>、<code>ToolEventEmitter</code>、注册接口），SPI 是业务实现的部分（<code>BcnAgent</code>、<code>TaskStore</code>）。它本身不保证各业务的实现一致。协议实现放在哪里运行，有两种形态。</p>
+<div class="tw"><table>
+<tr><th></th><th>进程内 SDK（本期）</th><th>BCN 托管适配层（不做）</th></tr>
+<tr><td>业务要做的</td><td>引入 starter，实现 SPI，建表并运维存储</td><td>只实现一个简单的 SOFARPC 流式接口</td></tr>
+<tr><td>协议升级</td><td>每个业务升级 SDK 并发布</td><td>BCN 团队发布一次</td></tr>
+<tr><td>多实例与存储</td><td>每个业务各自部署，SDK 提供统一实现</td><td>BCN 统一解决一次</td></tr>
+<tr><td>非 Java 技术栈</td><td>不支持，按 Profile 自行实现并通过 TCK</td><td>支持</td></tr>
+<tr><td>主要代价</td><td>版本碎片化；业务要运维存储</td><td>多一跳；中心服务的容量和可用性成为全局风险；业务接口变成一套私有协议，Agent 本身不再是标准 A2A 服务</td></tr>
+</table></div>
+<p>公司 90% 以上技术栈是 Java，因此本期只做进程内 SDK（<span class="tag d">D5</span>）。为了以后可以增加托管形态而不出现第二套协议逻辑，约束如下：</p>
+<ul>
+<li><code>server-core</code> 不依赖 Spring 和 SOFABoot。托管适配层可以由 <code>server-core</code> 加一个通过 RPC 调用业务接口的 <code>BcnAgent</code> 实现构成。</li>
+<li><code>AgentRequest</code> 和 <code>AgentResponseSink</code> 只包含可以跨进程表达的内容，不暴露线程、容器对象或进程内句柄。</li>
+</ul>
+<h4>进程内形态下，标准靠三件事保证</h4>
+<div class="tw"><table>
+<tr><th>机制</th><th>做法</th><th>防止的问题</th></tr>
+<tr><td>窄 SPI</td><td>简易层只让业务提供输入到输出文本流的逻辑。Task、状态、Artifact、终态、存储写入都不经过业务代码。开放的每个 SPI（尤其 <code>TaskStore</code>）都配合同测试，自定义实现必须通过。</td><td>业务代码写错协议行为</td></tr>
+<tr><td>TCK 准入</td><td>TCK 不只是自测工具。注册或升级等级时提供 TCK 通过记录，BCS 保存每个 Agent 通过的等级、Profile 版本和时间。见 <span class="tag q">Q13</span>。</td><td>声明合规但实际不合规</td></tr>
+<tr><td>版本治理</td><td>Card 的 profile 声明扩展带 <code>sdk</code> 字段，BCS 可以统计全量版本分布。Profile 规定最低 SDK 版本，低于它的 Agent 在注册或更新时得到告警或被拒绝。见 <span class="tag q">Q14</span>。</td><td>版本碎片化；协议修复无法触达</td></tr>
+</table></div>
+
 <h2 id="s9"><span class="n">9</span>多实例设计</h2>
 <h3 id="s9-1"><span class="n">9.1</span>模型</h3>
 <ul>
@@ -923,6 +947,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td>接入文档更新：无凭据调用从"本期限制"改为 Profile 要求；GRPC 为必选</td><td><span class="tag d">D1</span>、P-02</td><td>P1</td></tr>
 <tr><td>下行合同测试与 TCK 的 Client 方向用例对齐</td><td>第 10 节</td><td>P2 起逐步</td></tr>
 <tr><td>确认取消超时与 SDK 的 <code>cancel.wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
+<tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.11，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
 </table></div>
 <p>以下不在本设计范围内，但会影响整体可用性：BCS 的运行跟踪目前按单实例部署使用；兼容入口保留的 Bearer 下行链路不属于 Profile，继续按原约定工作。</p>
 
@@ -972,13 +997,15 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td><span class="tag q">Q3</span></td><td>调用上下文除 <code>userId</code> 外还需要哪些字段（租户、工号、渠道、语言等）</td><td>首版只有 <code>userId</code></td><td>7.2</td></tr>
 <tr><td><span class="tag q">Q4</span></td><td>现有 Harness adapter 的去向</td><td>扩展编解码和审批逻辑迁入 SDK；Harness 改为基于 SDK 的一个 <code>AdvancedBcnAgent</code> 实现</td><td>P4</td></tr>
 <tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>方案 B</td><td>8.2，决定 P1 工作量</td></tr>
-<tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的主要形态及数量分布</td><td>需要各平台提供</td><td>简易层是否需要更多便捷形式</td></tr>
+<tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的接口形态分布（同步、流式、是否带工具和审批）。技术栈已确认 90% 以上为 Java</td><td>需要各平台提供</td><td>简易层是否需要更多便捷形式；L3 的优先级</td></tr>
 <tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>文本 1 MiB；保留 7 天</td><td>P-74、9.8</td></tr>
 <tr><td><span class="tag q">Q8</span></td><td>L2 Agent 是否默认只接受来自 BCS 的调用</td><td>SDK 提供白名单能力，默认不开启；由平台按数据敏感度决定</td><td>7.2、第 13 节</td></tr>
 <tr><td><span class="tag q">Q9</span></td><td>停机等待时间的默认值，以及是否需要与发布系统联动</td><td>30 秒</td><td>8.7</td></tr>
 <tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.9</td></tr>
 <tr><td><span class="tag q">Q11</span></td><td>参考存储是否需要除 JDBC 外的实现（例如 Tair）</td><td>首期只提供 JDBC；其他实现通过 TaskStore 合同测试后可自行使用</td><td>9.8</td></tr>
 <tr><td><span class="tag q">Q12</span></td><td>GRPC 之外，HTTP+JSON 端点是否需要在生产环境开放</td><td>默认关闭，仅用于调试</td><td>P-03</td></tr>
+<tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
+<tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
