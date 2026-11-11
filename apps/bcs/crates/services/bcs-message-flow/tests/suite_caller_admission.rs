@@ -5,6 +5,8 @@ mod session_support;
 
 #[path = "cases/caller_admission_contract.rs"]
 mod caller_admission_contract;
+#[path = "cases/caller_inline_policy_off_contract.rs"]
+mod caller_inline_policy_off_contract;
 #[path = "cases/caller_dispatch_access_revalidation.rs"]
 mod caller_dispatch_access_revalidation;
 #[path = "cases/caller_dispatch_commit_contract.rs"]

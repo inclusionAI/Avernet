@@ -1,8 +1,14 @@
 //! Caller configuration delivery gate (P1.4 production consumer).
 //!
-//! Until P2 wires the protected caller send path, no Bot with an enabled
-//! caller switch may be content-dispatched: Owner/ordinary transports must
-//! never silently execute caller-enabled work. This decorator wraps every
+//! No Bot with an enabled caller switch may be content-dispatched over the
+//! ordinary transports: they must never silently execute caller-enabled
+//! work. The protected send path is threaded through the managed queue
+//! (the web-send admission force-selects caller-enabled targets into the
+//! managed rows, where the protected dispatcher claims the parked
+//! identity), so a Human's group speech does not ride this port for a
+//! caller-enabled target anymore — the gate stays as the closed-world
+//! guard for every transport entry that bypasses that seam (bot relays,
+//! callbacks, legacy clients). This decorator wraps every
 //! `BotDeliveryPort` and consults the authoritative configuration through
 //! the control-plane core on every content delivery:
 //!
