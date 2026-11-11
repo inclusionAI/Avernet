@@ -76,6 +76,20 @@ pub(super) async fn ownerships_for_projects_per_item(
         "version-0 tail stays None in every chunk"
     );
 
+    // Repeated IDs spanning SQL chunks must not duplicate persisted edges.
+    // Keep absent items interleaved so output positions/multiplicity matter.
+    let mut repeated = vec![owned_bot.to_string(); 257];
+    repeated[128] = "bot_own_batch_missing".to_string();
+    let views = repo.ownerships_for(&repeated).await.expect("repeated IDs");
+    assert_eq!(views.len(), repeated.len());
+    for (id, view) in repeated.iter().zip(&views) {
+        if id == owned_bot {
+            assert_eq!(view.as_ref().unwrap().owner_user_id, "own_batch_owner");
+        } else {
+            assert!(view.is_none());
+        }
+    }
+
     // A corrupt member is a strict batch error, never a silent None.
     let corrupt = "bot_own_batch_corrupt";
     fixture.seed_bot(env, corrupt, 1).await;

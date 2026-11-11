@@ -15,7 +15,7 @@ use bcs_service_api::ServiceResult;
 use bcs_service_api::types::bot_authority::{BotOwnershipView, human_actor_id};
 
 use super::{DbBotAuthorityStore, owner_integrity_error};
-use super::reads::chunked;
+use super::reads::{chunked, distinct_in_order};
 
 impl DbBotAuthorityStore {
     /// The full `ownerships_for` spine: same length and order as
@@ -31,7 +31,9 @@ impl DbBotAuthorityStore {
         if bot_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let id_refs: Vec<&str> = bot_ids.iter().map(String::as_str).collect();
+        // Query each persisted Bot once, even if its ID crosses input chunks.
+        // Keep bot_ids untouched for the aligned result projection below.
+        let id_refs = distinct_in_order(bot_ids.iter());
 
         // Chunked `(bot_id → ownership_version)`; absent rows are
         // missing/deleted bots and stay a per-item `None`.
@@ -107,10 +109,7 @@ impl DbBotAuthorityStore {
     /// Duplicate owners of ONE bot surface as multiple rows and are
     /// the caller's integrity decision, same as `owner_counts_in`.
     async fn owner_actors_in(&self, bots: &[&str]) -> ServiceResult<Vec<(String, String)>> {
-        let mut params = vec![self.env_param()];
-        for bot in bots {
-            params.push(DbValue::from(*bot));
-        }
+        let (identity, params) = self.indexed_batch_identity("to_id", bots);
         let rows = self
             .query(
                 "authority_owner_actors_chunk",
@@ -119,7 +118,7 @@ impl DbBotAuthorityStore {
                         "SELECT to_id, from_id FROM edge_grants \
                          WHERE env = ? AND grant_kind = 'owner' AND grant_ref_id = 0 \
                            AND rules IS NULL AND status = 'approved' AND {}",
-                        self.to_id_in(bots.len())
+                        identity
                     )
                     .as_str(),
                     params,
@@ -134,5 +133,27 @@ impl DbBotAuthorityStore {
                 ))
             })
             .collect()
+    }
+
+    /// Indexable candidate prefilter plus byte-exact residual for retained
+    /// MySQL collations. Only trusted column names from the store are passed.
+    /// A statement binds at most 128 distinct IDs (twice on MySQL), plus env;
+    /// the second predicate cannot widen the first one's candidate set.
+    pub(super) fn indexed_batch_identity(
+        &self,
+        column: &str,
+        ids: &[&str],
+    ) -> (String, Vec<DbValue>) {
+        let placeholders = self.id_placeholders(ids.len());
+        let mut predicate = format!("{column} IN ({placeholders})");
+        let mut params = vec![self.env_param()];
+        params.extend(ids.iter().map(|id| DbValue::from(*id)));
+        if self.flavor() == bcs_db_api::DbSqlFlavor::Mysql {
+            predicate.push_str(&format!(
+                " AND CAST({column} AS BINARY) IN ({placeholders})"
+            ));
+            params.extend(ids.iter().map(|id| DbValue::from(*id)));
+        }
+        (predicate, params)
     }
 }

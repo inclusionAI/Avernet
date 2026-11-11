@@ -6,8 +6,8 @@
 //! `status = 'approved'`), and never degrades a corrupt owner
 //! state or a storage failure into a deny/`None` (plan Task
 //! 1.5; spec §3.2 / §7). Batch queries are bounded collections
-//! of at most [`CHUNK`] ids per statement — never one query per
-//! input item.
+//! of at most [`CHUNK`] distinct identities per statement — never one query
+//! per input item. MySQL indexed prefilters may bind each identity twice.
 //!
 //! Owner/manager edges are metadata only: these reads never
 //! feed runtime permission decisions, and runtime grant edges
@@ -429,7 +429,7 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
     }
 }
 
-fn distinct_in_order<'a>(values: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
+pub(super) fn distinct_in_order<'a>(values: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
     let mut order: Vec<&str> = Vec::new();
     let mut seen: HashMap<&str, ()> = HashMap::new();
     for value in values {
@@ -476,10 +476,7 @@ impl DbBotAuthorityStore {
     /// Chunked `(bot_id → ownership_version)`; absent rows mean
     /// missing/deleted bots.
     pub(super) async fn bot_states_in(&self, bots: &[&str]) -> ServiceResult<Vec<(String, u64)>> {
-        let mut params = vec![self.env_param()];
-        for bot in bots {
-            params.push(DbValue::from(*bot));
-        }
+        let (identity, params) = self.indexed_batch_identity("bot_uuid", bots);
         let rows = self
             .query(
                 "authority_bot_states_chunk",
@@ -488,7 +485,7 @@ impl DbBotAuthorityStore {
                         "SELECT bot_uuid, ownership_version FROM bcs_bots \
                          WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
                            AND actor_kind = 'bot' AND {}",
-                        self.bot_id_in(bots.len())
+                        identity
                     )
                     .as_str(),
                     params,
@@ -514,10 +511,7 @@ impl DbBotAuthorityStore {
         &self,
         bots: &[&str],
     ) -> ServiceResult<Vec<(String, Option<String>)>> {
-        let mut params = vec![self.env_param()];
-        for bot in bots {
-            params.push(DbValue::from(*bot));
-        }
+        let (identity, params) = self.indexed_batch_identity("bot_uuid", bots);
         let rows = self
             .query(
                 "authority_legacy_creators_chunk",
@@ -526,7 +520,7 @@ impl DbBotAuthorityStore {
                         "SELECT bot_uuid, created_by FROM bcs_bots \
                          WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
                            AND {}",
-                        self.bot_id_in(bots.len())
+                        identity
                     )
                     .as_str(),
                     params,

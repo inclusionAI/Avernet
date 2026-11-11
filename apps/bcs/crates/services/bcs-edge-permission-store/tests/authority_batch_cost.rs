@@ -172,3 +172,23 @@ async fn batch_preserves_legacy_fallback_liveness_case_and_env_semantics() {
     let other = bcs_edge_permission_store::DbBotAuthorityStore::new(f.db.clone(), DbSqlFlavor::Sqlite, "other".into());
     assert_eq!(other.roles_for(&queries).await.unwrap(), vec![None; queries.len()]);
 }
+
+#[tokio::test]
+async fn ownerships_for_duplicate_ids_do_not_multiply_queries_or_owners() {
+    let db = Arc::new(CountingDb {
+        inner: Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap()),
+        reads: Mutex::new(Reads::default()),
+        fail_edges: AtomicBool::new(false),
+    });
+    let f = new_fixture_with_db("owndup", db.clone()).await;
+    f.seed_bot("owndup", "owned", 1).await;
+    f.grant_edge("owndup", "owned", "human_owner", BotAccessRelation::Owner).await;
+    for count in [129, 257] {
+        *db.reads.lock().unwrap() = Reads::default();
+        let ids = vec!["owned".to_string(); count];
+        let views = f.store.ownerships_for(&ids).await.expect("duplicate IDs are legal");
+        assert_eq!(views.len(), count);
+        assert!(views.iter().all(|v| v.as_ref().unwrap().owner_user_id == "owner"));
+        assert_eq!(db.reads.lock().unwrap().count, 2, "one distinct Bot");
+    }
+}

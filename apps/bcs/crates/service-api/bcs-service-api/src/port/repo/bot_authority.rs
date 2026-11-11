@@ -46,7 +46,7 @@ pub trait BotAuthorityRepoPort: Send + Sync {
 
     /// Batch role read; same length/order as the input, bounded
     /// collection queries (≤
-    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`] ids per
+    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`] distinct ids per
     /// statement).
     async fn roles_for(
         &self,
@@ -69,9 +69,11 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     /// (never a silent `None`), and storage failures are `Err`.
     ///
     /// Implementations use bounded collection queries (≤
-    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`] ids per
+    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`] distinct ids per
     /// statement), never one statement per input, and read zero rows
-    /// for an empty input.
+    /// for an empty input. Duplicate inputs preserve result order without
+    /// multiplying reads. Dialects may bind each id twice for an indexed
+    /// prefilter plus a byte-exact residual predicate.
     async fn ownerships_for(
         &self,
         bot_ids: &[String],
