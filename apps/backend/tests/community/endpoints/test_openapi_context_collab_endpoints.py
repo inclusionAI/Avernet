@@ -144,7 +144,6 @@ def _seed_create_happy(world) -> None:
                 "event_kind": "task.created",
                 "primitive_type": "Task",
             },
-            replayed=False,
         )
 
     bind_overrides(
