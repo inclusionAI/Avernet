@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 在建群组件求值前注册真实 Open 选路槽位。
+import '../../../../helpers/registerOpenGroupServiceBotRoutingSlots';
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';

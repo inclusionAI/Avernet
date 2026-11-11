@@ -74,16 +74,16 @@ export function AppSidebar({
               />
             )}
             {globalSearch && (
-            <IconButton
-              size="sm"
-              className="text-muted-foreground"
-              label="搜索"
-              icon={<Search className="h-4 w-4" />}
-              onClick={() => {
-                Tracert.click(Points.shell.globalSearchOpen);
-                setSearchOpen(true);
-              }}
-            />
+              <IconButton
+                size="sm"
+                className="text-muted-foreground"
+                label="搜索"
+                icon={<Search className="h-4 w-4" />}
+                onClick={() => {
+                  Tracert.click(Points.shell.globalSearchOpen);
+                  setSearchOpen(true);
+                }}
+              />
             )}
             {notificationBell && <NotificationBell size="sm" className="text-muted-foreground" />}
           </div>

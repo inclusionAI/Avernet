@@ -16,6 +16,7 @@
  *   因此不含任务引擎链。
  * - TaskPanel 重开快照（useSessionTaskPanelTab）同样经 sessionTaskPanelTab 槽位装配
  *   （collab 形态 null → 恒无快照，Monitor 判空退化为消息标记判定）。
+ * - 右缘域面板 × 副屏互斥由共享 useSidePanePanelMutex 编排，保留发布分支的让位/恢复行为。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { SessionView } from '@/domain/collaboration';

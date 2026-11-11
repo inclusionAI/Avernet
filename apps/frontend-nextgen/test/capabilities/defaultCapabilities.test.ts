@@ -347,7 +347,7 @@ describe('getPublicBotBackendEnabled / getShellVisibility 可选 Backend 决策'
     expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(true);
     expect(defaultCapabilities.getShellVisibility()).toEqual({
       status: 'available',
-      value: { spaceSwitcher: false, notificationBell: true },
+      value: { spaceSwitcher: false, notificationBell: true, globalSearch: true },
     });
   });
 
@@ -359,7 +359,7 @@ describe('getPublicBotBackendEnabled / getShellVisibility 可选 Backend 决策'
     expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(false);
     expect(defaultCapabilities.getShellVisibility()).toEqual({
       status: 'available',
-      value: { spaceSwitcher: false, notificationBell: false },
+      value: { spaceSwitcher: false, notificationBell: false, globalSearch: true },
     });
   });
 
