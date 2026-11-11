@@ -102,8 +102,6 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 
 请求采用 `snake_case`，不接受未定义字段。同一 `event_id + delivery_key` 对应同一任务；内容不同返回 `409`。
 
-TE 初评在 CW 复用维护周期等待原会话轨迹，从建单起最多等待 30 分钟。找到对应轨迹即派发 AIS。到期仍缺证据时按效果未知结束初评。
-
 OpenClaw 读取优先校验原会话键的索引映射。索引没有该键时，可凭 `session_id`，或旧任务完整 Cron 键 `agent:<agent>:cron:<cron>:run:<id>` 中的 ID，在冻结的目标 Bot 和 Agent 目录读取同名文件，并校验文件头的会话 ID。不会使用已被下一轮覆盖的 Cron 基础键，也不会搜索其他 Bot。历史文件可读不代表消息可投递；发送消息仍要求原会话键存在且指向同一 ID，避免新建或误投会话。
 
 HTTP `202`：
