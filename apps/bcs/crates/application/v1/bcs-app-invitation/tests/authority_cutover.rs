@@ -13,6 +13,8 @@
     reason = "test assertions intentionally fail fast"
 )]
 
+mod support;
+
 use std::sync::Arc;
 
 use bcs_bot::BotCore;
@@ -20,7 +22,7 @@ use bcs_bot_store::MemoryBotRepo;
 use bcs_app_invitation::{
     InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl,
 };
-use bcs_friend::{FriendCore, FriendRequestCore};
+use bcs_friend::FriendCore;
 use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};use bcs_service_api::application::v1::{
     CreateBotFriendRequest, FriendRequestDirection, FriendshipService,
@@ -59,8 +61,6 @@ impl Fixture {
         let relation = Arc::new(bcs_relation::RelationCore::memory());
         let friends =
             Arc::new(FriendCore::memory().with_relation(relation));
-        let friend_requests =
-            Arc::new(FriendRequestCore::memory(friends.clone(), bots.clone()));
         let session_repo: Arc<dyn SessionRepoPort> =
             Arc::new(MemorySessionRepo::new());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -84,9 +84,10 @@ impl Fixture {
             // they share the fixture's REAL chain.
             bot_authority: Some(hook.clone()),
         });
+        let legacy_friend = Arc::new(support::FakeFriendService::new());
         let service = InvitationFriendshipServiceImpl::new(
             friends.clone(),
-            friend_requests.clone(),
+            legacy_friend.clone(),
             groups.clone(),
             sessions.clone(),
             bots.clone(),
@@ -99,7 +100,7 @@ impl Fixture {
         .with_bot_authority_hook(hook.clone());
         let connect = InvitationFriendshipServiceImpl::new(
             friends,
-            friend_requests,
+            legacy_friend,
             groups,
             sessions as Arc<dyn SessionManagementService>,
             bots.clone(),
@@ -169,6 +170,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await
         .err(); // self-add may be rejected by the core; the
@@ -181,6 +183,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("stranger"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await
         .expect_err("X is denied");
@@ -201,6 +204,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await;
     assert!(
@@ -216,6 +220,7 @@ async fn friend_request_resource_leg_follows_the_current_edge() {
             caller: human_caller("bob"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-a".into(),
+            request_auth: None,
         })
         .await;
     let _ = b; // the entry's own core rules now decide for B
@@ -371,6 +376,7 @@ async fn friend_request_asset_creator_leg_is_preserved() {
             caller: human_caller("alice"),
             bot_uuid: "bot-a".into(),
             to_bot_uuid: "bot-b".into(),
+            request_auth: None,
         })
         .await
         .expect("alice's Bot requests bob's Bot");

@@ -77,10 +77,10 @@ use bcs_collaboration_store::{
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_friend::{FriendCore, FriendRequestCore};
-use bcs_friend_store::{
-    DbFriendRequestStore, DbFriendStore,
-};
+use bcs_friend::FriendCore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_friend::FriendRequestCore;
+use bcs_friend_store::DbFriendStore;
 #[cfg(any(test, feature = "test-utils"))]
 use bcs_friend_store::{MemoryFriendRepo, MemoryFriendRequestRepo};
 use bcs_invite_code_store::{DbInviteCodeStore, MemoryInviteCodeRepo};
@@ -134,7 +134,7 @@ use bcs_service_api::{
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, FriendRequestCoreService, FrontendDeliveryPort, GroupCoreService,
+    FriendCoreService, FriendService, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
     HandleBotTerminalEventCommand, HumanInputReadyEvent, InteractionService, InviteService,

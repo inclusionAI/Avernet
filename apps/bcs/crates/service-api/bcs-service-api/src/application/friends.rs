@@ -6,12 +6,17 @@ use serde::{Deserialize, Serialize};
 use crate::core::{
     DynamicStatusResponse, FriendRequest, FriendRequestDirection, FriendRequestStatus, ServiceError,
 };
+use crate::principal::RequestAuthHeaders;
 
 /// Create a friend request from the resolved caller to `to_bot`.
 #[derive(Debug, Clone)]
 pub struct CreateFriendRequestCommand {
     pub caller_actor_id: String,
     pub to_bot: String,
+    /// Forwarded inbound auth context, used only for downstream
+    /// notification/auth-sync calls. `None` for callers that carry no inbound
+    /// principal (Bot↔Bot service calls, internal tooling).
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// List friend requests for the resolved caller.
@@ -28,6 +33,10 @@ pub struct FriendRequestDecisionCommand {
     pub caller_actor_id: String,
     pub request_id: String,
     pub request_to_bot: Option<String>,
+    /// Forwarded inbound auth context, used only for downstream
+    /// notification/auth-sync calls. `None` for callers that carry no inbound
+    /// principal (Bot↔Bot service calls, internal tooling).
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// List friends of a target actor after access checks.

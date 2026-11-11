@@ -8,10 +8,10 @@
 //!
 //! Spec: `docs/superpowers/specs/2026-10-15-edge-connect-friendship-writeback-design.md`
 //!
-//! Implementations are expected to be best-effort from the *caller's* point of
-//! view: `DbConnectService` logs-and-ignores errors from this port because
-//! `edge_grants` is already the source of truth and there is no cross-store
-//! transaction.
+//! Bot↔Bot retains its best-effort coexistence policy. Human→Bot mirrors are
+//! required by the legacy Human friend list: failures must propagate, and
+//! retries must repair partial writes (including an already-removed repo row).
+//! There is no cross-store transaction; edge grants remain the mutation owner.
 
 use async_trait::async_trait;
 
@@ -19,8 +19,9 @@ use crate::ServiceResult;
 
 /// Mirror an edge-permission friendship decision into the legacy store.
 ///
-/// Only Bot↔Bot pairs are in scope; implementations may assume the pair has
-/// been kind-checked by the caller but should stay idempotent.
+/// Bot↔Bot and Human→Bot pairs are in scope. The relation mirror must be
+/// maintained for Human readers; both argument orders may occur on removal.
+/// Implementations must be idempotent and must not touch ownership edges.
 #[async_trait]
 pub trait FriendshipWritebackPort: Send + Sync {
     /// Insert the friendship row (idempotent; re-approving an approved pair

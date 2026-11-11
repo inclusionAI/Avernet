@@ -92,6 +92,8 @@ async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
             created_by: "caller-bot".to_string(),
             decided_by: None,
             decided_at: None,
+            created_at: 0,
+            updated_at: 0,
         },
     );
     let temp_dir = TempDir::new().unwrap();
@@ -162,6 +164,8 @@ async fn friend_connection_request_cancel_rejects_other_caller() {
             created_by: "other-bot".to_string(),
             decided_by: None,
             decided_at: None,
+            created_at: 0,
+            updated_at: 0,
         },
     );
     let temp_dir = TempDir::new().unwrap();

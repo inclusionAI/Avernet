@@ -13,8 +13,8 @@
 //!    owner/manager edges of the same (from, to) pair get DISTINCT
 //!    ids instead of the pre-migration collapse;
 //! 5. runtime friend reads stay healthy next to management edges
-//!    (A16 read direction), and revoke does not resurrect via
-//!    idempotent re-insert;
+//!    (A16 read direction), and re-insert after revoke reactivates
+//!    the same row in place (the upsert keeps re-adds idempotent);
 //! 6. re-running the migration produces no changes.
 //!
 //! MySQL carries the same rules as `migrations/mysql/
@@ -408,8 +408,10 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         "second approved owner must violate the unique constraint"
     );
 
-    // Runtime revoke + no-resurrect: revoking the manager edge and
-    // re-inserting it is idempotent and keeps it revoked.
+    // Runtime revoke + reactivate in place: revoking the manager edge and
+    // re-inserting it reuses the same row and brings it back to approved —
+    // the upsert keeps re-adds idempotent while reviving the revoked edge
+    // (unfriend → refriend → active holds for every grant kind).
     store
         .revoke_grant(manager_id, ENV)
         .await
@@ -432,8 +434,8 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         .remove(0);
     assert_eq!(
         manager_status.get("status"),
-        Some(&DbValue::String("revoked".into())),
-        "idempotent re-insert does not resurrect a revoked edge"
+        Some(&DbValue::String("approved".into())),
+        "re-insert after revoke reactivates the edge in place"
     );
 
     // A16 read direction: runtime friend reads ignore management

@@ -209,10 +209,16 @@ class Story:
         self.wait_card(target, lambda c: c["card"]["description"] == "Updated invoices\nfinance" and
                        c["card"]["skills"][0]["name"] == "payment")
 
-        # Friendship survives a subsequent private visibility change.
+        # Friendship survives a subsequent private visibility change. Friend
+        # requests are pending-by-default (edge-permission connect
+        # convergence): the target accepts before the relationship exists.
+        # A replayed "Already friends" response carries no request id.
         self.request("PUT", f"/bots/{target}/visibility", {"visibility": "public"})
-        self.request("POST", "/friends/request", {"from_bot": caller, "to_bot": target},
+        request = self.request("POST", "/friends/request", {"from_bot": caller, "to_bot": target},
                      owner=self.owner + "caller", token=auth)
+        request_id = (request.get("data") or {}).get("id")
+        if request_id:
+            self.request("POST", f"/friends/requests/{request_id}/accept", {}, token=token)
         self.request("PUT", f"/bots/{target}/visibility", {"visibility": "private"})
         self.wait_card(target, lambda c: c["labels"]["visibility"] == ["private"])
         item = {"id": target, "name": "Fuse display name", "summary": "Invoice result",

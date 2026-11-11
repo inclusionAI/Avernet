@@ -702,3 +702,7 @@ mod a2a_tests;
 #[cfg(test)]
 #[path = "migrations/group_card_tests.rs"]
 mod group_card_tests;
+
+#[cfg(test)]
+#[path = "migrations/friend_cutover_tests.rs"]
+mod friend_cutover_tests;
