@@ -97,6 +97,11 @@ environment. Supported values and validation live in `di/profile.py`.
 YAML files live under `src/agentclaw/community/configs/`, not a module-root
 `configs/` directory. Do not resurrect mode selection in domain services.
 
+`boot.py` sets `AGENTCLAW_CONFIG_PATH` before router imports to the first
+`configs/application.yaml` found under the working directory, then the source
+tree. OpenClaw reads that path during import, so this bootstrap must stay ahead
+of the router imports.
+
 `agentclaw` is a PEP 420 namespace. An enterprise superproject supplies a separate
 `agentclaw.corp` source root and registers implementations at its composition
 root. Public code must remain importable without that package or private SDKs.

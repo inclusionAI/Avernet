@@ -21,6 +21,7 @@ provides:
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
   - "BcsManagersPlugin + BcsManagersError — full-replace delivery of a Bot's BCS manager set"
+  - "ServiceBotEvalPlugin + ServiceBotEvalContext / ServiceBotEvalFile — service-Bot certification gate"
 consumes:
   []
 internal_dependencies:
@@ -42,6 +43,15 @@ internal_dependencies:
 ### Change impact
 
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+
+`ServiceBotEvalPlugin` is the transport-independent seam for service-Bot
+certification. It receives a server-derived `ServiceBotEvalContext` and uploads
+already read into memory (`ServiceBotEvalFile`), and returns the gate decision,
+certification view or pollable submission state as plain mappings. Community and
+local profiles bind deterministic skip implementations that allow the release
+trigger; an enterprise composition supplies the real evaluator instead of
+importing private providers or tables into community. Its Rule 25 conformance
+test drives an upper-layer consumer through the `world` fixture.
 
 Passport create, metadata-update, and credential-reissue operations may carry
 the optional TeamClaw `bot_type`. Enterprise adapters use it together with the

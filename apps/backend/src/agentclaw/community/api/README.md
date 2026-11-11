@@ -118,6 +118,7 @@ provides:
   - TrackLatestServiceProtocol
   - SkillMetadataParserProtocol
   - ServiceArtifactLineageReaderProtocol
+  - ServiceBotEvalServiceProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
   - ForumInteractionServiceProtocol
