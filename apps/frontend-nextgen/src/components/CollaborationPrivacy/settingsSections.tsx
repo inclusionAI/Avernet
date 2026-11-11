@@ -120,7 +120,7 @@ export function PublishApprovalSettings({
   );
 }
 
-/** Bot 好友审批分区：标题（含通知中心入口链接说明）+ 策略行。 */
+/** Bot 好友审批分区：标题（含审批处理入口链接说明——全栈为通知中心，BCS-only 为发现页入口）+ 策略行。 */
 export function FriendApprovalSettings({
   bot,
   onEditFriendApproval,

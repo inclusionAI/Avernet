@@ -98,6 +98,8 @@ export interface BotMetadataDto {
   template_type?: string;
   template_name?: string;
   bot_type?: string;
+  /** Owner 展示名；用于公开 Bot 卡片 ownerName 回填，未匹配到记录的候选保持「未公开」。 */
+  owner_name?: string;
   /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
   online_available?: boolean | null;
   status?: string;
@@ -177,12 +179,13 @@ export function listBots(params?: BackendUnknownRecord, signal?: AbortSignal) {
   });
 }
 
-/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。 */
-export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody) {
+/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。AbortSignal 可选透传。 */
+export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotMetadataDto>>>(BOT_ENDPOINTS.metadataQueries, {
     method: 'POST',
     params: userScopedParams(params),
     data: body,
+    signal,
   });
 }
 

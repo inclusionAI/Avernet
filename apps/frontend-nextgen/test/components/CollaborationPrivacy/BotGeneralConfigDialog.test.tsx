@@ -101,8 +101,10 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = jest.fn();
   useCollaborationPrivacyStore.getState().reset();
   // 默认 Open Core 形态：发布审批组隐藏；internal 用例内显式覆盖 capability。
+  // getPublicBotBackendEnabled 默认全栈开启：好友审批入口深链保持通知中心断言不变。
   mockCapabilities.mockReturnValue({
     getGeneralConfigPublishApprovalEnabled: () => ({ status: 'available', value: false }),
+    getPublicBotBackendEnabled: () => true,
   });
   mockedUseHumanIdentity.mockReturnValue({
     status: 'ready',
@@ -235,6 +237,7 @@ describe('BotGeneralConfigDialog Coding Bot 协作能力裁剪', () => {
 describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:INTERNAL × 团队空间）', () => {
   const internalCapabilities = {
     getGeneralConfigPublishApprovalEnabled: () => ({ status: 'available', value: true }),
+    getPublicBotBackendEnabled: () => true,
   };
 
   it('internal × 团队空间 Bot：发布审批读取真实配置并可持久化切换（AC-06/07）', async () => {

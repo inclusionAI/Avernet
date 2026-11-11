@@ -37,3 +37,11 @@ declare const BCS_ENDPOINT_PROD: string;
 
 /** Deployment opt-in after Provider provisioning; empty disables QwenWork onboarding. */
 declare const QWENWORK_PROVIDER_SLUG: string;
+
+/**
+ * 可选 Backend 增强开关（BCS 独立好友发现，define 注入）：本地 BCS-only 排障经
+ * TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false 编译关闭，构建默认全栈 true（config/config.ts）。
+ * 部署态优先读运行时 window.AVERNET_RUNTIME_CONFIG.PUBLIC_BOT_BACKEND_ENABLED（布尔值），
+ * 运行时显式设置优先于本编译常量；变量缺失（jest/SSR）按全栈默认开启。
+ */
+declare const TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: boolean | undefined;

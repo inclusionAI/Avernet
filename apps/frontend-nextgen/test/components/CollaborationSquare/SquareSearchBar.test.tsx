@@ -72,6 +72,39 @@ describe('SquareSearchBar', () => {
     expect(pill.textContent).toBe('智能');
   });
 
+  test('智能搜索 name_fallback 回退时触发器改展示「名称匹配」（bcs-standalone-friend-discovery）', () => {
+    const { rerender } = render(
+      <SquareSearchBar
+        resource="bot"
+        query="规划"
+        mode="smart"
+        searchResultMode="name_fallback"
+        onQueryChange={jest.fn()}
+        onModeChange={jest.fn()}
+      />,
+    );
+    const trigger = screen.getByRole('combobox', { name: 'Bot 搜索模式' });
+    // 回退标识替代语义渐变胶囊：普通前景色文字，不出现「智能」。
+    expect(trigger).toHaveTextContent('名称匹配');
+    expect(screen.queryByText('智能')).toBeNull();
+    const fallbackLabel = screen.getByText('名称匹配');
+    expect(fallbackLabel).toHaveClass('font-normal', 'text-muted-foreground');
+    expect(fallbackLabel.getAttribute('style')).toBeNull();
+
+    // 智能命中（semantic）时保持渐变胶囊。
+    rerender(
+      <SquareSearchBar
+        resource="bot"
+        query="规划"
+        mode="smart"
+        searchResultMode="semantic"
+        onQueryChange={jest.fn()}
+        onModeChange={jest.fn()}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: 'Bot 搜索模式' })).toHaveTextContent('智能');
+  });
+
   test('切换 Bot 搜索模式时先清空已有输入', () => {
     const onQueryChange = jest.fn();
     const onModeChange = jest.fn();
