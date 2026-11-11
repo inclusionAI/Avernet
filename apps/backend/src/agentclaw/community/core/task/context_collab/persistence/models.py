@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     Column,
     DateTime,
     Index,
@@ -108,9 +107,9 @@ class ContextCollabEventModel(Base):
     """One accepted event in a context's append-only event DAG.
 
     ``parent_event`` is NULL for the main-line creation event and otherwise
-    references an existing event in the same context; ``sequence_no`` is the
-    per-context acceptance order. The DDL defines no ``gmt_modified`` because
-    rows are never rewritten.
+    references an existing event in the same context; acceptance order is the
+    auto-increment ``id``. The DDL defines no ``gmt_modified`` because rows
+    are never rewritten.
     """
 
     __tablename__ = "ac_context_collab_event"
@@ -123,15 +122,7 @@ class ContextCollabEventModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     event_id = Column(String(128), nullable=False)
-    request_id = Column(String(256), nullable=False)
-    sequence_no = Column(BigInteger, nullable=False)
     parent_event = Column(String(128), nullable=True)
-    is_trunk = Column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=sql_text("0"),
-    )
     event_kind = Column(String(128), nullable=False)
     primitive_type = Column(String(64), nullable=False)
     actor_ref = Column(_medium_text(), nullable=False)
@@ -153,36 +144,11 @@ class ContextCollabEventModel(Base):
             unique=True,
         ),
         Index(
-            "uk_context_collab_event_request",
-            "avernet_tenant",
-            "env",
-            "collab_context_id",
-            "request_id",
-            unique=True,
-        ),
-        Index(
-            "uk_context_collab_event_seq",
-            "avernet_tenant",
-            "env",
-            "collab_context_id",
-            "sequence_no",
-            unique=True,
-        ),
-        Index(
             "idx_context_collab_event_parent",
             "avernet_tenant",
             "env",
             "collab_context_id",
             "parent_event",
-            "sequence_no",
-        ),
-        Index(
-            "idx_context_collab_event_trunk",
-            "avernet_tenant",
-            "env",
-            "collab_context_id",
-            "is_trunk",
-            "sequence_no",
         ),
     )
 

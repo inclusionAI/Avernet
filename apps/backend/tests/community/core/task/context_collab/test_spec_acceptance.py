@@ -100,7 +100,6 @@ def make_actor() -> ActorContext:
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
     """构造追加事件命令(spec §6.3 示例形);默认可追加的合法事件体。"""
     fields = {
-        "request_id": "append-001",
         "expected_version": 1,
         "event_kind": event_kind,
         "primitive_type": "Task",
@@ -141,25 +140,24 @@ def _stored_snapshot(engine, collab_context_id) -> dict:
     )
 
 
-def _event_payload(engine, collab_context_id, request_id) -> dict:
+def _event_payload(engine, collab_context_id, event_id) -> dict:
     """引擎直查事件行 payload 列(原生 JSON,无旁路内容存储)。"""
     with engine.connect() as conn:
         raw = conn.scalar(
             select(ContextCollabEventModel.payload).where(
                 ContextCollabEventModel.collab_context_id == collab_context_id,
-                ContextCollabEventModel.request_id == request_id,
+                ContextCollabEventModel.event_id == event_id,
             )
         )
     return json.loads(raw)
 
 
-def _append_message(service, ctx_id, *, request_id, expected_version,
-                    parent_event, content) -> None:
-    service.append_event(
+def _append_message(service, ctx_id, *, expected_version,
+                    parent_event, content) -> str:
+    result = service.append_event(
         ctx_id,
         make_append_command(
             "user_interaction.posted",
-            request_id=request_id,
             expected_version=expected_version,
             primitive_type="Message",
             parent_event=parent_event,
@@ -167,6 +165,7 @@ def _append_message(service, ctx_id, *, request_id, expected_version,
         ),
         make_actor(),
     )
+    return result.event_id
 
 
 class TestSpecAcceptance:
@@ -200,14 +199,12 @@ class TestSpecAcceptance:
         assert progress["completed_count"] == 0
         assert progress["active_count"] == 0
         assert progress["blocked_count"] == 0
-        # 初始事件行:task.created / Task、主干、sequence 1。
+        # 初始事件行:task.created / Task、无 parent。
         with engine.connect() as conn:
             initial = conn.execute(
                 select(
                     ContextCollabEventModel.event_kind,
                     ContextCollabEventModel.primitive_type,
-                    ContextCollabEventModel.sequence_no,
-                    ContextCollabEventModel.is_trunk,
                     ContextCollabEventModel.parent_event,
                 ).where(
                     ContextCollabEventModel.collab_context_id
@@ -216,8 +213,7 @@ class TestSpecAcceptance:
             ).one()
         assert initial.event_kind == "task.created"
         assert initial.primitive_type == "Task"
-        assert initial.sequence_no == 1
-        assert initial.is_trunk is True
+        assert initial.parent_event is None
 
     def test_2_create_rejects_missing_executor_and_missing_principal(
         self, service, engine
@@ -251,17 +247,16 @@ class TestSpecAcceptance:
         created = service.create_context(make_create_command(), make_actor())
         content = "评审结论:G4 合约一致性优先落地"
 
-        _append_message(
+        msg_event_id = _append_message(
             service,
             created.collab_context_id,
-            request_id="append-msg-001",
             expected_version=created.context_version,
             parent_event=created.current_event["event_id"],
             content=content,
         )
 
         payload = _event_payload(
-            engine, created.collab_context_id, "append-msg-001"
+            engine, created.collab_context_id, msg_event_id
         )
         assert payload["content"] == content
         assert "content_ref" not in payload
@@ -275,21 +270,28 @@ class TestSpecAcceptance:
         主干列表,current_snapshot / current_event / 统计两视角一致。"""
         created = service.create_context(make_create_command(), make_actor())
         initial_event_id = created.current_event["event_id"]
-        _append_message(  # 主干延续:parent=当前链头(初始事件)。
+        main_event_id = _append_message(  # 主干延续:parent=当前链头(初始事件)。
             service,
             created.collab_context_id,
-            request_id="append-msg-001",
             expected_version=created.context_version,
             parent_event=initial_event_id,
             content="主干消息",
         )
-        _append_message(  # 分支:parent=更早事件(非链头)→ is_trunk=False。
+        branch_event_id = _append_message(  # 分支:parent 挂更早的初始事件。
             service,
             created.collab_context_id,
-            request_id="append-branch-001",
             expected_version=created.context_version + 1,
             parent_event=initial_event_id,
             content="分支补充",
+        )
+        # R9:活动链取 current 沿 parent 回溯;分支追加后要把链头引回主干,
+        # 分支才会落在链外(trunk_events=true 被滤除)。
+        _append_message(
+            service,
+            created.collab_context_id,
+            expected_version=created.context_version + 2,
+            parent_event=main_event_id,
+            content="回到主干",
         )
 
         full = service.get_status(
@@ -309,15 +311,15 @@ class TestSpecAcceptance:
                 select(ContextCollabEventModel.parent_event).where(
                     ContextCollabEventModel.collab_context_id
                     == created.collab_context_id,
-                    ContextCollabEventModel.request_id == "append-branch-001",
+                    ContextCollabEventModel.event_id == branch_event_id,
                 )
             )
         assert branch_parent == initial_event_id
 
-        # trunk 视角:列表更短,只含主干事件。
+        # trunk 视角:列表更短,只含主干事件(分支事件被活动链滤除)。
         assert len(trunk.task_progress.events) < len(full.task_progress.events)
-        assert len(full.task_progress.events) == 3
-        assert len(trunk.task_progress.events) == 2
+        assert len(full.task_progress.events) == 4
+        assert len(trunk.task_progress.events) == 3
         # 统计与状态不变(R6:推导先于 trunk 过滤):快照(含 progress)、
         # current_event、版本两视角逐字一致。
         assert trunk.current_snapshot == full.current_snapshot
@@ -334,7 +336,6 @@ class TestSpecAcceptance:
         _append_message(
             service,
             created.collab_context_id,
-            request_id="append-msg-001",
             expected_version=created.context_version,
             parent_event=created.current_event["event_id"],
             content="进度与结构一并钉住",
@@ -371,7 +372,6 @@ class TestSpecAcceptance:
         _append_message(
             service,
             created.collab_context_id,
-            request_id="append-msg-001",
             expected_version=created.context_version,
             parent_event=created.current_event["event_id"],
             content="第二次查询前的固定消息",

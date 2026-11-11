@@ -1,8 +1,8 @@
 """``ContextCollabRepository`` create/read 落库行为(spec §6.2 / §9.4 规则 1/3/4)。
 
 覆盖:创建同事务插 1 行 collet + 1 行初始 task.created 事件(创建
-不设幂等键)、``get_current_status`` 的 trunk 过滤与 sequence_no 升序、
-未知 ID 返回 None。JSON 编解码以落库行为准校验,不只看返回对象。
+不设幂等键)、``get_current_status`` 全量按 id 升序返回(trunk 过滤在
+服务投影层)、未知 ID 返回 None。JSON 编解码以落库行为准校验。
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -126,11 +126,7 @@ class TestCreateContext:
             assert evt.event_id == record.initial_event.event_id
             assert evt.event_id.startswith("evt_")
             assert evt.collab_context_id == record.collet.collab_context_id
-            # 创建不设幂等键:初始事件的 request_id 取其自身 event_id。
-            assert evt.request_id == evt.event_id
-            assert evt.sequence_no == 1
             assert evt.parent_event is None
-            assert evt.is_trunk is True
             assert evt.event_kind == "task.created"
             assert evt.primitive_type == "Task"
             assert json.loads(evt.actor_ref) == {
@@ -150,9 +146,7 @@ class TestCreateContext:
 
         # 读路径 round-trip 必须恢复 tz-aware UTC:本仓储只写 UTC,
         # naive 恢复值统一补 UTC,与创建返回值可直接比较、可跨路径排序。
-        status = repo.get_current_status(
-            record.collet.collab_context_id, trunk_events=False
-        )
+        status = repo.get_current_status(record.collet.collab_context_id)
         assert status is not None
         round_tripped = status.events[0]
         assert round_tripped.occurred_at == record.initial_event.occurred_at
@@ -189,42 +183,30 @@ class TestGetCurrentStatus:
     def test_unknown_id_returns_none(self, db):
         repo = ContextCollabRepository(db)
 
-        assert repo.get_current_status("collet_unknown", trunk_events=False) is None
-        assert repo.get_current_status("collet_unknown", trunk_events=True) is None
+        assert repo.get_current_status("collet_unknown") is None
 
-    def test_trunk_flag_filters_but_never_drops_trunk_events(self, db):
+    def test_full_event_list_is_ordered_by_insertion_id(self, db):
+        """仓储全量返回事件,顺序即自增 id;trunk 过滤不在仓储层(R9)。"""
         repo = ContextCollabRepository(db)
         # 无执行 Agent 的创建请求:覆盖 executor_ref=None 的 JSON round-trip。
         created = repo.create_context(_create_request(executor=None))
         assert created.collet.context_spec.executor_ref is None
         assert created.collet.current_snapshot.executor_ref is None
 
-        full = repo.get_current_status(
-            created.collet.collab_context_id, trunk_events=False
-        )
+        full = repo.get_current_status(created.collet.collab_context_id)
         assert isinstance(full, ContextStatusRecord)
         assert full.collet == created.collet
         assert [event.event_id for event in full.events] == [
             created.initial_event.event_id
         ]
-        # 初始事件是主干,True/False 都包含。
-        trunk = repo.get_current_status(
-            created.collet.collab_context_id, trunk_events=True
-        )
-        assert [event.event_id for event in trunk.events] == [
-            created.initial_event.event_id
-        ]
 
-        # 手动直插一条非主干派生事件(直接 ORM,不走仓储 append_event)。
+        # 手动直插一条派生事件(直接 ORM,不走仓储 append_event)。
         with db.orm_session() as session:
             session.add(
                 ContextCollabEventModel(
                     collab_context_id=created.collet.collab_context_id,
                     event_id="evt_branch_manual",
-                    request_id="append-branch-manual",
-                    sequence_no=2,
                     parent_event=created.initial_event.event_id,
-                    is_trunk=False,
                     event_kind="user_interaction.posted",
                     primitive_type="Message",
                     actor_ref=json.dumps(
@@ -242,21 +224,15 @@ class TestGetCurrentStatus:
                 )
             )
 
-        full = repo.get_current_status(
-            created.collet.collab_context_id, trunk_events=False
-        )
-        assert [event.sequence_no for event in full.events] == [1, 2]
-        assert full.events[0].is_trunk is True
-        assert full.events[1].is_trunk is False
+        full = repo.get_current_status(created.collet.collab_context_id)
+        # 按 id 升序:初始事件在前,派生事件在后。
+        assert [event.event_id for event in full.events] == [
+            created.initial_event.event_id,
+            "evt_branch_manual",
+        ]
         assert full.events[1].payload == {
             "message_kind": "user_interaction",
             "content": "上下文做一下补充xxx",
         }
         assert full.events[1].actor_ref == CREATOR
         assert full.events[1].parent_event == created.initial_event.event_id
-        trunk = repo.get_current_status(
-            created.collet.collab_context_id, trunk_events=True
-        )
-        assert [event.event_id for event in trunk.events] == [
-            created.initial_event.event_id
-        ]

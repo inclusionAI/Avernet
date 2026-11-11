@@ -1,9 +1,8 @@
 """``ContextCollabRepository.append_event`` 落库行为(spec §9.4 规则 2/4/5)。
 
-覆盖:持锁事务内按 ``(collab_context_id, request_id)`` 幂等重放(重放先于
-版本检查、不写入不 bump)、``expected_version`` 乐观并发冲突不落任何半态、
-``parent_event`` 存在性校验、``sequence_no`` 事务内分配、``is_trunk``
-主干判定与 CAS 版本推进。幂等与冲突均以真实落库行为校验,不只看返回对象。
+覆盖(追加不设幂等键,spec 作者裁决;顺序即自增 id,主干在投影层推导):
+``expected_version`` 乐观并发冲突不落任何半态、逐字重发被 CAS 拒绝、
+``parent_event`` 存在性校验与 CAS 版本推进。以真实落库行为为准校验。
 """
 
 import dataclasses
@@ -81,14 +80,12 @@ def _created_context(repo: ContextCollabRepository) -> str:
 
 
 def _append_request(
-    request_id: str,
     expected_version: int,
     parent_event: str | None,
     *,
     snapshot_updater=None,
 ) -> AppendEventRecordRequest:
     return AppendEventRecordRequest(
-        request_id=request_id,
         expected_version=expected_version,
         event_kind="user_interaction.posted",
         primitive_type="Message",
@@ -116,29 +113,26 @@ def _event_rows(db, collab_context_id: str) -> list[ContextCollabEventModel]:
     return (
         db.query(ContextCollabEventModel)
         .filter(ContextCollabEventModel.collab_context_id == collab_context_id)
-        .order_by(ContextCollabEventModel.sequence_no.asc())
+        .order_by(ContextCollabEventModel.id.asc())
         .all()
     )
 
 
 class TestAppendEvent:
-    def test_happy_path_updates_snapshot_sequence_version_and_trunk(self, db):
+    def test_happy_path_updates_snapshot_and_version(self, db):
         repo = ContextCollabRepository(db)
         context_id = _created_context(repo)
-        initial_status = repo.get_current_status(context_id, trunk_events=False)
+        initial_status = repo.get_current_status(context_id)
         parent = initial_status.events[0].event_id
 
         record = repo.append_event(
             context_id,
-            _append_request("append-msg-001", expected_version=1, parent_event=parent),
+            _append_request(expected_version=1, parent_event=parent),
         )
 
         assert isinstance(record, EventAppendedRecord)
-        assert record.created is True
         assert record.event.event_id.startswith("evt_")
-        assert record.event.sequence_no == 2
         assert record.event.parent_event == parent
-        assert record.event.is_trunk is True  # parent == 锁行 current_event_id
         assert record.event.context_version_after == 2
         assert isinstance(record.event.occurred_at, datetime)
         assert record.collet.context_version == 2
@@ -151,9 +145,9 @@ class TestAppendEvent:
             assert row.current_event_id == record.event.event_id
             assert json.loads(row.current_snapshot)["status"] == "in_progress"
             events = _event_rows(session, context_id)
-            assert [e.sequence_no for e in events] == [1, 2]
-            assert events[1].request_id == "append-msg-001"
-            assert events[1].is_trunk is True
+            # 顺序即插入顺序:2 行,按 id 升序初始事件在前。
+            assert len(events) == 2
+            assert events[1].event_id == record.event.event_id
             assert events[1].context_version_after == 2
             assert json.loads(events[1].payload) == MESSAGE_PAYLOAD
             assert isinstance(events[1].occurred_at, datetime)
@@ -161,50 +155,47 @@ class TestAppendEvent:
                 record.event.occurred_at.replace(tzinfo=None) == events[1].occurred_at
             )
 
-    def test_duplicate_request_id_replays_before_version_check(self, db):
+    def test_verbatim_resubmit_rejected_by_cas_no_new_rows(self, db):
+        """追加无幂等键(Ruling R8):逐字重发被 expected_version 拒绝,
+        不落第二条事件(乐观并发即事实上的防重),版本不 bump。"""
         repo = ContextCollabRepository(db)
         context_id = _created_context(repo)
-        parent = repo.get_current_status(context_id, trunk_events=False).events[0].event_id
+        parent = repo.get_current_status(context_id).events[0].event_id
 
         first = repo.append_event(
             context_id,
-            _append_request("append-msg-002", expected_version=1, parent_event=parent),
+            _append_request(expected_version=1, parent_event=parent),
         )
-        first_version = repo.get_current_status(context_id, trunk_events=False).collet.context_version
-        assert first_version == 2
+        assert repo.get_current_status(context_id).collet.context_version == 2
 
-        # 同 request_id 且 expected_version 已过期(1 != 2):重放优先于版本检查,
-        # 直接返回原事件,不写任何行、不再 bump 版本。
-        second = repo.append_event(
-            context_id,
-            _append_request("append-msg-002", expected_version=1, parent_event=parent),
-        )
+        with pytest.raises(ContextCollabVersionConflict):
+            repo.append_event(
+                context_id,
+                _append_request(expected_version=1, parent_event=parent),
+            )
 
-        assert second.created is False
-        assert second.event.event_id == first.event.event_id
-        assert second.event.context_version_after == first.event.context_version_after
-        assert second.collet.context_version == 2
-        assert second.collet.current_event_id == first.event.event_id
         with db.orm_session() as session:
             events = _event_rows(session, context_id)
-            assert len(events) == 2
+            assert [e.event_id for e in events] == [
+                parent,
+                first.event.event_id,
+            ]
             assert _collet_row(session, context_id).context_version == 2
 
     def test_stale_expected_version_conflicts_without_writing(self, db):
         repo = ContextCollabRepository(db)
         context_id = _created_context(repo)
-        parent = repo.get_current_status(context_id, trunk_events=False).events[0].event_id
+        parent = repo.get_current_status(context_id).events[0].event_id
         appended = repo.append_event(
             context_id,
-            _append_request("append-msg-003", expected_version=1, parent_event=parent),
+            _append_request(expected_version=1, parent_event=parent),
         )
         assert appended.collet.context_version == 2
 
         with pytest.raises(ContextCollabVersionConflict):
             repo.append_event(
                 context_id,
-                _append_request(
-                    "append-msg-003-stale", expected_version=1, parent_event=parent
+                _append_request(expected_version=1, parent_event=parent
                 ),
             )
 
@@ -218,15 +209,15 @@ class TestAppendEvent:
     def test_parent_older_than_head_appends_branch_event(self, db):
         repo = ContextCollabRepository(db)
         context_id = _created_context(repo)
-        initial = repo.get_current_status(context_id, trunk_events=False)
+        initial = repo.get_current_status(context_id)
         root_event_id = initial.events[0].event_id
 
-        # 第一次:接在链头 → 主干。
+        # 第一次:接在初始事件后(head 推进)。
         head = repo.append_event(
             context_id,
-            _append_request("append-chain-001", expected_version=1, parent_event=root_event_id),
+            _append_request(expected_version=1, parent_event=root_event_id),
         )
-        assert head.event.is_trunk is True
+        assert head.collet.current_event_id == head.event.event_id
 
         # 第二次:parent_event 指向链中旧事件(root ≠ 当前链头 head)→ 分支;
         # snapshot_updater 收到的是持锁读出的已落库快照,不是内存旧值。
@@ -238,23 +229,25 @@ class TestAppendEvent:
 
         branch = repo.append_event(
             context_id,
-            _append_request(
-                "append-chain-002",
-                expected_version=2,
+            _append_request(expected_version=2,
                 parent_event=root_event_id,
                 snapshot_updater=branch_updater,
             ),
         )
 
-        assert branch.event.is_trunk is False
-        assert branch.event.sequence_no == 3
+        assert branch.event.event_id != head.event.event_id
         assert branch.event.context_version_after == 3
         assert branch.collet.context_version == 3
         assert [snap.status for snap in seen] == ["in_progress"]
 
         with db.orm_session() as session:
             events = _event_rows(session, context_id)
-            assert [e.is_trunk for e in events] == [True, True, False]
+            # 三行按 id 升序:初始、head、branch(分支挂在 root 上)。
+            assert [e.parent_event for e in events] == [
+                None,
+                root_event_id,
+                root_event_id,
+            ]
             assert json.loads(_collet_row(session, context_id).current_snapshot)[
                 "status"
             ] == "reviewing"
@@ -266,9 +259,7 @@ class TestAppendEvent:
         with pytest.raises(ContextCollabParentEventError):
             repo.append_event(
                 context_id,
-                _append_request(
-                    "append-dangling-001",
-                    expected_version=1,
+                _append_request(expected_version=1,
                     parent_event="evt_not_exist",
                 ),
             )
@@ -284,19 +275,17 @@ class TestAppendEvent:
 
         record = repo.append_event(
             context_id,
-            _append_request("append-trunk-001", expected_version=1, parent_event=None),
+            _append_request(expected_version=1, parent_event=None),
         )
 
-        assert record.event.is_trunk is True
         assert record.event.parent_event is None
-        assert record.event.sequence_no == 2
-
-        trunk_only = repo.get_current_status(context_id, trunk_events=True)
-        assert record.event.event_id in [e.event_id for e in trunk_only.events]
+        status = repo.get_current_status(context_id)
+        assert record.event.event_id in [e.event_id for e in status.events]
 
         with db.orm_session() as session:
             events = _event_rows(session, context_id)
-            assert events[1].is_trunk is True
+            assert len(events) == 2
+            assert events[1].event_id == record.event.event_id
             assert events[1].parent_event is None
 
     def test_unknown_collab_context_id_raises_not_found(self, db):
@@ -305,7 +294,7 @@ class TestAppendEvent:
         with pytest.raises(ContextCollabNotFoundError):
             repo.append_event(
                 "collet_unknown",
-                _append_request("append-ghost-001", expected_version=1, parent_event=None),
+                _append_request(expected_version=1, parent_event=None),
             )
 
         with db.orm_session() as session:

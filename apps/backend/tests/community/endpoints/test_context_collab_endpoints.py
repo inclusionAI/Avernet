@@ -162,7 +162,7 @@ def create_body():
 def append_body(parent_event):
     """spec §6.3 用户新增互动消息示例 (verbatim JSON, parent linked)."""
     return {
-        "request_id": "append-user-message-001",
+
         "expected_version": 1,
         "event_kind": "user_interaction.posted",
         "primitive_type": "Message",
@@ -346,7 +346,7 @@ def test_version_conflict_maps_to_409_error_envelope(client_world):
     # Aggregate is now at version 2; an append expecting version 1 conflicts.
     response = append_event(
         client_world, created["collab_context_id"], created["current_event"]["event_id"],
-        changes={"expected_version": 1, "request_id": "append-user-message-002"},
+        changes={"expected_version": 1},
     )
     assert response.status_code == 409
     body = response.json()
@@ -583,7 +583,7 @@ def context_collab_create_happy():
     scenario="create_error",
     input=CaseInput(
         headers=_HEADERS,
-        json_body={**create_body(), "request_id": "create-collet-err"},
+        json_body={**create_body()},
     ),
     seed=_seed_create_error,
     expect=ExpectError(

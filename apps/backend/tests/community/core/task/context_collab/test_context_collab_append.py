@@ -22,7 +22,6 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
-    compute_is_trunk,
     ensure_expected_version,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
@@ -99,7 +98,6 @@ def make_actor(
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
     """构造追加事件命令(spec §6.3 示例形);默认可追加的合法事件体。"""
     fields = {
-        "request_id": "append-001",
         "expected_version": 1,
         "event_kind": event_kind,
         "primitive_type": "Message",
@@ -147,10 +145,7 @@ class _FakeContextCollabRepository:
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=event_id,
-            request_id=event_id,
-            sequence_no=1,
             parent_event=None,
-            is_trunk=True,
             event_kind=request.initial_event.event_kind,
             primitive_type=request.initial_event.primitive_type,
             actor_ref=request.initial_event.actor_ref,
@@ -164,14 +159,12 @@ class _FakeContextCollabRepository:
         return ContextCreatedRecord(collet=collet, initial_event=initial_event)
 
     def get_current_status(
-        self, collab_context_id: str, *, trunk_events: bool
+        self, collab_context_id: str
     ) -> "ContextStatusRecord | None":
         collet = self.collets.get(collab_context_id)
         if collet is None:
             return None
         events = list(self.events.get(collab_context_id, []))
-        if trunk_events:
-            events = [event for event in events if event.is_trunk]
         return ContextStatusRecord(collet=collet, events=events)
 
     def append_event(
@@ -184,12 +177,6 @@ class _FakeContextCollabRepository:
                 f"collaboration context {collab_context_id!r} not found"
             )
         events = self.events.setdefault(collab_context_id, [])
-        for event in events:
-            if event.request_id == request.request_id:
-                # 重放返回当前行 collet + 原事件,不写任何行。
-                return EventAppendedRecord(
-                    event=event, collet=collet, created=False
-                )
         ensure_expected_version(request.expected_version, collet.context_version)
         if request.parent_event is not None and request.parent_event not in {
             event.event_id for event in events
@@ -202,12 +189,7 @@ class _FakeContextCollabRepository:
         event = EventRecord(
             collab_context_id=collab_context_id,
             event_id="evt_" + uuid4().hex,
-            request_id=request.request_id,
-            sequence_no=len(events) + 1,
             parent_event=request.parent_event,
-            is_trunk=compute_is_trunk(
-                request.parent_event, collet.current_event_id
-            ),
             event_kind=request.event_kind,
             primitive_type=request.primitive_type,
             actor_ref=request.actor_ref,
@@ -226,7 +208,7 @@ class _FakeContextCollabRepository:
         )
         events.append(event)
         self.collets[collab_context_id] = updated
-        return EventAppendedRecord(event=event, collet=updated, created=True)
+        return EventAppendedRecord(event=event, collet=updated)
 
 
 def _make_service(**command_overrides):
@@ -247,7 +229,6 @@ class TestAppendEventHappyPath:
         initial_event_id = created.current_event["event_id"]
         command = make_append_command(
             "user_interaction.posted",
-            request_id="append-user-message-001",
             expected_version=1,
             payload={
                 "message_kind": "user_interaction",
@@ -275,7 +256,6 @@ class TestAppendEventHappyPath:
         request = repo.append_calls[0][1]
         assert isinstance(request, AppendEventRecordRequest)
         assert repo.append_calls[0][0] == created.collab_context_id
-        assert request.request_id == "append-user-message-001"
         assert request.expected_version == 1
         assert request.event_kind == "user_interaction.posted"
         assert request.parent_event == initial_event_id
@@ -297,7 +277,6 @@ class TestStateMachineTransitions:
         repo, service, created = _make_service()
         command = make_append_command(
             "task.started",
-            request_id="append-start-001",
             primitive_type="Task",
             payload={},
             visibility="public",
@@ -316,7 +295,6 @@ class TestStateMachineTransitions:
         bot_actor = make_actor("bot", "bot_coding_001")
         command = make_append_command(
             "task.started",
-            request_id="append-start-bot-001",
             primitive_type="Task",
             payload={},
             actor_ref=bot_actor.actor,
@@ -333,14 +311,13 @@ class TestStateMachineTransitions:
         service.append_event(
             cid,
             make_append_command(
-                "task.started", request_id="append-start-001",
+                "task.started",
                 primitive_type="Task", payload={}, visibility="public",
             ),
             make_actor(),
         )
         submit = make_append_command(
             "task.submitted",
-            request_id="append-submit-001",
             expected_version=2,
             primitive_type="Task",
             payload={"artifacts": []},
@@ -361,7 +338,7 @@ class TestStateMachineTransitions:
         service.append_event(
             cid,
             make_append_command(
-                "task.started", request_id="append-start-001",
+                "task.started",
                 primitive_type="Task", payload={}, visibility="public",
             ),
             principal,
@@ -369,7 +346,7 @@ class TestStateMachineTransitions:
         service.append_event(
             cid,
             make_append_command(
-                "task.submitted", request_id="append-submit-001",
+                "task.submitted",
                 expected_version=2, primitive_type="Task",
                 payload={"artifacts": ["art_pr_001"]}, visibility="public",
             ),
@@ -379,7 +356,6 @@ class TestStateMachineTransitions:
         executor_actor = make_actor("human", "bot_coding_001")
         accept = make_append_command(
             "task.accepted",
-            request_id="append-accept-001",
             expected_version=3,
             primitive_type="Task",
             actor_ref=executor_actor.actor,
@@ -402,7 +378,7 @@ class TestStateMachineTransitions:
         started = service.append_event(
             cid,
             make_append_command(
-                "task.started", request_id="append-start-001",
+                "task.started",
                 primitive_type="Task", payload={}, visibility="public",
             ),
             principal,
@@ -410,7 +386,7 @@ class TestStateMachineTransitions:
         submitted = service.append_event(
             cid,
             make_append_command(
-                "task.submitted", request_id="append-submit-001",
+                "task.submitted",
                 expected_version=2, primitive_type="Task",
                 payload={"artifacts": ["art_pr_001"]}, visibility="public",
             ),
@@ -419,7 +395,7 @@ class TestStateMachineTransitions:
         accepted = service.append_event(
             cid,
             make_append_command(
-                "task.accepted", request_id="append-accept-001",
+                "task.accepted",
                 expected_version=3, primitive_type="Task",
                 payload={}, visibility="public",
             ),
@@ -436,7 +412,7 @@ class TestStateMachineTransitions:
         result = service.append_event(
             created.collab_context_id,
             make_append_command(
-                "task.cancelled", request_id="append-cancel-001",
+                "task.cancelled",
                 primitive_type="Task", payload={}, visibility="public",
             ),
             make_actor(),
@@ -453,7 +429,7 @@ class TestStateMachineTransitions:
         result = service.append_event(
             created.collab_context_id,
             make_append_command(
-                "task.started", request_id="append-start-001",
+                "task.started",
                 primitive_type="Task", payload={}, visibility="public",
             ),
             make_actor(),
@@ -468,7 +444,7 @@ class TestStateMachineTransitions:
         result = service.append_event(
             created.collab_context_id,
             make_append_command(
-                "task.submitted", request_id="append-submit-001",
+                "task.submitted",
                 primitive_type="Task",
                 payload={"artifacts": ["art_pr_001"]}, visibility="public",
             ),
@@ -553,29 +529,38 @@ class TestRepositorySemanticsPropagation:
         assert repo.collets[created.collab_context_id].context_version == 1
 
 
-class TestAppendReplayAcceptance:
-    def test_replayed_append_is_accepted_with_latest_state(self):
-        """同一 request_id 重放:created=False 仍 accepted,返回原事件 id
-        与当前行 collet 的最新状态/版本(仓储文档化的接受行为)。"""
+class TestAppendReduplication:
+    def test_repeated_append_rejected_by_cas_not_replayed(self):
+        """追加不设幂等键(spec 作者裁决):逐字重发被 ``expected_version``
+        乐观并发拒绝(409,不落第二行);要追加新事件须带新版本号。"""
         repo, service, created = _make_service()
         cid = created.collab_context_id
         command = make_append_command(
             "task.started",
-            request_id="append-start-001",
             primitive_type="Task",
             payload={},
             visibility="public",
         )
         first = service.append_event(cid, command, make_actor())
         assert first.accepted is True
+        assert first.context_version == 2
 
-        second = service.append_event(cid, command, make_actor())
-
-        assert second.accepted is True
-        assert second.event_id == first.event_id
-        assert second.parent_event == first.parent_event
-        assert second.event_kind == "task.started"
-        assert second.context_version == 2
-        assert second.current_status == "in_progress"
-        # 重放不写行:事件数不变。
+        with pytest.raises(ContextCollabVersionConflict):
+            service.append_event(cid, command, make_actor())
         assert len(repo.events[cid]) == 2
+
+        second = service.append_event(
+            cid,
+            make_append_command(
+                "task.started",
+                expected_version=2,
+                primitive_type="Task",
+                payload={},
+                visibility="public",
+            ),
+            make_actor(),
+        )
+        assert second.accepted is True
+        assert second.event_id != first.event_id
+        assert second.context_version == 3
+        assert len(repo.events[cid]) == 3

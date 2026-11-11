@@ -88,7 +88,7 @@ class _FakeContextCollabRepository:
 
     创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
     初始快照(status=created、progress.percent=0、current_event_id=None)、
-    初始 task.created 事件(sequence_no=1、is_trunk=True、parent=None)。
+    初始 task.created 事件(parent=None)。
     真实仓储见 persistence/repository.py。
     """
 
@@ -117,10 +117,7 @@ class _FakeContextCollabRepository:
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=event_id,
-            request_id=event_id,
-            sequence_no=1,
             parent_event=None,
-            is_trunk=True,
             event_kind=request.initial_event.event_kind,
             primitive_type=request.initial_event.primitive_type,
             actor_ref=request.initial_event.actor_ref,
@@ -275,10 +272,8 @@ def _event(event_id: str, visibility: str) -> EventRecord:
     return EventRecord(
         collab_context_id="collet_todo_001",
         event_id=event_id,
-        request_id=f"req_{event_id}",
-        sequence_no=1,
+
         parent_event=None,
-        is_trunk=True,
         event_kind="task.progress.updated",
         primitive_type="Activity",
         actor_ref=PRINCIPAL,

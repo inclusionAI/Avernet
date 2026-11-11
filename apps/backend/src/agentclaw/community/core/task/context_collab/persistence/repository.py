@@ -5,8 +5,8 @@
 行 → 领域对象一律显式构造,JSON 列(context_spec / current_snapshot /
 actor_ref / payload)用 L4 ``to_dict`` / ``from_dict`` 编解码。读查询过滤
 ``env == get_current_env()``,tenant 由 ORM guard 自动追加,不在此手写。
-``append_event`` 在持锁事务内完成幂等重放 → 版本检查 → parent 校验 →
-sequence 分配 → 主干判定 → 事件落库 → Collet CAS 更新(spec §9.4 规则 2/4/5)。
+``append_event`` 在持锁事务内完成版本检查 → parent 校验 → 事件落库 →
+Collet CAS 更新;追加不设幂等键,顺序即自增 id,主干在投影层推导。
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from typing import Callable, Protocol, runtime_checkable
 from uuid import uuid4
 
 from injector import inject
-from sqlalchemy import func
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -26,7 +25,6 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
-    compute_is_trunk,
     ensure_expected_version,
 )
 
@@ -84,8 +82,8 @@ class ContextCreatedRecord:
 
 @dataclass
 class ContextStatusRecord:
-    """``get_current_status`` 返回;events 按 sequence_no 升序不做可见性过滤
-    (trunk 过滤在仓储完成,visibility 过滤在 service/Query 层)。"""
+    """``get_current_status`` 返回;events 按自增 id 升序即接纳顺序,
+    不做可见性过滤(visibility 过滤与 trunk 过滤在 service/Query 层)。"""
 
     collet: Collet
     events: list[EventRecord]
@@ -93,15 +91,13 @@ class ContextStatusRecord:
 
 @dataclass
 class AppendEventRecordRequest:
-    """``append_event`` 请求;``request_id`` 是 G2 幂等键
-    ``(collab_context_id, request_id)`` 的本地一半。
+    """``append_event`` 请求;追加不设幂等键,重复提交即重复事件。
 
     ``snapshot_updater`` 由 Service(Task 10)构建,是 G4 求解出的
     "当前快照 → 新快照" 纯函数;仓储在持锁事务内执行它,保证其输入
     不会在计算与应用之间变陈旧。
     """
 
-    request_id: str
     expected_version: int
     event_kind: str
     primitive_type: str
@@ -114,12 +110,10 @@ class AppendEventRecordRequest:
 
 @dataclass
 class EventAppendedRecord:
-    """``append_event`` 返回;``created=False`` 表示 ``request_id`` 幂等重放
-    (返回原事件),``collet`` 是重放/追加后落库行的解码。"""
+    """``append_event`` 返回;``collet`` 是追加后落库行的解码。"""
 
     event: EventRecord
     collet: Collet
-    created: bool
 
 
 @runtime_checkable
@@ -127,13 +121,12 @@ class ContextCollabRepositoryProtocol(Protocol):
     """Collet 聚合的两张表(ac_context_collab_collet/event)存取协议。
 
     ``create_context`` 插 collet(initial snapshot/context_version=1)
-    + 初始事件(sequence_no=1、is_trunk=True、parent=None);
-    创建不设幂等键,重复调用即重复创建。
+    + 初始事件(parent=None);创建不设幂等键,重复调用即重复创建。
     """
 
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord: ...
     def append_event(self, collab_context_id: str, request: "AppendEventRecordRequest") -> "EventAppendedRecord": ...
-    def get_current_status(self, collab_context_id: str, *, trunk_events: bool) -> "ContextStatusRecord | None": ...
+    def get_current_status(self, collab_context_id: str) -> "ContextStatusRecord | None": ...
 
 
 def _dump_json(data: dict) -> str:
@@ -162,10 +155,7 @@ def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
     return EventRecord(
         collab_context_id=row.collab_context_id,
         event_id=row.event_id,
-        request_id=row.request_id,
-        sequence_no=int(row.sequence_no),
         parent_event=row.parent_event,
-        is_trunk=bool(row.is_trunk),
         event_kind=row.event_kind,
         primitive_type=row.primitive_type,
         actor_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
@@ -174,20 +164,6 @@ def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
         context_version_after=int(row.context_version_after),
         occurred_at=occurred_at,
     )
-
-
-def _event_replay(db, collab_context_id: str, request_id: str) -> EventRecord | None:
-    """按 ``(collab_context_id, request_id)`` 查幂等重放;未命中返回 ``None``。"""
-    row = (
-        db.query(ContextCollabEventModel)
-        .filter(
-            ContextCollabEventModel.collab_context_id == collab_context_id,
-            ContextCollabEventModel.request_id == request_id,
-            ContextCollabEventModel.env == get_current_env(),
-        )
-        .one_or_none()
-    )
-    return None if row is None else _event_from_row(row)
 
 
 def _parent_event_exists(db, collab_context_id: str, parent_event: str) -> bool:
@@ -202,20 +178,6 @@ def _parent_event_exists(db, collab_context_id: str, parent_event: str) -> bool:
         .one_or_none()
         is not None
     )
-
-
-def _next_sequence_no(db, collab_context_id: str) -> int:
-    """持锁事务内分配 ``MAX(sequence_no)+1``;
-    唯一键 ``uk_context_collab_event_seq`` 兜底。"""
-    current = (
-        db.query(func.max(ContextCollabEventModel.sequence_no))
-        .filter(
-            ContextCollabEventModel.collab_context_id == collab_context_id,
-            ContextCollabEventModel.env == get_current_env(),
-        )
-        .scalar()
-    )
-    return int(current or 0) + 1
 
 
 class ContextCollabRepository(ContextCollabRepositoryProtocol):
@@ -233,9 +195,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         """创建 Collet + 初始事件(spec §9.4 规则 1:同一事务两行)。
 
         创建不设幂等键(spec 作者裁决):重复调用即重复创建,自然防重
-        由调用方保证。初始事件的 ``request_id`` 列取其自身 ``event_id``
-        (该列 NOT NULL;event_id 上下文内唯一,不与追加事件的幂等键
-        语义冲突——追加的 ``request_id`` 是调用方指定的防重号)。
+        由调用方保证。
         """
         spec = request.context_spec
         # 初始快照由创建参数派生:status=created、progress 全 0;快照内的
@@ -254,10 +214,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=event_id,
-            request_id=event_id,
-            sequence_no=1,
             parent_event=None,
-            is_trunk=True,
             event_kind=request.initial_event.event_kind,
             primitive_type=request.initial_event.primitive_type,
             actor_ref=request.initial_event.actor_ref,
@@ -284,13 +241,13 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
     ) -> "EventAppendedRecord":
         """追加事件并推进 Collet 快照(spec §9.4 规则 2/4/5)。
 
-        持锁事务内的固定顺序:行锁读 collet → 幂等重放(先于版本检查,
-        命中即返回原事件,不写任何行)→ ``expected_version`` 检查 →
-        ``parent_event`` 存在性检查 → sequence 分配 → 主干判定 → 插事件 →
-        CAS 更新 collet。``with_for_update()`` 在 MySQL/OceanBase 上是行锁,
-        SQLite 测试驱动上优雅降级为普通读,由 CAS WHERE +
-        ``uk_context_collab_event_seq`` 唯一键兜底。任何写失败原样上抛,
-        异常路径靠事务回滚保证不落半态。
+        持锁事务内的固定顺序:行锁读 collet → ``expected_version`` 检查 →
+        ``parent_event`` 存在性检查 → 插事件 → CAS 更新 collet。
+        追加不设幂等键,事件顺序即插入顺序(自增 id),主干在查询时由
+        活动链推导(spec 作者裁决)。``with_for_update()`` 在
+        MySQL/OceanBase 上是行锁,SQLite 测试驱动上优雅降级为普通读,
+        由 CAS WHERE 把关。任何写失败原样上抛,异常路径靠事务回滚
+        保证不落半态。
         """
         with self._transaction() as db:
             row = (
@@ -305,11 +262,6 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             if row is None:
                 raise ContextCollabNotFoundError(
                     f"collaboration context {collab_context_id!r} not found"
-                )
-            replay = _event_replay(db, collab_context_id, request.request_id)
-            if replay is not None:
-                return EventAppendedRecord(
-                    event=replay, collet=_collet_from_row(row), created=False
                 )
             ensure_expected_version(request.expected_version, int(row.context_version))
             if request.parent_event is not None and not _parent_event_exists(
@@ -326,12 +278,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             event = EventRecord(
                 collab_context_id=collab_context_id,
                 event_id="evt_" + uuid4().hex,
-                request_id=request.request_id,
-                sequence_no=_next_sequence_no(db, collab_context_id),
                 parent_event=request.parent_event,
-                is_trunk=compute_is_trunk(
-                    request.parent_event, row.current_event_id
-                ),
                 event_kind=request.event_kind,
                 primitive_type=request.primitive_type,
                 actor_ref=request.actor_ref,
@@ -374,16 +321,15 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     current_event_id=event.event_id,
                     context_version=context_version,
                 ),
-                created=True,
             )
 
     def get_current_status(
-        self, collab_context_id: str, *, trunk_events: bool
+        self, collab_context_id: str
     ) -> ContextStatusRecord | None:
-        """读取 Collet + 事件列表(spec §9.4 规则 3:只读,不写库)。
+        """读取 Collet + 全量事件列表(spec §9.4 规则 3:只读,不写库)。
 
-        事件全量返回或仅主事件(参数过滤,顺序始终 sequence_no 升序);
-        ``trunk_events`` 只过滤不重排;不存在返回 ``None``。
+        事件按自增 id 升序返回(即接纳顺序);主干(trunk)过滤在查询投影
+        层由活动链推导,仓储_trunk/sequence 概念;不存在返回 ``None``。
         """
         with self._db.orm_session() as db:
             row = (
@@ -396,17 +342,15 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             )
             if row is None:
                 return None
-            events_query = db.query(ContextCollabEventModel).filter(
-                ContextCollabEventModel.collab_context_id == collab_context_id,
-                ContextCollabEventModel.env == get_current_env(),
-            )
-            if trunk_events:
-                events_query = events_query.filter(
-                    ContextCollabEventModel.is_trunk.is_(True)
+            event_rows = (
+                db.query(ContextCollabEventModel)
+                .filter(
+                    ContextCollabEventModel.collab_context_id == collab_context_id,
+                    ContextCollabEventModel.env == get_current_env(),
                 )
-            event_rows = events_query.order_by(
-                ContextCollabEventModel.sequence_no.asc()
-            ).all()
+                .order_by(ContextCollabEventModel.id.asc())
+                .all()
+            )
             return ContextStatusRecord(
                 collet=_collet_from_row(row),
                 events=[_event_from_row(event_row) for event_row in event_rows],
@@ -432,10 +376,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         return ContextCollabEventModel(
             collab_context_id=event.collab_context_id,
             event_id=event.event_id,
-            request_id=event.request_id,
-            sequence_no=event.sequence_no,
             parent_event=event.parent_event,
-            is_trunk=event.is_trunk,
             event_kind=event.event_kind,
             primitive_type=event.primitive_type,
             actor_ref=_dump_json(event.actor_ref.to_dict()),

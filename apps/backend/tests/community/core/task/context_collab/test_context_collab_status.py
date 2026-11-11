@@ -99,25 +99,19 @@ def _event(
     primitive_type: str,
     parent_event: str | None,
     visibility: str = "public",
-    is_trunk: bool = True,
-    sequence_no: int | None = None,
     payload: dict | None = None,
 ) -> EventRecord:
-    """最小事件构造器;sequence_no 默认按 event_id 尾号推导。"""
-    resolved_sequence_no = sequence_no or int(event_id[-3:])
+    """最小事件构造器;列表顺序即仓储 id 升序(接纳顺序)。"""
     return EventRecord(
         collab_context_id=COLLET_ID,
         event_id=event_id,
-        request_id=f"req_{event_id}",
-        sequence_no=resolved_sequence_no,
         parent_event=parent_event,
-        is_trunk=is_trunk,
         event_kind=event_kind,
         primitive_type=primitive_type,
         actor_ref=PRINCIPAL,
         visibility=visibility,
         payload=dict(payload or {}),
-        context_version_after=resolved_sequence_no,
+        context_version_after=1,
         occurred_at=OCCURRED_AT,
     )
 
@@ -174,8 +168,8 @@ def _fixture_events() -> list[EventRecord]:
 
 class _FakeStatusRepository:
     """手写 in-memory dict 仓储 fake,只实现 ``get_current_status`` 的
-    真实语义:collet 行 + events 按 sequence_no 升序存储,
-    ``trunk_events`` 只过滤不重排;不存在返回 ``None``。
+    真实语义:collet 行 + events 按接纳顺序(自增 id)全量返回,
+    不存在返回 ``None``;trunk 过滤在服务投影层完成。
     ``get_calls`` 记录读取入参,用于断言服务只读不写。
     """
 
@@ -184,19 +178,17 @@ class _FakeStatusRepository:
         self.events: dict[str, list[EventRecord]] = {
             collet.collab_context_id: list(events)
         }
-        self.get_calls: list[tuple[str, bool]] = []
+        self.get_calls: list[str] = []
         self.write_calls: list[tuple] = []
 
     def get_current_status(
-        self, collab_context_id: str, *, trunk_events: bool
+        self, collab_context_id: str
     ) -> "ContextStatusRecord | None":
-        self.get_calls.append((collab_context_id, trunk_events))
+        self.get_calls.append(collab_context_id)
         collet = self.collets.get(collab_context_id)
         if collet is None:
             return None
         events = list(self.events.get(collab_context_id, []))
-        if trunk_events:
-            events = [event for event in events if event.is_trunk]
         return ContextStatusRecord(collet=collet, events=events)
 
     # 写路径在查询用例中不允许被触达;若被调用记录并报错。
@@ -320,13 +312,16 @@ class TestTrunkFilterIdentity:
 
     @staticmethod
     def _branch_event(**overrides) -> EventRecord:
-        """主干外分支事件;字段可覆盖。"""
+        """挂在 evt_004 下的派生事件;字段可覆盖。
+
+        Ruling R9:is_trunk 不落库。default collet current=evt_004 → 活动
+        链为 evt_001..evt_004,本事件在链外;恢复链视图时它被过滤。
+        """
         fields = {
             "event_id": "evt_006",
             "event_kind": "task.progress.updated",
             "primitive_type": "Activity",
             "parent_event": "evt_004",
-            "is_trunk": False,
             "payload": {"summary": "主干外的分支补充"},
         }
         fields.update(overrides)
@@ -344,9 +339,11 @@ class TestTrunkFilterIdentity:
         )
 
         assert full.task_progress.total_events == 6
-        assert trunk.task_progress.total_events == 5
+        # Ruling R9:主干 = current(evt_004)沿 parent 回溯的活动链;
+        # 链后的 pending 事件(evt_005)与链外分支(evt_006)都被滤除。
+        assert trunk.task_progress.total_events == 4
         assert [entry["event_id"] for entry in trunk.task_progress.events] == [
-            "evt_001", "evt_002", "evt_003", "evt_004", "evt_005",
+            "evt_001", "evt_002", "evt_003", "evt_004",
         ]
         # 两次调用的 current_snapshot、current_event、percent 完全相等。
         assert full.current_snapshot == trunk.current_snapshot
@@ -374,7 +371,7 @@ class TestTrunkFilterIdentity:
         assert full.task_progress.total_events == 6
         assert [
             entry["event_id"] for entry in trunk.task_progress.events
-        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_005"]
+        ] == ["evt_001", "evt_002", "evt_003", "evt_004"]
         assert full.current_snapshot["progress"]["percent"] == 80
         assert trunk.current_snapshot["progress"]["percent"] == 80
 
@@ -388,9 +385,9 @@ class TestTrunkFilterIdentity:
             self._branch_event(
                 event_id="evt_branch_003",
                 parent_event="evt_002",
-                sequence_no=3,
                 payload={"summary": "分支上的活动已完成"},
             ),
+            fixture[2],  # evt_003 Task completed(承接链)
             fixture[3],  # evt_004 Activity active(current)
             fixture[4],  # evt_005 Activity pending
         ]
@@ -402,13 +399,14 @@ class TestTrunkFilterIdentity:
             COLLET_ID, trunk_events=True, context=make_actor()
         )
 
-        # 主干视图只有 evt_001 计入 completed;全量推导把分支活动
-        # 也算进去 —— 两个开关都必须报告全量推导值。
-        assert full.current_snapshot["progress"]["completed_count"] == 2
-        assert trunk.current_snapshot["progress"]["completed_count"] == 2
+        # 全量推导把分支活动也算进 completed(evt_001/e3/分支);
+        # 两个开关都必须报告全量推导值(Ruling R6)。
+        assert full.current_snapshot["progress"]["completed_count"] == 3
+        assert trunk.current_snapshot["progress"]["completed_count"] == 3
         assert full.current_snapshot["progress"] == (
             trunk.current_snapshot["progress"]
         )
+        # 活动链 = evt_001..evt_004(分支在链外)。
         assert trunk.task_progress.total_events == 4
 
     def test_current_pointer_on_branch_event_stays_projected(self):
@@ -440,20 +438,19 @@ class TestTrunkFilterIdentity:
         assert progress["blocked_count"] == 0
         assert progress["current_event_id"] == "evt_006"
 
+        # Ruling R9:current 指在分支上时,分支就在活动链上;
+        # 链 = evt_006 → evt_004 → … → evt_001,链外的 evt_005 被滤除。
         # 列出的主干条目状态与全量视图一致,不退化成全 pending。
         assert [
             entry["event_id"] for entry in trunk.task_progress.events
-        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_005"]
-        assert [
-            entry["status"] for entry in trunk.task_progress.events
-        ] == ["completed"] * 5
+        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_006"]
         assert [
             (entry["event_id"], entry["status"])
             for entry in trunk.task_progress.events
         ] == [
             (entry["event_id"], entry["status"])
             for entry in full.task_progress.events
-            if entry["event_id"] != "evt_006"
+            if entry["event_id"] != "evt_005"
         ]
 
 
@@ -544,7 +541,7 @@ class TestReadOnlyPath:
         )
 
         # 只触发了两次 get_current_status 读取;写路径零调用。
-        assert repo.get_calls == [(COLLET_ID, False), (COLLET_ID, False)]
+        assert repo.get_calls == [COLLET_ID, COLLET_ID]
         assert repo.write_calls == []
         # collet 行未变:版本、落库 progress 都保持原样。
         assert repo.collets[COLLET_ID] is before

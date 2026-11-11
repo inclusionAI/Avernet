@@ -26,10 +26,7 @@ CREATE TABLE `ac_context_collab_event` (
   `env` varchar(20) NOT NULL,
   `collab_context_id` varchar(128) NOT NULL,
   `event_id` varchar(128) NOT NULL,
-  `request_id` varchar(256) NOT NULL,
-  `sequence_no` bigint(20) NOT NULL,
   `parent_event` varchar(128) DEFAULT NULL,
-  `is_trunk` tinyint(1) NOT NULL DEFAULT 0,
   `event_kind` varchar(128) NOT NULL,
   `primitive_type` varchar(64) NOT NULL,
   `actor_ref` mediumtext NOT NULL COMMENT 'JSON actor reference',
@@ -40,9 +37,6 @@ CREATE TABLE `ac_context_collab_event` (
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_event` (`avernet_tenant`, `env`, `collab_context_id`, `event_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_event_request` (`avernet_tenant`, `env`, `collab_context_id`, `request_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_event_seq` (`avernet_tenant`, `env`, `collab_context_id`, `sequence_no`) GLOBAL,
-  KEY `idx_context_collab_event_parent` (`avernet_tenant`, `env`, `collab_context_id`, `parent_event`, `sequence_no`) GLOBAL,
-  KEY `idx_context_collab_event_trunk` (`avernet_tenant`, `env`, `collab_context_id`, `is_trunk`, `sequence_no`) GLOBAL
+  KEY `idx_context_collab_event_parent` (`avernet_tenant`, `env`, `collab_context_id`, `parent_event`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = 'Minimal append-only context collaboration event DAG';

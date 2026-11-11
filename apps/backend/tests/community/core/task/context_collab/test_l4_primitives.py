@@ -92,10 +92,7 @@ def _record(parent_event="evt_001"):
     return EventRecord(
         collab_context_id="collet_todo_001",
         event_id="evt_002",
-        request_id="append-user-message-001",
-        sequence_no=2,
         parent_event=parent_event,
-        is_trunk=False,
         event_kind="user_interaction.posted",
         primitive_type="Message",
         actor_ref=PrincipalRef(principal_type="human", principal_id="u_1001"),
@@ -253,9 +250,6 @@ def test_event_record_from_envelope_reverse_constructor_round_trips():
     record = _record()
     rebuilt = EventRecord.from_envelope(
         record.to_envelope(),
-        request_id=record.request_id,
-        sequence_no=record.sequence_no,
-        is_trunk=record.is_trunk,
         primitive_type=record.primitive_type,
         actor_ref=record.actor_ref,
         visibility=record.visibility,
@@ -271,9 +265,6 @@ def test_event_record_from_envelope_rejects_unsupported_version():
     with pytest.raises(ContextCollabValidationError):
         EventRecord.from_envelope(
             envelope,
-            request_id=record.request_id,
-            sequence_no=record.sequence_no,
-            is_trunk=record.is_trunk,
             primitive_type=record.primitive_type,
             actor_ref=record.actor_ref,
             visibility=record.visibility,

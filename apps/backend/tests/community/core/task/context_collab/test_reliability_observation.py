@@ -1,10 +1,10 @@
 """G2 可靠性规则与 G3 查询投影纯函数单测(Task 6)。
 
-覆盖 ``compute_is_trunk`` 主干判定真值表、``ensure_expected_version``
-乐观并发校验、``project_events`` 的主干筛选与状态推导(§12.2 #4:
-``trunk_events`` 只筛主干,不改变事件 status 与顺序),以及
-``build_progress`` 的非 Message 计数与 percent 规则(spec §6.4)。
-不触碰数据库,纯内存纯函数。
+覆盖 ``ensure_expected_version`` 乐观并发校验、``active_chain_ids``
+主干链推导(Ruling R9:is_trunk 不落库,主干 = current 沿 parent 回溯)、
+``project_events`` 的 trunk_ids 筛选与状态推导(§12.2 #4:trunk 筛选
+不改变事件 status 与顺序),以及 ``build_progress`` 的非 Message 计数与
+percent 规则(spec §6.4)。不触碰数据库,纯内存纯函数。
 """
 
 from datetime import datetime
@@ -15,11 +15,11 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
-    compute_is_trunk,
     ensure_expected_version,
 )
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
     EventProjection,
+    active_chain_ids,
     build_progress,
     project_events,
 )
@@ -33,33 +33,31 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 OCCURRED_AT = datetime(2026, 11, 10, 8, 30, 0)
 
 
-def _record(event_id, sequence_no, parent_event, *, is_trunk=True):
+def _record(event_id, parent_event):
+    """输入顺序即接纳顺序(仓储按自增 id 升序,Ruling R9)。"""
     return EventRecord(
         collab_context_id="collet_todo_001",
         event_id=event_id,
-        request_id=f"req_{event_id}",
-        sequence_no=sequence_no,
         parent_event=parent_event,
-        is_trunk=is_trunk,
         event_kind="task.progress.updated",
         primitive_type="Task",
         actor_ref=PrincipalRef(principal_type="human", principal_id="u_1001"),
         visibility="workspace",
         payload={"summary": f"{event_id} summary"},
-        context_version_after=sequence_no,
+        context_version_after=1,
         occurred_at=OCCURRED_AT,
     )
 
 
 def _chain_records():
-    """evt_001..evt_005 主干链 + 一条 is_trunk=False 的分支事件 evt_002b。"""
+    """evt_001..evt_005 主干链 + 挂在 evt_002 下的派生事件 evt_002b。"""
     return [
-        _record("evt_001", 1, None),
-        _record("evt_002", 2, "evt_001"),
-        _record("evt_003", 3, "evt_002"),
-        _record("evt_004", 4, "evt_003"),
-        _record("evt_005", 5, "evt_004"),
-        _record("evt_002b", 6, "evt_002", is_trunk=False),
+        _record("evt_001", None),
+        _record("evt_002", "evt_001"),
+        _record("evt_003", "evt_002"),
+        _record("evt_004", "evt_003"),
+        _record("evt_005", "evt_004"),
+        _record("evt_002b", "evt_002"),
     ]
 
 
@@ -76,12 +74,6 @@ def _projection(event_id, status, primitive_type="Task"):
     )
 
 
-def test_compute_is_trunk_truth_table():
-    assert compute_is_trunk(None, "evt_001") is True
-    assert compute_is_trunk("evt_001", "evt_001") is True
-    assert compute_is_trunk("evt_001", "evt_003") is False
-
-
 def test_ensure_expected_version_conflict_carries_current_version():
     ensure_expected_version(1, 1)
 
@@ -90,17 +82,32 @@ def test_ensure_expected_version_conflict_carries_current_version():
     assert "current context_version 2" in str(excinfo.value)
 
 
+def test_active_chain_ids_backtracks_parents_from_current():
+    records = _chain_records()
+    chain = active_chain_ids(records, "evt_004")
+    # evt_004 → evt_003 → evt_002 → evt_001,派生 evt_002b/未及 evt_005 不在链上。
+    assert chain == frozenset({"evt_001", "evt_002", "evt_003", "evt_004"})
+
+
+def test_active_chain_ids_empty_when_current_unknown_or_none():
+    records = _chain_records()
+    assert active_chain_ids(records, None) == frozenset()
+    assert active_chain_ids(records, "evt_missing") == frozenset()
+
+
 def test_project_events_trunk_filter_keeps_status_and_order():
     records = _chain_records()
-    full = project_events(records, current_event_id="evt_004", trunk_events=False)
-    trunk = project_events(records, current_event_id="evt_004", trunk_events=True)
+    full = project_events(records, current_event_id="evt_004")
+    trunk_ids = active_chain_ids(records, "evt_004")
+    trunk = project_events(
+        records, current_event_id="evt_004", trunk_ids=trunk_ids
+    )
 
     assert [p.event_id for p in trunk] == [
         "evt_001",
         "evt_002",
         "evt_003",
         "evt_004",
-        "evt_005",
     ]
     assert [p.event_id for p in full] == [
         "evt_001",
@@ -115,12 +122,18 @@ def test_project_events_trunk_filter_keeps_status_and_order():
         "completed",
         "completed",
         "active",
-        "pending",
     ]
 
     full_status = {p.event_id: p.status for p in full}
     for projection in trunk:
         assert full_status[projection.event_id] == projection.status
+
+
+def test_project_events_status_by_position_when_current_unknown():
+    """current 不在事件集内:全部 pending(§6.4 pending 语义)。"""
+    records = _chain_records()
+    projections = project_events(records, current_event_id="evt_missing")
+    assert all(p.status == "pending" for p in projections)
 
 
 def test_build_progress_counts_and_percent_fallback():

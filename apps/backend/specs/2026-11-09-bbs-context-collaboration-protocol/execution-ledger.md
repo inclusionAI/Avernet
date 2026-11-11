@@ -135,3 +135,12 @@ BRANCH COMPLETE: 24 commits, origin/dev 833a7db84..ad612f97d. Final review clean
 
 - **Ruling R7(spec 作者指示):** 创建接口去除幂等 —— `request_id` 不再是创建请求参数,`ac_context_collab_collet` 去掉 `create_request_id` 列与 `uk_context_collab_collet_request` 唯一键;重复调用即重复创建,防重由调用方保证。事件侧 `request_id` 幂等(`uk_context_collab_event_request`)不变。初始事件的 `request_id` 列取其自身 `event_id`(列 NOT NULL)。
 - 同步范围:spec §6.2/§9.2/§9.4/§9.5,ORM 模型,DDL(分支内建表,未落库 dev,原地修订),仓储(删除三层重放链),service_api/服务/DTO(replayed 字段移除),9 个测试文件(重复创建改为"各建一个上下文"的正向覆盖)。
+
+## 合并后变更 II(2026-11-11)
+
+- **Ruling R8(spec 作者指示):** 事件侧 `request_id` 幂等键整体去除 —— API 字段、`ac_context_collab_event.request_id` 列与 `uk_context_collab_event_request` 唯一键、仓储重放路径(Ruling R5 的"重放先于版本检查"随之作废)。防重语义:`expected_version` 乐观并发成为事实上的重复提交防线(逐字重发 → 409,不落第二行),其余防重由调用方保证。
+- **Ruling R9(spec 作者指示):** 事件表去掉 `sequence_no` 与 `is_trunk` 列(`uk_context_collab_event_seq`、`idx_context_collab_event_trunk` 唯一键/索引同删)。裁决:
+  - 事件顺序 = 自增 `id` 升序(即接纳顺序);
+  - `trunk_events=true` 的"主事件"改为查询时动态推导的**当前活动链**:自 `collet.current_event_id` 沿 `parent_event` 回溯到根的事件集合(`observation.active_chain_ids`);过滤只作用于 `task_progress.events[]`(R6 不变式保持),仓储协议 `get_current_status` 的 `trunk_events` 参数删除,主干判定不再发生于接纳时(spec §9.4 #4 半句失效);
+  - 投影 status(completed/active/pending)改按事件列表位置推导。
+- Event record 领域对象相应瘦身为:`collab_context_id / event_id / parent_event / event_kind / primitive_type / actor_ref / visibility / payload / context_version_after / occurred_at`。

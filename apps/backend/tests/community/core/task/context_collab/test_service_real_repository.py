@@ -14,7 +14,7 @@
   (actor=principal)→ done;
 - A07/08 分支事件(parent=更早事件)在 trunk_events=True/False 两视角间
   只差 task_progress.events 列表,current_snapshot/current_event 一致;
-- A09 幂等与并发(事件侧):重复事件 request_id 重放
+- A09 并发:逐字重发被 CAS 拒绝(追加无幂等键,Ruling R8)
   均不落新行;stale expected_version 抛 Conflict 且不落半态;
 - DI 冒烟:测试 profile 组合(TestingDatabaseModule + TaskPersistenceModule
   + TaskModule)与完整 ``build_injector(DeployProfile.TEST)`` 均能解析
@@ -104,7 +104,6 @@ def make_actor(
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
     """构造追加事件命令(spec §6.3 示例形);默认可追加的合法事件体。"""
     fields = {
-        "request_id": "append-001",
         "expected_version": 1,
         "event_kind": event_kind,
         "primitive_type": "Task",
@@ -146,20 +145,20 @@ def _collet_snapshot(engine, collab_context_id) -> dict:
     )
 
 
-def _event_column(engine, collab_context_id, request_id, column):
+def _event_column(engine, collab_context_id, event_id, column):
     with engine.connect() as conn:
         return conn.scalar(
             select(column).where(
                 ContextCollabEventModel.collab_context_id == collab_context_id,
-                ContextCollabEventModel.request_id == request_id,
+                ContextCollabEventModel.event_id == event_id,
             )
         )
 
 
-def _event_payload(engine, collab_context_id, request_id) -> dict:
+def _event_payload(engine, collab_context_id, event_id) -> dict:
     return json.loads(
         _event_column(
-            engine, collab_context_id, request_id, ContextCollabEventModel.payload
+            engine, collab_context_id, event_id, ContextCollabEventModel.payload
         )
     )
 
@@ -174,7 +173,6 @@ def _create_started(service) -> tuple[str, str, int]:
         created.collab_context_id,
         make_append_command(
             "task.started",
-            request_id="append-started-001",
             expected_version=created.context_version,
             parent_event=created.current_event["event_id"],
         ),
@@ -199,7 +197,7 @@ class TestAcceptanceFlows:
         snapshot = _collet_snapshot(engine, created.collab_context_id)
         assert snapshot["objective"] == OBJECTIVE
         assert snapshot["status"] == "created"
-        # 初始事件行:task.created / Task、sequence 1、主干、无 parent。
+        # 初始事件行:task.created / Task / 无 parent(已无 sequence/trunk 列)。
         assert (
             _event_column(
                 engine,
@@ -223,18 +221,9 @@ class TestAcceptanceFlows:
                 engine,
                 created.collab_context_id,
                 created.current_event["event_id"],
-                ContextCollabEventModel.sequence_no,
+                ContextCollabEventModel.parent_event,
             )
-            == 1
-        )
-        assert (
-            _event_column(
-                engine,
-                created.collab_context_id,
-                created.current_event["event_id"],
-                ContextCollabEventModel.is_trunk,
-            )
-            is True
+            is None
         )
 
     def test_a02_append_user_interaction_posted_native_payload_and_version(
@@ -247,7 +236,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "user_interaction.posted",
-                request_id="append-msg-001",
                 expected_version=created.context_version,
                 primitive_type="Message",
                 parent_event=created.current_event["event_id"],
@@ -277,8 +265,9 @@ class TestAcceptanceFlows:
             )
             == 2
         )
+        assert result.event_id.startswith("evt_")
         assert _event_payload(
-            engine, created.collab_context_id, "append-msg-001"
+            engine, created.collab_context_id, result.event_id
         ) == {"content": content}
 
     def test_a03_task_started_moves_snapshot_to_in_progress(self, service, engine):
@@ -288,7 +277,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.started",
-                request_id="append-started-001",
                 expected_version=created.context_version,
                 parent_event=created.current_event["event_id"],
             ),
@@ -309,7 +297,6 @@ class TestAcceptanceFlows:
             ctx_id,
             make_append_command(
                 "task.completed",
-                request_id="append-completed-001",
                 expected_version=started_version,
             ),
             make_actor(),
@@ -328,7 +315,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.started",
-                request_id="append-started-001",
                 expected_version=created.context_version,
                 parent_event=created.current_event["event_id"],
             ),
@@ -339,7 +325,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.submitted",
-                request_id="append-submitted-001",
                 expected_version=started.context_version,
                 payload={
                     "artifacts": [
@@ -359,7 +344,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.accepted",
-                request_id="append-accepted-001",
                 expected_version=submitted.context_version,
             ),
             make_actor(),  # actor = principal,过 actor_is_responsible_principal
@@ -376,18 +360,16 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.started",
-                request_id="append-started-001",
                 expected_version=created.context_version,
                 parent_event=initial_event_id,
             ),
             make_actor(),
         )
-        # 分支事件:parent 挂更早的初始事件(非当前链头)→ is_trunk=False。
+        # 分支事件:parent 挂更早的初始事件(非当前链头)。
         branch = service.append_event(
             created.collab_context_id,
             make_append_command(
                 "user_interaction.posted",
-                request_id="append-branch-001",
                 expected_version=started.context_version,
                 primitive_type="Message",
                 parent_event=initial_event_id,
@@ -395,14 +377,17 @@ class TestAcceptanceFlows:
             ),
             make_actor(),
         )
-        assert (
-            _event_column(
-                engine,
-                created.collab_context_id,
-                "append-branch-001",
-                ContextCollabEventModel.is_trunk,
-            )
-            is False
+        # 续链事件:把链头重新引回 started 路径 → 分支隐入链外(R9)。
+        service.append_event(
+            created.collab_context_id,
+            make_append_command(
+                "task.progress.updated",
+                expected_version=branch.context_version,
+                primitive_type="Activity",
+                parent_event=started.event_id,
+                payload={"summary": "继续主干推进"},
+            ),
+            make_actor(),
         )
 
         full = service.get_status(
@@ -414,8 +399,8 @@ class TestAcceptanceFlows:
 
         full_ids = [entry["event_id"] for entry in full.task_progress.events]
         trunk_ids = [entry["event_id"] for entry in trunk.task_progress.events]
-        assert len(full_ids) == 3
-        assert len(trunk_ids) == 2  # trunk 视角少一条(分支事件被滤除)
+        assert len(full_ids) == 4
+        assert len(trunk_ids) == 3  # 活动链不含分支事件
         assert set(full_ids) - set(trunk_ids) == {branch.event_id}
         # 两视角的 current_snapshot / current_event / 版本一致(§12.2 #4):
         # trunk 开关只过滤 task_progress.events 列表。
@@ -434,15 +419,14 @@ class TestAcceptanceFlows:
         assert _count(engine, ContextCollabColletModel) == 2
         assert _count(engine, ContextCollabEventModel) == 2
 
-    def test_a09_duplicate_event_request_id_replays_original_event(
-        self, service, engine
-    ):
+    def test_a09_verbatim_resubmit_rejected_by_cas(self, service, engine):
+        """追加无幂等键(Ruling R8):同版本逐字重发被 CAS 拒绝,
+        不落第二条事件;带新版本号才能追加新事件。"""
         created = service.create_context(make_create_command(), make_actor())
         first = service.append_event(
             created.collab_context_id,
             make_append_command(
                 "user_interaction.posted",
-                request_id="append-msg-001",
                 expected_version=created.context_version,
                 primitive_type="Message",
                 parent_event=created.current_event["event_id"],
@@ -451,28 +435,39 @@ class TestAcceptanceFlows:
             make_actor(),
         )
 
-        # 同 request_id 重发(甚至携带不同 payload)→ 重放原事件,不落新行。
-        replay = service.append_event(
+        # 逐字重发(仍带原调用所用的 expected_version=1,当前已是 2):
+        # 无幂等键可重放,由 CAS 直接拒绝,不落第二条事件。
+        with pytest.raises(ContextCollabVersionConflict):
+            service.append_event(
+                created.collab_context_id,
+                make_append_command(
+                    "user_interaction.posted",
+                    expected_version=created.context_version,
+                    primitive_type="Message",
+                    parent_event=created.current_event["event_id"],
+                    payload={"content": "重发内容不入链"},
+                ),
+                make_actor(),
+            )
+        assert _count(engine, ContextCollabEventModel) == 2
+        assert _event_payload(
+            engine, created.collab_context_id, first.event_id
+        ) == {"content": "唯一消息"}
+
+        second = service.append_event(
             created.collab_context_id,
             make_append_command(
                 "user_interaction.posted",
-                request_id="append-msg-001",
                 expected_version=first.context_version,
                 primitive_type="Message",
-                parent_event=created.current_event["event_id"],
-                payload={"content": "重发内容不应入链"},
+                parent_event=first.event_id,
+                payload={"content": "续链消息"},
             ),
             make_actor(),
         )
-
-        assert replay.accepted is True
-        assert replay.event_id == first.event_id
-        assert replay.context_version == first.context_version
-        assert _count(engine, ContextCollabEventModel) == 2
-        assert (
-            _event_payload(engine, created.collab_context_id, "append-msg-001")
-            == {"content": "唯一消息"}
-        )
+        assert second.accepted is True
+        assert second.event_id != first.event_id
+        assert _count(engine, ContextCollabEventModel) == 3
 
     def test_a09_stale_expected_version_conflicts_without_partial_writes(
         self, service, engine
@@ -482,7 +477,6 @@ class TestAcceptanceFlows:
             created.collab_context_id,
             make_append_command(
                 "task.started",
-                request_id="append-started-001",
                 expected_version=created.context_version,
                 parent_event=created.current_event["event_id"],
             ),
@@ -494,7 +488,6 @@ class TestAcceptanceFlows:
                 created.collab_context_id,
                 make_append_command(
                     "task.progress.updated",
-                    request_id="append-stale-001",
                     expected_version=created.context_version,  # 旧版本(当前 2)
                     payload={"percent": 40},
                 ),

@@ -1,7 +1,7 @@
 # 基于上下文自主协作协议 v2 设计方案（ACCS 按需采用版）
 
 - 日期：2026-11-09
-- 修订：2026-11-11（创建接口去除 request_id 幂等键及 create_request_id 列）
+- 修订：2026-11-11（去除全部幂等键与 event 表的 request_id/sequence_no/is_trunk 列；主干改为查询时活动链推导）
 - 状态：Draft / 待评审，尚未实现
 - 主题：基于上下文（Context / Collet）的自主协作
 - 代码落点：`apps/backend/src/agentclaw/community/core/task/context_collab/`
@@ -33,7 +33,7 @@ G4：字段、版本和状态值校验
 本版真正需要新增的持久化对象只有两个：
 
 1. **`Collet`**：一次上下文自主协作的唯一记录，保存 `collab_context_id`、创建参数和当前任务进度快照。
-2. **Event record（本地持久化记录）**：一次被接纳的协作事件，承载 ACCS `EventEnvelope`，保存 `event_id`、`request_id`、`parent_event`、事件类型和 `payload`。
+2. **Event record（本地持久化记录）**：一次被接纳的协作事件，承载 ACCS `EventEnvelope`，保存 `event_id`、`parent_event`、事件类型和 `payload`。
 
 `Task`、`Message`、`Participant`、`ResourceBinding`、`MethodBinding`、`Activity`、`Artifact` 等领域对象恢复保留，但不新增独立表；它们分别作为领域对象、值对象、快照字段、事件语义或外部引用存在。GET 只返回由两张表组合出的查询响应。
 
@@ -93,7 +93,7 @@ L1-L6 是协议栈层次和对象边界，不是前端 Service API 的目录归�
 | 治理面 | ACCS 正式概念对象（本方案按需采用） | 本方案中的使用方式 | 本次不引入 / 不复制 |
 | --- | --- | --- | --- |
 | G1 `Secure and Govern` | `Authentication`、`Authorization`、`Policy`、`Audit` | 创建、追加、查询前进行身份、授权、策略和审计校验；事件 `visibility` 只能收窄已有授权范围 | 不在本域复制认证、授权、策略或审计权威表 |
-| G2 `Keep Reliable and Live` | `Idempotency`、`Recovery`、`Reliability Signal` | `request_id` 幂等、事务失败恢复、版本冲突和事件 DAG 可靠性信号 | 当前不引入 `Retry`、`Lease`、`Heartbeat` 等独立运行对象；`expected_version` 不是 G2 自定义类 |
+| G2 `Keep Reliable and Live` | `Idempotency`、`Recovery`、`Reliability Signal` | 事务失败恢复、版本冲突和事件 DAG 可靠性信号（幂等责任移交给调用方，见 §9.2） | 当前不引入 `Retry`、`Lease`、`Heartbeat` 等独立运行对象；`expected_version` 不是 G2 自定义类 |
 | G3 `Observe, Evaluate and Evolve` | `Observation`、`Outcome` | 当前仅保留可选的执行观察和验收结果引用；GET 的 `task_progress` 是查询投影，不是 G3 权威对象 | 不引入 `Metric`、`Candidate`、`Verification`、`Experiment Ledger` 的独立生命周期 |
 | G4 `Ensure Contracts and Consistency` | `Schema`、`Version`、`State Machine`、`Conformance` | 请求/事件 schema、对象版本、状态迁移和合同测试；内部状态迁移记录只是 G4 实现细节 | 不创建独立 StateMachine、Transition Record、RuntimeBinding 表 |
 
@@ -206,7 +206,7 @@ L6 使用正式的 Product Profile 概念，不新增 `ProductKind` 或 `Workflo
 ### 3.7 G1-G4 与领域对象的边界
 
 - G1 使用 `Authentication`、`Authorization`、`Policy`、`Audit`，但不把 `Participant` 或 `Capability` 当作权限。
-- G2 使用 `Idempotency` 和 `Recovery` 约束 `request_id`、事务失败与重复提交；不为 `Retry`、`Lease`、`Heartbeat` 建当前首版对象。
+- G2 使用 `Recovery` 约束事务失败与重复提交（重复提交由 `expected_version` 乐观并发拒绝）；防重责任由调用方承担，本域不设幂等键；不为 `Retry`、`Lease`、`Heartbeat` 建当前首版对象。
 - G3 的 `Observation`、`Outcome` 可作为执行观察和验收结果引用；它们不替代 L4 `Task` 或 `Activity` 状态。
 - G4 使用 `Schema`、`Version`、`State Machine`、`Conformance` 约束事件和状态；状态迁移记录是实现细节，不是新增 ACCS L4 对象。
 
@@ -457,7 +457,6 @@ Content-Type: application/json
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
 | `collab_context_id` | path | string | 是 | L4 Collet ID 的 API 兼容名 |
-| `request_id` | body | string | 是 | G2 幂等键 |
 | `expected_version` | body | integer | 是 | 乐观并发版本 |
 | `event_kind` | body | string | 是 | 例如 `user_interaction.posted` |
 | `primitive_type` | body | string | 是 | `Message`、`Task` 或 `Activity` |
@@ -475,7 +474,6 @@ Content-Type: application/json
 
 ```json
 {
-  "request_id": "append-user-message-001",
   "expected_version": 1,
   "event_kind": "user_interaction.posted",
   "primitive_type": "Message",
@@ -598,7 +596,7 @@ GET /api/v1/collaboration/task/context_collab/{collab_context_id}?trunk_events=t
 
 - **做了哪些事情**：读取 `task_progress.events[]` 中已经接纳的事件。
 - **当前到了哪一步**：读取 `current_snapshot.status`、`progress.current_event_id` 和 `current_event`。
-- **主事件或全部事件**：`trunk_events=true` 只过滤 `is_trunk=1`，不改变 `current_snapshot`、统计或当前事件。
+- **主事件或全部事件**：`trunk_events=true` 只保留当前活动链（自 `current_event_id` 沿 `parent_event` 回溯到根的事件），不改变 `current_snapshot`、统计或当前事件；`is_trunk` 不落库。
 
 ### 6.5 OpenAPI 合同
 
@@ -628,7 +626,7 @@ OpenAPI schema 不应暴露未被本方案采用的 Agent Card、A2A Task、Metr
 | L5 | `MethodBinding=Open + Group`；不使用 `Swarm` |
 | L6 | `ProductProfile=public_discussion`；`MethodComposition=Open + Group`；`DomainProfile=bbs_community`；`WorkflowProfile=forum_public_discussion`；产品角色通过 `ScenarioRole` 映射到 `RoleBinding` |
 | G1 | `Authentication`、`Authorization`、`Policy`、`Audit` 校验 `topic.read`、`message.post` 和事件 visibility |
-| G2 | `Idempotency` 使用 `request_id`；`Recovery` 处理事务失败；事件记录保留 `parent_event`，查询使用 `trunk_events` |
+| G2 | `Recovery` 处理事务失败与重复提交（`expected_version` 并发拒绝）；事件记录保留 `parent_event`，查询使用 `trunk_events` |
 | G3 | `Observation` 可记录讨论活动；`Outcome` 可记录责任人汇总结果；GET 只是查询投影 |
 | G4 | `Schema` / `Version` / `State Machine` / `Conformance` 约束公开讨论事件和状态 |
 
@@ -655,7 +653,7 @@ OpenAPI schema 不应暴露未被本方案采用的 Agent Card、A2A Task、Metr
 | L5 | `MethodBinding=Single`，绑定 `Agent=bot_coding_001` |
 | L6 | `ProductProfile=team_todo`；`MethodComposition=Single`；`DomainProfile=team_space`；`WorkflowProfile=team_todo_execution`；`ScenarioRole` 映射责任人和执行 Agent |
 | G1 | `Authentication`、`Authorization`、`Policy`、`Audit` 校验 `todo.create`、`todo.execute`、`todo.accept` 和 Resource 访问权限 |
-| G2 | `Idempotency` 使用 `request_id`；`Recovery` 处理失败；`parent_event` 建立任务事件 DAG |
+| G2 | `Recovery` 处理失败；`parent_event` 建立任务事件 DAG |
 | G3 | `Observation` 记录 Bot 进度；`Outcome` 记录验收结果；不创建额外事实表 |
 | G4 | `Schema` / `Version` / `State Machine` / `Conformance` 约束 `Task`、`Activity`、`Artifact` 事件和状态 |
 
@@ -678,7 +676,7 @@ OpenAPI schema 不应暴露未被本方案采用的 Agent Card、A2A Task、Metr
 L4 Collet（context_spec + current_snapshot）
 Event record（EventEnvelope + parent_event + payload）
 GET Query / task_progress.events[]
-request_id / expected_version / trunk_events
+expected_version / trunk_events
 ```
 
 BBS 的 `Open + Group` 和团队代办的 `Single` 只是 `MethodBinding` 及 Profile 取值，不因为产品不同再新增领域表。
@@ -816,7 +814,7 @@ experiment_ledger.py         # G3 演进实验不在当前范围
 | 表 | 必要原因 | 不再单独建表的内容 |
 | --- | --- | --- |
 | `ac_context_collab_collet` | 保存 `collab_context_id`、创建幂等键、创建参数、当前任务/方法/运行/进度快照和 `context_version` | Task、方法、执行者、资源引用和当前进度都保存在 JSON 字段 |
-| `ac_context_collab_event` | 保存事件、`request_id`、`parent_event`、主干标记和 payload | 用户互动、进度、交付和验收信息都只是事件 payload，不是表 |
+| `ac_context_collab_event` | 保存事件、`parent_event` 和 payload | 用户互动、进度、交付和验收信息都只是事件 payload，不是表；主干预算不落库 |
 
 明确不新增：独立任务表、消息表、参与者表、角色表、方法表、状态迁移表、租约表、审计表、幂等表、产物表、Outcome 表。
 
@@ -826,7 +824,7 @@ experiment_ledger.py         # G3 演进实验不在当前范围
 - `ac_context_collab_collet.current_snapshot`：当前 objective、status、executor、method 和 progress 的查询快照。
 - `ac_context_collab_event.payload`：事件业务数据；用户互动消息直接放 `payload.content`。
 
-事件侧的 `request_id` 通过 `ac_context_collab_event` 的唯一键实现幂等，不另建幂等表；创建接口不设幂等键（调用方无需传入防重号，重复调用即重复创建）；`trunk_events` 是查询参数，不落表。
+三个接口都不设幂等键：调用方无需传入防重号，防重责任由调用方承担（逐字重复提交由 `expected_version` 乐观并发拒绝）；`trunk_events` 是查询参数，不落表。
 
 ### 9.3 持久化层目录与职责
 
@@ -849,8 +847,8 @@ get_current_status(collab_context_id, trunk_events) -> current status
 1. **创建**：同一事务插入一行 `ac_context_collab_collet` 和一行初始 `task.created` 事件；创建不设幂等键，重复调用即重复创建。
 2. **追加事件**：锁定 Collet 行，检查 `expected_version`、`parent_event` 和权限；同一事务插入 Event 并更新 Collet 的 `current_snapshot`、`current_event_id`、`context_version`。
 3. **查询**：读取一行 Collet 和事件列表；按授权和 `trunk_events` 过滤，组合 `task_progress.events[]`；不写数据库。
-4. **事件 DAG**：主事件 `parent_event=null`，派生事件引用同一上下文内已存在事件；`is_trunk` 在接纳时计算；事件顺序使用 `sequence_no`。
-5. **幂等与并发**：相同 `(tenant, env, collab_context_id, request_id)` 只能成功一次；`expected_version` 不匹配直接返回冲突。
+4. **事件 DAG**：主事件 `parent_event=null`，派生事件引用同一上下文内已存在事件；事件顺序为落库顺序（自增 id）；主事件在查询时由活动链推导（自 `current_event_id` 沿 `parent_event` 回溯），`trunk_events=true` 仅在投影层过滤事件列表。
+5. **并发**：追加不设幂等键，重复提交即重复事件（由调用方防重）；`expected_version` 不匹配直接返回冲突。
 6. **错误传播**：唯一键、数据库写入和版本冲突必须向上返回，不能吞错。
 
 ### 9.5 DDL
@@ -883,10 +881,7 @@ CREATE TABLE `ac_context_collab_event` (
   `env` varchar(20) NOT NULL,
   `collab_context_id` varchar(128) NOT NULL,
   `event_id` varchar(128) NOT NULL,
-  `request_id` varchar(256) NOT NULL,
-  `sequence_no` bigint(20) NOT NULL,
   `parent_event` varchar(128) DEFAULT NULL,
-  `is_trunk` tinyint(1) NOT NULL DEFAULT 0,
   `event_kind` varchar(128) NOT NULL,
   `primitive_type` varchar(64) NOT NULL,
   `actor_ref` mediumtext NOT NULL COMMENT 'JSON actor reference',
@@ -897,10 +892,7 @@ CREATE TABLE `ac_context_collab_event` (
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_event` (`avernet_tenant`, `env`, `collab_context_id`, `event_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_event_request` (`avernet_tenant`, `env`, `collab_context_id`, `request_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_event_seq` (`avernet_tenant`, `env`, `collab_context_id`, `sequence_no`) GLOBAL,
-  KEY `idx_context_collab_event_parent` (`avernet_tenant`, `env`, `collab_context_id`, `parent_event`, `sequence_no`) GLOBAL,
-  KEY `idx_context_collab_event_trunk` (`avernet_tenant`, `env`, `collab_context_id`, `is_trunk`, `sequence_no`) GLOBAL
+  KEY `idx_context_collab_event_parent` (`avernet_tenant`, `env`, `collab_context_id`, `parent_event`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = 'Minimal append-only context collaboration event DAG';
 ```
@@ -941,7 +933,7 @@ CREATE TABLE `ac_context_collab_event` (
 
 ### 11.2 G2
 
-- 创建和事件接纳都必须支持 `request_id` 幂等；事件通过 `parent_event` 保留派生关系。
+- 事件通过 `parent_event` 保留派生关系；防重由调用方负责，`expected_version` 并发拒绝兜底。
 - `expected_version` 与 Collet version 防止并发请求覆盖当前快照。
 - 外部回报必须先转换为已校验的 Event record；本方案不负责启动或恢复外部执行。
 
@@ -992,7 +984,7 @@ CREATE TABLE `ac_context_collab_event` (
 | A06 | 责任人验收 | 追加 `task.accepted` / `task.rejected` 事件，允许状态值合法迁移 |
 | A07 | 查询主事件 | `trunk_events=true` 仅返回 DAG 主事件 |
 | A08 | 查询全部事件 | 默认返回全部可见 Event record |
-| A09 | 并发写入 | 旧 `expected_version` 或重复 request_id 被正确拒绝 / 幂等返回 |
+| A09 | 并发写入 | 旧 `expected_version` 重复提交被正确拒绝（409），不落半态 |
 | A10 | 权限降级 | 查询响应过滤受限 Resource 和历史事件，不泄露内容 |
 
 ## 13. 分阶段交付

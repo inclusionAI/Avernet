@@ -44,9 +44,6 @@ def test_collet_unique_keys_match_ddl(engine):
         indexes["uk_context_collab_collet_context"]["column_names"]
     ) == ("avernet_tenant", "env", "collab_context_id")
     assert indexes["uk_context_collab_collet_context"]["unique"]
-    assert not any(
-        name.startswith("uk_context_collab_collet_request") for name in indexes
-    )
     assert tuple(
         indexes["idx_context_collab_collet_modified"]["column_names"]
     ) == ("avernet_tenant", "env", "gmt_modified")
@@ -59,10 +56,7 @@ def test_event_columns_match_ddl(engine):
         "env",
         "collab_context_id",
         "event_id",
-        "request_id",
-        "sequence_no",
         "parent_event",
-        "is_trunk",
         "event_kind",
         "primitive_type",
         "actor_ref",
@@ -83,38 +77,27 @@ def test_event_unique_keys_match_ddl(engine):
             True,
         ),
         (
-            "uk_context_collab_event_request",
-            ("avernet_tenant", "env", "collab_context_id", "request_id"),
-            True,
-        ),
-        (
-            "uk_context_collab_event_seq",
-            ("avernet_tenant", "env", "collab_context_id", "sequence_no"),
-            True,
-        ),
-        (
             "idx_context_collab_event_parent",
             (
                 "avernet_tenant",
                 "env",
                 "collab_context_id",
                 "parent_event",
-                "sequence_no",
-            ),
-            False,
-        ),
-        (
-            "idx_context_collab_event_trunk",
-            (
-                "avernet_tenant",
-                "env",
-                "collab_context_id",
-                "is_trunk",
-                "sequence_no",
             ),
             False,
         ),
     ):
+        assert name in indexes, f"missing index {name}"
+        assert tuple(indexes[name]["column_names"]) == columns
+        assert indexes[name]["unique"] == unique
+
+    # 已删除的幂等/序号/主干键不复存在(作者裁决)。
+    for removed in (
+        "uk_context_collab_event_request",
+        "uk_context_collab_event_seq",
+        "idx_context_collab_event_trunk",
+    ):
+        assert removed not in indexes
         assert name in indexes, f"missing index {name}"
         assert tuple(indexes[name]["column_names"]) == columns
         assert indexes[name]["unique"] == unique

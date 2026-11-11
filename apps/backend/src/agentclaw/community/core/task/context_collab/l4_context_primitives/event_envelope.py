@@ -27,16 +27,13 @@ class EventRecord:
     """本地事件持久化记录(不得命名 ``ColletEvent``,spec §3.4.1)。
 
     ``parent_event`` 是事件 DAG 的本地因果关系字段,主事件为 ``None``;
-    ``is_trunk`` 在接纳时计算;``occurred_at`` 是事件发生时间。行一旦
-    追加即不再改写,因此本记录没有生命周期方法。
+    事件顺序即插入顺序(表自增 id),主干链在查询时由投影层推导。
+    行一旦追加即不再改写,因此本记录没有生命周期方法。
     """
 
     collab_context_id: str
     event_id: str
-    request_id: str
-    sequence_no: int
     parent_event: str | None
-    is_trunk: bool
     event_kind: str
     primitive_type: str  # Message | Task | Activity
     actor_ref: PrincipalRef
@@ -62,9 +59,6 @@ class EventRecord:
         cls,
         envelope: "EventEnvelope",
         *,
-        request_id: str,
-        sequence_no: int,
-        is_trunk: bool,
         primitive_type: str,
         actor_ref: PrincipalRef,
         visibility: str,
@@ -72,10 +66,9 @@ class EventRecord:
     ) -> "EventRecord":
         """从 ACCS 信封反向构造本地记录。
 
-        信封只携带公共合同字段,``request_id`` / ``sequence_no`` /
-        ``is_trunk`` / ``primitive_type`` / ``actor_ref`` / ``visibility`` /
-        ``occurred_at`` 这些本地字段必须由调用方补充;不支持的信封版本
-        直接拒绝。
+        信封只携带公共合同字段,``primitive_type`` / ``actor_ref`` /
+        ``visibility`` / ``occurred_at`` 这些本地字段必须由调用方补充;
+        不支持的信封版本直接拒绝。
         """
         if envelope.event_version != EVENT_ENVELOPE_VERSION:
             raise ContextCollabValidationError(
@@ -85,10 +78,7 @@ class EventRecord:
         return cls(
             collab_context_id=envelope.aggregate_ref,
             event_id=envelope.event_id,
-            request_id=request_id,
-            sequence_no=sequence_no,
             parent_event=envelope.causation_id,
-            is_trunk=is_trunk,
             event_kind=envelope.event_type,
             primitive_type=primitive_type,
             actor_ref=actor_ref,

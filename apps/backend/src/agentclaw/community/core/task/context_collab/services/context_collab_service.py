@@ -23,6 +23,7 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 )
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
     EventProjection,
+    active_chain_ids,
     build_progress,
     project_events,
 )
@@ -264,17 +265,14 @@ class ContextCollabService(ContextCollabServiceProtocol):
         """追加事件用例(spec §6.3):加载 → G4 校验 → G1 check →
         状态机裁决 → 仓储追加 → 组装结果。
 
-        涉及聚合状态的并发语义由仓储把守:``parent_event`` 存在性、
-        ``expected_version`` 乐观并发与 request_id 幂等重放都在仓储持锁
-        事务内裁决,相关错误(VersionConflict / ParentEventError 等)原样
-        上抛,本层不预查、不吞。重放(``created=False``)仍视为接收成功:
-        返回原事件 id,``current_status`` / ``context_version`` 取当行
-        collet 的最新投影(文档化的接受行为)。``snapshot_updater`` 是
-        只替换 status 的纯函数,由仓储在其行锁内求值,避免陈旧写。
+        涉及聚合状态的并发语义由仓储把守:``parent_event`` 存在性与
+        ``expected_version`` 乐观并发都在仓储持锁事务内裁决,相关错误
+        (VersionConflict / ParentEventError 等)原样上抛,本层不预查、
+        不吞。追加不设幂等键(spec 作者裁决):重复提交即重复事件,
+        防重由调用方保证。``snapshot_updater`` 是只替换 status 的纯函数,
+        由仓储在其行锁内求值,避免陈旧写。
         """
-        status = self._repository.get_current_status(
-            collab_context_id, trunk_events=False
-        )
+        status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
@@ -292,7 +290,6 @@ class ContextCollabService(ContextCollabServiceProtocol):
         record = self._repository.append_event(
             collab_context_id,
             AppendEventRecordRequest(
-                request_id=command.request_id,
                 expected_version=command.expected_version,
                 event_kind=command.event_kind,
                 primitive_type=command.primitive_type,
@@ -322,19 +319,17 @@ class ContextCollabService(ContextCollabServiceProtocol):
     ) -> ContextCollabStatusProjection:
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
 
-        Controller Ruling R6 / spec §12.2 #4:服务总是向仓储全量取事件
-        (``trunk_events=False``),percent / 统计 / current_event 一律从
-        完整可见事件推导;``trunk_events=True`` 只过滤返回的
-        ``task_progress.events[]`` 条目(服务层完成),不改
-        current_snapshot / current_event / 统计。visibility 过滤(G1)
-        先于推导,统计与列表都只反映 actor 可见的事件。返回的
-        ``current_snapshot`` 用 ``build_progress`` 的实时投影替换落库
-        progress(落库值只是最后一次写时的陈旧快照);``current_event``
-        按 collet 行指针取投影条目,指针事件不可见时为 ``None``。
+        Ruling R6/R9 / spec §12.2 #4:仓储全量返回事件(顺序即接纳
+        顺序),percent / 统计 / current_event 一律从完整可见事件推导;
+        ``trunk_events=True`` 只过滤返回的 ``task_progress.events[]``
+        条目 —— 主干链由 ``active_chain_ids``(current 沿 parent 回溯)
+        推导,过滤不改 current_snapshot / current_event / 统计。
+        visibility 过滤(G1)先于推导,统计与列表都只反映 actor 可见的
+        事件。返回的 ``current_snapshot`` 用 ``build_progress`` 的实时
+        投影替换落库 progress;``current_event`` 按 collet 行指针取投影
+        条目,指针事件不可见时为 ``None``。
         """
-        status = self._repository.get_current_status(
-            collab_context_id, trunk_events=False
-        )
+        status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
@@ -343,24 +338,25 @@ class ContextCollabService(ContextCollabServiceProtocol):
         visible_events = self._authorizer.filter_visible_events(
             collet, status.events, context
         )
-        # 投影始终基于全量可见事件:current 指针落在分支事件上时,
-        # 事件状态与统计仍按真实 sequence 推导,不因 trunk 开关退化。
+        # 投影始终基于全量可见事件,不因 trunk 开关退化;
+        # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。
         projection = project_events(
             visible_events,
             current_event_id=collet.current_event_id,
-            trunk_events=False,
         )
-        listed_projection = projection
+        trunk_ids = None
         if trunk_events:
-            trunk_event_ids = {
-                record.event_id
-                for record in visible_events
-                if record.is_trunk
-            }
-            listed_projection = [
+            trunk_ids = active_chain_ids(
+                visible_events, collet.current_event_id
+            )
+        listed_projection = (
+            projection
+            if trunk_ids is None
+            else [
                 entry for entry in projection
-                if entry.event_id in trunk_event_ids
+                if entry.event_id in trunk_ids
             ]
+        )
         progress = build_progress(
             projection,
             current_event_id=collet.current_event_id,

@@ -101,7 +101,7 @@ def _create_body() -> dict:
 def _append_body() -> dict:
     """spec §6.3 用户新增互动消息示例 (verbatim JSON, parent linked below)."""
     return {
-        "request_id": "append-user-message-001",
+
         "expected_version": 1,
         "event_kind": "user_interaction.posted",
         "primitive_type": "Message",

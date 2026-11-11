@@ -200,10 +200,6 @@ class EventCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    request_id: str = Field(
-        min_length=1,
-        description="Client-supplied idempotency key for this append.",
-    )
     expected_version: int = Field(
         ge=1,
         description="Context version the append is based on; a mismatch with "
@@ -250,7 +246,6 @@ class EventCreateRequest(BaseModel):
                 "actor_ref.principal_id must match the authenticated principal"
             )
         return EventAppendCommand(
-            request_id=self.request_id,
             expected_version=self.expected_version,
             event_kind=self.event_kind,
             primitive_type=self.primitive_type,
