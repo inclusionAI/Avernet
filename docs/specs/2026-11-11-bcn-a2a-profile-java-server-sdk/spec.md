@@ -38,7 +38,7 @@ BCS 已作为公司级 A2A 注册中心和 A2A Client：Agent 注册 AgentCard�
 
 | 编号 | 决定 | 后果 |
 | --- | --- | --- |
-| D1 | 内部调用全部走 RPC，协议不定义额外鉴权 | 信任边界是内部 RPC 网络；Card 固定 `securityRequirements: []`；调用上下文的可信度等同于 RPC 调用方 |
+| D1 | 调用都在公司内部网络内完成（RPC，或内部域名上的 HTTP），协议不定义额外鉴权；三种绑定都保留，都不鉴权 | 信任边界是公司内部网络；Card 固定 `securityRequirements: []`；调用上下文的可信度等同于调用方在内网内 |
 | D2 | 多实例是一等约束 | SDK 的默认行为必须在多实例下正确，不能以单实例为前提 |
 | D3 | 多实例只提供跨实例存储的 SPI 和参考实现 | 任务始终在接收它的实例上执行；其他实例只通过共享存储协作，见第 6 节 |
 | D4 | 接受 D3 带来的三项降级 | 跨实例订阅为轮询合成；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复 |
@@ -54,8 +54,7 @@ BCS 继续兼容不使用 SDK、但符合 Profile 的第三方 Server。
 ### 4.2 基线
 
 - A2A 版本：`protocolVersion` 为 `"1.0"`，细节按 A2A 1.0.1 规范。
-- 必选绑定：`GRPC`（服务 `lf.a2a.v1.A2AService`，经 SOFARPC Triple 和 MOSN）。
-- 可选绑定：`HTTP+JSON`、`JSONRPC`，用于本地调试和非 SOFA 技术栈。三种绑定语义一致。
+- 绑定：`GRPC`（服务 `lf.a2a.v1.A2AService`，经 SOFARPC Triple 和 MOSN）、`HTTP+JSON`、`JSONRPC`，至少提供一种，地位相同。HTTP 类绑定通过内部域名访问。三种绑定语义一致，都不鉴权。
 - 方法：`SendMessage`、`SendStreamingMessage`、`GetTask`、`SubscribeToTask`、`CancelTask`。其他标准方法不属于 Profile。
 - 输入输出：`text/plain`。
 
@@ -75,7 +74,7 @@ BCS 继续兼容不使用 SDK、但符合 Profile 的第三方 Server。
 沿用 [Provider AgentCard 管理接口 v0.1](../../bcn-provider-agent-card-api-v0.1.zh-CN.md) 的字段要求，并补充：
 
 - `securityRequirements` 必须为 `[]`，不得声明 `securitySchemes`。
-- `supportedInterfaces` 至少包含一个 `GRPC` 接口。
+- `supportedInterfaces` 至少包含一个接口，绑定为 `GRPC`、`HTTP+JSON` 或 `JSONRPC`。
 - `defaultInputModes`、`defaultOutputModes` 必须包含 `text/plain`。
 - 一个进程承载多个 Agent 时，每个 Agent 使用可区分的接口地址或 `tenant`。
 
@@ -145,7 +144,7 @@ Data-only 扩展，`required:false`。`params` 包含：
 | `bcn-a2a-spec` | 扩展 URI 常量、扩展数据模型、Card 的 Profile 校验 | a2a-java 模型 |
 | `bcn-a2a-server-core` | 请求处理、Task 生命周期、行为约束、SPI 定义、内存存储 | `bcn-a2a-spec` |
 | `bcn-a2a-server-store-jdbc` | 存储 SPI 的 JDBC 参考实现 | `bcn-a2a-server-core` |
-| `bcn-a2a-server-sofaboot-starter` | 自动装配、GRPC（Triple）端点、可选 HTTP 端点、Card 发布 | `bcn-a2a-server-core`、SOFABoot |
+| `bcn-a2a-server-sofaboot-starter` | 自动装配、GRPC（Triple）端点、HTTP+JSON 和 JSONRPC 端点、Card 发布 | `bcn-a2a-server-core`、SOFABoot |
 | `bcn-a2a-tck` | 一致性测试套件 | `bcn-a2a-spec` |
 
 ### 5.3 SPI
@@ -192,7 +191,7 @@ SDK 负责：创建并持久化 Task、首帧返回 Task、把 `append` 转成�
 ### 5.4 starter 的装配
 
 - 发现容器内的 `BcnAgent` Bean，生成并校验 Card；不合规时启动失败。
-- 暴露 GRPC 端点；HTTP+JSON 和 JSONRPC 端点通过配置开启。
+- 按配置暴露 GRPC、HTTP+JSON、JSONRPC 端点，至少一种。
 - 存储实现通过配置选择，不在代码中判断环境。
 - `AgentRegistrar` 默认关闭。开启时使用 [Provider 管理接口](../../bcn-provider-agent-card-api-v0.1.zh-CN.md)，以 `provider_bot_ref` 保证重启不重复注册。
 
@@ -292,9 +291,8 @@ public interface TaskStore {
 需要随本 spec 一并处理或明确保留的不一致：
 
 1. 现有指南把"无应用层凭据"描述为本期限制；Profile 把它定为固定要求。兼容入口保留的 Bearer 链路不属于 Profile。
-2. 现有指南中三种绑定并列；Profile 把 `GRPC` 定为必选。
-3. A2A-003 目前写的是"待定义字段与信任规则"，并提到 SDK 提供验证扩展点；按 D1，首版不提供验签。
-4. 现有扩展 URI 使用仓库 `dev` 分支的文档地址。作为公司标准的标识不够稳定，见第 10 节。
+2. A2A-003 目前写的是"待定义字段与信任规则"，并提到 SDK 提供验证扩展点；按 D1，首版不提供验签。
+3. 现有扩展 URI 使用仓库 `dev` 分支的文档地址。作为公司标准的标识不够稳定，见第 10 节。
 
 ## 10. 待确认
 

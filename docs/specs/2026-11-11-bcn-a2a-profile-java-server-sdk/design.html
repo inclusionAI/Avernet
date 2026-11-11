@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.3</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.4</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -164,7 +164,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <h2 id="s5"><span class="n">5</span>已确认的决策</h2>
 <div class="tw"><table>
 <tr><th>编号</th><th>决策</th><th>直接后果</th><th>被否决的方案</th></tr>
-<tr><td><span class="tag d">D1</span></td><td>内部调用全部走 RPC，协议不定义额外鉴权</td><td>信任边界是内部 RPC 网络。Card 固定 <code>securityRequirements: []</code>。调用上下文的可信度等同于 RPC 调用方。</td><td>Bearer 下行凭据；签名的用户断言。成本高，与公司 RPC 互信惯例不一致。</td></tr>
+<tr><td><span class="tag d">D1</span></td><td>调用都在公司内部网络内完成（RPC，或内部域名上的 HTTP），协议不定义额外鉴权。<code>GRPC</code>、<code>HTTP+JSON</code>、<code>JSONRPC</code> 三种绑定都保留，都不鉴权</td><td>信任边界是公司内部网络。Card 固定 <code>securityRequirements: []</code>。调用上下文的可信度等同于“调用方在内网内”。</td><td>Bearer 下行凭据；签名的用户断言。成本高，与公司内部服务互信的惯例不一致。另外否决了“只保留 GRPC”。</td></tr>
 <tr><td><span class="tag d">D2</span></td><td>多实例是一等约束</td><td>SDK 的默认行为必须在多实例下正确；单实例只是特例。</td><td>要求粘性路由。MOSN 负载均衡下不现实。</td></tr>
 <tr><td><span class="tag d">D3</span></td><td>多实例只提供跨实例存储的 SPI 和参考实现</td><td>Task 始终在接收它的实例上执行。其他实例只读写共享存储。</td><td>基于消息队列的事件复制（a2a-java 的 replicated queue manager）。引入额外中间件依赖。</td></tr>
 <tr><td><span class="tag d">D4</span></td><td>接受 D3 带来的三项降级</td><td>跨实例订阅为轮询合成，粒度约 1 秒；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复。</td><td>—</td></tr>
@@ -179,8 +179,8 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
 <tr><td><span class="tag p">P-01</span></td><td>接口的 <code>protocolVersion</code> 必须为 <code>"1.0"</code>。对象和绑定细节遵循 A2A 1.0.1 规范。不兼容 0.3 的方法名和字段（<code>message/stream</code>、<code>kind</code>、<code>final</code>）。</td></tr>
-<tr><td><span class="tag p">P-02</span></td><td>必须提供 <code>GRPC</code> 绑定，服务为 <code>lf.a2a.v1.A2AService</code>，通过 SOFARPC Triple 暴露，经 MOSN 寻址。普通 Bolt/Hessian 接口不能替代。</td></tr>
-<tr><td><span class="tag p">P-03</span></td><td>可以额外提供 <code>HTTP+JSON</code> 和 <code>JSONRPC</code> 绑定。三种绑定的对象语义和行为必须一致。</td></tr>
+<tr><td><span class="tag p">P-02</span></td><td>必须提供 <code>GRPC</code>、<code>HTTP+JSON</code>、<code>JSONRPC</code> 三种绑定中的至少一种，可以同时提供多种。三种绑定地位相同，BCS 按 Card 中的声明顺序选择。<code>GRPC</code> 的服务为 <code>lf.a2a.v1.A2AService</code>，通过 SOFARPC Triple 暴露，经 MOSN 寻址；普通 Bolt/Hessian 接口不能替代。<code>HTTP+JSON</code> 和 <code>JSONRPC</code> 通过内部域名访问，流式使用 SSE。</td></tr>
+<tr><td><span class="tag p">P-03</span></td><td>三种绑定的对象语义和行为必须一致，都不要求应用层凭据。同一 Task 可以通过任一已声明的绑定查询、订阅和取消。所有端点只能在公司内部网络可达。</td></tr>
 <tr><td><span class="tag p">P-04</span></td><td>必须实现的方法由一致性等级决定（6.3）。Profile 之外的标准方法可以实现，BCS 不调用。</td></tr>
 <tr><td><span class="tag p">P-05</span></td><td>输入输出必须支持 <code>text/plain</code>。请求只包含文本 Part；响应的用户可见内容必须以文本 Artifact 提供。</td></tr>
 <tr><td><span class="tag p">P-06</span></td><td>JSON 使用 A2A 1.0 的 lowerCamelCase（ProtoJSON）。枚举使用全名，例如 <code>ROLE_USER</code>、<code>TASK_STATE_WORKING</code>。</td></tr>
@@ -210,7 +210,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><th>条款</th><th>内容</th></tr>
 <tr><td><span class="tag p">P-10</span></td><td><code>name</code>、<code>description</code>、<code>version</code>、<code>supportedInterfaces</code>、<code>capabilities</code>、<code>defaultInputModes</code>、<code>defaultOutputModes</code>、<code>skills</code> 必须显式提供。</td></tr>
 <tr><td><span class="tag p">P-11</span></td><td><code>securityRequirements</code> 必须为 <code>[]</code>，不得包含 <code>securitySchemes</code>。</td></tr>
-<tr><td><span class="tag p">P-12</span></td><td><code>supportedInterfaces</code> 必须包含至少一个 <code>GRPC</code> 接口，且排在首选位置。</td></tr>
+<tr><td><span class="tag p">P-12</span></td><td><code>supportedInterfaces</code> 必须包含至少一个接口，绑定为 <code>GRPC</code>、<code>HTTP+JSON</code> 或 <code>JSONRPC</code>，按偏好顺序排列。声明的每个接口都必须真实可用。</td></tr>
 <tr><td><span class="tag p">P-13</span></td><td><code>defaultInputModes</code> 和 <code>defaultOutputModes</code> 必须包含 <code>text/plain</code>。</td></tr>
 <tr><td><span class="tag p">P-14</span></td><td>一个进程承载多个 Agent 时，每个 Agent 必须有可区分的接口地址或 <code>tenant</code>。</td></tr>
 <tr><td><span class="tag p">P-15</span></td><td>必须通过 profile 声明扩展（7.1）声明 Profile 版本和等级。</td></tr>
@@ -224,7 +224,9 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
   "version": "1.3.0",
   "supportedInterfaces": [
     {"url": "https://order-agent.example.internal", "protocolBinding": "GRPC",
-     "protocolVersion": "1.0", "tenant": "order-agent"}
+     "protocolVersion": "1.0", "tenant": "order-agent"},
+    {"url": "https://order-agent.example.internal/a2a/order-agent", "protocolBinding": "HTTP+JSON",
+     "protocolVersion": "1.0"}
   ],
   "capabilities": {
     "streaming": true,
@@ -244,7 +246,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <p class="cap">扩展 URI 用占位符表示，命名空间见 <span class="tag q">Q2</span>。</p>
 
 <h3 id="s6-5"><span class="n">6.5</span>方法</h3>
-<p>下表给出 GRPC 方法和可选 HTTP+JSON 绑定的对应关系。JSONRPC 绑定使用相同的方法名作为 <code>method</code>。</p>
+<p>下表给出 GRPC 和 HTTP+JSON 绑定的对应关系。JSONRPC 绑定把五个方法统一 POST 到接口地址，以相同的方法名作为 <code>method</code>，流式响应为 SSE。</p>
 <div class="tw"><table>
 <tr><th>方法</th><th>GRPC</th><th>HTTP+JSON</th><th>成功响应</th></tr>
 <tr><td>SendMessage</td><td>unary</td><td><code>POST /message:send</code></td><td><code>task</code> 或 <code>message</code>，二选一</td></tr>
@@ -501,7 +503,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><code>bcn-a2a-spec</code></td><td>扩展 URI 常量、扩展数据模型及编解码、Card 的 Profile 校验器</td><td>a2a-java spec</td></tr>
 <tr><td><code>bcn-a2a-server-core</code></td><td>五个方法的处理、Task 生命周期、文本流约束、SPI 定义、内存 TaskStore</td><td><code>bcn-a2a-spec</code></td></tr>
 <tr><td><code>bcn-a2a-server-store-jdbc</code></td><td>TaskStore 的 JDBC 参考实现和建表语句</td><td><code>server-core</code>、JDBC</td></tr>
-<tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、GRPC（Triple）端点、可选 HTTP 端点、调用方身份提取、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
+<tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、GRPC（Triple）端点、HTTP+JSON 和 JSONRPC 端点（含 SSE）、调用方身份提取、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
 <tr><td><code>bcn-a2a-server-test</code></td><td>单元测试辅助：内存运行器、断言工具</td><td><code>server-core</code></td></tr>
 <tr><td><code>bcn-a2a-tck</code></td><td>一致性测试套件（第 10 节）</td><td><code>bcn-a2a-spec</code></td></tr>
 </table></div>
@@ -656,9 +658,10 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <div class="tw"><table>
 <tr><th>配置键</th><th>默认值</th><th>说明</th></tr>
 <tr><td><code>bcn.a2a.server.enabled</code></td><td><code>true</code></td><td>总开关</td></tr>
-<tr><td><code>bcn.a2a.server.interface-url</code></td><td>无，必填</td><td>写入 Card 的 GRPC 接口地址，即 MOSN 路由匹配的接口标识</td></tr>
-<tr><td><code>bcn.a2a.server.http.enabled</code></td><td><code>false</code></td><td>是否开启 HTTP+JSON 和 JSONRPC 端点</td></tr>
-<tr><td><code>bcn.a2a.server.http.base-path</code></td><td><code>/a2a</code></td><td>HTTP 端点前缀；每个 Agent 位于 <code>{base-path}/{tenant}</code></td></tr>
+<tr><td><code>bcn.a2a.server.bindings</code></td><td>无，必填</td><td>开启的绑定及其在 Card 中的顺序，取值 <code>GRPC</code>、<code>HTTP+JSON</code>、<code>JSONRPC</code>，至少一个</td></tr>
+<tr><td><code>bcn.a2a.server.grpc.interface-url</code></td><td>开启 GRPC 时必填</td><td>写入 Card 的 GRPC 接口地址，即 MOSN 路由匹配的接口标识</td></tr>
+<tr><td><code>bcn.a2a.server.http.base-url</code></td><td>开启 HTTP+JSON 或 JSONRPC 时必填</td><td>写入 Card 的内部域名地址，例如 <code>https://order-agent.example.internal</code></td></tr>
+<tr><td><code>bcn.a2a.server.http.base-path</code></td><td><code>/a2a</code></td><td>HTTP 端点前缀。HTTP+JSON 位于 <code>{base-path}/{tenant}</code>，JSONRPC 位于 <code>{base-path}/{tenant}/jsonrpc</code></td></tr>
 <tr><td><code>bcn.a2a.server.store</code></td><td><code>memory</code></td><td><code>memory</code> 或 <code>jdbc</code>，或自定义实现的 Bean 名</td></tr>
 <tr><td><code>bcn.a2a.server.single-instance</code></td><td><code>false</code></td><td>为 <code>false</code> 且存储为 <code>memory</code> 时启动告警；生产环境启动失败</td></tr>
 <tr><td><code>bcn.a2a.server.execution.max-concurrent</code></td><td>64</td><td>并发 Task 上限</td></tr>
@@ -677,7 +680,7 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <ul>
 <li><b>生成。</b>starter 根据 <code>AgentDescriptor</code>、配置的接口地址和已装配的能力生成 Card。扩展声明由 SDK 写入：只有对应 SPI 已装配，才声明该扩展。</li>
 <li><b>校验。</b>启动时用 <code>bcn-a2a-spec</code> 的校验器检查 Card。不合规则启动失败，并给出具体条款编号。</li>
-<li><b>发布。</b>开启 HTTP 时，在 <code>{base-path}/{tenant}/agent-card.json</code> 提供 Card。未开启 HTTP 时，通过内联 Card 注册。</li>
+<li><b>发布。</b>开启了 HTTP+JSON 或 JSONRPC 时，在 <code>{base-path}/{tenant}/agent-card.json</code> 提供 Card。只开启 GRPC 时，通过内联 Card 注册。</li>
 <li><b>注册。</b><code>AgentRegistrar</code> 默认关闭。开启后在启动完成时调用 BCS 的 Provider 管理接口：以 <code>provider_bot_ref</code> 查询，不存在则注册，存在且 Card 有变化则更新。管理凭据从平台的密钥配置读取，不写在应用配置中。注册失败不阻止应用启动，但会告警并重试。</li>
 </ul>
 <div class="box q"><p>多实例同时启动会并发注册。BCS 对重复的 <code>provider_bot_ref</code> 返回冲突，SDK 收到冲突后改为查询再更新。更新是完整替换且以最后写入为准，各实例的 Card 相同，因此结果一致。动态 Agent（<code>AgentResolver.list()</code> 的结果会变化）的注册时机见 <span class="tag q">Q10</span>。</p></div>
@@ -979,7 +982,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><th>改动</th><th>原因</th><th>阶段</th></tr>
 <tr><td>下行调用生成调用上下文 metadata 并协商该扩展</td><td>7.2，即待办 A2A-003</td><td>P3</td></tr>
 <tr><td>注册时识别 profile 声明扩展，校验等级自洽</td><td>7.1</td><td>P1</td></tr>
-<tr><td>接入文档更新：无凭据调用从"本期限制"改为 Profile 要求；GRPC 为必选</td><td><span class="tag d">D1</span>、P-02</td><td>P1</td></tr>
+<tr><td>接入文档更新：无凭据调用从"本期限制"改为 Profile 要求，三种绑定都适用</td><td><span class="tag d">D1</span>、P-02</td><td>P1</td></tr>
 <tr><td>下行合同测试与 TCK 的 Client 方向用例对齐</td><td>第 10 节</td><td>P2 起逐步</td></tr>
 <tr><td>确认取消超时与 SDK 的 <code>cancel.wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
 <tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.11，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
@@ -989,7 +992,8 @@ CREATE TABLE bcn_a2a_submission (
 <h2 id="s13"><span class="n">13</span>安全与信任</h2>
 <div class="tw"><table>
 <tr><th>主题</th><th>设计</th></tr>
-<tr><td>信任边界</td><td>内部 RPC 网络。Agent 的 A2A 端点不得暴露到公网。开启 HTTP 端点时同样只能在内网可达。</td></tr>
+<tr><td>信任边界</td><td>公司内部网络。三种绑定的端点都不鉴权，都不得暴露到公网。HTTP 端点只能绑定内部域名，不得挂到对外网关。这是部署要求，SDK 无法在代码层面保证。</td></tr>
+<tr><td>HTTP 下的调用方身份</td><td>GRPC 经 SOFARPC 可以取得调用方应用名。HTTP+JSON 和 JSONRPC 没有等价的可信来源，<code>callerApp()</code> 为空，<code>CallerPolicy</code> 的应用白名单对这两种绑定不生效。需要限制调用方的 Agent 应只开启 GRPC，或在网络层限制来源。见 <span class="tag q">Q8</span>。</td></tr>
 <tr><td>调用方身份</td><td>SDK 从 RPC 上下文取调用方应用名，提供给 Agent 和 <code>CallerPolicy</code>。Profile 不强制校验。</td></tr>
 <tr><td>用户身份</td><td><code>userId</code> 由 BCS 从已认证上下文生成，不验签。能发起 RPC 的内部应用可以构造它。</td></tr>
 <tr><td>隔离</td><td>所有存储访问都带 <code>agentKey</code>。跨 Agent、跨 tenant 的 Task 访问返回未找到。</td></tr>
@@ -1038,7 +1042,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td><span class="tag q">Q9</span></td><td>停机等待时间的默认值，以及是否需要与发布系统联动</td><td>30 秒</td><td>8.7</td></tr>
 <tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.9</td></tr>
 <tr><td><span class="tag q">Q11</span></td><td>参考存储是否需要除 JDBC 外的实现（例如 Tair）</td><td>首期只提供 JDBC；其他实现通过 TaskStore 合同测试后可自行使用</td><td>9.8</td></tr>
-<tr><td><span class="tag q">Q12</span></td><td>GRPC 之外，HTTP+JSON 端点是否需要在生产环境开放</td><td>默认关闭，仅用于调试</td><td>P-03</td></tr>
+<tr><td><span class="tag q">Q12</span></td><td>已结论：三种绑定都保留并可用于生产，都不鉴权。遗留问题：SDK 是否默认同时开启三种，还是由业务显式选择</td><td>由业务在 <code>bindings</code> 中显式选择，不设默认</td><td>P-03</td></tr>
 <tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
 <tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
 <tr><td><span class="tag q">Q15</span></td><td>BCS 是否转发已登记的业务扩展数据，以及转发的大小和频率限制</td><td>转发，不解释内容；落地时间跟随 BCS 提供 A2A 服务的阶段</td><td>7.4</td></tr>
