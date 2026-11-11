@@ -235,31 +235,25 @@ class SkillPackageValidator:
         skill_indexes = [
             index
             for index, (path, _content) in enumerate(normalized_entries)
-            if path.split("/")[-1] == "SKILL.md"
-            or (
-                allow_legacy_local_manifest
-                and path.split("/")[-1].lower() == "skill.md"
-            )
+            if path.split("/")[-1].lower() == "skill.md"
         ]
-        if allow_legacy_local_manifest and len(skill_indexes) > 1:
-            # Local Skills may link to nested capability/SKILL.md documents.
-            # Only the unambiguous package-root manifest defines their identity;
-            # never guess between sibling Skills or conflicting root names.
+        # Only a root manifest (possibly inside one transport wrapper) defines
+        # identity. Nested manifests are package content, not additional Skills.
+        root_indexes = [
+            index for index in skill_indexes if "/" not in normalized_entries[index][0]
+        ]
+        roots = {path.split("/")[0] for path, _content in normalized_entries}
+        if not root_indexes and len(roots) == 1:
             root_indexes = [
                 index
                 for index in skill_indexes
-                if "/" not in normalized_entries[index][0]
+                if normalized_entries[index][0].count("/") == 1
             ]
-            roots = {path.split("/")[0] for path, _content in normalized_entries}
-            if not root_indexes and len(roots) == 1:
-                root_indexes = [
-                    index
-                    for index in skill_indexes
-                    if normalized_entries[index][0].count("/") == 1
-                ]
-            if len(root_indexes) != 1:
-                raise SkillManifestMultipleError("multiple_skill_files")
-            skill_indexes = root_indexes
+        if not root_indexes and len(skill_indexes) == 1 and len(roots) > 1:
+            raise SkillPackageInvalidError("invalid_wrapper")
+        if len(root_indexes) > 1 or (skill_indexes and not root_indexes):
+            raise SkillManifestMultipleError("multiple_skill_files")
+        skill_indexes = root_indexes
         skill_files = [normalized_entries[index] for index in skill_indexes]
         if not skill_files:
             raise SkillManifestMissingError("missing_skill_file")
@@ -268,9 +262,9 @@ class SkillPackageValidator:
 
         skill_path, markdown = skill_files[0]
         if skill_path.split("/")[-1] != "SKILL.md":
-            canonical_skill_path = "/".join(
-                [*skill_path.split("/")[:-1], "SKILL.md"]
-            )
+            if not allow_legacy_local_manifest:
+                raise SkillManifestMissingError("missing_skill_file")
+            canonical_skill_path = "/".join([*skill_path.split("/")[:-1], "SKILL.md"])
             normalized_entries[skill_indexes[0]] = (canonical_skill_path, markdown)
             skill_path = canonical_skill_path
         entries = normalized_entries

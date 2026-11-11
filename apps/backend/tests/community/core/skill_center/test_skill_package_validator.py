@@ -251,13 +251,6 @@ def test_multiline_description_preserves_yaml_semantics(
         ([], "missing_skill_file"),
         (
             [
-                ("SKILL.md", b"name: one\ndescription: one\n"),
-                ("a/SKILL.md", b"name: one\ndescription: two\n"),
-            ],
-            "multiple_skill_files",
-        ),
-        (
-            [
                 ("weather/SKILL.md", _skill_md()),
                 ("outside.txt", b"outside"),
             ],
@@ -496,11 +489,36 @@ def test_local_package_preserves_nested_capability_documents(
     assert dict(package.files) == {"SKILL.md": manifest, **dict(nested)}
     assert _canonical_entries(package) == list(package.files)
     assert validator.validate_legacy_local_zip(package.canonical_zip) == package
-    # Local compatibility must not relax governed or exact Center packages.
     for validate in (validator.validate_zip, validator.validate_skill_center_exact_zip):
-        with pytest.raises(SkillPackageInvalidError) as error:
-            validate(package.canonical_zip)
-        assert error.value.reason == "multiple_skill_files"
+        assert validate(package.canonical_zip).files == package.files
+
+
+@pytest.mark.parametrize("wrapper", ["", "opaque/"])
+def test_exact_center_preserves_nested_manifests(wrapper: str) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    files = [("SKILL.md", _skill_md()), ("child/SKILL.md", b"reference")]
+    package = validator.validate_skill_center_exact_zip(
+        _zip([(wrapper + path, content) for path, content in files])
+    )
+    assert dict(package.files) == dict(files)
+    assert validator.revalidate(package) == package
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ("a/SKILL.md", "b/SKILL.md"),
+        ("wrapper/child/SKILL.md",),
+        ("SKILL.md", "SKILL.MD"),
+        ("wrapper/SKILL.md", "wrapper/skill.md"),
+    ],
+)
+def test_center_rejects_ambiguous_or_missing_root(paths: tuple[str, ...]) -> None:
+    with pytest.raises(SkillPackageInvalidError):
+        SkillPackageValidator(SkillParser()).validate_skill_center_exact_zip(
+            _zip([(path, _skill_md()) for path in paths])
+        )
+
 
 @pytest.mark.parametrize(
     ("paths",),
@@ -541,11 +559,11 @@ def test_local_package_preserves_nested_capability_documents(
     ],
 )
 def test_local_nested_documents_require_one_unambiguous_package_root(
-    paths: tuple[tuple[str, bytes], ...]
+    paths: tuple[tuple[str, bytes], ...],
 ) -> None:
     with pytest.raises(SkillPackageInvalidError) as error:
-        SkillPackageValidator(
-            SkillParser()
-        ).validate_legacy_local_zip(_zip(list(paths)))
+        SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+            _zip(list(paths))
+        )
 
     assert error.value.reason == "multiple_skill_files"

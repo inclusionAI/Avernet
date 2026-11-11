@@ -131,7 +131,8 @@ Both Backend and Engine enforce at least:
   paths, not additional independently installed Skills. Backend selects only
   the unambiguous root manifest (or one direct manifest inside a single
   transport wrapper); sibling packages and conflicting root filenames remain
-  invalid. Governed Draft/Center validation retains its single-manifest rule;
+  invalid. Draft and Center packages follow the same root selection rule while
+  retaining their strict root filename and metadata requirements;
 - the Legacy Backend entry point additionally accepts its historical
   case-insensitive manifest filename and YAML-only manifest, canonicalises the
   filename to `SKILL.md`, and sends those canonical bytes to the Engine.
