@@ -92,6 +92,8 @@ pub async fn assemble() -> (
             friend_ext TEXT DEFAULT NULL, \
             status TEXT NOT NULL DEFAULT 'online', \
             created_by TEXT, \
+            ownership_version INTEGER NOT NULL DEFAULT 0, \
+            actor_kind VARCHAR(16) NOT NULL DEFAULT 'bot', \
             is_deleted INTEGER NOT NULL DEFAULT 0, \
             PRIMARY KEY (bot_uuid, env))",
     ))

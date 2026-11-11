@@ -203,3 +203,82 @@ use super::*;
         assert_eq!(first.request_ids, second.request_ids);
         assert_eq!(events.lock().await.len(), 1);
     }
+
+    #[tokio::test]
+    async fn pending_friend_request_notifies_current_authority_owner_after_transfer() {
+        // The approval notification must reach the CURRENT authority owner —
+        // not the historical `created_by` fact. Here the legacy creator is
+        // 85020 while the post-transfer authority state (ownership_version 2
+        // + the approved owner edge) names bob.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:moved", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET ownership_version = 2 WHERE bot_uuid = ?",
+            vec![DbValue::from("x:moved")],
+        ))
+        .await
+        .expect("bump ownership_version");
+        eg.insert_grant(EdgeGrant {
+            edge_id: 0,
+            env: "dev".to_string(),
+            from_id: "human_bob".to_string(),
+            to_id: "x:moved".to_string(),
+            grant_kind: GrantKind::Owner,
+            grant_ref_id: 0,
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::SameAsFrom,
+            originator_policy_data: None,
+        })
+        .await
+        .expect("seed current owner edge");
+        let authority: Arc<dyn BotAuthorityRepoPort> =
+            Arc::new(bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                db.clone(),
+                "dev".to_string(),
+            ));
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder))
+            .with_bot_authority_port(Some(authority));
+        let res = svc
+            .create_connect("human_1", "x:moved", Some("hi".into()), None)
+            .await
+            .expect("manual pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].recipient_user_ids,
+            vec!["bob".to_string()],
+            "the current authority owner receives the notification, \
+             not the historical creator 85020"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_friend_request_falls_back_to_created_by_when_ownership_uninitialized() {
+        // Legacy bots (ownership_version = 0) have no authority owner edge:
+        // the strict ownership read errors and the recipients degrade to the
+        // historical `created_by` so unmigrated bots keep their existing
+        // notification behavior.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:legacy", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let authority: Arc<dyn BotAuthorityRepoPort> =
+            Arc::new(bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                db.clone(),
+                "dev".to_string(),
+            ));
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder))
+            .with_bot_authority_port(Some(authority));
+        let res = svc
+            .create_connect("human_1", "x:legacy", None, None)
+            .await
+            .expect("manual pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
+    }

@@ -25,7 +25,7 @@ use bcs_service_api::port::{
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
-    BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
+    BotActorConfigRepoPort, BotAuthorityRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{EdgePermissionFriendSyncService, ServiceError, ServiceResult};
@@ -60,6 +60,12 @@ pub struct DbConnectService {
     /// group gate (`bcs-group`) still reads. `None` = disabled (memory/local
     /// profiles, tests without a legacy store).
     friendship_writeback: Option<Arc<dyn FriendshipWritebackPort>>,
+    /// Strict authority reads for the CURRENT owner: friend-request
+    /// notifications must reach the owner edge holder, not the historical
+    /// `created_by` fact (ownership may have been transferred since).
+    /// `None` = degrade to the `created_by` fallback (tests that do not
+    /// seed authority state).
+    authority: Option<Arc<dyn BotAuthorityRepoPort>>,
     env: String,
 }
 
@@ -89,6 +95,7 @@ impl DbConnectService {
             friend_connect_notification,
             friend_auth_sync,
             friendship_writeback: None,
+            authority: None,
             env,
         }
     }
@@ -108,6 +115,18 @@ impl DbConnectService {
         writeback: Option<Arc<dyn FriendshipWritebackPort>>,
     ) -> Self {
         self.friendship_writeback = writeback;
+        self
+    }
+
+    /// Inject the strict authority read port used to resolve the CURRENT
+    /// owner for friend-request notifications. Builder style (consumes and
+    /// returns self) so the existing `new` signature and all current callers
+    /// stay untouched; the composition root wires it.
+    pub fn with_bot_authority_port(
+        mut self,
+        authority: Option<Arc<dyn BotAuthorityRepoPort>>,
+    ) -> Self {
+        self.authority = authority;
         self
     }
 
@@ -426,7 +445,7 @@ impl ConnectService for DbConnectService {
                             request_ids.clone(),
                             caller,
                             to_bot,
-                            self.target_notification_recipients(&cfg),
+                            self.target_notification_recipients(to_bot, &cfg).await,
                             message.as_deref(),
                             request_auth.clone(),
                         )
@@ -961,6 +980,25 @@ impl ConnectService for DbConnectService {
         })
     }
 
+    async fn find_pending_self_connect(
+        &self,
+        caller: &str,
+        to: &str,
+    ) -> ServiceResult<Option<PermissionRequest>> {
+        // Bounded existence read (LIMIT 1 at the store): the legacy
+        // duplicate-pending guard must not page the caller's whole history.
+        Ok(self
+            .requests
+            .find_request(
+                caller,
+                to,
+                &self.env,
+                RequestKind::Connect,
+                RequestStatus::Pending,
+                caller,
+            )
+            .await)
+    }
 }
 
 // ---- private helpers ------------------------------------------------------
@@ -1097,10 +1135,45 @@ impl DbConnectService {
             .any(|allowed| department_matches_allowlist_entry(&actor_department, allowed))
     }
 
-    fn target_notification_recipients(
+    /// Recipients of the friend-request approval notification.
+    ///
+    /// The CURRENT authority owner of the target bot decides pending
+    /// requests, so the current owner must be notified. `created_by` is only
+    /// a historical creator fact: after an ownership transfer the former
+    /// creator keeps receiving nothing-relevant pings while the new owner
+    /// stays unaware. When the authority port is unwired or its read fails
+    /// (uninitialized legacy ownership, transient lookup failure), degrade
+    /// to the `created_by` fallback with a WARN so ownerless/legacy bots
+    /// keep their existing notification behavior.
+    async fn target_notification_recipients(
         &self,
+        to_bot: &str,
         cfg: &bcs_domain::edge_permission::BotActorConfig,
     ) -> Vec<String> {
+        if let Some(authority) = &self.authority {
+            match authority.ownership(to_bot).await {
+                Ok(view) if !view.owner_user_id.is_empty() => {
+                    return vec![view.owner_user_id];
+                }
+                Ok(_) => {
+                    warn!(
+                        target_bot_id = %to_bot,
+                        env = %self.env,
+                        "authority ownership resolved to an empty owner id; \
+                         falling back to bot created_by for friend notification"
+                    );
+                }
+                Err(error) => {
+                    warn!(
+                        target_bot_id = %to_bot,
+                        env = %self.env,
+                        error = %error,
+                        "authority ownership read failed; \
+                         falling back to bot created_by for friend notification"
+                    );
+                }
+            }
+        }
         cfg.created_by.clone().into_iter().collect()
     }
 

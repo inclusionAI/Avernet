@@ -210,6 +210,9 @@ impl BcsServer {
                 crate::env::resolve_env(),
             )
             .with_friendship_writeback(Some(friendship_writeback))
+            // Friend-request notifications follow the CURRENT authority
+            // owner, not the historical `created_by` fact.
+            .with_bot_authority_port(Some(bot_authority_repo.clone()))
             .with_collaboration_registry(bot_registry.clone()),
         );
 

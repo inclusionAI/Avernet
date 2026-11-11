@@ -15,7 +15,8 @@
 //! `DbPermissionProfileStore`, `DbPermissionRequestStore`):
 //!
 //! - grants are unique on `(from_id, to_id, env, grant_kind, grant_ref_id)`
-//!   and the insert is idempotent, returning the existing id;
+//!   and the insert upserts: the conflicting row is refreshed in place and
+//!   keeps its id (a re-add after a revoke reactivates the revoked edge);
 //! - a *friend* edge is an approved `PermissionProfile` edge whose
 //!   `grant_ref_id` is the peer's active default profile id (D12);
 //! - request `gmt_create`/`gmt_modified` are store-managed timestamps.
@@ -28,7 +29,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use bcs_domain::edge_permission::{
     BotActorConfig, EdgeGrant, EdgeStatus, GrantKind, PermissionProfile, PermissionRequest,
-    ProfileStatus, RequestStatus,
+    ProfileStatus, RequestKind, RequestStatus,
 };
 use bcs_service_api::port::repo::edge_grant::{FriendIdsPage, FriendListQuery};
 use bcs_service_api::port::repo::{
@@ -355,7 +356,7 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
         let mut grants = self.grants.write().await;
-        let existing = grants.iter().find(|existing| {
+        let existing = grants.iter_mut().find(|existing| {
             existing.from_id == grant.from_id
                 && existing.to_id == grant.to_id
                 && existing.env == grant.env
@@ -363,7 +364,16 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
                 && existing.grant_ref_id == grant.grant_ref_id
         });
         if let Some(existing) = existing {
-            return Ok(existing.edge_id);
+            // Upsert parity with the SQL store: the conflicting row is
+            // refreshed in place and keeps its id, so a re-add after a
+            // revoke reactivates the revoked edge (unfriend → refriend →
+            // active) instead of returning the stale revoked row id.
+            let edge_id = existing.edge_id;
+            existing.rules = grant.rules;
+            existing.status = grant.status;
+            existing.originator_policy_type = grant.originator_policy_type;
+            existing.originator_policy_data = grant.originator_policy_data;
+            return Ok(edge_id);
         }
         let edge_id = next_id(&self.next_edge_id);
         grants.push(EdgeGrant { edge_id, ..grant });
@@ -460,6 +470,40 @@ impl PermissionRequestRepoPort for MemoryPermissionRequestStore {
             .cloned()
     }
 
+    async fn find_request(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        env: &str,
+        request_kind: RequestKind,
+        status: RequestStatus,
+        created_by: &str,
+    ) -> Option<PermissionRequest> {
+        // Same recency tie-break as `list` (updated_at DESC, request_id DESC).
+        let mut matches: Vec<PermissionRequest> = self
+            .requests
+            .read()
+            .await
+            .iter()
+            .filter(|request| {
+                request.env == env
+                    && request.from_id == from_id
+                    && request.to_id == to_id
+                    && request.request_kind == request_kind
+                    && request.status == status
+                    && request.created_by == created_by
+            })
+            .cloned()
+            .collect();
+        matches.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.request_id.cmp(&left.request_id))
+        });
+        matches.into_iter().next()
+    }
+
     async fn list_inbox(
         &self,
         to_id: &str,
@@ -523,9 +567,11 @@ impl PermissionRequestRepoPort for MemoryPermissionRequestStore {
 /// In-process [`BotActorConfigRepoPort`] projected from the in-memory bot
 /// registry.
 ///
-/// The in-memory registry is single-process and effectively single-env, so the
-/// lookup ignores `env` (the registry is the whole world) and only uses it as
-/// the projection fallback when a registration carries no env. The
+/// The in-memory registry is single-process and effectively single-env, so
+/// the registry facts are projected at the queried `env` — the same
+/// `(bot_id, env)` keying the DB-backed store uses — instead of trusting the
+/// registration's process-stamped env, which follows `resolve_env_str()` and
+/// differs across shells (dev/local/pre). The
 /// bot-internal attributes (`user_visibility`, `friend_check_in_strategy`,
 /// `friend_ext`) are not part of `RegisteredBot`; the in-memory path projects
 /// the product defaults (`protected` / `APPROVAL` / empty map) instead of
@@ -546,7 +592,7 @@ impl BotActorConfigRepoPort for MemoryBotActorConfigStore {
         let bot = self.registry.get(bot_id).await?;
         Some(BotActorConfig {
             bot_id: bot.bot_uuid,
-            env: bot.env.unwrap_or_else(|| env.to_string()),
+            env: env.to_string(),
             name: bot.capabilities.name.clone().unwrap_or_default(),
             visibility: bot.capabilities.visibility.clone(),
             status: match bot.status {
@@ -706,6 +752,53 @@ mod tests {
         assert!(backfilled.updated_at >= decided.updated_at);
     }
 
+    #[tokio::test]
+    async fn memory_permission_request_find_request_matches_all_predicates() {
+        let store = MemoryPermissionRequestStore::new();
+        store.insert(request("r1", "a", "b")).await.unwrap();
+        // Same pair authored by someone else (Bot↔Bot reverse-row shape)
+        // must not match.
+        let mut foreign = request("r2", "a", "b");
+        foreign.created_by = "b".to_string();
+        store.insert(foreign).await.unwrap();
+        store.insert(request("r3", "a", "c")).await.unwrap();
+
+        let found = store
+            .find_request("a", "b", ENV, RequestKind::Connect, RequestStatus::Pending, "a")
+            .await
+            .expect("exact lookup hits");
+        assert_eq!(found.request_id, "r1");
+        // Positive control: the foreign-authored row is findable by ITS
+        // author only (the reverse-row shape never satisfies the caller's
+        // own duplicate guard).
+        let foreign_found = store
+            .find_request("a", "b", ENV, RequestKind::Connect, RequestStatus::Pending, "b")
+            .await
+            .expect("the foreign-authored row hits its own author");
+        assert_eq!(foreign_found.request_id, "r2");
+        assert!(
+            store
+                .find_request("a", "b", ENV, RequestKind::Connect, RequestStatus::Approved, "a")
+                .await
+                .is_none(),
+            "status predicate applies"
+        );
+        assert!(
+            store
+                .find_request("a", "c", ENV, RequestKind::Connect, RequestStatus::Pending, "a")
+                .await
+                .is_some(),
+            "other pairs stay findable"
+        );
+        assert!(
+            store
+                .find_request("a", "b", ENV, RequestKind::Connect, RequestStatus::Pending, "nobody")
+                .await
+                .is_none(),
+            "author predicate keeps non-authors out"
+        );
+    }
+
     // ---- EdgeGrantRepoPort ---------------------------------------------
 
     #[tokio::test]
@@ -859,6 +952,33 @@ mod tests {
             "wrong-ref edge stays active"
         );
         assert!(store.is_authorized("caller", "target", ENV).await);
+    }
+
+    #[tokio::test]
+    async fn memory_edge_grant_reinsert_after_revoke_reactivates_the_same_edge() {
+        // Parity with the SQL upsert: re-adding after a revoke revives the
+        // revoked row in place (same edge id, approved again).
+        let profiles = Arc::new(MemoryPermissionProfileStore::new());
+        let store = MemoryEdgeGrantStore::new(profiles.clone());
+
+        let target_default = profiles.ensure_default_profile("target", ENV).await.unwrap();
+        let edge_id = store
+            .insert_grant(grant("caller", "target", GrantKind::PermissionProfile, target_default))
+            .await
+            .unwrap();
+        store.revoke_grant(edge_id, ENV).await.unwrap();
+        assert!(!store.has_friend_edge("caller", "target", ENV).await);
+
+        let again = store
+            .insert_grant(grant("caller", "target", GrantKind::PermissionProfile, target_default))
+            .await
+            .unwrap();
+        assert_eq!(again, edge_id, "the conflicting insert reuses the same in-memory row");
+        assert!(store.has_friend_edge("caller", "target", ENV).await);
+        let active = store.list_active_grants("caller", "target", ENV).await;
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].edge_id, edge_id);
+        assert_eq!(active[0].status, EdgeStatus::Approved);
     }
 
     // ---- BotActorConfigRepoPort ----------------------------------------

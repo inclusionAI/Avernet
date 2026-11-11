@@ -102,30 +102,31 @@ impl DbEdgeGrantStore {
         })
     }
 
-    /// INSERT with idempotent behavior on the unique key
+    /// INSERT with idempotent UPSERT on the unique key
     /// `(from_id, to_id, env, grant_kind, grant_ref_id)`: SQLite
-    /// `ON CONFLICT DO NOTHING` vs MySQL `INSERT IGNORE`.
+    /// `ON CONFLICT ... DO UPDATE` vs MySQL `ON DUPLICATE KEY UPDATE`.
+    ///
+    /// The conflicting row is refreshed in place and keeps its id: a re-add
+    /// after `revoke_grant` REACTIVATES the revoked edge (unfriend →
+    /// refriend → active) instead of returning the stale revoked row id
+    /// while the edge stays invisible to `has_friend_edge` / `list_friends`.
     ///
     /// Since the 033/034 bot-authority migration the unique key
     /// carries `grant_kind`: owner/manager management edges use
     /// `grant_ref_id = 0` for the same (from, to) pair as runtime
     /// profile/rules edges, and owner/manager must coexist.
-    fn insert_grant_sql(&self) -> &'static str {
-        match self.flavor {
-            EdgeGrantSqlFlavor::Mysql => {
-                "INSERT IGNORE INTO edge_grants \
-                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            }
-            EdgeGrantSqlFlavor::Sqlite => {
-                "INSERT INTO edge_grants \
-                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                 ON CONFLICT(from_id, to_id, env, grant_kind, grant_ref_id) DO NOTHING"
-            }
-        }
+    fn insert_grant_sql(&self) -> String {
+        let upsert = self.flavor.on_conflict_update(
+            &["from_id", "to_id", "env", "grant_kind", "grant_ref_id"],
+            &["rules", "status", "originator_policy_type", "originator_policy_data"],
+            &[("gmt_modified", "CURRENT_TIMESTAMP")],
+        );
+        format!(
+            "INSERT INTO edge_grants \
+             (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+              status, originator_policy_type, originator_policy_data) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) {upsert}"
+        )
     }
 }
 
@@ -758,6 +759,17 @@ impl DbPermissionRequestStore {
                 decided_at, gmt_create, gmt_modified \
          FROM permission_requests WHERE from_id = ? AND env = ? AND status = ? \
          ORDER BY gmt_modified DESC";
+
+    /// Bounded duplicate-guard read (LIMIT 1): existence of one caller-owned
+    /// `(from_id, to_id, env, request_kind, status)` row, newest first.
+    const FIND_REQUEST_SQL: &'static str =
+        "SELECT request_id, id, edge_id, env, from_id, to_id, request_kind, requested_ref_id, \
+                requested_rules, message, status, decision_reason, created_by, decided_by, \
+                decided_at, gmt_create, gmt_modified \
+         FROM permission_requests \
+         WHERE from_id = ? AND to_id = ? AND env = ? AND request_kind = ? \
+           AND status = ? AND created_by = ? \
+         ORDER BY gmt_modified DESC, id DESC LIMIT 1";
 }
 
 #[async_trait]
@@ -944,6 +956,49 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
             Err(err) => {
                 warn!(error = %err, "db_permission_request: list_sent failed");
                 Vec::new()
+            }
+        }
+    }
+
+    async fn find_request(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        env: &str,
+        request_kind: RequestKind,
+        status: RequestStatus,
+        created_by: &str,
+    ) -> Option<PermissionRequest> {
+        let rows = self
+            .query(
+                "find_request",
+                DbStatement::with_params(
+                    Self::FIND_REQUEST_SQL,
+                    vec![
+                        DbValue::from(from_id),
+                        DbValue::from(to_id),
+                        DbValue::from(env),
+                        DbValue::from(request_kind_str(request_kind)),
+                        DbValue::from(request_status_str(status)),
+                        DbValue::from(created_by),
+                    ],
+                ),
+            )
+            .await;
+        match rows {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .and_then(|row| match row_to_permission_request(&row) {
+                    Ok(r) => Some(r),
+                    Err(err) => {
+                        warn!(error = %err, "db_permission_request: find_request row skipped");
+                        None
+                    }
+                }),
+            Err(err) => {
+                warn!(error = %err, "db_permission_request: find_request failed");
+                None
             }
         }
     }
@@ -1711,15 +1766,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_grant_after_revoke_returns_revoked_row_pins_known_gap() {
-        // TODO(unfriend-refriend): pins the known pre-existing gap; flip when
-        // grant reactivation lands (follow-up dima).
-        //
-        // `insert_grant` is INSERT ... ON CONFLICT DO NOTHING on the unique key
-        // (from_id, to_id, env, grant_kind, grant_ref_id), so re-adding a
-        // friendship after an unfriend returns the existing REVOKED row: the
-        // second insert neither creates a fresh edge nor reactivates the old
-        // one.
+    async fn insert_grant_after_revoke_reactivates_the_same_row_in_place() {
+        // `insert_grant` upserts on the unique key
+        // (from_id, to_id, env, grant_kind, grant_ref_id): re-adding a
+        // friendship after an unfriend revives the revoked row IN PLACE —
+        // the edge id is stable and the grant returns to approved, so
+        // `list_active_grants` / `has_friend_edge` see the re-add.
         let store = sqlite_store().await;
         let ref_id = seed_default(&store, "b", "dev").await;
         let g = default_grant("a", "b", "dev", ref_id);
@@ -1729,12 +1781,12 @@ mod tests {
         let again = store.insert_grant(g).await.expect("re-insert");
         assert_eq!(
             again, edge_id,
-            "the conflicting insert returns the existing (revoked) row id"
+            "the conflicting insert reuses the existing row id"
         );
-        assert!(
-            store.list_active_grants("a", "b", "dev").await.is_empty(),
-            "re-adding does not resurrect a revoked grant"
-        );
+        let listed = store.list_active_grants("a", "b", "dev").await;
+        assert_eq!(listed.len(), 1, "the reactivated edge is active again");
+        assert_eq!(listed[0].edge_id, edge_id);
+        assert_eq!(listed[0].status, EdgeStatus::Approved);
         let status = store
             .db
             .query(DbStatement::with_params(
@@ -1746,8 +1798,8 @@ mod tests {
             .into_iter()
             .next()
             .and_then(|row| row.get_string("status").expect("status column"))
-            .expect("the revoked row still exists");
-        assert_eq!(status, "revoked", "the row is still revoked after re-insert");
+            .expect("the reactivated row still exists");
+        assert_eq!(status, "approved", "the row is approved after re-insert");
     }
 
     #[tokio::test]
@@ -2226,6 +2278,98 @@ mod tests {
             .expect("backfill");
         let got = store.get(&request_id, "dev").await.expect("found");
         assert_eq!(got.edge_id, Some(1001));
+    }
+
+    #[tokio::test]
+    async fn find_request_matches_every_predicate_and_returns_none_on_miss() {
+        let store = request_store().await;
+        // Exact match (from/to/env/kind/status/created_by all equal).
+        let exact = sample_request("dev");
+        let exact_id = exact.request_id.clone();
+        store.insert(exact).await.expect("insert exact");
+        // Same pair + kind + status, but authored by someone else (the
+        // Bot↔Bot reverse-row shape) must NOT match.
+        let mut foreign = sample_request("dev");
+        foreign.created_by = "bot_b".to_string();
+        store.insert(foreign).await.expect("insert foreign-authored");
+        // Different status / env rows stay isolated.
+        let mut approved = sample_request("dev");
+        approved.status = RequestStatus::Approved;
+        store.insert(approved).await.expect("insert approved");
+        store.insert(sample_request("pre")).await.expect("insert other env");
+
+        let found = store
+            .find_request(
+                "human_a",
+                "bot_b",
+                "dev",
+                RequestKind::Connect,
+                RequestStatus::Pending,
+                "human_a",
+            )
+            .await
+            .expect("the exact lookup hits");
+        assert_eq!(found.request_id, exact_id);
+        assert_eq!(found.created_by, "human_a");
+        // Positive control: the pre-env row is findable in its own env.
+        assert!(
+            store
+                .find_request(
+                    "human_a",
+                    "bot_b",
+                    "pre",
+                    RequestKind::Connect,
+                    RequestStatus::Pending,
+                    "human_a",
+                )
+                .await
+                .is_some(),
+            "env scoping is per-row, not global"
+        );
+
+        for (from_id, to_id, env, status, created_by) in [
+            ("human_a", "bot_c", "dev", RequestStatus::Pending, "human_a"), // no row for this target
+            ("human_a", "bot_b", "dev", RequestStatus::Rejected, "human_a"), // no rejected row
+            ("human_a", "bot_b", "pre", RequestStatus::Pending, "nobody"), // pre row author differs
+            ("human_a", "bot_b", "dev", RequestStatus::Pending, "nobody"), // other author misses
+        ] {
+            assert!(
+                store
+                    .find_request(from_id, to_id, env, RequestKind::Connect, status, created_by)
+                    .await
+                    .is_none(),
+                "find_request must not match ({from_id}, {to_id}, {env}, {status:?}, {created_by})"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn find_request_reads_at_most_one_bounded_row() {
+        let seed = request_store().await;
+        // A fat outbox: the duplicate guard must not materialize it.
+        for _ in 0..10 {
+            seed.insert(sample_request("dev")).await.expect("insert");
+        }
+        let db = Arc::new(RecordingFriendDb {
+            inner: seed.db,
+            reads: std::sync::Mutex::new(Vec::new()),
+        });
+        let store = DbPermissionRequestStore::sqlite(db.clone());
+        let found = store
+            .find_request(
+                "human_a",
+                "bot_b",
+                "dev",
+                RequestKind::Connect,
+                RequestStatus::Pending,
+                "human_a",
+            )
+            .await;
+        assert!(found.is_some(), "a matching pending row exists");
+        let reads = db.reads.lock().unwrap();
+        assert_eq!(reads.len(), 1, "exactly one bounded statement");
+        assert_eq!(reads[0].1, 1, "at most one row crosses the DB boundary");
+        assert!(reads[0].0.sql().contains("LIMIT 1"));
     }
 
     // ---- DbBotActorConfigStore (T12) ----

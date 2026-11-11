@@ -319,6 +319,14 @@ impl BcsServer {
                 friend_repo.clone(),
                 relation_svc.clone(),
             ));
+        // The SAME authority repo instance feeds the authority Core build
+        // below and the connect service's current-owner notification reads.
+        let bot_authority_repo = crate::bot_authority_wiring::db_authority_repo(
+            db_plugin.clone(),
+            &db_kind,
+            &bot_authority_env,
+            config.bot_authority.legacy_created_by_fallback,
+        );
         let connect_service_impl = Arc::new(
             bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),
@@ -331,6 +339,9 @@ impl BcsServer {
                 edge_permission_env,
             )
             .with_friendship_writeback(Some(friendship_writeback))
+            // Friend-request notifications follow the CURRENT authority
+            // owner, not the historical `created_by` fact.
+            .with_bot_authority_port(Some(bot_authority_repo.clone()))
             .with_collaboration_registry(bot_registry.clone()),
         );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
@@ -490,12 +501,7 @@ impl BcsServer {
             invite_token_secret.clone(),
         );
         let bot_authority = crate::bot_authority_wiring::build(
-            crate::bot_authority_wiring::db_authority_repo(
-                db_plugin.clone(),
-                &db_kind,
-                &bot_authority_env,
-                config.bot_authority.legacy_created_by_fallback,
-            ),
+            bot_authority_repo,
             &config,
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,

@@ -102,35 +102,19 @@ impl EdgeConnectFriendService {
     /// 409 with the existing request id, so the pending row is looked up first.
     /// `created_by == caller` keeps this to the caller's own forward row and
     /// ignores the Bot↔Bot reverse pending row (created by the caller but sent
-    /// to the caller).
+    /// to the caller). The lookup is a bounded existence query (`LIMIT 1` at
+    /// the store): as `permission_requests` grows, an unbounded outbox scan
+    /// would make every friend request create read the caller's full history.
     async fn ensure_no_pending_request(
         &self,
         caller: &str,
         to_bot: &str,
     ) -> Result<(), FriendUseCaseError> {
-        let page = self
+        if let Some(existing) = self
             .connect
-            .list_requests(
-                caller,
-                RequestDirection::Sent,
-                Some(RequestStatus::Pending),
-                1,
-                u32::MAX,
-            )
+            .find_pending_self_connect(caller, to_bot)
             .await
-            .map_err(FriendUseCaseError::service)?;
-
-        if let Some(existing) = page
-            .items
-            .into_iter()
-            // Only connect requests are friend requests: a pending
-            // permission/rules/revoke request is not a duplicate friend
-            // request and must not turn into a legacy 409.
-            .find(|request| {
-                request.request_kind == RequestKind::Connect
-                    && request.to_id == to_bot
-                    && request.created_by == caller
-            })
+            .map_err(FriendUseCaseError::service)?
         {
             return Err(FriendUseCaseError::service(
                 ServiceError::PendingRequestExists {

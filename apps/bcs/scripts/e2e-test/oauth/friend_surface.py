@@ -248,6 +248,21 @@ def v1_friendship_surface(browser, base, alpha, owner1, delta, epsilon, owner2, 
     assert not any(f.get('friend_bot_uuid') == delta or f.get('bot_uuid') == delta or
                    f.get('friend_uuid') == delta for f in items_of(body)), body
 
+    # Unfriend -> refriend -> active: the revoked friend edges must
+    # reactivate on re-add (the same (from,to,env,kind,ref) row revives in
+    # place instead of staying revoked while the API reports Approved).
+    body, _, _ = req_json(browser, 'POST', v1 + f'/bots/{alpha}/friend-requests', expected=201,
+        headers=owner1, body={'to_bot_uuid': delta})
+    refriend_id = data_of(body).get('request_id') or data_of(body).get('request_uuid')
+    assert refriend_id and data_of(body).get('status') == 'pending', body
+    body, _, _ = req_json(browser, 'POST', v1 + f'/friend-requests/{refriend_id}/accept', expected=200,
+        headers=owner2, body={})
+    assert data_of(body).get('status') == 'accepted', body
+    body, _, _ = req_json(browser, 'GET', v1 + f'/bots/{alpha}/friendships', headers=owner1)
+    assert any(f.get('friend_bot_uuid') == delta or f.get('bot_uuid') == delta or
+               f.get('friend_uuid') == delta for f in items_of(body)), \
+        're-added friendship must be visible again after the unfriend'
+
 
 def main():
     """Standalone driver: start one memory-mode companion and run the surface."""
