@@ -141,6 +141,11 @@ def _collet_from_row(row: ContextCollabColletModel) -> Collet:
     """
     return Collet(
         collab_context_id=row.collab_context_id,
+        actor_ref=(
+            PrincipalRef.from_dict(json.loads(row.actor_ref))
+            if row.actor_ref is not None
+            else None
+        ),
         context_spec=ContextSpec.from_dict(json.loads(row.context_spec)),
         current_snapshot=(
             CurrentSnapshot.from_dict(json.loads(row.current_snapshot))
@@ -240,6 +245,8 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         )
         collet = Collet(
             collab_context_id=collab_context_id,
+            # 创建主体与初始事件的 actor_ref 同源(创建人)。
+            actor_ref=request.initial_event.actor_ref,
             context_spec=spec,
             current_snapshot=snapshot,
             current_event_id=initial_event.event_id,
@@ -383,6 +390,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         """``Collet`` 领域对象 → 落库行;tenant 由 ORM guard 盖章。"""
         return ContextCollabColletModel(
             collab_context_id=collet.collab_context_id,
+            actor_ref=(
+                _dump_json(collet.actor_ref.to_dict())
+                if collet.actor_ref is not None
+                else None
+            ),
             context_spec=_dump_json(collet.context_spec.to_dict()),
             current_snapshot=_dump_json(collet.current_snapshot.to_dict()),
             current_event_id=collet.current_event_id,

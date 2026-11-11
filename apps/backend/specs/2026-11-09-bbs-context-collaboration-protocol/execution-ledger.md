@@ -154,3 +154,4 @@ BRANCH COMPLETE: 24 commits, origin/dev 833a7db84..ad612f97d. Final review clean
   4. 快照为 NULL 的聚合行:GET 返回 `current_snapshot: null`(事件链照常投影),追加事件保持 NULL、只推进版本与指针,响应 `current_status: null`;
   5. G1 身份判定改从 `context_spec`(创建参数,恒在)取 principal/executor,不再解引用可空的 current_snapshot。
 - **Ruling R10.1(spec 作者指示):** `ac_context_collab_event.primitive_type` 由 NOT NULL 放宽为 DEFAULT NULL(DDL/ORM/领域对象/wire 投影同步)。裁决:P1 追加接口必填三值白名单不变(primitive_type: Message|Task|Activity);部分行投影条目 `primitive_type: null`;**统计口径不变 —— 仅排除 Message,NULL 参与进度计数**。spec §9.4/§9.5 同 commit 同步(吸取 R10 spec 漏同步教训)。
+- **Ruling R11(spec 作者指示):** collet 表新增 `actor_ref`(创建主体引用,与初始 task.created 事件同值,可空容忍外部部分行;P1 创建恒写;暂不进 API 响应投影);两张表的 `actor_ref` 列类型由 mediumtext 收窄为 varchar(2048)(JSON 引用仅几十字节)。spec §9.1/§9.4/§9.5 同 commit 同步并经逐列 diff 校验。

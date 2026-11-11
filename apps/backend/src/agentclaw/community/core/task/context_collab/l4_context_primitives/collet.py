@@ -220,12 +220,14 @@ class CurrentSnapshot:
 class Collet:
     """L4 协作上下文聚合根。
 
-    持有聚合标识、创建参数、当前快照与聚合版本;事件事实由
-    ``ac_context_collab_event`` 表(见 ``event_envelope.EventRecord``)承载,
-    快照由事件改写,不在此复制事件历史。
+    持有聚合标识、创建主体引用(``actor_ref``,与初始 task.created 事件的
+    actor_ref 同值;可空容忍外部部分行)、创建参数、当前快照与聚合版本;
+    事件事实由 ``ac_context_collab_event`` 表(见
+    ``event_envelope.EventRecord``)承载,快照由事件改写,不在此复制事件历史。
     """
 
     collab_context_id: str
+    actor_ref: PrincipalRef | None
     context_spec: ContextSpec
     # 可空:允许外部写入只有 spec 的聚合行;P1 创建路径总是写满。
     current_snapshot: CurrentSnapshot | None

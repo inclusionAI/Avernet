@@ -78,6 +78,7 @@ def _collet(*, current_event_id: str = "evt_004") -> Collet:
     """
     return Collet(
         collab_context_id=COLLET_ID,
+        actor_ref=None,
         context_spec=_spec(),
         current_snapshot=CurrentSnapshot(
             objective=OBJECTIVE,

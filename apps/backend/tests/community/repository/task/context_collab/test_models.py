@@ -29,6 +29,7 @@ def test_collet_columns_match_ddl(engine):
         "avernet_tenant",
         "env",
         "collab_context_id",
+        "actor_ref",
         "context_spec",
         "current_snapshot",
         "current_event_id",

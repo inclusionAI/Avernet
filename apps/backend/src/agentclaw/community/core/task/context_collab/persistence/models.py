@@ -57,9 +57,11 @@ def _base_axes():
 class ContextCollabColletModel(Base):
     """One collaboration context: the aggregate snapshot row.
 
-    ``context_spec`` / ``current_snapshot`` hold the JSON projections of the
-    create request and the current objective/status/executor/progress; the
-    event DAG in ``ac_context_collab_event`` rewrites the snapshot and bumps
+    ``actor_ref`` is the creating principal reference (same value as the
+    initial task.created event carries); ``context_spec`` /
+    ``current_snapshot`` hold the JSON projections of the create request
+    and the current objective/status/executor/progress; the event DAG in
+    ``ac_context_collab_event`` rewrites the snapshot and bumps
     ``context_version`` per accepted event.
     """
 
@@ -72,6 +74,9 @@ class ContextCollabColletModel(Base):
         nullable=False,
     )
     collab_context_id = Column(String(128), nullable=False)
+    # 创建主体引用(与初始 task.created 事件的 actor_ref 同值);可空:
+    # 外部部分行可以没有;P1 创建路径恒写。
+    actor_ref = Column(String(2048), nullable=True)
     context_spec = Column(_medium_text(), nullable=False)
     # 可空(spec 作者裁决):允许外部写入只有 context_spec 的聚合行;
     # P1 创建路径仍总是写满快照,读路径对 NULL 容忍。
@@ -133,7 +138,8 @@ class ContextCollabEventModel(Base):
     # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;P1 追加路径
     # 仍总是写满这些值,读路径对 NULL 容忍(visibility=NULL 按 private 处理,
     # primitive_type=NULL 仍参与进度计数 —— 仅排除 Message)。
-    actor_ref = Column(_medium_text(), nullable=True)
+    # JSON 仅几十字节,varchar(2048) 足够,不再用 mediumtext。
+    actor_ref = Column(String(2048), nullable=True)
     visibility = Column(String(32), nullable=True)
     payload = Column(_medium_text(), nullable=True)
     context_version_after = Column(BigInteger, nullable=True)

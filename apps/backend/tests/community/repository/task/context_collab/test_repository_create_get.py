@@ -82,6 +82,10 @@ class TestCreateContext:
             row = collets[0]
             assert row.collab_context_id == record.collet.collab_context_id
             assert row.collab_context_id.startswith("collet_")
+            # 创建主体引用落列,与初始事件的 actor_ref 同值。
+            assert row.actor_ref is not None
+            assert json.loads(row.actor_ref) == CREATOR.to_dict()
+            assert record.collet.actor_ref == CREATOR
             assert row.context_version == 1
             assert row.current_event_id == record.initial_event.event_id
             assert row.env == get_current_env()

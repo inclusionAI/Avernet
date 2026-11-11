@@ -130,6 +130,7 @@ class _FakeContextCollabRepository:
         event_id = "evt_" + uuid4().hex
         collet = Collet(
             collab_context_id=collab_context_id,
+            actor_ref=None,
             context_spec=request.context_spec,
             current_snapshot=CurrentSnapshot(
                 objective=request.context_spec.objective,

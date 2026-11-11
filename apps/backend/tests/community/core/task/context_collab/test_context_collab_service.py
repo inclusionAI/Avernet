@@ -102,6 +102,7 @@ class _FakeContextCollabRepository:
         event_id = "evt_" + uuid4().hex
         collet = Collet(
             collab_context_id=collab_context_id,
+            actor_ref=None,
             context_spec=request.context_spec,
             current_snapshot=CurrentSnapshot(
                 objective=request.context_spec.objective,
@@ -241,6 +242,7 @@ def _fake_collet(
     """构造带 principal/executor 的最小 Collet,供授权器身份测试用。"""
     return Collet(
         collab_context_id="collet_todo_001",
+        actor_ref=None,
         context_spec=ContextSpec(
             space=SpaceRef(space_id="space_workspace_001", environment="prod"),
             principal_ref=PrincipalRef("human", principal_id),

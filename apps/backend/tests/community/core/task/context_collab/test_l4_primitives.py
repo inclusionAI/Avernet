@@ -224,6 +224,7 @@ def test_collet_holds_aggregate_state():
     snapshot = CurrentSnapshot.from_dict(SNAPSHOT_DICT)
     collet = Collet(
         collab_context_id="collet_todo_001",
+        actor_ref=None,
         context_spec=spec,
         current_snapshot=snapshot,
         current_event_id="evt_004",
