@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..artifacts.session_source import source_session_key
+
 import json
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 def diagnosis_dict(d: Diagnosis) -> dict[str, Any]:
     return {
         "session_id": d.session.session_id,
+        "session_key": source_session_key(d.session),
         "session_path": d.session.path,
         "query": d.query,
         "original_query": d.original_query,
