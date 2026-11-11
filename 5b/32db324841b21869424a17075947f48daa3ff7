@@ -1,0 +1,23 @@
+apps/backend/docs/diagnostics/bot-device-relations.md
+  s_63343409a8a3ba::t_cc2499c1c2cd85 15-26
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_63343409a8a3ba::t_366b9d21958cf9 18-26
+apps/backend/docs/diagnostics/investigation.md
+  s_63343409a8a3ba::t_a2c37a60fd785f 3,5,7,9-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5b32db324841b21869424a17075947f48daa3ff7",
+  "prompts": {},
+  "sessions": {
+    "s_63343409a8a3ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c486-2aab-7970-849a-649813792261",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
