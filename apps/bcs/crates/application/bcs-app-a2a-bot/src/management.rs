@@ -103,11 +103,7 @@ impl A2aBotManagement {
                 vec![owner]
             }
         };
-        if owners.len() != 1
-            || owners[0].trim().is_empty()
-            || owners[0] != owners[0].trim()
-            || owners[0].starts_with("human_")
-            || owners[0].chars().any(char::is_control)
+        if owners.len() != 1 || !bcs_service_api::valid_default_owner(&owners[0])
         { return Err(failure(Code::InvalidOwner, "owners", "ONE_OWNER_REQUIRED")); }
         policy::validate_provider_bot_ref(&command.provider_bot_ref)?;
         let (url, card) = self.public_load(command.source).await?;

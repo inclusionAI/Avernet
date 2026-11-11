@@ -27,6 +27,7 @@ pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
 pub mod provider;
+pub mod provider_a2a;
 pub mod provider_identity;
 pub mod provider_registration_token;
 pub mod register;

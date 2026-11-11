@@ -319,7 +319,7 @@ mod tests {
             );
 
         let registered = provider_management
-            .register_provider(RegisterProviderCommand { caller_capabilities: None,
+            .register_provider(RegisterProviderCommand { a2a: None, caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
@@ -825,7 +825,7 @@ mod tests {
             .state
             .services
             .provider_management
-            .register_provider(RegisterProviderCommand { caller_capabilities: None,
+            .register_provider(RegisterProviderCommand { a2a: None, caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),

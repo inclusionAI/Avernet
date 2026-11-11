@@ -722,6 +722,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
 
     let scope = bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)?;
     Ok(ProviderInfoResponse {
+        a2a: config.get("a2a").map(|v| json!({"default_owner":v.get("default_owner")})),
         collaboration_scope: Some(match scope { bcs_service_api::ProviderCollaborationScope::Standard => "standard", bcs_service_api::ProviderCollaborationScope::SameOwner => "same_owner" }.into()),
         provider_id: provider.provider_id,
         slug: provider.slug,
