@@ -76,11 +76,14 @@ export async function readPublicBotPage(input: ReadPublicBotPageInput): Promise<
       signal,
       onEnhancementUnavailable: handleEnhancementUnavailable,
     });
-    const keptIds = new Set(keptBots.map((bot) => bot.id));
+    // 入列必须使用 filter 返回的对象：owner_name 等增强字段只存在于返回副本上，
+    // 原始 batchEntries 仅用于定位 BCS 原始下标（id 唯一，按 id 回取增强副本）。
+    const keptBotsById = new Map(keptBots.map((bot) => [bot.id, bot] as const));
     for (const entry of batchEntries) {
-      if (!keptIds.has(entry.bot.id)) continue;
+      const keptBot = keptBotsById.get(entry.bot.id);
+      if (!keptBot) continue;
       if (items.length < pageSize) {
-        items.push(entry.bot);
+        items.push(keptBot);
         continue;
       }
       // 第 pageSize+1 条合格记录：hasMore 预读与续读游标的唯一依据；下一页从该记录的

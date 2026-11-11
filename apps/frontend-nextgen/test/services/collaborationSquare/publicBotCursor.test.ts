@@ -77,6 +77,38 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
     onEnhancementUnavailable.mockClear();
   });
 
+  it('metadata 返回 owner_name 时展示项回填 ownerName（不丢失 filter 产出的增强对象）', async () => {
+    const fetchCandidates = bcsPageFetcher(10);
+    const fetchMetadata = jest.fn(async (userId: string, pairs: { bot_id: string; owner_id: string }[]) => {
+      void userId;
+      return pairs.map((pair) => ({
+        bcn_bot_id: `${pair.bot_id}:${pair.owner_id}`,
+        bot_id: pair.bot_id,
+        owner_id: pair.owner_id,
+        owner_name: `归属人-${pair.owner_id}`,
+        bot_name: '候选Bot',
+        bot_type: 'personal',
+        online_available: null,
+      }));
+    });
+
+    const result = await readPublicBotPage({
+      actorId: 'human_7',
+      userId: '7',
+      offset: 0,
+      pageSize: 5,
+      backendEnabled: true,
+      fetchCandidates,
+      fetchMetadata,
+      signal,
+      onEnhancementUnavailable,
+    });
+
+    expect(result.items).toHaveLength(5);
+    expect(result.items[0].ownerName).toBe('归属人-owner-0');
+    expect(result.items[4].ownerName).toBe('归属人-owner-4');
+  });
+
   it('服务过滤后展示页 24 条、按 BCS 原顺序，nextOffset 指向第 25 条合格记录的原始位置（30），下一页不重叠', async () => {
     // 候选页 100 条里多条 metadata service,false（原始下标 0..5），下一 BCS 页仍有可展示项（total=200）。
     const fetchCandidates = bcsPageFetcher(200);
