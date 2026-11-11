@@ -33,7 +33,7 @@ Content-Type: application/json
 {"a2a":{"default_owner":"410025"}}
 ```
 
-- 省略 a2a、a2a:null 或 a2a:{}：保持原配置。
+- 省略 a2a、a2a:null 或 a2a:{}：不触发 A2A 配置合并或配置回写；同请求其他配置字段的更新照常保存。仅改名时不会恢复被并发请求清除的默认负责人。
 - default_owner 为合法字符串：设置/替换；1～128 UTF-8 字节，无首尾空白、控制字符或 human_ 前缀。不验证员工目录存在性，沿用原有 raw user ID 语义。
 - default_owner:null：清除默认负责人。其他 A2A/Provider 配置保留。
 - 空字符串、非法类型、非法 ID、未知 A2A 请求字段：拒绝，不连带提交同请求其他元数据。
@@ -61,4 +61,4 @@ Content-Type: application/json
 
 HTTP typed patch → Provider application → Provider Core：创建在 insert 前合入 config；更新在一次现有 metadata write 前局部合并并校验。不额外增加 DB round trip 或网络调用；配置回读不返回其他私有配置。公共 AgentCard 注册复用已认证 Provider config，不增加额外配置查询。
 
-回归覆盖见 `provider_slug_contract::a2a_default_owner_create_patch_readback_and_permissions`、`public_management::provider_config_update_changes_only_future_default_owners`、`provider_a2a::tests`。
+回归覆盖见 `provider_slug_contract::a2a_default_owner_create_patch_readback_and_permissions`、`public_management::provider_config_update_changes_only_future_default_owners`、`provider_a2a::tests`。`bcs-bot/tests/provider_a2a_patch.rs` 固定改名读取、并发清除、改名写入的交错顺序，验证空补丁不会恢复旧默认值，并覆盖同请求更新其他配置的场景。

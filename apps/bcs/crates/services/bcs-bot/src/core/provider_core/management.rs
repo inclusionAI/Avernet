@@ -376,7 +376,7 @@ if let Some(scope) = scope {
             let source = config.as_deref().unwrap_or(&current.config);
             config = Some(replace_caller_capabilities(source, caller_capabilities)?);
         }
-        if let Some(a2a) = a2a {
+        if let Some(a2a) = a2a.filter(|patch| patch.default_owner.is_some()) {
             config = Some(a2a.apply(config.as_deref().unwrap_or(&current.config))
                 .map_err(|message| ServiceError::InvalidOperation {message,request_id:None})?);
         }
