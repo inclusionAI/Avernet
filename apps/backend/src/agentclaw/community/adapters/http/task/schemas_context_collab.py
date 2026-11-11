@@ -5,8 +5,7 @@ EventCreateRequest, ContextCollabStatusResponse, TaskProgress,
 ContextSpec and the L2/L3 reference DTOs. Request models carry
 to_domain() builders for the service commands (the intake
 TaskIntakeCommandDTO.to_domain pattern); response models mirror exactly
-what ContextCollabService projects, including the occurred_at field
-the GET current_event projection carries beyond the 7-field set.
+what ContextCollabService projects, including the complete event metadata required by Todo consumers.
 
 Docstrings and Field descriptions are published verbatim into the public
 OpenAPI document (the /openapi/v1 twin mounts these models), so they stay
@@ -32,6 +31,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabCreatedResult,
+    ContextCollabRunResultDTO,
     ContextCollabStatusProjection,
     ContextCreateCommand,
     EventAcceptedResult,
@@ -140,8 +140,7 @@ class ContextSpec(BaseModel):
     )
     product_kind: str | None = Field(
         default=None,
-        description="Optional L6 product kind, e.g. team_todo or "
-        "public_discussion.",
+        description="Optional L6 product kind, e.g. team_todo or public_discussion.",
     )
     workflow_kind: str | None = Field(
         default=None,
@@ -174,9 +173,7 @@ class ContextSpec(BaseModel):
             product_kind=self.product_kind,
             workflow_kind=self.workflow_kind,
             method_kind=self.method_kind,
-            executor_ref=(
-                self.executor_ref.to_domain() if self.executor_ref else None
-            ),
+            executor_ref=(self.executor_ref.to_domain() if self.executor_ref else None),
             objective=self.objective,
             resource_refs=[ref.to_domain() for ref in self.resource_refs],
         )
@@ -212,8 +209,7 @@ class EventCreateRequest(BaseModel):
     )
     primitive_type: str = Field(
         min_length=1,
-        description="L4 primitive the event carries: Task, Message, or "
-        "Activity.",
+        description="L4 primitive the event carries: Task, Message, or Activity.",
     )
     actor_ref: PrincipalRefDto | None = Field(
         default=None,
@@ -232,13 +228,13 @@ class EventCreateRequest(BaseModel):
     )
     payload: dict = Field(
         default_factory=dict,
-        description="Event payload, validated against the event-kind schema "
-        "registry.",
+        description="Event payload, validated against the event-kind schema registry.",
     )
 
     def to_domain(self, authenticated_actor: PrincipalRef) -> EventAppendCommand:
         actor_ref = (
-            self.actor_ref.to_domain() if self.actor_ref is not None
+            self.actor_ref.to_domain()
+            if self.actor_ref is not None
             else authenticated_actor
         )
         if actor_ref.principal_id != authenticated_actor.principal_id:
@@ -288,9 +284,7 @@ class CurrentSnapshotDto(BaseModel):
 
     objective: str = Field(description="Current collaboration objective.")
     status: str = Field(description="Current snapshot status, e.g. created.")
-    principal_ref: str = Field(
-        description="Bare id of the L2 accountable principal."
-    )
+    principal_ref: str = Field(description="Bare id of the L2 accountable principal.")
     executor_ref: str | None = Field(
         default=None,
         description="Bare id of the executing agent, when one is bound.",
@@ -316,9 +310,7 @@ class ContextCollabCreatedResultDto(BaseModel):
     collab_context_id: str = Field(
         description="Id of the created collaboration context."
     )
-    context_version: int = Field(
-        description="Context version after creation (1)."
-    )
+    context_version: int = Field(description="Context version after creation (1).")
     current_snapshot: CurrentSnapshotDto = Field(
         description="Snapshot anchored on the initial task.created event."
     )
@@ -338,8 +330,7 @@ class EventAcceptedResultDto(BaseModel):
     )
     event_id: str = Field(description="Immutable id of the accepted event.")
     parent_event: str | None = Field(
-        description="Parent event id the event was linked to, when one was "
-        "given."
+        description="Parent event id the event was linked to, when one was given."
     )
     event_kind: str = Field(description="Registry kind of the event.")
     primitive_type: str | None = Field(
@@ -355,10 +346,25 @@ class EventAcceptedResultDto(BaseModel):
     )
 
 
+class ContextCollabRunResultDto(BaseModel):
+    """Executor start result after the task.started event is persisted."""
+
+    collab_context_id: str = Field(description="Started collaboration Context id.")
+    run_id: str = Field(description="Runtime execution handle.")
+    session_id: str | None = Field(
+        default=None, description="Runtime conversation session handle, when available."
+    )
+    context_version: int = Field(description="Context version after task.started.")
+    current_status: str = Field(description="Context status after task.started.")
+
+
 class TaskProgressEventDto(BaseModel):
-    """One task_progress.events entry (7-field projection, no occurred_at)."""
+    """One complete event projection exposed by B to collaboration consumers."""
 
     event_id: str = Field(description="Immutable id of the event.")
+    event_seq: int = Field(
+        ge=1, description="One-based acceptance order within the Context."
+    )
     parent_event: str | None = Field(
         default=None, description="Parent event id, when the event has one."
     )
@@ -366,6 +372,14 @@ class TaskProgressEventDto(BaseModel):
     primitive_type: str | None = Field(
         description="L4 primitive the event carries; null for an "
         "out-of-band partial event row."
+    )
+    actor_id: str = Field(description="Principal id attributed to the event.")
+    actor_type: str = Field(description="Principal type attributed to the event.")
+    execution_id: str = Field(
+        description="Runtime execution handle from run_id or execution_id payload."
+    )
+    context_version: int | None = Field(
+        default=None, description="Context version after this event was accepted."
     )
     status: str = Field(
         description="Progress projection status of the event: the current "
@@ -377,20 +391,14 @@ class TaskProgressEventDto(BaseModel):
     content: str | None = Field(
         default=None, description="Optional content payload of the event."
     )
+    artifacts: list[object] = Field(
+        default_factory=list, description="Artifacts carried in the event payload."
+    )
+    created_at: datetime = Field(description="Wall-clock time the event was accepted.")
 
 
 class CurrentEventDto(TaskProgressEventDto):
-    """§6.4 current_event: a progress entry plus occurred_at.
-
-    The occurred_at field is the 8th field the service projects on the
-    current event and must not be dropped at the DTO layer.
-    """
-
-    occurred_at: datetime | None = Field(
-        default=None,
-        description="Wall-clock time the current event was accepted, when "
-        "recorded.",
-    )
+    """The event currently anchoring the Context snapshot."""
 
 
 class TaskProgress(BaseModel):
@@ -409,9 +417,7 @@ class TaskProgress(BaseModel):
 class ContextCollabStatusResponse(BaseModel):
     """Status and task-progress response (spec §6.5 schema name, §6.4)."""
 
-    collab_context_id: str = Field(
-        description="Id of the collaboration context."
-    )
+    collab_context_id: str = Field(description="Id of the collaboration context.")
     context_version: int = Field(description="Current context version.")
     current_snapshot: CurrentSnapshotDto = Field(
         description="Snapshot anchored on the current event."
@@ -456,7 +462,9 @@ def _snapshot_to_dto(snapshot: dict) -> CurrentSnapshotDto:
     )
 
 
-def created_result_to_dto(result: ContextCollabCreatedResult) -> ContextCollabCreatedResultDto:
+def created_result_to_dto(
+    result: ContextCollabCreatedResult,
+) -> ContextCollabCreatedResultDto:
     event = result.current_event
     return ContextCollabCreatedResultDto(
         collab_context_id=result.collab_context_id,
@@ -484,6 +492,16 @@ def event_accepted_to_dto(result: EventAcceptedResult) -> EventAcceptedResultDto
     )
 
 
+def run_result_to_dto(result: ContextCollabRunResultDTO) -> ContextCollabRunResultDto:
+    return ContextCollabRunResultDto(
+        collab_context_id=result.collab_context_id,
+        run_id=result.run_id,
+        session_id=result.session_id,
+        context_version=result.context_version,
+        current_status=result.current_status,
+    )
+
+
 def status_to_dto(result: ContextCollabStatusProjection) -> ContextCollabStatusResponse:
     current_event = result.current_event
     return ContextCollabStatusResponse(
@@ -495,32 +513,12 @@ def status_to_dto(result: ContextCollabStatusProjection) -> ContextCollabStatusR
             else None
         ),
         current_event=(
-            CurrentEventDto(
-                event_id=current_event["event_id"],
-                parent_event=current_event["parent_event"],
-                event_kind=current_event["event_kind"],
-                primitive_type=current_event["primitive_type"],
-                status=current_event["status"],
-                summary=current_event["summary"],
-                content=current_event["content"],
-                occurred_at=current_event["occurred_at"],
-            )
-            if current_event is not None
-            else None
+            CurrentEventDto(**current_event) if current_event is not None else None
         ),
         task_progress=TaskProgress(
             total_events=result.task_progress.total_events,
             events=[
-                TaskProgressEventDto(
-                    event_id=event["event_id"],
-                    parent_event=event["parent_event"],
-                    event_kind=event["event_kind"],
-                    primitive_type=event["primitive_type"],
-                    status=event["status"],
-                    summary=event["summary"],
-                    content=event["content"],
-                )
-                for event in result.task_progress.events
+                TaskProgressEventDto(**event) for event in result.task_progress.events
             ],
         ),
     )

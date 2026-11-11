@@ -3,7 +3,6 @@ import type {
   CreateTodoInteractionInput,
   TodoAcceptanceInput,
   TodoListQuery,
-  UpdateTodoInput,
 } from '@/domain/todos/models';
 import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
@@ -35,7 +34,7 @@ export interface TodoEventDto extends BackendUnknownRecord {
   actor_type?: string;
   content?: string;
   execution_id?: string;
-  context_version?: string;
+  context_version?: number | null;
   status?: string | null;
   created_at?: string;
   artifacts?: Array<BackendUnknownRecord>;
@@ -94,19 +93,6 @@ export function createTodo(input: CreateTodoInput) {
       bot_id: input.botId,
     },
     operation: 'create-todo',
-  });
-}
-
-export function updateTodo(todoId: string, input: UpdateTodoInput) {
-  return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.detail(todoId), {
-    method: 'PATCH',
-    params: userScopedParams(),
-    data: {
-      ...(input.title === undefined ? {} : { title: input.title }),
-      ...(input.description === undefined ? {} : { description: input.description }),
-      ...(input.botId === undefined ? {} : { bot_id: input.botId }),
-    },
-    operation: 'update-todo',
   });
 }
 

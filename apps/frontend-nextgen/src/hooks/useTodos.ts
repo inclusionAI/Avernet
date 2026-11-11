@@ -1,7 +1,7 @@
 import { notifySuccess } from '@/components/ui/notify';
 import type { TodoStatus } from '@/domain/todos/models';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
-import { addTodo, editTodo, loadTodos } from '@/services/todos/todoService';
+import { addTodo, loadTodos } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,24 +100,6 @@ export function useTodos() {
     [currentSpaceId, refresh, setMutationLoading],
   );
 
-  const update = useCallback(
-    async (todoId: string, input: { title?: string; description?: string; botId?: string }) => {
-      setMutationLoading(true);
-      try {
-        const todo = await editTodo(todoId, input);
-        notifySuccess('待办已保存');
-        await refresh();
-        return todo;
-      } catch (cause) {
-        safeReportError(cause, { title: '保存待办失败' });
-        return null;
-      } finally {
-        setMutationLoading(false);
-      }
-    },
-    [refresh, setMutationLoading],
-  );
-
   return {
     currentSpace,
     currentSpaceId,
@@ -141,6 +123,5 @@ export function useTodos() {
     setBotId,
     refresh,
     create,
-    update,
   };
 }

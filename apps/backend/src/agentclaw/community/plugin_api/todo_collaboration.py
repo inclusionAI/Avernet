@@ -1,10 +1,9 @@
-"""External collaboration-plugin contract for Todo context and events.
+"""Plugin API through which Todo consumes B's collaboration Context runtime.
 
-The B-side collaboration service owns Context assembly, execution/run state and
-append-only collaboration events. Backend's Todo service is only a consumer of
-this Plugin API: it creates one collaboration context per initial Todo run,
-writes Human interaction/acceptance events, and projects the returned event
-stream for the workbench UI.
+Todo owns the product record and Human acceptance. B owns Context execution,
+its authoritative runtime status, and the append-only event stream. The
+contract below is transport-neutral; HTTP paths and envelope parsing belong to
+the concrete plugin implementation.
 """
 
 from __future__ import annotations
@@ -21,42 +20,22 @@ class TodoCollaborationError(RuntimeError):
 
 @dataclass(frozen=True)
 class TodoCollaborationContextRequest:
-    """Transport-neutral input for creating a collaboration Context."""
+    """Context specification created together with a new Todo."""
 
-    task_id: str
-    task_title: str
-    collaboration_goal: str
-    collaborators: tuple[str, ...]
-    owner_id: str
-    bot_id: str
-
-
-@dataclass(frozen=True)
-class TodoCollaborationContext:
-    """The stable B-side Context identity attached to one Todo."""
-
-    collab_context_id: str
-
-
-@dataclass(frozen=True)
-class TodoCollaborationEventRequest:
-    """A Human event sent to an existing collaboration Context.
-
-    B owns snapshot assembly. ``boundary_event_seq`` is the last event sequence
-    already seen by the Human UI; it is submitted for traceability, not stored
-    by A.
-    """
-
-    event_type: str
-    actor_id: str
-    content: str
-    boundary_event_seq: int
-    payload: dict[str, Any] = field(default_factory=dict)
+    space_id: str
+    environment: str
+    principal_id: str
+    product_kind: str
+    workflow_kind: str
+    method_kind: str
+    executor_id: str
+    objective: str
+    todo_id: str
 
 
 @dataclass(frozen=True)
 class TodoCollaborationArtifact:
-    """An executable result produced by a collaboration event."""
+    """An executable result carried by a collaboration event."""
 
     artifact_id: str
     name: str
@@ -65,7 +44,7 @@ class TodoCollaborationArtifact:
 
 @dataclass(frozen=True)
 class TodoCollaborationEvent:
-    """The normalized event shape exposed by B for one collaboration Context."""
+    """Complete normalized event projected by B for one Context."""
 
     event_id: str
     event_seq: int
@@ -74,10 +53,35 @@ class TodoCollaborationEvent:
     actor_type: str
     content: str
     execution_id: str
-    context_version: str
+    context_version: int | None
     status: str | None
     artifacts: tuple[TodoCollaborationArtifact, ...]
     created_at: str
+
+
+@dataclass(frozen=True)
+class TodoCollaborationContext:
+    """Current B Context snapshot and its complete visible event stream."""
+
+    collab_context_id: str
+    status: str
+    context_version: int
+    current_event_id: str | None
+    events: tuple[TodoCollaborationEvent, ...] = ()
+
+
+@dataclass(frozen=True)
+class TodoCollaborationEventRequest:
+    """One event append against an expected B Context version."""
+
+    expected_version: int
+    event_kind: str
+    primitive_type: str
+    actor_id: str
+    actor_type: str
+    parent_event: str | None
+    visibility: str
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -87,17 +91,19 @@ class TodoCollaborationPlugin(Plugin, Protocol):
     def create_context(
         self, request: TodoCollaborationContextRequest
     ) -> TodoCollaborationContext:
-        """Create a Context and start the initial single-Bot collaboration."""
+        """Create, but do not run, the Context bound to a new Todo."""
+        ...
+
+    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        """Read the current Context status and complete visible event stream."""
+        ...
+
+    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        """Start the configured executor and return the refreshed Context."""
         ...
 
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:
-        """Append one Human event; B decides whether it resumes execution."""
-        ...
-
-    def list_events(
-        self, *, collab_context_id: str
-    ) -> tuple[TodoCollaborationEvent, ...]:
-        """Return the complete B event stream for a collaboration Context."""
+        """Append an event and return its complete projection from B."""
         ...

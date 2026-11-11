@@ -108,9 +108,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -154,12 +151,8 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
-from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
-)
-from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
-    ForumInteractionService,
 )
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
@@ -194,6 +187,10 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.plugins.community.todo_collaboration import (
     HttpTodoCollaborationPlugin,
 )
+from agentclaw.community.plugins.community.context_collab_runtime import (
+    CommunityContextCollabRuntimePlugin,
+    UnavailableContextCollabRuntimePlugin,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -207,6 +204,9 @@ from agentclaw.community.plugin_api.notify_sender import (
 )
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationPlugin,
+)
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRuntimePlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
@@ -295,8 +295,14 @@ class TaskModule(Module):
             to=DatabaseForumInteractionTargetVerifier,
             scope=singleton,
         )
-        binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
-        binder.bind(ForumInteractionServiceProtocol, to=NotifyingForumInteractionService, scope=singleton)
+        binder.bind(
+            ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton
+        )
+        binder.bind(
+            ForumInteractionServiceProtocol,
+            to=NotifyingForumInteractionService,
+            scope=singleton,
+        )
         binder.bind(
             ForumPersonalCenterActivityServiceProtocol,
             to=ForumPersonalCenterActivityService,
@@ -353,6 +359,27 @@ class TaskModule(Module):
             base_url=task_dispatch.todo_collab_base_url,
             timeout_seconds=task_dispatch.todo_collab_timeout_seconds,
         )
+
+    @singleton
+    @provider
+    @inject
+    def context_collab_runtime_plugin(
+        self, injector: Injector
+    ) -> ContextCollabRuntimePlugin:
+        """Select the deployment Bot runtime, failing closed when unbound."""
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] OpenApiBotPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabRuntimePlugin(str(exc))
+        if openapi_bot is None:
+            return UnavailableContextCollabRuntimePlugin(
+                "OpenApiBotPort resolved to None"
+            )
+        return CommunityContextCollabRuntimePlugin(openapi_bot)
 
     @singleton
     @provider

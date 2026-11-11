@@ -8,7 +8,6 @@ import {
   listTodos,
   runTodo,
   submitTodoAcceptance,
-  updateTodo,
 } from '@/services/backendApi/todos/todoController';
 
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
@@ -87,24 +86,6 @@ describe('todoController', () => {
     });
   });
 
-  it('更新待办时下发当前用户', async () => {
-    await updateTodo('todo/1', {
-      title: '新标题',
-      description: '新描述',
-      botId: 'bot-2',
-    });
-
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1', {
-      method: 'PATCH',
-      params: userParams,
-      data: {
-        title: '新标题',
-        description: '新描述',
-        bot_id: 'bot-2',
-      },
-      operation: 'update-todo',
-    });
-  });
 
   it('提交验收时下发当前用户', async () => {
     await submitTodoAcceptance('todo/1', {

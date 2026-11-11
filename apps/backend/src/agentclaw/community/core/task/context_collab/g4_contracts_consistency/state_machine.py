@@ -133,8 +133,11 @@ def _validate_header(d: StateMachineDefinition) -> None:
             f"unsupported schema_version: {d.schema_version!r}"
         )
     _check_str(d.profile_ref, "profile_ref")
-    if not isinstance(d.profile_version, int) or isinstance(d.profile_version, bool) \
-            or d.profile_version < 1:
+    if (
+        not isinstance(d.profile_version, int)
+        or isinstance(d.profile_version, bool)
+        or d.profile_version < 1
+    ):
         raise ContextCollabValidationError(
             f"profile_version must be a positive int, got: {d.profile_version!r}"
         )
@@ -193,7 +196,8 @@ def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
 
 
 def _validate_transitions(
-    d: StateMachineDefinition, states: dict[str, StateDefinition],
+    d: StateMachineDefinition,
+    states: dict[str, StateDefinition],
 ) -> None:
     """§4.4 第 3/4/5/6 条:引用完整性、终态无出边、rule_id 唯一与裁决唯一。"""
     rule_ids: set[str] = set()
@@ -251,7 +255,7 @@ def _validate_transitions(
 
     # 同一 state+event 命中多条规则 → 多 guard 裁决不明确,拒绝(§4.4 第 5 条)。
     for i, first in enumerate(d.transitions):
-        for second in d.transitions[i + 1:]:
+        for second in d.transitions[i + 1 :]:
             if first.event_name != second.event_name:
                 continue
             overlap = set(first.from_states) & set(second.from_states)
@@ -263,8 +267,9 @@ def _validate_transitions(
                 )
 
 
-def _validate_reachability(d: StateMachineDefinition,
-                           states: dict[str, StateDefinition]) -> None:
+def _validate_reachability(
+    d: StateMachineDefinition, states: dict[str, StateDefinition]
+) -> None:
     """§4.4 第 2 条:非豁免状态必须从起点可达(waiting/blocked 例外,Ruling R3)。"""
     reachable: set[str] = {d.initial_state}
     queue: deque[str] = deque([d.initial_state])
@@ -365,7 +370,8 @@ def _guard_actor_can_start_task(
     ):
         return GuardOutcome(verdict="PASS", reason="actor is the executor agent")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is neither responsible principal nor executor",
+        verdict="FAIL",
+        reason="actor is neither responsible principal nor executor",
     )
 
 
@@ -375,7 +381,8 @@ def _guard_actor_is_responsible_principal(
     if evaluation.actor == evaluation.responsible:
         return GuardOutcome(verdict="PASS", reason="actor is the responsible principal")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is not the responsible principal",
+        verdict="FAIL",
+        reason="actor is not the responsible principal",
     )
 
 
@@ -385,7 +392,8 @@ def _guard_actor_can_cancel(
     if evaluation.actor == evaluation.responsible:
         return GuardOutcome(verdict="PASS", reason="actor may cancel the task")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is not the responsible principal",
+        verdict="FAIL",
+        reason="actor is not the responsible principal",
     )
 
 
@@ -404,7 +412,8 @@ def _guard_event_matches_task(
     if "task_id" not in evaluation.payload:
         return GuardOutcome(verdict="PASS", reason="no explicit task_id in payload")
     return GuardOutcome(
-        verdict="FAIL", reason="explicit task_id not supported in P1",
+        verdict="FAIL",
+        reason="explicit task_id not supported in P1",
     )
 
 
@@ -427,45 +436,77 @@ TEAM_TODO_EXECUTION_MACHINE = StateMachineDefinition(
     compatibility_policy="new_contexts_only",
     initial_state="created",
     states=(
-        StateDefinition(name="created", governance_kind="waiting",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="in_progress", governance_kind="active",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="reviewing", governance_kind="review",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="blocked", governance_kind="blocked",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="done", governance_kind="terminal_success",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="cancelled", governance_kind="terminal_cancelled",
-                        allowed_methods=("Single",)),
+        StateDefinition(
+            name="created", governance_kind="waiting", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="in_progress", governance_kind="active", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="reviewing", governance_kind="review", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="blocked", governance_kind="blocked", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="done", governance_kind="terminal_success", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="cancelled",
+            governance_kind="terminal_cancelled",
+            allowed_methods=("Single",),
+        ),
     ),
     transitions=(
-        TransitionRule(rule_id="start_task", from_states=("created",),
-                       event_name="task.started",
-                       guard_refs=("actor_can_start_task",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="update_progress", from_states=("in_progress",),
-                       event_name="task.progress.updated",
-                       guard_refs=("event_matches_task",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="submit_for_review", from_states=("in_progress",),
-                       event_name="task.submitted",
-                       guard_refs=("required_artifacts_present",),
-                       to_state="reviewing"),
-        TransitionRule(rule_id="accept_task", from_states=("reviewing",),
-                       event_name="task.accepted",
-                       guard_refs=("actor_is_responsible_principal",),
-                       to_state="done"),
-        TransitionRule(rule_id="reject_task", from_states=("reviewing",),
-                       event_name="task.rejected",
-                       guard_refs=("actor_is_responsible_principal",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="cancel_task",
-                       from_states=("created", "in_progress", "reviewing", "blocked"),
-                       event_name="task.cancelled",
-                       guard_refs=("actor_can_cancel",),
-                       to_state="cancelled"),
+        TransitionRule(
+            rule_id="start_task",
+            from_states=("created",),
+            event_name="task.started",
+            guard_refs=("actor_can_start_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="update_progress",
+            from_states=("in_progress",),
+            event_name="task.progress.updated",
+            guard_refs=("event_matches_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="complete_task",
+            from_states=("in_progress",),
+            event_name="task.completed",
+            guard_refs=("event_matches_task",),
+            to_state="done",
+        ),
+        TransitionRule(
+            rule_id="submit_for_review",
+            from_states=("in_progress",),
+            event_name="task.submitted",
+            guard_refs=("required_artifacts_present",),
+            to_state="reviewing",
+        ),
+        TransitionRule(
+            rule_id="accept_task",
+            from_states=("reviewing",),
+            event_name="task.accepted",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="done",
+        ),
+        TransitionRule(
+            rule_id="reject_task",
+            from_states=("reviewing",),
+            event_name="task.rejected",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="cancel_task",
+            from_states=("created", "in_progress", "reviewing", "blocked"),
+            event_name="task.cancelled",
+            guard_refs=("actor_can_cancel",),
+            to_state="cancelled",
+        ),
     ),
 )
 

@@ -53,6 +53,9 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from agentclaw.community.plugins.local.context_collab_runtime import (
+    LocalContextCollabRuntimePlugin,
+)
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -95,7 +98,9 @@ class _FakeContextCollabRepository:
     def __init__(self) -> None:
         self.create_calls: list[CreateContextRecordRequest] = []
 
-    def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
+    def create_context(
+        self, request: CreateContextRecordRequest
+    ) -> ContextCreatedRecord:
         self.create_calls.append(request)
 
         collab_context_id = "collet_" + uuid4().hex
@@ -140,7 +145,9 @@ class TestCreateContext:
     def test_creates_collet_with_initial_event(self):
         repo = _FakeContextCollabRepository()
         assert isinstance(repo, ContextCollabRepositoryProtocol)
-        service = ContextCollabService(repository=repo)
+        service = ContextCollabService(
+            repository=repo, runtime=LocalContextCollabRuntimePlugin()
+        )
         actor = make_actor()
 
         result = service.create_context(make_create_command(), actor)
@@ -173,11 +180,12 @@ class TestCreateContext:
         assert request.initial_event.payload == {"objective": OBJECTIVE}
 
     def test_single_without_executor_rejected(self):
-        service = ContextCollabService(repository=_FakeContextCollabRepository())
+        service = ContextCollabService(
+            repository=_FakeContextCollabRepository(),
+            runtime=LocalContextCollabRuntimePlugin(),
+        )
         with pytest.raises(ContextCollabValidationError):
-            service.create_context(
-                make_create_command(executor_ref=None), make_actor()
-            )
+            service.create_context(make_create_command(executor_ref=None), make_actor())
 
     @pytest.mark.parametrize(
         "overrides",
@@ -195,12 +203,18 @@ class TestCreateContext:
         ],
     )
     def test_invalid_create_payload_rejected(self, overrides):
-        service = ContextCollabService(repository=_FakeContextCollabRepository())
+        service = ContextCollabService(
+            repository=_FakeContextCollabRepository(),
+            runtime=LocalContextCollabRuntimePlugin(),
+        )
         with pytest.raises(ContextCollabValidationError):
             service.create_context(make_create_command(**overrides), make_actor())
 
     def test_service_satisfies_protocol(self):
-        service = ContextCollabService(repository=_FakeContextCollabRepository())
+        service = ContextCollabService(
+            repository=_FakeContextCollabRepository(),
+            runtime=LocalContextCollabRuntimePlugin(),
+        )
         assert isinstance(service, ContextCollabServiceProtocol)
 
 
@@ -217,15 +231,20 @@ class _RecordingAuthorizer(StructuralContextCollabAuthorizer):
 
 class TestAuthorizerSeam:
     def test_default_authorizer_is_structural(self):
-        service = ContextCollabService(repository=_FakeContextCollabRepository())
-        assert isinstance(
-            service, ContextCollabServiceProtocol
-        ) and isinstance(service._authorizer, StructuralContextCollabAuthorizer)
+        service = ContextCollabService(
+            repository=_FakeContextCollabRepository(),
+            runtime=LocalContextCollabRuntimePlugin(),
+        )
+        assert isinstance(service, ContextCollabServiceProtocol) and isinstance(
+            service._authorizer, StructuralContextCollabAuthorizer
+        )
 
     def test_injected_authorizer_checked_on_create(self):
         authorizer = _RecordingAuthorizer()
         service = ContextCollabService(
-            repository=_FakeContextCollabRepository(), authorizer=authorizer
+            repository=_FakeContextCollabRepository(),
+            runtime=LocalContextCollabRuntimePlugin(),
+            authorizer=authorizer,
         )
         assert isinstance(authorizer, ContextCollabAuthorizerProtocol)
         actor = make_actor()
@@ -274,7 +293,6 @@ def _event(event_id: str, visibility: str) -> EventRecord:
     return EventRecord(
         collab_context_id="collet_todo_001",
         event_id=event_id,
-
         parent_event=None,
         event_kind="task.progress.updated",
         primitive_type="Activity",
@@ -299,9 +317,7 @@ class TestStructuralAuthorizer:
             workflow_kind=None,
         )
         with pytest.raises(ContextCollabValidationError):
-            StructuralContextCollabAuthorizer().check_create(
-                spec, make_actor()
-            )
+            StructuralContextCollabAuthorizer().check_create(spec, make_actor())
 
     def test_check_append_requires_principal_or_executor(self):
         authorizer = StructuralContextCollabAuthorizer()
@@ -317,20 +333,27 @@ class TestStructuralAuthorizer:
     def test_filter_visible_events_by_actor_role(self):
         authorizer = StructuralContextCollabAuthorizer()
         collet = _fake_collet()
-        events = [_event("evt_pub", "public"),
-                  _event("evt_ws", "workspace"),
-                  _event("evt_priv", "private")]
+        events = [
+            _event("evt_pub", "public"),
+            _event("evt_ws", "workspace"),
+            _event("evt_priv", "private"),
+        ]
 
         principal_view = authorizer.filter_visible_events(
-            collet, events, make_actor("u_1001"))
+            collet, events, make_actor("u_1001")
+        )
         assert [e.event_id for e in principal_view] == [
-            "evt_pub", "evt_ws", "evt_priv",
+            "evt_pub",
+            "evt_ws",
+            "evt_priv",
         ]
 
         executor_view = authorizer.filter_visible_events(
-            collet, events, make_actor("bot_coding_001"))
+            collet, events, make_actor("bot_coding_001")
+        )
         assert [e.event_id for e in executor_view] == ["evt_pub", "evt_ws"]
 
         outsider_view = authorizer.filter_visible_events(
-            collet, events, make_actor("u_9999"))
+            collet, events, make_actor("u_9999")
+        )
         assert [e.event_id for e in outsider_view] == ["evt_pub"]

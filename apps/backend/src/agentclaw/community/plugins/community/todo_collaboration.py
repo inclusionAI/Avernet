@@ -1,11 +1,8 @@
-"""HTTP adapter for the B-side Todo collaboration service.
-
-This is the Plugin implementation, not domain policy: it owns paths, payloads,
-response parsing, and transport failures only. Event aggregation and Todo state
-decisions remain in Backend's Todo core service.
-"""
+"""HTTP implementation of Todo's B-side collaboration Plugin API."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import httpx
 
@@ -14,19 +11,18 @@ from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationArtifact,
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
+    TodoCollaborationError,
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
-    TodoCollaborationError,
     TodoCollaborationPlugin,
 )
-
 
 _CONTEXT_PATH = "/api/v1/collaboration/task/context_collab"
 
 
 @plugin_impl(
     mode=Mode.PROD,
-    rationale="direct HTTP adapter for the collaboration context/event service",
+    rationale="direct HTTP adapter for the collaboration Context service",
 )
 class HttpTodoCollaborationPlugin(TodoCollaborationPlugin):
     """Synchronous B adapter with no retries or local event cache."""
@@ -38,51 +34,74 @@ class HttpTodoCollaborationPlugin(TodoCollaborationPlugin):
     def create_context(
         self, request: TodoCollaborationContextRequest
     ) -> TodoCollaborationContext:
-        payload = {
-            "task_id": request.task_id,
-            "task_title": request.task_title,
-            "collaboration_goal": request.collaboration_goal,
-            "collaborators": list(request.collaborators),
-            "owner_id": request.owner_id,
-            "bot_id": request.bot_id,
-        }
-        data = self._request("POST", _CONTEXT_PATH, payload)
-        collab_context_id = _string(_dict(data).get("collab_context_id"))
-        if not collab_context_id:
-            raise TodoCollaborationError("B returned no collab_context_id")
-        return TodoCollaborationContext(collab_context_id=collab_context_id)
+        data = self._request(
+            "POST",
+            _CONTEXT_PATH,
+            {
+                "space": {
+                    "space_id": request.space_id,
+                    "environment": request.environment,
+                },
+                "principal_ref": {
+                    "principal_type": "human",
+                    "principal_id": request.principal_id,
+                },
+                "product_kind": request.product_kind,
+                "workflow_kind": request.workflow_kind,
+                "method_kind": request.method_kind,
+                "executor_ref": {
+                    "agent_type": "bot",
+                    "agent_id": request.executor_id,
+                },
+                "objective": request.objective,
+                "resource_refs": [
+                    {
+                        "resource_type": "todo",
+                        "resource_id": request.todo_id,
+                        "revision": None,
+                    }
+                ],
+            },
+        )
+        return _parse_context(_dict(data))
+
+    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        data = self._request("GET", f"{_CONTEXT_PATH}/{collab_context_id}")
+        return _parse_context(_dict(data))
+
+    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        self._request("POST", f"{_CONTEXT_PATH}/{collab_context_id}/run")
+        return self.get_context(collab_context_id=collab_context_id)
 
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:
-        payload = {
-            "event_type": request.event_type,
-            "actor_id": request.actor_id,
-            "content": request.content,
-            "boundary_event_seq": request.boundary_event_seq,
-            **request.payload,
-        }
-        data = self._request(
-            "POST", f"{_CONTEXT_PATH}/{collab_context_id}/events", payload
+        accepted = _dict(
+            self._request(
+                "POST",
+                f"{_CONTEXT_PATH}/{collab_context_id}/events",
+                {
+                    "expected_version": request.expected_version,
+                    "event_kind": request.event_kind,
+                    "primitive_type": request.primitive_type,
+                    "actor_ref": {
+                        "principal_type": request.actor_type,
+                        "principal_id": request.actor_id,
+                    },
+                    "parent_event": request.parent_event,
+                    "visibility": request.visibility,
+                    "payload": request.payload,
+                },
+            )
         )
-        return _parse_event(_dict(data))
-
-    def list_events(
-        self, *, collab_context_id: str
-    ) -> tuple[TodoCollaborationEvent, ...]:
-        data = self._request("GET", f"{_CONTEXT_PATH}/{collab_context_id}")
-        if isinstance(data, list):
-            raw_events = data
-        else:
-            wrapper = _dict(data)
-            raw_events = wrapper.get("events")
-            if not isinstance(raw_events, list):
-                raw_events = wrapper.get("event_list")
-            if not isinstance(raw_events, list):
-                raise TodoCollaborationError(
-                    "B collaboration response has no event list"
-                )
-        return tuple(_parse_event(_dict(item)) for item in raw_events)
+        event_id = _required_string(accepted.get("event_id"), "event_id")
+        context = self.get_context(collab_context_id=collab_context_id)
+        for event in context.events:
+            if event.event_id == event_id:
+                return event
+        raise TodoCollaborationError(
+            f"B accepted event {event_id!r} but did not project it"
+        )
 
     def _request(self, method: str, path: str, json: dict | None = None) -> object:
         if not self._base_url:
@@ -104,36 +123,60 @@ class HttpTodoCollaborationPlugin(TodoCollaborationPlugin):
             raise TodoCollaborationError(
                 "B collaboration response is not JSON"
             ) from exc
-        if isinstance(payload, dict) and "data" in payload:
-            data = payload["data"]
-        else:
-            data = payload
+        data = payload.get("data") if isinstance(payload, dict) else payload
         if data is None:
             raise TodoCollaborationError("B collaboration response is malformed")
         return data
 
 
+def _parse_context(record: dict) -> TodoCollaborationContext:
+    snapshot = _dict(record.get("current_snapshot"))
+    progress = _dict(snapshot.get("progress"))
+    current_event = _dict(record.get("current_event"))
+    task_progress = _dict(record.get("task_progress"))
+    raw_events = task_progress.get("events", [])
+    if not isinstance(raw_events, list):
+        raise TodoCollaborationError(
+            "B collaboration response has invalid task_progress.events"
+        )
+    current_event_id = progress.get("current_event_id")
+    if current_event_id is None:
+        current_event_id = current_event.get("event_id")
+    return TodoCollaborationContext(
+        collab_context_id=_required_string(
+            record.get("collab_context_id"), "collab_context_id"
+        ),
+        status=_required_string(snapshot.get("status"), "current_snapshot.status"),
+        context_version=_required_int(record.get("context_version"), "context_version"),
+        current_event_id=_optional_string(current_event_id),
+        events=tuple(_parse_event(_dict(item)) for item in raw_events),
+    )
+
+
 def _parse_event(record: dict) -> TodoCollaborationEvent:
     artifacts_raw = record.get("artifacts")
-    artifacts = ()
+    artifacts: tuple[TodoCollaborationArtifact, ...] = ()
     if isinstance(artifacts_raw, list):
         artifacts = tuple(
             artifact
             for artifact in (_parse_artifact(_dict(item)) for item in artifacts_raw)
             if artifact is not None
         )
+    created_at = record.get("created_at")
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
     return TodoCollaborationEvent(
-        event_id=_string(record.get("event_id")),
-        event_seq=_int(record.get("event_seq")),
-        event_type=_string(record.get("event_type"), "event"),
+        event_id=_required_string(record.get("event_id"), "event_id"),
+        event_seq=_required_int(record.get("event_seq"), "event_seq"),
+        event_type=_required_string(record.get("event_kind"), "event_kind"),
         actor_id=_string(record.get("actor_id")),
-        actor_type=_string(record.get("actor_type"), "human"),
-        content=_string(record.get("content") or record.get("message")),
+        actor_type=_string(record.get("actor_type")),
+        content=_string(record.get("content") or record.get("summary")),
         execution_id=_string(record.get("execution_id")),
-        context_version=_string(record.get("context_version")),
+        context_version=_optional_int(record.get("context_version")),
         status=_optional_string(record.get("status")),
         artifacts=artifacts,
-        created_at=_string(record.get("created_at") or record.get("created_time")),
+        created_at=_required_string(created_at, "created_at"),
     )
 
 
@@ -160,18 +203,31 @@ def _string(value: object, fallback: str = "") -> str:
     return str(value)
 
 
+def _required_string(value: object, field: str) -> str:
+    normalized = _string(value)
+    if not normalized:
+        raise TodoCollaborationError(f"B collaboration response has invalid {field}")
+    return normalized
+
+
 def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     return _string(value)
 
 
-def _int(value: object, field: str = "event_seq") -> int:
+def _required_int(value: object, field: str) -> int:
     if isinstance(value, bool):
-        raise TodoCollaborationError("B collaboration response has invalid event_seq")
+        raise TodoCollaborationError(f"B collaboration response has invalid {field}")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise TodoCollaborationError(
-            "B collaboration response has invalid event_seq"
+            f"B collaboration response has invalid {field}"
         ) from exc
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    return _required_int(value, "context_version")

@@ -19,7 +19,6 @@ provides:
 consumes:
   - TodoRepositoryProtocol
   - SpaceAccessServiceProtocol
-  - SpaceMemberServiceProtocol
   - BotRepository
   - TodoCollaborationPlugin
 internal_dependencies:
@@ -31,7 +30,8 @@ internal_dependencies:
 
 ### Change impact
 
-Changes affect the public Todo CRUD, Run, event, interaction, and acceptance
-surfaces. A does not write an interaction table; Human interaction and
-acceptance records are collaboration events appended through B and projected
-through A.
+Changes affect the public Todo create/read, Run, event, interaction, and
+acceptance surfaces. Todo editing is intentionally unsupported. A does not
+write an interaction table: Human interaction is appended through B, while
+Human acceptance is persisted only by A. Except for A-owned ``completed``,
+the public Todo status is projected from the bound B Context at read time.

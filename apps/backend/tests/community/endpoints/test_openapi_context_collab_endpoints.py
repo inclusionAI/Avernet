@@ -15,6 +15,7 @@ gateway-signed ``X-Avernet-Principal`` header, and missing/bad headers answer
 the surface's uniform 401 envelope. The happy/error cases below also satisfy the
 framework's frozen-baseline coverage gate for the three new routes.
 """
+
 from __future__ import annotations
 
 import time
@@ -22,8 +23,16 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, bind_overrides, endpoint_test
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+)
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    bind_overrides,
+    endpoint_test,
+)
 from agentclaw.community.api.task.context_collab_service import (
     ContextCollabServiceProtocol,
 )
@@ -33,6 +42,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabCreatedResult,
+    ContextCollabRunResultDTO,
     ContextCollabStatusProjection,
     EventAcceptedResult,
     TaskProgressProjectionDTO,
@@ -65,10 +75,15 @@ def _principal() -> str:
             "aud": "backend",
             "iat": now,
             "exp": now + 3600,
-            "principals": [{
-                "type": "user",
-                "subject": {"id": _CALLER, "username": "context-collab@example.test"},
-            }],
+            "principals": [
+                {
+                    "type": "user",
+                    "subject": {
+                        "id": _CALLER,
+                        "username": "context-collab@example.test",
+                    },
+                }
+            ],
         },
         _KEY,
         algorithm="HS256",
@@ -93,7 +108,11 @@ def _create_body() -> dict:
         "executor_ref": {"agent_type": "bot", "agent_id": "bot_coding_001"},
         "objective": "整理 Context 协作协议评审结论并提交可评审 PR",
         "resource_refs": [
-            {"resource_type": "forum_topic", "resource_id": "topic_001", "revision": "3"}
+            {
+                "resource_type": "forum_topic",
+                "resource_id": "topic_001",
+                "revision": "3",
+            }
         ],
     }
 
@@ -101,14 +120,16 @@ def _create_body() -> dict:
 def _append_body() -> dict:
     """spec §6.3 用户新增互动消息示例 (verbatim JSON, parent linked below)."""
     return {
-
         "expected_version": 1,
         "event_kind": "user_interaction.posted",
         "primitive_type": "Message",
         "actor_ref": {"principal_type": "human", "principal_id": "u_1001"},
         "parent_event": "evt_case_001",
         "visibility": "workspace",
-        "payload": {"message_kind": "user_interaction", "content": "上下文做一下补充xxx"},
+        "payload": {
+            "message_kind": "user_interaction",
+            "content": "上下文做一下补充xxx",
+        },
     }
 
 
@@ -126,6 +147,34 @@ _CASE_SNAPSHOT = {
         "current_event_id": "evt_case_001",
     },
 }
+
+
+def _event_projection(
+    *,
+    event_id: str,
+    event_seq: int,
+    parent_event: str | None,
+    event_kind: str,
+    primitive_type: str,
+    status: str,
+    content: str | None = None,
+) -> dict:
+    return {
+        "event_id": event_id,
+        "event_seq": event_seq,
+        "parent_event": parent_event,
+        "event_kind": event_kind,
+        "primitive_type": primitive_type,
+        "actor_id": "u_1001",
+        "actor_type": "human",
+        "execution_id": "",
+        "context_version": event_seq,
+        "status": status,
+        "summary": None,
+        "content": content,
+        "artifacts": [],
+        "created_at": "2026-11-10T08:00:00Z",
+    }
 
 
 def _seed_create_happy(world) -> None:
@@ -147,7 +196,9 @@ def _seed_create_happy(world) -> None:
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"create_context": create_context},
+        world,
+        ContextCollabServiceProtocol,
+        {"create_context": create_context},
     )
 
 
@@ -168,7 +219,9 @@ def _seed_append_happy(world) -> None:
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"append_event": append_event},
+        world,
+        ContextCollabServiceProtocol,
+        {"append_event": append_event},
     )
 
 
@@ -177,7 +230,39 @@ def _seed_append_conflict(world) -> None:
         raise ContextCollabVersionConflict("case: stale expected_version")
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"append_event": append_event},
+        world,
+        ContextCollabServiceProtocol,
+        {"append_event": append_event},
+    )
+
+
+def _seed_run_happy(world) -> None:
+    async def run_context(self, collab_context_id, context):
+        assert context.actor.principal_id == _CALLER
+        assert context.source == "openapi"
+        return ContextCollabRunResultDTO(
+            collab_context_id=collab_context_id,
+            run_id="run_case_001",
+            session_id="session_case_001",
+            context_version=2,
+            current_status="in_progress",
+        )
+
+    bind_overrides(
+        world,
+        ContextCollabServiceProtocol,
+        {"run_context": run_context},
+    )
+
+
+def _seed_run_missing(world) -> None:
+    async def run_context(self, collab_context_id, context):
+        raise ContextCollabNotFoundError("case: unknown collab context")
+
+    bind_overrides(
+        world,
+        ContextCollabServiceProtocol,
+        {"run_context": run_context},
     )
 
 
@@ -188,43 +273,43 @@ def _seed_get_happy(world) -> None:
             collab_context_id="collet_case_001",
             context_version=2,
             current_snapshot=dict(_CASE_SNAPSHOT),
-            current_event={
-                "event_id": "evt_case_002",
-                "parent_event": "evt_case_001",
-                "event_kind": "user_interaction.posted",
-                "primitive_type": "Message",
-                "status": "active",
-                "summary": None,
-                "content": "上下文做一下补充xxx",
-                "occurred_at": None,
-            },
+            current_event=_event_projection(
+                event_id="evt_case_002",
+                event_seq=2,
+                parent_event="evt_case_001",
+                event_kind="user_interaction.posted",
+                primitive_type="Message",
+                status="active",
+                content="上下文做一下补充xxx",
+            ),
             task_progress=TaskProgressProjectionDTO(
                 total_events=2,
                 events=[
-                    {
-                        "event_id": "evt_case_001",
-                        "parent_event": None,
-                        "event_kind": "task.created",
-                        "primitive_type": "Task",
-                        "status": "completed",
-                        "summary": None,
-                        "content": None,
-                    },
-                    {
-                        "event_id": "evt_case_002",
-                        "parent_event": "evt_case_001",
-                        "event_kind": "user_interaction.posted",
-                        "primitive_type": "Message",
-                        "status": "active",
-                        "summary": None,
-                        "content": "上下文做一下补充xxx",
-                    },
+                    _event_projection(
+                        event_id="evt_case_001",
+                        event_seq=1,
+                        parent_event=None,
+                        event_kind="task.created",
+                        primitive_type="Task",
+                        status="completed",
+                    ),
+                    _event_projection(
+                        event_id="evt_case_002",
+                        event_seq=2,
+                        parent_event="evt_case_001",
+                        event_kind="user_interaction.posted",
+                        primitive_type="Message",
+                        status="active",
+                        content="上下文做一下补充xxx",
+                    ),
                 ],
             ),
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"get_status": get_status},
+        world,
+        ContextCollabServiceProtocol,
+        {"get_status": get_status},
     )
 
 
@@ -233,7 +318,9 @@ def _seed_get_missing(world) -> None:
         raise ContextCollabNotFoundError("case: unknown collab context")
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"get_status": get_status},
+        world,
+        ContextCollabServiceProtocol,
+        {"get_status": get_status},
     )
 
 
@@ -265,7 +352,9 @@ def create_authenticated():
     scenario="unauthenticated",
     seed=_boot_verifier,
     input=CaseInput(json_body=_create_body()),
-    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+    expect=ExpectError(
+        status=401, json_contains={"code": 401000, "message": "Unauthorized"}
+    ),
 )
 def create_unauthenticated():
     pass
@@ -277,7 +366,9 @@ def create_unauthenticated():
     scenario="bad_principal_header",
     seed=_boot_verifier,
     input=CaseInput(headers=_BAD_HEADERS, json_body=_create_body()),
-    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+    expect=ExpectError(
+        status=401, json_contains={"code": 401000, "message": "Unauthorized"}
+    ),
 )
 def create_bad_header():
     """A forged/undecodable header answers the same uniform 401 as no header."""
@@ -321,7 +412,9 @@ def append_authenticated():
         path_params={"collab_context_id": "collet_case_001"},
         json_body=_append_body(),
     ),
-    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+    expect=ExpectError(
+        status=401, json_contains={"code": 401000, "message": "Unauthorized"}
+    ),
 )
 def append_unauthenticated():
     pass
@@ -370,6 +463,58 @@ def append_forged_actor_ref():
     pass
 
 
+# ── POST /context_collab/{id}/run(启动运行时)──────────────────────────────
+
+
+_RUN_PATH = f"{_BASE}/{{collab_context_id}}/run"
+
+
+@endpoint_test(
+    method="POST",
+    path=_RUN_PATH,
+    scenario="authenticated_run",
+    seed=lambda w: (_boot_verifier(w), _seed_run_happy(w)),
+    input=CaseInput(
+        path_params={"collab_context_id": "collet_case_001"},
+        headers=_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "collab_context_id": "collet_case_001",
+                "run_id": "run_case_001",
+                "context_version": 2,
+                "current_status": "in_progress",
+            },
+        },
+    ),
+)
+def run_authenticated():
+    """Run binds the runtime launch to the verified principal."""
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=_RUN_PATH,
+    scenario="unknown_context",
+    seed=lambda w: (_boot_verifier(w), _seed_run_missing(w)),
+    input=CaseInput(
+        path_params={"collab_context_id": "collet_case_missing"},
+        headers=_headers(),
+    ),
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found"},
+    ),
+)
+def run_unknown_context():
+    """Running an unknown Context maps to the 404 ErrorEnvelope."""
+    pass
+
+
 # ── GET /context_collab/{id}(查询)─────────────────────────────────────────
 
 
@@ -408,7 +553,9 @@ def status_authenticated():
     scenario="unauthenticated",
     seed=_boot_verifier,
     input=CaseInput(path_params={"collab_context_id": "collet_case_001"}),
-    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+    expect=ExpectError(
+        status=401, json_contains={"code": 401000, "message": "Unauthorized"}
+    ),
 )
 def status_unauthenticated():
     pass
@@ -424,7 +571,8 @@ def status_unauthenticated():
         headers=_headers(),
     ),
     expect=ExpectError(
-        status=404, json_contains={"code": 404000, "message": "Not found"},
+        status=404,
+        json_contains={"code": 404000, "message": "Not found"},
     ),
 )
 def status_unknown_context():

@@ -78,6 +78,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.bcs_managers
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.context_collab_runtime
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.device_connection_manager

@@ -20,7 +20,6 @@ from agentclaw.community.core.task.todos.errors import (
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
-    TodoPage,
     TodoRecord,
     TodoStatus,
 )
@@ -90,16 +89,13 @@ class TodoRepository(TodoRepositoryProtocol):
         with self._db.orm_session() as db:
             return self._require_todo(db, todo_id=todo_id).to_record()
 
-    def list_todos(
+    def list_todo_candidates(
         self,
         *,
         space_id: int,
         keyword: str | None,
-        status: TodoStatus | None,
-        offset: int,
-        limit: int,
         bot_id: str | None = None,
-    ) -> TodoPage:
+    ) -> tuple[TodoRecord, ...]:
         with self._db.orm_session() as db:
             query = db.query(TodoModel).filter(
                 TodoModel.space_id == space_id,
@@ -115,77 +111,30 @@ class TodoRepository(TodoRepositoryProtocol):
                         TodoModel.bot_name.ilike(pattern),
                     )
                 )
-            if status is not None:
-                query = query.filter(TodoModel.status == status.value)
             if bot_id is not None:
                 query = query.filter(TodoModel.bot_id == bot_id)
-            total = query.count()
-            rows = (
-                query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id))
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-            return TodoPage(
-                total=total,
-                items=tuple(row.to_record() for row in rows),
-            )
+            rows = query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id)).all()
+            return tuple(row.to_record() for row in rows)
 
-    def update_draft(
-        self,
-        *,
-        todo_id: str,
-        title: str,
-        description: str,
-        bot_id: str,
-        bot_name: str,
+    def bind_context_if_draft(
+        self, *, todo_id: str, collab_context_id: str
     ) -> TodoRecord:
         with self._transaction() as db:
             row = self._require_todo(db, todo_id=todo_id, lock=True)
             if row.status != TodoStatus.DRAFT.value:
-                raise TodoStateConflictError("Only draft Todos can be updated")
-            row.title = title
-            row.description = description
-            row.bot_id = bot_id
-            row.bot_name = bot_name
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
-
-    def start_if_draft(self, *, todo_id: str, collab_context_id: str) -> TodoRecord:
-        with self._transaction() as db:
-            row = self._require_todo(db, todo_id=todo_id, lock=True)
-            if row.status != TodoStatus.DRAFT.value:
-                raise TodoStateConflictError("Only draft Todos can start")
+                raise TodoStateConflictError(
+                    "Only draft Todos can bind a collaboration Context"
+                )
             if not collab_context_id:
                 raise TodoStateConflictError("collab_context_id is required")
-            row.status = TodoStatus.IN_PROGRESS.value
+            if row.collab_context_id is not None:
+                raise TodoStateConflictError("Todo already has a collaboration Context")
             row.collab_context_id = collab_context_id
             db.flush()
             db.refresh(row)
             return row.to_record()
 
-    def mark_running_if_pending_acceptance(self, *, todo_id: str) -> TodoRecord:
-        with self._transaction() as db:
-            row = self._require_todo(db, todo_id=todo_id, lock=True)
-            if row.status != TodoStatus.PENDING_ACCEPTANCE.value:
-                raise TodoStateConflictError("Todo is not pending acceptance")
-            row.status = TodoStatus.IN_PROGRESS.value
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
-
-    def mark_pending_acceptance_if_in_progress(self, *, todo_id: str) -> TodoRecord:
-        with self._transaction() as db:
-            row = self._require_todo(db, todo_id=todo_id, lock=True)
-            if row.status != TodoStatus.IN_PROGRESS.value:
-                return row.to_record()
-            row.status = TodoStatus.PENDING_ACCEPTANCE.value
-            db.flush()
-            db.refresh(row)
-            return row.to_record()
-
-    def accept_if_pending(
+    def record_acceptance(
         self,
         *,
         todo_id: str,
@@ -195,8 +144,8 @@ class TodoRepository(TodoRepositoryProtocol):
     ) -> TodoRecord:
         with self._transaction() as db:
             todo = self._require_todo(db, todo_id=todo_id, lock=True)
-            if todo.status != TodoStatus.PENDING_ACCEPTANCE.value:
-                raise TodoStateConflictError("Todo is not pending acceptance")
+            if todo.status == TodoStatus.COMPLETED.value:
+                raise TodoStateConflictError("Completed Todo cannot be accepted again")
             decision = TodoAcceptanceModel(
                 acceptance_id=f"acceptance_{uuid.uuid4().hex}",
                 todo_id=todo_id,
@@ -210,7 +159,7 @@ class TodoRepository(TodoRepositoryProtocol):
             todo.status = (
                 TodoStatus.COMPLETED.value
                 if verdict is AcceptanceVerdict.APPROVED
-                else TodoStatus.IN_PROGRESS.value
+                else TodoStatus.PENDING_ACCEPTANCE.value
             )
             db.flush()
             db.refresh(todo)

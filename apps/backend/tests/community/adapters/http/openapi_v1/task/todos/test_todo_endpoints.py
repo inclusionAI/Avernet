@@ -15,13 +15,11 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     list_todos,
     run_todo,
     submit_todo_acceptance,
-    update_todo,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
-    UpdateTodoRequest,
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
@@ -53,12 +51,12 @@ def _event() -> TodoEventRecord:
     return TodoEventRecord(
         event_id="event_3",
         event_seq=3,
-        event_type="execution.status",
+        event_type="task.completed",
         actor_id="bot_1",
         actor_type="bot",
         content="done",
         execution_id="execution_1",
-        context_version="v2",
+        context_version=2,
         status="pending_acceptance",
         artifacts=(_artifact(),),
         created_at="2026-11-10T08:00:00Z",
@@ -89,12 +87,12 @@ def _interaction_event() -> TodoEventRecord:
     return TodoEventRecord(
         event_id="event_2",
         event_seq=2,
-        event_type="human_interaction",
+        event_type="user_interaction.posted",
         actor_id="human_1",
         actor_type="human",
         content="Please revise section 2",
         execution_id="execution_1",
-        context_version="v2",
+        context_version=2,
         status=None,
         artifacts=(),
         created_at="2026-11-10T07:55:00Z",
@@ -124,11 +122,7 @@ class _RecordedService:
 
     def create_todo(self, **kwargs):
         self._record("create_todo", **kwargs)
-        return _todo(status=TodoStatus.DRAFT, collab_context_id=None)
-
-    def update_todo(self, **kwargs):
-        self._record("update_todo", **kwargs)
-        return _todo(status=TodoStatus.DRAFT, collab_context_id=None)
+        return _todo(status=TodoStatus.DRAFT)
 
     def start_todo(self, **kwargs):
         self._record("start_todo", **kwargs)
@@ -147,12 +141,12 @@ class _RecordedService:
         return TodoEventRecord(
             event_id="event_4",
             event_seq=4,
-            event_type="human_interaction",
+            event_type="user_interaction.posted",
             actor_id="human_1",
             actor_type="human",
             content="Please include the rollback plan",
             execution_id="execution_1",
-            context_version="v3",
+            context_version=3,
             status="in_progress",
             artifacts=(),
             created_at="2026-11-10T08:05:00Z",
@@ -224,7 +218,7 @@ async def test_create_todo_returns_201_and_passes_body_fields():
     assert payload.code == 201000
     assert payload.message == "Created"
     assert payload.data.status == TodoStatus.DRAFT
-    assert payload.data.collab_context_id is None
+    assert payload.data.collab_context_id == "context_todo_1"
     assert service.calls == [
         {
             "op": "create_todo",
@@ -238,24 +232,12 @@ async def test_create_todo_returns_201_and_passes_body_fields():
 
 
 @pytest.mark.asyncio
-async def test_get_update_and_run_use_authenticated_actor():
+async def test_get_and_run_use_authenticated_actor():
     service = _RecordedService()
 
     detail = await get_todo(
         todo_id="todo_1",
         request=_request("GET", "/openapi/v1/todos/todo_1"),
-        principal={"user_id": "human_1"},
-        user_id="human_1",
-        service=service,
-    )
-    updated = await update_todo(
-        todo_id="todo_1",
-        body=UpdateTodoRequest(
-            title="Updated title",
-            description="Updated description",
-            bot_id="bot_2",
-        ),
-        request=_request("PATCH", "/openapi/v1/todos/todo_1"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -269,18 +251,9 @@ async def test_get_update_and_run_use_authenticated_actor():
     )
 
     assert detail.data.todo_id == "todo_1"
-    assert updated.data.todo_id == "todo_1"
     assert started.data.status == TodoStatus.IN_PROGRESS
     assert service.calls == [
         {"op": "get_todo", "todo_id": "todo_1", "actor_id": "human_1"},
-        {
-            "op": "update_todo",
-            "todo_id": "todo_1",
-            "actor_id": "human_1",
-            "title": "Updated title",
-            "description": "Updated description",
-            "bot_id": "bot_2",
-        },
         {"op": "start_todo", "todo_id": "todo_1", "actor_id": "human_1"},
     ]
 
@@ -306,7 +279,7 @@ async def test_events_and_interactions_project_b_event_records():
 
     assert events.data[0].event_id == "event_3"
     assert events.data[0].execution_id == "execution_1"
-    assert events.data[0].context_version == "v2"
+    assert events.data[0].context_version == 2
     assert events.data[0].status == "pending_acceptance"
     assert events.data[0].artifacts[0].name == "report.docx"
     assert events.data[0].artifacts[0].url == "/files/report.docx"
@@ -315,7 +288,7 @@ async def test_events_and_interactions_project_b_event_records():
         {"op": "list_interactions", "todo_id": "todo_1", "actor_id": "human_1"},
     ]
     assert history.code == 200000
-    assert history.data[0].event_type == "human_interaction"
+    assert history.data[0].event_type == "user_interaction.posted"
 
 
 @pytest.mark.asyncio
@@ -336,7 +309,7 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
     assert response.status_code == 201
     assert payload.code == 201000
     assert payload.data.event_id == "event_4"
-    assert payload.data.event_type == "human_interaction"
+    assert payload.data.event_type == "user_interaction.posted"
     assert payload.data.content == "Please include the rollback plan"
     assert service.calls == [
         {

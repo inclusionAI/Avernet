@@ -32,7 +32,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
-    ("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): AdmissionMode.OPEN,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
+    ): AdmissionMode.OPEN,
     (
         "DELETE",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
@@ -162,7 +165,14 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
     ): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/run",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}",
+    ): AdmissionMode.REFUSED,
 }
 
 
@@ -171,7 +181,6 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/todos"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/todos/{todo_id}"): AdmissionMode.REFUSED,
-    ("PATCH", "/openapi/v1/todos/{todo_id}"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/todos/{todo_id}/run"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/todos/{todo_id}/events"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,

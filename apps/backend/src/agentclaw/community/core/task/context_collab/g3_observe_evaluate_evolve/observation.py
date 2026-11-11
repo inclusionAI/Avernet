@@ -37,13 +37,19 @@ class EventProjection:
     """
 
     event_id: str
+    event_seq: int
     parent_event: str | None
     event_kind: str
     primitive_type: str | None  # 外部部分行可为 NULL;统计仅排除 Message
+    actor_id: str
+    actor_type: str
+    execution_id: str
+    context_version: int | None
     status: str  # "completed" | "active" | "pending"
     summary: str | None  # payload.get("summary")
     content: str | None  # payload.get("content")(Message)
-    occurred_at: datetime
+    artifacts: tuple[object, ...]
+    created_at: datetime
 
 
 def default_projected_status() -> str:
@@ -51,7 +57,9 @@ def default_projected_status() -> str:
     return STATUS_PENDING
 
 
-def active_chain_ids(events: Sequence[EventRecord], current_event_id: str | None) -> frozenset[str]:
+def active_chain_ids(
+    events: Sequence[EventRecord], current_event_id: str | None
+) -> frozenset[str]:
     """主干链 = 从 current_event_id 沿 parent_event 回溯到根的事件集合。
 
     Ruling R9:is_trunk 不再落库,"主事件"在查询时由当前活动链推导;
@@ -98,16 +106,33 @@ def project_events(
         else:
             status = STATUS_PENDING
         payload = record.payload if record.payload is not None else {}
+        artifacts = payload.get("artifacts")
         projections.append(
             EventProjection(
                 event_id=record.event_id,
+                event_seq=index + 1,
                 parent_event=record.parent_event,
                 event_kind=record.event_kind,
                 primitive_type=record.primitive_type,
+                actor_id=(
+                    record.actor_ref.principal_id
+                    if record.actor_ref is not None
+                    else ""
+                ),
+                actor_type=(
+                    record.actor_ref.principal_type
+                    if record.actor_ref is not None
+                    else ""
+                ),
+                execution_id=str(
+                    payload.get("run_id") or payload.get("execution_id") or ""
+                ),
+                context_version=record.context_version_after,
                 status=status,
                 summary=payload.get("summary"),
                 content=payload.get("content"),
-                occurred_at=record.occurred_at,
+                artifacts=(tuple(artifacts) if isinstance(artifacts, list) else ()),
+                created_at=record.occurred_at,
             )
         )
     return projections

@@ -1,105 +1,195 @@
-"""Local, in-memory Todo collaboration double — no B service is reached."""
+"""Local in-memory implementation of Todo's collaboration Plugin API."""
 
 from __future__ import annotations
 
 import itertools
-from typing import Iterator
+from dataclasses import dataclass, replace
 
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
+    TodoCollaborationError,
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
     TodoCollaborationPlugin,
 )
 
 
+@dataclass
+class _LocalContext:
+    request: TodoCollaborationContextRequest
+    status: str
+    version: int
+    current_event_id: str | None
+    events: list[TodoCollaborationEvent]
+
+
 @plugin_impl(
     mode=Mode.LOCAL,
     flavor=Flavor.SIMULATOR,
-    rationale="simulates one B Context with an append-only event list",
+    rationale="simulates B Context lifecycle and append-only events",
 )
 class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
-    """Deterministic event simulator for tests and offline development."""
+    """Deterministic Context simulator for tests and offline development."""
 
     def __init__(self) -> None:
-        self._contexts: dict[str, list[TodoCollaborationEvent]] = {}
-        self._seq = itertools.count(1)
+        self._contexts: dict[str, _LocalContext] = {}
+        self._ids = itertools.count(1)
 
     def reset(self) -> None:
         self._contexts.clear()
-        self._seq = itertools.count(1)
+        self._ids = itertools.count(1)
 
     def create_context(
         self, request: TodoCollaborationContextRequest
     ) -> TodoCollaborationContext:
-        collab_context_id = f"context_{request.task_id}"
-        context = TodoCollaborationContext(collab_context_id=collab_context_id)
-        if collab_context_id in self._contexts:
-            return context
-        self._contexts[collab_context_id] = list(self._initial_events(request))
-        return context
+        context_id = f"context_{request.todo_id}"
+        existing = self._contexts.get(context_id)
+        if existing is not None:
+            return self._snapshot(context_id, existing)
+        event = self._event(
+            event_seq=1,
+            event_type="task.created",
+            actor_id=request.principal_id,
+            actor_type="human",
+            content=request.objective,
+            context_version=1,
+            status="active",
+        )
+        local = _LocalContext(
+            request=request,
+            status="created",
+            version=1,
+            current_event_id=event.event_id,
+            events=[event],
+        )
+        self._contexts[context_id] = local
+        return self._snapshot(context_id, local)
+
+    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        return self._snapshot(
+            collab_context_id, self._require_context(collab_context_id)
+        )
+
+    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+        local = self._require_context(collab_context_id)
+        if local.status != "created":
+            raise TodoCollaborationError("Context can run only from created")
+        local.version += 1
+        event = self._event(
+            event_seq=len(local.events) + 1,
+            event_type="task.started",
+            actor_id=local.request.executor_id,
+            actor_type="bot",
+            content="",
+            context_version=local.version,
+            status="active",
+            execution_id=f"run_{collab_context_id}",
+        )
+        local.events.append(event)
+        local.current_event_id = event.event_id
+        local.status = "in_progress"
+        return self._snapshot(collab_context_id, local)
 
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:
-        events = self._require_context(collab_context_id)
-        event = TodoCollaborationEvent(
-            event_id=f"event_{next(self._seq)}",
-            event_seq=len(events) + 1,
-            event_type=request.event_type,
+        local = self._require_context(collab_context_id)
+        if request.expected_version != local.version:
+            raise TodoCollaborationError("Context version conflict")
+        local.version += 1
+        event = self._event(
+            event_seq=len(local.events) + 1,
+            event_type=request.event_kind,
             actor_id=request.actor_id,
-            actor_type="human",
-            content=request.content,
-            execution_id=f"execution_{collab_context_id}",
-            context_version=f"v{len(events) + 1}",
-            status="in_progress",
-            artifacts=(),
-            created_at="2026-11-10T00:00:00Z",
+            actor_type=request.actor_type,
+            content=str(request.payload.get("content") or ""),
+            context_version=local.version,
+            status="active",
+            execution_id=str(
+                request.payload.get("run_id")
+                or request.payload.get("execution_id")
+                or ""
+            ),
         )
-        events.append(event)
-        return event
+        local.events.append(event)
+        local.current_event_id = event.event_id
+        return self._snapshot(collab_context_id, local).events[-1]
 
-    def list_events(
-        self, *, collab_context_id: str
-    ) -> tuple[TodoCollaborationEvent, ...]:
-        return tuple(self._require_context(collab_context_id))
-
-    def _require_context(self, collab_context_id: str) -> list[TodoCollaborationEvent]:
-        events = self._contexts.get(collab_context_id)
-        if events is None:
-            raise ValueError(f"collab context {collab_context_id} not found")
-        return events
-
-    def _initial_events(
-        self, request: TodoCollaborationContextRequest
-    ) -> Iterator[TodoCollaborationEvent]:
-        first = TodoCollaborationEvent(
-            event_id="event_1",
-            event_seq=1,
-            event_type="task.created",
-            actor_id=request.owner_id,
-            actor_type="human",
-            content=request.collaboration_goal,
-            execution_id=f"execution_context_{request.task_id}",
-            context_version="v1",
-            status="in_progress",
-            artifacts=(),
-            created_at="2026-11-10T00:00:00Z",
-        )
-        second = TodoCollaborationEvent(
-            event_id="event_2",
-            event_seq=2,
-            event_type="execution.status",
-            actor_id=request.bot_id,
+    def complete_context(self, collab_context_id: str) -> TodoCollaborationContext:
+        """Test helper that simulates B accepting task.completed."""
+        local = self._require_context(collab_context_id)
+        if local.status != "in_progress":
+            raise TodoCollaborationError("Context can complete only from in_progress")
+        local.version += 1
+        event = self._event(
+            event_seq=len(local.events) + 1,
+            event_type="task.completed",
+            actor_id=local.request.executor_id,
             actor_type="bot",
-            content="single bot started",
-            execution_id=f"execution_context_{request.task_id}",
-            context_version="v1",
-            status="in_progress",
-            artifacts=(),
-            created_at="2026-11-10T00:01:00Z",
+            content="",
+            context_version=local.version,
+            status="active",
+            execution_id=f"run_{collab_context_id}",
         )
-        yield first
-        yield second
+        local.events.append(event)
+        local.current_event_id = event.event_id
+        local.status = "done"
+        return self._snapshot(collab_context_id, local)
+
+    def _require_context(self, collab_context_id: str) -> _LocalContext:
+        context = self._contexts.get(collab_context_id)
+        if context is None:
+            raise TodoCollaborationError(
+                f"collab context {collab_context_id} not found"
+            )
+        return context
+
+    def _snapshot(
+        self, collab_context_id: str, local: _LocalContext
+    ) -> TodoCollaborationContext:
+        events = tuple(
+            replace(
+                event,
+                status=(
+                    "active"
+                    if event.event_id == local.current_event_id
+                    else "completed"
+                ),
+            )
+            for event in local.events
+        )
+        return TodoCollaborationContext(
+            collab_context_id=collab_context_id,
+            status=local.status,
+            context_version=local.version,
+            current_event_id=local.current_event_id,
+            events=events,
+        )
+
+    def _event(
+        self,
+        *,
+        event_seq: int,
+        event_type: str,
+        actor_id: str,
+        actor_type: str,
+        content: str,
+        context_version: int,
+        status: str,
+        execution_id: str = "",
+    ) -> TodoCollaborationEvent:
+        return TodoCollaborationEvent(
+            event_id=f"event_{next(self._ids)}",
+            event_seq=event_seq,
+            event_type=event_type,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            content=content,
+            execution_id=execution_id,
+            context_version=context_version,
+            status=status,
+            artifacts=(),
+            created_at="2026-11-10T00:00:00Z",
+        )

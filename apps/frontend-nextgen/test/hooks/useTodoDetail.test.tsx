@@ -36,7 +36,7 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     actorType: 'bot',
     content: `事件 ${eventSeq}`,
     executionId: 'execution-1',
-    contextVersion: 'v1',
+    contextVersion: 1,
     status: 'in_progress',
     createdAt: `2026-11-10T02:0${eventSeq}:00Z`,
     artifacts: [],
@@ -98,7 +98,7 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
 
 test('待验收互动只提交 message，不再组装本快照事件', async () => {
   mockedService.loadTodo.mockResolvedValue(pendingTodo);
-  mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'human_interaction' }));
+  mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
   await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingTodo));
@@ -112,7 +112,7 @@ test('待验收互动只提交 message，不再组装本快照事件', async () 
 });
 
 test('拒绝验收只提交 A 的验收决策，不再调用 Run 接口', async () => {
-  mockedService.acceptTodo.mockResolvedValue({ ...pendingTodo, status: 'in_progress' });
+  mockedService.acceptTodo.mockResolvedValue(pendingTodo);
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
   await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingTodo));

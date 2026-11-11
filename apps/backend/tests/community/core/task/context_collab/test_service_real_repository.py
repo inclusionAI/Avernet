@@ -9,7 +9,7 @@
 - A02 追加 user_interaction.posted:事件 +1、payload 原生 JSON 直存、
   collet.context_version=2;
 - A03 task.started( actor=principal)→ 落库 snapshot status=in_progress;
-- A04 task.completed 接纳成功但状态不越迁(无规则),事件行数 +1;
+- A04 task.completed 接纳成功并推进到 done,事件行数 +1;
 - A06 started → submitted(artifacts 非空)→ reviewing → accepted
   (actor=principal)→ done;
 - A07/08 分支事件(parent=更早事件)在 trunk_events=True/False 两视角间
@@ -60,6 +60,9 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from agentclaw.community.plugins.local.context_collab_runtime import (
+    LocalContextCollabRuntimePlugin,
+)
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import (
@@ -97,9 +100,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
 def make_actor(
     principal_type: str = "human", principal_id: str = "u_1001"
 ) -> ActorContext:
-    return ActorContext(
-        actor=PrincipalRef(principal_type, principal_id), source="api"
-    )
+    return ActorContext(actor=PrincipalRef(principal_type, principal_id), source="api")
 
 
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
@@ -120,7 +121,10 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 @pytest.fixture
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
-    return ContextCollabService(repository=ContextCollabRepository(db))
+    return ContextCollabService(
+        repository=ContextCollabRepository(db),
+        runtime=LocalContextCollabRuntimePlugin(),
+    )
 
 
 def _count(engine, model) -> int:
@@ -267,9 +271,9 @@ class TestAcceptanceFlows:
             == 2
         )
         assert result.event_id.startswith("evt_")
-        assert _event_payload(
-            engine, created.collab_context_id, result.event_id
-        ) == {"content": content}
+        assert _event_payload(engine, created.collab_context_id, result.event_id) == {
+            "content": content
+        }
 
     def test_a03_task_started_moves_snapshot_to_in_progress(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
@@ -291,7 +295,7 @@ class TestAcceptanceFlows:
         snapshot = _collet_snapshot(engine, created.collab_context_id)
         assert snapshot["status"] == "in_progress"
 
-    def test_a04_task_completed_accepted_but_status_unchanged(self, service, engine):
+    def test_a04_task_completed_moves_snapshot_to_done(self, service, engine):
         ctx_id, _, started_version = _create_started(service)
 
         result = service.append_event(
@@ -303,12 +307,12 @@ class TestAcceptanceFlows:
             make_actor(),
         )
 
-        # 接纳成功(事件 +1、版本 CAS)但状态机无规则 → status 不越迁。
+        # 接纳成功(事件 +1、版本 CAS)并按运行时完成事实推进到 done。
         assert result.accepted is True
-        assert result.current_status == "in_progress"
+        assert result.current_status == "done"
         assert _count(engine, ContextCollabEventModel) == 3
         snapshot = _collet_snapshot(engine, ctx_id)
-        assert snapshot["status"] == "in_progress"
+        assert snapshot["status"] == "done"
 
     def test_a06_submitted_then_accepted_reaches_done(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
@@ -451,9 +455,9 @@ class TestAcceptanceFlows:
                 make_actor(),
             )
         assert _count(engine, ContextCollabEventModel) == 2
-        assert _event_payload(
-            engine, created.collab_context_id, first.event_id
-        ) == {"content": "唯一消息"}
+        assert _event_payload(engine, created.collab_context_id, first.event_id) == {
+            "content": "唯一消息"
+        }
 
         second = service.append_event(
             created.collab_context_id,
@@ -522,10 +526,7 @@ class TestDiWiring:
 
         repository = injector.get(ContextCollabRepositoryProtocol)
         assert isinstance(repository, ContextCollabRepository)
-        assert (
-            injector.get(ContextCollabRepositoryProtocol)
-            is repository
-        )
+        assert injector.get(ContextCollabRepositoryProtocol) is repository
 
         service = injector.get(ContextCollabServiceProtocol)
         assert isinstance(service, ContextCollabService)
@@ -555,9 +556,9 @@ class TestNullablePartialRows:
         """模拟外部写入:把聚合行的 current_snapshot 置 NULL。"""
         with engine.connect() as conn:
             conn.execute(
-                sql_update(ContextCollabColletModel).where(
-                    ContextCollabColletModel.collab_context_id == collab_context_id
-                ).values(current_snapshot=None)
+                sql_update(ContextCollabColletModel)
+                .where(ContextCollabColletModel.collab_context_id == collab_context_id)
+                .values(current_snapshot=None)
             )
             conn.commit()
 
@@ -576,9 +577,7 @@ class TestNullablePartialRows:
         assert result.task_progress.total_events == 1
         assert result.current_event["event_kind"] == "task.created"
 
-    def test_append_onto_snapshotless_collet_keeps_null_snapshot(
-        self, service, engine
-    ):
+    def test_append_onto_snapshotless_collet_keeps_null_snapshot(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
         self._null_snapshot_collet(engine, created.collab_context_id)
 
@@ -635,7 +634,8 @@ class TestNullablePartialRows:
         ids = [e["event_id"] for e in principal_view.task_progress.events]
         assert "evt_partial_manual" in ids
         entry = next(
-            e for e in principal_view.task_progress.events
+            e
+            for e in principal_view.task_progress.events
             if e["event_id"] == "evt_partial_manual"
         )
         # payload NULL → summary/content None;primitive_type NULL → 条目 null

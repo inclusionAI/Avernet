@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from injector import singleton
 
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
@@ -14,14 +16,8 @@ from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.core.spaces.space_service_protocol import (
-    SpaceMemberServiceProtocol,
-)
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
-from agentclaw.community.core.task.todos.models import (
-    TodoRecord,
-    TodoStatus,
-)
+from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.plugin_api.todo_collaboration import TodoCollaborationPlugin
 from agentclaw.community.plugins.local.todo_collaboration import (
     LocalTodoCollaborationPlugin,
@@ -46,40 +42,25 @@ class FakeTodoRepository:
             updated_at=NOW,
         )
 
-    def create_todo(self, **kwargs: Any) -> TodoRecord:
+    def create_todo(self, **_kwargs: Any) -> TodoRecord:
         return self.todo
 
-    def get_todo(self, **kwargs: Any) -> TodoRecord:
+    def get_todo(self, **_kwargs: Any) -> TodoRecord:
         return self.todo
 
-    def list_todos(self, **kwargs: Any):
-        raise AssertionError("not used by this contract suite")
+    def list_todo_candidates(self, **_kwargs: Any) -> tuple[TodoRecord, ...]:
+        return (self.todo,)
 
-    def update_draft(self, **kwargs: Any) -> TodoRecord:
-        return self.todo
-
-    def start_if_draft(self, **kwargs: Any) -> TodoRecord:
-        from dataclasses import replace
-
+    def bind_context_if_draft(self, **kwargs: Any) -> TodoRecord:
         assert kwargs["collab_context_id"] == "context_todo_contract"
         self.todo = replace(
             self.todo,
-            status=TodoStatus.IN_PROGRESS,
             collab_context_id=kwargs["collab_context_id"],
         )
         return self.todo
 
-    def mark_running_if_pending_acceptance(self, **kwargs: Any) -> TodoRecord:
-        assert kwargs["todo_id"] == self.todo.todo_id
-        self.todo = _replace_status(self.todo, TodoStatus.IN_PROGRESS)
-        return self.todo
-
-    def mark_pending_acceptance_if_in_progress(self, **kwargs: Any) -> TodoRecord:
-        self.todo = _replace_status(self.todo, TodoStatus.PENDING_ACCEPTANCE)
-        return self.todo
-
-    def accept_if_pending(self, **kwargs: Any) -> TodoRecord:
-        self.todo = _replace_status(self.todo, TodoStatus.COMPLETED)
+    def record_acceptance(self, **_kwargs: Any) -> TodoRecord:
+        self.todo = replace(self.todo, status=TodoStatus.COMPLETED)
         return self.todo
 
 
@@ -88,16 +69,12 @@ class FakeSpaceAccess:
         return (
             SimpleNamespace(
                 id=kwargs["space_id"],
+                env="",
                 space_type="TEAM",
                 personal_owner_id=None,
             ),
             SimpleNamespace(user_id=kwargs["user_id"]),
         )
-
-
-class FakeSpaceMembers:
-    def list_members(self, **kwargs):
-        return 1, [SimpleNamespace(member=SimpleNamespace(user_id="user_2"))]
 
 
 class FakeBotRepository:
@@ -118,36 +95,36 @@ class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
     def __init__(self) -> None:
         super().__init__()
         self.context_calls = 0
+        self.run_calls = 0
         self.append_calls = 0
 
     def create_context(self, request):
         self.context_calls += 1
         return super().create_context(request)
 
+    def run_context(self, **kwargs):
+        self.run_calls += 1
+        return super().run_context(**kwargs)
+
     def append_event(self, **kwargs):
         self.append_calls += 1
         return super().append_event(**kwargs)
 
 
-def _replace_status(todo: TodoRecord, status: TodoStatus) -> TodoRecord:
-    from dataclasses import replace
-
-    return replace(todo, status=status)
-
-
-def bind_consumer_contract(world) -> tuple[TodoServiceProtocol, FakeTodoRepository, RecordingLocalCollaboration]:
+def bind_consumer_contract(
+    world,
+) -> tuple[TodoServiceProtocol, FakeTodoRepository, RecordingLocalCollaboration]:
     repository = FakeTodoRepository()
     collaboration = RecordingLocalCollaboration()
     binder = world.injector.binder
     binder.bind(TodoRepositoryProtocol, to=repository, scope=singleton)
     binder.bind(SpaceAccessServiceProtocol, to=FakeSpaceAccess(), scope=singleton)
-    binder.bind(SpaceMemberServiceProtocol, to=FakeSpaceMembers(), scope=singleton)
     binder.bind(BotRepository, to=FakeBotRepository(), scope=singleton)
     binder.bind(TodoCollaborationPlugin, to=collaboration, scope=singleton)
     return world.get(TodoServiceProtocol), repository, collaboration
 
 
-def test_todo_start_and_interaction_route_through_collaboration_plugin(world):
+def test_todo_create_run_and_interaction_route_through_collaboration_plugin(world):
     service, repository, collaboration = bind_consumer_contract(world)
 
     created = service.create_todo(
@@ -158,15 +135,8 @@ def test_todo_start_and_interaction_route_through_collaboration_plugin(world):
         bot_id="bot_1",
     )
     started = service.start_todo(todo_id=created.todo_id, actor_id="user_1")
-
-    # Consumer-level assertion: A persists only the B context identity.
-    assert started.status is TodoStatus.IN_PROGRESS
-    assert started.collab_context_id == "context_todo_contract"
-
-    # Service-enforced interaction state changes the consumer's mutable fake.
-    repository.todo = _replace_status(
-        repository.todo, TodoStatus.PENDING_ACCEPTANCE
-    )
+    collaboration.complete_context(started.collab_context_id)
+    pending = service.get_todo(todo_id=started.todo_id, actor_id="user_1")
     event = service.create_interaction(
         todo_id=started.todo_id,
         actor_id="user_1",
@@ -174,31 +144,40 @@ def test_todo_start_and_interaction_route_through_collaboration_plugin(world):
         message="Please revise section 2",
     )
 
-    # Plugin-hit assertion: B recorded task creation and the Human event.
+    assert repository.todo.collab_context_id == "context_todo_contract"
+    assert created.status is TodoStatus.DRAFT
+    assert started.status is TodoStatus.IN_PROGRESS
+    assert pending.status is TodoStatus.PENDING_ACCEPTANCE
     assert collaboration.context_calls == 1
+    assert collaboration.run_calls == 1
     assert collaboration.append_calls == 1
-    assert event.event_type == "human_interaction"
-    assert "context_todo_contract" in collaboration._contexts
+    assert event.event_type == "user_interaction.posted"
 
 
 def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(world):
-    service, repository, collaboration = bind_consumer_contract(world)
+    service, _repository, collaboration = bind_consumer_contract(world)
+    created = service.create_todo(
+        space_id=7,
+        actor_id="user_1",
+        title="Build contract test",
+        description="Exercise B boundary",
+        bot_id="bot_1",
+    )
+    started = service.start_todo(todo_id=created.todo_id, actor_id="user_1")
+    before = collaboration.get_context(
+        collab_context_id=started.collab_context_id
+    ).events
 
-    started = service.start_todo(todo_id=repository.todo.todo_id, actor_id="user_1")
-    before = list(collaboration._contexts[started.collab_context_id])
-
-    try:
+    with pytest.raises(TodoStateConflictError):
         service.create_interaction(
             todo_id=started.todo_id,
             actor_id="user_1",
             author_name=None,
             message="not allowed",
         )
-    except TodoStateConflictError:
-        pass
-    else:
-        raise AssertionError("interaction outside pending acceptance must fail")
 
-    # Failure is consumer policy; no event may be written to B.
+    after = collaboration.get_context(
+        collab_context_id=started.collab_context_id
+    ).events
     assert collaboration.append_calls == 0
-    assert list(collaboration._contexts[started.collab_context_id]) == before
+    assert after == before

@@ -20,7 +20,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 from agentclaw.community.adapters.http.openapi_v1.errors import UserIdMismatchError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     USER_ID_DESCRIPTION,
-    USER_ID_QUERY,
     caller_owner_id,
     refuse_app_only_caller,
 )
@@ -44,7 +43,6 @@ from .schemas import (
     TodoEventResponse,
     TodoResponse,
     TodoStatusSchema,
-    UpdateTodoRequest,
 )
 
 OwnersDep = Annotated[str, Query(min_length=1, description=USER_ID_DESCRIPTION)]
@@ -128,7 +126,7 @@ async def create_todo(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[TodoResponse]:
-    """Create one draft Todo for a Space-eligible Bot."""
+    """Create one Todo and its B collaboration Context for a Space-eligible Bot."""
     actor_id = call_user(user_id=user_id, principal=principal)
     result = await run_in_threadpool(  # allow-run-in-threadpool
         service.create_todo,
@@ -161,29 +159,6 @@ async def get_todo(
     return envelope(TodoResponse.from_record(result), request)
 
 
-@router.patch("/{todo_id}", response_model=Envelope[TodoResponse])
-@envelope_errors
-async def update_todo(
-    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
-    body: UpdateTodoRequest,
-    request: Request,
-    principal: PrincipalDep,
-    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
-    service: TodoServiceProtocol = Injected(TodoServiceProtocol),
-) -> Envelope[TodoResponse]:
-    """Patch one draft Todo after re-checking Space and Bot eligibility."""
-    actor_id = call_user(user_id=user_id, principal=principal)
-    result = await run_in_threadpool(  # allow-run-in-threadpool
-        service.update_todo,
-        todo_id=todo_id,
-        actor_id=actor_id,
-        title=body.title,
-        description=body.description,
-        bot_id=body.bot_id,
-    )
-    return envelope(TodoResponse.from_record(result), request)
-
-
 @router.post("/{todo_id}/run", response_model=Envelope[TodoResponse])
 @envelope_errors
 async def run_todo(
@@ -193,7 +168,7 @@ async def run_todo(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[TodoResponse]:
-    """Start a draft Todo and attach it to one B collaboration context."""
+    """Start the B collaboration Context already bound to a draft Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
     result = await run_in_threadpool(
         service.start_todo,
@@ -231,7 +206,7 @@ async def list_todo_interactions(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[list[TodoEventResponse]]:
-    """Return only Human interaction and acceptance events from B."""
+    """Return Human interaction events projected from B."""
     actor_id = call_user(user_id=user_id, principal=principal)
     events = await run_in_threadpool(
         service.list_interactions,

@@ -14,7 +14,7 @@ import type { Space } from '@/domain/admin/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
-import { Bot, CalendarClock, CheckCircle2, CirclePlay, FileText, History, Pencil, RotateCcw } from 'lucide-react';
+import { Bot, CalendarClock, CheckCircle2, CirclePlay, FileText, History, RotateCcw } from 'lucide-react';
 import { TodoAcceptanceActions } from './TodoAcceptanceActions';
 import { TodoEventTimeline } from './TodoEventTimeline';
 import { TodoInteractionPanel } from './TodoInteractionPanel';
@@ -23,7 +23,6 @@ interface TodoDetailDrawerProps {
   todoId: string | null;
   currentSpace?: Space;
   onClose: () => void;
-  onEdit: () => void;
   onListRefresh: () => Promise<void> | void;
 }
 
@@ -48,7 +47,7 @@ function InfoItem({ label, value, icon }: { label: string; value: React.ReactNod
 }
 
 /** 待办详情：产品信息、Bot 执行事件、互动和验收集中在一个抽屉内。 */
-export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onListRefresh }: TodoDetailDrawerProps) {
+export function TodoDetailDrawer({ todoId, currentSpace, onClose, onListRefresh }: TodoDetailDrawerProps) {
   const detail = useTodoDetail(todoId, onListRefresh);
   const {
     selectedTodo,
@@ -130,10 +129,7 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
               </div>
 
               {selectedTodo.status === 'draft' ? (
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={onEdit} leftIcon={<Pencil className="size-4" aria-hidden />}>
-                    编辑待办
-                  </Button>
+                <div className="flex justify-end">
                   <Button
                     onClick={() => void run()}
                     loading={mutationLoading}

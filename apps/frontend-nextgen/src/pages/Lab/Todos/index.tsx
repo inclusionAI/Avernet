@@ -23,13 +23,11 @@ export default function LabTodosPage() {
   const currentUserId = humanIdentity?.userId.trim() || undefined;
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const [bots, setBots] = useState<TodoBotOption[]>([]);
   const [botsLoading, setBotsLoading] = useState(false);
 
   const todos = useTodos();
   const selectedTodo = useTodoStore((state) => state.selectedTodo);
-  const setSelectedTodo = useTodoStore((state) => state.setSelectedTodo);
 
   useEffect(() => {
     if (!spaceInitialized) void init();
@@ -65,22 +63,14 @@ export default function LabTodosPage() {
 
   useEffect(() => {
     if (selectedTodoId && currentSpaceId !== undefined && selectedTodo && selectedTodo.spaceId !== currentSpaceId) {
-      setEditOpen(false);
       setSelectedTodoId(null);
     }
   }, [currentSpaceId, selectedTodo, selectedTodoId]);
 
-  useEffect(() => {
-    if (!selectedTodo || selectedTodo.status !== 'draft') setEditOpen(false);
-  }, [selectedTodo]);
-
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <PageHeader
-          title="待办"
-          description="当前空间的 Bot 待办。启动后查看事件过程，待验收时互动并提交验收结果。"
-        />
+        <PageHeader title="待办" description="当前空间的 Bot 待办。启动后查看事件过程，待验收时互动并提交验收结果。" />
 
         <TodoToolbar
           space={currentSpace}
@@ -117,38 +107,10 @@ export default function LabTodosPage() {
         onSubmit={async (input) => Boolean(await todos.create(input))}
       />
 
-      <TodoCreateModal
-        open={editOpen}
-        bots={bots}
-        loading={botsLoading}
-        mode="edit"
-        initialValues={
-          selectedTodo
-            ? {
-                title: selectedTodo.title,
-                description: selectedTodo.description,
-                botId: selectedTodo.botId,
-              }
-            : undefined
-        }
-        onOpenChange={setEditOpen}
-        onSubmit={async (input) => {
-          if (!selectedTodo || selectedTodo.status !== 'draft') return false;
-          const updatedTodo = await todos.update(selectedTodo.todoId, input);
-          if (!updatedTodo) return false;
-          setSelectedTodo(updatedTodo);
-          return true;
-        }}
-      />
-
       <TodoDetailDrawer
         todoId={selectedTodoId}
         currentSpace={currentSpace}
-        onClose={() => {
-          setEditOpen(false);
-          setSelectedTodoId(null);
-        }}
-        onEdit={() => setEditOpen(true)}
+        onClose={() => setSelectedTodoId(null)}
         onListRefresh={todos.refresh}
       />
     </main>

@@ -132,7 +132,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
       setMutationLoading(true);
       try {
         await addTodoInteraction(todoId, { message: text });
-        notifySuccess('互动已提交，B 将推进重新执行');
+        notifySuccess('互动已提交');
         await refresh();
         await onListRefresh?.();
         return true;
@@ -158,7 +158,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
           verdict,
           message: message?.trim() || undefined,
         });
-        notifySuccess(verdict === 'approved' ? '验收已通过' : '已记录验收意见，B 将推进重新执行');
+        notifySuccess(verdict === 'approved' ? '验收已通过' : '已记录验收意见');
         await refresh();
         await onListRefresh?.();
         return true;

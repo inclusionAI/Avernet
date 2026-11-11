@@ -59,7 +59,6 @@ jest.mock('@/services/todos/todoService', () => ({
   loadTodos: jest.fn(),
   loadTodo: jest.fn(),
   addTodo: jest.fn(),
-  editTodo: jest.fn(),
   acceptTodo: jest.fn(),
   loadTodoInteractions: jest.fn(),
   addTodoInteraction: jest.fn(),
@@ -109,7 +108,7 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     actorType: 'bot',
     content: `事件 ${eventSeq}`,
     executionId: 'execution-1',
-    contextVersion: 'v1',
+    contextVersion: 1,
     status: 'in_progress',
     createdAt: `2026-11-10T02:0${eventSeq}:00Z`,
     artifacts: [],
@@ -141,7 +140,7 @@ beforeEach(() => {
   mockedService.loadTodo.mockResolvedValue(pendingTodo);
   mockedService.loadTodoInteractions.mockResolvedValue([
     event(3, {
-      eventType: 'human_interaction',
+      eventType: 'user_interaction.posted',
       actorId: 'u-1',
       actorType: 'human',
       content: '请补充风险说明',
@@ -156,9 +155,8 @@ beforeEach(() => {
     }),
   ]);
   mockedService.addTodo.mockResolvedValue(createdTodo);
-  mockedService.editTodo.mockResolvedValue(createdTodo);
   mockedService.addTodoInteraction.mockResolvedValue(
-    event(4, { eventType: 'human_interaction', actorId: 'u-1', actorType: 'human', content: '补充回滚方案' }),
+    event(4, { eventType: 'user_interaction.posted', actorId: 'u-1', actorType: 'human', content: '补充回滚方案' }),
   );
   mockedService.acceptTodo.mockResolvedValue({ ...pendingTodo, status: 'completed' });
   mockedService.startTodoRun.mockResolvedValue({ ...pendingTodo, status: 'in_progress' });
@@ -293,7 +291,7 @@ describe('LabTodosPage（待办工作台）', () => {
   });
 
   it('拒绝验收只提交验收决策，不在前端调用 Run', async () => {
-    mockedService.acceptTodo.mockResolvedValue({ ...pendingTodo, status: 'in_progress' });
+    mockedService.acceptTodo.mockResolvedValue(pendingTodo);
 
     render(<LabTodosPage />);
     const row = (await screen.findByText('编写实施方案')).closest('tr');
@@ -301,7 +299,7 @@ describe('LabTodosPage（待办工作台）', () => {
     await screen.findByText('已完成方案');
 
     fireEvent.change(screen.getByPlaceholderText('可选：填写验收意见'), { target: { value: ' 请修改 ' } });
-    fireEvent.click(screen.getByRole('button', { name: '不通过并重做' }));
+    fireEvent.click(screen.getByRole('button', { name: '验收不通过' }));
 
     await waitFor(() =>
       expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
@@ -322,6 +320,7 @@ describe('LabTodosPage（待办工作台）', () => {
     fireEvent.click(await screen.findByRole('button', { name: '启动执行' }));
 
     await waitFor(() => expect(mockedService.startTodoRun).toHaveBeenCalledWith('todo-1'));
+    expect(screen.queryByRole('button', { name: '编辑待办' })).not.toBeInTheDocument();
   });
 
   it('非草稿不展示编辑和启动入口', async () => {
@@ -334,39 +333,4 @@ describe('LabTodosPage（待办工作台）', () => {
     expect(screen.queryByRole('button', { name: '启动执行' })).not.toBeInTheDocument();
   });
 
-  it('草稿支持编辑保存后更新详情', async () => {
-    const updatedDraft = {
-      ...draftTodo,
-      title: '更新后的实施方案',
-      description: '补充回滚与风险要求',
-      updatedAt: '2026-11-10T03:00:00Z',
-    };
-    mockedService.loadTodo.mockResolvedValueOnce(draftTodo);
-    mockedService.editTodo.mockResolvedValueOnce(updatedDraft);
-
-    render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑待办' }));
-    const dialog = await screen.findByRole('dialog', { name: '编辑待办' });
-    expect(within(dialog).getByRole('textbox', { name: '标题' })).toHaveValue('编写实施方案');
-
-    fireEvent.change(within(dialog).getByRole('textbox', { name: '标题' }), {
-      target: { value: ' 更新后的实施方案 ' },
-    });
-    fireEvent.change(within(dialog).getByRole('textbox', { name: '描述' }), {
-      target: { value: '补充回滚与风险要求' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }));
-
-    await waitFor(() =>
-      expect(mockedService.editTodo).toHaveBeenCalledWith('todo-1', {
-        title: '更新后的实施方案',
-        description: '补充回滚与风险要求',
-        botId: 'bot-owned:u-1',
-      }),
-    );
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑待办' })).not.toBeInTheDocument());
-  });
 });

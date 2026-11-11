@@ -8,7 +8,6 @@ export {
   acceptTodo,
   addTodo,
   addTodoInteraction,
-  editTodo,
   loadTodo,
   loadTodoEvents,
   loadTodoInteractions,

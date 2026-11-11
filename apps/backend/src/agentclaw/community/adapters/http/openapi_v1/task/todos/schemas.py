@@ -26,7 +26,7 @@ class TodoStatusSchema(_DocumentedEnum):
     COMPLETED = "completed"
 
     __descriptions__ = {
-        "draft": "Created and editable, but not started in B.",
+        "draft": "Its B Context exists but execution has not started.",
         "in_progress": "The selected Bot has an active collaboration context.",
         "pending_acceptance": "The Bot reported a result and awaits Human feedback.",
         "completed": "The Human approved an execution result.",
@@ -34,7 +34,7 @@ class TodoStatusSchema(_DocumentedEnum):
 
 
 class CreateTodoRequest(BaseModel):
-    """Create one draft Todo in the selected product Space."""
+    """Create one Todo and its collaboration Context in the selected product Space."""
 
     space_id: int = Field(
         gt=0,
@@ -47,34 +47,12 @@ class CreateTodoRequest(BaseModel):
     )
     description: str = Field(
         max_length=MAX_DESCRIPTION_LENGTH,
-        description="Collaboration goal and instructions passed to B on Run.",
+        description="Collaboration goal and instructions stored in B when the Todo is created.",
     )
     bot_id: str = Field(
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
         description="Identifier of the Space-eligible Bot that will execute the Todo.",
-    )
-
-
-class UpdateTodoRequest(BaseModel):
-    """Patch editable fields of a draft Todo."""
-
-    title: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=MAX_TITLE_LENGTH,
-        description="New Todo title; omit or set null to keep the current title.",
-    )
-    description: str | None = Field(
-        default=None,
-        max_length=MAX_DESCRIPTION_LENGTH,
-        description="New collaboration goal; omit or set null to keep the current value.",
-    )
-    bot_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=MAX_BOT_ID_LENGTH,
-        description="New Space-eligible Bot identifier; omit or set null to keep the current Bot.",
     )
 
 
@@ -94,7 +72,7 @@ class SubmitTodoAcceptanceRequest(BaseModel):
     verdict: Literal["approved", "rejected"] = Field(
         description=(
             "Human decision for the pending execution: approve to complete it, "
-            "or reject to return it for further processing."
+            "or reject while keeping it pending for further Human interaction."
         )
     )
     message: str | None = Field(
@@ -111,23 +89,43 @@ class TodoArtifactResponse(BaseModel):
         description="B-owned artifact identifier, if B provided one.",
     )
     name: str = Field(description="Display name of the produced artifact.")
-    url: str = Field(description="Address from which the artifact can be opened or downloaded.")
+    url: str = Field(
+        description="Address from which the artifact can be opened or downloaded."
+    )
 
 
 class TodoEventResponse(BaseModel):
     """Normalized B collaboration event returned through A."""
 
     event_id: str = Field(description="B-owned immutable event identifier.")
-    event_seq: int = Field(description="Monotonic sequence of this event inside the collaboration Context.")
-    event_type: str = Field(description="B event type, such as task.created or human_interaction.")
-    actor_id: str = Field(description="Identifier of the human, Bot, or system that produced the event.")
+    event_seq: int = Field(
+        description="Monotonic sequence of this event inside the collaboration Context."
+    )
+    event_type: str = Field(
+        description="B event type, such as task.created or user_interaction.posted."
+    )
+    actor_id: str = Field(
+        description="Identifier of the human, Bot, or system that produced the event."
+    )
     actor_type: str = Field(description="Actor kind, such as human, bot, or system.")
-    content: str = Field(description="Primary text or status content carried by the event.")
-    execution_id: str = Field(description="B execution identifier that owns this event.")
-    context_version: str = Field(description="B Context version used as this event's input.")
-    status: str | None = Field(description="B execution status after this event, if reported.")
-    artifacts: list[TodoArtifactResponse] = Field(description="Artifacts produced by the execution at this event.")
-    created_at: str = Field(description="B event creation timestamp in ISO-8601 format.")
+    content: str = Field(
+        description="Primary text or status content carried by the event."
+    )
+    execution_id: str = Field(
+        description="B execution identifier that owns this event."
+    )
+    context_version: int | None = Field(
+        description="B Context version after this event, or null when unavailable."
+    )
+    status: str | None = Field(
+        description="B execution status after this event, if reported."
+    )
+    artifacts: list[TodoArtifactResponse] = Field(
+        description="Artifacts produced by the execution at this event."
+    )
+    created_at: str = Field(
+        description="B event creation timestamp in ISO-8601 format."
+    )
 
     @classmethod
     def from_record(cls, record: TodoEventRecord) -> "TodoEventResponse":
@@ -159,11 +157,19 @@ class TodoResponse(BaseModel):
     todo_id: str = Field(description="A-owned Todo identifier.")
     space_id: int = Field(description="Product Space containing this Todo.")
     title: str = Field(description="Todo title shown in the workbench.")
-    description: str = Field(description="Collaboration goal passed to B on Run.")
+    description: str = Field(
+        description="Collaboration goal stored in B when the Todo is created."
+    )
     bot_id: str = Field(description="Bot selected to execute the Todo.")
-    bot_name: str = Field(description="Snapshot of the Bot name taken when the Todo was created or edited.")
-    status: TodoStatusSchema = Field(description="A-owned product state of the Todo.")
-    collab_context_id: str | None = Field(description="B collaboration Context bound after Run, or null before Run.")
+    bot_name: str = Field(
+        description="Snapshot of the Bot name taken when the Todo was created."
+    )
+    status: TodoStatusSchema = Field(
+        description="A completion state or the current B runtime-state projection."
+    )
+    collab_context_id: str | None = Field(
+        description="B collaboration Context bound when the Todo is created."
+    )
     created_at: str = Field(description="ISO-8601 creation timestamp of the Todo.")
     updated_at: str = Field(description="ISO-8601 last-update timestamp of the Todo.")
 

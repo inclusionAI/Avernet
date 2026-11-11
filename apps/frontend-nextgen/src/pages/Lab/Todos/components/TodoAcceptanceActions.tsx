@@ -17,7 +17,7 @@ export function TodoAcceptanceActions({ loading, onAccept }: TodoAcceptanceActio
     <section className="space-y-3 border-t border-divider pt-4">
       <div>
         <div className="text-sm font-semibold text-foreground">验收</div>
-        <p className="m-0 mt-1 text-xs text-muted-foreground">通过后待办完成；不通过会记录意见并重新执行。</p>
+        <p className="m-0 mt-1 text-xs text-muted-foreground">通过后待办完成；不通过会记录意见并保持待验收。</p>
       </div>
       <Textarea
         value={message}
@@ -28,7 +28,7 @@ export function TodoAcceptanceActions({ loading, onAccept }: TodoAcceptanceActio
       />
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="outline" onClick={() => void submit('rejected')} loading={loading}>
-          不通过并重做
+          验收不通过
         </Button>
         <Button onClick={() => void submit('approved')} loading={loading}>
           通过验收

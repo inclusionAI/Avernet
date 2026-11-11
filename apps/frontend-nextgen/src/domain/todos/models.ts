@@ -32,7 +32,7 @@ export interface TodoEvent {
   actorType: TodoActorType;
   content: string;
   executionId: string;
-  contextVersion: string;
+  contextVersion?: number;
   status?: string;
   createdAt: string;
   artifacts: TodoArtifact[];
@@ -52,12 +52,6 @@ export interface CreateTodoInput {
   title: string;
   description: string;
   botId: string;
-}
-
-export interface UpdateTodoInput {
-  title?: string;
-  description?: string;
-  botId?: string;
 }
 
 export interface CreateTodoInteractionInput {

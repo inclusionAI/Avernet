@@ -51,7 +51,10 @@ function mapArtifact(value: Record<string, unknown>): TodoEvent['artifacts'][num
 
 export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
   const artifacts = Array.isArray(dto.artifacts)
-    ? dto.artifacts.map(recordValue).map(mapArtifact).filter((item): item is TodoEvent['artifacts'][number] => item !== null)
+    ? dto.artifacts
+        .map(recordValue)
+        .map(mapArtifact)
+        .filter((item): item is TodoEvent['artifacts'][number] => item !== null)
     : [];
   const status = stringValue(dto.status);
   return {
@@ -62,7 +65,8 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
     actorType: stringValue(dto.actor_type).toLowerCase() || 'human',
     content: stringValue(dto.content),
     executionId: stringValue(dto.execution_id),
-    contextVersion: stringValue(dto.context_version, 'unknown'),
+    contextVersion:
+      dto.context_version === null || dto.context_version === undefined ? undefined : numberValue(dto.context_version),
     status: status || undefined,
     createdAt: stringValue(dto.created_at),
     artifacts,

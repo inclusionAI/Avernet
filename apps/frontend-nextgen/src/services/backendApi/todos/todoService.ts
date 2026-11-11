@@ -6,7 +6,6 @@ import type {
   TodoListQuery,
   TodoRecord,
   TodoStatus,
-  UpdateTodoInput,
 } from '@/domain/todos/models';
 import { BackendRequestError } from '../httpClient';
 import { isEnvelopeSuccess, type BackendApiEnvelope, type BackendApiPage } from '../types';
@@ -19,7 +18,6 @@ import {
   listTodos,
   runTodo,
   submitTodoAcceptance,
-  updateTodo,
   type TodoDto,
   type TodoEventDto,
 } from './todoController';
@@ -74,11 +72,6 @@ export async function addTodo(input: CreateTodoInput): Promise<TodoRecord> {
   return mapTodoDto(unwrap(response, '/openapi/v1/todos'));
 }
 
-export async function editTodo(todoId: string, input: UpdateTodoInput): Promise<TodoRecord> {
-  const response = await updateTodo(todoId, input);
-  return mapTodoDto(unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}`));
-}
-
 export async function acceptTodo(todoId: string, input: TodoAcceptanceInput): Promise<TodoRecord> {
   const response = await submitTodoAcceptance(todoId, input);
   return mapTodoDto(unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/acceptance`));
@@ -90,10 +83,7 @@ export async function loadTodoInteractions(todoId: string): Promise<TodoEvent[]>
   return readList(data);
 }
 
-export async function addTodoInteraction(
-  todoId: string,
-  input: CreateTodoInteractionInput,
-): Promise<TodoEvent> {
+export async function addTodoInteraction(todoId: string, input: CreateTodoInteractionInput): Promise<TodoEvent> {
   const response = await createTodoInteraction(todoId, input);
   const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/interactions`);
   return mapTodoEventDto(data);

@@ -36,6 +36,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
     MACHINE_REGISTRY,
     resolve_transition,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ContextSpec,
@@ -60,12 +63,17 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabCreatedResult,
+    ContextCollabRunResultDTO,
     ContextCollabServiceProtocol,
     ContextCollabStatusProjection,
     ContextCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
     TaskProgressProjectionDTO,
+)
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRunRequest,
+    ContextCollabRuntimePlugin,
 )
 
 CREATION_EVENT_KIND = "task.created"
@@ -118,12 +126,19 @@ def _created_event_projection(event: EventRecord) -> dict:
 
 _EVENT_PROJECTION_FIELDS = (
     "event_id",
+    "event_seq",
     "parent_event",
     "event_kind",
     "primitive_type",
+    "actor_id",
+    "actor_type",
+    "execution_id",
+    "context_version",
     "status",
     "summary",
     "content",
+    "artifacts",
+    "created_at",
 )
 
 
@@ -176,8 +191,7 @@ def _resolve_event_status(
     matched_rules = [
         rule
         for rule in machine.transitions
-        if rule.event_name == command.event_kind
-        and current_status in rule.from_states
+        if rule.event_name == command.event_kind and current_status in rule.from_states
     ]
     if not matched_rules:
         return current_status
@@ -205,9 +219,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
     def __init__(
         self,
         repository: ContextCollabRepositoryProtocol,
+        runtime: ContextCollabRuntimePlugin,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
     ) -> None:
         self._repository = repository
+        self._runtime = runtime
         self._authorizer = authorizer
 
     def create_context(
@@ -264,8 +280,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
 
     def append_event(
-        self, collab_context_id: str, command: EventAppendCommand,
-        context: ActorContext
+        self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
     ) -> EventAcceptedResult:
         """追加事件用例(spec §6.3):加载 → G4 校验 → G1 check →
         状态机裁决 → 仓储追加 → 组装结果。
@@ -328,9 +343,89 @@ class ContextCollabService(ContextCollabServiceProtocol):
             ),
         )
 
+    async def run_context(
+        self,
+        collab_context_id: str,
+        context: ActorContext,
+    ) -> ContextCollabRunResultDTO:
+        """Start the bound executor, then append the authoritative start event.
+
+        Runtime invocation and event persistence intentionally remain two
+        independent operations in this phase. A concurrent append after the
+        pre-read is rejected by the repository's expected-version check rather
+        than overwriting the newer Context state.
+        """
+        status = self._repository.get_current_status(collab_context_id)
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        collet = status.collet
+        snapshot = collet.current_snapshot
+        if snapshot is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot run without a current snapshot"
+            )
+        if snapshot.status != "created":
+            raise ContextCollabValidationError(
+                "collaboration context can run only from status 'created', "
+                f"got {snapshot.status!r}"
+            )
+        executor = collet.context_spec.executor_ref
+        if executor is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot run without an executor_ref"
+            )
+        todo_refs = [
+            ref
+            for ref in collet.context_spec.resource_refs
+            if ref.resource_type == "todo"
+        ]
+        if len(todo_refs) != 1:
+            raise ContextCollabValidationError(
+                "collaboration context run requires exactly one todo resource_ref"
+            )
+
+        runtime_result = await self._runtime.run(
+            ContextCollabRunRequest(
+                collab_context_id=collab_context_id,
+                executor_id=executor.agent_id,
+                principal_id=collet.context_spec.principal_ref.principal_id,
+                objective=collet.context_spec.objective,
+                todo_id=todo_refs[0].resource_id,
+            )
+        )
+        payload = {"run_id": runtime_result.run_id}
+        if runtime_result.session_id is not None:
+            payload["session_id"] = runtime_result.session_id
+        executor_actor = PrincipalRef("bot", executor.agent_id)
+        accepted = self.append_event(
+            collab_context_id,
+            EventAppendCommand(
+                expected_version=collet.context_version,
+                event_kind="task.started",
+                primitive_type="Task",
+                actor_ref=executor_actor,
+                parent_event=collet.current_event_id,
+                visibility="workspace",
+                payload=payload,
+            ),
+            ActorContext(actor=executor_actor, source=context.source),
+        )
+        if accepted.current_status is None:
+            raise ContextCollabValidationError(
+                "collaboration context run did not produce a current status"
+            )
+        return ContextCollabRunResultDTO(
+            collab_context_id=collab_context_id,
+            run_id=runtime_result.run_id,
+            session_id=runtime_result.session_id,
+            context_version=accepted.context_version,
+            current_status=accepted.current_status,
+        )
+
     def get_status(
-        self, collab_context_id: str, *, trunk_events: bool,
-        context: ActorContext
+        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
     ) -> ContextCollabStatusProjection:
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
 
@@ -361,16 +456,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
         trunk_ids = None
         if trunk_events:
-            trunk_ids = active_chain_ids(
-                visible_events, collet.current_event_id
-            )
+            trunk_ids = active_chain_ids(visible_events, collet.current_event_id)
         listed_projection = (
             projection
             if trunk_ids is None
-            else [
-                entry for entry in projection
-                if entry.event_id in trunk_ids
-            ]
+            else [entry for entry in projection if entry.event_id in trunk_ids]
         )
         progress = build_progress(
             projection,
@@ -389,10 +479,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         current_event = None
         for entry in projection:
             if entry.event_id == collet.current_event_id:
-                current_event = {
-                    **_event_projection_dict(entry),
-                    "occurred_at": entry.occurred_at,
-                }
+                current_event = _event_projection_dict(entry)
                 break
         return ContextCollabStatusProjection(
             collab_context_id=collet.collab_context_id,
@@ -401,8 +488,6 @@ class ContextCollabService(ContextCollabServiceProtocol):
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(
                 total_events=len(listed_projection),
-                events=[
-                    _event_projection_dict(entry) for entry in listed_projection
-                ],
+                events=[_event_projection_dict(entry) for entry in listed_projection],
             ),
         )

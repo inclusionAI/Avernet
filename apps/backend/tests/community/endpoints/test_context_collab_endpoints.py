@@ -24,6 +24,7 @@ from sqlalchemy.pool import StaticPool
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.base import Base
+
 # Side-effect import: registers the 2 context collab models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
@@ -35,6 +36,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from agentclaw.community.plugins.local.context_collab_runtime import (
+    LocalContextCollabRuntimePlugin,
+)
 from agentclaw.community.api.task.context_collab_service import (
     ContextCollabServiceProtocol,
 )
@@ -45,6 +49,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabCreatedResult,
+    ContextCollabRunResultDTO,
     ContextCollabStatusProjection,
     EventAcceptedResult,
     TaskProgressProjectionDTO,
@@ -100,6 +105,10 @@ class RecordingContextCollabService:
         self.calls.append("append_event")
         return self._inner.append_event(collab_context_id, command, context)
 
+    async def run_context(self, collab_context_id, context):
+        self.calls.append("run_context")
+        return await self._inner.run_context(collab_context_id, context)
+
     def get_status(self, collab_context_id, *, trunk_events, context):
         self.calls.append("get_status")
         return self._inner.get_status(
@@ -122,6 +131,7 @@ def client_world():
     service = RecordingContextCollabService(
         ContextCollabService(
             repository=ContextCollabRepository(InMemorySqliteDB(engine)),
+            runtime=LocalContextCollabRuntimePlugin(),
             authorizer=StructuralContextCollabAuthorizer(),
         )
     )
@@ -154,7 +164,11 @@ def create_body():
         "executor_ref": {"agent_type": "bot", "agent_id": "bot_coding_001"},
         "objective": "整理 Context 协作协议评审结论并提交可评审 PR",
         "resource_refs": [
-            {"resource_type": "forum_topic", "resource_id": "topic_001", "revision": "3"}
+            {
+                "resource_type": "forum_topic",
+                "resource_id": "topic_001",
+                "revision": "3",
+            }
         ],
     }
 
@@ -162,14 +176,16 @@ def create_body():
 def append_body(parent_event):
     """spec §6.3 用户新增互动消息示例 (verbatim JSON, parent linked)."""
     return {
-
         "expected_version": 1,
         "event_kind": "user_interaction.posted",
         "primitive_type": "Message",
         "actor_ref": {"principal_type": "human", "principal_id": "u_1001"},
         "parent_event": parent_event,
         "visibility": "workspace",
-        "payload": {"message_kind": "user_interaction", "content": "上下文做一下补充xxx"},
+        "payload": {
+            "message_kind": "user_interaction",
+            "content": "上下文做一下补充xxx",
+        },
     }
 
 
@@ -224,8 +240,9 @@ def test_create_route_path_is_singular_task(client_world):
     # spec §6.1 spells the prefix .../collaboration/task (singular); the plural
     # /api/v1/collaboration/tasks surface must not gain a context_collab route.
     assert (
-        client_world.client.post("/api/v1/collaboration/tasks/context_collab",
-                          json=create_body()).status_code
+        client_world.client.post(
+            "/api/v1/collaboration/tasks/context_collab", json=create_body()
+        ).status_code
         == 404
     )
 
@@ -283,7 +300,7 @@ def test_get_status_happy_path_with_trunk_events(client_world):
     assert data["context_version"] == 2
     assert data["current_snapshot"]["status"] == "created"
     assert data["current_event"]["event_kind"] == "user_interaction.posted"
-    assert data["current_event"]["occurred_at"] is not None
+    assert data["current_event"]["created_at"] is not None
     assert data["task_progress"]["total_events"] == 2
     statuses = [event["status"] for event in data["task_progress"]["events"]]
     assert statuses == ["completed", "active"]
@@ -293,8 +310,9 @@ def test_get_status_happy_path_with_trunk_events(client_world):
 
 def test_get_status_without_query_param_defaults_to_all_events(client_world):
     created = create_context(client_world)
-    append_event(client_world, created["collab_context_id"],
-                created["current_event"]["event_id"])
+    append_event(
+        client_world, created["collab_context_id"], created["current_event"]["event_id"]
+    )
     response = client_world.client.get(
         f"{PREFIX}/context_collab/{created['collab_context_id']}"
     )
@@ -307,8 +325,9 @@ def test_get_status_wire_shape_has_no_steps_field(client_world):
     task_progress.events[] 条目恰为 7 字段投影 —— delivery 未来多加一个
     字段(如 steps[])即红,不依赖 core 投影的 dataclass 键集。"""
     created = create_context(client_world)
-    append_event(client_world, created["collab_context_id"],
-                created["current_event"]["event_id"])
+    append_event(
+        client_world, created["collab_context_id"], created["current_event"]["event_id"]
+    )
     response = client_world.client.get(
         f"{PREFIX}/context_collab/{created['collab_context_id']}"
     )
@@ -327,12 +346,19 @@ def test_get_status_wire_shape_has_no_steps_field(client_world):
         assert "steps" not in entry
         assert set(entry) == {
             "event_id",
+            "event_seq",
             "parent_event",
             "event_kind",
             "primitive_type",
+            "actor_id",
+            "actor_type",
+            "execution_id",
+            "context_version",
             "status",
             "summary",
             "content",
+            "artifacts",
+            "created_at",
         }
 
 
@@ -341,11 +367,14 @@ def test_get_status_wire_shape_has_no_steps_field(client_world):
 
 def test_version_conflict_maps_to_409_error_envelope(client_world):
     created = create_context(client_world)
-    append_event(client_world, created["collab_context_id"],
-                 created["current_event"]["event_id"])
+    append_event(
+        client_world, created["collab_context_id"], created["current_event"]["event_id"]
+    )
     # Aggregate is now at version 2; an append expecting version 1 conflicts.
     response = append_event(
-        client_world, created["collab_context_id"], created["current_event"]["event_id"],
+        client_world,
+        created["collab_context_id"],
+        created["current_event"]["event_id"],
         changes={"expected_version": 1},
     )
     assert response.status_code == 409
@@ -358,7 +387,9 @@ def test_version_conflict_maps_to_409_error_envelope(client_world):
 def test_missing_content_maps_to_422_error_envelope(client_world):
     created = create_context(client_world)
     response = append_event(
-        client_world, created["collab_context_id"], created["current_event"]["event_id"],
+        client_world,
+        created["collab_context_id"],
+        created["current_event"]["event_id"],
         changes={"payload": {"message_kind": "user_interaction"}},
     )
     assert response.status_code == 422
@@ -371,7 +402,9 @@ def test_missing_content_maps_to_422_error_envelope(client_world):
 def test_unknown_parent_event_maps_to_422_error_envelope(client_world):
     created = create_context(client_world)
     response = append_event(
-        client_world, created["collab_context_id"], "evt_does_not_exist",
+        client_world,
+        created["collab_context_id"],
+        "evt_does_not_exist",
     )
     assert response.status_code == 422
     body = response.json()
@@ -382,10 +415,10 @@ def test_unknown_parent_event_maps_to_422_error_envelope(client_world):
 def test_actor_ref_mismatch_with_authenticated_actor_is_rejected(client_world):
     created = create_context(client_world)
     response = append_event(
-        client_world, created["collab_context_id"], created["current_event"]["event_id"],
-        changes={
-            "actor_ref": {"principal_type": "human", "principal_id": "u_9999"}
-        },
+        client_world,
+        created["collab_context_id"],
+        created["current_event"]["event_id"],
+        changes={"actor_ref": {"principal_type": "human", "principal_id": "u_9999"}},
     )
     assert response.status_code == 422
     body = response.json()
@@ -412,7 +445,9 @@ def test_unauthenticated_request_is_401_and_service_never_called(client_world):
     client_world.app.dependency_overrides[get_current_user] = unauthenticated
     assert client_world.service.calls == []
     assert (
-        client_world.client.post(f"{PREFIX}/context_collab", json=create_body()).status_code
+        client_world.client.post(
+            f"{PREFIX}/context_collab", json=create_body()
+        ).status_code
         == 401
     )
     assert client_world.service.calls == []
@@ -430,6 +465,7 @@ def test_unauthenticated_request_is_401_and_service_never_called(client_world):
 _HEADERS = {"x-user-id": AUTHENTICATED_STAFF_ID}
 _CREATE_PATH = f"{PREFIX}/context_collab"
 _APPEND_PATH = f"{PREFIX}/context_collab/{{collab_context_id}}/events"
+_RUN_PATH = f"{PREFIX}/context_collab/{{collab_context_id}}/run"
 _GET_PATH = f"{PREFIX}/context_collab/{{collab_context_id}}"
 
 _CASE_SNAPSHOT = {
@@ -448,6 +484,34 @@ _CASE_SNAPSHOT = {
 }
 
 
+def _event_projection(
+    *,
+    event_id: str,
+    event_seq: int,
+    parent_event: str | None,
+    event_kind: str,
+    primitive_type: str,
+    status: str,
+    content: str | None = None,
+) -> dict:
+    return {
+        "event_id": event_id,
+        "event_seq": event_seq,
+        "parent_event": parent_event,
+        "event_kind": event_kind,
+        "primitive_type": primitive_type,
+        "actor_id": "u_1001",
+        "actor_type": "human",
+        "execution_id": "",
+        "context_version": event_seq,
+        "status": status,
+        "summary": None,
+        "content": content,
+        "artifacts": [],
+        "created_at": "2026-11-10T08:00:00Z",
+    }
+
+
 def _seed_create_happy(world) -> None:
     def create_context(self, _command, _context):
         return ContextCollabCreatedResult(
@@ -463,7 +527,9 @@ def _seed_create_happy(world) -> None:
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"create_context": create_context},
+        world,
+        ContextCollabServiceProtocol,
+        {"create_context": create_context},
     )
 
 
@@ -472,7 +538,9 @@ def _seed_create_error(world) -> None:
         raise ContextCollabValidationError("case: invalid create body")
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"create_context": create_context},
+        world,
+        ContextCollabServiceProtocol,
+        {"create_context": create_context},
     )
 
 
@@ -490,7 +558,9 @@ def _seed_append_happy(world) -> None:
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"append_event": append_event},
+        world,
+        ContextCollabServiceProtocol,
+        {"append_event": append_event},
     )
 
 
@@ -499,7 +569,37 @@ def _seed_append_error(world) -> None:
         raise ContextCollabVersionConflict("case: stale expected_version")
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"append_event": append_event},
+        world,
+        ContextCollabServiceProtocol,
+        {"append_event": append_event},
+    )
+
+
+def _seed_run_happy(world) -> None:
+    async def run_context(self, collab_context_id, context):
+        return ContextCollabRunResultDTO(
+            collab_context_id=collab_context_id,
+            run_id="run_case_001",
+            session_id="session_case_001",
+            context_version=2,
+            current_status="in_progress",
+        )
+
+    bind_overrides(
+        world,
+        ContextCollabServiceProtocol,
+        {"run_context": run_context},
+    )
+
+
+def _seed_run_error(world) -> None:
+    async def run_context(self, collab_context_id, context):
+        raise ContextCollabNotFoundError("case: unknown collab context")
+
+    bind_overrides(
+        world,
+        ContextCollabServiceProtocol,
+        {"run_context": run_context},
     )
 
 
@@ -510,43 +610,43 @@ def _seed_get_happy(world) -> None:
             collab_context_id="collet_case_001",
             context_version=2,
             current_snapshot=dict(_CASE_SNAPSHOT),
-            current_event={
-                "event_id": "evt_case_002",
-                "parent_event": "evt_case_001",
-                "event_kind": "user_interaction.posted",
-                "primitive_type": "Message",
-                "status": "active",
-                "summary": None,
-                "content": "上下文做一下补充xxx",
-                "occurred_at": None,
-            },
+            current_event=_event_projection(
+                event_id="evt_case_002",
+                event_seq=2,
+                parent_event="evt_case_001",
+                event_kind="user_interaction.posted",
+                primitive_type="Message",
+                status="active",
+                content="上下文做一下补充xxx",
+            ),
             task_progress=TaskProgressProjectionDTO(
                 total_events=2,
                 events=[
-                    {
-                        "event_id": "evt_case_001",
-                        "parent_event": None,
-                        "event_kind": "task.created",
-                        "primitive_type": "Task",
-                        "status": "completed",
-                        "summary": None,
-                        "content": None,
-                    },
-                    {
-                        "event_id": "evt_case_002",
-                        "parent_event": "evt_case_001",
-                        "event_kind": "user_interaction.posted",
-                        "primitive_type": "Message",
-                        "status": "active",
-                        "summary": None,
-                        "content": "上下文做一下补充xxx",
-                    },
+                    _event_projection(
+                        event_id="evt_case_001",
+                        event_seq=1,
+                        parent_event=None,
+                        event_kind="task.created",
+                        primitive_type="Task",
+                        status="completed",
+                    ),
+                    _event_projection(
+                        event_id="evt_case_002",
+                        event_seq=2,
+                        parent_event="evt_case_001",
+                        event_kind="user_interaction.posted",
+                        primitive_type="Message",
+                        status="active",
+                        content="上下文做一下补充xxx",
+                    ),
                 ],
             ),
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"get_status": get_status},
+        world,
+        ContextCollabServiceProtocol,
+        {"get_status": get_status},
     )
 
 
@@ -555,7 +655,9 @@ def _seed_get_error(world) -> None:
         raise ContextCollabNotFoundError("case: unknown collab context")
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"get_status": get_status},
+        world,
+        ContextCollabServiceProtocol,
+        {"get_status": get_status},
     )
 
 
@@ -587,7 +689,8 @@ def context_collab_create_happy():
     ),
     seed=_seed_create_error,
     expect=ExpectError(
-        status=422, json_contains={"code": 422000, "message": "Invalid context collab request"},
+        status=422,
+        json_contains={"code": 422000, "message": "Invalid context collab request"},
     ),
 )
 def context_collab_create_error():
@@ -627,11 +730,56 @@ def context_collab_append_happy():
     ),
     seed=_seed_append_error,
     expect=ExpectError(
-        status=409, json_contains={"code": 409000, "message": "Context version conflict"},
+        status=409,
+        json_contains={"code": 409000, "message": "Context version conflict"},
     ),
 )
 def context_collab_append_error():
     """Stale expected_version maps to the 409 conflict envelope."""
+
+
+@endpoint_test(
+    method="POST",
+    path=_RUN_PATH,
+    scenario="run_happy",
+    input=CaseInput(
+        path_params={"collab_context_id": "collet_case_001"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_run_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "collab_context_id": "collet_case_001",
+                "run_id": "run_case_001",
+                "context_version": 2,
+                "current_status": "in_progress",
+            },
+        },
+    ),
+)
+def context_collab_run_happy():
+    """Run returns the runtime handles and updated Context projection."""
+
+
+@endpoint_test(
+    method="POST",
+    path=_RUN_PATH,
+    scenario="run_error",
+    input=CaseInput(
+        path_params={"collab_context_id": "collet_case_missing"},
+        headers=_HEADERS,
+    ),
+    seed=_seed_run_error,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found"},
+    ),
+)
+def context_collab_run_error():
+    """Running an unknown Context maps to the 404 error envelope."""
 
 
 @endpoint_test(
@@ -670,7 +818,8 @@ def context_collab_get_happy():
     ),
     seed=_seed_get_error,
     expect=ExpectError(
-        status=404, json_contains={"code": 404000, "message": "Not found"},
+        status=404,
+        json_contains={"code": 404000, "message": "Not found"},
     ),
 )
 def context_collab_get_error():

@@ -17,6 +17,7 @@ GET  /openapi/v1/collaboration/task/context_collab/{collab_context_id}       —
 ``@envelope_errors`` + ``ENVELOPE_ERRORS`` 的 ContextCollab 行映射
 ErrorEnvelope(422/409/404),router 不手写 ``HTTPException``。
 """
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -39,11 +40,13 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.adapters.http.task.schemas_context_collab import (
     ColletCreateRequest,
     ContextCollabCreatedResultDto,
+    ContextCollabRunResultDto,
     ContextCollabStatusResponse,
     EventAcceptedResultDto,
     EventCreateRequest,
     created_result_to_dto,
     event_accepted_to_dto,
+    run_result_to_dto,
     status_to_dto,
 )
 from agentclaw.community.api.task.context_collab_service import (
@@ -117,6 +120,21 @@ async def append_context_collab_event(
     command = body.to_domain(context.actor)
     result = service.append_event(collab_context_id, command, context)
     return envelope(event_accepted_to_dto(result), request)
+
+
+@router.post(
+    "/{collab_context_id}/run",
+    response_model=Envelope[ContextCollabRunResultDto],
+)
+@envelope_errors
+async def run_context_collab(
+    collab_context_id: CollabContextIdPath,
+    request: Request,
+    principal: PrincipalDep,
+    service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
+) -> Envelope[ContextCollabRunResultDto]:
+    result = await service.run_context(collab_context_id, _actor_context(principal))
+    return envelope(run_result_to_dto(result), request)
 
 
 @router.get(

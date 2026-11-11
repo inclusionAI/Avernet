@@ -76,7 +76,7 @@ class TodoEventRecord:
     actor_type: str
     content: str
     execution_id: str
-    context_version: str
+    context_version: int | None
     status: str | None
     artifacts: tuple[TodoArtifactRecord, ...]
     created_at: str
