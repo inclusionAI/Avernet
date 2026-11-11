@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.12</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.13</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -183,7 +183,24 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>需要 BCS 保存会话历史</td><td>经 BCS</td></tr>
 <tr><td>调用未按 Profile 接入的 Bot</td><td>经 BCS</td></tr>
 </table></div>
-<p>直连依赖 client SDK 和 BCS 的发现接口，属于后续阶段，本设计不展开。是否允许直连以及默认策略见 <span class="tag q">Q21</span>。</p>
+<h4>待讨论的方案：由 BCS 返回的 Card 决定路径</h4>
+<p>调用方不选择路径。它向 BCS 查询 AgentCard，然后按 Card 中的接口地址调用。BCS 对每个 Agent 按其类型和使用模式，以两种方式之一暴露 Card：</p>
+<div class="tw"><table>
+<tr><th></th><th>原生地址模式</th><th>BCN 地址模式</th></tr>
+<tr><td>Card 中的接口地址</td><td>Agent 自己的地址</td><td>BCS 的地址</td></tr>
+<tr><td>实际路径</td><td>调用方直连 Agent</td><td>调用方调 BCS，BCS 再调 Agent</td></tr>
+<tr><td>Card 内容</td><td>原始 Card</td><td>派生 Card：地址、绑定、流式和扩展声明按 BCS 实际能提供的写；原始签名不再有效</td></tr>
+<tr><td>适用</td><td>按 Profile 接入的 Agent，默认</td><td>未按 Profile 接入的 Bot（没有原生 A2A 地址，由 BCS 生成 Card）；有人工审批、需要 BCS 会话或集中审计的 Agent</td></tr>
+<tr><td><code>source.platform</code></td><td><code>direct</code></td><td><code>bcn</code></td></tr>
+</table></div>
+<p>这样调用方的代码在两种路径下相同，路径策略集中在注册中心，并且所有 Bot 对调用方都表现为标准 A2A 服务。工作台的人机对话不受影响：BCS 自己调用 Agent 时始终使用保存的原始 Card。需要一并确定的问题：</p>
+<ul>
+<li><b>模式由谁决定。</b>按 Agent 类型给默认值，Provider 或平台管理员可以调整。每个 Agent 固定一种，还是可以因调用方而异，待定。</li>
+<li><b>派生 Card 的规则。</b>BCS 保存的原始 Card 不改写；对外提供的是它的一个视图。需要规定哪些字段原样保留、哪些由 BCS 改写。</li>
+<li><b>BCN 地址模式不是强制。</b>原生地址在内网可达且不鉴权（<span class="tag d">D1</span>），知道地址即可绕过 BCS。必须经 BCS 的 Agent 需要配合网络层限制，或启用预留的 <code>proof</code>。</li>
+<li><b>模式切换与缓存。</b>调用方会缓存 Card。需要规定 Card 的有效期；进行中的 Task 不随模式切换而换地址。</li>
+</ul>
+<p>直连依赖 client SDK 和 BCS 的发现接口，BCN 地址模式依赖 BCS 对外提供 A2A 服务，都属于后续阶段，本设计不展开。汇总为 <span class="tag q">Q21</span>。</p>
 
 <h2 id="s5"><span class="n">5</span>已确认的决策</h2>
 <div class="tw"><table>
@@ -1401,7 +1418,7 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
 <tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
-<tr><td><span class="tag q">Q21</span></td><td>Agent 之间是否允许绕过 BCS 直连；默认策略；直连调用是否需要向 BCS 上报摘要用于审计</td><td>允许，Agent 之间的程序调用以直连为主，BCS 承担注册和发现；上报摘要为可选。具体设计放在 client SDK 阶段</td><td>4.1</td></tr>
+<tr><td><span class="tag q">Q21</span></td><td><b>待讨论项。</b>调用路径由 BCS 返回的 Card 决定：原生地址模式（直连）或 BCN 地址模式（经 BCS），按 Agent 类型和使用模式确定。需要讨论：各类 Agent 的默认模式；每个 Agent 固定一种还是因调用方而异；派生 Card 的改写规则；必须经 BCS 的 Agent 如何强制；直连调用是否向 BCS 上报摘要</td><td>采用该方案。按 Profile 接入的 Agent 默认原生地址；未按 Profile 接入的 Bot 只用 BCN 地址；每个 Agent 先固定一种；上报摘要为可选。具体设计放在 client SDK 和 BCS A2A 服务阶段</td><td>4.1</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
