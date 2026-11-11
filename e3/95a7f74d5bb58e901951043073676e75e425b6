@@ -1,0 +1,46 @@
+apps/backend/tests/community/core/devices/services/test_baas_connection_unavailable.py
+  s_40621bc596f67b::t_337d3733f3f215 1-54
+apps/backend/src/agentclaw/community/core/devices/device_service_protocol.py
+  s_40621bc596f67b::t_005cb927b23ef8 37-39
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py
+  s_40621bc596f67b::t_5895eb941ef10a 330-339,341-364,369-413
+  s_40621bc596f67b::t_4f410d3f1879f5 340,365-368
+apps/backend/tests/community/core/engine_runtime/test_connection_offline_cause.py
+  s_40621bc596f67b::t_c232f676002828 1-34,44,46-48,50-71
+  s_40621bc596f67b::t_a76762b433a80e 35-43,45,49
+apps/backend/tests/community/adapters/http/devices/test_get_device_connection_errors.py
+  s_40621bc596f67b::t_a76762b433a80e 66-90
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_40621bc596f67b::t_61f6efc7e2d858 82-83
+  s_40621bc596f67b::t_f96746a00058db 11,852,872-873
+  s_40621bc596f67b::t_bc5a856ae1e171 81
+apps/backend/src/agentclaw/community/core/devices/errors.py
+  s_40621bc596f67b::t_61f6efc7e2d858 18-21
+apps/backend/src/agentclaw/community/core/engine_runtime/connection.py
+  s_40621bc596f67b::t_61f6efc7e2d858 31,322-324
+  s_2cb160c1e91f68::t_4464fc616dccbc 325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e395a7f74d5bb58e901951043073676e75e425b6",
+  "prompts": {},
+  "sessions": {
+    "s_2cb160c1e91f68": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f3ec-75c3-af57-d49ef5d0077e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_40621bc596f67b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f9a2-75c3-8556-2339c0498dac",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
