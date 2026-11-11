@@ -8,44 +8,24 @@ from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from threading import Lock
 
-from search_core.api.models import ScoreDetails, SearchItem, SearchResult, StageScore
-
 _JSON_ATOMS = {str, int, float, bool, type(None)}
-_COPY_TYPES = {dict, list, tuple, SearchResult, SearchItem, ScoreDetails, StageScore}
 
 
 def _copy_value(value, memo=None):
-    """Copy containers and plain search records without pickle reconstruction.
+    """Copy JSON containers cheaply; retain deepcopy for every other type.
 
     Each read still owns its mutable containers. One memo preserves aliases and
     cycles, including references crossing into objects handled by deepcopy.
     Exact types keep custom container subclasses on their original copy path.
     """
     kind = type(value)
-    if kind not in _COPY_TYPES:
+    if kind not in (dict, list):
         return deepcopy(value, memo)
     if memo is None:
         memo = {}
     identity = id(value)
     if identity in memo:
         return memo[identity]
-    if kind is tuple:
-        copied = tuple(
-            item if type(item) in _JSON_ATOMS else _copy_value(item, memo)
-            for item in value
-        )
-        # A nested mutable container may have completed this tuple's cycle.
-        if identity in memo:
-            return memo[identity]
-        result = value if all(a is b for a, b in zip(value, copied)) else copied
-        memo[identity] = result
-        return result
-    if kind not in (dict, list):
-        # Exact known dataclass types have ordinary instance state and no copy hooks.
-        result = object.__new__(kind)
-        memo[identity] = result
-        result.__dict__.update(_copy_value(value.__dict__, memo))
-        return result
     result = {} if kind is dict else []
     memo[identity] = result
     if kind is dict:
