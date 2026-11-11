@@ -161,4 +161,4 @@ npm test
 | `server.mjs`、`cli.mjs` | 静态服务与命令行入口 |
 | `test/` | 转换、解析、示例、CLI 和 HTTP 回归 |
 
-[交付规格](specs/2026-11-11-json-to-a2a/spec.md)、[验证记录](specs/2026-11-11-json-to-a2a/validation.md)记录此次独立工具引入的范围与证据。专属 [CI](../../.github/workflows/a2a-json-tool.yml) 在工具变更时运行测试。
+[交付规格](specs/2026-11-11-json-to-a2a/spec.md)、[验证记录](specs/2026-11-11-json-to-a2a/validation.md)记录此次独立工具引入的范围与证据。修改工具后，在本目录运行 `npm test` 完成本地验证。
