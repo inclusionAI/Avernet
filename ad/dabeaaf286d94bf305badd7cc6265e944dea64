@@ -1,0 +1,88 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  h_9d7cfd405752f5 5,26-29,51-60,61,63-64,110,112-116,125,138,142-147,160-161,174,177-178,186,197,200,206,218,221,223-225,250,259-264,289,297-298,323,331,355,364,366-367
+apps/backend/tests/community/adapters/http/bot_public/test_risk_routes.py
+  h_9d7cfd405752f5 4-5,372,374-377,383-384,385-437,438-480,481-493
+apps/backend/src/agentclaw/community/di/modules/bot_public_module.py
+  h_9d7cfd405752f5 37-41,45,146,167,198-209,210,212
+apps/backend/tests/community/di/test_bot_public_risk_input_wiring.py
+  h_9d7cfd405752f5 1-13,14-19,21-45
+  s_befd386ce20825::t_c449d6027ae54d 20,46-55
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  h_9d7cfd405752f5 459,491-492,531-532,539,599-605,614-622,693-699,703,711-712,726,734,802,803-805,806,807-808,809-815,816-824,1008,1018,1029,1032,1067,1068,1069,1088-1089,1102-1103,1104-1114,1121-1123,1135-1136,1139-1140,1149,1164,1170-1174,1175,1179-1187,1193-1194,1195-1198,1199-1200,1201,1202-1209,1221,1222-1225,1228-1229,1274-1280,1291-1294
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_9d7cfd405752f5 2752,2768,2787,2797,2811-2816,2821,2835,2845-2859,2845-2846,2862-2874,2875-2886,2887,2888-2902,2903,2904-2914,2915,2916-2933,2934-2962,2963-2975,2976,2977-2993,2994,2995-3000,3001-3014,3015,3016-3022,3023-3024,3025-3033,3034,3035-3057
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  h_9d7cfd405752f5 18,39-44,46,55,156,160,190-217,218-224,225-237,238-242,243-245,246,247-250,251-255,256-257,258-270,271-273,366-369,370-371,372-377,378
+  s_befd386ce20825::t_ddb2a1b0b42137 4,45
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  h_9d7cfd405752f5 166,450-499,500,501-518,519-520,521-525,526,527,528-534,535-560,561,562-598,599-609,610-618,619-642,643-686
+apps/backend/src/agentclaw/community/core/bot_public_risk/notices.py
+  h_9d7cfd405752f5 67,105-115,121-127
+apps/backend/src/agentclaw/community/core/bot_public_risk/input_builder.py
+  h_9d7cfd405752f5 45,76-78,82-83,115
+  s_befd386ce20825::t_2472faf070924a 8,59,96-103,107,111,157
+apps/backend/src/agentclaw/community/core/mcp/services/repositories.py
+  h_9d7cfd405752f5 27-29
+apps/backend/tests/community/core/bot_public/test_risk_input.py
+  h_9d7cfd405752f5 25-26,66-67,79,126,159-173,175-184,186-213,215-234,290-291
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  h_9d7cfd405752f5 4,5,8,11-21,31,33,38,39-41,42-44,46,50,53-58,60,79,81,82-84,85-89,92,93,103-105,112-118,120-121,125,126-131,132,133,134-135,136-161,162-187,188,189-191,192,193-194,195,196-208,209,210-217,218,219-220,221-225,226-239,240-242,243-248
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  h_9d7cfd405752f5 4,7,12-13,16,26,28-31,32-33,35-57,69-71,72,73-74,75-81,82-83,84-85,86-103,104,105,106-108,109-116,117-126,136-140,152-153,156
+apps/backend/src/agentclaw/community/core/bot_public_risk/eligibility.py
+  h_9d7cfd405752f5 1-22
+apps/backend/src/agentclaw/community/core/bot_public_risk/publish_adapter.py
+  h_9d7cfd405752f5 1-44
+apps/backend/src/agentclaw/community/plugin_api/bot_publish_approval.py
+  h_9d7cfd405752f5 95,96,97,117-119
+apps/backend/src/agentclaw/community/plugins/community/bot_publish_approval.py
+  h_9d7cfd405752f5 10,41-43,45-46
+apps/backend/src/agentclaw/community/plugins/local/bot_publish_approval.py
+  h_9d7cfd405752f5 10,46-48,50-51
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  h_9d7cfd405752f5 6-7,73-86,87-88,89-119,120,121-133,134-141,142-173,174-187,188-214,215-233,234-280,281-319
+apps/backend/tests/community/core/bot_public/test_risk_eligibility.py
+  h_9d7cfd405752f5 1-38
+apps/backend/tests/community/core/bot_public/test_risk_publish_adapter.py
+  h_9d7cfd405752f5 1-45
+apps/backend/src/agentclaw/community/core/bot_public_risk/lifecycle.py
+  h_9d7cfd405752f5 9,34-35,49,61-64
+apps/backend/src/agentclaw/community/di/modules/bot_public_risk_module.py
+  h_9d7cfd405752f5 5,7-8,9,10-12,19-20,49-55,56-60,64,88-102,103-105,106,117-120,130-131
+apps/backend/tests/community/core/bot_public/test_risk_approval_guard.py
+  h_9d7cfd405752f5 5-6,32,43,48-53,63,70-76,77,78-83,84-126,127-141,142-168,169-209
+apps/backend/tests/community/core/bot_public/test_risk_lifecycle.py
+  h_9d7cfd405752f5 94-95,97-101,102-107,110-111,113-117,118-119,121
+  s_befd386ce20825::t_0175cbd17bac1f 96,108,112,120
+apps/backend/tests/community/core/task_queue/test_task_worker.py
+  h_9d7cfd405752f5 578-598
+apps/backend/src/agentclaw/community/core/bot_public_risk/service_protocol.py
+  h_9d7cfd405752f5 11-18,35-39
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository.py
+  h_9d7cfd405752f5 10,192,196-206,322-325,332-341,352-354
+apps/backend/tests/community/core/bot_public/test_risk_repository.py
+  h_9d7cfd405752f5 98,254-272
+apps/backend/tests/community/repository/identity/test_bot_mcp_call_config_tenant_isolation.py
+  s_befd386ce20825::t_0e4900cd2cf058 240-270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "addabeaaf286d94bf305badd7cc6265e944dea64",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
