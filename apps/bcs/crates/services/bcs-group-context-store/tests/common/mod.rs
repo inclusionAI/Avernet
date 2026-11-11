@@ -439,3 +439,21 @@ pub async fn preset_names_are_case_sensitive(repo: &dyn GroupContextRepo) {
     assert!(!repo.preset_exists(group, "timeline").await.unwrap());
     repo.change_preset(group, "owner", Delete { name: "Timeline".into() }).await.unwrap();
 }
+
+pub async fn editing_missing_preset_returns_not_found(repo: &dyn GroupContextRepo) {
+    use bcs_domain::group_context::GroupContextItemPresetChange::Edit;
+    use bcs_group_context_store::GroupContextStoreError;
+
+    let group = "missing-preset-edit";
+    let result = repo.change_preset(group, "owner", Edit {
+        name: "timeline".into(),
+        new_name: Some("events".into()),
+        description: Some("edited".into()),
+    }).await;
+    assert!(matches!(
+        result,
+        Err(GroupContextStoreError::NotFound { name, scope })
+            if name == "timeline" && scope == group
+    ));
+    assert!(repo.list_presets(group).await.unwrap().is_empty());
+}

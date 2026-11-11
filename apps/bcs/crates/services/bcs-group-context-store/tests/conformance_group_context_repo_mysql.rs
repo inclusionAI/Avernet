@@ -52,7 +52,9 @@ async fn mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions() 
         assert_preset_audit_roundtrip(&SqlGroupContextStore::oceanbase(plugin.clone()), suffix).await;
     }
 
-    common::preset_names_are_case_sensitive(&SqlGroupContextStore::oceanbase(plugin)).await;
+    let repo = SqlGroupContextStore::oceanbase(plugin);
+    common::preset_names_are_case_sensitive(&repo).await;
+    common::editing_missing_preset_returns_not_found(&repo).await;
     manager.close().await;
 }
 

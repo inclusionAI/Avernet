@@ -205,3 +205,8 @@ async fn preset_names_are_case_sensitive_in_memory_and_sqlite() {
     common::preset_names_are_case_sensitive(&MemoryGroupContextRepo::new()).await;
     common::preset_names_are_case_sensitive(&sqlite_repo().await).await;
 }
+
+#[tokio::test]
+async fn sqlite_editing_missing_preset_returns_not_found() {
+    common::editing_missing_preset_returns_not_found(&sqlite_repo().await).await;
+}

@@ -1,4 +1,5 @@
 use super::*;
+use bcs_db_api::DbTransactionParam;
 
 impl SqlGroupContextStore {
     pub(super) async fn has_preset(&self, group_id: &str, name: &str) -> StoreResult<bool> {
@@ -46,7 +47,8 @@ impl SqlGroupContextStore {
         change: GroupContextItemPresetChange,
     ) -> StoreResult<()> {
         let now = self.timestamp_param(Utc::now());
-        let is_edit = matches!(&change, GroupContextItemPresetChange::Edit { .. });
+        let mysql_edit = self.flavor == DbSqlFlavor::Mysql
+            && matches!(&change, GroupContextItemPresetChange::Edit { .. });
         let (statement, name) = match change {
             GroupContextItemPresetChange::Add { name, description } => (
                 DbStatement::with_params(
@@ -95,7 +97,12 @@ impl SqlGroupContextStore {
                 name,
             ),
         };
-        let result = self.db.execute(statement).await.map_err(|error| {
+        let matched = if mysql_edit {
+            self.execute_mysql_preset_edit(group_id, &name, statement).await
+        } else {
+            self.db.execute(statement).await.map(|result| result.affected_rows > 0)
+        }
+        .map_err(|error| {
             if error.is_duplicate_key() {
                 GroupContextStoreError::DuplicateActive {
                     name: name.clone(),
@@ -105,13 +112,46 @@ impl SqlGroupContextStore {
                 GroupContextStoreError::backend(error)
             }
         })?;
-        // MySQL reports zero changed rows for a repeated identical edit.
-        if result.affected_rows == 0 && !(is_edit && self.has_preset(group_id, &name).await?) {
+        if !matched {
             return Err(GroupContextStoreError::NotFound {
                 name,
                 scope: group_id.into(),
             });
         }
         Ok(())
+    }
+
+    async fn execute_mysql_preset_edit(
+        &self,
+        group_id: &str,
+        name: &str,
+        statement: DbStatement,
+    ) -> Result<bool, DbError> {
+        // MySQL counts changed rows. Lock the matched row before updating and
+        // bind its ID, so an absent match cannot update a later same-name insert.
+        let lookup = DbStatement::with_params(
+            "SELECT (SELECT id FROM bcs_group_context_item_presets \
+             WHERE group_id = ? AND name = ? FOR UPDATE) AS preset_id",
+            vec![group_id.into(), name.into()],
+        );
+        let update = DbStatement::with_transaction_params(
+            format!("{} AND id = ?", statement.sql()),
+            statement.params().iter().cloned().map(DbTransactionParam::from)
+                .chain([DbTransactionParam::query_result(0, 0, "preset_id")])
+                .collect(),
+        );
+        let results = self.db.transaction(vec![
+            DbTransactionStep::Query(lookup),
+            DbTransactionStep::Execute(update),
+        ]).await?;
+        match results.as_slice() {
+            [DbTransactionStepResult::Rows(rows), DbTransactionStepResult::Executed(_)] => {
+                let [row] = rows.as_slice() else {
+                    return Err(DbError::InvalidInput("expected one preset lookup row".into()));
+                };
+                Ok(db_get_column_opt::<u64>(row, "preset_id")?.is_some())
+            }
+            _ => Err(DbError::InvalidInput("expected preset lookup and update results".into())),
+        }
     }
 }
