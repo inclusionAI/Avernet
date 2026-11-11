@@ -42,6 +42,38 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
+  it.each(["none", "unknown", "performed", "accepted", "unknown_delivery", "missing_read"] as const)(
+    "closes an assessment as unnecessary only with verified evidence and no possible intervention (%s)", async scenario => {
+      const { service, records, agent } = setup();
+      const { task_id } = await service.create(request, actor);
+      const task = records.get(task_id)!;
+      task.interventionStatus = scenario === "unknown" || scenario === "performed" ? scenario : "none";
+      if (scenario === "accepted" || scenario === "unknown_delivery") {
+        task.delivery = { delivery: { status: scenario === "accepted" ? "accepted" : "unknown" } } as NonNullable<RecoveryStoredTask["delivery"]>;
+      }
+      task.evidence.push({ evidence_id: "read", tool_call_id: "read-call", source: "session_read",
+        location: "original session", excerpt: "等待审批人确认" });
+      if (scenario !== "missing_read") {
+        task.timeline.push({ event_id: "read-call", at_ms: 10, kind: "operation", actor: "agent",
+          summary: "检查原会话", payload: { raw_tool_call_id: "read-call", status: "succeeded" } });
+      }
+      const assessed = service.assess(task_id, task.version, { decision: "no_recovery_needed",
+        summary: "原会话按业务规则等待审批人确认", evidence_ids: ["read"] });
+
+      if (scenario !== "none") {
+        await expect(assessed).rejects.toMatchObject({ status: 422 });
+        expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", pending_results: [] });
+        expect(agent.release).not.toHaveBeenCalled();
+        return;
+      }
+      await assessed;
+      expect(records.get(task_id)).toMatchObject({
+        status: "completed", phase: "assess", completionReason: "no_recovery_needed",
+        judgment: { effect: "unknown", evidence_ids: ["read"] },
+        pending_results: [{ status: "completed", completion_reason: "no_recovery_needed", intervention_status: "none", effect: "unknown" }],
+      });
+      expect(agent.release).toHaveBeenCalledOnce();
+    });
   it("retries card creation if the first request never left the notifier", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);

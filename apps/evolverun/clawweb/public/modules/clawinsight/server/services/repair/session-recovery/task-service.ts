@@ -6,6 +6,7 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { cronJobId } from "./session-identity.js";
+import { recoveryMessagePending } from "./result.js";
 import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
 import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation } from "./owner-cooperation.js";
 import { DingTalkCardNotDispatchedError } from "../../notifications/dingtalk-sender.js";
@@ -144,9 +145,25 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
       if (value.ownerRequest?.status === "confirmed" && value.requiresFreshObservation) this.fail(409, "Owner 反馈后需先读取原会话最新现场，再判断处理条件与恢复效果");
-      if (!["message", "environment", "observe", "wait_cron"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
+      if (!["message", "environment", "observe", "wait_cron", "no_recovery_needed"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
         || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "初始判断需要决策、理由及已保存的证据");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      if (input.decision === "no_recovery_needed") {
+        if (value.interventionStatus !== "none" || recoveryMessagePending(value)) {
+          this.fail(422, "已有干预、投递或审计状态未确认，不能结束为无需自愈；按现有阶段处理");
+        }
+        const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
+          .map(event => event.payload.raw_tool_call_id ?? event.payload.tool_call_id));
+        if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
+          && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source) && reads.has(item.tool_call_id))) {
+          this.fail(422, "无需自愈需引用成功的现场读取，说明正常业务状态或适用的排除条件");
+        }
+        return { ...value, status: "completed", completionReason: "no_recovery_needed", version: value.version + 1,
+          observationDeadlineAt: null, ownerDeadlineAt: null, cronWait: undefined, requiresFreshObservation: false,
+          judgment: { delivery: "unconfirmed", response: "unknown", effect: value.judgment?.effect ?? "unknown",
+            summary: input.summary, evidence_ids: input.evidence_ids },
+          timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
+      }
       if (input.decision === "environment" && value.plan) this.fail(409, "本任务已有完整方案；Owner 反馈不允许重建方案，请核验原方案效果或按实际事项转交");
       if (input.decision === "wait_cron") {
         if (value.level === "debug" || value.request.target.engine !== "OC" || !cronJobId(value.request.session_key) || value.delivery) {
@@ -178,7 +195,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
         .map(event => event.payload.tool_call_id));
-      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
+      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued", "owner_handoff", "no_recovery_needed"].includes(input.decision)
         || value.phase === "plan" && !["insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
         || typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
         || !Array.isArray(input.evidence_ids) || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id && simulationReadTools.has(item.source)
