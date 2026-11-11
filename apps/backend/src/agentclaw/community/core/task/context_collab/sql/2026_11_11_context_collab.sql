@@ -28,7 +28,7 @@ CREATE TABLE `ac_context_collab_event` (
   `event_id` varchar(128) NOT NULL,
   `parent_event` varchar(128) DEFAULT NULL,
   `event_kind` varchar(128) NOT NULL,
-  `primitive_type` varchar(64) NOT NULL,
+  `primitive_type` varchar(64) DEFAULT NULL COMMENT 'L4 primitive (Message/Task/Activity); nullable for partial rows',
   `actor_ref` mediumtext DEFAULT NULL COMMENT 'JSON actor reference; nullable for partial rows',
   `visibility` varchar(32) DEFAULT NULL,
   `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; nullable for partial rows',

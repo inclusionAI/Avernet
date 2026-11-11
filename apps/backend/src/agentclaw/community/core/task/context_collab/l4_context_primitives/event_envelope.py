@@ -37,8 +37,10 @@ class EventRecord:
     event_id: str
     parent_event: str | None
     event_kind: str
-    primitive_type: str  # Message | Task | Activity
-    # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;
+    # 可空列(spec 作者裁决):Message | Task | Activity;外部部分行可为 NULL
+    # (读路径照常投影;统计仅排除 Message,NULL 参与计数)。
+    primitive_type: str | None
+    # 以下同为可空列(spec 作者裁决):允许外部写入部分字段的事件行;
     # P1 追加路径总是写满这些值。
     actor_ref: PrincipalRef | None
     visibility: str | None  # public | workspace | private;NULL 按 private 处理

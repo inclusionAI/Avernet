@@ -128,9 +128,11 @@ class ContextCollabEventModel(Base):
     event_id = Column(String(128), nullable=False)
     parent_event = Column(String(128), nullable=True)
     event_kind = Column(String(128), nullable=False)
-    primitive_type = Column(String(64), nullable=False)
+    # 可空(spec 作者裁决):允许外部写入的部分行;P1 追加路径仍必写白名单值。
+    primitive_type = Column(String(64), nullable=True)
     # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;P1 追加路径
-    # 仍总是写满这些值,读路径对 NULL 容忍(visibility=NULL 按 private 处理)。
+    # 仍总是写满这些值,读路径对 NULL 容忍(visibility=NULL 按 private 处理,
+    # primitive_type=NULL 仍参与进度计数 —— 仅排除 Message)。
     actor_ref = Column(_medium_text(), nullable=True)
     visibility = Column(String(32), nullable=True)
     payload = Column(_medium_text(), nullable=True)

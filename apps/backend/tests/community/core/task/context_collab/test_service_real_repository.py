@@ -610,7 +610,8 @@ class TestNullablePartialRows:
         self, service, engine
     ):
         created = service.create_context(make_create_command(), make_actor())
-        # 外部写入的部分事件行:actor_ref/visibility/payload/version_after 全 NULL。
+        # 外部写入的部分事件行:primitive_type/actor_ref/visibility/payload/
+        # version_after 全 NULL。
         with engine.connect() as conn:
             conn.execute(
                 sql_insert(ContextCollabEventModel).values(
@@ -618,7 +619,7 @@ class TestNullablePartialRows:
                     event_id="evt_partial_manual",
                     parent_event=created.current_event["event_id"],
                     event_kind="task.progress.updated",
-                    primitive_type="Activity",
+                    primitive_type=None,
                     actor_ref=None,
                     visibility=None,
                     payload=None,
@@ -637,9 +638,12 @@ class TestNullablePartialRows:
             e for e in principal_view.task_progress.events
             if e["event_id"] == "evt_partial_manual"
         )
-        # payload NULL → summary/content None;计数按 primitive 正常参与。
+        # payload NULL → summary/content None;primitive_type NULL → 条目 null
+        # (R10.1:计数仅排除 Message,NULL 参与计数 —— 这里在 current 之后为
+        # pending,不进入计数)。
         assert entry["summary"] is None
         assert entry["content"] is None
+        assert entry["primitive_type"] is None
 
         outsider_view = service.get_status(
             created.collab_context_id,

@@ -39,7 +39,7 @@ class EventProjection:
     event_id: str
     parent_event: str | None
     event_kind: str
-    primitive_type: str
+    primitive_type: str | None  # 外部部分行可为 NULL;统计仅排除 Message
     status: str  # "completed" | "active" | "pending"
     summary: str | None  # payload.get("summary")
     content: str | None  # payload.get("content")(Message)

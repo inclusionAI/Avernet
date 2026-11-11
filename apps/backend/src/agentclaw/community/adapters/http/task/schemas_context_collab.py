@@ -342,7 +342,10 @@ class EventAcceptedResultDto(BaseModel):
         "given."
     )
     event_kind: str = Field(description="Registry kind of the event.")
-    primitive_type: str = Field(description="L4 primitive the event carries.")
+    primitive_type: str | None = Field(
+        description="L4 primitive the event carries; null for an "
+        "out-of-band partial event row."
+    )
     context_version: int = Field(
         description="Context version after the accepted append."
     )
@@ -360,7 +363,10 @@ class TaskProgressEventDto(BaseModel):
         default=None, description="Parent event id, when the event has one."
     )
     event_kind: str = Field(description="Registry kind of the event.")
-    primitive_type: str = Field(description="L4 primitive the event carries.")
+    primitive_type: str | None = Field(
+        description="L4 primitive the event carries; null for an "
+        "out-of-band partial event row."
+    )
     status: str = Field(
         description="Progress projection status of the event: the current "
         "event is active, earlier ones completed."

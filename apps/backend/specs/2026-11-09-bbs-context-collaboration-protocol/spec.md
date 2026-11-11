@@ -1,7 +1,7 @@
 # 基于上下文自主协作协议 v2 设计方案（ACCS 按需采用版）
 
 - 日期：2026-11-09
-- 修订：2026-11-11（去除全部幂等键与 event 表的 request_id/sequence_no/is_trunk 列；主干改为查询时活动链推导；current_snapshot 与 event 的 actor_ref/visibility/payload/context_version_after 列放宽为可空）
+- 修订：2026-11-11（去除全部幂等键与 event 表的 request_id/sequence_no/is_trunk 列；主干改为查询时活动链推导；current_snapshot 与 event 的 actor_ref/visibility/payload/primitive_type/context_version_after 列放宽为可空）
 - 状态：Draft / 待评审，尚未实现
 - 主题：基于上下文（Context / Collet）的自主协作
 - 代码落点：`apps/backend/src/agentclaw/community/core/task/context_collab/`
@@ -846,7 +846,7 @@ get_current_status(collab_context_id) -> current status   # 全量返回，trunk
 
 1. **创建**：同一事务插入一行 `ac_context_collab_collet` 和一行初始 `task.created` 事件；创建不设幂等键，重复调用即重复创建。
 2. **追加事件**：锁定 Collet 行，检查 `expected_version`、`parent_event` 和权限；同一事务插入 Event 并更新 Collet 的 `current_snapshot`、`current_event_id`、`context_version`；`current_snapshot` 为 NULL 的聚合行保持 NULL，仅推进版本与指针。
-3. **查询**：读取一行 Collet 和事件列表；按授权和 `trunk_events` 过滤，组合 `task_progress.events[]`；不写数据库。`current_snapshot` 为 NULL 的聚合行返回 `current_snapshot: null`，事件链投影照常；事件行中可为 NULL 的 `actor_ref`/`visibility`/`payload`/`context_version_after` 解码为 null，`visibility=NULL` 按 private 处理。
+3. **查询**：读取一行 Collet 和事件列表；按授权和 `trunk_events` 过滤，组合 `task_progress.events[]`；不写数据库。`current_snapshot` 为 NULL 的聚合行返回 `current_snapshot: null`，事件链投影照常；事件行中可为 NULL 的 `actor_ref`/`visibility`/`payload`/`primitive_type`/`context_version_after` 解码为 null，`visibility=NULL` 按 private 处理；`primitive_type=NULL` 仍参与进度计数（统计仅排除 `Message`）。
 4. **事件 DAG**：主事件 `parent_event=null`，派生事件引用同一上下文内已存在事件；事件顺序为落库顺序（自增 id）；主事件在查询时由活动链推导（自 `current_event_id` 沿 `parent_event` 回溯），`trunk_events=true` 仅在投影层过滤事件列表。
 5. **并发**：追加不设幂等键，重复提交即重复事件（由调用方防重）；`expected_version` 不匹配直接返回冲突。
 6. **错误传播**：唯一键、数据库写入和版本冲突必须向上返回，不能吞错。
@@ -883,7 +883,7 @@ CREATE TABLE `ac_context_collab_event` (
   `event_id` varchar(128) NOT NULL,
   `parent_event` varchar(128) DEFAULT NULL,
   `event_kind` varchar(128) NOT NULL,
-  `primitive_type` varchar(64) NOT NULL,
+  `primitive_type` varchar(64) DEFAULT NULL COMMENT 'L4 primitive (Message/Task/Activity); nullable for partial rows',
   `actor_ref` mediumtext DEFAULT NULL COMMENT 'JSON actor reference; nullable for partial rows',
   `visibility` varchar(32) DEFAULT NULL,
   `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; nullable for partial rows',
