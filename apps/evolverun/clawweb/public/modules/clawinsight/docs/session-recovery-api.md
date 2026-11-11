@@ -211,6 +211,8 @@ CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一
 
 重试过程只记录任务时间线，不逐次回传上游。重试成功后继续原流程；预算耗尽或 Base 明确回报不可重试时，结束任务并回传 `failed + unknown`，`result_text` 保留脱敏失败原因、作业编号（已取得时）及重试情况。方案执行失败、Agent 明确回报受阻仍按原业务流程结束，不自动增加修复方案。等待 Owner、等待效果或已结束任务不会因 AIS 退出而变为失败；外部停止未过期的作业不自动重建。
 
+Agent 临近 Base 截止时可在 `waiting_owner`、运行中的 `observe / verify`，或已有 Cron 等待窗口的 `assess` 回报 `release`。控制面核对当前执行、状态和阶段，只结束该 execution，保留业务等待窗口，不计入失败重试。仍在运行的任务按原阶段续接；观察窗口到期时按等待效果流程收口。
+
 ## 继续等待效果的任务
 
 `POST /api/insight/v1/internal/monitoring/session-recoveries/:taskId/continue`
