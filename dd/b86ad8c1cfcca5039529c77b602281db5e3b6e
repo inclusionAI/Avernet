@@ -1,0 +1,16 @@
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  h_9d7cfd405752f5 173-186
+apps/backend/tests/community/core/bot_public/test_risk_lifecycle.py
+  h_9d7cfd405752f5 111-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ddb86ad8c1cfcca5039529c77b602281db5e3b6e",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

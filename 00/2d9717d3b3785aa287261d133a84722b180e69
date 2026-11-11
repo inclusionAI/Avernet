@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/task/task_context/test_relay_report.py
+  s_4efef845bd857d::t_4ffd2e188726cc 27,387-388,393-394,404
+apps/backend/specs/2026-10-20-task-artifact-domain/spec.md
+  s_4efef845bd857d::t_4ffd2e188726cc 255
+apps/backend/tests/community/core/task/task_artifact/test_artifact_report_item.py
+  s_4efef845bd857d::t_4ffd2e188726cc 455-463,465-468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "002d9717d3b3785aa287261d133a84722b180e69",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

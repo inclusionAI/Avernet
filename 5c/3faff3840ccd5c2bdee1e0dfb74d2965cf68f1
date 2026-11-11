@@ -1,0 +1,19 @@
+apps/bcs/crates/services/bcs-bot-store/src/lib.rs
+  s_63347400243a1a::t_4a71c471876777 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c3faff3840ccd5c2bdee1e0dfb74d2965cf68f1",
+  "prompts": {},
+  "sessions": {
+    "s_63347400243a1a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a47f-dc79-7492-a369-5971c956975b",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

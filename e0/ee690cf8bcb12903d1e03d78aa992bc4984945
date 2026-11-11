@@ -1,0 +1,31 @@
+apps/backend/specs/failed-draft-restart/001-spec-output.md
+  s_f2e14d16b90bc1::t_88af42a2bfe924 1-136
+apps/backend/specs/failed-draft-restart/002-code-report.md
+  s_f2e14d16b90bc1::t_b366a22276cc5d 1-69
+apps/backend/specs/failed-draft-restart/003-review-report.md
+  s_f2e14d16b90bc1::t_1a2b8437c7815a 1-89
+apps/backend/specs/failed-draft-restart/implementation-plan.md
+  s_f2e14d16b90bc1::t_3921b19c3eefba 1-10
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_f2e14d16b90bc1::t_b0a84553df9f22 37-39,4539,4559-4574,4932
+apps/backend/src/agentclaw/community/core/bot_management/services/restart_binding_scope.py
+  s_f2e14d16b90bc1::t_75656558becefc 1-55
+apps/backend/tests/community/core/bot_management/services/test_service_draft_restart_recovery.py
+  s_f2e14d16b90bc1::t_b94644879ffeec 1-240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e0ee690cf8bcb12903d1e03d78aa992bc4984945",
+  "prompts": {},
+  "sessions": {
+    "s_f2e14d16b90bc1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a6a5-92f3-7341-9c8f-7f07ca39c2de",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

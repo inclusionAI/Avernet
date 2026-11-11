@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 182,206
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelTab.ts
+  h_059e888e5e4e82 1-32
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sidePaneContent.ts
+  h_059e888e5e4e82 47-51,117-121
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  h_059e888e5e4e82 28,139-140,183,185-186,201,203
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  h_059e888e5e4e82 25,101-102,121-125,138,140
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  h_059e888e5e4e82 216-246
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChatHeaderPanels.test.ts
+  h_059e888e5e4e82 7,60,179-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "203be31aad24546cc8bb95898c66710d280d2842",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

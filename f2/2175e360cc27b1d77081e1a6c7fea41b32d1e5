@@ -1,0 +1,44 @@
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_0ba32314276228::t_e3c9ee4683ccc5 656
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 15,18
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_0ba32314276228::t_9ce1de82d4ddc1 42,100-113
+  s_0ba32314276228::t_667c2f02ca6b1f 39-41,44-45,48-50,60-61,64-65
+  s_0ba32314276228::t_d8293fb92f8b55 114-115
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/OwnerCooperation.tsx
+  s_0ba32314276228::t_e3c9ee4683ccc5 24,51,58,61
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 30,286,567
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 83,85-87,92
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 22,24-25
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 263-265,281
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 4,29,33,35
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/session-recovery.ts
+  s_0ba32314276228::t_e3c9ee4683ccc5 6
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_0ba32314276228::t_667c2f02ca6b1f 173,285,306,321,339,341,343
+  s_0ba32314276228::t_9ce1de82d4ddc1 300
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_0ba32314276228::t_667c2f02ca6b1f 31-34,38,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f22175e360cc27b1d77081e1a6c7fea41b32d1e5",
+  "prompts": {},
+  "sessions": {
+    "s_0ba32314276228": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c4d4-3c77-7c93-99a2-f72966f823cf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

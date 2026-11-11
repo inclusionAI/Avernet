@@ -1,0 +1,53 @@
+apps/backend/src/agentclaw/community/adapters/http/resources/file_router.py
+  s_3a96314c63bfb3::t_1a6d2cc701d075 46,449-450
+apps/backend/src/agentclaw/community/core/devices/README.md
+  s_bb24bfd9e0d916::t_45e4ec5e04080b 12-17
+apps/backend/src/agentclaw/community/core/devices/errors.py
+  s_3a96314c63bfb3::t_779a4c685581f8 67-70
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_filesystem.py
+  s_3a96314c63bfb3::t_2ddcba3e48539f 20,166-172
+apps/backend/tests/community/adapters/http/resources/test_mkdir_read_only.py
+  s_3a96314c63bfb3::t_46834903cc1cba 1-21
+apps/backend/tests/community/plugins/prod/test_baas_device_filesystem.py
+  s_3a96314c63bfb3::t_a2199464b27e29 178-194
+apps/frontend/src/utils/vscodeRequestAdapter.ts
+  s_68438866e3020f::t_0dbbedf8d45020 28,55,61-89,113
+engine/adapter/README.md
+  s_68438866e3020f::t_fd0ceb517380f4 29-31
+engine/adapter/docs/file-upload-api.md
+  s_68438866e3020f::t_2308a0db7a419e 1-10
+engine/adapter/src/engine/community/api/file/router.py
+  s_68438866e3020f::t_e2b5c5199e2525 13,108-122,131-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "27de24ecacf8ed5c7592c5d806aca9a09b36a429",
+  "prompts": {},
+  "sessions": {
+    "s_3a96314c63bfb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-089d-74a3-be00-2785ae2ec0ff",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_68438866e3020f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-19d3-72f0-b004-25acfac2a3e5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_bb24bfd9e0d916": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-0c6c-7910-a59e-65d4cc091259",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

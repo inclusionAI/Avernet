@@ -1,0 +1,33 @@
+apps/backend/tests/community/adapters/http/session_resources/test_router.py
+  s_c7770ebd3d04bc::t_069a91075afb94 233
+  s_c7770ebd3d04bc::t_88a0e5d4519a69 251
+  s_c7770ebd3d04bc::t_a0392604983a59 25-27,239-250,252-258
+  s_c7770ebd3d04bc::t_bbd2edf22608a1 234-238
+apps/backend/src/agentclaw/community/adapters/http/session_resources/router.py
+  s_c7770ebd3d04bc::t_c5c21a70171129 26,51-52
+apps/backend/src/agentclaw/community/core/session_resources/baas_client.py
+  s_c7770ebd3d04bc::t_67acf5f5891a4f 256
+  s_c7770ebd3d04bc::t_c5c21a70171129 5,21-27,116,157,244-245,257
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_c7770ebd3d04bc::t_8294baeec42294 235,238
+apps/backend/tests/community/core/session_resources/test_baas_client.py
+  s_c7770ebd3d04bc::t_df4e6dab408a56 7,146-147,149-150,152-166,168-169,171-183
+  s_c7770ebd3d04bc::t_d8094322f48290 148,167
+  s_c7770ebd3d04bc::t_d7166819820609 151,170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a0eeaf945b01baed31f723a331387d982b6fb86",
+  "prompts": {},
+  "sessions": {
+    "s_c7770ebd3d04bc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-8f02-7d91-ada2-281b7063f921",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  s_4efef845bd857d::t_bf91cc15fddc85 944-950
+apps/backend/src/agentclaw/community/core/task/task_harness/timeout_policy.py
+  s_4efef845bd857d::t_bf91cc15fddc85 1-29
+apps/backend/src/agentclaw/community/core/task/task_harness/centralized_recovery.py
+  s_4efef845bd857d::t_bf91cc15fddc85 5
+apps/backend/tests/community/core/task/task_trajectory/test_trajectory_gates_reset.py
+  s_4efef845bd857d::t_70482cfe1848c9 73-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3ae361a524047e5cd2f8414689d946193e03a95c",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
