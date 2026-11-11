@@ -8,7 +8,6 @@ CREATE TABLE `ac_context_collab_collet` (
   `avernet_tenant` varchar(64) NOT NULL DEFAULT 'teamclaw',
   `env` varchar(20) NOT NULL,
   `collab_context_id` varchar(128) NOT NULL,
-  `create_request_id` varchar(256) NOT NULL,
   `context_spec` mediumtext NOT NULL COMMENT 'JSON: create request references and method fields',
   `current_snapshot` mediumtext NOT NULL COMMENT 'JSON: current objective, status, executor and progress',
   `current_event_id` varchar(128) DEFAULT NULL,
@@ -17,7 +16,6 @@ CREATE TABLE `ac_context_collab_collet` (
   `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_collet_context` (`avernet_tenant`, `env`, `collab_context_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_collet_request` (`avernet_tenant`, `env`, `create_request_id`) GLOBAL,
   KEY `idx_context_collab_collet_modified` (`avernet_tenant`, `env`, `gmt_modified`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = 'Minimal context collaboration aggregate snapshot';

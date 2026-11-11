@@ -21,7 +21,6 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    ResourceRef,
     SpaceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
@@ -79,7 +78,6 @@ def _collet(*, current_event_id: str = "evt_004") -> Collet:
     """
     return Collet(
         collab_context_id=COLLET_ID,
-        create_request_id="create-collet-001",
         context_spec=_spec(),
         current_snapshot=CurrentSnapshot(
             objective=OBJECTIVE,

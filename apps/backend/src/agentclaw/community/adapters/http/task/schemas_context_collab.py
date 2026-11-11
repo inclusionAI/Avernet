@@ -126,9 +126,10 @@ class ResourceRefDto(BaseModel):
 class ContextSpec(BaseModel):
     """Nested context-spec shape published as its own schema (spec §6.5).
 
-    Fields map one-to-one onto the §6.2 create-request table except the
-    idempotent request_id; L2/L3/L5/L6 information is held as references or
-    enum strings rather than copied from the external registries.
+    Fields map one-to-one onto the §6.2 create-request table; L2/L3/L5/L6
+    information is held as references or enum strings rather than copied
+    from the external registries. Creation carries no idempotency key:
+    a repeated call creates a second context.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -166,22 +167,8 @@ class ContextSpec(BaseModel):
         "content is never copied.",
     )
 
-
-class ColletCreateRequest(ContextSpec):
-    """Create-collaboration-context request: the context spec plus a request_id."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    request_id: str = Field(
-        min_length=1,
-        description="Client-supplied idempotency key: the same request_id "
-        "replays the original creation result instead of creating a second "
-        "context.",
-    )
-
     def to_domain(self) -> ContextCreateCommand:
         return ContextCreateCommand(
-            request_id=self.request_id,
             space=self.space.to_domain(),
             principal_ref=self.principal_ref.to_domain(),
             product_kind=self.product_kind,
@@ -193,6 +180,12 @@ class ColletCreateRequest(ContextSpec):
             objective=self.objective,
             resource_refs=[ref.to_domain() for ref in self.resource_refs],
         )
+
+
+class ColletCreateRequest(ContextSpec):
+    """Create-collaboration-context request(spec §6.2;无幂等键字段)。"""
+
+    model_config = ConfigDict(extra="ignore")
 
 
 class EventCreateRequest(BaseModel):
@@ -323,7 +316,7 @@ class ContextEventBriefDto(BaseModel):
 
 
 class ContextCollabCreatedResultDto(BaseModel):
-    """Create response plus the idempotent-replay marker."""
+    """Create response(spec §6.2)。"""
 
     collab_context_id: str = Field(
         description="Id of the created collaboration context."
@@ -336,10 +329,6 @@ class ContextCollabCreatedResultDto(BaseModel):
     )
     current_event: ContextEventBriefDto = Field(
         description="The initial task.created event."
-    )
-    replayed: bool = Field(
-        description="True when an earlier create with the same request_id was "
-        "replayed instead of creating a new context."
     )
 
 
@@ -477,7 +466,6 @@ def created_result_to_dto(result: ContextCollabCreatedResult) -> ContextCollabCr
             event_kind=event["event_kind"],
             primitive_type=event["primitive_type"],
         ),
-        replayed=result.replayed,
     )
 
 

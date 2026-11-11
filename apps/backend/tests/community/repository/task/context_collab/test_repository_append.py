@@ -9,7 +9,6 @@
 import dataclasses
 import json
 from datetime import datetime
-from uuid import uuid4
 
 import pytest
 
@@ -69,7 +68,6 @@ def _context_spec() -> ContextSpec:
 def _created_context(repo: ContextCollabRepository) -> str:
     record = repo.create_context(
         CreateContextRecordRequest(
-            create_request_id="create-" + uuid4().hex,
             context_spec=_context_spec(),
             initial_event=InitialEventDraft(
                 event_kind="task.created",

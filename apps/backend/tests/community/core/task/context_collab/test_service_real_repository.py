@@ -14,7 +14,7 @@
   (actor=principal)→ done;
 - A07/08 分支事件(parent=更早事件)在 trunk_events=True/False 两视角间
   只差 task_progress.events 列表,current_snapshot/current_event 一致;
-- A09 幂等与并发:重复 create_request_id 重放、重复事件 request_id 重放
+- A09 幂等与并发(事件侧):重复事件 request_id 重放
   均不落新行;stale expected_version 抛 Conflict 且不落半态;
 - DI 冒烟:测试 profile 组合(TestingDatabaseModule + TaskPersistenceModule
   + TaskModule)与完整 ``build_injector(DeployProfile.TEST)`` 均能解析
@@ -76,7 +76,6 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 def make_create_command(**overrides) -> ContextCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
-        "request_id": "create-collet-001",
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
@@ -205,7 +204,7 @@ class TestAcceptanceFlows:
             _event_column(
                 engine,
                 created.collab_context_id,
-                "create-collet-001",
+                created.current_event["event_id"],
                 ContextCollabEventModel.event_kind,
             )
             == "task.created"
@@ -214,7 +213,7 @@ class TestAcceptanceFlows:
             _event_column(
                 engine,
                 created.collab_context_id,
-                "create-collet-001",
+                created.current_event["event_id"],
                 ContextCollabEventModel.primitive_type,
             )
             == "Task"
@@ -223,7 +222,7 @@ class TestAcceptanceFlows:
             _event_column(
                 engine,
                 created.collab_context_id,
-                "create-collet-001",
+                created.current_event["event_id"],
                 ContextCollabEventModel.sequence_no,
             )
             == 1
@@ -232,7 +231,7 @@ class TestAcceptanceFlows:
             _event_column(
                 engine,
                 created.collab_context_id,
-                "create-collet-001",
+                created.current_event["event_id"],
                 ContextCollabEventModel.is_trunk,
             )
             is True
@@ -425,18 +424,15 @@ class TestAcceptanceFlows:
         assert trunk.context_version == full.context_version
         assert trunk.task_progress.total_events == len(trunk_ids)
 
-    def test_a09_duplicate_create_request_id_replays_without_new_rows(
-        self, service, engine
-    ):
+    def test_a09_repeated_create_makes_distinct_contexts(self, service, engine):
+        """创建不设幂等键(spec 作者裁决):重复调用各建一个上下文。"""
         first = service.create_context(make_create_command(), make_actor())
-
         second = service.create_context(make_create_command(), make_actor())
 
-        assert second.replayed is True
-        assert second.collab_context_id == first.collab_context_id
-        assert second.context_version == first.context_version
-        assert _count(engine, ContextCollabColletModel) == 1
-        assert _count(engine, ContextCollabEventModel) == 1
+        assert first.collab_context_id != second.collab_context_id
+        assert second.context_version == 1
+        assert _count(engine, ContextCollabColletModel) == 2
+        assert _count(engine, ContextCollabEventModel) == 2
 
     def test_a09_duplicate_event_request_id_replays_original_event(
         self, service, engine

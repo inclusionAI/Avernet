@@ -71,7 +71,6 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 def make_create_command(**overrides) -> ContextCreateCommand:
     """构造创建命令(spec §6.2 示例);与 Task 7 测试同形态,可按字段覆盖。"""
     fields = {
-        "request_id": "create-collet-001",
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
@@ -116,9 +115,9 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 class _FakeContextCollabRepository:
     """手写 in-memory 仓储 fake,承载三个用例的仓储真实语义。
 
-    创建:生成 ``collet_`` / ``evt_`` ID、初始快照(status=created、
-    progress 全 0)、初始 task.created 事件;重复 ``create_request_id``
-    返回 ``created=False``。追加:NotFound → 幂等重放(先于版本检查,
+    创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
+    初始快照(status=created、progress 全 0)、初始 task.created 事件。
+    追加:NotFound → 幂等重放(先于版本检查,
     返回原事件 + 当前行 collet)→ ``ensure_expected_version`` →
     parent 存在性检查 → ``snapshot_updater`` 求值 → CAS 推进版本。
     """
@@ -126,22 +125,13 @@ class _FakeContextCollabRepository:
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
         self.events: dict[str, list[EventRecord]] = {}
-        self._create_records: dict[str, ContextCreatedRecord] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
-        replayed = self._create_records.get(request.create_request_id)
-        if replayed is not None:
-            return ContextCreatedRecord(
-                collet=self.collets[replayed.collet.collab_context_id],
-                initial_event=replayed.initial_event,
-                created=False,
-            )
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         collet = Collet(
             collab_context_id=collab_context_id,
-            create_request_id=request.create_request_id,
             context_spec=request.context_spec,
             current_snapshot=CurrentSnapshot(
                 objective=request.context_spec.objective,
@@ -157,7 +147,7 @@ class _FakeContextCollabRepository:
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=event_id,
-            request_id=request.create_request_id,
+            request_id=event_id,
             sequence_no=1,
             parent_event=None,
             is_trunk=True,
@@ -169,13 +159,9 @@ class _FakeContextCollabRepository:
             context_version_after=1,
             occurred_at=datetime.now(timezone.utc),
         )
-        record = ContextCreatedRecord(
-            collet=collet, initial_event=initial_event, created=True
-        )
         self.collets[collab_context_id] = collet
         self.events[collab_context_id] = [initial_event]
-        self._create_records[request.create_request_id] = record
-        return record
+        return ContextCreatedRecord(collet=collet, initial_event=initial_event)
 
     def get_current_status(
         self, collab_context_id: str, *, trunk_events: bool

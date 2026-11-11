@@ -31,9 +31,11 @@ class ActorContext:
 
 @dataclass
 class ContextCreateCommand:
-    """创建协作上下文命令;字段与 spec §6.2 表格一一对应。"""
+    """创建协作上下文命令;字段与 spec §6.2 表格一一对应。
 
-    request_id: str
+    创建不设幂等键(spec 作者裁决:调用方无需传入防重号)。
+    """
+
     space: SpaceRef
     principal_ref: PrincipalRef
     product_kind: str | None
@@ -60,14 +62,12 @@ class EventAppendCommand:
 
 @dataclass
 class ContextCollabCreatedResult:
-    """创建用例结果;``current_snapshot`` 为 §6.2 响应形态(含 progress),
-    ``replayed`` True 表示幂等命中已存在的 ``create_request_id``。"""
+    """创建用例结果;``current_snapshot`` 为 §6.2 响应形态(含 progress)。"""
 
     collab_context_id: str
     context_version: int
     current_snapshot: dict  # CurrentSnapshot 派生的 §6.2 响应投影
     current_event: dict      # 初始事件基础字段投影
-    replayed: bool
 
 
 @dataclass

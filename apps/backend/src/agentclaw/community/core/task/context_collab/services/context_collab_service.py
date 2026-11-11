@@ -210,11 +210,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → 组装结果。
 
         枚举校验(method_kind / product_kind / workflow_kind)与必填字符串
-        校验(request_id / objective)在本层完成;Single 必须有 executor 由
-        结构授权器完成。仓储负责幂等:重复 ``create_request_id``
-        返回原上下文(``replayed=True``)。
+        校验(objective)在本层完成;Single 必须有 executor 由结构授权器
+        完成。创建不设幂等键(spec 作者裁决):重复调用即重复创建。
         """
-        create_request_id = _required_str(command.request_id, "request_id")
         objective = _required_str(command.objective, "objective")
         spec = ContextSpec(
             space=command.space,
@@ -238,7 +236,6 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         record = self._repository.create_context(
             CreateContextRecordRequest(
-                create_request_id=create_request_id,
                 context_spec=spec,
                 initial_event=InitialEventDraft(
                     event_kind=CREATION_EVENT_KIND,
@@ -251,20 +248,13 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
         # progress.current_event_id 为 None,权威事件指针在 Event record)。
-        # 重放路径不盲写初始事件 id:按仓储已存的事件指针投影 —— 上下文
-        # 可能已被后续事件推进,当行的 current_event_id 才反映当前状态。
         snapshot = _created_snapshot_projection(record.collet.current_snapshot)
-        snapshot["progress"]["current_event_id"] = (
-            record.initial_event.event_id
-            if record.created
-            else record.collet.current_event_id
-        )
+        snapshot["progress"]["current_event_id"] = record.initial_event.event_id
         return ContextCollabCreatedResult(
             collab_context_id=record.collet.collab_context_id,
             context_version=record.collet.context_version,
             current_snapshot=snapshot,
             current_event=_created_event_projection(record.initial_event),
-            replayed=not record.created,
         )
 
     def append_event(

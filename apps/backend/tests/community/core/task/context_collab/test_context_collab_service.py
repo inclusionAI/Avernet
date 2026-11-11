@@ -2,7 +2,7 @@
 
 覆盖 ``ContextCollabService.create_context``(spec §6.2 指定执行请求
 示例)、输入校验(未知枚举 / 空值 / 缺 executor)、幂等重放
-(``replayed=True`` 返回原结果)与结构授权器(§13:Single 必须有
+与结构授权器(§13:Single 必须有
 executor、append 身份、visibility 过滤)。仓储用手写 in-memory fake,
 不触碰数据库;真实仓储实现由 Task 8 提供。
 """
@@ -62,7 +62,6 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 def make_create_command(**overrides) -> ContextCreateCommand:
     """用 spec §6.2 指定执行请求示例构造创建命令;可按字段覆盖。"""
     fields = {
-        "request_id": "create-collet-001",
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
@@ -87,32 +86,22 @@ def make_actor(principal_id: str = "u_1001") -> ActorContext:
 class _FakeContextCollabRepository:
     """手写 in-memory 仓储 fake,只实现 create_context 的 P1 语义。
 
-    首次创建:生成 ``collet_`` / ``evt_`` ID、初始快照(status=created、
-    progress.percent=0、current_event_id=None)、初始 task.created 事件
-    (sequence_no=1、is_trunk=True、parent=None),``created=True``;
-    重复 ``create_request_id`` 返回原 collet + 原初始事件,
-    ``created=False``。真实仓储由 Task 8 实现。
+    创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
+    初始快照(status=created、progress.percent=0、current_event_id=None)、
+    初始 task.created 事件(sequence_no=1、is_trunk=True、parent=None)。
+    真实仓储见 persistence/repository.py。
     """
 
     def __init__(self) -> None:
-        self.by_request_id: dict[str, ContextCreatedRecord] = {}
         self.create_calls: list[CreateContextRecordRequest] = []
 
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
         self.create_calls.append(request)
-        replayed = self.by_request_id.get(request.create_request_id)
-        if replayed is not None:
-            return ContextCreatedRecord(
-                collet=replayed.collet,
-                initial_event=replayed.initial_event,
-                created=False,
-            )
 
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         collet = Collet(
             collab_context_id=collab_context_id,
-            create_request_id=request.create_request_id,
             context_spec=request.context_spec,
             current_snapshot=CurrentSnapshot(
                 objective=request.context_spec.objective,
@@ -128,7 +117,7 @@ class _FakeContextCollabRepository:
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
             event_id=event_id,
-            request_id=request.create_request_id,
+            request_id=event_id,
             sequence_no=1,
             parent_event=None,
             is_trunk=True,
@@ -140,11 +129,7 @@ class _FakeContextCollabRepository:
             context_version_after=1,
             occurred_at=datetime.now(timezone.utc),
         )
-        record = ContextCreatedRecord(
-            collet=collet, initial_event=initial_event, created=True
-        )
-        self.by_request_id[request.create_request_id] = record
-        return record
+        return ContextCreatedRecord(collet=collet, initial_event=initial_event)
 
     def append_event(self, collab_context_id, request):
         raise NotImplementedError("fake only implements create_context")
@@ -165,7 +150,6 @@ class TestCreateContext:
         assert isinstance(result, ContextCollabCreatedResult)
         assert result.collab_context_id.startswith("collet_")
         assert result.context_version == 1
-        assert result.replayed is False
         assert result.current_snapshot["objective"] == OBJECTIVE
         assert result.current_snapshot["status"] == "created"
         assert result.current_snapshot["method_kind"] == "Single"
@@ -183,7 +167,6 @@ class TestCreateContext:
         # 服务传给仓储的创建请求语义(§6.2 / 初始事件)。
         request = repo.create_calls[0]
         assert isinstance(request, CreateContextRecordRequest)
-        assert request.create_request_id == "create-collet-001"
         assert request.context_spec.method_kind == "Single"
         assert request.context_spec.executor_ref == EXECUTOR
         assert request.initial_event.event_kind == "task.created"
@@ -201,14 +184,12 @@ class TestCreateContext:
     @pytest.mark.parametrize(
         "overrides",
         [
-            {"request_id": ""},
             {"product_kind": "os"},
             {"workflow_kind": "unknown"},
             {"method_kind": "Swarm"},
             {"objective": ""},
         ],
         ids=[
-            "empty-request-id",
             "unknown-product-kind",
             "unknown-workflow-kind",
             "unknown-method-kind",
@@ -219,20 +200,6 @@ class TestCreateContext:
         service = ContextCollabService(repository=_FakeContextCollabRepository())
         with pytest.raises(ContextCollabValidationError):
             service.create_context(make_create_command(**overrides), make_actor())
-
-    def test_replayed_create_returns_original_result(self):
-        repo = _FakeContextCollabRepository()
-        service = ContextCollabService(repository=repo)
-
-        first = service.create_context(make_create_command(), make_actor())
-        second = service.create_context(make_create_command(), make_actor())
-
-        assert first.replayed is False
-        assert second.replayed is True
-        assert second.collab_context_id == first.collab_context_id
-        assert second.context_version == first.context_version
-        assert second.current_snapshot == first.current_snapshot
-        assert second.current_event == first.current_event
 
     def test_service_satisfies_protocol(self):
         service = ContextCollabService(repository=_FakeContextCollabRepository())
@@ -277,7 +244,6 @@ def _fake_collet(
     """构造带 principal/executor 的最小 Collet,供授权器身份测试用。"""
     return Collet(
         collab_context_id="collet_todo_001",
-        create_request_id="create-collet-001",
         context_spec=ContextSpec(
             space=SpaceRef(space_id="space_workspace_001", environment="prod"),
             principal_ref=PrincipalRef("human", principal_id),

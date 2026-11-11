@@ -1,9 +1,8 @@
 """``ContextCollabRepository`` create/read 落库行为(spec §6.2 / §9.4 规则 1/3/4)。
 
-覆盖:创建同事务插 1 行 collet + 1 行初始 task.created 事件、
-``create_request_id`` 幂等重放(``created=False`` 且不新增行)、
-``get_current_status`` 的 trunk 过滤与 sequence_no 升序、未知 ID 返回 None。
-幂等与 JSON 编解码以落库行为准校验,不只看返回对象。
+覆盖:创建同事务插 1 行 collet + 1 行初始 task.created 事件(创建
+不设幂等键)、``get_current_status`` 的 trunk 过滤与 sequence_no 升序、
+未知 ID 返回 None。JSON 编解码以落库行为准校验,不只看返回对象。
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -54,11 +53,9 @@ def _context_spec(executor: AgentRef | None = EXECUTOR) -> ContextSpec:
 
 
 def _create_request(
-    request_id: str = "create-collet-001",
     executor: AgentRef | None = EXECUTOR,
 ) -> CreateContextRecordRequest:
     return CreateContextRecordRequest(
-        create_request_id=request_id,
         context_spec=_context_spec(executor),
         initial_event=InitialEventDraft(
             event_kind="task.created",
@@ -76,7 +73,6 @@ class TestCreateContext:
         record = repo.create_context(_create_request())
 
         assert isinstance(record, ContextCreatedRecord)
-        assert record.created is True
         with db.orm_session() as session:
             collets = session.query(ContextCollabColletModel).all()
             events = session.query(ContextCollabEventModel).all()
@@ -86,7 +82,6 @@ class TestCreateContext:
             row = collets[0]
             assert row.collab_context_id == record.collet.collab_context_id
             assert row.collab_context_id.startswith("collet_")
-            assert row.create_request_id == "create-collet-001"
             assert row.context_version == 1
             assert row.current_event_id == record.initial_event.event_id
             assert row.env == get_current_env()
@@ -131,7 +126,8 @@ class TestCreateContext:
             assert evt.event_id == record.initial_event.event_id
             assert evt.event_id.startswith("evt_")
             assert evt.collab_context_id == record.collet.collab_context_id
-            assert evt.request_id == "create-collet-001"
+            # 创建不设幂等键:初始事件的 request_id 取其自身 event_id。
+            assert evt.request_id == evt.event_id
             assert evt.sequence_no == 1
             assert evt.parent_event is None
             assert evt.is_trunk is True
@@ -163,7 +159,6 @@ class TestCreateContext:
         assert round_tripped.occurred_at.tzinfo is not None
         assert round_tripped.occurred_at.utcoffset() == timedelta(0)
         # 返回的领域对象与落库行一致。
-        assert record.collet.create_request_id == "create-collet-001"
         assert record.collet.context_spec == _context_spec()
         assert record.collet.current_snapshot.status == "created"
         assert record.collet.current_snapshot.executor_ref == EXECUTOR
@@ -172,24 +167,19 @@ class TestCreateContext:
         assert record.initial_event.actor_ref == CREATOR
         assert record.initial_event.payload == {"objective": OBJECTIVE}
 
-    def test_duplicate_create_request_id_replays_without_new_rows(self, db):
+    def test_repeated_create_makes_a_second_context(self, db):
+        """创建不设幂等键(spec 作者裁决):重复请求各建一个上下文。"""
         repo = ContextCollabRepository(db)
 
         first = repo.create_context(_create_request())
         second = repo.create_context(_create_request())
 
-        assert first.created is True
-        assert second.created is False
-        assert second.collet.collab_context_id == first.collet.collab_context_id
-        assert second.collet == first.collet
-        assert second.initial_event.event_id == first.initial_event.event_id
-        assert second.initial_event.event_kind == "task.created"
-        assert second.initial_event.sequence_no == 1
+        assert first.collet.collab_context_id != second.collet.collab_context_id
+        assert first.initial_event.event_id != second.initial_event.event_id
         with db.orm_session() as session:
-            assert session.query(ContextCollabColletModel).count() == 1
-            assert session.query(ContextCollabEventModel).count() == 1
-
-        # 重放从落库行反序列化,JSON 列 round-trip 无损。
+            assert session.query(ContextCollabColletModel).count() == 2
+            assert session.query(ContextCollabEventModel).count() == 2
+        # 每次创建的 JSON 列均独立 round-trip 无损。
         assert second.collet.context_spec == first.collet.context_spec
         assert second.collet.current_snapshot == first.collet.current_snapshot
         assert second.collet.current_snapshot.executor_ref == EXECUTOR
@@ -205,9 +195,7 @@ class TestGetCurrentStatus:
     def test_trunk_flag_filters_but_never_drops_trunk_events(self, db):
         repo = ContextCollabRepository(db)
         # 无执行 Agent 的创建请求:覆盖 executor_ref=None 的 JSON round-trip。
-        created = repo.create_context(
-            _create_request(request_id="create-trunk-001", executor=None)
-        )
+        created = repo.create_context(_create_request(executor=None))
         assert created.collet.context_spec.executor_ref is None
         assert created.collet.current_snapshot.executor_ref is None
 

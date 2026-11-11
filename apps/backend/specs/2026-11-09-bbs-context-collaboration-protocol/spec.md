@@ -1,7 +1,7 @@
 # 基于上下文自主协作协议 v2 设计方案（ACCS 按需采用版）
 
 - 日期：2026-11-09
-- 修订：2026-11-11
+- 修订：2026-11-11（创建接口去除 request_id 幂等键及 create_request_id 列）
 - 状态：Draft / 待评审，尚未实现
 - 主题：基于上下文（Context / Collet）的自主协作
 - 代码落点：`apps/backend/src/agentclaw/community/core/task/context_collab/`
@@ -380,7 +380,6 @@ GET  /openapi/v1/collaboration/task/context_collab/{collab_context_id}
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
-| `request_id` | body | string | 是 | G2 幂等键 |
 | `space` | body | object | 是 | L3 Space 引用 |
 | `principal_ref` | body | object | 是 | L2 责任主体引用 |
 | `product_kind` | body | string | 否 | L6 产品类型，如 `team_todo`、`public_discussion` |
@@ -399,7 +398,6 @@ Content-Type: application/json
 
 ```json
 {
-  "request_id": "create-collet-001",
   "space": {
     "space_id": "space_workspace_001",
     "environment": "prod"
@@ -828,7 +826,7 @@ experiment_ledger.py         # G3 演进实验不在当前范围
 - `ac_context_collab_collet.current_snapshot`：当前 objective、status、executor、method 和 progress 的查询快照。
 - `ac_context_collab_event.payload`：事件业务数据；用户互动消息直接放 `payload.content`。
 
-`request_id` 通过两张表的唯一键实现幂等，不另建幂等表；`trunk_events` 是查询参数，不落表。
+事件侧的 `request_id` 通过 `ac_context_collab_event` 的唯一键实现幂等，不另建幂等表；创建接口不设幂等键（调用方无需传入防重号，重复调用即重复创建）；`trunk_events` 是查询参数，不落表。
 
 ### 9.3 持久化层目录与职责
 
@@ -848,7 +846,7 @@ get_current_status(collab_context_id, trunk_events) -> current status
 
 ### 9.4 三个 API 的事务规则
 
-1. **创建**：同一事务插入一行 `ac_context_collab_collet` 和一行初始 `task.created` 事件；重复 `create_request_id` 返回原上下文。
+1. **创建**：同一事务插入一行 `ac_context_collab_collet` 和一行初始 `task.created` 事件；创建不设幂等键，重复调用即重复创建。
 2. **追加事件**：锁定 Collet 行，检查 `expected_version`、`parent_event` 和权限；同一事务插入 Event 并更新 Collet 的 `current_snapshot`、`current_event_id`、`context_version`。
 3. **查询**：读取一行 Collet 和事件列表；按授权和 `trunk_events` 过滤，组合 `task_progress.events[]`；不写数据库。
 4. **事件 DAG**：主事件 `parent_event=null`，派生事件引用同一上下文内已存在事件；`is_trunk` 在接纳时计算；事件顺序使用 `sequence_no`。
@@ -867,7 +865,6 @@ CREATE TABLE `ac_context_collab_collet` (
   `avernet_tenant` varchar(64) NOT NULL DEFAULT 'teamclaw',
   `env` varchar(20) NOT NULL,
   `collab_context_id` varchar(128) NOT NULL,
-  `create_request_id` varchar(256) NOT NULL,
   `context_spec` mediumtext NOT NULL COMMENT 'JSON: create request references and method fields',
   `current_snapshot` mediumtext NOT NULL COMMENT 'JSON: current objective, status, executor and progress',
   `current_event_id` varchar(128) DEFAULT NULL,
@@ -876,7 +873,6 @@ CREATE TABLE `ac_context_collab_collet` (
   `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_collet_context` (`avernet_tenant`, `env`, `collab_context_id`) GLOBAL,
-  UNIQUE KEY `uk_context_collab_collet_request` (`avernet_tenant`, `env`, `create_request_id`) GLOBAL,
   KEY `idx_context_collab_collet_modified` (`avernet_tenant`, `env`, `gmt_modified`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = 'Minimal context collaboration aggregate snapshot';

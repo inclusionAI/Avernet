@@ -85,7 +85,6 @@ _BAD_HEADERS = {PRINCIPAL_HEADER: "not-a-gateway-signed-token"}
 def _create_body() -> dict:
     """spec §6.2 指定执行请求示例 (verbatim JSON)."""
     return {
-        "request_id": "create-collet-001",
         "space": {"space_id": "space_workspace_001", "environment": "prod"},
         "principal_ref": {"principal_type": "human", "principal_id": "u_1001"},
         "product_kind": "team_todo",

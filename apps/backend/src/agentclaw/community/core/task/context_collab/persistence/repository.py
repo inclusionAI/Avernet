@@ -19,7 +19,6 @@ from uuid import uuid4
 
 from injector import inject
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -55,7 +54,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 # 初始事件对进入 Collet 的主体可见(G4 visibility 白名单内,spec §6.3)。
 _CREATION_EVENT_VISIBILITY = "public"
-_COLLET_REQUEST_INDEX = "uk_context_collab_collet_request"
 
 
 @dataclass
@@ -70,20 +68,18 @@ class InitialEventDraft:
 
 @dataclass
 class CreateContextRecordRequest:
-    """仓储创建请求;``create_request_id`` 是 G2 幂等键。"""
+    """仓储创建请求;创建不设幂等键(spec 作者裁决:调用方无需防重)。"""
 
-    create_request_id: str
     context_spec: ContextSpec
     initial_event: InitialEventDraft
 
 
 @dataclass
 class ContextCreatedRecord:
-    """仓储创建返回;``created=False`` 表示幂等命中返回原上下文。"""
+    """仓储创建返回:新建的 Collet 与其初始事件。"""
 
     collet: Collet
     initial_event: EventRecord
-    created: bool
 
 
 @dataclass
@@ -130,10 +126,9 @@ class EventAppendedRecord:
 class ContextCollabRepositoryProtocol(Protocol):
     """Collet 聚合的两张表(ac_context_collab_collet/event)存取协议。
 
-    ``create_context`` 首次创建插 collet(initial
-    snapshot/context_version=1)+ 初始事件(sequence_no=1、
-    is_trunk=True、parent=None),重复 ``create_request_id`` 返回
-    原行且 ``created=False``。
+    ``create_context`` 插 collet(initial snapshot/context_version=1)
+    + 初始事件(sequence_no=1、is_trunk=True、parent=None);
+    创建不设幂等键,重复调用即重复创建。
     """
 
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord: ...
@@ -150,7 +145,6 @@ def _collet_from_row(row: ContextCollabColletModel) -> Collet:
     """落库行 → ``Collet`` 领域对象;显式逐字段构造。"""
     return Collet(
         collab_context_id=row.collab_context_id,
-        create_request_id=row.create_request_id,
         context_spec=ContextSpec.from_dict(json.loads(row.context_spec)),
         current_snapshot=CurrentSnapshot.from_dict(json.loads(row.current_snapshot)),
         current_event_id=row.current_event_id,
@@ -179,33 +173,6 @@ def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
         payload=json.loads(row.payload),
         context_version_after=int(row.context_version_after),
         occurred_at=occurred_at,
-    )
-
-
-def _is_unique_conflict(
-    exc: IntegrityError,
-    *,
-    index_name: str,
-    table_name: str,
-    required_columns: tuple[str, ...],
-) -> bool:
-    """Recognize one named MySQL/OceanBase or column-based SQLite conflict."""
-    message = str(getattr(exc, "orig", None) or exc)
-    if index_name in message:
-        return True
-    return (
-        "UNIQUE constraint failed" in message
-        and table_name in message
-        and all(column in message for column in required_columns)
-    )
-
-
-def _is_collet_request_idempotency_conflict(exc: IntegrityError) -> bool:
-    return _is_unique_conflict(
-        exc,
-        index_name=_COLLET_REQUEST_INDEX,
-        table_name="ac_context_collab_collet",
-        required_columns=("avernet_tenant", "env", "create_request_id"),
     )
 
 
@@ -265,15 +232,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
         """创建 Collet + 初始事件(spec §9.4 规则 1:同一事务两行)。
 
-        幂等(spec §9.4 规则 1/G2):事务前先按 ``create_request_id`` 查
-        重放,命中返回原 collet + 原初始事件且 ``created=False``;并发下
-        由 ``uk_context_collab_collet_request`` 唯一键兜底,IntegrityError
-        分类命中后转为重放,其余如实上抛。
+        创建不设幂等键(spec 作者裁决):重复调用即重复创建,自然防重
+        由调用方保证。初始事件的 ``request_id`` 列取其自身 ``event_id``
+        (该列 NOT NULL;event_id 上下文内唯一,不与追加事件的幂等键
+        语义冲突——追加的 ``request_id`` 是调用方指定的防重号)。
         """
-        replay = self._find_request_replay(request.create_request_id)
-        if replay is not None:
-            return replay
-
         spec = request.context_spec
         # 初始快照由创建参数派生:status=created、progress 全 0;快照内的
         # progress.current_event_id 由 service 组装响应时回填(spec §6.2)。
@@ -287,10 +250,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         )
         now = datetime.now(timezone.utc)
         collab_context_id = "collet_" + uuid4().hex
+        event_id = "evt_" + uuid4().hex
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
-            event_id="evt_" + uuid4().hex,
-            request_id=request.create_request_id,
+            event_id=event_id,
+            request_id=event_id,
             sequence_no=1,
             parent_event=None,
             is_trunk=True,
@@ -304,31 +268,16 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         )
         collet = Collet(
             collab_context_id=collab_context_id,
-            create_request_id=request.create_request_id,
             context_spec=spec,
             current_snapshot=snapshot,
             current_event_id=initial_event.event_id,
             context_version=1,
         )
-        try:
-            with self._transaction() as db:
-                # 事务内复查:窗口内并发的重复创建到此转为重放。
-                replay = self._replay_record(db, request.create_request_id)
-                if replay is not None:
-                    return replay
-                db.add(self._collet_row(collet, now=now))
-                db.add(self._event_row(initial_event, now=now))
-                db.flush()
-                return ContextCreatedRecord(
-                    collet=collet, initial_event=initial_event, created=True
-                )
-        except IntegrityError as exc:
-            if not _is_collet_request_idempotency_conflict(exc):
-                raise
-            replay = self._find_request_replay(request.create_request_id)
-            if replay is None:
-                raise
-            return replay
+        with self._transaction() as db:
+            db.add(self._collet_row(collet, now=now))
+            db.add(self._event_row(initial_event, now=now))
+            db.flush()
+            return ContextCreatedRecord(collet=collet, initial_event=initial_event)
 
     def append_event(
         self, collab_context_id: str, request: "AppendEventRecordRequest"
@@ -463,54 +412,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 events=[_event_from_row(event_row) for event_row in event_rows],
             )
 
-    def _find_request_replay(
-        self, create_request_id: str
-    ) -> ContextCreatedRecord | None:
-        """事务外按 G2 幂等键查重放;未命中返回 ``None``。"""
-        with self._db.orm_session() as db:
-            return self._replay_record(db, create_request_id)
-
-    def _replay_record(
-        self, db, create_request_id: str
-    ) -> ContextCreatedRecord | None:
-        """collet + 其初始事件一起读出并组装 ``created=False`` 记录。"""
-        row = (
-            db.query(ContextCollabColletModel)
-            .filter(
-                ContextCollabColletModel.create_request_id == create_request_id,
-                ContextCollabColletModel.env == get_current_env(),
-            )
-            .one_or_none()
-        )
-        if row is None:
-            return None
-        event_row = (
-            db.query(ContextCollabEventModel)
-            .filter(
-                ContextCollabEventModel.collab_context_id == row.collab_context_id,
-                ContextCollabEventModel.request_id == create_request_id,
-                ContextCollabEventModel.env == get_current_env(),
-            )
-            .one_or_none()
-        )
-        if event_row is None:
-            # collet 与初始事件同一事务写入,缺行即存储被外部破坏;如实上抛。
-            raise RuntimeError(
-                f"collet {row.collab_context_id!r} has no initial event for "
-                f"create request {create_request_id!r}"
-            )
-        return ContextCreatedRecord(
-            collet=_collet_from_row(row),
-            initial_event=_event_from_row(event_row),
-            created=False,
-        )
-
     @staticmethod
     def _collet_row(collet: Collet, *, now: datetime) -> ContextCollabColletModel:
         """``Collet`` 领域对象 → 落库行;tenant 由 ORM guard 盖章。"""
         return ContextCollabColletModel(
             collab_context_id=collet.collab_context_id,
-            create_request_id=collet.create_request_id,
             context_spec=_dump_json(collet.context_spec.to_dict()),
             current_snapshot=_dump_json(collet.current_snapshot.to_dict()),
             current_event_id=collet.current_event_id,

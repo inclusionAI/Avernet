@@ -220,13 +220,12 @@ class CurrentSnapshot:
 class Collet:
     """L4 协作上下文聚合根。
 
-    持有聚合标识、创建幂等键、创建参数、当前快照与聚合版本;事件事实由
+    持有聚合标识、创建参数、当前快照与聚合版本;事件事实由
     ``ac_context_collab_event`` 表(见 ``event_envelope.EventRecord``)承载,
     快照由事件改写,不在此复制事件历史。
     """
 
     collab_context_id: str
-    create_request_id: str
     context_spec: ContextSpec
     current_snapshot: CurrentSnapshot
     current_event_id: str | None

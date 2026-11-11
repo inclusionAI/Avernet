@@ -73,7 +73,6 @@ class ContextCollabColletModel(Base):
         nullable=False,
     )
     collab_context_id = Column(String(128), nullable=False)
-    create_request_id = Column(String(256), nullable=False)
     context_spec = Column(_medium_text(), nullable=False)
     current_snapshot = Column(_medium_text(), nullable=False)
     current_event_id = Column(String(128), nullable=True)
@@ -91,13 +90,6 @@ class ContextCollabColletModel(Base):
             "avernet_tenant",
             "env",
             "collab_context_id",
-            unique=True,
-        ),
-        Index(
-            "uk_context_collab_collet_request",
-            "avernet_tenant",
-            "env",
-            "create_request_id",
             unique=True,
         ),
         Index(

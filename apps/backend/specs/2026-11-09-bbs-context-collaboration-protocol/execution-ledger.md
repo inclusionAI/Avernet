@@ -130,3 +130,8 @@ All R1-R6 rulings audited consistent with spec. Spec errata filed mentally: §6.
 
 Final fix wave: fix round 1/1 (2 addressed: Artifact doc claim + .gitignore entry; 0 open; commits 2bcb122..ad612f9, re-review clean)
 BRANCH COMPLETE: 24 commits, origin/dev 833a7db84..ad612f97d. Final review clean. Workspace retired; git history is the record.
+
+## 合并后变更(2026-11-11)
+
+- **Ruling R7(spec 作者指示):** 创建接口去除幂等 —— `request_id` 不再是创建请求参数,`ac_context_collab_collet` 去掉 `create_request_id` 列与 `uk_context_collab_collet_request` 唯一键;重复调用即重复创建,防重由调用方保证。事件侧 `request_id` 幂等(`uk_context_collab_event_request`)不变。初始事件的 `request_id` 列取其自身 `event_id`(列 NOT NULL)。
+- 同步范围:spec §6.2/§9.2/§9.4/§9.5,ORM 模型,DDL(分支内建表,未落库 dev,原地修订),仓储(删除三层重放链),service_api/服务/DTO(replayed 字段移除),9 个测试文件(重复创建改为"各建一个上下文"的正向覆盖)。

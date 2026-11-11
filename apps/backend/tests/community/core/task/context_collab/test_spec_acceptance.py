@@ -73,7 +73,6 @@ _EVENT_ENTRY_FIELDS = frozenset(
 def make_create_command(**overrides) -> ContextCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
-        "request_id": "create-collet-001",
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",

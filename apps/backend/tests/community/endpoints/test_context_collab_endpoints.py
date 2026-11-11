@@ -146,7 +146,6 @@ def client_world():
 def create_body():
     """spec §6.2 指定执行请求示例 (verbatim JSON)."""
     return {
-        "request_id": "create-collet-001",
         "space": {"space_id": "space_workspace_001", "environment": "prod"},
         "principal_ref": {"principal_type": "human", "principal_id": "u_1001"},
         "product_kind": "team_todo",
@@ -201,7 +200,6 @@ def test_create_happy_path_envelope_and_snapshot(client_world):
     assert "request_id" in body
     assert body["data"]["collab_context_id"].startswith("collet_")
     assert body["data"]["context_version"] == 1
-    assert body["data"]["replayed"] is False
 
     snapshot = body["data"]["current_snapshot"]
     assert snapshot["objective"] == "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -462,7 +460,6 @@ def _seed_create_happy(world) -> None:
                 "event_kind": "task.created",
                 "primitive_type": "Task",
             },
-            replayed=False,
         )
 
     bind_overrides(

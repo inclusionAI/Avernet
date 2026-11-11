@@ -227,7 +227,6 @@ def test_collet_holds_aggregate_state():
     snapshot = CurrentSnapshot.from_dict(SNAPSHOT_DICT)
     collet = Collet(
         collab_context_id="collet_todo_001",
-        create_request_id="create-request-001",
         context_spec=spec,
         current_snapshot=snapshot,
         current_event_id="evt_004",

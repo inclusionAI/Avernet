@@ -29,7 +29,6 @@ def test_collet_columns_match_ddl(engine):
         "avernet_tenant",
         "env",
         "collab_context_id",
-        "create_request_id",
         "context_spec",
         "current_snapshot",
         "current_event_id",
@@ -45,10 +44,9 @@ def test_collet_unique_keys_match_ddl(engine):
         indexes["uk_context_collab_collet_context"]["column_names"]
     ) == ("avernet_tenant", "env", "collab_context_id")
     assert indexes["uk_context_collab_collet_context"]["unique"]
-    assert tuple(
-        indexes["uk_context_collab_collet_request"]["column_names"]
-    ) == ("avernet_tenant", "env", "create_request_id")
-    assert indexes["uk_context_collab_collet_request"]["unique"]
+    assert not any(
+        name.startswith("uk_context_collab_collet_request") for name in indexes
+    )
     assert tuple(
         indexes["idx_context_collab_collet_modified"]["column_names"]
     ) == ("avernet_tenant", "env", "gmt_modified")
