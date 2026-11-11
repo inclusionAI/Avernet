@@ -10,7 +10,7 @@ orientation.
 
 - `docs/adr/` is the authority for BaaS architecture **decisions** and their
   consequences. Start at its [`README.md`](docs/adr/README.md) index; the
-  current set is ADR-0001 … ADR-0014.
+  current set is ADR-0001 … ADR-0015.
 - Orientation set: ADR-0001 (layering and where code belongs), ADR-0003
   (the spi ↔ plugins seam for any new backend), ADR-0007 (how the two
   editions relate). ADR-0005/0004 before touching publish or lifecycle code;
