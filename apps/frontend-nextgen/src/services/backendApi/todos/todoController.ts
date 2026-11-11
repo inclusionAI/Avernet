@@ -5,6 +5,7 @@ import type {
   TodoListQuery,
   UpdateTodoInput,
 } from '@/domain/todos/models';
+import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
@@ -60,14 +61,14 @@ export const TODO_ENDPOINTS = {
 export function listTodos(query: TodoListQuery) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<TodoDto> | TodoDto[]>>(TODO_ENDPOINTS.list, {
     method: 'GET',
-    params: {
+    params: userScopedParams({
       space_id: query.spaceId,
       keyword: query.keyword || undefined,
       status: query.status,
       bot_id: query.botId,
       page: query.page,
       page_size: query.pageSize,
-    },
+    }),
     operation: 'list-todos',
     retryOnTransient: true,
   });
@@ -76,6 +77,7 @@ export function listTodos(query: TodoListQuery) {
 export function getTodo(todoId: string) {
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.detail(todoId), {
     method: 'GET',
+    params: userScopedParams(),
     operation: 'get-todo',
     retryOnTransient: true,
   });
@@ -84,6 +86,7 @@ export function getTodo(todoId: string) {
 export function createTodo(input: CreateTodoInput) {
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.list, {
     method: 'POST',
+    params: userScopedParams(),
     data: {
       space_id: input.spaceId,
       title: input.title,
@@ -97,6 +100,7 @@ export function createTodo(input: CreateTodoInput) {
 export function updateTodo(todoId: string, input: UpdateTodoInput) {
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.detail(todoId), {
     method: 'PATCH',
+    params: userScopedParams(),
     data: {
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.description === undefined ? {} : { description: input.description }),
@@ -109,6 +113,7 @@ export function updateTodo(todoId: string, input: UpdateTodoInput) {
 export function submitTodoAcceptance(todoId: string, input: TodoAcceptanceInput) {
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.acceptance(todoId), {
     method: 'POST',
+    params: userScopedParams(),
     data: {
       verdict: input.verdict,
       message: input.message || undefined,
@@ -120,6 +125,7 @@ export function submitTodoAcceptance(todoId: string, input: TodoAcceptanceInput)
 export function listTodoInteractions(todoId: string) {
   return backendRequest<BackendApiEnvelope<TodoEventDto[]>>(TODO_ENDPOINTS.interactions(todoId), {
     method: 'GET',
+    params: userScopedParams(),
     operation: 'list-todo-interactions',
     retryOnTransient: true,
   });
@@ -128,6 +134,7 @@ export function listTodoInteractions(todoId: string) {
 export function createTodoInteraction(todoId: string, input: CreateTodoInteractionInput) {
   return backendRequest<BackendApiEnvelope<TodoEventDto>>(TODO_ENDPOINTS.interactions(todoId), {
     method: 'POST',
+    params: userScopedParams(),
     data: { message: input.message },
     operation: 'create-todo-interaction',
   });
@@ -136,6 +143,7 @@ export function createTodoInteraction(todoId: string, input: CreateTodoInteracti
 export function listTodoEvents(todoId: string) {
   return backendRequest<BackendApiEnvelope<TodoEventDto[]>>(TODO_ENDPOINTS.events(todoId), {
     method: 'GET',
+    params: userScopedParams(),
     operation: 'list-todo-events',
     retryOnTransient: true,
   });
@@ -144,6 +152,7 @@ export function listTodoEvents(todoId: string) {
 export function runTodo(todoId: string) {
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.run(todoId), {
     method: 'POST',
+    params: userScopedParams(),
     operation: 'run-todo',
   });
 }
