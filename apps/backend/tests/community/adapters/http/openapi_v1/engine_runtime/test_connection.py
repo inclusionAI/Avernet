@@ -335,6 +335,7 @@ def test_friend_connection_rejects_instance_selection(client, connections):
         (404, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 409),
         (503, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 409),
         (404, {"detail": {"error": "BOT_NOT_FOUND"}}, 502),
+        (404, "NO_ACTIVE_DEVICES", 502),
         (503, {"detail": {"error": "OTHER"}}, 502),
         (500, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 502),
         (None, None, 502),
@@ -364,6 +365,8 @@ def test_baas_http_failure_through_device_router_and_public_api(
     http = Mock()
     if status is None:
         http.get.side_effect = httpx.ReadTimeout("timeout", request=request)
+    elif isinstance(body, str):
+        http.get.return_value = httpx.Response(status, text=body, request=request)
     else:
         http.get.return_value = httpx.Response(status, json=body, request=request)
     baas = BaasService(
