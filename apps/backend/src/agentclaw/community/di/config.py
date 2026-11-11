@@ -25,6 +25,7 @@ from agentclaw.community.di.acli_market_config import (
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig as OpenApiUserIdBypassConfig,
 )
+from agentclaw.community.di.clawweb_config import ClawwebConfig as ClawwebConfig
 
 from agentclaw.community.core.apply_engine.delivery_mode import (
     TeclawDeliveryMode,

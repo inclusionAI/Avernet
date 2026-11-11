@@ -170,7 +170,14 @@ QUALIFIER_BAAS = "baas"
 QUALIFIER_BCN = "bcn"
 QUALIFIER_GENERAL = "general"
 QUALIFIER_MASA_AGENT_EVAL = "masa_agent_eval"
+QUALIFIER_CLAWWEB = "clawweb"
 """General-purpose HttpClient with ``base_url=""`` — callers pass full absolute
 URLs so no base-URL prefix is prepended. Use when the target host varies
 per-call (e.g. BaaS ``invoke_http`` / ``get_http_info`` where the container
 URL is resolved at runtime from BaaS and differs from the BaaS host itself)."""
+"""Clawweb host — the bot-workflow-permission clone endpoint the ``task_nav``
+bot_config kind POSTs at apply time. ``base_url`` is the per-deployment
+clawweb origin (prod / pre / simulator-internal), selected by the deployment
+overlay the same way every other qualified binding is; the ``task_nav``
+handler's clone Port injects this qualifier and POSTs the relative
+``/api/internal/bot-workflow-permissions/clone`` path."""
