@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  s_befd386ce20825::t_b6ce84b5611201 27,125,161,186,206
+apps/backend/tests/community/core/bot_public/test_risk_repository.py
+  s_31bddf6da485b6::t_45546068418158 367-387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a4d7a007243c93de666bca1c2395f058eaf6248",
+  "prompts": {},
+  "sessions": {
+    "s_31bddf6da485b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e3c-6538-7131-aa36-096bb26dec74",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
