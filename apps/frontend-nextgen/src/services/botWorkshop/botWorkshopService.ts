@@ -314,14 +314,8 @@ export const botWorkshopService = {
         ...(input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
       };
     }
-    // success:dst bot 异步创建中,头像 best-effort 持久化(失败仅 console.warn,不阻断)。
-    if (input.avatarUrl) {
-      try {
-        await botAvatarService.save(dto.bot_id, input.avatarUrl);
-      } catch (avatarError) {
-        console.warn('[botWorkshopService.copyBot] avatar 持久化失败,降级为默认头像:', avatarError);
-      }
-    }
+    // The destination is created asynchronously; the caller saves its avatar
+    // after the destination becomes readable.
     return { type: 'issued', botId: dto.bot_id, operationId: dto.operation_id };
   },
   /**

@@ -8,7 +8,8 @@ import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { cn } from '@/utils/cn';
 import type React from 'react';
-import AvatarEditor from '../BotAvatar/AvatarEditor';
+import { useState } from 'react';
+import AvatarEditor, { type AvatarProcessingStatus } from '../BotAvatar/AvatarEditor';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
 import { CreateBotEngineSelector } from './CreateBotEngineSelector';
 import { DesktopDeviceFields } from './DesktopDeviceFields';
@@ -51,6 +52,7 @@ export function CreateBotFormFields({
   onCancel,
   onSubmit,
 }: CreateBotFormFieldsProps) {
+  const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
   const configuredEngines = useBotEngineOptions();
   const engineOptions =
     values.scenario === 'local'
@@ -115,7 +117,7 @@ export function CreateBotFormFields({
     ) : null;
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" onSubmit={(event) => { if (avatarStatus !== 'idle') event.preventDefault(); else onSubmit(event); }}>
       {isLocal ? <DesktopDeviceFields values={values} setValues={setValues} /> : null}
       <div className="space-y-4">
         <label className="block space-y-2 text-xs font-medium text-foreground">
@@ -161,6 +163,7 @@ export function CreateBotFormFields({
         <div className="space-y-2 text-xs font-medium text-foreground">
           <span className="block">Bot 头像</span>
           <AvatarEditor
+            onProcessingChange={setAvatarStatus}
             value={values.avatarUrl ?? ''}
             seed={values.name.trim() || 'new-bot'}
             disabled={creating}
@@ -245,6 +248,7 @@ export function CreateBotFormFields({
               !hasEngineOptions ||
               Boolean(isAgentCoding && agentCodingError) ||
               creating ||
+              avatarStatus !== 'idle' ||
               (isLocal && !values.local?.mountPath)
             }
             loading={creating}
