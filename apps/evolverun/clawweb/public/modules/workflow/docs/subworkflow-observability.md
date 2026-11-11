@@ -32,8 +32,15 @@ The trusted engine `POST /api/internal/runs` path accepts an optional
 `parent_relation` only when covered by the existing engine signature. The server
 locks and validates the parent run, its currently-running node execution, its
 persisted immutable workflow snapshot, and—when present—the durable fanout
-group/item dispatch claim. It verifies the persisted parent bot/owner/session
-identity and child workflow before inserting the child run and `flow_run_links`
+group/item dispatch claim. On an externally provisioned database that predates
+migration v145, `flow_runs.workflow_snapshot_json` may be absent; in that
+compatibility mode only a deployment-bound run (with valid `workflow_version`
+and `workflow_deploy_number`) may resolve its immutable snapshot through
+`workflow_deploy_history`. Saved/draft runs cannot use this fallback because
+their mutable `state_json` is not a trusted registration receipt.
+
+It verifies the persisted parent bot/owner/session identity and child workflow
+before inserting the child run and `flow_run_links`
 in one transaction. The response includes the validated snake-case
 `parent_relation` receipt; it is not stored in or exposed as the public run row.
 Exact retries return the same receipt and relation; changed registration
