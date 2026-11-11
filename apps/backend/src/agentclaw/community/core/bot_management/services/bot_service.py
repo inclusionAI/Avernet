@@ -180,9 +180,6 @@ PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 # aggregate failure.
 _CALLER_REFRESH_MAX_WORKERS = 5
 
-# Rollout gate: enable only after the scheduled credential provider is deployed.
-SCHEDULED_CALLER_REFRESH_ENABLED = False
-
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
     """构建操作人上下文。"""
@@ -6102,33 +6099,28 @@ class BotService(BotServiceProtocol):
                     "skipped": True,
                     "reason": f"unsupported bot_type: {bot_type}",
                 }
-            if bot_type == "service" and not SCHEDULED_CALLER_REFRESH_ENABLED:
-                logger.info(
-                    "scheduled_caller_refresh_skipped bot_id=%s owner_user_id=%s reason=disabled",
-                    bot_id, user_id,
-                )
-            if SCHEDULED_CALLER_REFRESH_ENABLED and bot_type == "service" and self._scheduled_caller_refresh is not None:
+            if bot_type == "service" and self._scheduled_caller_refresh is not None:
                 refresh_fields = {
                     "bot_id": bot_id, "owner_user_id": user_id,
+                    "entity_id": stable_resource_owner_id(bot), "env": get_current_env(),
                 }
                 started = time.monotonic()
+                logger.info("scheduled_caller_refresh_requested fields=%s", refresh_fields)
                 try:
-                    refresh_fields.update(entity_id=stable_resource_owner_id(bot), env=get_current_env())
-                    logger.info("scheduled_caller_refresh_requested fields=%s", refresh_fields)
                     # COSEC: use the resolved Bot's tenant, never a callback-supplied tenant.
                     with avernet_tenant_scope(bot.get("avernet_tenant") or DEFAULT_AVERNET_TENANT):
                         self._scheduled_caller_refresh.refresh(**refresh_fields)
                 except Exception as exc:
-                    # COSEC: optional Caller failures must not fail Owner refresh or expose credentials.
                     logger.warning(
-                        "scheduled_caller_refresh_failed fields=%s owner_refresh=success error_type=%s duration_ms=%.1f",
+                        "scheduled_caller_refresh_failed fields=%s error_type=%s duration_ms=%.1f",
                         refresh_fields, type(exc).__name__, (time.monotonic() - started) * 1000,
                     )
-                else:
-                    logger.info(
-                        "scheduled_caller_refresh_succeeded fields=%s duration_ms=%.1f",
-                        refresh_fields, (time.monotonic() - started) * 1000,
-                    )
+                    # COSEC: provider exceptions may contain credentials; expose only a stable failure.
+                    raise BotServiceError("Caller credential refresh failed") from None
+                logger.info(
+                    "scheduled_caller_refresh_succeeded fields=%s duration_ms=%.1f",
+                    refresh_fields, (time.monotonic() - started) * 1000,
+                )
             logger.info(
                 f"[bot_service.refresh_passport_token] Device hot-update succeeded: "
                 f"bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, bindings={bindings}"

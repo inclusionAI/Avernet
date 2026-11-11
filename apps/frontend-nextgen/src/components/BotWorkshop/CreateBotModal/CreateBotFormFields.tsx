@@ -19,7 +19,6 @@ interface CreateBotFormFieldsProps {
   spaces: BotCreateSpace[];
   creating: boolean;
   error?: string;
-  onErrorChange?: (error?: string) => void;
   agentCodingError?: string;
   agentCodingTemplates: AgentCodingTemplate[];
   agentCodingTemplatesLoading?: boolean;
@@ -40,7 +39,6 @@ export function CreateBotFormFields({
   spaces,
   creating,
   error,
-  onErrorChange,
   agentCodingError,
   agentCodingTemplates,
   agentCodingTemplatesLoading,
@@ -130,12 +128,7 @@ export function CreateBotFormFields({
             maxLength={40}
             placeholder="例如：项目知识助手"
             className={inputFocusClass}
-            onChange={(event) => {
-              // 名称修正后立即清理上一次提交遗留的名称错误，避免旧错误
-              // 持续置红名称输入框，也避免遮挡 AgentCoding 配置校验提示。
-              onErrorChange?.(undefined);
-              setValues((current) => ({ ...current, name: event.target.value }));
-            }}
+            onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
           {nameHasInvalidCharacter ? (
@@ -241,12 +234,7 @@ export function CreateBotFormFields({
           </Button>
           <Button
             type="submit"
-            disabled={
-              !hasEngineOptions ||
-              Boolean(isAgentCoding && agentCodingError) ||
-              creating ||
-              (isLocal && !values.local?.mountPath)
-            }
+            disabled={!hasEngineOptions || creating || (isLocal && !values.local?.mountPath)}
             loading={creating}
           >
             {isLocal ? '创建本地 Bot' : '创建云端 Bot'}

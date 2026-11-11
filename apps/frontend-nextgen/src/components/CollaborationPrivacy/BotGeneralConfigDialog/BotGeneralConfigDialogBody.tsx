@@ -214,7 +214,7 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
                   bot={targetBot}
                   busyAction={privacy.busyAction}
                   onToggleDirect={privacy.toggleDirect}
-                  grid={false}
+                  grid={isExternalBot}
                   visibleSettings={visibleAbilitySettings}
                   afterCollaborationStatus={repairRow}
                 />

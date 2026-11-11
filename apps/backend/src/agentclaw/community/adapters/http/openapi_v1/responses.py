@@ -331,8 +331,6 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
-    ServicePublicationGateBlockedError,
-    ServicePublicationGatePendingError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -565,14 +563,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
-    ServicePublicationGateBlockedError: (
-        403,
-        "评测未通过，无法推进发布",
-    ),
-    ServicePublicationGatePendingError: (
-        409,
-        "评测认证处理中，请稍后再试",
-    ),
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -882,8 +872,6 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetAccessDeniedError: 403201,
     McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
-    ServicePublicationGateBlockedError: 403210,
-    ServicePublicationGatePendingError: 409210,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {

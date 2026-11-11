@@ -138,7 +138,7 @@ class TestRouter:
         }
         assert svc.callback.calls[-1] == (
             "search_bots",
-            ("需要测试能力", "t1", "t1", "run-1"),
+            ("需要测试能力", "t1", "t1"),
         )
 
     def test_relay_search_ignores_unknown_fields(self, task_client):
@@ -162,7 +162,7 @@ class TestRouter:
         assert response.status_code == 200, response.text
         assert len(svc.callback.calls) == before + 1
 
-        assert svc.callback.calls[-1] == ("search_bots", ("需要测试能力", "t1", "t1", "run-1"))
+        assert svc.callback.calls[-1] == ("search_bots", ("需要测试能力", "t1", "t1"))
 
     def test_relay_dispatch_uses_internal_network_and_origin_generation(
         self, task_client
@@ -890,7 +890,6 @@ def test_relay_search_forwards_explicit_viewer_after_generation_check(
             "query": "q",
             "task_id": "t1",
             "node_id": "t1",
-            "relay_token": "run-1",
             "viewer_actor_type": viewer_type,
             "viewer_actor_id": viewer_id,
         }
@@ -952,4 +951,4 @@ def test_relay_search_null_viewer_keeps_legacy_service_call(task_client):
         },
     )
     assert response.status_code == 200, response.text
-    assert svc.callback.calls[-1] == ("search_bots", ("q", "t1", "t1", "run-1"))
+    assert svc.callback.calls[-1] == ("search_bots", ("q", "t1", "t1"))

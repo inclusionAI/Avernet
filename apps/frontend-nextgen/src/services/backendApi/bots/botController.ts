@@ -248,18 +248,9 @@ export function deleteBot(bot_id: string) {
 
 // 重启 Bot。
 export function restartBot(bot_id: string, target?: BotEngineRuntimeRequestOptions) {
-  const body = target?.extraConfigs
-    ? {
-        // Legacy AICoding callers put the operator in the JSON body as well as
-        // the OpenAPI query identity. Keep that wire shape for template confirmations.
-        ...(target.userId ? { user_id: target.userId } : {}),
-        extra_configs: target.extraConfigs,
-      }
-    : undefined;
   return backendRequest<BackendApiEnvelope<BotDto>>(BOT_ENDPOINTS.restart(bot_id), {
     method: 'POST',
     params: target ? userScopedParams({ user_id: target.userId, entity_id: target.ownerId }) : userScopedParams(),
-    data: body,
     signal: target?.signal,
   });
 }

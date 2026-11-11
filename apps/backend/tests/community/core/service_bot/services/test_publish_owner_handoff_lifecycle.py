@@ -188,7 +188,6 @@ def test_new_platform_lock_surfaces_keep_locator_separate_from_permission(
             bot_repo=lifecycle.bots, publish_repo=Mock(), publish_service=lifecycle.publish,
             flow_service=lifecycle.flow, approval_service=Mock(), collaborator_service=collaborators,
             lock_service=locks, bot_service=lifecycle.bot_service, device_service=Mock(),
-            eval_gate=Mock(),
         )
     if actor == "B":
         assert service.get_lock("service", actor_id=actor, owner_id=locator).need_lock is False

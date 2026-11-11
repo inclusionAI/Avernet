@@ -34,7 +34,6 @@ async def test_failed_target_restores_context_and_preserves_exception():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("method", "path", "elapsed", "reported"), [
     ("GET", "/openapi/v1/bots/a/models", .5, True),
-    ("GET", "/openapi/v1/bots/catalog/search", .75, True),
     ("GET", "/openapi/v1/bots/a/sessions", .75, True),
     ("GET", "/openapi/v1/bots/a/connection", .75, True),
     ("GET", "/openapi/v1/bots/a/sessions/favorites", .75, True),

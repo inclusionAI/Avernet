@@ -205,7 +205,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
                   spaces={spaces}
                   creating={busy}
                   error={error || expertCreation.error}
-                  onErrorChange={setError}
                   agentCodingError={agentCodingError}
                   agentCodingTemplates={agentCodingTemplates.templates}
                   agentCodingTemplatesLoading={agentCodingTemplates.loading}

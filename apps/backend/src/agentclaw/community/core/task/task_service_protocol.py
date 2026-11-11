@@ -8,7 +8,6 @@ from agentclaw.community.core.task.domain.models import (
     BotCandidate,
     NodeOpResult,
     TaskExecutionGraph,
-    TaskStopResult,
     TaskContext,
     TaskNode,
     TaskOpResult,
@@ -107,7 +106,7 @@ class TaskServiceProtocol(Protocol):
     async def report(self, command: TaskReportCommand) -> TaskReportResult: ...
 
     async def search_bots(
-        self, *, query: str, task_id: str, node_id: str, relay_token: str,
+        self, *, query: str, task_id: str, node_id: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]: ...
@@ -148,16 +147,6 @@ class TaskServiceProtocol(Protocol):
         failure_reason: str | None = None,
         extend_props_patch: dict | None = None,
     ) -> NodeOpResult: ...
-
-    async def stop_task(
-        self,
-        task_id: str,
-        *,
-        reason: str = "manual_stop",
-        operator: str = "",
-    ) -> TaskStopResult:
-        """Manual stop one task graph into CANCELLED; never retry or resume it."""
-        ...
 
     def get_task_nodes_by_session(self, session_id: str) -> list[TaskNodeSessionRef]:
         """Return every visible task node linked to a chat session, newest first."""

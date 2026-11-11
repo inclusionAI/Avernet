@@ -2,8 +2,6 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import type { ConversationBotView } from '@/domain/conversation';
 import { useConversationSessions } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
-import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
-import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -69,21 +67,6 @@ const sessionOf = (sessionId: string) => ({
 const okPage = (sessionIds: string[], total = sessionIds.length) => ({
   ok: true as const,
   data: { items: sessionIds.map(sessionOf), total },
-});
-
-it('loads sessions for a legacy bot-only URL and finishes with a session-selection prompt', async () => {
-  listManagedSessions.mockResolvedValue(okPage(['existing-session']));
-  const { result } = renderHook(() => {
-    const options = { userId: '327325', managedBots: [managedBot], friendBots: [] };
-    const sessions = useConversationSessions(options);
-    const selection = useConversationSelection({ ...options, hydrated: true });
-    const placeholder = useConversationSessionPlaceholder({ ...options, sessions });
-    return { selection, placeholder };
-  });
-  act(() => result.current.selection.onRouteSelection({ botId: managedBot.bot.realBotId }));
-  await waitFor(() => expect(result.current.placeholder?.status).toBe('unselected'));
-  expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1, 10, '');
-  expect(result.current.selection.selection.botId).toBe(managedBot.bot.botId);
 });
 
 function deferred<T>() {

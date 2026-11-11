@@ -1,7 +1,6 @@
 /** @jest-environment jsdom */
 import Page from '@/pages/BotWorkshop/Detail';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { useBotSessionFilesFeature } from '@/pages/Workspace/hooks/useBotSessionFilesFeature';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import type { BotLifecycle, BotRuntimeStage } from '@/domain/botWorkshop';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -29,16 +28,13 @@ jest.mock('@/pages/BotWorkshop/Detail/DetailHeader', () => ({ DetailHeader: () =
 jest.mock('@/pages/BotWorkshop/Detail/DetailNavigation', () => ({ DetailNavigation: () => null }));
 jest.mock('@/pages/BotWorkshop/Detail/DetailPanelContent', () => ({ DetailPanelContent: () => null }));
 jest.mock('@/pages/Workspace/hooks/useBotChat');
-jest.mock('@/pages/Workspace/hooks/useBotSessionFilesFeature', () => ({
-  useBotSessionFilesFeature: jest.fn(() => ({ capabilitySets: null, featureNode: null })),
-}));
 jest.mock('@/pages/Workspace/hooks/useBotCapabilitySets', () => ({ useBotCapabilitySets: () => null }));
 jest.mock('@/pages/Workspace/hooks/useBotModels', () => ({ useBotModels: () => ({ models: [], loading: false }) }));
 jest.mock('@/services/workspace/botSessionService', () => ({
   botSessionService: { listSessions: jest.fn(), listModels: jest.fn() },
 }));
 jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
-  DebugChatComposer: () => <div data-testid="composer" />,
+  DebugChatComposer: ({ bot }: { bot: { runtimeStage: string } }) => <div data-testid="composer-stage">{bot.runtimeStage}</div>,
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -56,7 +52,7 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
   ['view', 'running', 'online', 'online'],
   ['view', 'running', undefined, 'online'],
   ['view', 'prestable', 'verify', 'verify'],
-])('%s lifecycle=%s route=%s uses %s for debug requests and file feature', async (mode, lifecycle, stage, expected) => {
+])('%s lifecycle=%s route=%s uses %s for debug requests and composer', async (mode, lifecycle, stage, expected) => {
   mockLifecycle = lifecycle;
   mockSearch = `?id=bot&type=${mode}${stage ? `&runtime_stage=${stage}` : ''}`;
   render(<Page />);
@@ -65,8 +61,5 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
   ));
   expect(useBotChat).toHaveBeenLastCalledWith(expect.objectContaining({ runtimeStage: expected }),
     null, undefined, expect.any(Function), 'viewer');
-  expect(screen.getByTestId('composer')).toBeInTheDocument();
-  expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
-    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), null, 'viewer', expect.any(Function),
-  );
+  expect(screen.getByTestId('composer-stage')).toHaveTextContent(expected);
 });

@@ -95,9 +95,6 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
       () => findDuplicateRepoUrls(backendRepos, frontendRepos, libRepos),
       [backendRepos, frontendRepos, libRepos],
     );
-    const duplicateRepoError = duplicateRepoUrls.size
-      ? `存在重复的仓库地址：${Array.from(duplicateRepoUrls).join('、')}，同一 Bot 内不可配置重复仓库`
-      : null;
     const validateYuqueKbRepos = useCallback(async (): Promise<boolean> => {
       const hasEntriesToValidate = yuqueKbRepos.some((repo) => repo.url?.trim() && repo.token?.trim());
       if (hasEntriesToValidate) setValidatingYuque(true);
@@ -113,12 +110,10 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
       }
     }, [yuqueKbRepos]);
     const validate = useCallback(async (): Promise<string | undefined> => {
-      // 仓库重复是本地硬校验，优先于远程语雀预检返回，避免无效请求。
-      if (duplicateRepoError) return duplicateRepoError;
       const yuqueValid = await validateYuqueKbRepos();
       if (!yuqueValid) return '语雀知识库校验失败，请检查标红的条目';
       return modelValidationError ?? undefined;
-    }, [duplicateRepoError, modelValidationError, validateYuqueKbRepos]);
+    }, [modelValidationError, validateYuqueKbRepos]);
     useImperativeHandle(ref, () => ({ validateYuqueKbRepos, validate }), [validate, validateYuqueKbRepos]);
     useEffect(() => {
       if (!initialConfig) return;
@@ -222,7 +217,7 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
     useEffect(() => {
       const config = buildConfig();
       onChange(config);
-      onValidationChange?.(duplicateRepoError ?? modelValidationError);
+      onValidationChange?.(modelValidationError);
       let warning: string | null = null;
       const hasYuqueMissingToken = yuqueKbRepos.some((r) => r.url?.trim() && !r.token?.trim());
       if (hasYuqueMissingToken) {
@@ -230,7 +225,7 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
       }
       setYuqueTokenWarning(warning);
       onWarningChange?.(warning);
-    }, [buildConfig, duplicateRepoError, onChange, onValidationChange, onWarningChange, modelValidationError, yuqueKbRepos]);
+    }, [buildConfig, onChange, onValidationChange, onWarningChange, modelValidationError, yuqueKbRepos]);
     return (
       <div className="space-y-4 rounded-xl border border-slate-200/60 bg-slate-50/80 p-4">
         <AppCodingRepositoryFields

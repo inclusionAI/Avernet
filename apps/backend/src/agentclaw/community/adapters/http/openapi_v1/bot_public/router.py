@@ -29,7 +29,6 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.utils.runtime_list_timing import timed_thread
 
 from .schemas import (
     DiscoveredPublicBot,
@@ -235,8 +234,7 @@ async def search_public_bots(
         _log_failure("search", request, "invalid_filters")
         return error_response(422, "Invalid Catalog Search filters", request)
     try:
-        result = await timed_thread(
-            "catalog.search", service.search_catalog_public_bots_by_keyword,
+        result = service.search_catalog_public_bots_by_keyword(
             search=search,
             page=page_number,
             page_size=page_size,

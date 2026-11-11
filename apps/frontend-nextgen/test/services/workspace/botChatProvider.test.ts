@@ -73,9 +73,7 @@ describe('botChatProvider', () => {
     const provider = createBotChatProvider({ bot: target, userId: 'u', sessionId: 'same-session-id' });
     await provider.connect();
     expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: 'u', owner_id: '2088', stage });
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', stage, {
-      sessionKey: 'same-session-id',
-    });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', stage);
     expect(adapters.OpenClawProvider).toHaveBeenCalledWith(expect.objectContaining({ url: `wss://gw/${stage}/ws` }));
     const config = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0];
     await config.credentialProvider();
@@ -83,9 +81,7 @@ describe('botChatProvider', () => {
     await provider.request({ content: '验证', sessionId: 'same-session-id' });
     expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
     for (const call of [1, 2, 3]) {
-      expect(mockedGetIamToken).toHaveBeenNthCalledWith(call, 'b', 'u', '2088', stage, {
-        sessionKey: 'same-session-id',
-      });
+      expect(mockedGetIamToken).toHaveBeenNthCalledWith(call, 'b', 'u', '2088', stage);
     }
     await provider.disconnect();
   });
@@ -157,7 +153,7 @@ describe('botChatProvider', () => {
       credentialProvider?: () => Promise<{ xIAMToken?: string; xProxypassToken?: string }>;
     };
     expect(mockedGetIamToken).toHaveBeenCalledTimes(1);
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online', { sessionKey: 'sid-1' });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online');
     expect(cfg.xIAMToken).toBe('iam-token');
     expect(typeof cfg.credentialProvider).toBe('function');
     // 重连刷新只返回 xIAMToken,不返回 xProxypassToken——避免 SDK 给内含 token 的 url 追加查询参数。
@@ -185,10 +181,9 @@ describe('botChatProvider', () => {
     await p.request({ content: 'hi', sessionId: 'sid-1' });
 
     expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
-    const draftContext = { sessionKey: 'sid-1' };
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(1, 'b', 'u', '2088', 'draft', draftContext);
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(2, 'b', 'u', '2088', 'draft', draftContext);
-    expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'draft', draftContext);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(1, 'b', 'u', '2088', 'draft');
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(2, 'b', 'u', '2088', 'draft');
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'draft');
   });
 
   it('getChatUrl 对 human_ 前缀的 userId 只传工号(回归:连接接口不再带 human_ 前缀)', async () => {
@@ -218,11 +213,6 @@ describe('botChatProvider', () => {
       owner_id: '2088',
       f_user_id: '900003',
       session_id: 'sid-1',
-    });
-    expect(mockedGetIamToken).toHaveBeenCalledWith('b', '900003', '2088', undefined, {
-      sessionKey: 'sid-1',
-      friendUserId: '900003',
-      ownerId: '2088',
     });
   });
 
@@ -309,12 +299,7 @@ describe('botChatProvider', () => {
         expect.objectContaining({ stage: 'online', owner_id: '2088' }),
       );
       expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
-      const context = role === 'isFriendBot'
-        ? { sessionKey: 'sid-1', friendUserId: '900003', ownerId: '2088' }
-        : { sessionKey: 'sid-1' };
-      for (const args of mockedGetIamToken.mock.calls) {
-        expect(args).toEqual(['b', '900003', '2088', 'online', context]);
-      }
+      for (const args of mockedGetIamToken.mock.calls) expect(args).toEqual(['b', '900003', '2088', 'online']);
     },
   );
 
@@ -535,9 +520,7 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity owner，不�
   await provider.connect();
   await provider.loadHistory();
   expect(mockedGetConnection).toHaveBeenCalledWith('shared', { user_id: 'viewer', owner_id: 'team-entity', stage: 'online' });
-  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', 'online', {
-    sessionKey: 'team-session',
-  });
+  expect(mockedGetIamToken).toHaveBeenCalledWith('shared', 'viewer', 'team-entity', 'online');
   expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(
     teamBot,
     'human_viewer',
@@ -563,10 +546,5 @@ it.each([
   await provider.request({ content: 'hi', sessionId: 's1' });
   expect(mockedGetConnection.mock.calls[0][1]).not.toHaveProperty('stage');
   expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
-  const context = _role === 'friend'
-    ? { sessionKey: 's1', friendUserId: 'viewer', ownerId: '2088' }
-    : { sessionKey: 's1' };
-  for (const args of mockedGetIamToken.mock.calls) {
-    expect(args).toEqual(['b', 'viewer', '2088', undefined, context]);
-  }
+  for (const args of mockedGetIamToken.mock.calls) expect(args).toEqual(['b', 'viewer', '2088', undefined]);
 });

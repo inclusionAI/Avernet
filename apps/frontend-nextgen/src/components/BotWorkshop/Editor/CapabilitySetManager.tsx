@@ -10,8 +10,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { BotCapabilitySet, BotEditorSkill } from '@/domain/botEditor';
 import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
 import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
-import { useCapabilitySetExpansion } from '@/hooks/useCapabilitySetExpansion';
+import { useEffect, useState } from 'react';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
@@ -37,7 +36,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     onUploadSkillFolder,
     onLoadCandidates,
   } = props;
-  const expansion = useCapabilitySetExpansion(sets, props.botId, props.authenticatedUserId, props.ownerId);
+  const [expanded, setExpanded] = useState<string[]>(sets[0] ? [sets[0].id] : []);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [picker, setPicker] = useState<CapabilityPicker>();
@@ -58,7 +57,9 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     const url = getCapabilities().getBotSkillPickerDetailUrl(skill).value;
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
-
+  useEffect(() => {
+    if (sets[0]) setExpanded((current) => (current.length ? current : [sets[0].id]));
+  }, [sets]);
   const create = async () => {
     await onCreate(name.trim());
     setName('');
@@ -87,16 +88,17 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           // 仅靠组间距分组；标题行左侧零内边距，使能力集标题与「能力集管理」文字严格左对齐。
           <div className="w-full space-y-4 px-8 py-5 lg:px-10">
             {sets.map((set) => {
-              const open = expansion.isExpanded(set);
+              const open = expanded.includes(set.id);
               const displayName = set.isDefault ? '默认能力集' : set.name;
               return (
                 <section key={set.id}>
                   <div className="group flex items-center gap-2">
                     <Button
                       variant="ghost"
-                      aria-expanded={open}
                       className="h-auto min-w-0 flex-1 items-start justify-start px-0 py-0 text-left"
-                      onClick={() => expansion.toggle(set)}
+                      onClick={() =>
+                        setExpanded((current) => (open ? current.filter((id) => id !== set.id) : [...current, set.id]))
+                      }
                     >
                       <span className="min-w-0">
                         <span className="flex items-center gap-2">

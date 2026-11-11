@@ -7,7 +7,7 @@ import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
 import { SessionManagePanel } from './ManagePanel/SessionManagePanel';
-import { ResizableWorkspaceSidebar } from './ResizableWorkspaceSidebar';
+import { WorkspaceOverlayPanel } from './WorkspaceOverlayPanel';
 
 export interface WorkspaceManagePanelsProps {
   activePanel: GroupPanelKind;
@@ -55,22 +55,17 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
 
   if (!group) return null;
 
-  // 对话区内联副屏（与 chat 页右缘面板同形）：aside 常挂、open 开合，面板本体保持
-  // 「挂载 == 打开」语义（GroupManagePanel key 群切换重建），仅展开态渲染。
-  const manageOpen = activePanel === 'manage';
-  const sessionManageOpen = activePanel === 'sessionManage' && session !== null;
+  // 会话局部遮罩由公共覆盖层处理，保留内部及 Portal 浮层交互。
   return (
     <>
-      <ResizableWorkspaceSidebar
-        ariaLabel="群管理面板"
-        data-manage-panel="true"
-        side="right"
-        open={manageOpen}
-        onDismiss={manageOpen ? onClose : undefined}
-        {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-        className="bg-background"
-      >
-        {manageOpen ? (
+      {activePanel === 'manage' ? (
+        <WorkspaceOverlayPanel
+          ariaLabel="群管理面板"
+          data-manage-panel="true"
+          onDismiss={onClose}
+          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
+          className="z-30 bg-background"
+        >
           <GroupManagePanel
             key={group.groupId}
             group={group}
@@ -93,19 +88,17 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             dingTalkBinding={props.dingTalkBinding}
             dingTalkLoading={props.dingTalkLoading}
           />
-        ) : null}
-      </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
+      ) : null}
 
-      <ResizableWorkspaceSidebar
-        ariaLabel="会话管理面板"
-        data-manage-panel="true"
-        side="right"
-        open={sessionManageOpen}
-        onDismiss={sessionManageOpen ? onClose : undefined}
-        {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-        className="bg-background"
-      >
-        {sessionManageOpen && session ? (
+      {activePanel === 'sessionManage' && session ? (
+        <WorkspaceOverlayPanel
+          ariaLabel="会话管理面板"
+          data-manage-panel="true"
+          onDismiss={onClose}
+          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
+          className="z-30 bg-background"
+        >
           <SessionManagePanel
             key={session.sessionId}
             session={session}
@@ -124,8 +117,8 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             onRemoveMember={props.onRemoveSessionMember}
             onShare={props.onShareSession}
           />
-        ) : null}
-      </ResizableWorkspaceSidebar>
+        </WorkspaceOverlayPanel>
+      ) : null}
     </>
   );
 }

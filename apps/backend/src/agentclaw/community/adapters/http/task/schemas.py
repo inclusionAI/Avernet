@@ -202,13 +202,6 @@ class BbsResultDTO(BaseModel):
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
 
 
-class TaskStopRequestDTO(BaseModel):
-    """POST /api/v1/collaboration/tasks/{task_id}/stop 请求体(人工停止任务为 CANCELLED)。"""
-
-    reason: str = Field(default="manual_stop", description="停止原因")
-    operator: str = Field(default="manual_stop", description="操作者账号/工号")
-
-
 class TaskNodeUpdateDTO(BaseModel):
     """POST /api/v1/collaboration/tasks/nodes/update 请求体(内部节点写口:直接更新节点 run_info)。
 

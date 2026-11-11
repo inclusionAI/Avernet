@@ -257,17 +257,17 @@ export const botEditorService = {
   },
   setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean) =>
     botEditorController.setMcpActive(botId, mcp.serverCode, active),
-  async createSkillSet(botId: string, name: string, ownerId?: string) {
-    const created = await botEditorController.createSkillSet(botId, { name }, ownerId);
+  async createSkillSet(botId: string, name: string) {
+    const created = await botEditorController.createSkillSet(botId, { name });
     const setId = created.data?.id;
     if (!setId) throw new Error('能力集已创建，但响应缺少能力集标识，无法自动启用');
-    await botEditorController.setSkillSetActive(botId, setId, true, ownerId);
+    await botEditorController.setSkillSetActive(botId, setId, true);
     return created;
   },
-  updateSkillSet: (botId: string, id: string, name: string, ownerId?: string) => botEditorController.updateSkillSet(botId, id, { name }, ownerId),
-  deleteSkillSet: (botId: string, id: string, ownerId?: string) => botEditorController.deleteSkillSet(botId, id, ownerId),
-  async setSkillSetActive(botId: string, set: BotCapabilitySet, active: boolean, ownerId?: string) {
-    const response = await botEditorController.setSkillSetActive(botId, set.id, active, ownerId);
+  updateSkillSet: (botId: string, id: string, name: string) => botEditorController.updateSkillSet(botId, id, { name }),
+  deleteSkillSet: (botId: string, id: string) => botEditorController.deleteSkillSet(botId, id),
+  async setSkillSetActive(botId: string, set: BotCapabilitySet, active: boolean) {
+    const response = await botEditorController.setSkillSetActive(botId, set.id, active);
     if (
       isEnvelopeFailure(response) ||
       !response.data ||
@@ -278,16 +278,16 @@ export const botEditorService = {
     }
     return { id: response.data.id, active: response.data.is_active };
   },
-  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean, ownerId?: string) =>
-    botEditorController.setSkillSetSkill(botId, setId, skillId, active, ownerId),
-  async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[], ownerId?: string) {
+  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
+    botEditorController.setSkillSetSkill(botId, setId, skillId, active),
+  async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[]) {
     const distinct = [...new Set(skillCodes)];
     if (distinct.length > 20) throw new Error('一次最多添加 20 个 Skill');
-    const created = await botEditorController.createSkillCenterReferences(botId, setId, distinct, ownerId);
+    const created = await botEditorController.createSkillCenterReferences(botId, setId, distinct);
     const requestId = created.data?.request_id;
     if (!requestId) throw new Error('SkillCenter 引用已提交，但响应缺少轮询标识');
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      const result = await botEditorController.listSkillCenterReferences(botId, setId, requestId, ownerId);
+      const result = await botEditorController.listSkillCenterReferences(botId, setId, requestId);
       const items = result.data?.items ?? [];
       const failed = items.find((item) => item.status === 'FAILED');
       if (failed) throw new Error(failed.error_message || 'SkillCenter Skill 添加失败');
@@ -298,14 +298,14 @@ export const botEditorService = {
     }
     throw new Error('SkillCenter Skill 仍在添加中，请稍后刷新查看');
   },
-  async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean, ownerId?: string) {
+  async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean) {
     if (active) {
       const permission = await botEditorController.getMcpPermission(serverCode);
       if (!permission.data?.has_access) {
         throw new Error('无法添加，请去 MCP 详情页申请权限后重试');
       }
     }
-    return botEditorController.setSkillSetMcp(botId, setId, serverCode, active, ownerId);
+    return botEditorController.setSkillSetMcp(botId, setId, serverCode, active);
   },
   createDirectory: (botId: string, path: string, ownerId?: string) =>
     botEditorController.createDirectory(botId, path, ownerId),

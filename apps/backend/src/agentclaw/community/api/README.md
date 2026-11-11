@@ -179,7 +179,6 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.models    # EngineResult / BotFacts / ConnectionResult — typed in engine_runtime_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.quality.models          # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
-  - agentclaw.community.plugin_api.service_bot_eval  # ServiceBotEvalFile accepts already-read upload material in the transport-independent Protocol
   - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
   - agentclaw.community.core.service_bot.service_edit_lock_service_protocol
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)

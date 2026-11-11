@@ -15,11 +15,7 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.task.domain.models import (
-    NodeOpResult,
-    Status,
-    TaskStopResult,
-)
+from agentclaw.community.core.task.domain.models import NodeOpResult, Status
 
 
 class _StubService:
@@ -27,26 +23,9 @@ class _StubService:
 
     def __init__(self) -> None:
         self.last: dict | None = None
-        self.stopped: tuple | None = None
 
     def get_task_dashboard(self, task_id):
         return SimpleNamespace(is_relay=False)
-
-    async def stop_task(
-        self,
-        task_id: str,
-        *,
-        reason: str = "manual_stop",
-        operator: str = "",
-    ) -> TaskStopResult:
-        self.stopped = (task_id, reason, operator)
-        return TaskStopResult(
-            task_id=task_id,
-            status=Status.CANCELLED,
-            stopped_nodes=["t4"],
-            reason=reason,
-            operator=operator,
-        )
 
     async def update_task_node_info(
         self,
@@ -165,14 +144,6 @@ class TestNodeUpdateApi:
         assert svc.last["output_patch"] == {"output": "done"}
         assert svc.last["status"] is None
         assert svc.last["exec_error"] is None
-
-    def test_stop_task_route_passthrough(self, client):
-        c, svc = client
-        c.post(
-            "/api/v1/collaboration/tasks/t4/stop",
-            json={"reason": "manual test", "operator": "146836"},
-        )
-        assert getattr(svc, "stopped", None) == ("t4", "manual test", "146836")
 
     def test_exec_error_passthrough(self, client):
         c, svc = client

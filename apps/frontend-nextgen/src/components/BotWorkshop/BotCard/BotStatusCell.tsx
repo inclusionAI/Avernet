@@ -11,8 +11,7 @@ export interface BotStatusCellProps {
   bot: BotDomain;
   progressExpanded?: boolean;
   onToggleProgress?: () => void;
-  onPublicationChanged?: () => Promise<void>;
-  onPublicationGateBlocked?: (bot: BotDomain) => void;
+  onManagePublication?: (bot: BotDomain) => void;
 }
 
 /**
@@ -48,8 +47,7 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({
   bot,
   progressExpanded,
   onToggleProgress,
-  onPublicationChanged,
-  onPublicationGateBlocked,
+  onManagePublication,
 }) => {
   // 复制进行中(gated by 特性开关):copy_state 非空时,该 bot 仍是「复制中」态,
   // 状态列直接展示复制进度文案替代生命周期状态(部署/发布菜单在此态无意义),
@@ -89,11 +87,7 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({
   );
 
   const status = (
-    <BotStatusPublicationMenu
-      bot={bot}
-      onPublicationChanged={onPublicationChanged}
-      onPublicationGateBlocked={onPublicationGateBlocked}
-    >
+    <BotStatusPublicationMenu bot={bot} onManagePublication={onManagePublication}>
       {statusDisplay}
     </BotStatusPublicationMenu>
   );

@@ -44,7 +44,7 @@ it('每次进入 file 子菜单刷新完整候选，不在普通渲染时查询'
   const refresh = jest.fn(async () => {
     useBotSessionFileStore
       .getState()
-      .setReadyFiles([{ resourceId: 'r1', displayName: '接口.md', status: 'ready', sizeBytes: 1, errorCode: null, creatorType: null, creatorName: null, createdAt: null }]);
+      .setReadyFiles([{ resourceId: 'r1', displayName: '接口.md', status: 'ready', sizeBytes: 1, errorCode: null }]);
   });
   const scopedFiles = { ...files, refresh };
   const { result } = renderHook(() => useCommands({ files: scopedFiles }));
@@ -82,7 +82,7 @@ it('切换查询作用域后丢弃上一会话的候选响应', async () => {
   rerender({ scope: next });
   useBotSessionFileStore
     .getState()
-    .setReadyFiles([{ resourceId: 'old', displayName: '旧文件.md', status: 'ready', sizeBytes: 1, errorCode: null, creatorType: null, creatorName: null, createdAt: null }]);
+    .setReadyFiles([{ resourceId: 'old', displayName: '旧文件.md', status: 'ready', sizeBytes: 1, errorCode: null }]);
   await act(async () => {
     finish();
   });

@@ -2,7 +2,6 @@
 
 import BotTable from '@/components/BotWorkshop/BotCard';
 import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
-import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
@@ -734,8 +733,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('服务 Bot 从状态下拉直接获取操作，更多菜单不再重复入口', async () => {
-    const load = jest.spyOn(botEditorService, 'listLifecycle').mockResolvedValue([]);
+  test('服务 Bot 从状态下拉进入发布管理，更多菜单不再重复入口', () => {
     const bot = mapBotDto({
       bot_id: 'general-service-draft',
       bot_name: 'GeneralCC 服务 Bot',
@@ -747,23 +745,21 @@ describe('Agent Coding Bot row actions', () => {
       actions: ['chat', 'restart', 'delete'],
     }).item;
 
-    const onPublicationChanged = jest.fn();
+    const onManagePublication = jest.fn();
     renderTable(bot, {
       onConversation: noop,
       onAction: jest.fn().mockResolvedValue(undefined),
-      onPublicationChanged,
+      onManagePublication,
       getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
     });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
     expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument());
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'GeneralCC 服务 Bot 发布状态' }));
-    expect(await screen.findByText('当前暂无可执行操作')).toBeInTheDocument();
-    expect(onPublicationChanged).not.toHaveBeenCalled();
-    expect(load).toHaveBeenCalledWith(bot.id, bot.ownerId);
-    load.mockRestore();
+    expect(onManagePublication).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发布与阶段推进' }));
+    expect(onManagePublication).toHaveBeenCalledWith(bot);
   });
 
   test('Bot 成员点击 Coding Bot 去使用时进入 Coding Chat', () => {
@@ -791,7 +787,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('团队空间普通成员未加入 Coding Bot 时展示去申请', () => {
+  test('普通空间成员不能使用非协作的 Coding Bot', () => {
     const bot = mapBotDto({
       bot_id: 'space-member-coding-bot',
       bot_name: '空间成员 Coding Bot',
@@ -800,49 +796,18 @@ describe('Agent Coding Bot row actions', () => {
       template_type: 'myTemplate',
       bot_type: 'personal',
       display_state: 'running',
-      actions: ['view'],
-      space: { space_id: '1', kind: 'team' },
+      actions: ['view', 'chat'],
     }).item;
     const onConversation = jest.fn();
-    const onAuthorize = jest.fn();
     renderTable(bot, {
       onConversation,
       onAction: jest.fn().mockResolvedValue(undefined),
       canOpenConversation: (item) => item.actions.includes('edit'),
-      getCollaborationMode: () => 'request',
-      onAuthorize,
     });
 
-    expect(screen.queryByRole('button', { name: '去使用 空间成员 Coding Bot' })).not.toBeInTheDocument();
-    const requestButton = screen.getByRole('button', { name: '去申请 空间成员 Coding Bot' });
-    fireEvent.click(requestButton);
-    expect(onAuthorize).toHaveBeenCalledWith(bot);
+    const useButton = screen.getByRole('button', { name: '去使用 空间成员 Coding Bot' });
+    expect(useButton).toBeDisabled();
     expect(onConversation).not.toHaveBeenCalled();
-  });
-
-  test('团队空间 Coding Bot 成员仍展示去使用', () => {
-    const bot = mapBotDto({
-      bot_id: 'space-collaborator-coding-bot',
-      bot_name: '团队成员 Coding Bot',
-      owner_id: 'owner-1',
-      active_engine: 'claude_code',
-      template_type: 'myTemplate',
-      bot_type: 'personal',
-      display_state: 'running',
-      actions: ['view', 'edit'],
-      space: { space_id: '1', kind: 'team' },
-    }).item;
-    const onConversation = jest.fn();
-    renderTable(bot, {
-      onConversation,
-      onAction: jest.fn().mockResolvedValue(undefined),
-      canOpenConversation: (item) => item.actions.includes('edit'),
-      getCollaborationMode: () => undefined,
-      onAuthorize: jest.fn(),
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '去使用 团队成员 Coding Bot' }));
-    expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
   test('Coding Bot 行内仅固定展示去使用，任务实例与更多操作收口在气泡菜单', () => {
@@ -1069,7 +1034,7 @@ describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () =
       <BotTable
         bots={[bot]}
         onView={onView}
-        onPublicationChanged={jest.fn()}
+        onManagePublication={jest.fn()}
         onAction={jest.fn().mockResolvedValue(undefined)}
       />,
     );

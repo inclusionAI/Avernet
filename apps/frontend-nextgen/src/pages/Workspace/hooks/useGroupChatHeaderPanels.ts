@@ -3,22 +3,19 @@
  *
  * 与 chat 侧 useChatHeaderPanels 的差异：
  * - 右缘面板互斥由 GroupWorkspaceArea 的单一 activePanel 统一（会话管理/历史消息/资源管理），
- *   本 Hook 不再持有面板开关态，只承载纯本地域：收藏模型（SessionView.favorite）、
- *   历史搜索（前端过滤，Service 同源）、副屏镜像开合。
+ *   本 Hook 不再持有面板开关态，只承载三块纯本地域：
+ *   收藏模型（SessionView.favorite）、历史搜索（前端过滤，Service 同源）、副屏镜像开合。
  * - 群侧 GroupChatPane 在会话切换时 closePanelForce()，故副屏开合态必须随切换复位
  *   （chat 孪生已在同边界补齐复位）；sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK
  *   onIsOpenChange 保持真实开合态（含渲染器「挂载即 openTab」的默认展开），
  *   toggle 仅乐观翻转、随后由真实态事件纠偏；副屏打开路径共享 chat 侧
  *   reopenSidePaneTabsFromMessages（按消息标记幂等重建，防 autoCloseWhenEmpty 弹回），
  *   图标判空共享 sessionHasSidePaneContent。
- * - 右缘域面板 × 副屏互斥（面板展开前置让位、全收自动回开、副屏展开收面板）委托
- *   sidePanePanelMutex——装配参数（panelsOpen/closePanels）由 GroupWorkspaceArea 注入。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { SessionView } from '@/domain/collaboration';
 import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
-import { useSidePanePanelMutex } from '@/pages/Workspace/Chat/hooks/sidePanePanelMutex';
 import {
   markTaskNavigationRouteHydrated,
   shouldPreserveTaskPanelForSession,
@@ -45,31 +42,22 @@ export interface UseGroupChatHeaderPanelsOptions {
   panelRef: React.RefObject<PanelHandle | null>;
   /** 收藏切换出口（useGroupSessions.toggleFavorite；群侧无 pending 模型，不发明）。 */
   toggleFavorite: (sessionId: string) => Promise<void>;
-  /** 右缘域面板（GroupWorkspaceArea activePanel）是否有面板在开——右缘面板 × 副屏互斥。 */
-  panelsOpen?: boolean;
-  /** 副屏展开时收右缘域面板（setActivePanel('none')）。 */
-  closePanels?: () => void;
 }
 
 export interface UseGroupChatHeaderPanelsResult {
   favorites: GroupChatFavoritesModel;
   historySearch: UseSessionHistorySearchModel;
-  /** 右缘域面板即将展开前的副屏让位：收起副屏并记录回开标记，面板全收后自动回开。 */
-  dismissSidePaneForPanels: () => void;
   /** 副屏真实开合态（ChatLayoutPanelSlot onIsOpenChange 同步；toggle 乐观翻转其后纠偏）。 */
   sidePaneOpen: boolean;
   /** 会话无副屏内容（消息无 <AixUI type="panel">）时 Monitor 图标禁用，toggle 空转。 */
   sidePaneDisabled: boolean;
   toggleSidePane: () => void;
-  /** 真实开合同步入口（接线至 ChatLayoutPanelSlot onOpenStateChange：镜像 + 互斥收面板）。 */
+  /** 真实开合同步入口（接线至 ChatLayoutPanelSlot onOpenStateChange）。 */
   onSidePaneIsOpenChange: (open: boolean) => void;
   /** 点击搜索结果后待定位高亮的 messageId（3s 后自动清除）。 */
   highlightMessageId: string | null;
   locateMessage: (messageId: string) => void;
 }
-
-/** 互斥未装配（panelsOpen/closePanels 缺省）时的占位收面板，不得影响回调稳定身份。 */
-const noopPanelsClose = () => undefined;
 
 /** 历史消息面板的搜索/筛选/结果模型（本地源即时过滤；与 chat 侧同构）。 */
 function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: number): UseSessionHistorySearchModel {
@@ -113,16 +101,7 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   const taskTab = useSessionTaskPanelTab(sessionId);
 
   const [sidePaneOpen, setSidePaneOpen] = useState(false);
-  // 右缘域面板 × 副屏互斥：群侧面板与 chat 同为右缘 aside，副屏（AppShell 悬浮层）展开后
-  // 整条盖住面板让位区（chat 侧已修的同款掩盖几何）——复用同一互斥 Hook，装配参数由
-  // GroupWorkspaceArea 注入（activePanel 单一来源 → panelsOpen / closePanels）。
-  const sidePaneMutex = useSidePanePanelMutex({
-    panelRef,
-    sidePaneOpen,
-    panelsOpen: options.panelsOpen ?? false,
-    closePanels: options.closePanels ?? noopPanelsClose,
-    onMirrorChange: setSidePaneOpen,
-  });
+  const onSidePaneIsOpenChange = useCallback((open: boolean) => setSidePaneOpen(open), []);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -132,8 +111,6 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   if (lastSessionIdRef.current !== sessionId) {
     lastSessionIdRef.current = sessionId;
     if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/collaboration')) setSidePaneOpen(false);
-    // 让位回开标记同边界作废：副屏已 closePanelForce 清 tabs，回开会被 autoCloseWhenEmpty 空弹。
-    sidePaneMutex.clearSidePaneExclusion();
     setHighlightMessageId(null);
     setSessionEpoch((epoch) => epoch + 1);
   }
@@ -185,11 +162,10 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   return {
     favorites,
     historySearch,
-    dismissSidePaneForPanels: sidePaneMutex.dismissSidePaneForPanels,
     sidePaneOpen,
     sidePaneDisabled,
     toggleSidePane,
-    onSidePaneIsOpenChange: sidePaneMutex.onSidePaneIsOpenChange,
+    onSidePaneIsOpenChange,
     highlightMessageId,
     locateMessage,
   };

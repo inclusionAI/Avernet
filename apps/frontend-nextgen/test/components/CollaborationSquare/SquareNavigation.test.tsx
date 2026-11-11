@@ -10,7 +10,7 @@ jest.mock('@umijs/max', () => ({
 
 test('发现导航保留公开 Bot/群并提供专家', () => {
   const { rerender } = render(<SquareNavigation active="bot" />);
-  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['公开 Bot', '专家', '公开协作群']);
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['公开 Bot', '专家 Bot', '公开协作群']);
   const bot = screen.getByRole('link', { name: '公开 Bot' });
   const group = screen.getByRole('link', { name: '公开协作群' });
   // dmore Frame 1：选中 pill 为 6px 圆角 + 主色软底；非选中无底色。
@@ -29,7 +29,7 @@ test('发现导航保留公开 Bot/群并提供专家', () => {
 
 test('专家使用独立可访问路由与选中状态', () => {
   render(<SquareNavigation active="expert" />);
-  const expert = screen.getByRole('link', { name: '专家' });
+  const expert = screen.getByRole('link', { name: '专家 Bot' });
   expect(expert).toHaveAttribute('href', '/collaboration-square/experts');
   expect(expert).toHaveAttribute('aria-current', 'page');
   expect(screen.getByRole('link', { name: '公开 Bot' })).not.toHaveAttribute('aria-current');
