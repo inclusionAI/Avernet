@@ -52,7 +52,11 @@ def inspect_index(index, source_id, fields):
                     **(
                         {"vector": vector_preview(point.vector)}
                         if kind == "vector"
-                        else {}
+                        else {
+                            "name": point.payload.get("_bm25_name"),
+                            "text": point.payload.get("_bm25_text"),
+                            "name_grams": point.payload.get("_bm25_name_grams"),
+                        }
                     ),
                 }
                 for point in points[kind]

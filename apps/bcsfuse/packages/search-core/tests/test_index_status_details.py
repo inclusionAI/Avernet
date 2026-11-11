@@ -91,8 +91,55 @@ def test_status_shows_all_documents_and_real_index_content_without_embedding(wor
         assert len(body["qdrant"][collection]) == 2
         assert all(d["index_key"] == "current" for d in body["qdrant"][collection])
     assert model.calls == before
+    main = next(d for d in body["qdrant"]["keyword_documents"] if d["id"] == "demo")
+    assert main["name"] == "billing"
+    assert main["text"] == "invoice search"
+    assert main["name_grams"] == "bil ill lli lin ing"
+    secondary = next(
+        d for d in body["qdrant"]["keyword_documents"] if d["id"] != "demo"
+    )
+    assert secondary["name"] == secondary["name_grams"] == ""
     schema = client.get("/openapi.json").json()["components"]["schemas"]
     assert "documents" in schema["CardStatus"]["properties"]
+
+
+def test_keyword_status_reads_stored_bm25_fields_without_reconstructing(world):
+    from uuid import NAMESPACE_URL, uuid5
+
+    _, index, model, updates, client = world
+    updates.run_once()
+    before = model.calls
+    store = index._keyword
+    point_id = str(uuid5(NAMESPACE_URL, "demo"))
+    store._client.set_payload(
+        store.collection_name,
+        {
+            "_bm25_name": "indexed name",
+            "_bm25_text": "indexed body",
+            "_bm25_name_grams": "stored tokens",
+        },
+        points=[point_id],
+        wait=True,
+    )
+    body = client.get(PATH).json()
+    main = next(d for d in body["qdrant"]["keyword_documents"] if d["id"] == "demo")
+    assert (main["name"], main["text"], main["name_grams"]) == (
+        "indexed name",
+        "indexed body",
+        "stored tokens",
+    )
+    assert main["search_text"] == "invoice search"
+    store._client.delete_payload(
+        store.collection_name,
+        ["_bm25_name", "_bm25_text", "_bm25_name_grams"],
+        points=[point_id],
+        wait=True,
+    )
+    body = client.get(PATH).json()
+    main = next(d for d in body["qdrant"]["keyword_documents"] if d["id"] == "demo")
+    assert main["name"] is main["text"] is main["name_grams"] is None
+    assert main["search_text"] == "invoice search"
+    assert model.calls == before
 
 
 def test_status_exposes_drift_even_if_last_applied_versions_match(world):

@@ -42,6 +42,23 @@ def sync(client, worker="bot:owner", **changes):
     return response.json()
 
 
+def test_tc_status_exposes_shared_doc_and_actual_keyword_details(runtime):
+    client, registry = runtime
+    sync(client, name="aliuct值班助手", description="查询事件")
+    registry.require("tc_card_search").updates.run_once()
+    response = client.get("/api/v2/agent-cards/bot:owner/index-status")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["documents"]
+    assert body["doc_version"] == body["indexed_doc_version"]
+    assert body["qdrant"]["status"] == "ok"
+    assert body["qdrant"]["vector_documents"]
+    keyword = body["qdrant"]["keyword_documents"][0]
+    assert keyword["name"] == "aliuct值班助手"
+    assert keyword["text"] == keyword["search_text"]
+    assert "uct" in keyword["name_grams"].split()
+
+
 def test_sync_writes_one_card_and_never_imports_md_or_synthetic_capabilities(runtime):
     client, registry = runtime
     response = sync(

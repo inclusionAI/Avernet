@@ -32,8 +32,21 @@ class IndexedVectorContent(IndexedContent):
     vector: VectorPreview
 
 
+class IndexedKeywordContent(IndexedContent):
+    name: str | None = Field(
+        default=None, description="Qdrant 实际 _bm25_name；字段缺失时为 null"
+    )
+    text: str | None = Field(
+        default=None, description="Qdrant 实际 _bm25_text；字段缺失时为 null"
+    )
+    name_grams: str | None = Field(
+        default=None,
+        description="Qdrant 实际 _bm25_name_grams，保留空格分隔的原始片段；缺失时为 null",
+    )
+
+
 class QdrantContent(BaseModel):
     status: Literal["ok", "unavailable", "unsupported"]
     error: str = ""
     vector_documents: list[IndexedVectorContent] = Field(default_factory=list)
-    keyword_documents: list[IndexedContent] = Field(default_factory=list)
+    keyword_documents: list[IndexedKeywordContent] = Field(default_factory=list)
