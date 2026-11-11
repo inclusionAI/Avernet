@@ -74,7 +74,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <b>目录</b>
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
-<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a>
+<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.13</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.14</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -582,6 +582,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>解析后通过 <code>CallerContext</code> 提供</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ToolEventEmitter</code></td></tr>
 <tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ApprovalHandler</code></td></tr>
+<tr><td>协作（群协作感知）</td><td>请求 metadata 加 Task 字段</td><td>可选</td><td><span class="tag q">待设计</span></td><td>后续阶段，见 7.8</td></tr>
 <tr><td>来源分类 <code>source-agent/v2</code></td><td>Card 数据</td><td>可选</td><td><span class="tag ok">已有</span></td><td>配置项写入 Card</td></tr>
 </table></div>
 
@@ -798,6 +799,29 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-125</span></td><td>扩展数据不得携带凭据。业务扩展的数据不得用于 BCS 的路由和授权。</td></tr>
 </table></div>
 <div class="box"><p><b>当前状态。</b>BCS 目前只协商自己理解的扩展，业务扩展经过 BCS 时不生效。透明透传（7.6）需要 BCS 侧实现，在此之前业务扩展只在调用方直连 Agent 时可用。</p></div>
+
+<h3 id="s7-8"><span class="n">7.8</span>群协作与扩展的边界</h3>
+<p>透明透传只适用于 BCS 不需要理解的数据。群协作不一样：BCS 要决定消息发给谁、谁必须回应、什么时候结束，这些判断依据的信息它必须理解。由此得到一条划分规则：</p>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-126</span></td><td>BCS 需要理解才能工作的语义，只能由平台扩展承载。业务扩展的数据 BCS 永远不解释，因此不能用来驱动 BCS 的路由、协作和授权（同 P-125）。</td></tr>
+<tr><td><span class="tag p">P-127</span></td><td>群里的其他 Bot 只能看到文本和降级文本。业务扩展的数据停在本次调用的路径上，不广播（同 P-138）。需要其他 Bot 知道的信息必须写进文本。</td></tr>
+</table></div>
+<p>这不要求协议把 Agent 分成两类。区分的是扩展的级别，不是 Agent 的种类：同一个 Agent 可以既用业务扩展向自己的前端透传数据，又参与群协作。BCS 按 Agent 声明的能力和 Provider 的设置来决定它能以什么方式入群。</p>
+<div class="tw"><table>
+<tr><th>参与方式</th><th>条件</th><th>BCS 做什么</th><th>Agent 看到什么</th></tr>
+<tr><td>不入群</td><td>Provider 设置为只接受点对点调用</td><td>不把它加入协作群</td><td>只有单个调用方的请求</td></tr>
+<tr><td>文本入群</td><td>任何等级的 Agent，默认。这是现状</td><td>把群里的发言拼成文本（带发言人前缀）发给 Agent；把 Agent 的文本回复广播给群。路由完全由 BCS 按文本和群规则决定</td><td>一段文本，不知道自己在群里</td></tr>
+<tr><td>协作感知</td><td>Agent 声明平台协作扩展</td><td>以结构化方式提供群上下文，并按 Agent 返回的协作意图路由</td><td>群、角色、成员、是否被要求回应</td></tr>
+</table></div>
+<h4>平台协作扩展的方向（待设计）</h4>
+<p>这是一个独立的平台扩展，需要单独设计。这里只列出它应该覆盖的信息，说明它与扩展点模型的关系。</p>
+<div class="tw"><table>
+<tr><th>方向</th><th>扩展点</th><th>内容</th></tr>
+<tr><td>BCS 到 Agent</td><td>E2</td><td>群标识和协作模式；本 Agent 在群中的角色；本条消息的发言人；是否被点名（必须回应，还是可以不回应）；成员列表及其简介</td></tr>
+<tr><td>Agent 到 BCS</td><td>E3</td><td>要点名的成员；选择不回应；任务交接或完成的信号</td></tr>
+</table></div>
+<p>它必须可降级：未协商时退回文本入群。它与一致性等级（6.3）和 Card 的暴露模式（4.1）无关：BCS 自己调用 Agent 时始终使用保存的原始 Card，所以以原生地址暴露的 Agent 同样可以入群。范围和时间见 <span class="tag q">Q22</span>。</p>
 
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
@@ -1419,6 +1443,7 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
 <tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
 <tr><td><span class="tag q">Q21</span></td><td><b>待讨论项。</b>调用路径由 BCS 返回的 Card 决定：原生地址模式（直连）或 BCN 地址模式（经 BCS），按 Agent 类型和使用模式确定。需要讨论：各类 Agent 的默认模式；每个 Agent 固定一种还是因调用方而异；派生 Card 的改写规则；必须经 BCS 的 Agent 如何强制；直连调用是否向 BCS 上报摘要</td><td>采用该方案。按 Profile 接入的 Agent 默认原生地址；未按 Profile 接入的 Bot 只用 BCN 地址；每个 Agent 先固定一种；上报摘要为可选。具体设计放在 client SDK 和 BCS A2A 服务阶段</td><td>4.1</td></tr>
+<tr><td><span class="tag q">Q22</span></td><td>群协作：是否需要平台协作扩展让 Agent 感知群，还是维持现在的文本入群；群内两个 Bot 之间是否需要交换结构化数据（目前只广播文本）；Provider 是否可以将 Agent 设为不入群</td><td>首版维持文本入群，增加“不入群”设置；平台协作扩展单独立项设计；群内结构化交换暂不支持</td><td>7.8</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
