@@ -1,0 +1,21 @@
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_edf09d9cb9f10c::t_12350cc3857ffb 5,43-45,238
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionCommands.test.tsx
+  s_edf09d9cb9f10c::t_6e820b5445907c 47,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15cbd372d19c53deca721b0b23871a05242bc6b0",
+  "prompts": {},
+  "sessions": {
+    "s_edf09d9cb9f10c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-046a-7441-bc8f-a1cf3118dc24",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
