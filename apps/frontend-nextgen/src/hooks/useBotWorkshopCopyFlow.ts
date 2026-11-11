@@ -146,6 +146,12 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
         setPendingIssuedBotId(result.botId);
       } catch (error) {
         setCopying(false);
+        // httpClient 已把默认提示 enqueue 进 errorNotifyStore(由顶层观察者兜底发一条),
+        // 此处 hook 自己再 toast.error 会重复(两条相同中文)。catch 内按 toastKey 撤掉默认那条,
+        // 只留 hook 的兜底文案;与 404 轮询的 cancel 同源范式。
+        if (error instanceof BackendRequestError && error.toastKey) {
+          useErrorNotifyStore.getState().cancel(error.toastKey);
+        }
         toast.error(error instanceof Error ? error.message : 'Bot 复制失败');
         throw error;
       }
