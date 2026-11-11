@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spin } from '@/components/ui/Spin';
 import { Textarea } from '@/components/ui/Textarea';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
-import { History, RefreshCw } from 'lucide-react';
+import { Download, History, RefreshCw } from 'lucide-react';
 import { history, useParams, useSearchParams } from '@umijs/max';
 import { useMemo, useState } from 'react';
 
@@ -249,6 +249,17 @@ const EvaluationPage: React.FC = () => {
                                     查看报告
                                   </a>
                                 ) : null}
+                                {item.archive_download_url ? (
+                                  <a
+                                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                                    href={item.archive_download_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <Download className="size-3.5" />
+                                    下载材料包
+                                  </a>
+                                ) : null}
                               </div>
                             </div>
                           ))}
@@ -273,6 +284,19 @@ const EvaluationPage: React.FC = () => {
                       <p className="font-medium text-muted-foreground">说明</p>
                       <p className="mt-1">{evaluation.submission.message ?? '等待认证结果'}</p>
                     </div>
+                    {evaluation.submission.archive_download_url ? (
+                      <div className="md:col-span-3">
+                        <a
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                          href={evaluation.submission.archive_download_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Download className="size-3.5" />
+                          下载本次评测材料包
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </>
