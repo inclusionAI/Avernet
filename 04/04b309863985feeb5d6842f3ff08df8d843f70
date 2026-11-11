@@ -1,0 +1,25 @@
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/management.rs
+  s_36b244205b9bdf::t_cb44be39fafa0c 379
+apps/bcs/crates/services/bcs-bot/tests/provider_a2a_patch.rs
+  s_36b244205b9bdf::t_f9e0fad79cc73f 36-41,47-49,52-55,64-66,69-72,83-100,107-124,126-151,159-162,172-207,210-213
+  s_36b244205b9bdf::t_d8782abed5199a 1-35,42-46,50-51,56-63,67-68,73-82,101-106,125,152-158,163-171,208-209,214-215
+apps/bcs/docs/provider-a2a-default-owner.md
+  s_36b244205b9bdf::t_4673ddcd391f28 64
+  s_36b244205b9bdf::t_5ff97f040afb84 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0404b309863985feeb5d6842f3ff08df8d843f70",
+  "prompts": {},
+  "sessions": {
+    "s_36b244205b9bdf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1caba-89eb-7551-9674-a9220f05aa64",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
