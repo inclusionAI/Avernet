@@ -3,6 +3,12 @@ declare module '*.less';
 /** 仅 PRESET=local 注入；非本地构建固定为空字符串。 */
 declare const TEAMCLAW_OPENAPI_USER_ID: string;
 
+/**
+ * agentswarm 运行所属的 tenant（define 注入）。
+ * 该网关把 tenant 作为显式请求参数而非取自登录主体，本版本固定为 `teamclaw`。
+ */
+declare const TEAMCLAW_AGENTSWARM_TENANT: string | undefined;
+
 /** 登录策略（本地开发可覆盖）：内部 PRE 联调使用 ACE 网关。 */
 declare const TEAMCLAW_LOGIN_STRATEGY: 'ace-gateway' | 'oauth-provider' | undefined;
 
