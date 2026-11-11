@@ -406,7 +406,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
 
     @staticmethod
     def _event_row(event: EventRecord, *, now: datetime) -> ContextCollabEventModel:
-        """``EventRecord`` 领域对象 → 落库行;append-only,不写 gmt_modified。"""
+        """``EventRecord`` 领域对象 → 落库行;append-only,gmt_modified 与 gmt_create 同值写入。"""
         return ContextCollabEventModel(
             collab_context_id=event.collab_context_id,
             event_id=event.event_id,
@@ -420,4 +420,5 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             occurred_at=event.occurred_at,
             env=get_current_env(),
             gmt_create=now,
+            gmt_modified=now,
         )

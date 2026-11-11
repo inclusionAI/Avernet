@@ -891,6 +891,7 @@ CREATE TABLE `ac_context_collab_event` (
   `context_version_after` bigint(20) DEFAULT NULL,
   `occurred_at` timestamp NOT NULL,
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_event` (`avernet_tenant`, `env`, `collab_context_id`, `event_id`) GLOBAL,
   KEY `idx_context_collab_event_parent` (`avernet_tenant`, `env`, `collab_context_id`, `parent_event`) GLOBAL

@@ -66,6 +66,7 @@ def test_event_columns_match_ddl(engine):
         "context_version_after",
         "occurred_at",
         "gmt_create",
+        "gmt_modified",
     }
 
 

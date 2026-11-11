@@ -118,8 +118,10 @@ class ContextCollabEventModel(Base):
     references an existing event in the same context; acceptance order is the
     auto-increment ``id``. ``actor_ref`` / ``visibility`` / ``payload`` /
     ``context_version_after`` are nullable so out-of-band writers may record
-    partial rows; the P1 append path always writes them. The DDL defines no
-    ``gmt_modified`` because rows are never rewritten.
+    partial rows; the P1 append path always writes them. ``gmt_modified``
+    follows the shared axis pattern: the append path writes it equal to
+    ``gmt_create`` and the DDL keeps the ON UPDATE default for any future
+    out-of-band rewrite.
     """
 
     __tablename__ = "ac_context_collab_event"
@@ -145,9 +147,9 @@ class ContextCollabEventModel(Base):
     payload = Column(_medium_text(), nullable=True)
     context_version_after = Column(BigInteger, nullable=True)
     occurred_at = Column(TIMESTAMP, nullable=False)
-    # Append-only table: the DDL carries no gmt_modified, so take only the
-    # first three axis columns (env, avernet_tenant, gmt_create).
-    env, avernet_tenant, gmt_create = _base_axes()[:3]
+    # Append-only table, but gmt_modified still mirrors the shared axis
+    # pattern so an out-of-band rewrite keeps the audit trail consistent.
+    env, avernet_tenant, gmt_create, gmt_modified = _base_axes()
 
     __table_args__ = (
         Index(
