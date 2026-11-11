@@ -49,8 +49,12 @@ from agentclaw.community.api.task.task_grant_service import (
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
+)
+from agentclaw.community.core.repository.implementations.task.todos import (
+    TodoRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
     ForumAuthorStatsRepository,
@@ -66,6 +70,9 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.todos import (
+    TodoRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.feedback import (
     FeedbackRepositoryProtocol,
@@ -104,6 +111,7 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
 from agentclaw.community.core.task.task_center.delivery_lifecycle import (
     TaskDeliveryLifecycle,
 )
+from agentclaw.community.core.task.todos.services.todo_service import TodoService
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
 )
@@ -170,6 +178,9 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.plugins.community.todo_collaboration import (
+    HttpTodoCollaborationPlugin,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -180,6 +191,9 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
+)
+from agentclaw.community.plugin_api.todo_collaboration import (
+    TodoCollaborationPlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
@@ -282,6 +296,8 @@ class TaskModule(Module):
         )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
+        binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
+        binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -293,6 +309,22 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def todo_collaboration_plugin(
+        self, task_dispatch: TaskDispatchConfig
+    ) -> TodoCollaborationPlugin:
+        """B-side collaboration adapter selected by the task_dispatch config.
+
+        An empty ``todo_collab_base_url`` leaves the feature unusable but keeps
+        Todo CRUD and acceptance testable without a B deployment.
+        """
+        return HttpTodoCollaborationPlugin(
+            base_url=task_dispatch.todo_collab_base_url,
+            timeout_seconds=task_dispatch.todo_collab_timeout_seconds,
         )
 
     @singleton

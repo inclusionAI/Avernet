@@ -255,7 +255,6 @@ app = FastAPI(lifespan=_app_lifespan)
 # middleware, and at construction, because the lifespan guard above only fires
 # on hosts that drive the lifespan protocol.
 install_worker_runtime_guard(app)
-
 def finalize_worker_runtime() -> None:
     """Initialize everything this worker process owns — see :mod:`.boot`.
 
@@ -340,6 +339,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError, CallerMcpSyncError, CallerBcsSyncError,
 )
 from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
+from agentclaw.community.core.task.todos import errors as _TodoErrors  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpEndpointUnavailableError,
     McpPermissionDeniedError,
@@ -392,6 +392,8 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
+    _TodoErrors.TodoNotFoundError: 404, _TodoErrors.TodoStateConflictError: 409,
+    _TodoErrors.TodoBotScopeError: 403, _TodoErrors.TodoBotAmbiguousError: 409,
     **ACLI_CLI_ERROR_STATUS,
 }
 
@@ -399,7 +401,6 @@ _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
     EngineUrlNotConfigured: 500,
     EngineUnreachable:      502,
 }
-
 def _trace_headers(request: Request) -> dict[str, str]:
     """Return ``{"X-Trace-ID": <id>}`` for echoing on error responses.
 
@@ -409,7 +410,6 @@ def _trace_headers(request: Request) -> dict[str, str]:
     """
     trace_id = getattr(request.state, "trace_id", None)
     return {"X-Trace-ID": trace_id} if trace_id else {}
-
 def _is_public_api(request: Request) -> bool:
     """Whether this request belongs to the public OpenAPI surface."""
     from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api

@@ -153,3 +153,17 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # it is NoCheck for the same reason.
     ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
 }
+
+
+#: Todo workbench is a browser Human self-service surface; app-only callers are refused.
+TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("GET", "/openapi/v1/todos"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/todos"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/todos/{todo_id}"): AdmissionMode.REFUSED,
+    ("PATCH", "/openapi/v1/todos/{todo_id}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/todos/{todo_id}/run"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/todos/{todo_id}/events"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
+}
