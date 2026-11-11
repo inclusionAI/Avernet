@@ -1,0 +1,12 @@
+# Replace paths and configure model mode before running; never put API keys here.
+repository: /absolute/path/to/open_Avernet
+output_dir: /absolute/path/to/private-bcn-bench-runs
+bcs_url: http://127.0.0.1:21000
+model_mode: manual  # existing singlebox/.env.local model settings; alternatively home
+port_start: 32001
+startup_timeout_seconds: 300
+judge:
+  url: https://your-provider.example/v1/chat/completions
+  model: your-judge-model
+  api_key_env: BCN_BENCH_JUDGE_API_KEY
+  timeout_seconds: 120
