@@ -23,10 +23,11 @@
 """
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from injector import Injector
-from sqlalchemy import func, select
+from sqlalchemy import func, insert as sql_insert, select, update as sql_update
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
@@ -540,3 +541,111 @@ class TestDiWiring:
         assert isinstance(service, ContextCollabService)
         assert injector.get(ContextCollabServiceProtocol) is service
         assert isinstance(service._repository, ContextCollabRepository)
+
+
+class TestNullablePartialRows:
+    """Ruling R10:可空列的容忍语义(engine 直查)。
+
+    - current_snapshot 可空:GET 返回 null;追加事件保持 NULL、只推进版本与指针;
+    - event 的 actor_ref/visibility/payload/context_version_after 可空:
+      解码不崩,visibility=NULL 按 private 处理(fail-safe)。
+    """
+
+    def _null_snapshot_collet(self, engine, collab_context_id) -> None:
+        """模拟外部写入:把聚合行的 current_snapshot 置 NULL。"""
+        with engine.connect() as conn:
+            conn.execute(
+                sql_update(ContextCollabColletModel).where(
+                    ContextCollabColletModel.collab_context_id == collab_context_id
+                ).values(current_snapshot=None)
+            )
+            conn.commit()
+
+    def test_snapshotless_collet_gets_null_snapshot_but_full_progress(
+        self, service, engine
+    ):
+        created = service.create_context(make_create_command(), make_actor())
+        self._null_snapshot_collet(engine, created.collab_context_id)
+
+        result = service.get_status(
+            created.collab_context_id, trunk_events=False, context=make_actor()
+        )
+
+        assert result.current_snapshot is None
+        # 事件链照常投影:初始事件仍在,统计只数非 Message。
+        assert result.task_progress.total_events == 1
+        assert result.current_event["event_kind"] == "task.created"
+
+    def test_append_onto_snapshotless_collet_keeps_null_snapshot(
+        self, service, engine
+    ):
+        created = service.create_context(make_create_command(), make_actor())
+        self._null_snapshot_collet(engine, created.collab_context_id)
+
+        appended = service.append_event(
+            created.collab_context_id,
+            make_append_command(
+                "task.started",
+                expected_version=created.context_version,
+                primitive_type="Task",
+                parent_event=created.current_event["event_id"],
+                payload={},
+            ),
+            make_actor(),
+        )
+
+        assert appended.accepted is True
+        assert appended.current_status is None
+        assert appended.context_version == 2
+        with engine.connect() as conn:
+            stored = conn.scalar(
+                select(ContextCollabColletModel.current_snapshot).where(
+                    ContextCollabColletModel.collab_context_id
+                    == created.collab_context_id
+                )
+            )
+        assert stored is None  # 保持 NULL,不虚构快照
+
+    def test_partial_event_row_decodes_and_null_visibility_is_private(
+        self, service, engine
+    ):
+        created = service.create_context(make_create_command(), make_actor())
+        # 外部写入的部分事件行:actor_ref/visibility/payload/version_after 全 NULL。
+        with engine.connect() as conn:
+            conn.execute(
+                sql_insert(ContextCollabEventModel).values(
+                    collab_context_id=created.collab_context_id,
+                    event_id="evt_partial_manual",
+                    parent_event=created.current_event["event_id"],
+                    event_kind="task.progress.updated",
+                    primitive_type="Activity",
+                    actor_ref=None,
+                    visibility=None,
+                    payload=None,
+                    context_version_after=None,
+                    occurred_at=datetime.now(timezone.utc),
+                )
+            )
+            conn.commit()
+
+        principal_view = service.get_status(
+            created.collab_context_id, trunk_events=False, context=make_actor()
+        )
+        ids = [e["event_id"] for e in principal_view.task_progress.events]
+        assert "evt_partial_manual" in ids
+        entry = next(
+            e for e in principal_view.task_progress.events
+            if e["event_id"] == "evt_partial_manual"
+        )
+        # payload NULL → summary/content None;计数按 primitive 正常参与。
+        assert entry["summary"] is None
+        assert entry["content"] is None
+
+        outsider_view = service.get_status(
+            created.collab_context_id,
+            trunk_events=False,
+            context=make_actor(principal_id="u_9999"),
+        )
+        outsider_ids = [e["event_id"] for e in outsider_view.task_progress.events]
+        # visibility NULL 按 private:非 principal 看不到,不泄露。
+        assert "evt_partial_manual" not in outsider_ids

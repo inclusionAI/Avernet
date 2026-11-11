@@ -73,7 +73,9 @@ class ContextCollabColletModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     context_spec = Column(_medium_text(), nullable=False)
-    current_snapshot = Column(_medium_text(), nullable=False)
+    # 可空(spec 作者裁决):允许外部写入只有 context_spec 的聚合行;
+    # P1 创建路径仍总是写满快照,读路径对 NULL 容忍。
+    current_snapshot = Column(_medium_text(), nullable=True)
     current_event_id = Column(String(128), nullable=True)
     context_version = Column(
         BigInteger,
@@ -108,8 +110,10 @@ class ContextCollabEventModel(Base):
 
     ``parent_event`` is NULL for the main-line creation event and otherwise
     references an existing event in the same context; acceptance order is the
-    auto-increment ``id``. The DDL defines no ``gmt_modified`` because rows
-    are never rewritten.
+    auto-increment ``id``. ``actor_ref`` / ``visibility`` / ``payload`` /
+    ``context_version_after`` are nullable so out-of-band writers may record
+    partial rows; the P1 append path always writes them. The DDL defines no
+    ``gmt_modified`` because rows are never rewritten.
     """
 
     __tablename__ = "ac_context_collab_event"
@@ -125,10 +129,12 @@ class ContextCollabEventModel(Base):
     parent_event = Column(String(128), nullable=True)
     event_kind = Column(String(128), nullable=False)
     primitive_type = Column(String(64), nullable=False)
-    actor_ref = Column(_medium_text(), nullable=False)
-    visibility = Column(String(32), nullable=False)
-    payload = Column(_medium_text(), nullable=False)
-    context_version_after = Column(BigInteger, nullable=False)
+    # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;P1 追加路径
+    # 仍总是写满这些值,读路径对 NULL 容忍(visibility=NULL 按 private 处理)。
+    actor_ref = Column(_medium_text(), nullable=True)
+    visibility = Column(String(32), nullable=True)
+    payload = Column(_medium_text(), nullable=True)
+    context_version_after = Column(BigInteger, nullable=True)
     occurred_at = Column(DateTime, nullable=False)
     # Append-only table: the DDL carries no gmt_modified, so take only the
     # first three axis columns (env, avernet_tenant, gmt_create).

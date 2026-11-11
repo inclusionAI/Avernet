@@ -346,8 +346,9 @@ class EventAcceptedResultDto(BaseModel):
     context_version: int = Field(
         description="Context version after the accepted append."
     )
-    current_status: str = Field(
-        description="Snapshot status after the append."
+    current_status: str | None = Field(
+        description="Snapshot status after the append; null when the "
+        "aggregate row was written out-of-band without a snapshot."
     )
 
 
@@ -482,7 +483,11 @@ def status_to_dto(result: ContextCollabStatusProjection) -> ContextCollabStatusR
     return ContextCollabStatusResponse(
         collab_context_id=result.collab_context_id,
         context_version=result.context_version,
-        current_snapshot=_snapshot_to_dto(result.current_snapshot),
+        current_snapshot=(
+            _snapshot_to_dto(result.current_snapshot)
+            if result.current_snapshot is not None
+            else None
+        ),
         current_event=(
             CurrentEventDto(
                 event_id=current_event["event_id"],

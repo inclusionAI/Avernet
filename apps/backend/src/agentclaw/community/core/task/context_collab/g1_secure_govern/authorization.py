@@ -42,11 +42,15 @@ class ContextCollabAuthorizerProtocol(Protocol):
 
 
 def _is_principal(collet: Collet, actor: ActorContext) -> bool:
-    return actor.actor.principal_id == collet.current_snapshot.principal_ref.principal_id
+    # 身份取自创建参数(context_spec 恒在),不经 current_snapshot(可空)。
+    return (
+        actor.actor.principal_id
+        == collet.context_spec.principal_ref.principal_id
+    )
 
 
 def _is_executor(collet: Collet, actor: ActorContext) -> bool:
-    executor = collet.current_snapshot.executor_ref
+    executor = collet.context_spec.executor_ref
     return executor is not None and actor.actor.principal_id == executor.agent_id
 
 
@@ -57,7 +61,8 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
       (principal/executor 引用非空已在 value object 校验);
     - ``check_append``:actor 必须是 principal 或 executor;
     - ``filter_visible_events``:public 永远可见,workspace 仅
-      principal/executor 可见,private 仅 principal 可见。
+      principal/executor 可见,private 仅 principal 可见;visibility
+      为 NULL 的部分行按 private 处理(fail-safe)。
     """
 
     def check_create(self, spec: ContextSpec, actor: ActorContext) -> None:
@@ -89,6 +94,10 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
                 is_principal or is_executor
             ):
                 visible.append(record)
-            elif record.visibility == VISIBILITY_PRIVATE and is_principal:
+            elif (
+                record.visibility == VISIBILITY_PRIVATE
+                or record.visibility is None
+            ) and is_principal:
+                # visibility=NULL(外部部分行)按 private 处理:收紧不泄露。
                 visible.append(record)
         return visible

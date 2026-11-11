@@ -135,11 +135,18 @@ def _dump_json(data: dict) -> str:
 
 
 def _collet_from_row(row: ContextCollabColletModel) -> Collet:
-    """落库行 → ``Collet`` 领域对象;显式逐字段构造。"""
+    """落库行 → ``Collet`` 领域对象;显式逐字段构造。
+
+    ``current_snapshot`` 可空:外部可写入只有 spec 的聚合行。
+    """
     return Collet(
         collab_context_id=row.collab_context_id,
         context_spec=ContextSpec.from_dict(json.loads(row.context_spec)),
-        current_snapshot=CurrentSnapshot.from_dict(json.loads(row.current_snapshot)),
+        current_snapshot=(
+            CurrentSnapshot.from_dict(json.loads(row.current_snapshot))
+            if row.current_snapshot is not None
+            else None
+        ),
         current_event_id=row.current_event_id,
         context_version=int(row.context_version),
     )
@@ -158,10 +165,18 @@ def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
         parent_event=row.parent_event,
         event_kind=row.event_kind,
         primitive_type=row.primitive_type,
-        actor_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
+        actor_ref=(
+            PrincipalRef.from_dict(json.loads(row.actor_ref))
+            if row.actor_ref is not None
+            else None
+        ),
         visibility=row.visibility,
-        payload=json.loads(row.payload),
-        context_version_after=int(row.context_version_after),
+        payload=json.loads(row.payload) if row.payload is not None else None,
+        context_version_after=(
+            int(row.context_version_after)
+            if row.context_version_after is not None
+            else None
+        ),
         occurred_at=occurred_at,
     )
 
@@ -287,8 +302,15 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 context_version_after=context_version,
                 occurred_at=now,
             )
-            # snapshot_updater 在行锁内对持锁读出的快照执行,其视图不可能变陈旧。
-            new_snapshot = request.snapshot_updater(previous.current_snapshot)
+            # snapshot_updater 在行锁内对持锁读出的快照执行,其视图不可能变陈旧;
+            # current_snapshot 为 NULL 的外部部分行保持 NULL(Ruling R10):
+            # 只推进 version 与事件指针,不为它虚构快照。
+            if previous.current_snapshot is None:
+                new_snapshot = None
+                snapshot_write: str | None = None
+            else:
+                new_snapshot = request.snapshot_updater(previous.current_snapshot)
+                snapshot_write = _dump_json(new_snapshot.to_dict())
             db.add(self._event_row(event, now=now))
             updated_rows = (
                 db.query(ContextCollabColletModel)
@@ -299,7 +321,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 )
                 .update(
                     {
-                        "current_snapshot": _dump_json(new_snapshot.to_dict()),
+                        "current_snapshot": snapshot_write,
                         "current_event_id": event.event_id,
                         "context_version": context_version,
                     },

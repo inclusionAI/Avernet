@@ -28,7 +28,9 @@ class EventRecord:
 
     ``parent_event`` 是事件 DAG 的本地因果关系字段,主事件为 ``None``;
     事件顺序即插入顺序(表自增 id),主干链在查询时由投影层推导。
-    行一旦追加即不再改写,因此本记录没有生命周期方法。
+    ``actor_ref`` / ``visibility`` / ``payload`` / ``context_version_after``
+    与落库列同宽为可空,容忍外部写入的部分行。行一旦追加即不再改写,
+    因此本记录没有生命周期方法。
     """
 
     collab_context_id: str
@@ -36,10 +38,12 @@ class EventRecord:
     parent_event: str | None
     event_kind: str
     primitive_type: str  # Message | Task | Activity
-    actor_ref: PrincipalRef
-    visibility: str  # public | workspace | private
-    payload: dict
-    context_version_after: int
+    # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;
+    # P1 追加路径总是写满这些值。
+    actor_ref: PrincipalRef | None
+    visibility: str | None  # public | workspace | private;NULL 按 private 处理
+    payload: dict | None
+    context_version_after: int | None
     occurred_at: datetime
 
     def to_envelope(self) -> "EventEnvelope":

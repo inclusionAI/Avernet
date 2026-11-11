@@ -83,7 +83,8 @@ class EventAcceptedResult:
     event_kind: str
     primitive_type: str
     context_version: int
-    current_status: str
+    # 可空:快照为 NULL 的外部部分行追加事件后无状态可报。
+    current_status: str | None
 
 
 @dataclass
@@ -96,11 +97,15 @@ class TaskProgressProjectionDTO:
 
 @dataclass
 class ContextCollabStatusProjection:
-    """查询用例结果(GET 最新状态与任务进度)。"""
+    """查询用例结果(GET 最新状态与任务进度)。
+
+    ``current_snapshot`` 可空:外部写入的只有 spec 的聚合行返回 null,
+    事件链投影照常。
+    """
 
     collab_context_id: str
     context_version: int
-    current_snapshot: dict
+    current_snapshot: dict | None
     current_event: dict | None
     task_progress: TaskProgressProjectionDTO
 

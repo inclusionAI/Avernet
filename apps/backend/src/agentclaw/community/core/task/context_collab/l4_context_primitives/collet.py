@@ -227,6 +227,7 @@ class Collet:
 
     collab_context_id: str
     context_spec: ContextSpec
-    current_snapshot: CurrentSnapshot
+    # 可空:允许外部写入只有 spec 的聚合行;P1 创建路径总是写满。
+    current_snapshot: CurrentSnapshot | None
     current_event_id: str | None
     context_version: int

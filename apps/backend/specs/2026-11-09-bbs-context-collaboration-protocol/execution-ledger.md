@@ -144,3 +144,12 @@ BRANCH COMPLETE: 24 commits, origin/dev 833a7db84..ad612f97d. Final review clean
   - `trunk_events=true` 的"主事件"改为查询时动态推导的**当前活动链**:自 `collet.current_event_id` 沿 `parent_event` 回溯到根的事件集合(`observation.active_chain_ids`);过滤只作用于 `task_progress.events[]`(R6 不变式保持),仓储协议 `get_current_status` 的 `trunk_events` 参数删除,主干判定不再发生于接纳时(spec §9.4 #4 半句失效);
   - 投影 status(completed/active/pending)改按事件列表位置推导。
 - Event record 领域对象相应瘦身为:`collab_context_id / event_id / parent_event / event_kind / primitive_type / actor_ref / visibility / payload / context_version_after / occurred_at`。
+
+## 合并后变更 III(2026-11-11)
+
+- **Ruling R10(spec 作者指示):** 列可空化 —— `ac_context_collab_collet.current_snapshot` 与 `ac_context_collab_event` 的 `actor_ref`/`visibility`/`payload`/`context_version_after` 由 NOT NULL 放宽为 DEFAULT NULL(DDL + ORM 同步)。配套裁决:
+  1. P1 三个 API 写路径不变(仍写满全部值,各自必填校验不动);可空性服务于外部/带外写入的部分行;
+  2. 读路径全容忍:NULL 解码为领域对象 None 字段;payload=NULL → 投影 summary/content=null、不参与 percent;
+  3. **visibility=NULL 按 private 处理**(fail-safe:未知隐私范围收紧不泄露);
+  4. 快照为 NULL 的聚合行:GET 返回 `current_snapshot: null`(事件链照常投影),追加事件保持 NULL、只推进版本与指针,响应 `current_status: null`;
+  5. G1 身份判定改从 `context_spec`(创建参数,恒在)取 principal/executor,不再解引用可空的 current_snapshot。

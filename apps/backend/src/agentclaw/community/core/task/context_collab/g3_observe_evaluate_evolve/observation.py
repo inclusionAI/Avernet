@@ -97,6 +97,7 @@ def project_events(
             status = STATUS_ACTIVE
         else:
             status = STATUS_PENDING
+        payload = record.payload if record.payload is not None else {}
         projections.append(
             EventProjection(
                 event_id=record.event_id,
@@ -104,8 +105,8 @@ def project_events(
                 event_kind=record.event_kind,
                 primitive_type=record.primitive_type,
                 status=status,
-                summary=record.payload.get("summary"),
-                content=record.payload.get("content"),
+                summary=payload.get("summary"),
+                content=payload.get("content"),
                 occurred_at=record.occurred_at,
             )
         )
