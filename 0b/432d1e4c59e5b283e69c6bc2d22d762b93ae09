@@ -1,0 +1,33 @@
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_c56ff46febc594::t_d656e223445b0f 709-710
+  s_c56ff46febc594::t_fc680df3ad8dd9 694-708,711-741
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_c56ff46febc594::t_d656e223445b0f 80-90
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  s_c56ff46febc594::t_943216188e0eef 2544
+  s_c56ff46febc594::t_50394b4023f475 2507-2541
+  s_c56ff46febc594::t_2388875fe9efac 2542-2543,2545-2595
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_c56ff46febc594::t_d41dfbc37bd5bb 221-224
+apps/backend/src/agentclaw/community/core/bot_management/engines/default.py
+  s_c56ff46febc594::t_d41dfbc37bd5bb 95-98
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_c56ff46febc594::t_d41dfbc37bd5bb 73-74,76,78,84
+  s_c56ff46febc594::t_c81f93eec9778c 75,77,79-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b432d1e4c59e5b283e69c6bc2d22d762b93ae09",
+  "prompts": {},
+  "sessions": {
+    "s_c56ff46febc594": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c49f-f1a3-79e2-8560-03ab24f31c27",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
