@@ -291,7 +291,7 @@ async fn open_strategy_promotes_protected_without_agent_view_scope_to_public() {
 }
 
 #[tokio::test]
-async fn open_strategy_keeps_protected_with_agent_view_scope() {
+async fn open_strategy_promotes_protected_with_agent_view_scope() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-2").await;
     service
         .patch(PatchBotInternalAttributes {
@@ -311,15 +311,15 @@ async fn open_strategy_keeps_protected_with_agent_view_scope() {
         .await
         .expect("open friend check-in");
 
-    assert_eq!(attributes.visibility, "protected");
+    assert_eq!(attributes.visibility, "public");
     assert_eq!(attributes.friend_ext, scoped_agent_friend_ext());
 }
 
 #[tokio::test]
-async fn open_strategy_reads_the_agent_view_scope_from_the_patch_friend_ext() {
+async fn open_strategy_promotes_regardless_of_patch_agent_view_scope() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-3").await;
 
-    // 同一次 patch 自带组织范围 → 目标态仍是限定可见 → 不升
+    // 同一次 patch 自带组织范围也升级，且保留传入的 friend_ext。
     let attributes = service
         .patch(PatchBotInternalAttributes {
             bot_id: "bot-open-3".to_string(),
@@ -329,12 +329,14 @@ async fn open_strategy_reads_the_agent_view_scope_from_the_patch_friend_ext() {
         })
         .await
         .expect("open with scoped friend_ext");
-    assert_eq!(attributes.visibility, "protected");
+    assert_eq!(attributes.visibility, "public");
+    assert_eq!(attributes.friend_ext, scoped_agent_friend_ext());
 
-    // 先回到 APPROVAL 再同 patch 清范围 + OPEN → 目标态无范围 → 升
+    // 重新设为 protected + APPROVAL，清范围与否都不影响下一次 OPEN 升级。
     service
         .patch(PatchBotInternalAttributes {
             bot_id: "bot-open-3".to_string(),
+            visibility: Some("protected".to_string()),
             friend_check_in_strategy: Some(FriendCheckInStrategy::Approval),
             ..Default::default()
         })

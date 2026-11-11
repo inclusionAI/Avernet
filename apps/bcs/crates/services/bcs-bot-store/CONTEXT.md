@@ -390,3 +390,27 @@ NO PAD 043 preserves trailing-space-distinct legacy keys. Exact original 043
 history is retained and upgraded by 044, never checksum-rewritten. MySQL tests
 cover real retained rows, the fresh chain and the original-history upgrade;
 compatible engines without utf8mb4_0900_bin are unsupported, not silently folded.
+
+## Atomic Open friend check-in patches
+
+`patch_control_plane` evaluates the Open-to-public rule inside the write boundary:
+no explicit visibility, effective protected visibility (including the existing
+NULL/empty legacy read default). Organization scope never gates promotion:
+missing, empty, nonempty or malformed scope values are irrelevant. Derivation
+does not modify `friend_ext`; an explicit replacement keeps its usual semantics.
+Explicit visibility wins, and non-Open writes do not derive.
+SQL writes strategy and conditional visibility in one UPDATE over the live row;
+Memory checks under the existing record-write mutex before durable replacement.
+There is no post-write promotion, new cache, migration or retry loop.
+
+The SQL path retains its existing precheck, one UPDATE and read-back (three
+single-row DB round trips normally), eliminating the prior extra Core read.
+The derived path holds the existing live-bot publication guard during read-back
+so it publishes the actual SQL visibility rather than an assumed public value.
+This is a bounded configuration write; no scans, batching or external delivery.
+An unchanged MySQL update retains the existing missing-row recheck.
+
+Tests: `open_check_in_visibility` (Memory, full SQLite migration chain and
+controlled concurrent SQL writes), application `open_check_in_concurrency`,
+and the shared `support/open_check_in_contract.rs` mounted in bcs-admin's
+native full MySQL migration-chain gate.

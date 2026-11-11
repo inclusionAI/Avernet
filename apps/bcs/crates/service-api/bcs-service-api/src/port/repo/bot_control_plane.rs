@@ -125,6 +125,11 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
         query: BotTaskModesQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
 
+    /// Apply the patch atomically. An explicit Open strategy without explicit
+    /// visibility promotes protected to public regardless of organization scope.
+    /// Evaluate live visibility inside the write boundary, never against a
+    /// separate read snapshot. Derivation does not modify friend_ext.
+    /// Explicit visibility wins; other strategies do not derive visibility.
     async fn patch_control_plane(
         &self,
         bot_id: &str,

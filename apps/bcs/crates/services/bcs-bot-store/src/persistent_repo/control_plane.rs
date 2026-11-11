@@ -604,6 +604,9 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             return Ok(None);
         }
 
+        let derive_visibility = patch.friend_check_in_strategy
+            == Some(bcs_service_api::FriendCheckInStrategy::Open)
+            && patch.visibility.is_none();
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
@@ -627,6 +630,14 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         if let Some(visibility) = patch.visibility.as_deref() {
             assignments.push("visibility = ?".to_string());
             params.push(Value::from(visibility));
+        } else if derive_visibility {
+            // Check the live visibility in the same UPDATE as the strategy.
+            // Organization scope does not gate promotion. Preserve the legacy
+            // NULL/empty default used by control-plane reads.
+            assignments.push(
+                "visibility = CASE WHEN COALESCE(NULLIF(visibility, ''), 'protected') = 'protected' \
+                 THEN 'public' ELSE visibility END".to_string(),
+            );
         }
         if let Some(status) = patch.status {
             assignments.push("status = ?".to_string());
@@ -697,12 +708,24 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             return Ok(None);
         }
 
-        if let Some(bot) = self.bots.write().await.get_mut(bot_id) {
+        let mut bots = self.bots.write().await;
+        // SQL may have kept a concurrently changed visibility. Read the actual
+        // result, never the old snapshot or an assumed public value. Keep the
+        // cache publication guard through this read so another local patch
+        // cannot publish its privacy update between our read and publication.
+        let derived_record = if derive_visibility {
+            self.get_control_plane(bot_id, env).await?
+        } else {
+            None
+        };
+        if let Some(bot) = bots.get_mut(bot_id) {
             if let Some(name) = patch.name {
                 bot.capabilities.name = Some(name);
             }
             if let Some(visibility) = patch.visibility {
                 bot.capabilities.visibility = visibility;
+            } else if let Some(record) = &derived_record {
+                bot.capabilities.visibility = record.visibility.clone();
             }
             if let Some(status) = patch.status {
                 bot.status = status;
@@ -723,7 +746,12 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             }
         }
 
-        self.get_control_plane(bot_id, env).await
+        drop(bots);
+        if derive_visibility {
+            Ok(derived_record)
+        } else {
+            self.get_control_plane(bot_id, env).await
+        }
     }
 
     // ── Per-Bot caller configuration (spec §10.7.2/§15.96) ─────────────
