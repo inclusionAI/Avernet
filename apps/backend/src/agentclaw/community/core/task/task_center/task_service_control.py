@@ -148,4 +148,3 @@ class TaskServiceControlMixin:
             extend_props_patch=extend_props_patch,
         )
         return await self._centralized_adapter.on_report(patch)
-

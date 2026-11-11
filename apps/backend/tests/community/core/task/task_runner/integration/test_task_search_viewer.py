@@ -40,7 +40,7 @@ async def test_task_search_uses_product_viewer_rules_and_preserves_readiness(
 ):
     # Target metadata is independent from the semantic index runtime-state fact.
     rows = [
-        ("protected", "protected", "private", True, "ACTIVE", "offline"),
+        ("protected", "protected", "private", True, "ACTIVE", "online"),
         ("human-only", "private", "public", True, "ACTIVE", "online"),
         ("public", "public", "private", True, "ACTIVE", "online"),
         ("disconnected", "public", "public", False, "ACTIVE", "online"),
@@ -133,38 +133,31 @@ async def test_task_search_uses_product_viewer_rules_and_preserves_readiness(
         }
     )
     result = await service.search_bots(
-        query="测试发布的bot", task_id="task", node_id="node", relay_token="generation-1", **options
+        query="测试发布的bot",
+        task_id="task",
+        node_id="node",
+        relay_token="generation-1",
+        **options,
     )
     expected = {
-        None: ["public:owner", "both:owner"],
+        None: ["protected:owner", "public:owner", "both:owner"],
         "bot": ["protected:owner", "public:owner", "both:owner"],
-        "human": ["human-only:owner", "both:owner"],
+        "human": ["protected:owner", "public:owner", "both:owner"],
     }
     assert [item.bot_id for item in result] == expected[viewer_type]
     assert recommendations[0]["top_k"] == 5
     params = calls[0]
+    assert recommendations[0]["filters"] == {"runtime_state": ["online"]}
+    assert params["visibility"] == "public,protected"
+    assert params["user_visibility"] == "public,protected,private"
+    assert params["status"] == "online"
     if viewer_type is None:
-        assert recommendations[0]["filters"] == {"runtime_state": ["online"]}
-        assert params["visibility"] == "public"
-        assert params["user_visibility"] == "public,protected,private"
-        assert params["status"] == "online" and params["tc_bot"] is True
         assert "viewer_actor_type" not in params
     elif viewer_type == "bot":
-        assert recommendations[0]["filters"] == {
-            "availability": ["public", "protected"],
-            "runtime_state": ["online", "offline"],
-        }
-        assert params["visibility"] == "public,protected"
         assert params["viewer_actor_id"] == "viewer:owner"
-        assert "tc_bot" not in params and "status" not in params
+        assert "tc_bot" not in params
     else:
-        assert recommendations[0]["filters"] == {
-            "availability": ["public", "protected", "private"],
-            "runtime_state": ["online"],
-        }
-        assert params["user_visibility"] == "public,protected"
         assert params["viewer_actor_id"] == "146836" and params["tc_bot"] is True
-        assert "visibility" not in params
 
 
 @pytest.mark.asyncio
@@ -240,6 +233,40 @@ async def test_explicit_viewer_keeps_five_candidate_cap_and_runtime_filter(viewe
     assert [item.bot_id for item in candidates] == [
         f"b{i}:owner" for i in [6, 5, 4, 3, 2]
     ]
-    assert calls[0]["viewer_actor_id"] == "viewer-id"
-    assert "catalog_filters" not in calls[0] and "filters" not in calls[0]
-    assert calls[0]["runtime_state"] == "online"
+    assert calls[0]["filters"] == {"runtime_state": ["online"]}
+    assert calls[0]["catalog_filters"].viewer_actor_id == "viewer-id"
+    assert calls[0]["catalog_filters"].visibility == ("public", "protected")
+    assert calls[0]["catalog_filters"].user_visibility == (
+        "public",
+        "protected",
+        "private",
+    )
+    assert calls[0]["catalog_filters"].status == "online"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("viewer_type", ["bot", "human"])
+async def test_explicit_viewer_visibility_is_transmitted(viewer_type):
+    calls = []
+
+    class Semantic:
+        def search_by_keyword(self, **kwargs):
+            calls.append(kwargs)
+            return {"items": [], "total": 0}
+
+    service = _Service(TaskSearch(SemanticKeywordBotDiscover(None, Semantic())))
+    candidates = await service.search_bots(
+        query="q",
+        task_id="t",
+        node_id="n",
+        relay_token="generation-1",
+        viewer_actor_type=viewer_type,
+        viewer_actor_id="viewer:owner" if viewer_type == "bot" else "146836",
+        visibility="protected",
+    )
+    assert candidates == []
+    assert calls[0]["filters"]["availability"] == ["protected"]
+    assert calls[0]["filters"]["runtime_state"] == ["online"]
+    assert calls[0]["catalog_filters"].visibility == ("protected",)
+    assert calls[0]["catalog_filters"].user_visibility == ("protected",)
+    assert calls[0]["catalog_filters"].viewer_actor_type == viewer_type
