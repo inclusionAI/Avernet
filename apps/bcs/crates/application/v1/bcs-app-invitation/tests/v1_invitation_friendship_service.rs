@@ -1713,6 +1713,54 @@ async fn accept_friend_request_receiver_ok() {
 }
 
 #[tokio::test]
+async fn accept_friend_request_decided_read_failure_is_internal() {
+    // The decision itself succeeds, but the connect-store read-back of the
+    // decided row fails: per `decided_friend_request` this is a server
+    // inconsistency, so the caller gets an internal error, never a 404 — and
+    // the decision must NOT be rolled back.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    let created = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("create request");
+    fx.connect
+        .fail_get_with(ServiceError::InternalError("connect store read is down".into()));
+
+    let error = fx
+        .service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: created.request_id.clone(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("unreadable decided request must surface as an internal error");
+    assert_code(error, "internal_error");
+    assert!(
+        matches!(
+            fx.legacy_friend.calls().last(),
+            Some(FriendCall::Accept { .. })
+        ),
+        "calls: {:?}",
+        fx.legacy_friend.calls(),
+    );
+    assert_eq!(
+        fx.legacy_friend.status_of(&created.request_id),
+        Some(FriendRequestStatus::Accepted),
+        "the decision already landed even though the read-back failed",
+    );
+}
+
+#[tokio::test]
 async fn accept_friend_request_non_receiver_forbidden() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;

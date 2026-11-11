@@ -1,6 +1,8 @@
 use super::*;
 use bcs_db_local::LocalSqliteDbPlugin;
 
+mod mapping_branches;
+
 #[test]
 fn parse_timestamp_epoch_ms_converts_db_timestamp() {
     // SQLite CURRENT_TIMESTAMP / MySQL `timestamp` format, UTC.

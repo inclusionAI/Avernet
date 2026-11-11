@@ -297,6 +297,7 @@ pub struct FakeConnectService {
     friendships: Mutex<Vec<(String, String)>>,
     revoke_calls: Mutex<Vec<(String, String)>>,
     revoke_error: Mutex<Option<ServiceError>>,
+    get_error: Mutex<Option<ServiceError>>,
     /// Optional view onto the legacy friend-request rows. In production both
     /// surfaces are converged on the connect store; this fake mirrors the
     /// mutation the legacy facade fake performs so `get_request` (the V1
@@ -329,6 +330,10 @@ impl FakeConnectService {
 
     pub fn fail_revoke_with(&self, error: ServiceError) {
         *lock(&self.revoke_error) = Some(error);
+    }
+
+    pub fn fail_get_with(&self, error: ServiceError) {
+        *lock(&self.get_error) = Some(error);
     }
 }
 
@@ -367,6 +372,9 @@ impl ConnectService for FakeConnectService {
     }
 
     async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest> {
+        if let Some(error) = lock(&self.get_error).take() {
+            return Err(error);
+        }
         let source = self
             .legacy_source
             .as_ref()
