@@ -40,12 +40,7 @@ export function BotStatusPublicationMenu({
   useEffect(() => () => clearTimeout(closeTimer.current), []);
   const publication = publicationManagementAvailability(bot);
   const enabled = bot.serviceMode === 'service' && publication.visible && Boolean(onPublicationChanged);
-  const menu = useBotPublicationMenu(
-    bot,
-    enabled && open,
-    onPublicationChanged,
-    onPublicationGateBlocked,
-  );
+  const menu = useBotPublicationMenu(bot, enabled && open, onPublicationChanged);
   if (!enabled) return <>{children}</>;
 
   const disabledReason =
@@ -178,7 +173,9 @@ export function BotStatusPublicationMenu({
         }
         onCancel={() => setSelection(undefined)}
         onConfirm={async () => {
-          if (selection && (await menu.run(selection.action, selection.item))) setSelection(undefined);
+          const result = selection ? await menu.run(selection.action, selection.item) : 'failed';
+          if (result === 'success' || result === 'blocked') setSelection(undefined);
+          if (result === 'blocked') onPublicationGateBlocked?.(bot);
         }}
       />
     </div>

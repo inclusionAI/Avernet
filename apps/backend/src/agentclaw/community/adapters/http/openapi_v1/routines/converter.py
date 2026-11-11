@@ -38,7 +38,7 @@ def _ms_to_iso(ms: Any) -> str:
         return ""
     try:
         return datetime.fromtimestamp(int(ms) / 1000, tz=_tz.utc).isoformat()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return ""
 
 
@@ -56,6 +56,8 @@ def _map_routine(data: dict) -> Routine:
     data = {**(data.get("bot") or {}), **data}
     sched = data.get("schedule") or {}
     payload = data.get("payload") or {}
+    state = data.get("state")
+    next_run_ms = state.get("next_run_at_ms") if isinstance(state, dict) else None
     model = payload.get("model")
     timeout_secs = _coerce_timeout_secs(payload.get("timeout_secs"))
     return Routine(
@@ -73,6 +75,7 @@ def _map_routine(data: dict) -> Routine:
         timezone=sched.get("tz") or None,
         model=str(model) if model else None,
         timeout_secs=timeout_secs,
+        next_run_at=_ms_to_iso(next_run_ms) or None,
         gmt_create=_ms_to_iso(data.get("created_at_ms")),
         gmt_modified=_ms_to_iso(data.get("updated_at_ms")),
     )

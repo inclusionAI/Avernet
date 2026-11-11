@@ -24,3 +24,16 @@ Bot 编辑页调试对话复用普通对话的 slash 输入能力；方案于 20
 
 ## Validation
 先跑相关单元/组件测试，再以最新内部工程组装本地前端连接预发验证；验证通过后创建目标 dev 的 Avernet PR。真实环境证据和缺口记于 validation.md。
+
+## Release integration amendment (2026-11-11, approved continuation)
+以发布回流 PR #3847 的 d14a5cee6928edf2296aeb4508a2d26cab267e73 为开发基线，不等待合入 dev；不修改该 PR、不推送或新建 PR。
+- 保留发布线 Sender、共享文件 feature、上传 Modal 和资源面板；知识库仍由部署扩展提供。
+- 当扩展启用时，调试输入的命令、菜单、选中引用与发送装饰同时生效；文件和知识库混发保留原文件协议。
+- 调试用户消息使用已有展示 Host；文件名卡片和模型/停止按钮不退化。
+- 切换完整调试上下文时清除输入、引用、弹层和上传；取消后晚到的上传不得写回新会话。
+
+
+## Latest dev delivery amendment (2026-11-11, approved)
+The user authorized resuming both repository changes from current dev, local paired validation and two dev-targeted PRs. This supersedes the earlier release-head/no-PR iteration constraint; preserve that earlier evidence as history. Public baseline: 3958a48287907da0393cd38992e8e62c42f4703d, including the merged release integration. Retain the release Sender/file feature; mount only the existing generic composer and user-message presentation extension points. Service debug file requests use the explicit resolved stage; personal debug file requests retain the stage-omitted shape. Knowledge request/card protocol ownership remains in the companion enterprise implementation.
+
+Tracking issue: https://github.com/inclusionAI/Avernet/issues/3866.

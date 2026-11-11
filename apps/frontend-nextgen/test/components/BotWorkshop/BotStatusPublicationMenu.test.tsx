@@ -254,6 +254,7 @@ test('评测门禁未通过时拦截预发推进并引导评测', async () => {
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '发布到预发' }));
   await waitFor(() => expect(precheck).toHaveBeenCalledWith(bot.id, '3', bot.ownerId));
   expect(blocked).toHaveBeenCalledWith(expect.objectContaining({ id: bot.id, publicationVersion: 3 }));
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(botEditorService.advanceLifecycle).not.toHaveBeenCalled();
   expect(refresh).not.toHaveBeenCalled();
 });

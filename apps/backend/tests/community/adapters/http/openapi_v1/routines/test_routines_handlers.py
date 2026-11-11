@@ -110,8 +110,14 @@ def test_map_routine_flattens_adapter_dict():
     assert r.gmt_modified  # non-empty ISO str
 
 
+@pytest.mark.parametrize("state", [None, {}, "unknown", {"next_run_at_ms": "bad"}, {"next_run_at_ms": 10**30}])
+def test_map_routine_without_valid_next_run_returns_null(state):
+    assert _map_routine({"state": state}).next_run_at is None
+
+
 def test_map_routine_handles_missing_fields():
     r = _map_routine({})
+    assert r.next_run_at is None
     assert r.routine_id == ""
     assert r.bot_id == ""
     assert r.name == ""

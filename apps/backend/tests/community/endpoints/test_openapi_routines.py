@@ -92,6 +92,7 @@ def _routine() -> dict:
         "enabled": True,
         "schedule": {"kind": "cron", "expr": "0 9 * * *", "tz": "Asia/Shanghai"},
         "payload": {"kind": "message", "message": "echo hi"},
+        "state": {"next_run_at_ms": 1767225600123},
         "created_at_ms": 1722165600000,
         "updated_at_ms": 1722165600000,
     }
@@ -208,6 +209,7 @@ _HAPPY_CASES = (
                 "bot_id": _BOT_ID,
                 "enabled": True,
                 "timezone": "Asia/Shanghai",
+                "next_run_at": "2026-01-01T00:00:00.123000+00:00",
             }
         },
     ),
@@ -338,6 +340,7 @@ endpoint_test(
                         "routine_id": _ROUTINE_ID,
                         "bot_id": _BOT_ID,
                         "bot_name": "Routine Bot",
+                        "next_run_at": "2026-01-01T00:00:00.123000+00:00",
                         "runtime_stage": "online",
                     }
                 ],
