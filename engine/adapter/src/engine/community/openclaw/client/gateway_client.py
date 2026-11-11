@@ -402,6 +402,14 @@ class OpenClawGatewayClient(GatewayConnection):
             if buffer_before_ack(on_chat_event, event):
                 return
             payload = event.payload or {}
+            is_session_tool = event.event == "session.tool"
+            if is_session_tool:
+                # Session mirrors are global: isolate this parent before trusting a run.
+                if payload.get("stream") != "tool" or not children.matches_parent(payload):
+                    return
+                payload = dict(payload)
+                payload.pop("state", None)  # A tool mirror cannot terminate the chat.
+                event = EventFrame(event="agent", payload=payload)
             if children.observe_event(event.event, payload):
                 return
             remember_trusted_parent_session(payload)
@@ -477,37 +485,17 @@ class OpenClawGatewayClient(GatewayConnection):
                     cleared_retries,
                 )
 
-            spawn_result = data.get("result") if isinstance(data, dict) else None
-            spawn_details = spawn_result.get("details") if isinstance(spawn_result, dict) else None
-            is_spawn_result = (
-                stream_val == "tool"
-                and isinstance(data, dict)
-                and data.get("name") == "sessions_spawn"
-                and data.get("phase") == "result"
+            known_children = len(children.runs)
+            children.register_spawn_result(
+                payload, allowed_run_ids, trusted_parent_session_keys,
+                source="session.tool" if is_session_tool else event.event,
             )
-            if (
-                is_spawn_result
-                and not data.get("isError")
-                and isinstance(spawn_details, dict)
-                and spawn_details.get("status") == "accepted"
-                and isinstance(spawn_details.get("childSessionKey"), str)
-                and bool(spawn_details.get("childSessionKey", "").strip())
-                and isinstance(spawn_details.get("runId"), str)
-                and bool(spawn_details.get("runId", "").strip())
-            ):
-                child_run_id = spawn_details["runId"]
-                child_session_key = spawn_details["childSessionKey"]
-                # COSEC: Child identities must not alias an authorized parent.
-                if child_run_id in allowed_run_ids or child_session_key in trusted_parent_session_keys:
-                    log.info("[chat_stream][child_spawn_rejected] reason=parent_identity")
-                else:
-                    children.register(child_run_id, child_session_key)
-            elif is_spawn_result:
-                log.info(
-                    "[chat_stream][sessions_spawn_not_accepted] status=%s isError=%s",
-                    spawn_details.get("status") if isinstance(spawn_details, dict) else None,
-                    data.get("isError"),
-                )
+            if is_session_tool:
+                if pending_early_final is not None and len(children.runs) > known_children:
+                    pending_early_final = None
+                    event_queue.put_nowait(EventFrame(event="session.tool", payload={}))
+                    log.info("operation=child_spawn source=session.tool status=discard_early_final")
+                return  # Bookkeeping only; never duplicate tools or leak other sessions.
 
             if (
                 pending_early_final is not None and not children.runs
@@ -621,6 +609,7 @@ class OpenClawGatewayClient(GatewayConnection):
         # 注册事件监听
         self.on_event("chat", on_chat_event)
         self.on_event("agent", on_chat_event)
+        self.on_event("session.tool", on_chat_event)
         self.on_event("approval.requested", on_approval_requested)
         self.on_event("approval.resolved", on_approval_resolved)
         self.on_event("exec.approval.requested", on_approval_requested)
@@ -720,6 +709,9 @@ class OpenClawGatewayClient(GatewayConnection):
                             yield payload
                         break
 
+                    if event.event == "session.tool":
+                        pending_early_final = None  # Restart a grace wait after a new child.
+                        continue
                     payload = event.payload or {}
                     state = payload.get("state")
                     is_terminal = state in ("final", "error", "aborted")
@@ -822,6 +814,7 @@ class OpenClawGatewayClient(GatewayConnection):
             done = True
             self.off_event("chat", on_chat_event)
             self.off_event("agent", on_chat_event)
+            self.off_event("session.tool", on_chat_event)
             self.off_event("approval.requested", on_approval_requested)
             self.off_event("approval.resolved", on_approval_resolved)
             self.off_event("exec.approval.requested", on_approval_requested)

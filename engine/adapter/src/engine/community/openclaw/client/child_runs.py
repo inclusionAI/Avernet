@@ -97,6 +97,37 @@ class ChildRuns:
             run_id, session_key, child.completed, self.pending_count,
         )
 
+    def register_spawn_result(
+        self, payload: dict[str, Any], parent_run_ids: set[str],
+        parent_sessions: set[str], *, source: str,
+    ) -> None:
+        """Register accepted identities from either authorized tool channel."""
+        data = payload.get("data")
+        if not (
+            payload.get("stream") == "tool" and isinstance(data, dict)
+            and data.get("name") == "sessions_spawn" and data.get("phase") == "result"
+        ):
+            return
+        result = data.get("result")
+        details = result.get("details") if isinstance(result, dict) else None
+        if not (
+            not data.get("isError") and isinstance(details, dict)
+            and details.get("status") == "accepted"
+            and isinstance(details.get("childSessionKey"), str)
+            and details["childSessionKey"].strip()
+            and isinstance(details.get("runId"), str) and details["runId"].strip()
+        ):
+            log.info("[chat_stream][sessions_spawn_not_accepted] source=%s", source)
+            return
+        if details["runId"] in parent_run_ids or details["childSessionKey"] in parent_sessions:
+            log.info("[chat_stream][child_spawn_rejected] reason=parent_identity source=%s", source)
+            return
+        self.register(details["runId"], details["childSessionKey"])
+        log.info(
+            "operation=child_spawn source=%s status=accepted pendingChildren=%d",
+            source, self.pending_count,
+        )
+
     def observe_event(self, event_name: str, payload: dict[str, Any]) -> bool:
         run_id = payload.get("runId")
         session_key = payload.get("sessionKey")

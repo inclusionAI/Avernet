@@ -161,6 +161,7 @@ class GatewayConnection:
         self._ws: Optional[ClientConnection] = None
         self._hello: Optional[HelloOk] = None
         self._connected = False
+        self._session_subscription_pending = False
         self._closing = False
         self._connection_lock = asyncio.Lock()
         # 统一透传 header（由 server 按配置开关决定是否传入）
@@ -186,7 +187,7 @@ class GatewayConnection:
 
     @property
     def connected(self) -> bool:
-        return self._connected and self._ws is not None
+        return self._connected and self._ws is not None and not self._session_subscription_pending
 
     @property
     def hello(self) -> Optional[HelloOk]:
@@ -360,6 +361,7 @@ class GatewayConnection:
             raise ConnectionError(f"Handshake failed: {error_msg}")
 
         self._hello = HelloOk.from_dict(response.payload)
+        self._session_subscription_pending = "sessions.subscribe" in self._hello.features.methods
         self._connected = True
 
         # 打印服务端返回的详细信息
@@ -371,6 +373,35 @@ class GatewayConnection:
         # 启动消息接收循环
         self._recv_task = asyncio.create_task(self._recv_loop())
 
+        # tool-events recipients are run-scoped; mirrors also cover future announces.
+        if self._session_subscription_pending:
+            started = time.monotonic()
+            connection_id = self._hello.server.conn_id
+            log.info(
+                "system=openclaw direction=outbound operation=session_tools "
+                "connectionId=%s status=request params={}", connection_id,
+            )
+            try:
+                response = await self.send_request("sessions.subscribe", {})
+                subscribed = (response.payload or {}).get("subscribed") is True
+                if not response.ok or not subscribed:
+                    raise ConnectionError("OpenClaw session tool subscription rejected")
+            except Exception as exc:
+                log.warning(
+                    "system=openclaw direction=inbound operation=session_tools status=failed "
+                    "connectionId=%s errorType=%s elapsedMs=%.3f",
+                    connection_id, type(exc).__name__, (time.monotonic() - started) * 1000,
+                )
+                raise
+            log.info(
+                "system=openclaw direction=inbound operation=session_tools status=success "
+                "connectionId=%s subscribed=true elapsedMs=%.3f",
+                connection_id, (time.monotonic() - started) * 1000,
+            )
+        else:
+            log.info("system=openclaw operation=session_tools status=unsupported")
+
+        self._session_subscription_pending = False
         return self._hello
 
     async def disconnect(self) -> None:
@@ -381,6 +412,7 @@ class GatewayConnection:
     async def _disconnect(self) -> None:
         self._closing = True
         self._connected = False
+        self._session_subscription_pending = False
         self._hello = None
         recv_task, self._recv_task = self._recv_task, None
         ws, self._ws = self._ws, None
