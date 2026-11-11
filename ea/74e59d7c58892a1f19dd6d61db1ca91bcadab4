@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/di/modules/task_persistence_module.py
+  s_e0cb98366a65ad::t_8f667e7cc04d0e 95-98
+  s_e0cb98366a65ad::t_82dc0743226585 129-135
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_e0cb98366a65ad::t_4e2d1d4ea04463 168
+  s_e0cb98366a65ad::t_cf88da85a97d4a 1-167,169-486,488-553
+  s_e0cb98366a65ad::t_afc6e260c79054 487
+apps/backend/tests/community/core/task/context_collab/conftest.py
+  s_e0cb98366a65ad::t_c8346282f6a4bc 1-53
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_e0cb98366a65ad::t_8095bc9787e000 298-311
+  s_e0cb98366a65ad::t_b0bfa7cf6095c7 100-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea74e59d7c58892a1f19dd6d61db1ca91bcadab4",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

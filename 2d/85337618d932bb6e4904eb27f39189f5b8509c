@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/errors.py
+  s_e0cb98366a65ad::t_3904f9c1347b57 1-25
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profiles.py
+  s_e0cb98366a65ad::t_2dc4f87846f3f7 1-23
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  s_e0cb98366a65ad::t_884296a79c6f9a 1-177
+apps/backend/src/agentclaw/community/core/task/context_collab/l2_agent_network/network_refs.py
+  s_e0cb98366a65ad::t_9389bc4951723d 1-62
+apps/backend/src/agentclaw/community/core/task/context_collab/l3_spaces_resources/space_resource_refs.py
+  s_e0cb98366a65ad::t_3d9a6121a981b2 1-77
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_binding.py
+  s_e0cb98366a65ad::t_9c5a1b1a5cb23c 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d85337618d932bb6e4904eb27f39189f5b8509c",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
