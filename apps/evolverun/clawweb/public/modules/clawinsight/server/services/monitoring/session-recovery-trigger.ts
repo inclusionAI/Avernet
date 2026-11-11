@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { logRepairEvent, repairLogError } from "../repair/common/logging.js";
 import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
-import { parseRequest } from "../repair/session-recovery/validation.js";
+import { isRecoveryTraceId, parseRequest } from "../repair/session-recovery/validation.js";
 import {
   DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
 } from "./contracts.js";
@@ -102,6 +102,7 @@ export function createMonitoringRecoveryTrigger(input: {
           target: recoveryTarget,
           session_key: event.sessionKey,
           ...(event.sessionId ? { session_id: event.sessionId } : {}),
+          ...(isRecoveryTraceId(event.traceId) ? { trace_id: event.traceId } : {}),
           delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
           diagnosis,
         });

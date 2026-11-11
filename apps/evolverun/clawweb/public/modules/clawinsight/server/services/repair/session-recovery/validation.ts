@@ -24,9 +24,13 @@ export function parseOwnerHandoffContent(raw: unknown): RecoveryOwnerHandoffCont
   return { summary, instructions };
 }
 
+export function isRecoveryTraceId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
 export function parseRequest(raw: unknown): RecoveryRequest {
   const body = object(raw), target = object(body.target);
-  for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "session_id", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);
+  for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "session_id", "trace_id", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);
   for (const key of Object.keys(target)) if (!["bot_id", "entity_id", "env", "engine", "runtime_identity"].includes(key)) invalid(`未知 target 字段 ${key}`);
   if (target.env !== "pre" && target.env !== "prod") invalid("target.env 必须是 pre 或 prod");
   if (target.engine !== "OC" && target.engine !== "CC" && target.engine !== "TE") invalid("target.engine 必须是 OC、CC 或 TE");
@@ -44,11 +48,14 @@ export function parseRequest(raw: unknown): RecoveryRequest {
   if (sessionId !== undefined && !/^[A-Za-z0-9_-]+$/.test(sessionId)) invalid("session_id 无效");
   const cronId = target.engine === "OC" ? cronRunSessionId(sessionKey) : undefined;
   if (sessionId && cronId && sessionId !== cronId) invalid("session_id 与 Cron session_key 不一致");
+  const traceId = body.trace_id;
+  if (traceId !== undefined && !isRecoveryTraceId(traceId)) invalid("trace_id 无效");
   const errorLocation = body.error_location === undefined ? undefined : text(body.error_location, "error_location", 2048);
   const level = body.execution_level;
   if (level !== undefined && level !== "debug" && level !== "approval" && level !== "automatic") invalid("execution_level 必须是 debug、approval 或 automatic");
   return { ...(errorLocation === undefined ? {} : { error_location: errorLocation }),
     ...(level === undefined ? {} : { execution_level: level }), event_id: text(body.event_id, "event_id", 128), tc_fault_label: label, delivery_key: deliveryKey,
     diagnosis: text(body.diagnosis, "diagnosis", 8000), ...(sessionId === undefined ? {} : { session_id: sessionId }),
+    ...(traceId === undefined ? {} : { trace_id: traceId }),
     target: { bot_id: botId, entity_id: entityId, env: target.env, engine: target.engine, ...(runtimeIdentity ? { runtime_identity: runtimeIdentity } : {}) }, session_key: sessionKey };
 }

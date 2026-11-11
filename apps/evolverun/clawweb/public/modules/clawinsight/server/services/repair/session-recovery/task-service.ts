@@ -1,6 +1,6 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { logRepairEvent, repairLogError } from "../common/logging.js";
-import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
+import { BotRuntimeError, type BotSessionTrajectoryReader } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { createHash, randomUUID } from "node:crypto";
@@ -18,6 +18,15 @@ import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLe
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 const CRON_WAIT_MS = 5 * 60 * 1000;
+const TE_ASSESSMENT_WAIT_MS = 30 * 60 * 1000;
+
+function sameRecoveryRequest(stored: RecoveryRequest, incoming: RecoveryRequest): boolean {
+  const { trace_id: storedTrace, ...storedRequest } = stored;
+  const { trace_id: incomingTrace, ...incomingRequest } = incoming;
+  // A diagnostic delivered before trace IDs were persisted can still be retried after rollout.
+  return (!storedTrace || !incomingTrace || storedTrace === incomingTrace)
+    && JSON.stringify(storedRequest) === JSON.stringify(incomingRequest);
+}
 
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
@@ -46,6 +55,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     actionNotifier?: RecoveryActionNotifier;
     reporter: RecoveryTaskReporter;
     observationMs: number;
+    trajectory?: BotSessionTrajectoryReader;
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
     handbookConfig?: RecoveryHandbookConfigStore;
@@ -85,7 +95,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       ? ["simulation", simulation.batchId, request.event_id, request.delivery_key] : [request.event_id, request.delivery_key])).digest("hex").slice(0, 48)}`;
     const existing = await this.deps.tasks.find(taskId);
     if (existing) {
-      if (JSON.stringify(existing.request) !== JSON.stringify(request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
+      if (!sameRecoveryRequest(existing.request, request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     const handbook = this.deps.handbookConfig ? await resolveRecoveryHandbook(request, this.deps.handbookConfig)
@@ -101,7 +111,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     catch (error) {
       const raced = await this.deps.tasks.find(taskId);
       if (!raced) throw error;
-      if (JSON.stringify(raced.request) !== JSON.stringify(request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
+      if (!sameRecoveryRequest(raced.request, request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     logRepairEvent("session-recovery", "session_recovery_task", "created", { environment: this.deps.controlPlaneEnvironment,
@@ -119,6 +129,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private async start(task: RecoveryStoredTask): Promise<void> {
     task = await this.required(task.taskId);
     if (task.status !== "running" || !this.ownsTask(task)) return;
+    if (!await this.readyForInitialAssessment(task)) return;
     try { await this.deps.agent.start(task); }
     catch (error) {
       logRepairEvent("session-recovery", "session_recovery_task", "startup_failed", { environment: this.deps.controlPlaneEnvironment,
@@ -128,6 +139,43 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (latest.execution?.executionId !== task.execution?.executionId || latest.executionRetry?.retryAt) throw error;
       await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId, false, undefined, "AGENT_START_FAILED");
     }
+  }
+
+  private async readyForInitialAssessment(task: RecoveryStoredTask): Promise<boolean> {
+    const reader = this.deps.trajectory;
+    if (!reader || task.simulation || task.phase !== "assess" || task.execution || task.request.target.engine !== "TE") return true;
+    const created = task.timeline.find(event => event.kind === "created");
+    const target = task.runtimeTarget?.target;
+    if (!created || !target) return true;
+
+    const { session_key: sessionKey, trace_id: traceId } = task.request;
+    let summary = "初评等待 30 分钟后仍未查到原会话轨迹，无法确认现场";
+    let accessDenied = false;
+    try {
+      const result = await reader.read({ target, sessionKey, traceId, offset: 0, limit: 1, maxBytes: 32 * 1024 });
+      const found = traceId
+        ? (result.trace as { traceId?: unknown } | undefined)?.traceId === traceId
+        : Array.isArray(result.traces) && result.traces.length > 0;
+      if (found) return true;
+    } catch (error) {
+      accessDenied = error instanceof BotRuntimeError && error.code === "trajectory_scope_mismatch";
+      summary = accessDenied ? "原会话轨迹访问被拒绝，无法完成初评" : "初评等待 30 分钟后仍无法读取原会话轨迹，无法确认现场";
+      logRepairEvent("session-recovery", "session_recovery_assessment_trajectory", "read_failed", {
+        taskId: task.taskId, eventId: task.request.event_id, ...repairLogError(error),
+      });
+    }
+    if (!accessDenied && this.now() < created.at_ms + TE_ASSESSMENT_WAIT_MS) return false;
+
+    const failed = await this.mutate(task.taskId, task.version, value => {
+      if (value.status !== "running" || value.phase !== "assess" || value.execution) {
+        this.fail(409, "原会话轨迹等待状态已变化");
+      }
+      return { ...value, status: "failed", version: value.version + 1,
+        judgment: this.failureJudgment(value, summary),
+        timeline: [...value.timeline, this.event("assessment", "service", summary, { reason: "initial_trajectory_unavailable" })] };
+    });
+    this.notifyGroup(failed, "result");
+    return false;
   }
 
   async recordDelivery(taskId: string, result: RecoveryResult): Promise<void> {
