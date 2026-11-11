@@ -42,9 +42,31 @@ beforeEach(async () => {
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
 it.each([
-  { change: { runtimeIdentity: { stage: "online", version: "V8" } }, detail: "发布版本：V7 → V8" },
+  { engine: "OC", activeEngine: "openclaw", provider: "baas" },
+  { engine: "CC", activeEngine: "claude_code", provider: "baas" },
+  { engine: "TE", activeEngine: "teclaw", provider: "teclaw" },
+])("sends initial $engine guidance to the original session after a version-only release change", async ({ engine, activeEngine, provider }) => {
+  target = { ...target, provider, activeEngine, botType: "service", runtimeIdentity: { stage: "online", version: "V7" } };
+  const ack = await service.create({ ...request, target: { ...request.target, engine } }, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const frozen = (await tasks.find(ack.task_id))!;
+  target = { ...target, runtimeIdentity: { stage: "online", version: "V8" } };
+  vi.mocked(runtime.sendMessage).mockResolvedValue({ status: "accepted", platformMessageId: "message-1" });
+
+  const result = await agent.retryMessage(frozen, { clientRequestId: "version-change", purpose: "继续原任务", message: "请核实已有结果后继续" });
+
+  expect(result).toMatchObject({ status: "succeeded", result: { status: "accepted", initial_message: true } });
+  expect(runtime.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    target: expect.objectContaining(target), expectedEngine: activeEngine,
+    sessionKey: request.session_key, deliveryKey: request.delivery_key,
+  }));
+  expect((await tasks.find(ack.task_id))?.runtimeTarget).toEqual(frozen.runtimeTarget);
+});
+
+it.each([
   { change: { bindingId: "binding-new" }, detail: "运行绑定：binding → binding-new" },
   { change: { deviceId: "device-new" }, detail: "运行设备：fixture → device-new" },
+  { change: { runtimeIdentity: { stage: "online", version: "V8" }, bindingId: "binding-new" }, detail: "运行绑定：binding → binding-new" },
 ])("records the actual target change and an unsent receipt without weakening the guard: $detail", async ({ change, detail }) => {
   target = { ...target, provider: "teclaw", activeEngine: "teclaw", botType: "service", runtimeIdentity: { stage: "online", version: "V7" } };
   const ack = await service.create({ ...request, target: { ...request.target, engine: "TE" } }, actor);

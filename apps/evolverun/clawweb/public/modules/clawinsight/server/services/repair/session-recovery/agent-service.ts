@@ -34,10 +34,17 @@ function recoveryToolRequest(body: Record<string, unknown>): Record<string, unkn
   return { ...redactEvidenceValue(body) as Record<string, unknown>,
     requestDigest: createHash("sha256").update(comparableRequestPayload(body)).digest("hex") };
 }
-export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
+function recoveryTargetFingerprint(target: ResolvedBotTarget, ignorePublishVersion = false): string {
+  const runtimeIdentity = ignorePublishVersion && target.runtimeIdentity
+    ? { ...target.runtimeIdentity, version: undefined }
+    : target.runtimeIdentity;
   const identity = [target.environment, target.ownerId, target.botId, target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null];
-  if (target.deviceUuid || target.runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(target.runtimeIdentity ?? null));
-  const fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  if (target.deviceUuid || runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(runtimeIdentity ?? null));
+  return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
+export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
+  const fingerprint = recoveryTargetFingerprint(target);
   return { version: 1, fingerprint, reason: "task_created", target: { ...target, environment: target.environment as "pre" | "prod",
     botType: target.botType === "service" ? "service" : "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
 }
@@ -467,7 +474,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
-      if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, messageTargetChange(task.runtimeTarget!.target, currentTarget));
+      const frozen = task.runtimeTarget!;
+      let deliveryTarget: ResolvedBotTarget = frozen.target;
+      if (recoveryTargetFingerprint(currentTarget) !== frozen.fingerprint) {
+        const versionChanged = currentTarget.runtimeIdentity?.version !== frozen.target.runtimeIdentity?.version;
+        if (!initial || task.phase !== "assess" || task.request.target.runtime_identity?.version || !versionChanged
+          || recoveryTargetFingerprint(currentTarget, true) !== recoveryTargetFingerprint(frozen.target, true)) {
+          fail(409, messageTargetChange(frozen.target, currentTarget));
+        }
+        deliveryTarget = { ...frozen.target, runtimeIdentity: currentTarget.runtimeIdentity };
+      }
       const cronId = task.request.target.engine === "OC" ? cronJobId(task.request.session_key) : undefined;
       if (cronId) {
         const state = await new BotEngineOperations(this.deps.runtime).execute(task.runtimeTarget!.target, { method: "GET", path: "/api/cron/running" }, false)
@@ -490,7 +506,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const startedAt = this.now();
       const message = `${marker}\n${body.message}`;
       markDispatched();
-      const receipt = await this.deps.runtime.sendMessage({ target: task.runtimeTarget!.target, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
+      const receipt = await this.deps.runtime.sendMessage({ target: deliveryTarget, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
         deliveryKey: key, messageMarker: marker, message }).catch(() => ({ status: "unknown" as const }));
       return { ...receipt, session_key: deliverySessionKey, delivery_key: key, message, initial_message: initial,
         ...(ownerRequest ? { owner_request_id: ownerRequest.requestId } : {}), started_at_ms: startedAt, finished_at_ms: this.now() };
