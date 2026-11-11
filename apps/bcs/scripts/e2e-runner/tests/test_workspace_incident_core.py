@@ -29,6 +29,7 @@ from bcs_e2e.workspace_cli_profile import (
     validate_workspace_incident_core_profile,
 )
 from bcs_e2e.migration_inventory import migration_plan
+from bcs_e2e.write_transport import WriteTransportError
 
 DRIVER = "driver-bot"
 MEMBER = "member-bot"
@@ -485,6 +486,36 @@ class WorkspaceIncidentCoreTests(unittest.TestCase):
                          ["singlebox-product-cli", "preprod-product-cli"])
         self.assertEqual(row["remote_validation"], "NOT_RUN")
         self.assertFalse(row["grants_release_credit"])
+
+    def test_failed_obligation_carries_error_detail(self):
+        # Preprod tightened participant-mode authorization on 2026-11-11
+        # (the bearer owner must equal the path actor), so a foreign QA
+        # token surfaces as a WriteTransportError. The failing step and the
+        # case snapshot must carry the transport detail instead of null.
+        def reject_participant_mode(data, operation, kwargs):
+            if operation == WORKSPACE_GROUP_PARTICIPANT_MODE_OPERATION:
+                raise WriteTransportError(
+                    "operation workspace_group.participant_mode returned "
+                    "HTTP 403")
+
+        execution, _ = self.run_case(preprod=True,
+                                     deform=reject_participant_mode)
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertEqual(execution.completed_count, 1)
+        self.assertEqual(execution.error_type, "WriteTransportError")
+        self.assertIn("returned HTTP 403", execution.error_detail or "")
+        snapshot = execution.snapshot()
+        self.assertEqual(snapshot["error_type"], "WriteTransportError")
+        self.assertIn("returned HTTP 403", snapshot["error_detail"] or "")
+        steps = snapshot["steps"]
+        self.assertEqual(steps[0]["status"], "PASS")
+        self.assertIsNone(steps[0]["error_detail"])
+        self.assertEqual(steps[1]["status"], "NOT_RUN")
+        self.assertEqual(steps[1]["error_type"], "WriteTransportError")
+        self.assertIn("returned HTTP 403", steps[1]["error_detail"] or "")
+        self.assertEqual(steps[2]["status"], "NOT_RUN")
+        self.assertIsNone(steps[2]["error_type"])
+        self.assertIsNone(steps[2]["error_detail"])
 
 
 if __name__ == "__main__":
