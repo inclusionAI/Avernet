@@ -1,0 +1,14 @@
+docs/rfcs/accs/README.md
+  h_ac15f2628ff97c 100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7cde333dc0c0e6cd4a2455cff919a793613f6bed",
+  "prompts": {},
+  "humans": {
+    "h_ac15f2628ff97c": {
+      "author": "Zhenyu Guo <guozhen.gzy@antfin.com>"
+    }
+  }
+}
