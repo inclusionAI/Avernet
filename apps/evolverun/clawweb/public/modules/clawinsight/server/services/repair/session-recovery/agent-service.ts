@@ -163,13 +163,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId, task.request.target.entity_id);
     else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId, task.request.target.entity_id);
   }
-  async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
+  async release(input: RecoveryStoredTask, requestedByAgent = false): Promise<void> {
     const task = await this.required(input.taskId);
     const owner = resolveTaskControlPlaneEnvironment(task);
     if (owner && owner !== this.deps.controlPlaneEnvironment) return;
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
     await this.save(task, value => {
-      if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
+      if (requestedByAgent) {
+        const canRelease = value.status === "waiting_owner" || (value.status === "running"
+          && (value.phase === "observe" || value.phase === "verify" || (value.phase === "assess" && value.cronWait)));
+        if (!canRelease || value.status !== input.status || value.phase !== input.phase) {
+          fail(409, "任务阶段或等待状态已变化，请刷新任务后继续");
+        }
+      }
       return { ...value, execution: this.executions.end(value.execution!),
         timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] };
     }, task.execution.executionId);

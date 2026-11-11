@@ -128,6 +128,47 @@ it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override 
   expect(JSON.stringify(events)).not.toContain("executionTicket");
 });
 
+it.each(["observe", "verify", "assess"] as const)("releases a waiting %s execution and resumes without using a failure retry", async phase => {
+  const { task_id } = await service.create({ ...request,
+    ...(phase === "assess" ? { session_key: "agent:main:cron:daily:run:original" } : {}) }, actor);
+  await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
+  const initial = (await tasks.find(task_id))!;
+  const now = Date.now(), waiting = phase === "assess" ? { cronWait: { startedAt: now, deadlineAt: now + 300000 } }
+    : { observationDeadlineAt: now + 3600000 };
+  const task = (await tasks.update(task_id, initial.version, value => ({ ...value, phase, ...waiting, version: value.version + 1 })))!;
+  const previousId = task.execution!.executionId;
+  const repo = new EvolveRepository(db), step = (await repo.findStep(task.aisExecution!.stepId))!;
+
+  await agent.report(task, { kind: "release", phase });
+  const released = (await tasks.find(task_id))!;
+  expect(released).toMatchObject({ status: "running", phase, ...waiting, execution: { executionId: previousId, state: "ended" } });
+  expect(released.executionRetry).toBeUndefined();
+
+  await service.maintenance();
+  await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step, report: { status: "failed", retryable: true } });
+  const resumed = (await tasks.find(task_id))!;
+  expect(resumed).toMatchObject({ status: "running", phase, ...waiting, execution: { jobId: "job-2" } });
+  expect(resumed.execution!.executionId).not.toBe(previousId);
+  expect(resumed.executionRetry).toBeUndefined();
+  expect(ais.execute).toHaveBeenCalledTimes(2);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("rejects active release outside a waiting phase and when the phase changed before saving", async () => {
+  const { task_id } = await service.create(request, actor);
+  await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
+  const initial = (await tasks.find(task_id))!;
+  await expect(agent.report(initial, { kind: "release", phase: "assess" })).rejects.toMatchObject({ status: 409 });
+  const observing = (await tasks.update(task_id, initial.version, value => ({ ...value, phase: "observe", version: value.version + 1 })))!;
+  await tasks.update(task_id, observing.version, value => ({ ...value, phase: "verify", version: value.version + 1 }));
+
+  await expect(agent.report(observing, { kind: "release", phase: "observe" })).rejects.toMatchObject({ status: 409 });
+  const current = (await tasks.find(task_id))!;
+  expect(current.execution).toEqual(initial.execution);
+  expect(current.executionRetry).toBeUndefined();
+  expect(ais.execute).toHaveBeenCalledOnce();
+});
+
 it("counts an AIS failure once after committing its terminal task state despite repeated callbacks", async () => {
   const output = vi.mocked(logRepairEvent).mockClear();
   const { task_id } = await service.create(request, actor);
