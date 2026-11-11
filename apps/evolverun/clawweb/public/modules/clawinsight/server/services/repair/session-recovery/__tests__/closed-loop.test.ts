@@ -243,7 +243,7 @@ it("non-MCP goes to one environment plan without any initial retry message", asy
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "环境文件有确定错误，需修复后继续", evidence_ids: [read.evidenceId] });
   task = await current(task.taskId); expect(task.phase).toBe("plan"); expect(runtime.sendMessage).not.toHaveBeenCalled();
   await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
-  expect(task.status).toBe("waiting_owner"); expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(task.status).toBe("waiting_owner"); expect(notifier.notify).not.toHaveBeenCalled();
   expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "plan" }));
   await service.decide(task.taskId, task.plan!.digest, true, actor);
   await agent.apply(await current(task.taskId), { actionId: "fix", clientRequestId: "fix-skill", purpose: "执行获批环境修复" });
@@ -277,7 +277,7 @@ it("an oversized trajectory page is recorded as a readable failure instead of br
 afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
 it("approves one plan in the same execution, retries the original session, recovers with durable evidence", async () => {
   let task = await toPlan(await create()); expect(submissions).toHaveLength(1); expect(submissions[0].input.credentials.executionTicket).toBeTruthy();
-  await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("waiting_owner"); expect(notifier.notify).toHaveBeenCalledTimes(1);
+  await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("waiting_owner"); expect(notifier.notify).not.toHaveBeenCalled();
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "fix-1", purpose: "修正配置" })).rejects.toMatchObject({ status: 403 });
   await service.decide(task.taskId, task.plan!.digest, true, actor); task = await current(task.taskId); expect(submissions).toHaveLength(1);
   const body = { actionId: "fix", clientRequestId: "fix-1", purpose: "修正配置" }, apply = await agent.apply(task, body); expect(apply.status).toBe("succeeded");

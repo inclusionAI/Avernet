@@ -281,7 +281,7 @@ it("does not accept model-only target loss or an ordinary HTTP 404 as destroyed-
 });
 
 
-it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner and ends a handbook-directed handoff in %s without a plan or continuation", async phase => {
+it.each(["assess", "observe", "plan", "verify"] as const)("ends a handbook-directed handoff in %s without an Owner DM or continuation", async phase => {
   let task = phase === "observe" ? await toObserve(await create()) : await create();
   if (["plan", "verify"].includes(phase)) task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase, version: value.version + 1 })))!;
   const read = await inspect(task, "handoff-evidence"); task = await current(task.taskId);
@@ -290,9 +290,8 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", phase, completionReason: "owner_handoff", plan: null,
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
-  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-    taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect: "not_recovered", summary });
-  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  expect(notifier.notify).not.toHaveBeenCalled();
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result")).toBe(false);
   const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
   expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
     kind: "termination", summary, payload: { completion_reason: "owner_handoff" },
@@ -304,7 +303,7 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   await service.maintenance();
   expect(submissions).toHaveLength(1);
   await expect(agent.report(task, { kind: "owner_handoff", phase, summary, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(notifier.notify).not.toHaveBeenCalled();
 });
 
 it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered", "unknown"].map(effect => ({ phase, effect }))))(
@@ -320,8 +319,7 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered
     expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", phase, plan: null,
       ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" },
       judgment: { effect, summary, delivery: "unconfirmed", response: "none", evidence_ids: [read.evidenceId] } });
-    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect, summary });
+    expect(notifier.notify).not.toHaveBeenCalled();
     expect(runtime.sendMessage).not.toHaveBeenCalled();
     expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
     await service.reportResults();
@@ -384,18 +382,6 @@ it.each(["not_intervened", "invalid", null, 1])("rejects invalid handoff effect 
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 
-it.each(["disabled", "failed"])("ends without claiming Owner notification when the channel is %s", async state => {
-  let task = await create(); const read = await inspect(task); task = await current(task.taskId);
-  if (state === "disabled") notifier.notify.mockResolvedValue(false);
-  else notifier.notify.mockRejectedValue(new Error("notification unavailable"));
-  await agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "已核实 MCP 服务权限不足，请 Owner 在能力集中申请权限。", evidence_ids: [read.evidenceId] });
-  task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", execution: { state: "ended" } });
-  expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === true)).toBe(false);
-  if (state === "failed") expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === false)).toBe(true);
-  await service.maintenance(); expect(submissions).toHaveLength(1);
-});
-
 it("requires saved scene evidence and never notifies from Debug or an in-progress apply", async () => {
   let task = await create();
   await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "仅有诊断推测", evidence_ids: [] })).rejects.toMatchObject({ status: 422 });
@@ -413,7 +399,7 @@ it("accepts an older package's permission report through the generic Owner hando
   let task = await create(); const read = await inspect(task); task = await current(task.taskId);
   await agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "服务明确要求当前身份授权，请 Owner 申请后继续。", evidence_ids: [read.evidenceId] });
   expect(await current(task.taskId)).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "not_recovered" } });
-  expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(notifier.notify).not.toHaveBeenCalled();
 });
 
 it("rejects a stale Owner handoff without notifying or ending the replacement execution", async () => {
@@ -492,21 +478,19 @@ function useNativeOwnerCards() {
   return sender;
 }
 
-it("delivers all three material requirements while retaining the complete report and ending ordinary handoff", async () => {
+it("retains the full handoff report and material requirements without sending a DingTalk DM", async () => {
   const sender = useNativeOwnerCards();
   let task = await create(); const read = await inspect(task, "materials-brief"); task = await current(task.taskId);
   const report = "## 调查与核实\n" + "原Bot已核实材料缺失，正确等待用户补充；现场和证据均已检查。\n".repeat(50);
   const handoff = { summary: "抽奖活动权益评审缺少必要材料，当前等待补充。", instructions: "请回原会话补充：\n1. 活动页面文案；\n2. 权益实际发放规则；\n3. 图1（领取路径截图）。" };
   await agent.report(task, { kind: "owner_handoff", phase: "assess", effect: "unknown", summary: report, handoff, evidence_ids: [read.evidenceId] });
-  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "unknown", summary: report }, execution: { state: "ended" } });
   expect(saved.ownerRequest).toBeUndefined();
   expect(saved.timeline.findLast(event => event.kind === "termination")).toMatchObject({ summary: report, payload: { handoff } });
-  expect(card.cardParamMap).toMatchObject({ summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false" });
-  expect(card.cardParamMap.instructions).toContain("3. 图1");
-  expect(card.cardParamMap.summary).not.toContain("恢复情况尚未确认");
-  expect(card).not.toHaveProperty("callbackRouteKey"); expect(card.cardParamMap).not.toHaveProperty("config");
-  expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(sender.sendCard).toHaveBeenCalledOnce();
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+  expect(sender.sendCard).not.toHaveBeenCalled();
 });
 
 it("uses the same Owner brief for permission handling and preserves its full investigation in the waiting timeline", async () => {

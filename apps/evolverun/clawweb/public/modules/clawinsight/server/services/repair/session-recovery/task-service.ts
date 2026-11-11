@@ -249,7 +249,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now()),
       timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }), finalSummary);
     this.notifyGroup(task, "plan");
-    if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
+    // Temporarily pause one-way Owner DMs while callback cards remain active.
+    // if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
     if (task.status === "completed") await this.deps.agent.release(task);
     if (task.status === "completed") this.notifyGroup(task, "result");
   }
@@ -431,9 +432,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase, ...(handoff ? { handoff } : {}) })] };
     }, finalSummary);
-    // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
-    try { await this.notify(task, "result", input.summary, handoff); }
-    finally { await this.deps.agent.release(task); }
+    // Temporarily pause the one-way Owner handoff DM.
+    // await this.notify(task, "result", input.summary, handoff);
+    await this.deps.agent.release(task);
     this.notifyGroup(await this.required(taskId), "result");
   }
 
