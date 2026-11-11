@@ -97,13 +97,14 @@ metadata={"scene":"chat"}
 
 这里只生成请求 JSON，不调用远程 Agent、不处理响应或流式事件。实际发送时需选择 AgentCard 声明的 JSON-RPC 接口，并按服务要求附上认证信息与 `A2A-Version: 1.0` 请求头。
 
-## 命令行
+## a2a CLI
 
 CLI 可独立运行，无需启动网页。需要 Node.js 22 或更高版本，共用网页的解析和转换规则，不调用大模型。
 
-在工具目录注册命令：
+从 Avernet 仓库根目录进入工具目录并注册命令：
 
 ```bash
+cd tools/a2a-json-tool
 npm link
 a2a --help
 ```
@@ -111,9 +112,15 @@ a2a --help
 随后可在任意目录执行，输入文件路径相对于当前工作目录：
 
 ```bash
-a2a message business.json > request.json
+# 将输入文件转换为消息请求
+a2a message input.json > request.json
+
+# 将 Agent 配置转换为 AgentCard
 a2a card agent.json > agent-card.json
+
+# 通过管道输入完整 JSON、JSON 字段片段或对象打印文本
 echo '{"question":"你好"}' | a2a message
+echo '"question":"你好"' | a2a message
 echo 'message=Message(role=USER,parts=[TextPart(content=你好)])' | a2a message -
 ```
 
