@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.11</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.12</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -162,6 +162,28 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <figcaption>绿色为 SDK 提供，黄色为平台实现，蓝色为已有或共享的基础设施。实例之间不直接通信。</figcaption>
 </figure>
 <p>本期的调用方向只有一个：BCS 调 Agent。Agent 不需要知道 BCS 的 Run、Session。唯一的反向调用是可选的推送通知（6.12）：Agent 向调用方指定的地址发送 Task 状态变化的提示，本期只定义语义，不实现。BCS 对外提供 A2A 服务后，Agent 也可以作为调用方，届时由 client SDK 支持，不在本设计范围内。</p>
+
+<h3 id="s4-1"><span class="n">4.1</span>调用路径：经 BCS 与直连</h3>
+<p>按 Profile 接入的 Agent 是内网可达、不鉴权的标准 A2A 服务，因此两个 Agent 之间在技术上可以直接调用，不必经过 BCS。BCS 可以只承担控制面（注册、发现、分发 Card、策略），数据面由两端直连。Profile 的条款对两种路径都成立，不假设调用方一定是 BCS。</p>
+<div class="tw"><table>
+<tr><th>BCS 在链路中提供的</th><th>直连时</th><th>补充手段</th></tr>
+<tr><td>发现</td><td>不受影响</td><td>调用前向 BCS 查询 Card，之后直连</td></tr>
+<tr><td>可见性和访问控制</td><td>变弱：知道地址即可调用</td><td>发现时只返回有权看到的 Agent；被调方用 <code>AgentAuthorizer</code> 按来源判断；需要更强保证时由 BCS 在发现阶段签发短期凭证，放入预留的 <code>proof</code>，被调方离线验证</td></tr>
+<tr><td>审计和统一观测</td><td>没有集中记录</td><td>两端 SDK 输出统一的指标和链路；可异步向 BCS 上报调用摘要，不在调用路径上</td></tr>
+<tr><td>用户身份和来源信息</td><td>由调用方 Agent 填写</td><td>可信度与经 BCS 时相同，都依赖内网互信（<span class="tag d">D1</span>）</td></tr>
+<tr><td>会话历史、群聊、同一会话的排队</td><td>没有</td><td>需要这些的场景经 BCS</td></tr>
+<tr><td>对接未按 Profile 接入的 Bot</td><td>不能</td><td>经 BCS</td></tr>
+<tr><td>业务扩展的透传限制（7.6）</td><td>不存在，两端直接约定</td><td>—</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>场景</th><th>建议路径</th></tr>
+<tr><td>Agent 之间的程序调用</td><td>直连</td></tr>
+<tr><td>人通过工作台对话</td><td>经 BCS</td></tr>
+<tr><td>群聊、多 Bot 协作</td><td>经 BCS</td></tr>
+<tr><td>需要 BCS 保存会话历史</td><td>经 BCS</td></tr>
+<tr><td>调用未按 Profile 接入的 Bot</td><td>经 BCS</td></tr>
+</table></div>
+<p>直连依赖 client SDK 和 BCS 的发现接口，属于后续阶段，本设计不展开。是否允许直连以及默认策略见 <span class="tag q">Q21</span>。</p>
 
 <h2 id="s5"><span class="n">5</span>已确认的决策</h2>
 <div class="tw"><table>
@@ -573,7 +595,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><code>version</code></td><td>string，必填</td><td><code>"1"</code></td></tr>
 <tr><td><code>userId</code></td><td>string，有用户时必填</td><td>发起调用的业务用户标识，1 到 128 个字符。Bot 之间协作等没有用户的调用可以省略</td></tr>
 <tr><td><code>source</code></td><td>object，必填</td><td>调用来源，供 Agent 自行授权</td></tr>
-<tr><td><code>source.platform</code></td><td>string，必填</td><td>转发本次调用的平台。BCS 固定填 <code>"bcn"</code></td></tr>
+<tr><td><code>source.platform</code></td><td>string，必填</td><td>本次调用的路径。经 BCS 时填 <code>"bcn"</code>，Agent 之间直连时填 <code>"direct"</code>。被调方可以据此区分并采用不同的授权规则</td></tr>
 <tr><td><code>source.app</code></td><td>string，可选</td><td>通过 BCN 接口发起调用的上游应用</td></tr>
 <tr><td><code>source.botId</code></td><td>string，可选</td><td>发起调用的 Bot（Bot 之间协作时）</td></tr>
 <tr><td><code>source.scene</code></td><td>string，可选</td><td>调用场景：<code>direct</code>（工作台单聊）、<code>group</code>（群聊协作）、<code>api</code>（程序调用）</td></tr>
@@ -582,13 +604,13 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
-<tr><td><span class="tag p">P-100</span></td><td>BCS 从已认证的调用上下文生成字段。用户消息、模型输出和外部传入的 metadata 不得成为字段来源。</td></tr>
+<tr><td><span class="tag p">P-100</span></td><td>调用方（BCS，或直连时的调用方 Agent）从自己已认证的调用上下文生成字段。用户消息、模型输出和外部传入的 metadata 不得成为字段来源。Agent 把自己收到的用户身份继续传给下一个 Agent 时，必须原样传递，不得替换成其他用户。</td></tr>
 <tr><td><span class="tag p">P-101</span></td><td>Agent 不验签。字段的可信度等同于"本次调用来自公司内部网络中的可信应用"（<span class="tag d">D1</span>）。三种绑定相同。</td></tr>
 <tr><td><span class="tag p">P-102</span></td><td>Card 以 <code>required: true</code> 声明本扩展时，未协商或缺少 <code>userId</code> 的请求必须拒绝，不得回退为默认用户或共享用户。</td></tr>
 <tr><td><span class="tag p">P-103</span></td><td>Agent 必须把 <code>userId</code> 与 Task 一起保存。同一 Task 的续交消息如果带有不同的 <code>userId</code>，必须拒绝。</td></tr>
 <tr><td><span class="tag p">P-104</span></td><td>GetTask、SubscribeToTask、CancelTask 不携带上下文，按 Task 关联处理。</td></tr>
 <tr><td><span class="tag p">P-105</span></td><td><code>userId</code> 不得写入 Artifact、状态消息或工具观察记录。</td></tr>
-<tr><td><span class="tag p">P-106</span></td><td>BCS 必须为每次调用填写 <code>source</code>，取值来自 BCS 已认证的调用关系（调用 BCN 接口的应用、发起协作的 Bot），不得来自请求体中的自述。</td></tr>
+<tr><td><span class="tag p">P-106</span></td><td>调用方必须为每次调用填写 <code>source</code>。经 BCS 时，取值来自 BCS 已认证的调用关系（调用 BCN 接口的应用、发起协作的 Bot），不得来自请求体中的自述。直连时，调用方 Agent 填写自己的应用名和 Bot 标识。</td></tr>
 <tr><td><span class="tag p">P-107</span></td><td>是否接受调用由 Agent 决定。Profile 不规定授权规则。Agent 拒绝时必须在创建 Task 之前返回权限错误（GRPC 为 PERMISSION_DENIED，HTTP 为 403），错误信息不得泄露授权规则。</td></tr>
 <tr><td><span class="tag p">P-108</span></td><td><code>source</code> 是来源声明，不是凭据。它解决"Agent 知道是谁在调用，并据此决定"，不解决"证明调用方没有说谎"。</td></tr>
 </table></div>
@@ -1379,6 +1401,7 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
 <tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
+<tr><td><span class="tag q">Q21</span></td><td>Agent 之间是否允许绕过 BCS 直连；默认策略；直连调用是否需要向 BCS 上报摘要用于审计</td><td>允许，Agent 之间的程序调用以直连为主，BCS 承担注册和发现；上报摘要为可选。具体设计放在 client SDK 阶段</td><td>4.1</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
