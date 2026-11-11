@@ -90,7 +90,11 @@ class RuntimeBindingResolutionService:
                     "personal bot has no Caller Service runtime binding"
                 )
             return self._service_source(request.stage)
-        if bot_type == SERVICE_BOT_TYPE and self._value(bot.get("call_type")) == "caller":
+        if (
+            bot_type == SERVICE_BOT_TYPE
+            and self._value(bot.get("call_type")) == "caller"
+            and self._value(bot.get("active_engine")) != "teclaw"
+        ):
             return RuntimeBindingSource.CALLER_INSTANCE
         if bot_type != SERVICE_BOT_TYPE:
             if request.stage != STAGE_DRAFT:
