@@ -158,8 +158,8 @@ export const CodingModelConfigField: React.FC<CodingModelConfigFieldProps> = ({
     if (!allowCodefuseModels || usingExternalModelOptions || !isSelectedCfuse) {
       return null;
     }
-    return validateCodefuseTokenOwner(cfuseToken);
-  }, [allowCodefuseModels, cfuseToken, isSelectedCfuse, usingExternalModelOptions]);
+    return validateCodefuseTokenOwner(cfuseToken, userNo);
+  }, [allowCodefuseModels, cfuseToken, isSelectedCfuse, userNo, usingExternalModelOptions]);
   useEffect(() => {
     if (!showModelDropdown) return;
     const firstRuntimeGroup = groupedModelEntries[0]?.[0] ?? null;

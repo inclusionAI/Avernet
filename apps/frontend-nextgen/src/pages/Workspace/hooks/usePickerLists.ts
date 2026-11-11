@@ -28,10 +28,8 @@ export interface PickerListsController {
   error?: string;
   retry: () => void;
   loadMore: () => void;
-  /** 推荐交集输入：当前已加载的可协作列表（ref 提供最新值）。 */
+  /** 当前已加载的可协作列表，供 discover 补充历史元数据（不作为过滤条件）。 */
   candidatesRef: MutableRefObject<CollaborationBotView[]>;
-  /** 候选列表为空时的首屏落地回调（供推荐链路兜底拉取后写入列表/分页状态）。 */
-  applyCandidatesSnapshot: (items: CollaborationBotView[], hasMore: boolean, offset: number) => void;
 }
 
 interface UsePickerListsInput {
@@ -65,7 +63,7 @@ export function usePickerLists(input: UsePickerListsInput): PickerListsControlle
   const friendsOffsetRef = useRef(0);
   const mineOffsetRef = useRef(0);
   const candidatesOffsetRef = useRef(0);
-  // 推荐交集以当前已加载的可协作列表为输入，ref 提供最新值。
+  // ref 提供当前已加载候选的最新元数据，不限制 discover 结果。
   const candidatesRef = useRef<CollaborationBotView[]>([]);
 
   useEffect(() => {
@@ -222,12 +220,6 @@ export function usePickerLists(input: UsePickerListsInput): PickerListsControlle
     setRetryNonce((current) => current + 1);
   }, []);
 
-  const applyCandidatesSnapshot = useCallback((items: CollaborationBotView[], hasMore: boolean, offset: number) => {
-    candidatesOffsetRef.current = offset;
-    setCandidates(items);
-    setCandidatesHasMore(hasMore);
-  }, []);
-
   return {
     friends,
     mine,
@@ -243,6 +235,5 @@ export function usePickerLists(input: UsePickerListsInput): PickerListsControlle
     retry,
     loadMore,
     candidatesRef,
-    applyCandidatesSnapshot,
   };
 }

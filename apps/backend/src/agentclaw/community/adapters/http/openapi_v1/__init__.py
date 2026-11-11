@@ -252,6 +252,7 @@ from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
 from .service_envs import router as service_envs_router
+from .service_eval.router import router as service_eval_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -424,6 +425,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
+    service_eval_router,
     containers_router,
     diagnostics_router,
     channels_router,

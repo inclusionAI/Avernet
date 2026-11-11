@@ -18,6 +18,15 @@ export function canRestartFailedServiceBot(bot: BotDomain) {
 
 export function failedServiceDeleteReason(bot: BotDomain) {
   return bot.serviceMode === 'service' && bot.lifecycle === 'failed' && !bot.actions.includes('delete')
-    ? '发布失败的服务 Bot 需先重试恢复；当前后端不支持直接删除失败发布记录'
+    ? '该 Bot 发布失败，当前暂不支持删除，请先重试恢复。'
     : undefined;
+}
+
+export function botDeleteDisabledReason(bot: BotDomain, lockedByOther: boolean) {
+  if (lockedByOther) return '该 Bot 正被他人编辑，暂时无法删除。';
+  if (bot.actions.includes('delete')) return undefined;
+  if (bot.lifecycle === 'deploying') return 'Bot 正在部署，暂时无法删除，请等待部署结束。';
+  const reason = bot.disabledActions.delete;
+  if (reason) return reason;
+  return failedServiceDeleteReason(bot) ?? '当前状态暂不支持删除该 Bot。';
 }

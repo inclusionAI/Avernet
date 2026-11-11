@@ -15,5 +15,9 @@ export function generateBotAvatarBatch(seed: string, batch: number): string[] {
 
 /** 与 Bot 管理共用固定种子的默认头像；不需要请求 owner-only 头像接口。 */
 export function resolveBotAvatarUrl(avatarUrl: string | null | undefined, botId: string): string {
-  return avatarUrl?.trim() || generateBotAvatar(botId.trim());
+  if (avatarUrl?.trim()) return avatarUrl.trim();
+  // 协作身份的 `:归属` 后缀不属于管理页 Bot ID，不能改变默认头像种子。
+  const id = botId.trim();
+  const separator = id.indexOf(':');
+  return generateBotAvatar(separator < 0 ? id : id.slice(0, separator));
 }
