@@ -154,6 +154,7 @@ pub async fn verify(repo: &(impl BotRepoPort + BotControlPlaneRepoPort)) {
     verify_public_only_request_means_all_visible(repo).await;
     verify_single_field_transitions(repo).await;
     verify_pending_approval_is_not_effective_scope(repo).await;
+    verify_metadata_only_writes_do_not_normalize_legacy_visibility(repo).await;
     // Legacy registry writes can leave a noncanonical row. A profile/user-only
     // patch must not act as an unrelated privacy migration.
     seed(repo, "unrelated-patch", "protected", FriendCheckInStrategy::Approval, json!({})).await;
@@ -237,7 +238,7 @@ async fn verify_single_field_transitions(repo: &(impl BotRepoPort + BotControlPl
             all.clone(),
         ),
         (
-            "public-needs-approval",
+            "public-only-opens-legacy-approval",
             "private",
             Approval,
             all.clone(),
@@ -245,8 +246,8 @@ async fn verify_single_field_transitions(repo: &(impl BotRepoPort + BotControlPl
                 visibility: Some("public".into()),
                 ..Default::default()
             },
-            "protected",
-            Approval,
+            "public",
+            Open,
             all.clone(),
         ),
         (
@@ -389,6 +390,68 @@ async fn verify_pending_approval_is_not_effective_scope(
     }
 }
 
+/// Metadata-only writes must not lazily migrate a legacy public Bot when the
+/// effective empty/restricted scope category did not change.
+async fn verify_metadata_only_writes_do_not_normalize_legacy_visibility(
+    repo: &(impl BotRepoPort + BotControlPlaneRepoPort),
+) {
+    let cases = [
+        (
+            "metadata-user-approval",
+            json!({}),
+            json!({"public_user_approval": {"status": "PROCESSING", "puid": "user-1"}}),
+        ),
+        (
+            "metadata-empty-scope-shape",
+            json!({"view_scope_agent_friend_deps": []}),
+            json!({
+                "view_scope_agent_friend_deps": null,
+                "public_agent_approval": {"status": "AGREE", "puid": "agent-1"}
+            }),
+        ),
+        (
+            "metadata-restricted-scope-change",
+            json!({"view_scope_agent_friend_deps": ["D1"]}),
+            json!({
+                "view_scope_agent_friend_deps": ["D2"],
+                "public_user_approval": {"status": "PROCESSING", "puid": "user-2"}
+            }),
+        ),
+    ];
+    for (id, initial_scope, next_scope) in cases {
+        seed(
+            repo,
+            id,
+            "protected",
+            FriendCheckInStrategy::Approval,
+            initial_scope,
+        )
+        .await;
+        // Legacy visibility writers can still produce this retained state.
+        repo.update_visibility(id, "public").await.unwrap();
+        let record = repo
+            .patch_control_plane(
+                id,
+                &bcs_config::resolve_env_str(),
+                BotControlPlanePatch {
+                    friend_ext: Some(ext(next_scope.clone())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_state(
+            repo,
+            record,
+            "public",
+            FriendCheckInStrategy::Approval,
+            next_scope,
+        )
+        .await;
+    }
+}
+
 /// Old external clients express all-visible with visibility alone. BCS owns
 /// clearing just the active agent scope; unrelated data and draft approval stay.
 async fn verify_public_only_request_means_all_visible(
@@ -405,15 +468,25 @@ async fn verify_public_only_request_means_all_visible(
     });
     let mut cleared = scoped.clone();
     cleared["view_scope_agent_friend_deps"] = json!([]);
-    for (index, strategy, expected) in [(0, Open, "public"), (1, Approval, "protected"), (2, DeptFree, "protected")] {
+    for (index, initial_strategy) in [(0, Open), (1, Approval), (2, DeptFree)] {
         let id = format!("public-only-{index}");
-        seed(repo, &id, "protected", strategy, scoped.clone()).await;
+        seed(repo, &id, "protected", initial_strategy, scoped.clone()).await;
         for _ in 0..2 {
             let record = repo.patch_control_plane(&id, &env, BotControlPlanePatch {
                 visibility: Some("public".into()), ..Default::default()
             }).await.unwrap().unwrap();
-            assert_state(repo, record, expected, strategy, cleared.clone()).await;
+            assert_state(repo, record, "public", Open, cleared.clone()).await;
         }
+    }
+    for (index, strategy) in [(0, Approval), (1, DeptFree)] {
+        let id = format!("public-with-explicit-restriction-{index}");
+        seed(repo, &id, "protected", strategy, scoped.clone()).await;
+        let record = repo.patch_control_plane(&id, &env, BotControlPlanePatch {
+            visibility: Some("public".into()),
+            friend_check_in_strategy: Some(strategy),
+            ..Default::default()
+        }).await.unwrap().unwrap();
+        assert_state(repo, record, "protected", strategy, scoped.clone()).await;
     }
     seed(repo, "public-plus-open", "protected", Approval, scoped.clone()).await;
     let record = repo.patch_control_plane("public-plus-open", &env, BotControlPlanePatch {

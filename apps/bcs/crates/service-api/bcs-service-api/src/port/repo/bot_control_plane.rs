@@ -125,18 +125,23 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
         query: BotTaskModesQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
 
-    /// Apply the patch atomically. Patching visibility, check-in strategy or
-    /// friend_ext normalizes the effective configuration: private stays private;
+    /// Apply the patch atomically. Patching visibility or check-in strategy
+    /// normalizes the effective configuration: private stays private;
     /// public/protected become public iff strategy is Open and the active agent
     /// scope is missing, null or an empty array, otherwise protected. Malformed
-    /// scopes never authorize public. Explicit public/protected express visible
-    /// intent, not an override. Supplied fields win over stored fields; omitted
-    /// fields are read inside the write boundary. Pending approval sub-blocks do
-    /// not determine active scope. Other attribute-only patches leave visibility
-    /// unchanged. For legacy all-visible intent, explicit visibility=public
-    /// without friend_ext clears only the active top-level agent scope in the
-    /// same write, preserving sibling fields. Explicit friend_ext takes precedence;
-    /// strategy-only and private patches never implicitly clear scope.
+    /// scopes never authorize public. A friend_ext-only patch normalizes only
+    /// when the live and target scopes change between the empty and non-empty
+    /// categories; metadata updates and same-category replacements leave
+    /// visibility unchanged. Supplied fields win over stored fields; omitted
+    /// fields are read inside the write boundary. Pending approval sub-blocks
+    /// do not determine active scope. Other attribute-only patches leave
+    /// visibility unchanged. For legacy all-visible intent, explicit
+    /// visibility=public without friend_ext or an explicit strategy derives
+    /// Open and clears only the active top-level agent scope in the same write,
+    /// preserving sibling fields. Explicit visibility=public together with Open
+    /// also clears that scope; explicit non-Open strategies preserve it. Explicit friend_ext takes
+    /// precedence over this compatibility rule; strategy-only and private
+    /// patches never implicitly clear scope.
     async fn patch_control_plane(
         &self,
         bot_id: &str,

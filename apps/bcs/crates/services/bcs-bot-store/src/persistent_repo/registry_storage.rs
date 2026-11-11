@@ -476,10 +476,16 @@ impl PersistentBotRepo {
     ) -> Vec<bcs_service_api::RegisteredBot> {
         let env = resolve_env();
         let stale: std::collections::HashSet<String> = {
-            let invalidated = self.registry_metadata_bypass.read().await;
-            if invalidated.is_empty() { return candidates; }
+            let state = self
+                .registry_metadata
+                .lock()
+                .expect("registry metadata state poisoned");
+            if state.permanent.is_empty() && state.in_flight.is_empty() { return candidates; }
             candidates.iter()
-                .filter(|bot| invalidated.contains(&(env.clone(), bot.bot_uuid.clone())))
+                .filter(|bot| {
+                    let key = (env.clone(), bot.bot_uuid.clone());
+                    state.permanent.contains(&key) || state.in_flight.contains(&key)
+                })
                 .map(|bot| bot.bot_uuid.clone()).collect()
         };
         if stale.is_empty() { return candidates; }

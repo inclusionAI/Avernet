@@ -269,13 +269,13 @@ async fn sqlite_failed_open_patch_publishes_neither_visibility_nor_strategy() {
 }
 
 #[tokio::test]
-async fn visibility_patch_observes_concurrently_enabled_approval() {
+async fn legacy_public_only_patch_commits_open_atomically() {
     let record = execute_patch_after_concurrent_write(
         "UPDATE bcs_bots SET friend_check_in_strategy = 'APPROVAL' WHERE bot_uuid = 'race'",
-        "protected", serde_json::json!({}), FriendCheckInStrategy::Open,
+        "public", serde_json::json!({}), FriendCheckInStrategy::Open,
         BotControlPlanePatch { visibility: Some("public".into()), ..Default::default() },
     ).await;
-    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Approval);
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
 }
 
 #[tokio::test]

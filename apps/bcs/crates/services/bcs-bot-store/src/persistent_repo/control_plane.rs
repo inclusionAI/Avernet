@@ -625,8 +625,15 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             assignments.push("name = CASE WHEN agent_card IS NULL THEN ? ELSE name END".to_string());
             params.push(Value::from(name));
         }
+        let mut publication_guard = if derive_visibility {
+            Some(self.begin_privacy_publication(env, bot_id).await)
+        } else {
+            None
+        };
         if derive_visibility {
             // Normalization uses the live row plus this patch in ONE UPDATE.
+            // Keep visibility before friend_ext for MySQL SET evaluation:
+            // scope_transition must read the pre-update live friend_ext.
             let (assignment, visibility_params) =
                 crate::control_plane_visibility::sql_assignment(&patch, self.flavor);
             assignments.push(assignment);
@@ -667,6 +674,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             params.push(Value::from(serialized_string_value(
                 &friend_check_in_strategy,
             )?));
+        } else if crate::control_plane_visibility::opens_check_in_for_legacy_all_visible(&patch) {
+            assignments.push("friend_check_in_strategy = 'OPEN'".to_string());
         }
         if patch.descriptor.is_some() {
             let mut json_updates = Vec::new();
@@ -708,28 +717,28 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             return Ok(None);
         }
 
-        let mut bots = self.bots.write().await;
         // SQL may have kept a concurrently changed visibility. Read the actual
-        // result, never the old snapshot or an assumed public value. Keep the
-        // cache publication guard through this read so another local patch
-        // cannot publish its privacy update between our read and publication.
+        // result under the dedicated privacy publication guard, never the old
+        // snapshot or an assumed public value. The global registry lock is only
+        // taken after this DB read, for the final cache publication.
         let derived_record = if derive_visibility {
             match self.get_control_plane(bot_id, env).await {
                 Ok(Some(record)) => Some(record),
                 Ok(None) => {
-                    self.invalidate_registry_metadata(env, bot_id).await;
+                    publication_guard.take().expect("privacy guard").fail();
                     return Ok(None);
                 }
                 Err(error) => {
                     // The UPDATE already committed. Never serve a stale public
                     // cache entry after a failed read-back of a restriction.
-                    self.invalidate_registry_metadata(env, bot_id).await;
+                    publication_guard.take().expect("privacy guard").fail();
                     return Err(error);
                 }
             }
         } else {
             None
         };
+        let mut bots = self.bots.write().await;
         if let Some(bot) = bots.get_mut(bot_id) {
             if let Some(name) = patch.name {
                 bot.capabilities.name = Some(name);
@@ -758,6 +767,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
 
         drop(bots);
         if derive_visibility {
+            publication_guard.take().expect("privacy guard").complete();
             Ok(derived_record)
         } else {
             self.get_control_plane(bot_id, env).await

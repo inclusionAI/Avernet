@@ -13,7 +13,7 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort,
-    ServiceResult, UserVisibility,
+    ServiceResult, UserVisibility, FriendCheckInStrategy,
 };
 use bcs_service_api::port::repo::bot_control_plane::{
     BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
@@ -450,6 +450,10 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 bot.friend_check_in_strategy,
             )
         };
+        let normalize_visibility =
+            crate::control_plane_visibility::should_normalize_scope_transition(
+                &patch, &friend_ext,
+            );
 
         if let Some(name) = patch.name.as_ref() {
             capabilities.name = Some(name.clone());
@@ -484,11 +488,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         }
         if let Some(value) = patch.friend_check_in_strategy {
             friend_check_in_strategy = value;
+        } else if crate::control_plane_visibility::opens_check_in_for_legacy_all_visible(&patch) {
+            friend_check_in_strategy = FriendCheckInStrategy::Open;
         }
 
         // Normalize the merged target state while the record-write guard is
         // held. Both upgrades and restrictions commit with the other fields.
-        if crate::control_plane_visibility::should_normalize(&patch) {
+        if normalize_visibility {
             capabilities.visibility = crate::control_plane_visibility::normalize(
                 &capabilities.visibility, friend_check_in_strategy, &friend_ext,
             );

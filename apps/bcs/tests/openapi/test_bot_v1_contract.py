@@ -462,7 +462,8 @@ def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
         "descriptor_kind": "bot_only",
         "descriptor_arrays": "replace",
         "visibility_normalization": "private_else_public_iff_open_and_unscoped_else_protected",
-        "public_without_friend_ext": "clear_active_agent_scope",
+        "public_without_friend_ext": "derive_open_and_clear_active_agent_scope",
+        "friend_ext_only_normalization": "empty_nonempty_scope_transitions_only",
     }
     assert _success_data(operation)["discriminator"]["propertyName"] == "kind"
 
