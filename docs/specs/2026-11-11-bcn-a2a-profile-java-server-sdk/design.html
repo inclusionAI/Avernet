@@ -74,7 +74,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <b>目录</b>
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
-<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 扩展登记</a><a class="sub" href="#s7-7">7.7 扩展治理</a>
+<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.10</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.11</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -129,7 +129,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <h2 id="s3"><span class="n">3</span>术语</h2>
 <div class="tw"><table>
 <tr><th>术语</th><th>含义</th></tr>
-<tr><td class="nw">Profile</td><td>A2A 1.0 的一个子集，加上更严格的行为约束和一组登记的扩展。不是新协议。</td></tr>
+<tr><td class="nw">Profile</td><td>A2A 1.0 的一个子集，加上更严格的行为约束、一组平台扩展和五个扩展点。不是新协议。</td></tr>
 <tr><td class="nw">Agent / Bot</td><td>Agent 是提供 A2A 服务的一方；注册到 BCS 后在 BCN 中称为 Bot。</td></tr>
 <tr><td class="nw">Provider</td><td>BCS 中的服务提供方账号，一个 Provider 下可注册多个 Agent。</td></tr>
 <tr><td class="nw">Task</td><td>A2A 中一次执行的载体，有 <code>id</code>、<code>contextId</code>、状态和 Artifact。由 Agent 分配 ID。</td></tr>
@@ -176,7 +176,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
 <h3 id="s6-1"><span class="n">6.1</span>定位</h3>
-<p>合规 Agent 是一个标准的 A2A 1.0 Server，任何标准 A2A Client 都能调用它。Profile 只做三件事：选定子集，收紧行为，登记扩展。BCS 继续兼容不使用 SDK 但符合 Profile 的 Server。</p>
+<p>合规 Agent 是一个标准的 A2A 1.0 Server，任何标准 A2A Client 都能调用它。Profile 只做三件事：选定子集，收紧行为，规定怎么扩展。BCS 继续兼容不使用 SDK 但符合 Profile 的 Server。</p>
 
 <h3 id="s6-2"><span class="n">6.2</span>基线</h3>
 <div class="tw"><table>
@@ -291,7 +291,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>调用上下文，<code>required: true</code></td><td>L2 能力。未协商或缺少用户时拒绝（P-102）</td></tr>
 <tr><td>工具观察、exec 审批</td><td>L3 的两项，可分别声明（6.3、7.3）</td></tr>
 <tr><td>来源分类</td><td>可选的 Card 描述数据，扩展点 E1</td></tr>
-<tr><td>订单 UI 扩展</td><td>业务扩展，必须 <code>required: false</code>（P-124）；使用的扩展点与登记描述一致（7.6）</td></tr>
+<tr><td>订单 UI 扩展</td><td>业务扩展，必须 <code>required: false</code>（P-124）；<code>params</code> 中列出使用的扩展点和媒体类型，供调用方了解</td></tr>
 <tr><td><code>defaultInputModes</code>、技能级 <code>inputModes</code> 和 <code>outputModes</code></td><td>多模态声明（P-160）。文本始终在列表中（P-13）</td></tr>
 <tr><td><code>securityRequirements: []</code></td><td>不鉴权（P-11、<span class="tag d">D1</span>）</td></tr>
 </table></div>
@@ -604,7 +604,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 
 <h3 id="s7-4"><span class="n">7.4</span>扩展模型</h3>
 <p>前面的平台扩展是逐个定义的。业务方的定制需求主要有三类：请求里带业务参数；响应和 Task 更新里带自定义字段；返回给客户端或前端渲染的 UI 数据。为每个业务逐个写规范、逐个改 BCS 不可持续。</p>
-<p><b>扩展点和扩展是两回事。</b>扩展点由 Profile 固定，业务不能新增或修改，也不需要登记；五个不够用时向 BCN 提需求，通过 Profile 升级增加。扩展是业务自己定义的约定，选用其中几个扩展点来放数据。扩展只在需要经 BCS 中转时才要登记（7.6）；业务自己的调用方直连自己的 Agent 时不需要。</p>
+<p><b>扩展点和扩展是两回事。</b>扩展点由 Profile 固定，业务不能新增或修改，也不需要登记；五个不够用时向 BCN 提需求，通过 Profile 升级增加。扩展是业务自己定义的约定，选用其中几个扩展点来放数据。扩展不需要登记就可以使用，经过 BCS 时也是透明透传（7.6）。</p>
 <p>本节定义五个<b>扩展点</b>。每个扩展点规定数据放在哪里、活多久、多大、中间环节怎么处理。业务扩展只需要声明自己用了哪些扩展点，BCS、SDK 和 Client 按扩展点的规则处理，不需要理解数据内容。</p>
 <div class="tw"><table>
 <tr><th>扩展点</th><th>用途</th><th>载体</th><th>方向</th><th>生命周期</th><th>大小上限</th></tr>
@@ -634,7 +634,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
-<tr><td><span class="tag p">P-130</span></td><td>业务扩展和未登记扩展只能使用这五个扩展点。一个扩展可以使用多个扩展点。</td></tr>
+<tr><td><span class="tag p">P-130</span></td><td>业务扩展只能使用这五个扩展点。一个扩展可以使用多个扩展点。</td></tr>
 <tr><td><span class="tag p">P-131</span></td><td>所有扩展数据都以扩展 URI 为键或标记。不同 URI 的数据互不影响；任何一方不得读取或修改其他 URI 的数据。</td></tr>
 <tr><td><span class="tag p">P-132</span></td><td>E3 的更新是整体替换该 URI 下的值。Agent 是唯一写入者。Task 进入终态后不得再修改。</td></tr>
 <tr><td><span class="tag p">P-133</span></td><td>E4 发出时必须保持真实的 Task 状态，不得为了发事件而改变状态。Client 不得依赖 E4 的完整性。</td></tr>
@@ -690,15 +690,39 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <p>两级可以同时使用：同一份内容，Agent 按协商结果选择发业务块、平台块，或降级文本。平台 UI 扩展的组件集需要单独设计，见 <span class="tag q">Q17</span>。</p>
 
-<h3 id="s7-6"><span class="n">7.6</span>扩展描述与登记</h3>
-<p>业务扩展登记时提交一份描述。BCS 和 SDK 依据描述处理数据，不依据内容。登记的是描述，不是代码，BCS 不需要为每个扩展发版。</p>
+<h3 id="s7-6"><span class="n">7.6</span>经 BCS 透传</h3>
+<p>业务扩展经过 BCS 时，BCS <b>透明透传</b>，不需要登记，BCS 也不需要认识这个扩展。这之所以可行，是因为扩展点的设计已经把 BCS 需要知道的事情固定了：</p>
+<ul>
+<li>数据属于哪个扩展点，从它所在的位置就能判断，不需要额外的描述。</li>
+<li>大小和数量上限按扩展点统一规定，不按扩展分别规定。</li>
+<li>每个结构化块都带降级文本，BCS 自己需要文本的地方始终有文本可用。</li>
+</ul>
+<p>透传不是无条件的。BCS 只做四项与内容无关的检查：</p>
 <div class="tw"><table>
-<tr><th>情况</th><th>是否需要登记</th></tr>
-<tr><td>业务自己的调用方直连自己的 Agent</td><td>不需要。双方都实现该扩展即可</td></tr>
-<tr><td>调用经过 BCS，扩展数据要原样传给上游</td><td>需要。自助登记，描述通过自动校验即生效</td></tr>
-<tr><td>希望 BCN 工作台渲染，或需要超出默认大小上限</td><td>需要 BCN 人工评审。前者要申请成为平台扩展</td></tr>
+<tr><th>条款</th><th>内容</th><th>防止的问题</th></tr>
+<tr><td><span class="tag p">P-136</span></td><td>只透传已协商的扩展。BCS 把上游 Client 声明的扩展 URI 带给 Agent（去掉 Agent 的 Card 中没有声明的）。Agent 返回的数据中，URI 不在这个集合内的一律丢弃。</td><td>Agent 向上游夹带对方没有要求的数据</td></tr>
+<tr><td><span class="tag p">P-137</span></td><td>按扩展点的统一上限检查大小和数量（7.4、7.5）。超过上限的那一条被丢弃并计数，不影响文本结果和 Task 状态。</td><td>单个 Agent 占用 BCS 的带宽和存储</td></tr>
+<tr><td><span class="tag p">P-138</span></td><td>只沿本次调用的路径透传。扩展数据不广播给群聊中的其他 Bot，不进入其他 Bot 的上下文。BCS 自己需要内容的地方（会话历史、转发给其他 Bot）使用文本和降级文本。</td><td>一个业务的私有数据流到不相关的 Bot</td></tr>
+<tr><td><span class="tag p">P-139</span></td><td>BCS 不解释、不改写扩展数据，日志中只记录 URI 和大小，不记录内容。</td><td>业务数据进入 BCS 的日志</td></tr>
 </table></div>
-<p>自动校验的内容：URI 带版本且未被占用；只使用五个扩展点；声明为可选；各扩展点的 Schema 可访问且大小在上限内；使用 E5 时媒体类型符合命名规则。</p>
+<h4>经过 BCS 时的协商与透传</h4>
+<ol class="seq">
+<li><div><span class="who">Client</span>在请求中列出自己实现的扩展。当前阶段的终端是 BCN 工作台，由 BCS 代为声明工作台支持的集合。</div></li>
+<li><div><span class="who">BCS</span>向 Agent 协商的集合为：上游声明的扩展中 Agent 的 Card 也声明了的，再加上 BCS 自己处理的平台扩展。</div></li>
+<li><div><span class="who">Agent</span>只对协商到的扩展发出数据；其余按降级规则输出文本。</div></li>
+<li><div><span class="who">BCS</span>E2 原样下发；E3、E4、E5 原样上送。平台扩展照常由 BCS 处理。</div></li>
+</ol>
+<h4>只透传、不登记，剩下的问题</h4>
+<div class="tw"><table>
+<tr><th>问题</th><th>影响</th><th>处理</th></tr>
+<tr><td>URI 冲突</td><td>两个业务用同一个 URI 表达不同含义</td><td>URI 必须使用业务自己的域名或命名空间（P-120）。透传只发生在一次调用的两端之间，冲突不会串到别的调用</td></tr>
+<tr><td>找不到负责人</td><td>某个扩展的数据出问题时不知道找谁</td><td>从发出数据的 Agent 追到它的 Provider。BCS 的指标按 Agent 和 URI 统计</td></tr>
+<tr><td>无法发现和复用</td><td>不同团队重复定义相似的扩展</td><td>可选的扩展目录，见 <span class="tag q">Q16</span>。它只用于查找，不是使用的前提</td></tr>
+<tr><td>BCS 的会话历史只有文本</td><td>超过 Agent 的 Task 保留期后，重新打开历史会话只能看到降级文本，看不到当时的卡片</td><td>是否由 BCS 保存 E3、E5 是产品决定，见 <span class="tag q">Q15</span></td></tr>
+<tr><td>BCN 工作台不认识业务扩展</td><td>显示降级文本</td><td>符合设计。需要在工作台渲染的内容应使用平台 UI 扩展</td></tr>
+</table></div>
+<h4>扩展描述（可选）</h4>
+<p>业务可以为自己的扩展写一份描述。它不是使用扩展的前提，有两个用途：SDK 在测试模式下按其中的 Schema 校验数据；以后如果建立扩展目录，作为登记内容。</p>
 <pre><code>{
   "uri": "&lt;订单 UI 扩展 URI&gt;",
   "owner": "order-platform",
@@ -706,45 +730,35 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
   "points": ["E2", "E3", "E5"],
   "mediaTypes": ["application/vnd.example.order-card+json"],
   "schemas": {"E2": "&lt;JSON Schema 地址&gt;", "E3": "&lt;JSON Schema 地址&gt;", "E5": "&lt;JSON Schema 地址&gt;"},
-  "relay": true,
   "spec": "&lt;规范文档地址&gt;"
 }</code></pre>
 <div class="tw"><table>
 <tr><th>字段</th><th>说明</th></tr>
 <tr><td><code>uri</code></td><td>扩展标识，带版本</td></tr>
-<tr><td><code>owner</code></td><td>负责的业务方，用于变更通知和问题排查</td></tr>
-<tr><td><code>stability</code></td><td><code>experimental</code>、<code>stable</code>、<code>deprecated</code>。<code>deprecated</code> 必须给出下线日期</td></tr>
-<tr><td><code>points</code></td><td>使用的扩展点。使用未声明的扩展点的数据会被 SDK 拒绝、被 BCS 丢弃</td></tr>
+<tr><td><code>owner</code></td><td>负责的业务方</td></tr>
+<tr><td><code>stability</code></td><td><code>experimental</code>、<code>stable</code>、<code>deprecated</code></td></tr>
+<tr><td><code>points</code></td><td>使用的扩展点。SDK 拒绝发出未列出的扩展点上的数据，帮助业务发现用错的地方</td></tr>
 <tr><td><code>mediaTypes</code></td><td>E5 块的类型，使用 <code>application/vnd.&lt;业务&gt;.&lt;名称&gt;+json</code> 形式</td></tr>
-<tr><td><code>schemas</code></td><td>各扩展点数据的 JSON Schema。SDK 在测试模式下校验；BCS 不校验内容</td></tr>
-<tr><td><code>relay</code></td><td>是否需要 BCS 中转给上游 Client</td></tr>
+<tr><td><code>schemas</code></td><td>各扩展点数据的 JSON Schema，供 SDK 测试模式和调用方使用</td></tr>
 </table></div>
-<h4>经过 BCS 时的协商与中转</h4>
-<ol class="seq">
-<li><div><span class="who">Client</span>在请求中列出自己实现的扩展。当前阶段的终端是 BCN 工作台，由 BCS 代为声明工作台支持的集合。</div></li>
-<li><div><span class="who">BCS</span>向 Agent 协商的集合为：上游声明的扩展，与已登记且 <code>relay</code> 为 true 的扩展的交集，再加上 BCS 自己处理的平台扩展。</div></li>
-<li><div><span class="who">Agent</span>只对协商到的扩展发出数据；其余按降级规则输出文本。</div></li>
-<li><div><span class="who">BCS</span>按扩展点中转：E2 原样下发；E3、E5 原样上送并随 Task 保存；E4 原样上送，不保存。检查大小上限和扩展点声明，不解释内容。</div></li>
-</ol>
 
 <h3 id="s7-7"><span class="n">7.7</span>扩展治理</h3>
 <p>扩展是双边约定，定义方式必须统一，否则每个扩展都会变成一套私有协议。</p>
 <div class="tw"><table>
 <tr><th>级别</th><th>定义方</th><th>可否 <code>required: true</code></th><th>BCS 的处理</th><th>SDK 支持</th></tr>
 <tr><td>平台扩展</td><td>BCN</td><td>可以</td><td>理解并处理</td><td>Server 和 Client 两侧内置</td></tr>
-<tr><td>业务扩展</td><td>业务方，在 BCN 扩展目录登记</td><td>不可以</td><td>不解释内容；按扩展点规则中转（7.6），见 <span class="tag q">Q15</span></td><td>扩展通道（8.5）</td></tr>
-<tr><td>未登记扩展</td><td>任意</td><td>不可以</td><td>Card 中原样保存；不协商，不中转</td><td>扩展通道，仅对直连的 Client 有效</td></tr>
+<tr><td>业务扩展</td><td>业务方。不需要登记</td><td>不可以</td><td>不解释内容，透明透传（7.6）</td><td>扩展通道（8.5）</td></tr>
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
 <tr><td><span class="tag p">P-120</span></td><td>每个扩展有一个稳定的、带版本的 URI，对应一份规范文档。不兼容变更使用新的 URI。</td></tr>
 <tr><td><span class="tag p">P-121</span></td><td>规范文档必须写明：数据放在哪里、Server 的义务、Client 的义务、未协商时的行为、大小限制。</td></tr>
-<tr><td><span class="tag p">P-122</span></td><td>扩展数据只能放在 7.4 定义的五个扩展点上，并在登记描述（7.6）中声明使用了哪些。</td></tr>
+<tr><td><span class="tag p">P-122</span></td><td>扩展数据只能放在 7.4 定义的五个扩展点上。</td></tr>
 <tr><td><span class="tag p">P-123</span></td><td>扩展不得在标准对象上增加顶层字段，不得新增 RPC 方法，不得改变 Task 状态机（6.6）和文本流规则（6.7）。</td></tr>
-<tr><td><span class="tag p">P-124</span></td><td>业务扩展和未登记扩展必须是 <code>required: false</code>，并且可降级：未协商时 Agent 仍能以纯文本完成任务。</td></tr>
+<tr><td><span class="tag p">P-124</span></td><td>业务扩展必须是 <code>required: false</code>，并且可降级：未协商时 Agent 仍能以纯文本完成任务。</td></tr>
 <tr><td><span class="tag p">P-125</span></td><td>扩展数据不得携带凭据。业务扩展的数据不得用于 BCS 的路由和授权。</td></tr>
 </table></div>
-<div class="box q"><p><b>BCS 在中间时的问题。</b>业务扩展是业务调用方和业务 Agent 之间的约定，但调用经过 BCS。BCS 目前只协商自己理解的扩展，因此业务扩展经过 BCS 时不生效。倾向的做法是：对已登记的业务扩展，BCS 原样转发对应的 metadata 和 DataPart，不解释内容（<span class="tag q">Q15</span>）。这要到 BCS 提供 A2A 服务时才能落地，但登记规则需要现在确定（<span class="tag q">Q16</span>）。</p></div>
+<div class="box"><p><b>当前状态。</b>BCS 目前只协商自己理解的扩展，业务扩展经过 BCS 时不生效。透明透传（7.6）需要 BCS 侧实现，在此之前业务扩展只在调用方直连 Agent 时可用。</p></div>
 
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
@@ -857,7 +871,7 @@ public class OrderAgent implements BcnAgent {
 <tr><td><code>AgentRegistrar</code></td><td>启动时向 BCS 注册或更新 Card</td><td>关闭</td><td>通常使用 SDK 提供的实现并配置开启</td></tr>
 <tr><td><code>TaskIdGenerator</code></td><td>生成 <code>taskId</code>、<code>contextId</code></td><td>随机 UUID</td><td>需要自定义格式</td></tr>
 <tr><td><code>ExtensionChannel</code></td><td>业务扩展在五个扩展点上的读写通道（7.4）。简易层和完整层都可以使用</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
-<tr><td><code>ExtensionRegistry</code></td><td>提供已登记扩展的描述（7.6），SDK 据此检查扩展点和大小</td><td>读取应用内的描述文件</td><td>需要从 BCN 扩展目录动态获取时</td></tr>
+<tr><td><code>ExtensionDescriptors</code></td><td>提供本应用所用扩展的描述（7.6，可选），用于检查扩展点是否用对，以及测试模式下的 Schema 校验</td><td>读取应用内的描述文件；没有描述时不检查</td><td>通常不需要</td></tr>
 <tr><td><code>PushSender</code></td><td>向推送地址发送状态提示，含地址白名单检查和有限重试（6.12）。本期只定义接口</td><td>未启用；Card 不声明推送能力</td><td>后续阶段由 SDK 提供 HTTP 实现</td></tr>
 </table></div>
 
@@ -944,7 +958,7 @@ void putFile(String blockId, String mediaType, String filename,
 <tr><td>扩展未协商</td><td><code>requestData</code> 为空；<code>setTaskField</code>、<code>setBlockField</code>、<code>emitEvent</code> 被丢弃；<code>putBlock</code> 不发出结构化块，在该块关闭或 Task 结束时把最后一次的 <code>fallbackText</code> 作为文本块输出</td></tr>
 <tr><td>文本与块交替</td><td>Agent 只管按顺序调用 <code>append</code> 和 <code>putBlock</code>。SDK 负责在块之后为后续文本分配新的 <code>artifactId</code>，保证顺序（P-140）</td></tr>
 <tr><td>数据超过上限，或使用了描述中未声明的扩展点</td><td>抛出异常给 Agent 代码，不发出</td></tr>
-<tr><td>测试模式</td><td>按登记的 JSON Schema 校验数据，不通过则测试失败。生产环境不校验内容</td></tr>
+<tr><td>测试模式</td><td>按扩展描述中的 JSON Schema 校验数据（有描述时），不通过则测试失败。生产环境不校验内容</td></tr>
 </table></div>
 <pre><code>// 订单 Agent：文本、卡片、文本
 var ui = sink.extension(OrderUi.URI);
@@ -1296,7 +1310,7 @@ sink.complete();</code></pre>
 <tr><td>确认取消超时与 SDK 的 <code>cancel.wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
 <tr><td>推送接收端点；对声明了推送能力的 Agent，长任务和非流式任务改用推送加低频查询</td><td>6.12，取决于 <span class="tag q">Q19</span></td><td>P6</td></tr>
 <tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.11，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
-<tr><td>扩展目录：登记业务扩展的描述；按扩展点中转 E2 到 E5 的数据；Task 关联中保存 E3、E5</td><td>7.6，取决于 <span class="tag q">Q15</span></td><td>P4 之后</td></tr>
+<tr><td>业务扩展的透明透传：转发协商集合；按扩展点上限检查；只沿调用路径；日志不记内容。下行 adapter 的文本投影需要跳过并保留非文本的块和字段</td><td>7.6。会话历史是否保存取决于 <span class="tag q">Q15</span></td><td>P4 之后</td></tr>
 <tr><td>工作台前端：按内容块序列渲染；实现平台 UI 扩展；对不认识的块显示降级文本</td><td>7.5，取决于 <span class="tag q">Q17</span></td><td>P4 之后</td></tr>
 <tr><td>多模态：工作台上传文件并以地址下发；中转输出的文件块；按已支持的类型填写 <code>acceptedOutputModes</code>；注册时不再只看 <code>text/plain</code></td><td>6.13，取决于 <span class="tag q">Q20</span></td><td>P4 之后</td></tr>
 </table></div>
@@ -1359,8 +1373,8 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q12</span></td><td>已结论：三种绑定都保留并可用于生产，都不鉴权。遗留问题：SDK 是否默认同时开启三种，还是由业务显式选择</td><td>由业务在 <code>bindings</code> 中显式选择，不设默认</td><td>P-03</td></tr>
 <tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
 <tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
-<tr><td><span class="tag q">Q15</span></td><td>BCS 是否按扩展点中转已登记的业务扩展数据。这意味着 BCS 要保存 E3 和 E5，而目前 BCS 只处理文本</td><td>中转，不解释内容。业务自己的前端经 BCS 调用时才需要，落地时间跟随 BCS 提供 A2A 服务的阶段</td><td>7.6</td></tr>
-<tr><td><span class="tag q">Q16</span></td><td>业务扩展的登记流程：在哪里登记、谁评审、规范文档放在哪里</td><td>自助登记加自动校验，通过即生效；只有申请平台扩展或超出默认上限时由 BCN 人工评审。登记入口放在 BCS 管理接口还是仓库，以及自动校验由谁实现，待定</td><td>7.6、7.7</td></tr>
+<tr><td><span class="tag q">Q15</span></td><td>BCS 的会话历史是否保存业务扩展的 E3 和 E5 数据。不保存则超过 Agent 的 Task 保留期后只剩降级文本；保存则 BCS 要存储它不理解的业务数据</td><td>首版不保存，只保存文本和降级文本。有明确的历史回看需求后再评估</td><td>7.6</td></tr>
+<tr><td><span class="tag q">Q16</span></td><td>是否建立可选的扩展目录，供各团队查找和复用扩展。它不是使用扩展的前提</td><td>首版不建。扩展的规范文档由业务方自己发布；业务扩展数量多起来之后再建目录</td><td>7.6、7.7</td></tr>
 <tr><td><span class="tag q">Q17</span></td><td>平台 UI 扩展的组件集：自行设计，还是采用已有的开放规范（例如面向 Agent 生成界面的 A2UI，需要先评估其成熟度和与内容块模型的匹配）</td><td>先确定内容块模型（7.5），组件集单独立项；在此之前工作台只渲染文本和降级文本</td><td>7.5</td></tr>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
