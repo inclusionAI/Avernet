@@ -186,7 +186,7 @@ it('does not import Git when the freshly read DB CAS token changed', async () =>
   mocks.dbReceipt = { ...mocks.dbReceipt, draftToken: 'c'.repeat(64) }
   confirmGitOverwrite()
   await waitFor(() => expect(mocks.fetch.mock.calls.some(([url]) => url.endsWith('/editor-draft'))).toBe(true))
-  expect(await screen.findByText(/无法载入|基线.*变化|重新核对/, {}, { timeout: 5_000 })).toBeVisible()
+  expect(await screen.findByText(/^无法载入 Git 工作流：数据库或 Git 基线已变化/, { selector: '[role="alert"]' })).toBeVisible()
   assertNoGitImport()
 })
 
@@ -202,7 +202,7 @@ it.each(['commit', 'workflow bytes', 'other file bytes', 'file mode', 'missing f
     mocks.gitSnapshot = changed
     confirmGitOverwrite()
     await waitFor(() => expect(mocks.fetch.mock.calls.some(([url]) => url.includes('/pack-version?version=draft'))).toBe(true))
-    expect(await screen.findByText(/无法载入|基线.*变化|重新核对/, {}, { timeout: 5_000 })).toBeVisible()
+    expect(await screen.findByText(/^无法载入 Git 工作流：数据库或 Git 基线已变化/, { selector: '[role="alert"]' })).toBeVisible()
     assertNoGitImport()
   },
 )
@@ -220,7 +220,7 @@ it.each(['editor-draft', 'pack-version?version=draft'])('keeps edits made while 
   await waitFor(() => expect(mocks.fetch.mock.calls.some(([url]) => url.includes(endpoint))).toBe(true))
   act(() => useEditorStore.getState().updateSpecField('title', 'Newer local edit'))
   await act(async () => { release(); await pending })
-  expect(await screen.findByText(/无法载入|基线.*变化|重新核对/, {}, { timeout: 5_000 })).toBeVisible()
+  expect(await screen.findByText(/^无法载入 Git 工作流：对比期间工作流或文件已变化/, { selector: '[role="alert"]' })).toBeVisible()
   assertNoGitImport('Newer local edit')
 })
 

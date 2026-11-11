@@ -74,10 +74,12 @@ pub(super) fn start_card_refresh(service: Arc<dyn A2aBotManagementService>) -> C
 pub(super) fn build_bot_core(
     repo:Arc<bcs_bot_store::PersistentBotRepo>,providers:&super::resource_builders::ProviderRepoBundle,
     db:Arc<dyn DbPlugin>,flavor:bcs_db_api::DbSqlFlavor,config:&crate::BcsConfig,guard:OutboundUrlGuard,
+    catalog_changes:Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 )->Arc<bcs_bot::BotCore> {
     Arc::new(bcs_bot::BotCore::with_provider_repos(repo,providers.provider_repo.clone(),
         providers.provider_credentials.clone(),providers.provider_bindings.clone())
         .with_bot_provider_repo(providers.bot_providers.clone())
+        .with_catalog_changes(catalog_changes)
         .with_a2a_anonymous(config.a2a_allow_anonymous)
         .with_a2a_route_policy(guard,config.a2a_grpc.as_ref().map(|mesh|mesh.routes.iter().map(|route|route.interface_url.clone()).collect()).unwrap_or_default())
         .with_a2a_cards(Arc::new(DbA2aBotStore::new(db,crate::env::resolve_env(),flavor))))

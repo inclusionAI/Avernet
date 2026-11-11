@@ -9,7 +9,7 @@ use tracing::debug;
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_service_api::{
-    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    ActorKind, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort,
@@ -22,6 +22,33 @@ use bcs_service_api::port::repo::bot_control_plane::{
 
 use super::MemoryBotRepo;
 use super::{PersistedCapabilities, unix_millis};
+
+/// Candidate visibility for one viewer perspective. A Human viewer uses the
+/// target's `user_visibility`; a Bot viewer uses the Bot-facing `visibility`.
+/// Collaboration adds the approved friend set to that same dimension.
+fn candidate_visible(
+    viewer_kind: ActorKind,
+    purpose: BotCandidateVisibility,
+    bot_visibility: &str,
+    user_visibility: UserVisibility,
+    is_friend: bool,
+) -> bool {
+    match (viewer_kind, purpose) {
+        (ActorKind::Human, BotCandidateVisibility::Discovery) => {
+            matches!(
+                user_visibility,
+                UserVisibility::Public | UserVisibility::Protected
+            )
+        }
+        (ActorKind::Human, BotCandidateVisibility::Collaboration) => {
+            user_visibility == UserVisibility::Public || is_friend
+        }
+        (_, BotCandidateVisibility::Discovery) => {
+            matches!(bot_visibility, "public" | "protected")
+        }
+        (_, BotCandidateVisibility::Collaboration) => bot_visibility == "public" || is_friend,
+    }
+}
 
 #[async_trait]
 impl BotControlPlaneRepoPort for MemoryBotRepo {
@@ -117,7 +144,7 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
                 continue;
             };
-            if bot.bot_id == query.acting_bot_id || bot.kind != bcs_service_api::ActorKind::Bot {
+            if bot.bot_id == query.acting_bot_id || bot.kind != ActorKind::Bot {
                 continue;
             }
             if name
@@ -127,13 +154,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 continue;
             }
             let is_friend = query.friend_ids.contains(&bot.bot_id);
-            let visible = match query.visibility {
-                BotCandidateVisibility::Discovery => {
-                    matches!(bot.visibility.as_str(), "public" | "protected")
-                }
-                BotCandidateVisibility::Collaboration => bot.visibility == "public" || is_friend,
-            };
-            if visible {
+            if candidate_visible(
+                query.viewer_kind,
+                query.visibility,
+                &bot.visibility,
+                bot.user_visibility,
+                is_friend,
+            ) {
                 records.push(BotCandidateReadRecord { bot, is_friend });
             }
         }
@@ -200,7 +227,7 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
                 continue;
             };
-            if bot.bot_id == query.acting_bot_id || bot.kind != bcs_service_api::ActorKind::Bot {
+            if bot.bot_id == query.acting_bot_id || bot.kind != ActorKind::Bot {
                 continue;
             }
             if bot_uuid_filter
@@ -210,9 +237,14 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 continue;
             }
             if search_text.as_ref().is_some_and(|needle| {
-                !bot.name.to_lowercase().contains(needle)
-                    && !bot.descriptor.summary.to_lowercase().contains(needle)
-                    && !bot.bot_id.to_lowercase().contains(needle)
+                let name_matches = bot.name.to_lowercase().contains(needle);
+                if query.name_only {
+                    !name_matches
+                } else {
+                    !name_matches
+                        && !bot.descriptor.summary.to_lowercase().contains(needle)
+                        && !bot.bot_id.to_lowercase().contains(needle)
+                }
             }) {
                 continue;
             }
@@ -221,18 +253,16 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                     continue;
                 }
             } else {
-                match query.visibility {
-                    BotCandidateVisibility::Discovery => {
-                        if !matches!(bot.visibility.as_str(), "public" | "protected") {
-                            continue;
-                        }
-                    }
-                    BotCandidateVisibility::Collaboration => {
-                        let is_friend = query.friend_ids.contains(&bot.bot_id);
-                        if bot.visibility != "public" && !is_friend {
-                            continue;
-                        }
-                    }
+                let is_friend = query.friend_ids.contains(&bot.bot_id);
+                let visible = candidate_visible(
+                    query.viewer_kind.unwrap_or(ActorKind::Bot),
+                    query.visibility,
+                    &bot.visibility,
+                    bot.user_visibility,
+                    is_friend,
+                );
+                if !visible {
+                    continue;
                 }
             }
             if let Some(values) = user_visibility_filter.as_ref() {
@@ -333,7 +363,7 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
                 continue;
             };
-            if bot.kind != bcs_service_api::ActorKind::Bot {
+            if bot.kind != ActorKind::Bot {
                 continue;
             }
             let passes = match (query.task_claim_mode, query.task_dream_mode, query.match_mode) {

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.domain_coverage import DomainCoverage
 
 
 class TestDomainCoverageModel:

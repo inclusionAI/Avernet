@@ -57,9 +57,19 @@ impl BotRepoPort for PersistentBotRepo {
         owner_user_id: &str,
         mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
     ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
-        self.initialize_owned_bot(bot_id, owner_user_id, &mutation)
+        self.initialize_owned_bot(bot_id, owner_user_id, &mutation, &[])
             .await
     }
+
+    async fn initialize_provider_authority(
+        &self, bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
+        crate::ownership_managers::validate_provider_initialization(&initialization)?;
+        self.initialize_owned_bot(bot_id, &initialization.owner_user_id,
+            &initialization.mutation, &initialization.initial_manager_user_ids).await
+    }
+
 
     async fn ownership_governance_state(
         &self,

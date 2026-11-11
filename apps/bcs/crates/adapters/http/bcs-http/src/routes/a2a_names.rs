@@ -1,4 +1,4 @@
-//! Name-only BCN Card management; remote A2A methods live on the Agent server.
+//! Provider-name registration and named chat; Card management uses stable Bot IDs.
 use axum::{Json,extract::{Path,Query,State},http::{HeaderMap,StatusCode},response::{IntoResponse,Response}};
 use serde::Deserialize;
 use serde_json::{json,Value};
@@ -7,16 +7,9 @@ use crate::state::HttpAppState;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Names {pub provider_name:String,pub bot_name:String}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Registration {
+    pub provider_bot_ref:String,
     pub owners:Vec<String>,pub summary:Option<String>,pub agent_card_url:Option<String>,pub agent_card:Option<Value>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Update {
-    pub provider_name:String,pub bot_name:String,pub agent_card_url:Option<String>,pub agent_card:Option<Value>,
 }
 fn error(error:ServiceError)->Response {
     let (status,message)=match error {
@@ -37,7 +30,7 @@ fn source(url:Option<String>,card:Option<Value>)->Result<A2aCardSource,Response>
     A2aCardSource::from_parts(url,card).map_err(error)?.ok_or_else(||error(ServiceError::InvalidOperation {message:"Card source required".into(),request_id:None}))
 }
 fn view(card:NamedA2aCard)->Value {
-    json!({"provider_name":card.provider_name,"bot_name":card.bot_name,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card})
+    json!({"provider_bot_ref":card.provider_bot_ref,"bot_id":card.bot_id,"provider_name":card.provider_name,"bot_name":card.bot_name,"agent_card_url":card.agent_card_url,"agent_card":card.agent_card})
 }
 fn now_ms()->i64 {std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value|value.as_millis().min(i64::MAX as u128) as i64).unwrap_or(0)}
 fn unavailable()->Response {(StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":"A2A management unavailable"}))).into_response()}
@@ -46,40 +39,23 @@ pub async fn register(State(state):State<HttpAppState>,Path(provider_name):Path<
     let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
     let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
     let source=match source(body.agent_card_url,body.agent_card) {Ok(source)=>source,Err(error)=>return error};
-    match service.register_named(RegisterNamedA2aBotCommand {provider_name,provider_admin_token:token,owners:body.owners,summary:body.summary,source,now_ms:now_ms()}).await {
+    match service.register_named(RegisterNamedA2aBotCommand {provider_bot_ref:body.provider_bot_ref,provider_name,provider_admin_token:token,owners:body.owners,summary:body.summary,source,now_ms:now_ms()}).await {
         Ok(result)=>{let mut value=view(result.card);if let Some(token)=result.bot_runtime_token {value["bot_runtime_token"]=json!(token);}(StatusCode::CREATED,Json(value)).into_response()},
         Err(failure)=>error(failure),
     }
 }
-pub async fn get(State(state):State<HttpAppState>,Query(names):Query<Names>,headers:HeaderMap)->Response {
-    let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
-    let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
-    match service.get_named(&names.provider_name,&token,&names.bot_name).await {Ok(card)=>Json(view(card)).into_response(),Err(failure)=>error(failure)}
-}
-pub async fn update(State(state):State<HttpAppState>,headers:HeaderMap,Json(body):Json<Update>)->Response {
-    let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
-    let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
-    let source=match source(body.agent_card_url,body.agent_card) {Ok(source)=>source,Err(error)=>return error};
-    match service.configure_named(&body.provider_name,&token,&body.bot_name,source,now_ms()).await {Ok(card)=>Json(view(card)).into_response(),Err(failure)=>error(failure)}
-}
-pub async fn refresh(State(state):State<HttpAppState>,headers:HeaderMap,Json(names):Json<Names>)->Response {
-    let token=match token(&headers) {Ok(token)=>token,Err(error)=>return error};
-    let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
-    match service.refresh_named(&names.provider_name,&token,&names.bot_name,now_ms()).await {Ok(card)=>Json(view(card)).into_response(),Err(failure)=>error(failure)}
-}
-
 /// Keep the established caller authentication and chat admission checks intact.
-pub async fn chat(State(state):State<HttpAppState>,Path((provider_name,bot_name)):Path<(String,String)>,
+pub async fn chat(State(state):State<HttpAppState>,Path((provider_name,provider_bot_ref)):Path<(String,String)>,
     headers:HeaderMap,uri:axum::http::Uri,Json(body):Json<super::bot_chat::ChatRequest>)->Response {
     let Some(service)=&state.services.a2a_bot_management else {return unavailable()};
     if let Err(failure)=super::bot_chat::resolve_bot_caller(&state,&headers).await {
         return (failure.into_response().status(),Json(json!({"error":"Caller authentication required"}))).into_response();
     }
-    let target=match service.resolve_named_target(&provider_name,&bot_name).await {
+    let target=match service.resolve_provider_ref_target(&provider_name,&provider_bot_ref).await {
         Ok(target)=>target,Err(failure)=>return error(failure),
     };
     match super::bot_chat::bot_chat_async(State(state),Path(target),headers,uri,Json(body)).await {
-        Ok((status,Json(result)))=>(status,Json(json!({"provider_name":provider_name,"bot_name":bot_name,
+        Ok((status,Json(result)))=>(status,Json(json!({"provider_name":provider_name,"provider_bot_ref":provider_bot_ref,
             "run_id":result["run_id"],"session_id":result["session_id"],"status":result["status"],
             "expires_at_ms":result["expires_at_ms"]}))).into_response(),
         Err(failure)=>{

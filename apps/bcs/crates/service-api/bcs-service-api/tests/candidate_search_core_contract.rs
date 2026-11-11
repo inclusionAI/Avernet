@@ -1,10 +1,10 @@
 #![allow(deprecated)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateVisibility, BotCapabilities,
+    ActorKind, ActorStatus, AuthorizedCandidateSearchQuery, BotCandidateVisibility, BotCapabilities,
     RegisteredBot, ServiceResult, WorkerProfile as RootWorkerProfile,
     WorkerProfileService as RootWorkerProfileService,
     WorkerRecommendCommand as RootWorkerRecommendCommand,
@@ -27,7 +27,7 @@ use bcs_service_api::{
         BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
         BotCandidateSearchMode, BotCandidateSearchQuery, LegacyBotCandidateSearchCoreResult,
         WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
-        WorkerRecommendation,
+        WorkerRecommendation, WorkerRecommendationScope,
     },
 };
 
@@ -95,10 +95,12 @@ impl WorkerProfileCoreService for FakeWorkerProfileCoreService {
             query,
             top_k,
             min_score,
+            scope,
         } = command;
         assert_eq!(query, "database expert");
         assert_eq!(top_k, 20);
         assert_eq!(min_score, 0.1);
+        assert_eq!(scope, WorkerRecommendationScope::LegacyDefault);
         Ok(WorkerRecommendResult {
             recommendations: vec![WorkerRecommendation {
                 worker_id: "bot-2".to_string(),
@@ -175,6 +177,7 @@ async fn worker_profile_contract_exposes_all_provider_fields() {
             query: "database expert".to_string(),
             top_k: 20,
             min_score: 0.1,
+            scope: WorkerRecommendationScope::LegacyDefault,
         })
         .await
         .unwrap();
@@ -214,6 +217,75 @@ fn candidate_search_modes_are_core_variants_without_wire_assumptions() {
 }
 
 #[test]
+fn worker_recommendation_scope_is_explicit_on_every_command() {
+    let legacy = WorkerRecommendCommand {
+        query: "legacy".to_string(),
+        top_k: 20,
+        min_score: 0.0,
+        scope: WorkerRecommendationScope::LegacyDefault,
+    };
+    let authorized = WorkerRecommendCommand {
+        query: "authorized".to_string(),
+        top_k: 20,
+        min_score: 0.0,
+        scope: WorkerRecommendationScope::AllVisibilities,
+    };
+    assert_eq!(legacy.scope, WorkerRecommendationScope::LegacyDefault);
+    assert_eq!(
+        authorized.scope,
+        WorkerRecommendationScope::AllVisibilities
+    );
+    assert_ne!(legacy.scope, authorized.scope);
+}
+
+#[test]
+fn authorized_candidate_query_exposes_viewer_and_authorized_edges() {
+    let query = AuthorizedCandidateSearchQuery {
+        query: "planning".to_string(),
+        acting_actor_id: "acting".to_string(),
+        env: "pre".to_string(),
+        viewer_kind: ActorKind::Human,
+        visibility: BotCandidateVisibility::Discovery,
+        friend_ids: HashSet::from(["bot-2".to_string()]),
+        limit: 20,
+    };
+    let AuthorizedCandidateSearchQuery {
+        query,
+        acting_actor_id,
+        env,
+        viewer_kind,
+        visibility,
+        friend_ids,
+        limit,
+    } = query;
+    assert_eq!(query, "planning");
+    assert_eq!(acting_actor_id, "acting");
+    assert_eq!(env, "pre");
+    assert_eq!(viewer_kind, ActorKind::Human);
+    assert_eq!(visibility, BotCandidateVisibility::Discovery);
+    assert_eq!(friend_ids, HashSet::from(["bot-2".to_string()]));
+    assert_eq!(limit, 20);
+}
+
+#[tokio::test]
+async fn authorized_candidate_search_default_fails_closed() {
+    let service = FakeCandidateSearchCoreService;
+    let error = service
+        .search_authorized_candidates(AuthorizedCandidateSearchQuery {
+            query: "planning".to_string(),
+            acting_actor_id: "acting".to_string(),
+            env: "pre".to_string(),
+            viewer_kind: ActorKind::Human,
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            limit: 20,
+        })
+        .await
+        .expect_err("unconfigured authorized search must not return success");
+    assert!(matches!(error, bcs_service_api::ServiceError::InternalError(_)));
+}
+
+#[test]
 fn legacy_worker_profile_import_paths_remain_source_compatible() {
     fn accepts_application_service(_: &dyn ApplicationWorkerProfileService) {}
     fn accepts_actors_service(_: &dyn ActorsWorkerProfileService) {}
@@ -249,6 +321,7 @@ fn legacy_worker_profile_import_paths_remain_source_compatible() {
         query: "query".to_string(),
         top_k: 1,
         min_score: 0.0,
+        scope: WorkerRecommendationScope::LegacyDefault,
     };
     let recommendation = WorkerRecommendation {
         worker_id: "bot-2".to_string(),
@@ -275,6 +348,7 @@ fn legacy_worker_profile_import_paths_remain_source_compatible() {
             query: "query".to_string(),
             top_k: 1,
             min_score: 0.0,
+            scope: WorkerRecommendationScope::LegacyDefault,
         },
         WorkerRecommendation {
             worker_id: "bot-2".to_string(),

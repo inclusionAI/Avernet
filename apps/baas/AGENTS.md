@@ -49,3 +49,4 @@ an ADR **before** implementation, following the README recipe: next number is
   (community tree; enterprise runtime code is under the same principle).
 - Contribute shared changes through the Avernet dev branch first; the
   internal monorepo consumes them and bumps its submodule pointer.
+For knowledge or architecture changes, read the [app knowledge standard](docs/agents/knowledge-standard.md), [architecture index](docs/arch/README.md), and [decision index](docs/adr/README.md).

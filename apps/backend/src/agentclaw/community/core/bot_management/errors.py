@@ -51,3 +51,13 @@ class BotCombinationUnsupportedError(BotCreateError):
 
 class ApplicationCodingUnavailableError(BotCreateError):
     """Application Coding requires a Workspace Hosting capability."""
+
+
+class IdentitySourceInvalidError(BotCreateError):
+    """The declared identity Bot cannot supply identity to this Bot.
+
+    Covers every rejection of ``identity_bot_id``: the target does not
+    exist, is not visible to the caller, is soft-deleted, belongs to another
+    entity, has no issued passport, has an empty agent code, or its declared
+    scope does not contain this Bot's. The message names what is wrong.
+    """

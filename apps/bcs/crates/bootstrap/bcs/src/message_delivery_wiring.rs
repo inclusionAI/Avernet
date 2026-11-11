@@ -393,6 +393,8 @@ pub async fn wire_with_caller_assembly(
     Ok(flow)
 }
 
+const EPOCH_RESTART_BACKOFF: Duration = Duration::from_secs(5);
+
 /// Drop the epoch futures on demotion: no follower recovery and no new I/O.
 /// JoinSet drop aborts local I/O tasks; persisted send-start records remain
 /// uncertain until the next master's recovery (never blindly re-enqueued).
@@ -459,7 +461,21 @@ async fn run_on_master(
                         break;
                     }
                 }
-                result = &mut epoch => return result,
+                result = &mut epoch => {
+                    let error = match result {
+                        Ok(()) => return Ok(()),
+                        Err(error) => error,
+                    };
+                    // A failed epoch must not leave the queue dead until a
+                    // process restart: back off, then start a fresh epoch
+                    // (fresh recovery sweep) while leadership is still held.
+                    tracing::error!(%error, "delivery master epoch failed; restarting after backoff");
+                    tokio::select! {
+                        _ = shutdown.changed() => return Ok(()),
+                        _ = tokio::time::sleep(EPOCH_RESTART_BACKOFF) => {}
+                    }
+                    break;
+                }
                 _ = &mut sampler => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
                 _ = &mut reconciliation => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
             }
@@ -571,6 +587,47 @@ mod tests {
                 _ => Err(bcs_service_api::ServiceError::InternalError("unavailable".into())),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn failed_epoch_restarts_after_backoff_instead_of_stopping_the_queue() {
+        use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+        let fixture = wiring_support::FlowTestSupport::new_group_with_driver_and_observer().await;
+        let flow = Arc::new(BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry,
+            fixture.bot_delivery, fixture.frontend_delivery));
+        let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+        let service = Arc::new(ManagedMessageDelivery::new(repo.clone()));
+        let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo, Default::default()));
+        // A zero tick makes every epoch fail at once, standing in for any
+        // error that ends `DeliveryRuntime::run`.
+        let runtime = DeliveryRuntime {
+            policy: None,
+            service: service.clone(),
+            preparation: Arc::new(QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: service.clone() }),
+            transport: flow.bot_delivery.clone(),
+            config: DeliveryRuntimeConfig {
+                max_safe_retries: 0, bots: BTreeMap::new(), pause_dispatch: false,
+                tick: Duration::ZERO, expiry_tick: Duration::from_secs(1),
+                io_timeout: Duration::from_secs(1), run_timeout: Duration::from_secs(1),
+                cancel_timeout: Duration::from_secs(1), startup_recovery_grace: Duration::ZERO,
+                max_tasks: 1, max_abort_tasks: 1,
+            },
+            caller_dispatch: None,
+        };
+        let term = Arc::new(AtomicU64::new(0));
+        let caller_term = CallerTermState { handoff: None, observe: None, lineage: None, relay: None, term: term.clone() };
+        let leader: Arc<dyn bcs_service_api::LeaderElectionPort> = Arc::new(TestLeader(AtomicU8::new(1)));
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(run_on_master(runtime, leader, service, policy,
+            Arc::new(crate::delivery_metrics::DeliveryMetrics::default()), caller_term, shutdown));
+        // Each epoch bumps the term on start and again when it exits, so a
+        // third bump means a second epoch started after the first failed.
+        tokio::time::timeout(EPOCH_RESTART_BACKOFF + Duration::from_secs(3), async {
+            while term.load(Ordering::SeqCst) < 3 { tokio::time::sleep(Duration::from_millis(20)).await; }
+        }).await.expect("a failed epoch must be restarted, not end the scheduler");
+        assert!(!task.is_finished());
+        stop.send(true).unwrap();
+        assert!(task.await.unwrap().is_ok());
     }
 
     #[tokio::test]

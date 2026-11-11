@@ -341,7 +341,10 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         self.observe_operation("queued_heads", start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
     }
     async fn work_batch(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
-        let start = std::time::Instant::now(); let result = self.repo.work_batch(kind, now_ms, after, limit).await;
+        self.work_batch_excluding(kind, now_ms, after, limit, &[]).await
+    }
+    async fn work_batch_excluding(&self, kind: DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
+        let start = std::time::Instant::now(); let result = self.repo.work_batch_excluding(kind, now_ms, after, limit, exclude).await;
         let operation = match kind { DeliveryWorkBatch::Expired => "expiry_batch", DeliveryWorkBatch::Control => "control_batch", DeliveryWorkBatch::Recovery => "recovery_batch" };
         self.observe_operation(operation, start.elapsed().as_secs_f64(), result.as_ref().map_or(0, Vec::len), result.is_ok()); Ok(result?)
     }
@@ -362,12 +365,19 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         }
         let reasons: BTreeMap<_, _> = waiting.into_iter().collect();
         let mut owners = BTreeMap::new();
+        // Wait reasons are advisory: a row that cannot be read is left to
+        // the scheduler's row isolation instead of failing the whole tick.
         for id in reasons.keys() {
-            if let Some(row) = self.repo.get_delivery(id).await? { owners.insert(id.clone(), row.target_bot_id); }
+            match self.repo.get_delivery(id).await {
+                Ok(Some(row)) => { owners.insert(id.clone(), row.target_bot_id); }
+                Ok(None) => {}
+                Err(error @ MessageDeliveryRepoError::Storage(_)) => return Err(error.into()),
+                Err(error) => tracing::debug!(delivery_id = %id, %error, "wait reason skipped for an unreadable delivery row"),
+            }
         }
         let _guards = self.mutations.acquire(owners.values().cloned()).await;
         let mut updates = Vec::new();
-        for id in reasons.keys() {
+        for id in owners.keys() {
             let Some(mut row) = self.repo.get_delivery(id).await? else { continue; };
             if owners.get(id) != Some(&row.target_bot_id) { return Err(ManagedDeliveryError::Conflict); }
             let Some(reason) = reasons.get(&row.delivery_id) else {
@@ -615,9 +625,10 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         if batch.is_empty() { break; }
         for row in batch {
             cursor = row.delivery_id.clone();
-            self.apply(DeliveryTransitionCommand {
+            let delivery_id = row.delivery_id;
+            match self.apply(DeliveryTransitionCommand {
                 caller_dispatch_commit: None,
-                delivery_id: row.delivery_id,
+                delivery_id: delivery_id.clone(),
                 expected_state_version: row.state.state_version,
                 event: Event::Recover,
                 now_ms,
@@ -629,7 +640,15 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 caller_cancel: None,
                 caller_terminal: None,
             })
-            .await?;
+            .await
+            {
+                Ok(_) => {}
+                // An outage fails the whole sweep so the caller retries it.
+                Err(error @ ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(_))) => return Err(error),
+                // One row's deterministic fault must not block takeover for
+                // every other row; the run-deadline control still bounds it.
+                Err(error) => tracing::error!(%delivery_id, %error, "delivery recovery skipped one row"),
+            }
         }
         }
         Ok(())

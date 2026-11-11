@@ -10,9 +10,9 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.stance_signal import StanceSignal
-from src.application.services.structured_signal_extractor import StructuredSignalExtractor
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.stance_signal import StanceSignal
+from app.application.services.structured_signal_extractor import StructuredSignalExtractor
 
 
 class TestStructuredSignalExtractor:
@@ -22,14 +22,14 @@ class TestStructuredSignalExtractor:
     def setup(self):
         """每个测试前的设置"""
         # 重置 FeatureFlags
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
             self.mock_flags = mock_flags
             yield
 
     def test_extract_stance_signals_disabled(self):
         """测试 Feature Flag 关闭时返回空列表"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = False
 
             extractor = StructuredSignalExtractor()
@@ -42,10 +42,10 @@ class TestStructuredSignalExtractor:
 
     def test_extract_from_perspective_basic(self):
         """测试从视角提取信号"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 # Mock registry
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
@@ -74,10 +74,10 @@ class TestStructuredSignalExtractor:
 
     def test_extract_stance_signals_no_dimensions(self):
         """测试无维度配置时返回空列表"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {}
                 mock_registry.return_value = mock_reg
@@ -92,10 +92,10 @@ class TestStructuredSignalExtractor:
 
     def test_extract_stance_signals_with_speed_keywords(self):
         """测试提取速度相关关键词"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
                     "speed_vs_quality": MagicMock(
@@ -123,10 +123,10 @@ class TestStanceSignalExtraction:
 
     def test_speed_keywords_extraction(self):
         """测试速度关键词提取"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
                     "speed_vs_quality": MagicMock(
@@ -151,10 +151,10 @@ class TestStanceSignalExtraction:
 
     def test_quality_keywords_extraction(self):
         """测试质量关键词提取"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
                     "speed_vs_quality": MagicMock(
@@ -179,10 +179,10 @@ class TestStanceSignalExtraction:
 
     def test_neutral_stance(self):
         """测试中立立场"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
                     "speed_vs_quality": MagicMock(
@@ -207,10 +207,10 @@ class TestStanceSignalExtraction:
 
     def test_extract_with_question_context(self):
         """测试带问题上下文的提取"""
-        with patch("src.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
+        with patch("app.application.services.structured_signal_extractor.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
+            with patch("app.application.services.structured_signal_extractor.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimensions.return_value = {
                     "speed_vs_quality": MagicMock(

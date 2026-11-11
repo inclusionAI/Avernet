@@ -6,12 +6,12 @@ Stage 1 Service Tests
 
 import pytest
 
-from src.application.services.worker_runtime_state_service import WorkerRuntimeStateService
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-from src.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
-from src.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
-from src.domain.models.worker import (
+from app.application.services.worker_runtime_state_service import WorkerRuntimeStateService
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+from app.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
+from app.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -21,9 +21,9 @@ from src.domain.models.worker import (
     Capability,
     CapabilityLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.exceptions import WorkerNotFoundException
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.exceptions import WorkerNotFoundException
 
 
 class TestWorkerRuntimeStateService:

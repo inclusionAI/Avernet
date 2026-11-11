@@ -121,10 +121,13 @@ it('lets the Owner open and close sharing using the existing task controls', asy
   await waitFor(() => expect(sessionRecoveryApi.setTaskShared).toHaveBeenLastCalledWith('task', false));
   await screen.findByRole('button', { name: '分享' });
 });
-it('shows shared tasks read-only without approval, Owner cooperation, annotations or Agent log downloads', async () => {
-  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, shared: true, canOperate: false, canManageShare: false } as never);
+it.each([
+  { shared: true, label: '共享的只读自愈任务' },
+  { shared: false, label: 'Bot 协作者只读' },
+])('shows $label without approval, Owner cooperation, annotations or Agent log downloads', async ({ shared, label }) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, shared, canOperate: false, canManageShare: false } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
-  await screen.findByText('共享的只读自愈任务');
+  await screen.findByText(label);
   expect(screen.getByText('完整修复方案')).toBeVisible();
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|关闭分享|^分享$|停止任务|重试停止 AIS/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();

@@ -54,6 +54,13 @@ class Category(StrEnum):
     SKILLS = "skills"
     #: The engine's own configuration mapping (validated, not yet materialised: #2858).
     ENGINE_CONFIG = "engine_config"
+    #: A mapping of per-kind configuration the bot carries — the destination a
+    #: copy converges render-screen rows (and later task-nav rows, …) onto. Each
+    #: key is one sync kind, its value that kind's entry list; one
+    #: ``BotConfigMaterialiser`` dispatches by kind to a registered handler. A
+    #: mapping-valued Category like ``ENGINE_CONFIG``, not a list Category like
+    #: ``RESOURCES``. Materialised in ``PRE_CONTAINER`` (a plain DB-row write).
+    BOT_CONFIG = "bot_config"
     #: Identity (persona) files such as ``SOUL.md`` or ``CLAUDE.md``, each by type.
     IDENTITY = "identity"
     #: Command-line tools placed in the bot's ``~/.local/bin``, each by name.

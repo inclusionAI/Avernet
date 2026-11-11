@@ -13,9 +13,11 @@ import type {
   BotDomain,
 } from '@/services/botWorkshop';
 import { useExcludeFileTree } from '@/hooks/useExcludeFileTree';
+import { Spin } from '@/components/ui/Spin';
 import { cn } from '@/utils/cn';
 import { Check, Copy as CopyIcon } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AuthorizationPanel } from '../CreateBotModal/AuthorizationPanel';
 import { CopyBotFormFields } from './CopyBotFormFields';
 import { ExcludeFileTree } from './ExcludeFileTree';
@@ -25,10 +27,9 @@ interface CopyBotModalProps {
   /** 复制时归属空间列表(用于第 2 步只读展示源 Bot 空间名)。 */
   spaces: BotCreateSpace[];
   copying: boolean;
-  /**
-   * AgentPass 授权视图(复制 auth_required 分支)。与创建同款处理:复用
-   * `useBotCreateAuthorization` 轮询 dst bot 的 auth-status,ISSUED 后自动收敛。
-   */
+  /** detail-wait 在跑(pendingIssuedBotId 已设)。区别于 copying(copyBot API in-flight 也真):
+   * 「正在等待新 Bot 创建」罩只在 awaitingDetail 时弹,提交后/auth 出来前那段不弹。 */
+  awaitingDetail: boolean;
   authorization?: BotCreateAuthorization & { message?: string; error?: string };
   onClose: () => void;
   onSubmit: (input: BotCopyInput) => Promise<void>;
@@ -58,6 +59,7 @@ const CopyBotModal: React.FC<CopyBotModalProps> = ({
   sourceBot,
   spaces,
   copying,
+  awaitingDetail,
   authorization,
   onClose,
   onSubmit,
@@ -86,9 +88,33 @@ const CopyBotModal: React.FC<CopyBotModalProps> = ({
     setValues((current) => ({ ...current, excludes: [...excludeTree.excluded] }));
   }, [excludeTree.excluded]);
 
-  // AgentPass 授权进入时复用 CreateBotModal 同款 iframe 全屏承载;与创建一致,
-  // 由 useBotCreateAuthorization 轮询 auth-status,ISSUED 后自动收敛。
+  // auth_required:AuthorizationPanel(iframe)全屏承载授权页。授权页 auth 完成后 copy 不再
+  // 轮询 auth-status(dst 无该端点),detail-wait 由 useBotWorkshopCopyFlow 的 pendingIssuedBotId
+  // effect 承担,detail 可查才 setCopying(false)+onClose()+toast+load。
   if (authorization) return <AuthorizationPanel authorization={authorization} />;
+  // 授权浮窗(iframe)被清掉后(AgentPass 倒计时关 / auth 完成等),只要 awaitingDetail
+  // (detail-wait 在跑、dst bot 还没查到),弹一个新浮窗(半透明模糊背景 + 卡片 + loading
+  // 按钮)接管持住 —— 不让浮窗真关掉,用户也关不掉,直到 detail-wait 可查才
+  // setCopying(false)+onClose()+toast+load。issued 路径(无 authorization)同样落到这里。
+  // 用 awaitingDetail 而非 copying:copyBot API in-flight 时 copying 也真但 pending 没设,
+  // 那段(提交后/auth 出来前)不弹罩,避免"正在等待新 Bot 创建"出现两次。
+  if (awaitingDetail) {
+    if (typeof document === 'undefined') return null;
+    return createPortal(
+      <div className="fixed inset-0 z-[200] flex h-dvh w-screen items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]">
+        <div
+          role="status"
+          aria-label="正在等待新 Bot 创建"
+          aria-live="polite"
+          className="w-full max-w-sm rounded-lg border border-border bg-background px-6 py-5 text-center text-foreground shadow-lg"
+        >
+          <Spin tip="正在等待新 Bot 创建…" className="py-1" />
+          <p className="mt-2 text-xs text-muted-foreground">复制已提交,完成后将自动刷新列表,请勿关闭。</p>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   const stepIndex = STEP_LABELS.findIndex((item) => item.key === step);
   const busy = copying || excludeTree.loading;

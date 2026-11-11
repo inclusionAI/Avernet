@@ -217,6 +217,7 @@ const BotWorkshopPage: React.FC = () => {
           sourceBot={workshop.copyBot}
           spaces={copySourceSpaces}
           copying={workshop.copying}
+          awaitingDetail={workshop.awaitingDetail}
           authorization={workshop.copyAuthorization}
           onClose={workshop.closeCopy}
           onSubmit={workshop.submitCopy}

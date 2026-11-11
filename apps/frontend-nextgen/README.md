@@ -27,6 +27,21 @@ npm run check:open-core
 npm run ci
 ```
 
+## Discovery public groups
+
+The [public group card](src/components/CollaborationSquare/GroupCard/index.tsx)
+shows the driver Bot, not the Owner user (the public directory does not return
+that user). The member dialog still uses Owner information from group details.
+[Member loading](src/services/collaborationSquare/collaborationSquareApiAdapter.ts)
+preserves each participant's `avatar_url`. The
+[member dialog](src/components/CollaborationSquare/GroupMembersModal/index.tsx)
+uses that avatar when present; Bots without one use the shared
+[Bot avatar resolver](src/domain/botAvatar.ts), seeded by participant `actor_id`,
+to match Bot management. Human members without an avatar retain their initial.
+Regression coverage lives in
+[`GroupMemberAvatar.test.tsx`](test/components/CollaborationSquare/GroupMemberAvatar.test.tsx)
+and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.

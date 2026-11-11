@@ -318,6 +318,12 @@ def resolve_capabilities(
             else _REASON_DESKTOP if desktop
             else None
         ),
+        # bot config sync is engine-agnostic by the 2026-11-09 constraint —
+        # every engine uses the same kind set, so a single unconditional verdict
+        # (supported) holds for every bot, teclaw and desktop included. There is
+        # no per-engine gate here: ``copy.py``'s ``_COPYABLE_ENGINES`` narrows
+        # the copy *surface*, but the construct itself never refuses by engine.
+        Category.BOT_CONFIG: None,
         # Whether a *form* can be resolved at all. Which (category, protocol)
         # COMBINATIONS are open is a different question, answered by
         # ``source_matrix`` below — these flat rows structurally cannot express

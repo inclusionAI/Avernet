@@ -261,6 +261,7 @@ export const defaultCapabilities: AppCapabilities = {
   getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
   getBotEditorPanels: () => ({ status: 'available', value: [] }),
   getConversationComposer: () => ({ status: 'available', value: null }),
+  getUserMessagePresentation: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({

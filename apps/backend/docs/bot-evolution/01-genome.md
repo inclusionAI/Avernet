@@ -1308,16 +1308,19 @@ The manifest apply pipeline already keeps the platform's own durable copy of
 everything it fetches (`core/content_store/`, built as the Manifest's W11 and
 moved out as its own component in #3064):
 
-- **Bytes** live in a content-addressed blob directory,
-  `<root>/blobs/<hex[:2]>/<hex64>`, written once and atomically and
-  hash-verified on read. A directory (a skill, or a directory resource) is one
+- **Bytes** live in a content-addressed blob store, written once and
+  hash-verified on read: by default the deployment's object storage, under
+  the key `content-store/blobs/<hex[:2]>/<hex64>`, which every backend
+  instance shares. A directory (a skill, or a directory resource) is one
   blob: the `acm-tree-v1` encoding of its files (`canonical_tree_bytes`),
   which is deterministic, uncompressed, and decodable back into the files.
   Editing one file of a directory therefore stores a new blob for the whole
   tree; per-file blobs would avoid that and are the recorded follow-up (open
-  decision G-1, closed for v1). The root is
-  `user_config.bot_config_manifest.content_store_dir` (default
-  `./data/manifest_content`; deployments point it at a shared volume).
+  decision G-1, closed for v1). Which blob store runs is wired by the
+  deployment's profile: the object storage by default; the test and singlebox
+  profiles, whose object storage is a test double, bind a local tree
+  `<root>/blobs/<hex[:2]>/<hex64>` under
+  `user_config.bot_config_manifest.content_store_dir`.
 - **Provenance** lives in `ac_manifest_content`, an append-only log of store
   events (bot, source URL, credential *name*, apply). The table holds no
   bytes.

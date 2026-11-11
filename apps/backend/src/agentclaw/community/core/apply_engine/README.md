@@ -143,6 +143,7 @@ consumed_by:
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_management.engines.registry  # the runtime-engine routing policy the resources materialiser addresses workspaces through
+  - agentclaw.community.core.bot_management.render_screen_service_protocol  # the render-screen service the bot_config render_screen handler converges a copy's screens through
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer
   - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader, the compose seams the managed-files reader inherits

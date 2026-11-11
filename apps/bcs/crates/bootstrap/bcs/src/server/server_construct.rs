@@ -82,6 +82,9 @@ impl BcsServer {
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
+        let card_changes = (config.bcsfuse.enabled
+            && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2)
+            .then(|| Arc::new(bcs_fusion::CardChangeQueue::default()));
         // Task 4.3a: the SAME bot repo Arc backs the shared
         // runtime permission-profile port (replacing the
         // Noop previously injected on this chain). One
@@ -97,7 +100,7 @@ impl BcsServer {
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
         // Local single-node mode uses an in-memory relation graph.
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
@@ -110,7 +113,7 @@ impl BcsServer {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -122,7 +125,7 @@ impl BcsServer {
                 provider_webhook_url_guard,
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
-                build_bot_catalog_cleanup(&config),
+                build_bot_catalog_cleanup(&config, card_changes.as_ref()),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -141,7 +144,7 @@ impl BcsServer {
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let friend_repo = Arc::new(MemoryFriendRepo::with_data_dir(
@@ -454,7 +457,7 @@ impl BcsServer {
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
-        ));
+        ).with_message_flow(message_flow.clone()));
         let session_launch = Arc::new(SessionLaunchApplication::new(
             bot_registry.clone(),
             sessions.clone(),
@@ -521,8 +524,9 @@ impl BcsServer {
         ));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
+            card_changes.clone(),
             invite_token_secret.clone(),
-            control_plane_repo,
+            control_plane_repo.clone(),
             &provider_repos,
             bot_registry.clone(),
             sessions.clone(),
@@ -620,7 +624,7 @@ impl BcsServer {
             .registry(bot_registry.clone())
             .bot_authority(bot_authority.service.clone())
             .bot_authority_hook(bot_authority.hook.clone())
-            .group(sessions)
+            .group(sessions.clone())
             .routing(router)
             .fusion(fusion)
             .friend(friend_store)
@@ -666,7 +670,8 @@ impl BcsServer {
         spawn_session_files_pending_sweep(services.session_files.clone());
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
-        register_late_lifecycles(&lifecycle, fuse_client.as_ref());
+        register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
+            control_plane_repo, sessions.clone(), &config);
         register_eventing_lifecycles(
             &lifecycle,
             eventing_runtime.lifecycle.as_ref(),

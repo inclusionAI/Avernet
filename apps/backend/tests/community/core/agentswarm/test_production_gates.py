@@ -69,6 +69,7 @@ def _gate_config(*, grace: float = 0.2, slice_seconds: float = 2.0,
 def _submit_request(tenant: str = TENANT, *, goal: str = "gate goal",
                     idem: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=tenant, goal=goal,
         agents=(dm.AgentSpec(name="a1", role="worker"),),
         provider=dm.ProviderKind.STUB, idempotency_key=idem,
@@ -536,3 +537,9 @@ class TestUpstreamDegradation:
         assert result["agent_id"] == agent_id
         assert result["status"] is dm.AgentStatus.FAILED
         assert result["error"] == "upstream_breaker_open"
+
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

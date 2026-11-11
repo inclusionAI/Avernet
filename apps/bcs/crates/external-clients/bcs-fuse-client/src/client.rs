@@ -14,11 +14,11 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 /// - `fusion_client`: longer timeout for LLM-backed fusion calls
 /// - `sync_client`: shorter timeout for worker CRUD operations
 pub struct FuseClient {
-    base_url: String,
+    pub(crate) base_url: String,
     /// Longer timeout for LLM-backed fusion (default: 120s).
     fusion_client: ClientWithDefaults<reqwest::Client>,
     /// Shorter timeout for sync/offline CRUD (default: 10s).
-    sync_client: ClientWithDefaults<reqwest::Client>,
+    pub(crate) sync_client: ClientWithDefaults<reqwest::Client>,
 }
 
 impl std::fmt::Debug for FuseClient {

@@ -48,8 +48,12 @@ bcsfuse_load_env() {
         log_info "Hybrid model policy: reapplied ${hybrid_model} for BCSFuse SOP"
     fi
 
-    # Ensure provider mode defaults to dev
-    export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
+    # Mock coverage runs without external model credentials.
+    if [[ "${SINGLEBOX_COVERAGE:-}" == "1" && "${SINGLEBOX_MODEL_CONFIG_MODE:-}" == "mock" ]]; then
+        export BCSFUSE_PROVIDER_MODE=dev_smoke
+    else
+        export BCSFUSE_PROVIDER_MODE="${BCSFUSE_PROVIDER_MODE:-dev}"
+    fi
     export BCSFUSE_SERVER_PORT="${BCSFUSE_PORT:-8765}"
 
     # Compat mapping: reuse OPENCLAW_OPENAI_* if bcsfuse vars are unset or still

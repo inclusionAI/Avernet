@@ -66,6 +66,7 @@ def db():
 
 def _mk_req(tenant="t1", *, idem=None, goal="admission goal") -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=tenant,
         goal=goal,
         agents=(dm.AgentSpec(name="a1", role="research"),),
@@ -250,3 +251,8 @@ class TestAdmissionControl:
         # Fail-clear config rejection keeps precedence over 429-class caps.
         with pytest.raises(AgentSwarmConfigError):
             asyncio.run(svc.submit_async(_mk_req("t1")))
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

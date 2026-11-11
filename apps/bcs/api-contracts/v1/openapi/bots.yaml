@@ -9,9 +9,18 @@ BotCandidatesPath:
       physical Bot managed by the current Human or that Human's own Human Actor,
       identified as human_{subject.id}. Results remain physical Bots, stay in
       the selected Bot record's environment, and exclude the selected Bot,
-      Humans, deleted rows, and unonboarded rows. An empty or whitespace-only
-      name is treated as absent; otherwise matching is a trimmed case-insensitive
-      substring. Status and reachability do not remove candidates.
+      Humans, deleted rows, and unonboarded rows. Discovery visibility is
+      two-dimensional and applies before pagination: a Human viewer keeps
+      targets whose user_visibility is public or protected, while a Bot viewer
+      keeps targets whose visibility is public or protected. collaboration
+      keeps the existing public-only or approved-friend branch on that same
+      viewer dimension. is_friend is derived only from approved Connect edges;
+      the legacy friend store is not authoritative for this field. An empty or
+      whitespace-only name is treated as absent; otherwise matching is a
+      trimmed case-insensitive substring. Status and reachability do not remove
+      candidates. This path is the only
+      recommended candidate entry point; eligible-candidates keeps the same
+      request and response semantics as a deprecated compatibility alias.
     x-avernet-security:
       user: required
       app: required
@@ -22,6 +31,10 @@ BotCandidatesPath:
       result_kind: bot
       environment: same_as_acting_bot
       exclude_self: true
+      viewer_visibility:
+        human: user_visibility
+        bot: visibility
+      friend_source: approved_connect_edge
       purpose_visibility:
         discovery:
           - public
@@ -114,19 +127,24 @@ BotCandidatesPath:
 EligibleBotCandidatesPath:
   get:
     operationId: list_eligible_bot_candidates
+    deprecated: true
     tags: ["Collaboration / Bots"]
     summary: >-
-      List candidate physical Bots from a managed Bot's edge-permission friend graph.
+      Deprecated compatibility alias of the candidate list for a managed Bot
+      (including Human Actor).
     description: >-
-      Human control-plane operation. The path bot_id must identify either a
-      physical Bot managed by the current Human or that Human's own Human Actor,
-      identified as human_{subject.id}. Results remain physical Bots, stay in
-      the selected Bot record's environment, and exclude the selected Bot,
-      Humans, deleted rows, and unonboarded rows. Eligibility is sourced from
-      the edge-permission friend graph and filtered to physical Bot peers only.
-      An empty or whitespace-only name is treated as absent; otherwise matching
-      is a trimmed case-insensitive substring. Status and reachability do not
-      remove candidates.
+      Deprecated compatibility alias of
+      /openapi/v1/collaboration/bots/{bot_id}/candidates; it keeps an identical
+      request and response shape and identical semantics, including the
+      two-dimensional viewer visibility filter and the approved-connect-edge
+      friend source, and delegates to that candidate list. Use the candidates
+      path for new callers. The path bot_id must identify either a physical Bot
+      managed by the current Human or that Human's own Human Actor, identified
+      as human_{subject.id}. Results remain physical Bots, stay in the selected
+      Bot record's environment, and exclude the selected Bot, Humans, deleted
+      rows, and unonboarded rows. An empty or whitespace-only name is treated as
+      absent; otherwise matching is a trimmed case-insensitive substring.
+      Status and reachability do not remove candidates.
     x-avernet-security:
       user: required
       app: required
@@ -137,6 +155,10 @@ EligibleBotCandidatesPath:
       result_kind: bot
       environment: same_as_acting_bot
       exclude_self: true
+      viewer_visibility:
+        human: user_visibility
+        bot: visibility
+      friend_source: approved_connect_edge
       purpose_visibility:
         discovery:
           - public
@@ -236,14 +258,26 @@ BotCandidateSearchPath:
       Human control-plane projection of legacy /actors/search. The path bot_id
       replaces legacy current_bot_uuid, while purpose maps to legacy
       cooperatable_only. Search first uses the configured semantic worker
-      recommendation service with a fixed top-K of 20. If recommendation is
-      unavailable, empty, or yields no visible Bots, the operation falls back
-      to a trimmed case-insensitive Bot-name substring search. Results contain
+      recommendation service with a fixed top-K of 20. Results contain
       physical Bots only and preserve recommendation ordering when available.
       An omitted, empty, or whitespace-only q returns an empty successful
       result without invoking semantic or name search. Gateway route admission
       does not require a User, App, or Bot Principal. BCS still requires a
-      usable Human identity and authorizes the selected perspective.
+      usable Human identity and authorizes the selected perspective. An
+      authenticated Human browser is an explicit read-only consumer of this
+      operation; it has no /openapi/v1 alias and no anonymous access, and it
+      needs the same usable Human identity and perspective authorization. A
+      semantic call performs at most one provider recall of up to 20 candidate
+      items. The result is the authorized subset of that recall, in provider
+      order; it may contain fewer than 20 items because no top-up query fills
+      the page. When that recall is empty, the provider is unavailable or
+      fails, or every recalled Bot is filtered out, the operation falls back to
+      a trimmed case-insensitive Bot-name substring search; the fallback is
+      likewise bounded to 20 items and applies the same viewer visibility
+      filtering before pagination. Recalled Bots that survive authorization
+      but are absent from the registry are skipped; when every recalled Bot
+      is absent, the operation returns an empty semantic result rather than
+      a name fallback.
     x-avernet-security:
       user: optional
       app: optional
@@ -260,7 +294,11 @@ BotCandidateSearchPath:
         collaboration:
           cooperatable_only: true
       top_k: 20
-      primary_ordering: recommendation_score_desc
+      primary_ordering: provider_order
+      friend_source: approved_connect_edge
+      viewer_visibility:
+        human: user_visibility
+        bot: visibility
       fallback: trimmed_case_insensitive_name_substring
       empty_query:
         equivalent_inputs:
@@ -539,10 +577,14 @@ MyBotsPath:
   get:
     operationId: list_my_bots
     tags: ["Collaboration / Bots"]
-    summary: List Bot rows created by the current Human.
+    summary: >-
+      List Bot rows controllable by the current Human (the owner|manager
+      union plus the Human self entry).
     description: >-
-      Human control-plane operation. Ownership is selected by comparing the
-      current Human staff_no with created_by, without kind-specific handling.
+      Human control-plane operation. The candidate set is the caller's
+      approved owner|manager edge union plus the Human self entry (the §10.2a
+      legacy creator window may also contribute rows during the migration
+      window), without kind-specific handling.
       Both physical Bot and Human rows can be returned. Omitting kind means all
       kinds; reachability only matches physical Bots, so combining kind=human
       with reachability produces an empty page.
@@ -561,6 +603,8 @@ MyBotsPath:
       omitted_kind: all
       reachability_applies_to: bot
       ordering:
+        - human_self_first
+        - reachable_first
         - created_at_desc
         - bot_id_asc
     parameters:
@@ -585,7 +629,10 @@ MyBotsPath:
           $ref: ../domain-models.yaml#/BotStatus
       - name: reachability
         in: query
-        description: Computed reachability filter for physical Bots only.
+        description: >-
+          Computed reachability filter for physical Bots only; when omitted,
+          the same computed value still drives the page order (reachable rows
+          before unreachable ones).
         schema:
           $ref: ../domain-models.yaml#/BotReachability
       - name: offset
@@ -604,8 +651,11 @@ MyBotsPath:
     responses:
       "200":
         description: >-
-          Owned rows ordered by created_at descending with bot_id ascending as
-          the deterministic tie-breaker, then paginated.
+          Rows ordered with the Human self entry first, then reachable
+          physical Bots before unreachable ones over the same runtime
+          observation, created_at descending with bot_id ascending as the
+          deterministic tie-breaker, then paginated; an explicit reachability
+          filter degenerates the order to plain created_at descending.
         content:
           application/json:
             schema:

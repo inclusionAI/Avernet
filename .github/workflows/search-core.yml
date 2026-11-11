@@ -1,0 +1,45 @@
+name: Shared search contracts
+
+on:
+  pull_request:
+    paths:
+      - 'apps/bcsfuse/**'
+      - 'docker/services/bcsfuse.dockerfile'
+      - '.github/workflows/search-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install public packages from this checkout
+        run: python -m pip install -e 'apps/bcsfuse/packages/search-core[http,test]' -e 'apps/bcsfuse[dev]'
+      - name: Core contracts
+        run: python -m pytest apps/bcsfuse/packages/search-core/tests -q
+      - name: TC compatibility contracts
+        working-directory: apps/bcsfuse
+        run: >-
+          python -m pytest tests/contract/test_tc_catalog.py
+          tests/contract/test_tc_same_instance_migration.py
+          tests/contract/test_tc_legacy_transactions.py
+          tests/contract/test_tc_sync_contract.py
+          tests/contract/test_tc_http_compat.py
+          tests/contract/test_tc_fuse_modes.py
+          tests/contract/test_tc_review_regressions.py
+          tests/contract/test_tc_migration.py
+          tests/contract/test_search_migration_baseline.py
+          tests/contract/test_shared_search_application.py
+          tests/unit/application/test_profile_merge_service.py
+          tests/unit/utils/test_fuse_util.py
+          tests/integration/test_g9_core_acceptance.py
+          tests/unit/bootstrap/test_app_factory.py
+          tests/opensource/test_bootstrap_safe_imports.py
+          tests/opensource/test_package_layout.py
+          tests/smoke/test_smoke_main.py -q

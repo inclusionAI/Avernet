@@ -44,7 +44,6 @@ pub mod persistent_repo;
 pub mod provider;
 pub mod a2a;
 mod a2a_search;
-mod a2a_source;
 pub mod provider_cache;
 mod caller_config_cache;
 
@@ -57,6 +56,7 @@ mod heartbeat_tests;
 /// projection's registration/profile composites' re-exports
 /// live behind the crate facade.
 pub(crate) mod ownership;
+mod ownership_managers;
 /// Atomic retirement composition (bot-authority
 /// spec §7.1): shared SQL pieces for the ordinary and
 /// Provider retire commands, plus (in the memory

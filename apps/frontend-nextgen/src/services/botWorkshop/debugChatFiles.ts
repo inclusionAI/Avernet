@@ -1,9 +1,5 @@
 import type { SendFileRefs } from '@/pages/Workspace/hooks/useBotChat';
-
-export interface DebugChatFileReference {
-  resourceId: string;
-  displayName: string;
-}
+import type { SubmitContext } from '@tc-chat/ui/es/Sender';
 
 export interface DebugChatRequest {
   content: string;
@@ -35,31 +31,20 @@ export function parseDebugChatMessageContent(content: string): DebugChatMessageC
   };
 }
 
-/** 将会话文件转换为 SDK 识别的 file-ref 与资源引用参数。 */
-export function buildDebugChatFileRequest(text: string, files: DebugChatFileReference[]): DebugChatRequest {
-  if (files.length === 0) return { content: text };
-
-  const references = files.map((file, index) => ({
-    ...file,
-    insertId: `debug_file_${index + 1}`,
-  }));
-
+/** 保留 Sender（及平台扩展）生成的正文与引用 ID，转换为聊天 SDK 参数。 */
+export function buildDebugChatFileRequest(text: string, context?: SubmitContext): DebugChatRequest {
+  const refs = context?.fileRefs;
+  if (!refs?.length) return { content: text };
   return {
-    content: `${references.map((file) => `<file-ref insert_id="${file.insertId}"></file-ref>`).join('')}${text}`,
+    content: context?.resolvedContent ?? text,
     options: {
-      resourceReferences: references.map((file) => ({
+      resourceReferences: refs.map((file) => ({
         type: 'file',
-        resource_id: file.resourceId,
-        insert_id: file.insertId,
+        resource_id: file.resource_id,
+        insert_id: file.insert_id,
       })),
-      promptFileRefs: references.map((file) => ({
-        resource_id: file.resourceId,
-        insert_id: file.insertId,
-      })),
-      fileRefDisplay: references.map((file) => ({
-        insert_id: file.insertId,
-        name: file.displayName,
-      })),
+      promptFileRefs: refs.map((file) => ({ resource_id: file.resource_id, insert_id: file.insert_id })),
+      fileRefDisplay: refs.map((file) => ({ insert_id: file.insert_id, name: file.display_name })),
     },
   };
 }

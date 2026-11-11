@@ -8,6 +8,11 @@ pub(super) fn create_fusion_service(
     Arc<dyn bcs_service_api::FusionCoreService>,
     Option<Arc<FuseClient>>,
 ) {
+    if config.bcsfuse.enabled && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2 {
+        let client = FuseClient::new(&config.bcsfuse)
+            .expect("valid BCSFuse client configuration");
+        return (Arc::new(LocalFusionService::new(config.bots_base_dir.clone())), Some(Arc::new(client)));
+    }
     if config.bcsfuse.enabled {
         match FuseClientService::new(&config.bcsfuse, &config.bots_base_dir) {
             Ok(svc) => {
@@ -122,6 +127,10 @@ where
 pub(super) fn register_late_lifecycles(
     lifecycle: &Arc<Mutex<LifecycleOrchestrator>>,
     fuse_client: Option<&Arc<FuseClient>>,
+    card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
+    bots: Arc<dyn BotControlPlaneRepoPort>,
+    groups: Arc<dyn GroupCoreService>,
+    config: &BcsConfig,
 ) {
     if let Some(client) = fuse_client {
         let adapter = Arc::new(bcs_fusion::FuseClientLifecycle::new(client.clone()));
@@ -131,6 +140,11 @@ pub(super) fn register_late_lifecycles(
             .try_lock()
             .expect("orchestrator should be uncontended at registration time");
         guard.register("fuse_client", adapter as Arc<dyn ServiceLifecycle>);
+        if let Some(queue) = card_changes {
+            guard.register("fuse_card_sync", Arc::new(bcs_fusion::FuseCardSyncLifecycle::new(
+                queue, client.clone(), bots, groups, crate::env::resolve_env(), config.bcsfuse.sync_retry_base_ms,
+            )));
+        }
     }
 }
 

@@ -459,10 +459,19 @@ async fn agentpass_gateway_supports_existing_delivery_and_callback_authenticatio
 
 #[tokio::test]
 async fn upstream_persists_membership_without_delivery_binding_and_rejects_duplicate_ref() {
-    let f = fixture(None, false).await;
+    #[derive(Default)]
+    struct Changes(std::sync::Mutex<Vec<String>>);
+    impl bcs_service_api::port::CatalogChangePort for Changes {
+        fn agent_changed(&self, id: &str) { self.0.lock().unwrap().push(id.into()); }
+        fn group_changed(&self, _: &str) { panic!("registration must not publish a Group"); }
+    }
+    let changes = Arc::new(Changes::default());
+    let mut f = fixture(None, false).await;
+    f.core = f.core.with_catalog_changes(Some(changes.clone()));
     let command = request(&f, ProviderRegistrationMode::Plugin);
     let first = f.core.register(command.clone()).await.unwrap();
     assert!(matches!(f.core.register(command).await, Err(ServiceError::Conflict(_))));
+    assert_eq!(*changes.0.lock().unwrap(), vec![first.record.bot_uuid.clone()], "only committed registration publishes");
     assert!(!first.record.bot_token.starts_with("MOCK_"));
     assert!(
         f.membership

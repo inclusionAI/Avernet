@@ -21,14 +21,14 @@ class TestPlanningResultBasics:
 
     def test_planning_result_importable(self):
         """测试 PlanningResult 可导入"""
-        from src.domain.models.planning_result import PlanningResult
+        from app.domain.models.planning_result import PlanningResult
 
         assert PlanningResult is not None
 
     def test_planning_result_constructs_with_plan_draft(self):
         """测试使用 PlanDraft 构造 PlanningResult"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -58,11 +58,11 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_optional_dependencies(self):
         """测试 PlanningResult 接受可选的 dependencies"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             DependencyRef,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -97,11 +97,11 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_optional_risks(self):
         """测试 PlanningResult 接受可选的 risks"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanRisk,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -134,8 +134,8 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_optional_assumptions(self):
         """测试 PlanningResult 接受可选的 assumptions"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -159,8 +159,8 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_optional_open_questions(self):
         """测试 PlanningResult 接受可选的 open_questions"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -183,11 +183,11 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_optional_fallbacks(self):
         """测试 PlanningResult 接受可选的 fallbacks"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanFallback,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -219,8 +219,8 @@ class TestPlanningResultBasics:
 
     def test_planning_result_accepts_status_and_confidence(self):
         """测试 PlanningResult 接受 status 和 confidence"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -249,11 +249,11 @@ class TestPlanningResultWarningsAndErrors:
 
     def test_planning_result_accepts_warnings(self):
         """测试 PlanningResult 接受 warnings"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanningWarning,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -284,11 +284,11 @@ class TestPlanningResultWarningsAndErrors:
 
     def test_planning_result_accepts_errors(self):
         """测试 PlanningResult 接受 errors"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanningError,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -323,8 +323,8 @@ class TestPlanningResultIsSuccessful:
 
     def test_is_successful_returns_true_when_no_errors(self):
         """测试没有 errors 时 is_successful 返回 True"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -346,11 +346,11 @@ class TestPlanningResultIsSuccessful:
 
     def test_is_successful_returns_false_when_has_errors(self):
         """测试有 errors 时 is_successful 返回 False"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanningError,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -379,11 +379,11 @@ class TestPlanningResultIsSuccessful:
 
     def test_is_successful_returns_true_with_only_warnings(self):
         """测试只有 warnings 时 is_successful 返回 True"""
-        from src.domain.models.planning_result import (
+        from app.domain.models.planning_result import (
             PlanningResult,
             PlanningWarning,
         )
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -416,7 +416,7 @@ class TestPlanningResultValidation:
 
     def test_planning_result_requires_plan_draft(self):
         """测试 PlanningResult 必需 plan_draft"""
-        from src.domain.models.planning_result import PlanningResult
+        from app.domain.models.planning_result import PlanningResult
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
@@ -427,8 +427,8 @@ class TestPlanningResultValidation:
 
     def test_planning_result_requires_objective(self):
         """测试 PlanningResult 必需 objective"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
         from pydantic import ValidationError
 
         plan_draft = PlanDraft(
@@ -450,8 +450,8 @@ class TestPlanningResultValidation:
 
     def test_confidence_within_valid_range(self):
         """测试 confidence 在有效范围内"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -488,8 +488,8 @@ class TestPlanningResultValidation:
 
     def test_status_must_be_valid(self):
         """测试 status 必须是有效值"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -513,8 +513,8 @@ class TestPlanningResultValidation:
 
     def test_planning_result_rejects_extra_fields(self):
         """测试 PlanningResult 拒绝额外字段"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
         from pydantic import ValidationError
 
         plan_draft = PlanDraft(
@@ -541,8 +541,8 @@ class TestPlanningResultDefaults:
 
     def test_dependencies_defaults_to_empty_list(self):
         """测试 dependencies 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -564,8 +564,8 @@ class TestPlanningResultDefaults:
 
     def test_risks_defaults_to_empty_list(self):
         """测试 risks 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -587,8 +587,8 @@ class TestPlanningResultDefaults:
 
     def test_assumptions_defaults_to_empty_list(self):
         """测试 assumptions 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -610,8 +610,8 @@ class TestPlanningResultDefaults:
 
     def test_open_questions_defaults_to_empty_list(self):
         """测试 open_questions 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -633,8 +633,8 @@ class TestPlanningResultDefaults:
 
     def test_fallbacks_defaults_to_empty_list(self):
         """测试 fallbacks 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -656,8 +656,8 @@ class TestPlanningResultDefaults:
 
     def test_warnings_defaults_to_empty_list(self):
         """测试 warnings 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -679,8 +679,8 @@ class TestPlanningResultDefaults:
 
     def test_errors_defaults_to_empty_list(self):
         """测试 errors 默认为空列表"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -702,8 +702,8 @@ class TestPlanningResultDefaults:
 
     def test_status_defaults_to_draft(self):
         """测试 status 默认为 draft"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -725,8 +725,8 @@ class TestPlanningResultDefaults:
 
     def test_confidence_defaults_to_zero(self):
         """测试 confidence 默认为 0.0"""
-        from src.domain.models.planning_result import PlanningResult
-        from src.domain.models.plan_draft import PlanDraft, PlanStep
+        from app.domain.models.planning_result import PlanningResult
+        from app.domain.models.plan_draft import PlanDraft, PlanStep
 
         plan_draft = PlanDraft(
             task_id="tsk_001",
@@ -752,7 +752,7 @@ class TestHelperTypes:
 
     def test_plan_risk_constructs(self):
         """测试 PlanRisk 构造"""
-        from src.domain.models.planning_result import PlanRisk
+        from app.domain.models.planning_result import PlanRisk
 
         risk = PlanRisk(
             risk_id="risk_1",
@@ -768,7 +768,7 @@ class TestHelperTypes:
 
     def test_plan_fallback_constructs(self):
         """测试 PlanFallback 构造"""
-        from src.domain.models.planning_result import PlanFallback
+        from app.domain.models.planning_result import PlanFallback
 
         fallback = PlanFallback(
             fallback_id="fb_1",
@@ -782,7 +782,7 @@ class TestHelperTypes:
 
     def test_dependency_ref_constructs(self):
         """测试 DependencyRef 构造"""
-        from src.domain.models.planning_result import DependencyRef
+        from app.domain.models.planning_result import DependencyRef
 
         dep = DependencyRef(
             from_step="step_2",
@@ -796,7 +796,7 @@ class TestHelperTypes:
 
     def test_planning_warning_constructs(self):
         """测试 PlanningWarning 构造"""
-        from src.domain.models.planning_result import PlanningWarning
+        from app.domain.models.planning_result import PlanningWarning
 
         warning = PlanningWarning(
             field="test_field",
@@ -810,7 +810,7 @@ class TestHelperTypes:
 
     def test_planning_error_constructs(self):
         """测试 PlanningError 构造"""
-        from src.domain.models.planning_result import PlanningError
+        from app.domain.models.planning_result import PlanningError
 
         error = PlanningError(
             field="test_field",

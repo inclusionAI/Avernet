@@ -334,3 +334,59 @@ repopulate stale names. Single reads add one indexed row lookup; batches retain
 invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
 not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
 Card-owned name even when a caller carries an older capabilities snapshot.
+
+
+## Provider initial manager snapshot
+
+`initialize_provider_authority` is Provider-only, distinct from governance backfill
+and ongoing manager edits/sync. Version-0 initialization commits owner/version,
+initial manager Human actors, manager edges and the Provider `initialize` audit
+snapshot together. An initialized Bot never reapplies the snapshot. Ordinary fresh multi-user
+registration now uses `create_provider_admin_bot_with_ownership`: Bot, optional
+Gateway binding, Human actors, initial authority, profile and audit share the
+existing ownership transaction/staged publication. No version-0 Bot is visible
+to the mine sweep on failure or before authority commits. Single-owner legacy
+registration retains its previous boundary; A2A retains its full composite. Human-token registration
+must supply an empty initial-manager list. No runtime permission-policy change.
+MySQL migration 043 aligns the actor registry and active identity-reference
+keys/predicates to NO PAD utf8mb4_0900_bin (corrected 043 plus additive 044), so distinct principals do not alias grants, runtime
+profiles, group/session membership, routing or actor-scoped content. The complete
+32-column/23-table inventory and maintenance requirements are in the review-followup spec. SQLite and Memory already compare these IDs byte-exactly. No lowercasing,
+identity remapping or historical migration rewrite is allowed. Apply with writers
+stopped before multi-user admission; retain the collation on application rollback.
+The native MySQL manager test drives the full migration chain, retained-row upgrade,
+case/accent-distinct and existing-Human cases, ordinary partial initialization and
+A2A whole-registration failure rollback/retry.
+
+The input is bounded to 101 entries (100 initial managers). SQL adds five steps
+inside the existing transaction for a nonempty set: one batched Human insert,
+one live-Human count guard, one batched edge upsert, one exact-identity edge count
+guard and one guard consumption. At most 100 Human/edge rows are written per
+batch; the largest statement binds 500 values. No per-person network lookup or
+DB call is introduced. The two counts return one scalar each; predicate scans
+remain subject to existing indexes/collation. Existing deterministic rollback
+retries stay bounded to three; no new retry worker/cache exists. Memory validates
+and stages actors/edges before publishing under the existing record/authority
+lock order. Tests: `provider_initial_managers` (Memory application and SQLite),
+Provider A2A conformance, and `ownership_managers` bounded-statement unit test.
+
+Ordinary registration checks actual governance completion for both connection
+modes. A SQL governance read performs three queries when `created_by` is present:
+one Bot row, one Human existence count and the approved-owner edge read (normally
+0–1 rows). Gateway replays already paid this cost; new registrations and Plugin
+replays now also pay it to avoid reinitializing committed authority. No manager
+list is read. The underlying owner-edge integrity read remains unchanged.
+
+### Review concurrency and migration repairs (2026-11-09)
+
+Memory candidate listing takes authority before bots, matching initialization;
+a controlled pending-future regression checks it never pins bots while waiting
+for authority. Multi-user registration stages manager Humans before the durable
+file and publishes them with authority under the same guards. Its credential-free
+Provider marker uses the existing fail-closed restart mechanism. Memory authority
+remains process-local, as before; this is not a new persistence guarantee.
+
+NO PAD 043 preserves trailing-space-distinct legacy keys. Exact original 043
+history is retained and upgraded by 044, never checksum-rewritten. MySQL tests
+cover real retained rows, the fresh chain and the original-history upgrade;
+compatible engines without utf8mb4_0900_bin are unsupported, not silently folded.

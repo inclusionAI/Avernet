@@ -108,6 +108,7 @@ class BotFileSyncMaterialiser(Materialiser):
                 result = await self._file_sync.sync(
                     target=target,
                     source_bot_id=entry.source_bot_id,
+                    source_owner_id=entry.source_owner_id,
                     path=entry.path,
                     excludes=entry.excludes,
                 )

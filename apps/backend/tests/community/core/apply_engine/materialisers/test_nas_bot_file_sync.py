@@ -85,7 +85,7 @@ def _run(port, **kwargs):
     return asyncio.run(port.sync(**kwargs))
 
 
-def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw"):
+def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw", source_owner_id="owner"):
     import asyncio
 
     target = BotFileSyncTarget(
@@ -97,7 +97,13 @@ def _ok(port, *, source_over=None, excludes=(), target_engine="openclaw"):
         entity_type="staff",
     )
     return asyncio.run(
-        port.sync(target=target, source_bot_id="src_1", path="workspace/", excludes=excludes)
+        port.sync(
+            target=target,
+            source_bot_id="src_1",
+            source_owner_id=source_owner_id,
+            path="workspace/",
+            excludes=excludes,
+        )
     )
 
 
@@ -113,9 +119,14 @@ def _port(nas_root, run_command, *, source=_MISSING, plan=None):
             "bot_id": "src_1",
             "active_engine": "openclaw",
             "entity_id": "owner",
+            "owner_id": "owner",
             "entity_type": "staff",
             "env": "dev",
         }
+    # The port reads the source row by (bot_id, owner_id) now — the repo's
+    # owner-scoped read is what the strategy uses; the un-scoped one stays
+    # for any caller that still resolves by bot_id alone.
+    bot_repo.get_by_id_and_owner.return_value = source
     bot_repo.get_by_id.return_value = source
     return NasBotFileSyncPort(
         bot_repo=bot_repo,
@@ -148,9 +159,8 @@ def test_a_sync_builds_the_rsync_argv_at_the_engine_root(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
+        "owner_id": "owner", "entity_type": "staff", "env": "dev",
     })
-    # The source workspace must exist (the port checks it before the rsync).
     storage_id_dir = tmp_path / "dev_staff_owner_openclaw_src_1"
     (storage_id_dir / ".openclaw").mkdir(parents=True)
 
@@ -199,9 +209,9 @@ def test_an_engine_the_sandbox_registry_cannot_resolve_is_refused(tmp_path):
             raise KeyError(engine_type)
 
     port = NasBotFileSyncPort(
-        bot_repo=MagicMock(get_by_id=MagicMock(return_value={
+        bot_repo=MagicMock(get_by_id_and_owner=MagicMock(return_value={
             "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-            "entity_type": "staff", "env": "dev",
+            "owner_id": "owner", "entity_type": "staff", "env": "dev",
         })),
         sandbox_registry=_UnresolvableRegistry(),
         path_factory=_factory(tmp_path),
@@ -224,7 +234,7 @@ def test_a_missing_source_bot_is_refused_without_rsync(tmp_path):
 
 
 def test_a_raising_source_lookup_is_a_composed_reason_and_logs_the_traceback(tmp_path, monkeypatch):
-    """``get_by_id`` raising (DB/MOSN transient, session failure) used to unwind
+    """``get_by_id_and_owner`` raising (DB/MOSN transient, session failure) used to unwind
     straight into ``BotFileSyncMaterialiser.write``'s catch — surfaced as the
     catch-all ``"bot file sync failed"`` with no per-branch log. Now it is
     wrapped here: the report gets the composed ``"bot workspace sync failed"``
@@ -232,7 +242,7 @@ def test_a_raising_source_lookup_is_a_composed_reason_and_logs_the_traceback(tmp
     so the same PARTIAL is traceable."""
     seen = []
     port = _port(tmp_path, _recording_runner(seen))
-    port._bot_repo.get_by_id.side_effect = RuntimeError("session expired: connection lost")
+    port._bot_repo.get_by_id_and_owner.side_effect = RuntimeError("session expired: connection lost")
 
     logged: list[tuple[str, tuple]] = []
 
@@ -257,7 +267,7 @@ def test_a_cross_engine_source_and_destination_is_refused(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "aicoding", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
+        "owner_id": "owner", "entity_type": "staff", "env": "dev",
     })
     result = _ok(port, target_engine="openclaw")
     assert result.ok is False
@@ -269,7 +279,7 @@ def test_a_cross_env_source_is_refused(tmp_path):
     seen = []
     port = _port(tmp_path, _recording_runner(seen), source={
         "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "pre",  # source in env 'pre', process is 'dev'
+        "owner_id": "owner", "entity_type": "staff", "env": "pre",  # source in env 'pre', process is 'dev'
     })
     result = _ok(port)  # target.env = 'dev'
     assert result.ok is False
@@ -277,81 +287,64 @@ def test_a_cross_env_source_is_refused(tmp_path):
     assert seen == []
 
 
-def test_a_missing_source_workspace_is_refused_without_rsync(tmp_path):
+def test_the_source_row_is_read_by_bot_id_and_owner_not_by_bot_id_alone(tmp_path):
+    # A ``bot_id`` is not globally unique (the reserved ``default`` bot has a
+    # row per account), so the strategy reads the source row with
+    # ``get_by_id_and_owner(bot_id, owner_id)`` rather than ``get_by_id(bot_id)``
+    # — the latter's ``first()`` could return another owner's row and converge
+    # the wrong workspace. Assert the owner-scoped read is the one called, and
+    # that the source bot id + the caller's source owner reach it verbatim.
     seen = []
-    # The NAS dir is never created, so source_path.exists() is False.
     port = _port(tmp_path, _recording_runner(seen))
+    _ok(port, source_owner_id="the_source_owner")
+    call = port._bot_repo.get_by_id_and_owner.call_args
+    assert call.args[0] == "src_1"
+    assert call.args[1] == "the_source_owner"
+    port._bot_repo.get_by_id.assert_not_called()
+
+
+def test_a_source_bot_under_a_different_owner_is_refused_without_rsync(tmp_path):
+    # When the owner-scoped read finds nothing (no row for this owner — a
+    # ``default`` bot_id that belongs to a *different* account), the port must
+    # surface "source bot not found" rather than fall back to reading by bot_id
+    # alone and converging someone else's workspace.
+    seen = []
+    port = _port(tmp_path, _recording_runner(seen))
+    port._bot_repo.get_by_id_and_owner.return_value = None  # nothing under this owner
+    result = _ok(port, source_owner_id="other_owner")
+    assert result.ok is False
+    assert result.reason == "source bot not found"
+    assert seen == []  # rsync never ran — the wrong owner matched no row
+
+
+def test_a_missing_source_workspace_runs_rsync_and_returns_a_composed_reason(tmp_path):
+    seen = []
+    # The NAS dir is never created, so the source workspace does not exist on
+    # disk. There is no pre-flight ``exists()`` anymore (a root-owned
+    # ``.merge_nas`` path cannot be stat'd by the backend's admin user — see the
+    # port's docstring), so the port invokes ``sudo rsync``; a missing source is
+    # a non-zero rsync exit, caught and composed as the single sync-failed
+    # reason rather than surfaced as raw stderr.
+    port = _port(tmp_path, _recording_runner(seen, raises=subprocess.CalledProcessError(
+        1, ["sudo", "rsync"], "No such file or directory",
+    )))
     result = _ok(port)
     assert result.ok is False
-    assert "source workspace not found" in result.reason
-    assert seen == []
-
-
-def test_an_mkdir_failure_is_a_composed_reason(tmp_path):
-    seen = []
-    # Force target_path.mkdir to raise: make the *resolvable* target render a
-    # path whose parent (the storage_id dir) is a regular file. The source path
-    # resolves to a different storage id on disk, and exists; the target path
-    # is get_bot_nas_dir(...) / ".openclaw" — with the parent a file, mkdir
-    # raises NotADirectoryError, which the port composes.
-    storage_dir = tmp_path / "real_storage"
-    (storage_dir / ".openclaw").mkdir(parents=True)
-    port = _port(tmp_path / "elsewhere", _recording_runner(seen), source={
-        "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
-    })
-    # Make the source workspace exist (the port's existence check passes).
-    # The fake factory always returns the same storage id, so source and target
-    # share it; mkdir is the call we want to fail. Plant a *file* at the
-    # resolved dir to break the .openclaw subdir mkdir.
-    resolved = storage_dir  # both source and target resolve here via the fake
-    # Recreate the source workspace and then make the engine root a *file*
-    # so the target's mkdir(parents=True) on a path under a file fails.
-    # Easiest: a separate factory that returns a path whose .openclaw parent
-    # is the source workspace itself, and the port already mkdir'd it. To keep
-    # this deterministic, point the factory at a dir whose `.openclaw` is a file.
-    file_root = tmp_path / "file_storage"
-    file_root.mkdir()
-    (file_root / ".openclaw").write_text("not a dir")  # a file, not a directory
-
-    port._path_factory.get_bot_nas_dir = lambda *a, **k: file_root
-    # But the source existence check runs first on the same path and sees a
-    # file (not a dir) — the port's `source_path.exists()` returns True for a
-    # file. To exercise mkdir-failure distinctly, route source to a real dir
-    # and target to the file_root. Override path_factory per-call by splitting.
-    real_source_root = tmp_path / "src_storage"
-    (real_source_root / ".openclaw").mkdir(parents=True)
-
-    calls = {"n": 0}
-
-    def split_factory(entity_id, bot_id, engine_type, entity_type="staff"):
-        # First (and only source) call resolves to the real source root.
-        calls["n"] += 1
-        return real_source_root if calls["n"] == 1 else file_root
-
-    bot_repo = MagicMock(get_by_id=MagicMock(return_value={
-        "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-        "entity_type": "staff", "env": "dev",
-    }))
-    port2 = NasBotFileSyncPort(
-        bot_repo=bot_repo,
-        sandbox_registry=_Registry(_build_plan()),
-        path_factory=SimpleNamespace(get_bot_nas_dir=split_factory),
-        run_command=_recording_runner(seen),
-        env="dev",
-    )
-    import asyncio
-
-    target = BotFileSyncTarget(
-        bot_id="b_dst", owner_id="o", entity_id="owner", env="dev",
-        engine_type="openclaw", entity_type="staff",
-    )
-    result = asyncio.run(port2.sync(
-        target=target, source_bot_id="src_1", path="workspace/", excludes=()
-    ))
-    assert result.ok is False
     assert result.reason == "bot workspace sync failed"
-    assert seen == []
+    assert len(seen) == 1  # rsync was invoked — no pre-flight refusal
+
+
+def test_a_missing_target_directory_is_handled_by_rsync_not_a_preflight_mkdir(tmp_path):
+    seen = []
+    # The target dir does not exist and the port does not pre-create it: rsync
+    # runs under ``sudo`` and makes the directory on demand. A pre-flight mkdir
+    # would have raised ``PermissionError`` on a root-owned ``.merge_nas``; the
+    # port no longer has one, so rsync is invoked directly and, on success, the
+    # sync is reported ok.
+    port = _port(tmp_path, _recording_runner(seen))
+    result = _ok(port)
+    assert result.ok is True
+    assert len(seen) == 1  # rsync ran; no mkdir pre-flight short-circuit
 
 
 def test_a_raising_run_command_is_a_composed_reason_never_raw_text(tmp_path):
@@ -381,9 +374,9 @@ def test_a_raising_build_plan_resolution_is_a_composed_reason(tmp_path):
                     raise RuntimeError("sandbox missing")
             return _P()
     port = NasBotFileSyncPort(
-        bot_repo=MagicMock(get_by_id=MagicMock(return_value={
+        bot_repo=MagicMock(get_by_id_and_owner=MagicMock(return_value={
             "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
-            "entity_type": "staff", "env": "dev",
+            "owner_id": "owner", "entity_type": "staff", "env": "dev",
         })),
         sandbox_registry=_BrokenRegistry(),
         path_factory=_factory(tmp_path),

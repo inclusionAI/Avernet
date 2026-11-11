@@ -25,5 +25,13 @@ _NOT_IMPLEMENTED = BotFileSyncResult(
 class NoopBotFileSyncPort(BotFileSyncPort):
     """The port with no engine behind it. Replace per engine to make it real."""
 
-    async def sync(self, *, target: BotFileSyncTarget, source_bot_id, path, excludes):
+    async def sync(
+        self,
+        *,
+        target: BotFileSyncTarget,
+        source_bot_id,
+        source_owner_id,
+        path,
+        excludes,
+    ):
         return _NOT_IMPLEMENTED

@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import pytest
 
-from src.application.services.execution_packet_service import ExecutionPacketService
-from src.domain.services.execution_packet_compiler import ExecutionPacketCompiler
-from src.domain.models.compiler_input import CompilerInput, CompilerHints
-from src.domain.models.compiler_result import CompilerResult
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
-from src.domain.models.candidate_bundle import CandidateBundle
-from src.domain.models.workspace import Workspace, WorkspaceStatus
-from src.domain.models.execution_packet import ExecutionPacket, ContextPack, ResourcePack, SkillPack, Guardrails, OutputContract
-from src.domain.models.worker import (
+from app.application.services.execution_packet_service import ExecutionPacketService
+from app.domain.services.execution_packet_compiler import ExecutionPacketCompiler
+from app.domain.models.compiler_input import CompilerInput, CompilerHints
+from app.domain.models.compiler_result import CompilerResult
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.candidate_bundle import CandidateBundle
+from app.domain.models.workspace import Workspace, WorkspaceStatus
+from app.domain.models.execution_packet import ExecutionPacket, ContextPack, ResourcePack, SkillPack, Guardrails, OutputContract
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel, Availability, TrustLevel,
 )
@@ -302,7 +302,7 @@ class TestExecutionPacketServiceIntegration:
         sample_workspace: Workspace,
     ):
         """测试服务与真实 BaselineExecutionPacketCompiler 集成"""
-        from src.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
+        from app.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
 
         compiler = BaselineExecutionPacketCompiler()
         service = ExecutionPacketService(compiler=compiler)
@@ -329,7 +329,7 @@ class TestExecutionPacketServiceIntegration:
         sample_team_spec: TeamSpec,
     ):
         """测试服务处理最小输入"""
-        from src.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
+        from app.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
 
         compiler = BaselineExecutionPacketCompiler()
         service = ExecutionPacketService(compiler=compiler)

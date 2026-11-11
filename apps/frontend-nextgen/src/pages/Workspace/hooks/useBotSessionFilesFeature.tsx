@@ -3,16 +3,15 @@
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
 import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
-import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
+import { useBotSessionCommands } from '@/pages/Workspace/hooks/useBotSessionCommands';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
 import { resolveChatRuntimeStage, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
-import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
-import { FileIcon, Zap } from 'lucide-react';
+import type { CommandConfig, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
+import { FileIcon } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -125,71 +124,9 @@ export function useBotSessionFilesFeature(
     [enabled],
   );
 
-  // /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新最新清单(数据最新鲜);
-  // query 为 /file 后的过滤词(空串=刚唤起)。refresh 后从 store 读最新列表(闭包快照滞后)。
-  const onSearchFiles = useCallback(
-    async (query: string): Promise<CommandItem[]> => {
-      await files.refresh();
-      const { readyFiles } = useBotSessionFileStore.getState();
-      const keyword = query.trim().toLowerCase();
-      const matched = keyword
-        ? readyFiles.filter((f) => f.displayName.toLowerCase().includes(keyword))
-        : readyFiles;
-      return matched.map((f) => ({
-        id: `__file__${f.resourceId}`,
-        name: f.displayName,
-        description: '引用到输入框',
-        icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
-        data: { resource_id: f.resourceId, display_name: f.displayName },
-        preventInsert: true,
-        onSelect: () => handleReference(f),
-      }));
-    },
-    [files, handleReference],
-  );
-
-  const onSearchSkills = useCallback(async (query: string): Promise<CommandItem[]> => {
-    const skills = await skillsState.loadSkills();
-    const keyword = query.trim().toLowerCase();
-    return skills.filter((skill) => skill.name.toLowerCase().includes(keyword)).map((s) => ({
-        id: `__skill__${s.skillId}`,
-        name: s.name,
-        description: s.description || (s.active ? '已激活' : '未激活'),
-        icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
-        data: { skill_id: s.skillId },
-      }));
-  }, [skillsState.loadSkills]);
-
-  // /skill /file /clear 命令项装配抽取到 botSessionCommandItems.tsx（纯配置，行为不变）。
-  const commandItems = useMemo<CommandItem[]>(
-    () =>
-      buildBotSessionCommandItems({
-        canUseSkills,
-        skillItems: [],
-        onSearchSkills,
-        onSearchFiles,
-        skillsLoading: skillsState.isLoading,
-        filesLoading: files.isLoadingList,
-        onClear,
-        onSelectSkill: handleSelectSkill,
-      }),
-    [canUseSkills, onSearchSkills, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
-  );
-
-  const command = useMemo<CommandConfig>(
-    () => ({
-      categories: [
-        {
-          key: '__bot_commands__',
-          label: '命令',
-          items: commandItems,
-        },
-      ],
-      onSelect: () => {},
-      format: () => '',
-    }),
-    [commandItems],
-  );
+  const command = useBotSessionCommands({
+    enabled, canUseSkills, files, skillsState, handleReference, handleSelectSkill, onClear,
+  });
 
   // 上传文件仍在 ComposerCapabilitiesMenu（onUpload）；文件管理入口已迁至单聊顶栏
   // （ChatPanel onManageFiles → openFileDrawer），fileToolbar 不渲染独立按钮。

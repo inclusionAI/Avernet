@@ -637,6 +637,7 @@ export type SessionAnalysisTask = {
   stepCreatedAt?: number | string | null; stepStartedAt?: number | string | null;
   stepCompletedAt?: number | string | null;
   result: Record<string, unknown> | null; reportMarkdown?: string | null;
+  sessionPreviewUnavailableReason?: string | null;
   sessionPreview?: { events: Record<string, unknown>[]; eventCount: number; parseErrorCount: number; truncated: boolean } | null;
   artifacts?: string[]; error: string | null; gmtCreate: number | string; gmtModified: number | string;
 }

@@ -9,9 +9,8 @@ import type { WorkOrder } from '@/domain/admin/models';
 import { workOrderService } from '@/services/admin/workOrderService';
 import { Points } from '@/tracking/points';
 import { cn } from '@/utils/cn';
-import { formatAbsoluteTime } from '@/utils/format';
+import { formatNotificationTime } from '@/utils/notificationTime';
 import { Tracert } from '@/utils/tracert';
-import { Eye } from 'lucide-react';
 import { useState } from 'react';
 import { Tag } from '../Tag';
 
@@ -61,15 +60,9 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
   // 已处理审批的状态文字（§2.3：APPROVED=success / REJECTED=destructive / 其他回退 statusLabel）
   const statusText =
     wo.status === 'APPROVED' ? (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
-        <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden />
-        已通过
-      </span>
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">已同意</span>
     ) : wo.status === 'REJECTED' ? (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden />
-        已驳回
-      </span>
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">已驳回</span>
     ) : (
       <span className="text-xs text-muted-foreground">{wo.statusLabel}</span>
     );
@@ -77,17 +70,26 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
   return (
     <>
       <Card
+        role="group"
+        tabIndex={0}
+        aria-label={`查看详情：${wo.title}`}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onView?.(wo);
+          }
+        }}
         className={cn(
-          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-divider bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
-          !isApproval && wo.isRead && 'opacity-75',
+          'flex min-h-[101px] cursor-pointer items-start gap-2 sm:gap-4 rounded-xl border-0 bg-transparent px-3 py-4 shadow-none transition-colors hover:bg-muted/50',
         )}
         onClick={() => onView?.(wo)}
       >
-        <Tag tone={wo.typeTone} className="shrink-0">
-          {wo.typeLabel}
+        <Tag className="mt-0.5 h-6 shrink-0 rounded-full px-2 text-[11px] font-normal">
+          {isApproval ? '审批' : '通知'}
         </Tag>
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">{wo.title}</span>
+          <span className="block break-words text-[13px] font-medium text-foreground">{wo.title}</span>
           {wo.content ? (
             <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
               {wo.content}
@@ -110,17 +112,21 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
             </div>
           ) : null}
           {wo.gmtModified ? (
-            <div className="mt-1 text-xs text-muted-foreground">{formatAbsoluteTime(wo.gmtModified)}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{formatNotificationTime(wo.gmtModified)}</div>
           ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 self-center items-center gap-3">
+          {!wo.isRead && (!isApproval || actionable) && (
+            <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-label="未读" />
+          )}
           {isApproval ? (
             actionable ? (
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  variant="primary"
+                  variant="outline"
+                  className="rounded-full font-normal"
                   disabled={!canAct}
                   loading={submitting}
                   onClick={(e) => {
@@ -132,7 +138,8 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="outline"
+                  className="rounded-full font-normal"
                   disabled={!canAct || submitting}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -146,13 +153,13 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
               statusText
             )
           ) : wo.isRead ? (
-            <Tag>已查看</Tag>
+            <span className="text-xs text-muted-foreground">已查看</span>
           ) : (
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                variant="secondary"
-                leftIcon={<Eye size={14} />}
+                variant="outline"
+                className="rounded-full font-normal"
                 disabled={!canAct}
                 onClick={(e) => {
                   e.stopPropagation();

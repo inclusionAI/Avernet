@@ -89,10 +89,17 @@ class BotFileSyncPort(Protocol):
         *,
         target: BotFileSyncTarget,
         source_bot_id: str,
+        source_owner_id: str,
         path: str,
         excludes: tuple[str, ...],
     ) -> BotFileSyncResult:
-        """Converge the source bot's workspace tree onto the destination's."""
+        """Converge the source bot's workspace tree onto the destination's.
+
+        ``source_owner_id`` disambiguates the source row when a ``source_bot_id``
+        is not globally unique — the reserved ``default`` bot has a row per
+        account, so the sync reads ``(source_bot_id, source_owner_id)`` rather
+        than by ``source_bot_id`` alone.
+        """
         ...
 
 

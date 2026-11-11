@@ -134,6 +134,18 @@ _BOT_SOURCE_IS_RESOURCES_ONLY = SourceRefusal(
     "with a 'from: <bot-source>' entry",
 )
 
+#: ``bot_config`` is a copy-only mapping a copy serialises from the source
+#: bot's live configuration rows; no entry names a source, and no protocol
+#: fetches one — the materialiser reads the source bot's rows directly. Stated
+#: once rather than per cell, the same way ``mcp``'s "no source" is: the
+#: question "why can I not reach a bot_config over content/oss/git/bot" has one
+#: answer.
+_BOT_CONFIG_HAS_NO_SOURCE = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "a bot_config entry is the copy-serialised mapping of a source bot's "
+    "configuration rows; it names no source, and no protocol fetches one",
+)
+
 #: Every cell, written out. Listed rather than defaulted: a table whose
 #: unwritten cells mean anything at all is a table that answers questions
 #: nobody ruled on.
@@ -187,6 +199,13 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.ENGINE_CONFIG, SourceKind.BOT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
+    # bot_config is copy-only: a mapping the copy serializer writes from the
+    # source bot's live rows, never a source a protocol fetches. Every cell is
+    # closed with the one reason, exactly like ``mcp``'s four cells are.
+    (Category.BOT_CONFIG, SourceKind.CONTENT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.OSS): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.GIT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.BOT): _BOT_CONFIG_HAS_NO_SOURCE,
 }
 
 

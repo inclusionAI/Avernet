@@ -48,8 +48,18 @@ type CloneRequest = {
 };
 
 type EffectiveGrant = { can_view: number; can_execute: number; can_edit: number };
+type CloneResultRow = { workflow_id: string };
+type CloneOutcome = "granted" | "already_covered" | "no_source_grants";
 
 const VALID_SCOPES: ReadonlySet<string> = new Set(["exact", "exact+owner-rows"]);
+
+function plural(count: number): string {
+  return count === 1 ? "" : "s";
+}
+
+function formatWorkflowIds(rows: readonly CloneResultRow[]): string {
+  return rows.map((row) => row.workflow_id).join(", ");
+}
 
 /** Parse a bare/compound bot reference into (botId, ownerId). */
 async function resolveBotRef(
@@ -175,11 +185,19 @@ export function createBotWorkflowPermissionCloneRouter(deps: CloneRouterDeps): R
       sourceRows.push(...(await deps.botPermRepo.listOwnerLevelRows(source.ownerId)));
     }
     const sourceGrants = mergeRowsByWorkflow(sourceRows);
+    const dryRun = body.dry_run === true;
     if (sourceGrants.size === 0) {
-      res.status(404).json({
-        error: "Not Found",
-        code: "NO_SOURCE_GRANTS",
-        message: "Source bot has no workflow permission rows to clone",
+      res.json({
+        success: true,
+        outcome: "no_source_grants",
+        message: "Clone complete: source bot has no workflow permissions to copy",
+        dry_run: dryRun,
+        granted: 0,
+        rows: [],
+        skipped: [],
+        source_effective_total: 0,
+        source_resolved: { bot_id: source.botId, owner_id: source.ownerId, source: source.source },
+        target_resolved: { bot_id: target.botId, owner_id: target.ownerId, source: target.source },
       });
       return;
     }
@@ -188,9 +206,8 @@ export function createBotWorkflowPermissionCloneRouter(deps: CloneRouterDeps): R
     const targetRows = await deps.botPermRepo.listRowsForBot(target.ownerId, target.botId);
     const targetGrants = mergeRowsByWorkflow(targetRows);
 
-    const dryRun = body.dry_run === true;
-    const granted: Array<{ workflow_id: string; can_view: number; can_execute: number; can_edit: number }> = [];
-    const skipped: Array<{ workflow_id: string; reason: "already-covered" }> = [];
+    const granted: Array<CloneResultRow & EffectiveGrant> = [];
+    const skipped: Array<CloneResultRow & { reason: "already-covered" }> = [];
 
     for (const [workflowId, grant] of sourceGrants) {
       const existing = targetGrants.get(workflowId);
@@ -235,8 +252,23 @@ export function createBotWorkflowPermissionCloneRouter(deps: CloneRouterDeps): R
       granted.length, skipped.length,
     );
 
+    const outcome: CloneOutcome = granted.length > 0 ? "granted" : "already_covered";
+
+    let message: string;
+    if (outcome === "already_covered") {
+      message = `Clone complete: target bot already covers ${skipped.length} workflow${plural(skipped.length)}: ${formatWorkflowIds(skipped)}`;
+    } else {
+      const action = dryRun ? "Would copy" : "Copied";
+      message = `${action} ${granted.length} workflow${plural(granted.length)}: ${formatWorkflowIds(granted)}`;
+      if (skipped.length > 0) {
+        message += `; skipped ${skipped.length} already-covered workflow${plural(skipped.length)}: ${formatWorkflowIds(skipped)}`;
+      }
+    }
+
     res.json({
       success: true,
+      outcome,
+      message,
       dry_run: dryRun,
       granted: granted.length,
       rows: granted,

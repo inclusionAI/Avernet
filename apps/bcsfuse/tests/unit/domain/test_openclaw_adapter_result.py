@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.openclaw_adapter_result import (
+from app.domain.models.openclaw_adapter_result import (
     OpenClawAdapterResult,
     AdapterExplanation,
     AdapterWarning,
     AdapterError,
 )
-from src.domain.models.handoff_bundle import HandoffBundle, HandoffFile, Manifest
+from app.domain.models.handoff_bundle import HandoffBundle, HandoffFile, Manifest
 
 
 # =============================================================================

@@ -23,10 +23,10 @@ class TestFileScanner:
 
     def test_scan_single_staff_default(self):
         """测试扫描单个员工的默认目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -48,10 +48,10 @@ class TestFileScanner:
 
     def test_scan_staff_with_bot(self):
         """测试扫描员工的 bot 目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -79,10 +79,10 @@ class TestFileScanner:
 
     def test_scan_skip_backup_directory(self):
         """测试跳过备份目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -104,10 +104,10 @@ class TestFileScanner:
 
     def test_scan_include_backup_directory(self):
         """测试包含备份目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -130,10 +130,10 @@ class TestFileScanner:
 
     def test_scan_skip_bots_when_disabled(self):
         """测试禁用 bot 扫描"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -154,10 +154,10 @@ class TestFileScanner:
 
     def test_scan_multiple_staffs(self):
         """测试扫描多个员工"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -177,10 +177,10 @@ class TestFileScanner:
 
     def test_scan_multiple_roots(self):
         """测试扫描多个根目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -214,10 +214,10 @@ class TestFileScanner:
 
     def test_scan_duplicate_profiles(self):
         """测试重复 profile 处理（不同 root）- 方案 B：保留第一条，忽略后续重复项"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -247,10 +247,10 @@ class TestFileScanner:
 
     def test_scan_non_staff_directory_ignored(self):
         """测试忽略非 staff 目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -273,10 +273,10 @@ class TestFileScanner:
 
     def test_scan_empty_root(self):
         """测试空根目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -289,10 +289,10 @@ class TestFileScanner:
 
     def test_scan_nonexistent_root(self):
         """测试不存在的根目录"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -312,7 +312,7 @@ class TestScanEntry:
 
     def test_scan_entry_properties(self):
         """测试 ScanEntry 属性"""
-        from src.infra.worker_profiles.scanners.file_scanner import ScanEntry
+        from app.infra.worker_profiles.scanners.file_scanner import ScanEntry
 
         entry = ScanEntry(
             staff_id="260065",
@@ -333,10 +333,10 @@ class TestFileScannerBotPattern:
 
     def test_valid_bot_directory_patterns(self):
         """测试有效的 bot 目录模式"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -366,10 +366,10 @@ class TestFileScannerBotPattern:
 
     def test_invalid_bot_directory_patterns(self):
         """测试无效的 bot 目录模式"""
-        from src.infra.worker_profiles.scanners.file_scanner import (
+        from app.infra.worker_profiles.scanners.file_scanner import (
             FileScanner,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 

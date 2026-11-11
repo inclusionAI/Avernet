@@ -15,9 +15,11 @@
 //! by the persistent conditions (env/kind/name/
 //! status), role-deduped (owner wins over manager),
 //! stably sorted by bot id and INCLUDING the legal
-//! Human self entry. Only identity columns (id/kind/
-//! status plus the edge relation) leave the store —
-//! no full Bot configuration is read to count.
+//! Human self entry. Identity columns (id/kind/
+//! status) plus the edge relation and the row's
+//! persisted `created_at` (the application's
+//! mine-page order key) leave the store — no full
+//! Bot configuration is read to count.
 //!
 //! There is deliberately NO pagination and NO
 //! reachability here: those are the application's §8.0
@@ -29,7 +31,7 @@
 
 use std::collections::HashSet;
 
-use bcs_db_api::{DbRow, DbValue as Value, db_get_column_opt};
+use bcs_db_api::{DbRow, DbValue as Value, db_get_column, db_get_column_opt};
 use bcs_service_api::types::bot_authority::{
     BotAccessRelation, human_actor_id,
 };
@@ -68,7 +70,7 @@ fn status_of(raw: &str) -> ActorStatus {
     }
 }
 
-fn row_candidate(row: &DbRow) -> ControlledBotCandidate {
+fn row_candidate(row: &DbRow) -> ServiceResult<ControlledBotCandidate> {
     let cell = |column: &str| {
         db_get_column_opt::<String>(row, column)
             .ok()
@@ -79,12 +81,16 @@ fn row_candidate(row: &DbRow) -> ControlledBotCandidate {
     let kind = kind_of(&cell("actor_kind"));
     let status = status_of(&cell("status"));
     let access = cell("access_kind");
-    ControlledBotCandidate {
+    let created_at = db_get_column::<i64>(row, "created_at")
+        .map_err(store_error)?
+        .max(0) as u64;
+    Ok(ControlledBotCandidate {
         id,
         kind,
         status,
         access_relation: relation_of(&access),
-    }
+        created_at,
+    })
 }
 
 /// Role dedup over the SAME bot in the returned order:
@@ -129,6 +135,8 @@ pub(super) async fn sql_list_controllable(
         bcs_db_api::DbSqlFlavor::Mysql => "CAST(e.from_id AS BINARY) = ?",
         bcs_db_api::DbSqlFlavor::Sqlite => "e.from_id = ?",
     };
+    let edge_created = repo.flavor.unix_ts("b.gmt_create");
+    let self_created = repo.flavor.unix_ts("s.gmt_create");
     let name_filter = query
         .name
         .as_deref()
@@ -192,32 +200,37 @@ pub(super) async fn sql_list_controllable(
         params.push(Value::from(query.env.as_str()));
         params.push(Value::from(query.user_id.as_str()));
         params.push(Value::from(query.user_id.as_str()));
-        "UNION ALL \
-         SELECT l.bot_uuid, \
-                COALESCE(l.actor_kind, 'bot') AS actor_kind, \
-                l.status, \
-                'owner' AS access_kind \
-         FROM bcs_bots l \
-         WHERE l.env = ? \
-           AND COALESCE(l.is_deleted, 0) = 0 \
-           AND COALESCE(l.actor_kind, 'bot') = 'bot' \
-           AND l.ownership_version = 0 \
-           AND l.created_by = ? AND HEX(l.created_by) = HEX(?) \
-           {legacy_filters}"
-            .replace("{legacy_filters}", &filters_for("l", &mut params))
+        let legacy_filters = filters_for("l", &mut params);
+        let legacy_created = repo.flavor.unix_ts("l.gmt_create");
+        format!(
+            "UNION ALL \
+             SELECT l.bot_uuid, \
+                    COALESCE(l.actor_kind, 'bot') AS actor_kind, \
+                    l.status, \
+                    'owner' AS access_kind, \
+                    ({legacy_created}) * 1000 AS created_at \
+             FROM bcs_bots l \
+             WHERE l.env = ? \
+               AND COALESCE(l.is_deleted, 0) = 0 \
+               AND COALESCE(l.actor_kind, 'bot') = 'bot' \
+               AND l.ownership_version = 0 \
+               AND l.created_by = ? AND HEX(l.created_by) = HEX(?) \
+               {legacy_filters}"
+        )
     } else {
         String::new()
     };
 
     let sql = format!(
         "SELECT t.bot_uuid, t.actor_kind, t.status, \
-                t.access_kind \
+                t.access_kind, t.created_at \
          FROM (\
            SELECT b.bot_uuid, \
                   COALESCE(b.actor_kind, 'bot') AS actor_kind, \
                   b.status, \
                   CASE WHEN e.grant_kind = 'owner' \
-                       THEN 'owner' ELSE 'manager' END AS access_kind \
+                       THEN 'owner' ELSE 'manager' END AS access_kind, \
+                  ({edge_created}) * 1000 AS created_at \
            FROM edge_grants e \
            JOIN bcs_bots b \
              ON b.bot_uuid = e.to_id AND b.env = e.env \
@@ -232,7 +245,8 @@ pub(super) async fn sql_list_controllable(
            SELECT s.bot_uuid, \
                   COALESCE(s.actor_kind, 'human') AS actor_kind, \
                   s.status, \
-                  'owner' AS access_kind \
+                  'owner' AS access_kind, \
+                  ({self_created}) * 1000 AS created_at \
            FROM bcs_bots s \
            WHERE s.env = ? \
              AND COALESCE(s.is_deleted, 0) = 0 \
@@ -250,6 +264,8 @@ pub(super) async fn sql_list_controllable(
         .await
         .map_err(store_error)?;
     Ok(dedup_candidates(
-        rows.iter().map(row_candidate).collect::<Vec<_>>(),
+        rows.iter()
+            .map(row_candidate)
+            .collect::<ServiceResult<Vec<_>>>()?,
     ))
 }
