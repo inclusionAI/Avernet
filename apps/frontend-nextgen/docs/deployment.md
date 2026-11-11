@@ -108,9 +108,11 @@ default Open product Singlebox serves — are not pruned by the export, and the
 legacy `apps/frontend` is not involved.
 
 The image shape matches the default form (same nginx template); only the page
-assembly differs: 协作群 (collaboration groups) and 外部 Bot (external bots) as
-the two top-level pages. The required upstream environment variables are
-unchanged. After the collab form passes runtime network acceptance, the
+assembly differs: 协作群 (collaboration groups), 发现 (public Bots/groups only)
+and 外部 Bot (external bots) as the three top-level entries. The discovery
+assembly disables Backend enhancement and Human single-chat actions even if
+`PUBLIC_BOT_BACKEND_ENABLED` is enabled in runtime configuration. The required
+upstream environment variables are unchanged. After the collab form passes runtime network acceptance, the
 following upstreams may point at valid, resolvable local placeholders (e.g.
 `http://127.0.0.1:9`): `TASK_ENGINE_UPSTREAM`, `CLAWWEB_UPSTREAM`,
 `PRIVATE_CHAT_*_UPSTREAM`, `AIXCORE_UPSTREAM`, `TEAMCLAW_ADMIN_UPSTREAM`
@@ -134,7 +136,18 @@ Avernet; the internal export deliverable lives in OCB's
 | Isolated install/typecheck/test/build in the exported tree | **VERIFIED via OCB `scripts/ci-collab-export.sh`** (export + output-tree-only `npm ci`/`typecheck`/`test`/`build` + failure-atomicity probes); asserted by the same gate on private CI. |
 | Docker image build/startup from the output root | **UNVERIFIED locally — no Docker CLI on the dev machine.** Owner: private deployment environment; exact steps in OCB `apps/frontend-nextgen/deploy/collab/README.md` (`docker build -f apps/frontend-nextgen/deploy/collab/Dockerfile .`). |
 | Image runtime smoke: health, deep-link fallback, private auth, retained collaboration/external-Bot flows, zero task/admin requests | **UNVERIFIED — requires the private stack.** Owner: private deployment environment against configured upstreams; checklist in OCB `deploy/collab/README.md`. Until it passes, the upstream-placeholder guidance above stays conditional. |
-| Collab-form browser smoke (dev server or image: exact two-entry sidebar, no search/bell, dialogs, WS push, criterion-8 request trace) | **UNVERIFIED — no browser automation in this run.** Owned by the same private deployment acceptance. |
+| Collab-form browser smoke (dev server or image: exact three-entry sidebar, no search/bell, dialogs, WS push, criterion-8 request trace) | **UNVERIFIED — no browser automation in this run.** Owned by the same private deployment acceptance. |
 
 The exported output is an internal deliverable; none of the internal evidence
 above is produced by or published from this repository.
+
+
+### Discovery export update (2026-11-11)
+
+The public collab routes/closure now include public Bots and public groups; the
+expert and task routes remain excluded. Private overlays must inherit the public
+collab capabilities without re-enabling `getPublicBotBackendEnabled` or
+`getDiscoveryExpertsEnabled`, and artifact tests must expect three sidebar entries
+and two discovery tabs. Re-run the isolated export/typecheck/build gate and target
+stack browser smoke after updating the Avernet revision. Historical export
+validation above does not validate this expanded discovery artifact.

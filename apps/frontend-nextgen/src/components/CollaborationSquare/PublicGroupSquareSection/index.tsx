@@ -5,7 +5,7 @@ import { ShareGroupDialog } from '@/components/CollaborationSquare/ShareGroupDia
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
-import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
+import type { usePublicDiscovery } from '@/hooks/usePublicDiscovery';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -29,7 +29,7 @@ function GroupLoadingState() {
 
 export interface PublicGroupSquareSectionProps {
   /** 协作广场群视图（由 Shell 从 `useCollaborationSquare('group')` 组装后注入）。 */
-  square: ReturnType<typeof useCollaborationSquare>;
+  square: ReturnType<typeof usePublicDiscovery>;
   /** 滚动容器 ref，用于群列表 IntersectionObserver 的 root（Shell 共享的 `<main>`）。 */
   scrollRootRef: React.RefObject<HTMLElement>;
   /** 是否还可加载下一页（Shell 计算后透传，保持与全局 `onScroll` 预取一致）。 */

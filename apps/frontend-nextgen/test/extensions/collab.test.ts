@@ -13,12 +13,19 @@ describe('collab 装配', () => {
     expect(appExtension.capabilities.getRestrictedPublicationScopeEnabled().value).toBe(false);
   });
 
-  it('导航覆盖为「协作群 + 外部 Bot」两项', () => {
+  it('导航覆盖为「协作群 + 发现 + 外部 Bot」三项', () => {
     const items = appExtension.capabilities.getPrimaryNavigationItems().value;
     expect(items?.map((item) => [item.id, item.path])).toEqual([
       ['collaboration', '/workspace/collaboration'],
+      ['collaboration-square', '/collaboration-square'],
       ['external-bots', '/external-bots'],
     ]);
+  });
+
+  it('公开发现强制 BCS-only，不提供专家入口', () => {
+    expect(appExtension.capabilities.getPublicBotBackendEnabled()).toBe(false);
+    expect(appExtension.capabilities.getDiscoveryExpertsEnabled().value).toBe(false);
+    expect(defaultCapabilities.getDiscoveryExpertsEnabled().value).toBe(true);
   });
 
   it('壳层可见性覆盖：隐藏空间切换/通知中心/全局搜索', () => {

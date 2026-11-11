@@ -1,5 +1,10 @@
 # Collab assembly and independent internal-site export
 
+Scope amended on 2026-11-11 by `../2026-11-11-collab-discovery/spec.md`: retain
+public Bot/group discovery, no experts, and no Human private-chat actions.
+Historical validation records below remain evidence for their original scope,
+not for the expanded exported artifact.
+
 Status: implementation plan revised on 2026-11-03. Review fixes cover
 task-execute group creation, nullable avatar consumers, space initialization,
 dynamic import closure checks, and attachment controls. plan.md Tasks 1–16
@@ -194,11 +199,15 @@ env-injection pattern as `BCS_ENDPOINT_*` / `__A2A_CLIENT_DEFAULT__`:
 | `/workspace/collaboration-only`, `/workspace/collaboration/group`, `/workspace/collaboration/session` | `pages/Workspace/Collaboration/Focused` | focused/embeddable deep links (unchanged) |
 | `/workspace/invite/:type/:token` | `pages/Workspace/InviteAcceptPanel` | invite acceptance must keep working |
 | `/workspace/bcn/chat/detail` | `pages/Workspace/BcnChatDetail` | external BCN landing entry |
+| `/collaboration-square` | redirect → `/collaboration-square/bots` | public discovery entry |
+| `/collaboration-square/bots` | `pages/CollaborationSquare/Bots` | BCS-only public Bot discovery and friendship |
+| `/collaboration-square/groups` | `pages/CollaborationSquare/Groups` | public group browsing and session creation |
 | `/external-bots` | new thin page `pages/ExternalBots` | PageHeader + reused `ExternalBotPanel`, bypassing `BotWorkshop/index.tsx` entirely |
 | `*` | `pages/NotFound` | |
 
 Cut (physically absent from the bundle): `/workspace/chat`, `/bot-workshop*`,
-`/collaboration-square*`, `/lab*`, `/evolution-factory*`, `/work/my-task`,
+`/collaboration-square/experts*`, `/collaboration-square/tasks`,
+`/collaboration-square/community`, `/lab*`, `/evolution-factory*`, `/work/my-task`,
 `/space-admin`, `/ticket-center`, `/welcome`, `/components`,
 `/design-system`, `/private-chat/chat`, the legacy `/work` `/manage`
 redirects.
@@ -215,8 +224,9 @@ All routes stay under the existing `AppLayout` (auth boot, invite gate) and
   the shell module (that would create a capabilities → shell import
   cycle). `getMergedNavigationItems()` falls back to the in-module array
   when the capability yields null — Open behavior is zero-change — and the
-  collab assembly overrides it to exactly two items: **协作群**
-  (`/workspace/collaboration`) and **外部 Bot** (`/external-bots`).
+  collab assembly overrides it to exactly three items: **协作群**
+  (`/workspace/collaboration`), **发现** (`/collaboration-square`) and
+  **外部 Bot** (`/external-bots`).
   Internal overlay inherits the null default through its `...defaults`
   spread and stays unchanged.
   `getInternalNavigationItems()` keeps its additive role.
@@ -413,7 +423,8 @@ for Avernet's public sources.
 
 1. `npm run build:collab` succeeds; `scripts/check-collab-closure.cjs`
    proves the collab route entry closure contains no
-   `pages/{BotWorkshop,Lab,EvolutionFactory,CollaborationSquare,Admin,SpaceAdmin,TicketCenter,Welcome,MyTask,ScheduledTasks,Demo}`,
+   `pages/{BotWorkshop,Lab,EvolutionFactory,Admin,SpaceAdmin,TicketCenter,Welcome,MyTask,ScheduledTasks,Demo}`,
+   no `pages/CollaborationSquare` except `Bots/index.tsx` and `Groups/index.tsx`,
    no `pages/Workspace/Chat` except the explicit allowlist
    (`Chat/components/SessionHistorySearchPanel`,
    `Chat/hooks/sidePaneContent`), and no
@@ -423,7 +434,7 @@ for Avernet's public sources.
    entries; type-only edges and installed dependency internals are excluded.
 2. `npm run dev:collab` (or the collab Docker image) against the singlebox
    gateway: login works, `/` lands on `/workspace/collaboration`, the
-   sidebar shows exactly 协作群 and 外部 Bot, with no global-search entry
+   sidebar shows exactly 协作群, 发现 and 外部 Bot, with no global-search entry
    and no notification bell.
 3. Group flows work end to end: create group via the retained BCS wizard, add an
    external-bot participant, send/receive messages and questions, exec
@@ -435,6 +446,9 @@ for Avernet's public sources.
 4. `/external-bots` lists `bot_` external bots; the registration dialog
    offers the OpenClaw / DeepSeek Harness / QwenWork panels; visibility
    config saves through the external-bot direct route.
+   Discovery shows public Bots/groups only. Human existing friends and managed
+   Bots cannot open private chat; acceptance cannot auto-create a private session.
+   Bot/profile/friendship and public group flows issue only BCS requests.
 5. Deep links work: invite acceptance, `/workspace/bcn/chat/detail`, the
    three focused routes; removed routes render `NotFound`.
 6. Open form regression: `npm run ci` fully green, and the Open-form

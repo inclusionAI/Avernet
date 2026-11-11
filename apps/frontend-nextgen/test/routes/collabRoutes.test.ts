@@ -45,7 +45,9 @@ describe('collab 形态路由表', () => {
     const forbidden = [
       '/workspace/chat',
       '/bot-workshop',
-      '/collaboration-square',
+      '/collaboration-square/experts',
+      '/collaboration-square/tasks',
+      '/collaboration-square/community',
       '/lab',
       '/evolution-factory',
       '/work/my-task',
@@ -58,6 +60,12 @@ describe('collab 形态路由表', () => {
       expect(allPaths.some((path) => path === prefix || path?.startsWith(`${prefix}/`))).toBe(false);
     }
     expect(topLevel.some((route) => route.path === '/welcome' || route.path === '/design-system')).toBe(false);
+  });
+
+  it('发现只注册公开 Bot 和公开协作群，入口默认指向公开 Bot', () => {
+    expect(findRoute('/collaboration-square')?.redirect).toBe('/collaboration-square/bots');
+    expect(findRoute('/collaboration-square/bots')?.component).toBe('@/pages/CollaborationSquare/Bots');
+    expect(findRoute('/collaboration-square/groups')?.component).toBe('@/pages/CollaborationSquare/Groups');
   });
 
   it('404 兜底为 NotFound', () => {

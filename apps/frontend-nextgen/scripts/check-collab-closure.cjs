@@ -13,6 +13,14 @@ const FORBIDDEN = [
   'src/pages/Lab',
   'src/pages/EvolutionFactory/',
   'src/pages/CollaborationSquare/',
+  'src/components/CollaborationSquare/SquarePageShell/',
+  'src/components/CollaborationSquare/PublicTaskCatalogPanel/',
+  'src/hooks/useCollaborationSquare.ts',
+  'src/hooks/useCollaborationSquareTask',
+  'src/services/collaborationSquare/collaborationSquareService.ts',
+  'src/services/collaborationSquare/collaborationSquareApiAdapter.ts',
+  'src/services/collaborationSquare/mockCollaborationSquareAdapter',
+  'src/services/backendApi/collaboration/bbsTaskController',
   'src/pages/Admin/',
   'src/pages/SpaceAdmin/',
   'src/pages/TicketCenter/',
@@ -55,6 +63,9 @@ const FORBIDDEN = [
 
 /** 正向复用白名单：禁入前缀下的豁免（其余 pages/Workspace/Chat 一律违例）。新增豁免 = 扩 spec，不许随手加。 */
 const ALLOW = [
+  // 2026-11-11 collab-discovery：仅这两个页面入口获准，专家/任务页面仍禁入。
+  'src/pages/CollaborationSquare/Bots/index.tsx',
+  'src/pages/CollaborationSquare/Groups/index.tsx',
   'src/pages/Workspace/Chat/components/SessionHistorySearchPanel',
   'src/pages/Workspace/Chat/hooks/sidePaneContent',
 ];

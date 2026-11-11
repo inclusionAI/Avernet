@@ -142,3 +142,24 @@ enrichment skips `/openapi/v1/bots` in both general configuration and shell iden
 initialization, without discarding an engine/provider already
 included in the collaboration Bot response. Capabilities are read at request
 time, after extension registration, including when refreshing configuration.
+
+## Collab public discovery
+
+`FRONTEND_FORM=collab` (or `npm run build:collab`) retains three sidebar entries:
+协作群, 发现, 外部 Bot. Discovery defaults to `/collaboration-square/bots` and
+also exposes `/collaboration-square/groups`; experts and task pages remain absent.
+
+The collab assembly fixes `getPublicBotBackendEnabled()` to `false` and
+`getDiscoveryExpertsEnabled().value` to `false`. Deployment runtime configuration
+cannot re-enable Backend metadata/profile enhancement or Human single-chat entry.
+Human cards for existing friends and managed Bots have no conversation button;
+accepted friendships update their state without opening a private session.
+Public groups retain member inspection and BCS session creation, navigating to
+`/workspace/collaboration`. Open defaults retain their existing expert and chat
+behavior.
+
+See `specs/2026-11-11-collab-discovery/` for scope and validation. The closure guard
+allows only the two explicit discovery page files and rejects the legacy
+full/task shell, hook, adapter and BBS transport. OCB export/overlay tests must
+consume this public assembly and update their navigation expectations; private
+artifact/image verification must be run separately in that repository.

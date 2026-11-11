@@ -117,3 +117,31 @@ test('exact facade alias does not rewrite registry subpaths', () => {
   });
   assert.deepEqual(result.failures, []);
 });
+
+for (const page of ['Bots', 'Groups']) {
+  test(`collab discovery allows only the ${page} page entry`, () => {
+    const result = fixture(`import '@/pages/CollaborationSquare/${page}';`, {
+      [`src/pages/CollaborationSquare/${page}/index.tsx`]: 'export {};',
+    });
+    assert.deepEqual(result.failures, []);
+  });
+}
+
+for (const forbidden of [
+  'src/pages/CollaborationSquare/Experts/index.tsx',
+  'src/pages/CollaborationSquare/Tasks/index.tsx',
+  'src/pages/CollaborationSquare/Bots/Hidden.tsx',
+  'src/components/CollaborationSquare/SquarePageShell/index.tsx',
+  'src/hooks/useCollaborationSquareTask.ts',
+  'src/services/collaborationSquare/collaborationSquareService.ts',
+  'src/services/backendApi/collaboration/bbsTaskController.ts',
+]) {
+  test(`allowed discovery entry cannot pull ${forbidden} into collab`, () => {
+    const specifier = `@/${forbidden.slice(4).replace(/\.(tsx?|jsx?)$/, '')}`;
+    const result = fixture("import '@/pages/CollaborationSquare/Bots';", {
+      'src/pages/CollaborationSquare/Bots/index.tsx': `export * from '${specifier}';`,
+      [forbidden]: 'export {};',
+    });
+    assert.ok(result.failures.some((failure) => failure.includes(forbidden)));
+  });
+}

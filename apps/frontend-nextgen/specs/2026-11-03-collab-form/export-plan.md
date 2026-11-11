@@ -135,7 +135,9 @@ Do not reuse the full private navigation, gray-release old-site link, search,
 notification, admin or task feature overrides.
 
 The resulting assembly must retain null task/routing/bootstrap slots,
-`avatarEditor: null`, exactly two navigation entries, and disabled spaces,
+`avatarEditor: null`, exactly three navigation entries (协作群/发现/外部 Bot),
+BCS-only public Bot/group discovery with experts and Human private chat disabled,
+and disabled spaces,
 search and notification initialization. It uses the existing private auth
 strategy and identity mapping; it must not silently fall back to public OAuth.
 Keep shared group/BCS/external-Bot logic in Avernet. Select any additional

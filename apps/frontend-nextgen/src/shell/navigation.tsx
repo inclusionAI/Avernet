@@ -103,7 +103,7 @@ export const navigationItems: NavigationItem[] = [
  */
 export function getMergedNavigationItems(): NavigationItem[] {
   // 形态化基线：capability 默认返回 null → 模块基线数组（Open/internal 现状）；
-  // collab 装配覆盖为两项极简导航。显式 [] 为合法「空基线」覆盖（truthy，区别于 null），
+  // collab 装配覆盖为三项极简导航。显式 [] 为合法「空基线」覆盖（truthy，区别于 null），
   // internal 注入项仍按 section 追加；status 非 available 时与 null 同义（回退模块基线）。
   const primary = getCapabilities().getPrimaryNavigationItems();
   const baseline = primary.status === 'available' && primary.value ? primary.value : navigationItems;

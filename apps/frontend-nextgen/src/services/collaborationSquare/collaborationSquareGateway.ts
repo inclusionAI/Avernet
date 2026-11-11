@@ -57,3 +57,6 @@ export interface CollaborationSquareGateway {
   /** 任务只读详情；目标不存在或状态未知时抛 `target_invalid`。 */
   getPublicTask(taskId: string, signal?: AbortSignal): Promise<PublicTask>;
 }
+
+/** BCS 公开发现契约：Bot/群能力，不包含任务广场。 */
+export type PublicDiscoveryGateway = Omit<CollaborationSquareGateway, 'listPublicTasks' | 'getPublicTask'>;

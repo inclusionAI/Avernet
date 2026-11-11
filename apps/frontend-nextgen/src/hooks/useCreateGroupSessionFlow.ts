@@ -2,7 +2,7 @@ import type { CreateGroupSessionFormValues } from '@/components/CollaborationSqu
 import { notifySuccess } from '@/components/ui/notify';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
 import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
-import { collaborationSquareGroupService } from '@/services/collaborationSquare';
+import { collaborationSquareGroupService } from '@/services/collaborationSquare/publicDiscoveryRuntime';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { history } from '@umijs/max';
 import { useCallback, useState } from 'react';

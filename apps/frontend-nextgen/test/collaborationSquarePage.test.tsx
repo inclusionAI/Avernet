@@ -234,10 +234,12 @@ describe('collaboration square accessible UI', () => {
       'config/routes.ts',
       'src/components/CollaborationSquare/CreateGroupSessionModal/index.tsx',
       'src/components/CollaborationSquare/SquarePageShell/index.tsx',
+      'src/components/CollaborationSquare/PublicDiscoveryPageShell/index.tsx',
       'src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx',
       'src/components/CollaborationSquare/PublicGroupSquareSection/index.tsx',
       'src/components/CollaborationSquare/ShareGroupDialog/index.tsx',
       'src/hooks/useCollaborationSquare.ts',
+      'src/hooks/usePublicDiscovery.ts',
       'src/hooks/useCollaborationSquareList.ts',
       'src/hooks/useCreateGroupSessionFlow.ts',
     ];

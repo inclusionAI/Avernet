@@ -1,5 +1,5 @@
-import { SquarePageShell } from '@/components/CollaborationSquare/SquarePageShell';
+import { PublicDiscoveryPageShell } from '@/components/CollaborationSquare/PublicDiscoveryPageShell';
 
 export default function CollaborationSquareBotsPage() {
-  return <SquarePageShell resource="bot" />;
+  return <PublicDiscoveryPageShell resource="bot" />;
 }

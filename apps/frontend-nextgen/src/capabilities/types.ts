@@ -634,7 +634,7 @@ export interface AppCapabilities {
   /**
    * 产品一级导航基线的形态开关（collab-form）。
    * 返回 null = 使用 `src/shell/navigation.tsx` 的 Open Core 基线数组（Open/internal 默认，行为零变化）；
-   * collab 装配（`src/extensions/collab.ts`）覆盖为「协作群 + 外部 Bot」两项。
+   * collab 装配（`src/extensions/collab.ts`）覆盖为「协作群 + 发现 + 外部 Bot」三项。
    * internal overlay 的注入项仍经 `getInternalNavigationItems` 按 section 追加，与本基线正交。
    */
   getPrimaryNavigationItems: () => CapabilityResult<NavigationItem[] | null>;
@@ -765,6 +765,8 @@ export interface AppCapabilities {
    * 时为 false，运行时显式设置优先。同步签名，不发请求。
    */
   getPublicBotBackendEnabled: () => boolean;
+  /** 发现页专家 Tab 可见性；Open/internal 默认开启，collab 关闭且不注册专家路由。 */
+  getDiscoveryExpertsEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（空间切换器 / 通知中心 / 搜索入口，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`、`globalSearch=true`

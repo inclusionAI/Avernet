@@ -248,7 +248,7 @@ export const defaultCapabilities: AppCapabilities = {
   // 「导航中的内部入口」按开源模式分隔的强约束。internal overlay 经 extensions/internal.ts 覆盖注入。
   getInternalNavigationItems: () => ({ status: 'available', value: [] }),
   // Open Core 默认 null = 沿用 shell/navigation 基线导航数组（不 import 该模块，避免依赖环）；
-  // collab 形态经 src/extensions/collab.ts 覆盖为两项。
+  // collab 形态经 src/extensions/collab.ts 覆盖为三项。
   getPrimaryNavigationItems: () => ({ status: 'available', value: null }),
   // Open Core 默认不收录内部 route meta（/capability-workshop/*、/market/* 已从 routeMetaList 剥离）。
   getInternalRouteMetas: () => ({ status: 'available', value: [] }),
@@ -366,6 +366,7 @@ export const defaultCapabilities: AppCapabilities = {
   // 铃铛不挂载，未读轮询随 AppSidebar 条件挂载自然停止（不在 notification service 捕获 404 伪装禁用）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getPublicBotBackendEnabled: publicBotBackendEnabled,
+  getDiscoveryExpertsEnabled: () => ({ status: 'available', value: true }),
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
     value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled(), globalSearch: true },

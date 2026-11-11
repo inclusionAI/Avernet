@@ -8,7 +8,7 @@ import '@/services/workspace/chatBridge';
 import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
 import type { NavigationItem } from '@/shell/navigation';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
-import { PlugZap, Users } from 'lucide-react';
+import { Compass, PlugZap, Users } from 'lucide-react';
 import type { AppExtension } from './contract';
 import { registerExtensionSlots } from './slots';
 
@@ -24,6 +24,14 @@ const collabNavigationItems: NavigationItem[] = [
     description: '与用户和 Bot 即时协作',
   },
   {
+    id: 'collaboration-square',
+    label: '发现',
+    path: '/collaboration-square',
+    icon: Compass,
+    section: 'collab',
+    description: '发现公开 Bot 与协作群',
+  },
+  {
     id: 'external-bots',
     label: '外部 Bot',
     path: '/external-bots',
@@ -36,6 +44,9 @@ const collabNavigationItems: NavigationItem[] = [
 // 未列出的 capability 一律沿用 Open Core 默认（spread 继承）；新增能力需复核 collab 经营面是否收纳。
 const collabCapabilities: AppCapabilities = {
   ...defaultCapabilities,
+  // collab 无 Backend 增强与单聊页：运行时部署配置不能重新开放会话按钮/自动建聊。
+  getPublicBotBackendEnabled: () => false,
+  getDiscoveryExpertsEnabled: () => ({ status: 'available', value: false }),
   // BCN-only 不接入组织目录（继承默认 false），也不查询引擎资产目录补充标签。
   getCollaborationBotEngineLabelEnabled: () => ({ status: 'available', value: false }),
   getSpaceContextInitializationEnabled: () => ({ status: 'available', value: false }),

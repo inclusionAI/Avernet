@@ -7,7 +7,7 @@ import { Users } from 'lucide-react';
 /**
  * 产品一级导航基线的形态开关（collab-form）：
  * Open Core 默认 null = 沿用 `src/shell/navigation.tsx` 的 Open Core 基线数组（Open/internal 零变化）；
- * collab 装配覆盖为「协作群 + 外部 Bot」两项。internal 注入项仍经
+ * collab 装配覆盖为「协作群 + 发现 + 外部 Bot」三项。internal 注入项仍经
  * `getInternalNavigationItems` 按 section 追加，与本基线正交。
  */
 // 注意：extendCapabilities 合并后无法恢复，故默认形态用例一律置前，override 用例置于文件末尾

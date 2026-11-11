@@ -16,6 +16,10 @@ export const routes = [
       // 邀请加群链路与 BCN 外部协作会话外链落地页保留。
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
+      // BCS-only 公开发现：不注册专家、任务广场或单聊。
+      { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
+      { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
+      { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       // 外部 Bot 管理（Bot 管理「外部 Bot」面板的独立薄页面）。
       { path: '/external-bots', component: '@/pages/ExternalBots' },
       // 404 兜底：本形态不含的页面（单聊/BotWorkshop/Lab/…）统一落到 NotFound。

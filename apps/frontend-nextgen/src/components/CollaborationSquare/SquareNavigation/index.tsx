@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Link } from '@umijs/max';
 import type { ReactNode } from 'react';
 
@@ -21,11 +22,13 @@ export function SquareNavigation({
   /** 页头右侧工具区（搜索/筛选/身份选择器等；详情态等无工具场景不传）。 */
   actions?: ReactNode;
 }) {
+  const expertsEnabled = getCapabilities().getDiscoveryExpertsEnabled().value;
+  const items = ITEMS.filter((item) => item.resource !== 'expert' || expertsEnabled);
   return (
     <nav className="shrink-0 bg-background" aria-label="协作广场资源导航">
       <div className="flex h-15 w-full items-center justify-between gap-3 px-5">
         <div className="flex min-w-0 items-center gap-1.5">
-          {ITEMS.map((item) => (
+          {items.map((item) => (
             <Link
               key={item.resource}
               to={item.path}

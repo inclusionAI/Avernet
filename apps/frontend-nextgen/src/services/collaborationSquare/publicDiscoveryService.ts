@@ -1,0 +1,165 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
+import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
+import type {
+  BotCatalogViewer,
+  FriendRequestActor,
+  HumanBotActionContext,
+  OpenBotConversationOptions,
+  PublicBot,
+  PublicBotDiscoveryQuery,
+  PublicBotSearchQuery,
+  PublicGroupSearchQuery,
+} from '@/domain/collaborationSquare/types';
+import { listGroups as listBackendGroups } from '@/services/backendApi/collaboration/collaborationGroupController';
+import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
+import { CollaborationSquareError } from './collaborationSquareError';
+import type { PublicDiscoveryGateway } from './collaborationSquareGateway';
+
+export { CollaborationSquareError } from './collaborationSquareError';
+
+export interface CollaborationSquareServiceOverview {
+  module: string;
+  description: string;
+}
+
+export class PublicDiscoveryService {
+  private readonly inFlight = new Set<string>();
+  constructor(private readonly gateway: PublicDiscoveryGateway) {}
+
+  getOverview(): CollaborationSquareServiceOverview {
+    void listBackendGroups;
+    void queryCollaborationBots;
+    return {
+      module: 'collaborationSquare',
+      description: '协作广场 Service 已保留 collaboration Controller 接缝，当前功能通过可替换 Adapter 提供数据。',
+    };
+  }
+
+  listBots(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
+    return this.gateway.listBots(query, context, signal);
+  }
+  listBotPage(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
+    return this.gateway.listBotPage(query, context, signal);
+  }
+  async resolveSharedBot(
+    targetId: string,
+    searchHint: string,
+    context?: HumanBotActionContext,
+    viewer?: BotCatalogViewer,
+    signal?: AbortSignal,
+  ) {
+    const id = targetId.trim();
+    const search = searchHint.trim();
+    if (!id || !search) return null;
+
+    // BCS 原始游标遍历：停止条件是 hasMore=false（不能按 page*pageSize>=total 计算——
+    // total 是未过滤口径，metadata 过滤后的展示页会在中途耗尽）。
+    const pageSize = 100;
+    let offset = 0;
+    while (!signal?.aborted) {
+      const result = await this.gateway.listBotPage(
+        {
+          search,
+          offset,
+          pageSize,
+          ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
+        },
+        context,
+        signal,
+      );
+      const matched = result.items.find((bot) => bot.id === id);
+      if (matched) return matched;
+      if (!result.hasMore || result.items.length === 0) return null;
+      offset = result.nextOffset;
+    }
+    return null;
+  }
+  /**
+   * 老版分享链接落地反查：无名称提示时按 canonical 复合 ID（bot_id:owner_id）游标遍历公开 Bot。
+   * 老版 id 与好友申请 canonical target 同构，直接按 getPublicBotTargetId 匹配；
+   * 仅接受含冒号的复合 ID，避免误吞其他用途的 id 参数。目标落在（过滤后）第二页亦可命中。
+   */
+  async resolvePublicBotById(
+    targetId: string,
+    context?: HumanBotActionContext,
+    viewer?: BotCatalogViewer,
+    signal?: AbortSignal,
+  ) {
+    const id = targetId.trim();
+    if (!id || !id.includes(':')) return null;
+
+    const pageSize = 100;
+    let offset = 0;
+    while (!signal?.aborted) {
+      const result = await this.gateway.listBotPage(
+        {
+          offset,
+          pageSize,
+          ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
+        },
+        context,
+        signal,
+      );
+      const matched = result.items.find((bot) => getPublicBotTargetId(bot) === id);
+      if (matched) return matched;
+      if (!result.hasMore || result.items.length === 0) return null;
+      offset = result.nextOffset;
+    }
+    return null;
+  }
+  discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
+    return this.gateway.discoverBots(query, context, signal);
+  }
+  getBotProfile(bot: PublicBot, signal?: AbortSignal) {
+    return this.gateway.getBotProfile(bot, signal);
+  }
+  listGroups(query?: PublicGroupSearchQuery, signal?: AbortSignal) {
+    return this.gateway.listGroups(query, signal);
+  }
+  listGroupPage(query?: PublicGroupSearchQuery, signal?: AbortSignal) {
+    return this.gateway.listGroupPage(query, signal);
+  }
+  listGroupMembers(groupId: string, signal?: AbortSignal) {
+    return this.gateway.listGroupMembers(groupId, signal);
+  }
+
+  private async runTargetAction<T>(key: string, task: () => Promise<T>) {
+    if (this.inFlight.has(key)) throw new CollaborationSquareError('duplicate_action', '该操作正在提交，请勿重复操作');
+    this.inFlight.add(key);
+    try {
+      return await task();
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+
+  requestBotFriendship(
+    botId: string,
+    context: HumanBotActionContext,
+    friendRequestBotId?: string,
+    fromActor?: FriendRequestActor,
+  ) {
+    const targetId = friendRequestBotId?.trim() || botId;
+    const actor = fromActor ?? { type: 'human' as const, id: context.userId };
+    if (actor.type === 'bot' && actor.id.trim() === targetId) {
+      return Promise.reject(new CollaborationSquareError('forbidden', '不能添加当前工作 Bot 自身为好友'));
+    }
+    return this.runTargetAction(`friend:${actor.type}:${actor.id}:${targetId}`, () =>
+      this.gateway.requestBotFriendship(botId, context, friendRequestBotId, actor),
+    );
+  }
+
+  openBotConversation(botId: string, context: HumanBotActionContext, options?: OpenBotConversationOptions) {
+    return this.runTargetAction(`conversation:${botId}`, () =>
+      this.gateway.openBotConversation(botId, context, options),
+    );
+  }
+
+  createGroupSession(
+    groupId: string,
+    context?: HumanBotActionContext,
+    options?: { title?: string; query?: string; messageViewScope?: MessageViewScope },
+  ) {
+    return this.runTargetAction(`session:${groupId}`, () => this.gateway.createGroupSession(groupId, context, options));
+  }
+}
