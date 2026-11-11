@@ -176,7 +176,7 @@ use super::*;
         // must survive its failure.
         let pending = rq
             .list_inbox("x:notify_fail", "dev", Some(RequestStatus::Pending))
-            .await;
+            .await.expect("request listing");
         assert!(
             pending
                 .iter()

@@ -85,3 +85,18 @@ Authority role lookup excludes Human management targets before owner/fallback
 resolution, in both scalar and batched Bot-state queries. Actor kind is an
 additional predicate on the existing statements; query counts and chunk bounds
 are unchanged. A Human row with created_by is never a legacy-owned physical Bot.
+
+## Request reads and source layout
+
+`PermissionRequestRepoPort::list_inbox` and `list_sent` return `ServiceResult`.
+SQL errors and invalid persisted rows fail the complete list; implementations
+must not return empty/partial success. Connect listing and pending lookups
+propagate these errors, including through legacy/V1 friendship facades.
+
+SQL implementations are separated into `edge_grants.rs`, `profiles.rs`,
+`requests.rs` and `bot_config.rs`; shared row/statement mapping is in
+`mapping.rs`. `memory.rs` implements the same repo ports, with conformance
+coverage for both SQL and memory stores. The result-type change does not add
+queries or change ordering: one SELECT per inbox/outbox, two for All. Pending
+connect checks still scan the target's pending inbox (existing behavior), so
+this change does not claim bounded pagination or improved high-fan-in cost.

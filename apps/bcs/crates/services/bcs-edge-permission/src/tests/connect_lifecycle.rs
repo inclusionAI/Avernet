@@ -193,7 +193,7 @@ use super::*;
 
         // The bot's inbox (to_id=x:nodupe) should contain exactly 1 request
         // for this connect (the original, now approved) — not 2.
-        let inbox = rq.list_inbox("x:nodupe", "dev", None).await;
+        let inbox = rq.list_inbox("x:nodupe", "dev", None).await.expect("request listing");
         let ours: Vec<&PermissionRequest> = inbox
             .iter()
             .filter(|r| r.from_id == "human_1")

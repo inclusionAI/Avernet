@@ -127,21 +127,15 @@ impl EdgeConnectFriendService {
         Ok(())
     }
 
-    /// Legacy receiver resolution: the command may carry the receiver
-    /// explicitly (URL addressee); otherwise read it from the request.
+    /// Resolve the actual receiver from the persisted Connect request.
+    /// A receiver hint is transport context, never authorization evidence.
     async fn request_receiver_actor(
         &self,
         command: &FriendRequestDecisionCommand,
     ) -> Result<String, FriendUseCaseError> {
-        if let Some(to_bot) = command.request_to_bot.as_deref() {
-            return Ok(to_bot.to_string());
-        }
-        Ok(self
-            .connect
-            .get_request(&command.request_id)
-            .await
-            .map_err(FriendUseCaseError::service)?
-            .to_id)
+        // A hint supplied by an adapter is not the authority: resolve the
+        // persisted Connect row on every decision path, including Bot tokens.
+        self.friend_request_receiver(&command.request_id).await
     }
 
     async fn authorize_request_receiver(

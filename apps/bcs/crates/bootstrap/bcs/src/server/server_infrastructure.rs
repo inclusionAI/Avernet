@@ -60,6 +60,8 @@ impl BcsServer {
                 "LocalSqlite storage selected but DbPlugin handle is unavailable".to_string(),
             )
         })?;
+        bcs_db_migrations::ensure_friend_request_cutover(db_plugin.as_ref()).await
+            .map_err(|err| crate::BcsError::StorageInitError(format!("friend request cutover: {err}")))?;
         let db_kind = infrastructure_plugins.db_kind();
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);

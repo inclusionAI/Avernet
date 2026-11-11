@@ -9,6 +9,9 @@ use bcs_db_api::{
 };
 use sha2::{Digest, Sha256};
 
+mod friend_cutover;
+pub use friend_cutover::ensure_friend_request_cutover;
+
 // Integration tests also load this module via #[path] under a different name.
 #[path = "migrations/baseline.rs"]
 mod baseline;
@@ -160,6 +163,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 41, name: "group_agent_cards" },
     SqliteMigration { version: 42, name: "auth_session_version" },
     SqliteMigration { version: 43, name: "delivery_session_lookup" },
+    SqliteMigration { version: 44, name: "legacy_friend_request_cutover" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -559,6 +563,12 @@ async fn apply_sqlite_migration_body(
             .await?;
             Ok(())
         }
+        44 => {
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/044_legacy_friend_request_cutover.sql"
+            ))).await?;
+            ensure_friend_request_cutover(db).await
+        }
         _ => Ok(()),
     }
 }
@@ -702,3 +712,7 @@ mod a2a_tests;
 #[cfg(test)]
 #[path = "migrations/group_card_tests.rs"]
 mod group_card_tests;
+
+#[cfg(test)]
+#[path = "migrations/friend_cutover_tests.rs"]
+mod friend_cutover_tests;

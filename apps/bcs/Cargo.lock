@@ -1463,6 +1463,7 @@ dependencies = [
  "bcs-edge-permission-store",
  "bcs-friend",
  "bcs-group-store",
+ "bcs-relation",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",
