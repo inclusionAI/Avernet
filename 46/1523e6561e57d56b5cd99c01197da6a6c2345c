@@ -1,0 +1,21 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  s_4efef845bd857d::t_ba11920cf447cc 112-120
+submodules/avernet
+  s_4efef845bd857d::t_7a19a7627c13c7 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "461523e6561e57d56b5cd99c01197da6a6c2345c",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
