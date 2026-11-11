@@ -13,6 +13,7 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
   const [history, setHistory] = useState<ServiceBotEvalHistoryDto | undefined>();
   const [submission, setSubmission] = useState<ServiceBotEvalSubmissionDto | undefined>();
   const [loading, setLoading] = useState(Boolean(botId && botVersion));
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string>();
 
@@ -40,6 +41,23 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadHistory = useCallback(
+    async (pageNo = 1, pageSize = 10) => {
+      if (!botId || !botVersion) return;
+      setHistoryLoading(true);
+      try {
+        const historyResult = await serviceBotEvalService.history(botId, botVersion, ownerId, pageNo, pageSize);
+        setHistory(historyResult);
+        setActionError(undefined);
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : '历史评测记录加载失败');
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [botId, botVersion, ownerId],
+  );
 
   const submit = useCallback(
     async (sampleFiles: File[], reportFiles: File[], triggerSource: ServiceBotEvalTriggerSource) => {
@@ -103,6 +121,8 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
     loading,
     submitting,
     actionError,
+    historyLoading,
+    loadHistory,
     reload: load,
     submit,
     sync,

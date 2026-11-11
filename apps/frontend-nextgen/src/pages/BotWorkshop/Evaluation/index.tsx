@@ -3,10 +3,11 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
 import { Empty } from '@/components/ui/Empty';
+import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
 import { Spin } from '@/components/ui/Spin';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
-import { History, RefreshCw } from 'lucide-react';
+import { Download, History, RefreshCw } from 'lucide-react';
 import { history, useParams, useSearchParams } from '@umijs/max';
 import { useMemo, useState } from 'react';
 
@@ -41,6 +42,7 @@ const EvaluationPage: React.FC = () => {
   const botVersion = params.botVersion ?? '';
   const ownerId = searchParams.get('owner_id') ?? undefined;
   const evaluation = useServiceBotEval(botId, botVersion, ownerId);
+  const evalHistory = evaluation.history;
   const detail = evaluation.detail as Record<string, any> | undefined;
   const tabs = detail?.tabs as Record<string, { enabled?: boolean; visible?: boolean; visible_reason?: string }> | undefined;
   const certState = detail?.cert_state as Record<string, unknown> | undefined;
@@ -94,7 +96,7 @@ const EvaluationPage: React.FC = () => {
 
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
-      <div className="w-full max-w-7xl p-5 sm:p-6">
+      <div className="w-full p-5 sm:p-6">
         <Button variant="link" onClick={() => history.push('/bot-workshop')}>
           ← 返回 Bot 管理
         </Button>
@@ -220,36 +222,60 @@ const EvaluationPage: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <div>
-                      {evaluation.history?.records?.length ? (
-                        <div className="overflow-hidden rounded-lg border border-border">
-                          {evaluation.history.records.map((item, index) => (
-                            <div
-                              key={item.id ?? String(index)}
-                              className="flex flex-wrap items-center justify-between gap-3 border-border px-4 py-3 text-xs odd:bg-background even:bg-muted/20"
-                            >
-                              <div>
-                                <p className="m-0 font-medium text-foreground">{item.mode ?? '统一评测'}</p>
-                                <p className="m-0 mt-1 text-muted-foreground">
-                                  {item.evaluated_at ?? '时间未知'} · {item.summary ?? '暂无摘要'}
-                                </p>
+                    <div
+                      className={evaluation.historyLoading ? 'space-y-4 opacity-60' : 'space-y-4'}
+                      aria-busy={evaluation.historyLoading}
+                    >
+                      {evalHistory?.records?.length ? (
+                        <div className="space-y-4">
+                          <div className="overflow-hidden rounded-lg border border-border">
+                            {evalHistory.records.map((item, index) => (
+                              <div
+                                key={item.id ?? String(index)}
+                                className="flex flex-col gap-3 border-border px-4 py-3 text-xs odd:bg-background even:bg-muted/20 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="m-0 font-medium text-foreground">{item.mode ?? '统一评测'}</p>
+                                  <p className="m-0 mt-1 break-words text-muted-foreground">
+                                    {item.evaluated_at ?? '时间未知'} · {item.summary ?? '暂无摘要'}
+                                  </p>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
+                                  {item.report_url ? (
+                                    <a
+                                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                                      href={item.report_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      <History className="size-3.5" />
+                                      查看报告
+                                    </a>
+                                  ) : null}
+                                  {item.archive_download_url ? (
+                                    <a
+                                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                                      href={item.archive_download_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      <Download className="size-3.5" />
+                                      下载材料包
+                                    </a>
+                                  ) : null}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
-                                {item.report_url ? (
-                                  <a
-                                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                                    href={item.report_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                  >
-                                    <History className="size-3.5" />
-                                    查看报告
-                                  </a>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
+                          <Pagination
+                            current={evalHistory.page.page_no}
+                            pageSize={evalHistory.page.page_size}
+                            total={evalHistory.page.total}
+                            onChange={(pageNo) => void evaluation.loadHistory(pageNo, evalHistory.page.page_size)}
+                            onPageSizeChange={(pageSize) => void evaluation.loadHistory(1, pageSize)}
+                            layout="between"
+                          />
                         </div>
                       ) : (
                         <Empty title="暂无历史评测记录" description="完成评测后在查看到历史结论与报告。" />
@@ -271,6 +297,19 @@ const EvaluationPage: React.FC = () => {
                       <p className="font-medium text-muted-foreground">说明</p>
                       <p className="mt-1">{evaluation.submission.message ?? '等待认证结果'}</p>
                     </div>
+                    {evaluation.submission.archive_download_url ? (
+                      <div className="md:col-span-3">
+                        <a
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                          href={evaluation.submission.archive_download_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Download className="size-3.5" />
+                          下载本次评测材料包
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </>
