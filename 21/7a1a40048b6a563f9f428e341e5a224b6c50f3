@@ -1,0 +1,23 @@
+engine/bootloader/bootstrapping/service_bot_transition.sh
+  s_675e398b603643::t_afcf67b6fae52d 499-501
+engine/bootloader/tests/test_service_bot_transition_permissions.py
+  s_675e398b603643::t_da3c30019fe3b5 303-310,325-328
+engine/bootloader/tests/test_service_permission_snapshot.py
+  s_675e398b603643::t_9d2ee19f9365af 127-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "217a1a40048b6a563f9f428e341e5a224b6c50f3",
+  "prompts": {},
+  "sessions": {
+    "s_675e398b603643": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d8-4a6c-78a1-9221-a3e06be159ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
