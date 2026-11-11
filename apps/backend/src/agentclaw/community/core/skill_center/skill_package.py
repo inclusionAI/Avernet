@@ -241,6 +241,25 @@ class SkillPackageValidator:
                 and path.split("/")[-1].lower() == "skill.md"
             )
         ]
+        if allow_legacy_local_manifest and len(skill_indexes) > 1:
+            # Local Skills may link to nested capability/SKILL.md documents.
+            # Only the unambiguous package-root manifest defines their identity;
+            # never guess between sibling Skills or conflicting root names.
+            root_indexes = [
+                index
+                for index in skill_indexes
+                if "/" not in normalized_entries[index][0]
+            ]
+            roots = {path.split("/")[0] for path, _content in normalized_entries}
+            if not root_indexes and len(roots) == 1:
+                root_indexes = [
+                    index
+                    for index in skill_indexes
+                    if normalized_entries[index][0].count("/") == 1
+                ]
+            if len(root_indexes) != 1:
+                raise SkillManifestMultipleError("multiple_skill_files")
+            skill_indexes = root_indexes
         skill_files = [normalized_entries[index] for index in skill_indexes]
         if not skill_files:
             raise SkillManifestMissingError("missing_skill_file")

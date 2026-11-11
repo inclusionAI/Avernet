@@ -468,3 +468,84 @@ def test_directory_rejects_traversal_before_canonical_zip_is_created() -> None:
         )
 
     assert error.value.reason == "unsafe_file_path"
+
+
+@pytest.mark.parametrize("wrapper", ["", "weather/"])
+@pytest.mark.parametrize("manifest_name", ["SKILL.md", "skill.MD"])
+def test_local_package_preserves_nested_capability_documents(
+    wrapper: str, manifest_name: str
+) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    manifest = _skill_md() + b"[Review](capability/review/SKILL.md)\n"
+    nested = [
+        ("capability/review/SKILL.md", b"# Review\nSee scripts/main.py\n"),
+        (
+            "capability/review/scripts/main.py",
+            b"raise RuntimeError('not executed')",
+        ),
+        ("capability/query/SKILL.md", _skill_md(name="query")),
+    ]
+    payload = _zip(
+        [(wrapper + manifest_name, manifest)]
+        + [(wrapper + path, data) for path, data in nested]
+    )
+
+    package = validator.validate_legacy_local_zip(payload)
+
+    assert package.name == "weather"
+    assert dict(package.files) == {"SKILL.md": manifest, **dict(nested)}
+    assert _canonical_entries(package) == list(package.files)
+    assert validator.validate_legacy_local_zip(package.canonical_zip) == package
+    # Local compatibility must not relax governed or exact Center packages.
+    for validate in (validator.validate_zip, validator.validate_skill_center_exact_zip):
+        with pytest.raises(SkillPackageInvalidError) as error:
+            validate(package.canonical_zip)
+        assert error.value.reason == "multiple_skill_files"
+
+@pytest.mark.parametrize(
+    ("paths",),
+    [
+        (
+            (
+                ("a/SKILL.md", _skill_md()),
+                ("b/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/capability/a/SKILL.md", _skill_md()),
+                ("weather/capability/b/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("SKILL.md", _skill_md()),
+                ("SKILL.MD", _skill_md()),
+                ("capability/query/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/SKILL.md", _skill_md()),
+                ("weather/SKILL.MD", _skill_md()),
+                ("weather/capability/query/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/SKILL.md", _skill_md()),
+                ("weather/capability/query/SKILL.md", _skill_md()),
+                ("outside.txt", b"outside"),
+            ),
+        ),
+    ],
+)
+def test_local_nested_documents_require_one_unambiguous_package_root(
+    paths: tuple[tuple[str, bytes], ...]
+) -> None:
+    with pytest.raises(SkillPackageInvalidError) as error:
+        SkillPackageValidator(
+            SkillParser()
+        ).validate_legacy_local_zip(_zip(list(paths)))
+
+    assert error.value.reason == "multiple_skill_files"
