@@ -15,8 +15,8 @@ builds standalone (the `pyproject.toml` here declares `readme = "README.md"`).
 
 See the full getting-started guide (both engines, config, troubleshooting):
 
-- [`docs/open-source-guide.md`](../../../docs/open-source-guide.md)
-- 中文版：[`docs/open-source-guide.zh-CN.md`](../../../docs/open-source-guide.zh-CN.md)
+- [`docs/quick-start.md`](../../docs/quick-start.md)
+- 中文版：[`docs/quick-start.zh-CN.md`](../../docs/quick-start.zh-CN.md)
 
 Quick start (claude_code, the out-of-the-box engine):
 
