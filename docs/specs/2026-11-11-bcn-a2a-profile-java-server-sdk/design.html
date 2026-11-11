@@ -604,6 +604,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 
 <h3 id="s7-4"><span class="n">7.4</span>扩展模型</h3>
 <p>前面的平台扩展是逐个定义的。业务方的定制需求主要有三类：请求里带业务参数；响应和 Task 更新里带自定义字段；返回给客户端或前端渲染的 UI 数据。为每个业务逐个写规范、逐个改 BCS 不可持续。</p>
+<p><b>扩展点和扩展是两回事。</b>扩展点由 Profile 固定，业务不能新增或修改，也不需要登记；五个不够用时向 BCN 提需求，通过 Profile 升级增加。扩展是业务自己定义的约定，选用其中几个扩展点来放数据。扩展只在需要经 BCS 中转时才要登记（7.6）；业务自己的调用方直连自己的 Agent 时不需要。</p>
 <p>本节定义五个<b>扩展点</b>。每个扩展点规定数据放在哪里、活多久、多大、中间环节怎么处理。业务扩展只需要声明自己用了哪些扩展点，BCS、SDK 和 Client 按扩展点的规则处理，不需要理解数据内容。</p>
 <div class="tw"><table>
 <tr><th>扩展点</th><th>用途</th><th>载体</th><th>方向</th><th>生命周期</th><th>大小上限</th></tr>
@@ -690,7 +691,14 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <p>两级可以同时使用：同一份内容，Agent 按协商结果选择发业务块、平台块，或降级文本。平台 UI 扩展的组件集需要单独设计，见 <span class="tag q">Q17</span>。</p>
 
 <h3 id="s7-6"><span class="n">7.6</span>扩展描述与登记</h3>
-<p>业务扩展登记时提交一份描述。BCS 和 SDK 依据描述处理数据，不依据内容。</p>
+<p>业务扩展登记时提交一份描述。BCS 和 SDK 依据描述处理数据，不依据内容。登记的是描述，不是代码，BCS 不需要为每个扩展发版。</p>
+<div class="tw"><table>
+<tr><th>情况</th><th>是否需要登记</th></tr>
+<tr><td>业务自己的调用方直连自己的 Agent</td><td>不需要。双方都实现该扩展即可</td></tr>
+<tr><td>调用经过 BCS，扩展数据要原样传给上游</td><td>需要。自助登记，描述通过自动校验即生效</td></tr>
+<tr><td>希望 BCN 工作台渲染，或需要超出默认大小上限</td><td>需要 BCN 人工评审。前者要申请成为平台扩展</td></tr>
+</table></div>
+<p>自动校验的内容：URI 带版本且未被占用；只使用五个扩展点；声明为可选；各扩展点的 Schema 可访问且大小在上限内；使用 E5 时媒体类型符合命名规则。</p>
 <pre><code>{
   "uri": "&lt;订单 UI 扩展 URI&gt;",
   "owner": "order-platform",
@@ -1352,7 +1360,7 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
 <tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
 <tr><td><span class="tag q">Q15</span></td><td>BCS 是否按扩展点中转已登记的业务扩展数据。这意味着 BCS 要保存 E3 和 E5，而目前 BCS 只处理文本</td><td>中转，不解释内容。业务自己的前端经 BCS 调用时才需要，落地时间跟随 BCS 提供 A2A 服务的阶段</td><td>7.6</td></tr>
-<tr><td><span class="tag q">Q16</span></td><td>业务扩展的登记流程：在哪里登记、谁评审、规范文档放在哪里</td><td>规范文档放仓库 <code>docs/specs/a2a/extensions/</code>，以合并请求方式登记，BCN 团队评审是否满足 P-120 到 P-125 和扩展点规则</td><td>7.6、7.7</td></tr>
+<tr><td><span class="tag q">Q16</span></td><td>业务扩展的登记流程：在哪里登记、谁评审、规范文档放在哪里</td><td>自助登记加自动校验，通过即生效；只有申请平台扩展或超出默认上限时由 BCN 人工评审。登记入口放在 BCS 管理接口还是仓库，以及自动校验由谁实现，待定</td><td>7.6、7.7</td></tr>
 <tr><td><span class="tag q">Q17</span></td><td>平台 UI 扩展的组件集：自行设计，还是采用已有的开放规范（例如面向 Agent 生成界面的 A2UI，需要先评估其成熟度和与内容块模型的匹配）</td><td>先确定内容块模型（7.5），组件集单独立项；在此之前工作台只渲染文本和降级文本</td><td>7.5</td></tr>
 <tr><td><span class="tag q">Q18</span></td><td>各扩展点的大小上限和每个 Task 的块数量上限</td><td>E1、E2、E3 为 16 KB，E4 为 64 KB，E5 为 256 KB，64 块；压测后调整</td><td>7.4、7.5</td></tr>
 <tr><td><span class="tag q">Q19</span></td><td>已有结论：目前没有明确的长任务场景，推送只定语义、不实现；声明推送能力时要求实现四个配置方法。遗留：条款依据的是 A2A 仓库主分支的规范和 proto，实现前需要对照 1.0.1 正式版复核，尤其是安全章节</td><td>实现启动时复核</td><td>6.12</td></tr>
