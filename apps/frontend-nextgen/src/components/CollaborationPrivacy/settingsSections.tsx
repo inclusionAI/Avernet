@@ -4,6 +4,7 @@
  * 提取为 DOM 等价重构——页面侧渲染结果与提取前一致，既有测试断言不受影响。
  */
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
+import { TriangleAlert } from 'lucide-react';
 import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
 import { LabelHelpTooltip } from './HelpTooltip';
 import { RelationCard, type RelationCardProps } from './RelationCard';
@@ -83,15 +84,23 @@ interface FriendApprovalSettingsProps extends FriendApprovalSectionCallbacks {
  * 仅 internal × 团队空间 Bot 渲染（形态经 capability getGeneralConfigPublishApprovalEnabled 承载，
  * 空间经 spaceKind==='team' 判定，均由弹窗容器组合后决定是否渲染本组件）。
  * 开关为受控本地态（配置展示级：不持久化、不走工单，弹窗关闭即恢复默认关）；
+ * 开关仅服务 Bot 可用——团队空间内的非服务 Bot（如切到团队空间的个人 Bot）无协作者语义，
+ * 禁用置关并提示原因，容器同时不发审批配置请求。
  * 不跟随 joinedBcn 只读（平台治理配置，不依赖 BCN 网络）。
  */
 export function PublishApprovalSettings({
   checked,
+  disabled,
+  notice,
   loading,
   error,
   onChange,
 }: {
   checked: boolean;
+  /** 非服务 Bot 禁用置关：无协作者语义，审批配置不可用也不请求。 */
+  disabled?: boolean;
+  /** 禁用原因提示（与 error 段落同布局的 muted 弱提示）。 */
+  notice?: string;
   loading?: boolean;
   error?: string;
   onChange: (checked: boolean) => void;
@@ -102,18 +111,24 @@ export function PublishApprovalSettings({
         <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">发布审批</h4>
         <LabelHelpTooltip
           label="发布审批"
-          content="控制共同编辑者发布该 Bot 前是否需要 Owner 审批；仅团队空间 Bot 展示本组。"
+          content="控制共同编辑者发布该 Bot 前是否需要 Owner 审批；仅服务 Bot 可配置。"
         />
       </div>
       <div className="divide-y divide-divider">
         <SettingRow
           label="共同编辑者发布需 Owner 审批"
           description="开启后，共同编辑者发布该 Bot 前需经 Owner 审批；关闭后可直接发布。"
-          checked={checked}
-          disabled={Boolean(error)}
+          checked={disabled ? false : checked}
+          disabled={disabled || Boolean(error)}
           busy={loading}
           onChange={onChange}
         />
+        {notice ? (
+          <p className="m-0 flex items-center gap-1.5 py-2 text-xs text-warning">
+            <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+            {notice}
+          </p>
+        ) : null}
         {error ? <p className="m-0 py-2 text-xs text-destructive">{error}</p> : null}
       </div>
     </>

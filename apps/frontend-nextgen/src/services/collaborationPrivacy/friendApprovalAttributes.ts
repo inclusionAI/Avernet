@@ -39,14 +39,24 @@ function mapPendingPublication(value: unknown, audience: PublicAudience): Pendin
   const status = typeof value.status === 'string' ? value.status.trim().toUpperCase() : '';
   const id = typeof value.puid === 'string' ? value.puid.trim() : '';
   const visibility = typeof value.visibility === 'string' ? value.visibility.trim().toLowerCase() : '';
-  if (!pendingPublicationStatuses.has(status) || !id || (visibility !== 'public' && visibility !== 'private')) {
+  if (
+    !pendingPublicationStatuses.has(status) ||
+    !id ||
+    // 后端慢连工单块（friend_ext.public_*_approval）的 visibility 契约是 public/protected/private；
+    // protected（限定组织可见）此前被拒收导致组织可见场景审批外链丢失（bot-public-risk-check）。
+    (visibility !== 'public' && visibility !== 'protected' && visibility !== 'private')
+  ) {
     return undefined;
   }
 
+  // protected 恒为受限可见（view_friend_deps 缺失时兜底 restricted），public 依 deps 判定。
+  const restricted =
+    visibility === 'protected' ||
+    (Array.isArray(value.view_friend_deps) && value.view_friend_deps.length > 0);
   const target =
     visibility === 'private'
       ? { scope: 'none' as const, organizationPaths: [] }
-      : Array.isArray(value.view_friend_deps) && value.view_friend_deps.length > 0
+      : restricted
       ? { scope: 'restricted' as const, organizationPaths: [] }
       : { scope: 'all' as const, organizationPaths: [] };
   const approvalUrl = toSafeApprovalUrl(value.approval_url);

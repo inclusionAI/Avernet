@@ -245,7 +245,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
     jest.mocked(botEditorService.loadApproval).mockResolvedValue(true);
 
-    render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
+    render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
 
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
 
@@ -271,6 +271,21 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     expect(screen.getAllByRole('heading', { level: 4 })[0].textContent).toBe('Bot 可见性');
   });
 
+  it('internal × 团队空间个人 Bot：分区渲染但开关禁用置关并提示，不发审批配置请求', async () => {
+    mockCapabilities.mockReturnValue(internalCapabilities);
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
+
+    expect(screen.getByText('发布审批')).toBeInTheDocument();
+    expect(screen.getByText('个人 Bot 暂不支持协作者申请')).toBeInTheDocument();
+    const approvalSwitch = screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' });
+    expect(approvalSwitch).toBeDisabled();
+    expect(botEditorService.loadApproval).not.toHaveBeenCalled();
+  });
+
   it('Open Core × 团队空间 Bot：不渲染发布审批（SHAPE:INTERNAL，AC-06）', async () => {
     // beforeEach 默认 Open Core 形态（capability value: false），无需覆盖。
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
@@ -288,7 +303,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
       .spyOn(collaborationPrivacyService, 'loadOverview')
       .mockResolvedValue(overviewWithBot(makeBot('bot-1:900004', false)));
 
-    render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
+    render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
 
     await waitFor(() => expect(screen.getAllByText('加入 BCN 后才能修改协作权限')).toHaveLength(2));
 
@@ -322,7 +337,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     mockCapabilities.mockReturnValue(internalCapabilities);
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
 
-    const first = render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
+    const first = render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' }));
     await waitFor(() =>
@@ -330,7 +345,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     );
     first.unmount();
 
-    render(<BotGeneralConfigDialog bot={rowBot('team')} onClose={jest.fn()} />);
+    render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
     expect(botEditorService.loadApproval).toHaveBeenCalledTimes(2);
