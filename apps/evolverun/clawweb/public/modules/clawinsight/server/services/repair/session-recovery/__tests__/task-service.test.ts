@@ -42,39 +42,17 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
-  it.each([true, false])("does a final TE trace check at 30 minutes (trace found: %s)", async found => {
-    let now = 1000;
-    const { service, records, agent, deps } = setup(false, () => now);
-    const target = { environment: "prod" as const, ownerId: "owner", botId: "default", provider: "baas",
-      bindingId: "binding", deviceId: "device", activeEngine: "teclaw" };
-    deps.resolveTarget = async () => recoveryTargetSnapshot(target);
-    const read = vi.fn().mockResolvedValue({ traces: [] });
-    deps.trajectory = { read };
+  it("dispatches TE assessment after persisting the diagnostic trace ID", async () => {
+    const { service, records, agent, deps } = setup();
+    deps.resolveTarget = async () => recoveryTargetSnapshot({
+      environment: "prod", ownerId: "owner", botId: "default", provider: "baas",
+      bindingId: "binding", deviceId: "device", activeEngine: "teclaw",
+    });
     const { task_id } = await service.create({ ...request, trace_id: "fault-trace",
       target: { ...request.target, engine: "TE" } }, actor);
     await flush();
-    expect(agent.start).not.toHaveBeenCalled();
-    expect(read).toHaveBeenCalledWith(expect.objectContaining({
-      target: expect.objectContaining(target), traceId: "fault-trace", sessionKey: request.session_key,
-    }));
-
-    now += 30 * 60 * 1000 - 1;
-    await service.maintenance();
-    expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess" });
-    expect(agent.start).not.toHaveBeenCalled();
-
-    now += 1;
-    if (found) read.mockResolvedValue({ trace: { traceId: "fault-trace" }, observations: [] });
-    await service.maintenance();
-    expect(read).toHaveBeenCalledTimes(3);
-    if (found) {
-      expect(agent.start).toHaveBeenCalledOnce();
-      expect(records.get(task_id)?.status).toBe("running");
-    } else {
-      expect(agent.start).not.toHaveBeenCalled();
-      expect(records.get(task_id)).toMatchObject({ status: "failed", phase: "assess",
-        judgment: { effect: "unknown" }, pending_results: [{ status: "failed", phase: "assess", effect: "unknown" }] });
-    }
+    expect(records.get(task_id)?.request.trace_id).toBe("fault-trace");
+    expect(agent.start).toHaveBeenCalledOnce();
   });
 
   it("accepts a replay of a task saved before trace IDs were persisted", async () => {
