@@ -196,6 +196,10 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
     candidate = _success_data(operation)["properties"]["items"]["items"]
     assert set(candidate["required"]) == {"bot", "is_friend"}
     assert candidate["properties"]["bot"]["properties"]["kind"]["const"] == "bot"
+    owner = candidate["properties"]["owner_user_id"]
+    assert owner["type"] == "string"
+    assert owner["minLength"] == 1
+    assert "authority edge" in owner["description"]
 
 
 def test_candidates_publish_viewer_visibility_and_edge_friend_source() -> None:

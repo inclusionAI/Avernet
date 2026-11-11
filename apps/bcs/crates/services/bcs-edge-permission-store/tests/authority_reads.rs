@@ -163,6 +163,63 @@ async fn legacy_created_by_fallback_resolves_only_the_legacy_creator() {
     );
 }
 
+/// `ownerships_for` legacy arm (migration-window shim): a version-0
+/// Bot projects its stored `created_by` ONLY with the flag on;
+/// initialized Bots read their approved owner edge instead, and a
+/// legacy Bot without a creator projects `None`.
+#[tokio::test]
+async fn ownerships_for_legacy_arm_only_when_enabled() {
+    let fixture = new_fixture(ENV).await;
+    execute(
+        fixture.db.as_ref(),
+        "INSERT INTO bcs_bots (bot_uuid, env, name, created_by, ownership_version) \
+         VALUES ('legacy-bot', ?, 'x', '85020', 0)",
+        vec![DbValue::from(ENV)],
+    )
+    .await;
+    execute(
+        fixture.db.as_ref(),
+        "INSERT INTO bcs_bots (bot_uuid, env, name, ownership_version) \
+         VALUES ('legacy-bot-no-creator', ?, 'x', 0)",
+        vec![DbValue::from(ENV)],
+    )
+    .await;
+    fixture.seed_bot(ENV, "init-bot", 1).await;
+    fixture.grant_edge(ENV, "init-bot", "human_real_owner", BotAccessRelation::Owner).await;
+
+    let ids = vec![
+        "legacy-bot".to_string(),
+        "legacy-bot-no-creator".to_string(),
+        "init-bot".to_string(),
+    ];
+    let shim = DbBotAuthorityStore::new(
+        fixture.db.clone(),
+        bcs_db_api::DbSqlFlavor::Sqlite,
+        ENV.to_string(),
+    )
+    .with_legacy_created_by_fallback(true);
+    let views = shim.ownerships_for(&ids).await.expect("shim batch");
+    let legacy = views[0].as_ref().expect("legacy creator projects");
+    assert_eq!(legacy.owner_user_id, "85020");
+    assert_eq!(legacy.owner_actor_id, "human_85020");
+    assert!(views[1].is_none(), "version-0 without creator stays None");
+    assert_eq!(
+        views[2].as_ref().expect("edge owner wins").owner_user_id,
+        "real_owner",
+    );
+
+    // Flag OFF (strict posture): only the initialized edge projects.
+    let strict = DbBotAuthorityStore::new(
+        fixture.db.clone(),
+        bcs_db_api::DbSqlFlavor::Sqlite,
+        ENV.to_string(),
+    );
+    let views = strict.ownerships_for(&ids).await.expect("strict batch");
+    assert!(views[0].is_none(), "shim off projects no legacy owner");
+    assert!(views[1].is_none());
+    assert!(views[2].is_some());
+}
+
 #[tokio::test]
 async fn legacy_fallback_never_shadows_initialized_or_deleted_bots() {
     let fixture = new_fixture(ENV).await;

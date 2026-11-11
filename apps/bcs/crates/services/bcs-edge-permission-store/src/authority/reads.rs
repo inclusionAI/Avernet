@@ -36,7 +36,7 @@ pub(super) const TRANSFER_COLUMNS: &str = "bot_id, target_owner_actor_id, from_o
      decided_by_id, reason, result_ownership_version, bot_name_snapshot";
 
 /// Slice ids into bounded collection-query chunks.
-fn chunked<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
+pub(super) fn chunked<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
     // Borrowed from `items` for the statement batch only.
     items
         .chunks(CHUNK)
@@ -219,6 +219,16 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             owner_actor_id: owner.clone(),
             owner_user_id: self.human_user_id(&owner)?,
         })
+    }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>> {
+        // The chunked spine lives in `reads_ownerships.rs` (the
+        // transfers_support precedent): the trait file keeps its
+        // line budget; semantics are identical to this boundary.
+        self.ownership_projection(bot_ids).await
     }
 
     async fn managers(&self, query: ManagerListQuery) -> ServiceResult<ManagerPage> {
@@ -465,7 +475,7 @@ impl DbBotAuthorityStore {
 
     /// Chunked `(bot_id → ownership_version)`; absent rows mean
     /// missing/deleted bots.
-    async fn bot_states_in(&self, bots: &[&str]) -> ServiceResult<Vec<(String, u64)>> {
+    pub(super) async fn bot_states_in(&self, bots: &[&str]) -> ServiceResult<Vec<(String, u64)>> {
         let mut params = vec![self.env_param()];
         for bot in bots {
             params.push(DbValue::from(*bot));
@@ -500,7 +510,7 @@ impl DbBotAuthorityStore {
     /// rows become fallback candidates at the final mapping, so the
     /// read does not pre-filter on ownership_version (the same live-row
     /// scoping `bot_states_in` uses).
-    async fn legacy_creators_in(
+    pub(super) async fn legacy_creators_in(
         &self,
         bots: &[&str],
     ) -> ServiceResult<Vec<(String, Option<String>)>> {
@@ -825,7 +835,7 @@ impl DbBotAuthorityStore {
 
     /// Owner edges must point at Human actor ids; anything else is
     /// corrupt data (edges are Human → Bot by spec §3.2.4).
-    fn to_id_in(&self, count: usize) -> String {
+    pub(super) fn to_id_in(&self, count: usize) -> String {
         let placeholders = self.id_placeholders(count);
         match self.flavor() {
             bcs_db_api::DbSqlFlavor::Mysql => {
@@ -837,7 +847,7 @@ impl DbBotAuthorityStore {
 
     /// Owner edges must point at Human actor ids; anything else is
     /// corrupt data (edges are Human → Bot by spec §3.2.4).
-    fn human_user_id(&self, owner_actor_id: &str) -> ServiceResult<String> {
+    pub(super) fn human_user_id(&self, owner_actor_id: &str) -> ServiceResult<String> {
         human_user_id_of_actor(owner_actor_id).ok_or_else(|| {
             owner_integrity_error(format!(
                 "owner edge subject '{owner_actor_id}' is not a Human actor id"

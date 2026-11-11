@@ -57,6 +57,26 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     /// corrupt state is an error.
     async fn ownership(&self, bot_id: &str) -> ServiceResult<BotOwnershipView>;
 
+    /// Batch owner read for display projections (e.g. candidate
+    /// pages): same length and order as `bot_ids`, one entry per
+    /// requested id. Unlike [`BotAuthorityRepoPort::ownership`], a
+    /// missing/deleted bot or an uninitialized (version-0) one yields
+    /// a per-item `None` instead of erroring the whole batch; when
+    /// the migration-window legacy shim is enabled a version-0 bot
+    /// projects its stored `created_by` as the owner. A live bot with
+    /// `ownership_version > 0` whose approved-owner set is not
+    /// exactly one row remains a completeness `Err` for the batch
+    /// (never a silent `None`), and storage failures are `Err`.
+    ///
+    /// Implementations use bounded collection queries (≤
+    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`] ids per
+    /// statement), never one statement per input, and read zero rows
+    /// for an empty input.
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>>;
+
     /// Paged manager list with owner summary.
     async fn managers(&self, query: ManagerListQuery) -> ServiceResult<ManagerPage>;
 

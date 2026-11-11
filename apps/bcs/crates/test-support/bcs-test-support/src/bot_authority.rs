@@ -183,6 +183,17 @@ impl BotAuthorityPort for NoopBotAuthorityPort {
             "bot authority hook is not configured".to_string(),
         ))
     }
+
+    async fn ownerships_for(
+        &self,
+        _bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<
+        Vec<Option<BotOwnershipView>>,
+    > {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not configured".to_string(),
+        ))
+    }
 }
 
 
@@ -852,6 +863,16 @@ impl BotAuthorityPort for LazySeedAuthorityHook {
         self.flush().await;
         BotAuthorityCoreService::require_manage(&*self.core, user_id, bot_id).await
     }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<
+        Vec<Option<BotOwnershipView>>,
+    > {
+        self.flush().await;
+        BotAuthorityCoreService::ownerships_for(&*self.core, bot_ids).await
+    }
 }
 
 /// One lazy-seed authority chain: the hook and the
@@ -964,6 +985,17 @@ impl BotAuthorityPort for FailingAuthorityHook {
         _user_id: &str,
         _bot_id: &str,
     ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "authority storage unavailable".to_string(),
+        ))
+    }
+
+    async fn ownerships_for(
+        &self,
+        _bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<
+        Vec<Option<BotOwnershipView>>,
+    > {
         Err(bcs_service_api::ServiceError::InternalError(
             "authority storage unavailable".to_string(),
         ))

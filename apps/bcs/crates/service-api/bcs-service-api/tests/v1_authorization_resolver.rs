@@ -73,6 +73,13 @@ impl BotAuthorityPort for HookStub {
     async fn require_manage(&self, _user_id: &str, _bot_id: &str) -> ServiceResult<()> {
         Err(ServiceError::InternalError("require_manage unused".into()))
     }
+
+    async fn ownerships_for(
+        &self,
+        _bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<bcs_service_api::types::bot_authority::BotOwnershipView>>> {
+        Err(ServiceError::InternalError("ownerships_for is not part of resolver contracts".into()))
+    }
 }
 
 fn human_user(id: &str) -> AuthenticatedUserIdentity {

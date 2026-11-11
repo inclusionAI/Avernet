@@ -67,6 +67,11 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(candidates_status, StatusCode::OK);
     let candidates_body = response_json(candidates).await;
     assert_eq!(candidates_body["data"]["items"][0]["bot"]["kind"], "bot");
+    assert_eq!(
+        candidates_body["data"]["items"][0]["owner_user_id"],
+        "owner-user-1",
+        "candidate items carry the edge-grant owner id as display metadata"
+    );
 
     let eligible_candidates = app
         .clone()

@@ -70,6 +70,65 @@ async fn same_bot_many_viewers_uses_bounded_pair_queries() {
     }
 }
 
+/// `ownerships_for` (candidate-page owner projection) is two bounded
+/// collection statements per 128-id chunk — never one read per Bot,
+/// and zero statements for an empty page.
+#[tokio::test]
+async fn ownerships_for_uses_bounded_chunk_queries() {
+    for count in [0usize, 1, 64, 100, 129, 257] {
+        let db = Arc::new(CountingDb { inner: Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap()),
+            reads: Mutex::new(Reads::default()), fail_edges: AtomicBool::new(false) });
+        let f = new_fixture_with_db("ownbatch", db.clone()).await;
+        let mut ids = Vec::new();
+        for index in 0..count {
+            let bot = format!("bot-{index}");
+            f.seed_bot("ownbatch", &bot, 1).await;
+            f.grant_edge("ownbatch", &bot, "human_owner", BotAccessRelation::Owner).await;
+            ids.push(bot);
+        }
+        *db.reads.lock().unwrap() = Reads::default();
+        let views = f.store.ownerships_for(&ids).await.unwrap();
+        assert_eq!(views.len(), ids.len(), "aligned to the page");
+        assert!(
+            views.iter().all(|view| view
+                .as_ref()
+                .is_some_and(|v| v.owner_user_id == "owner")),
+            "every owned Bot projects"
+        );
+        let reads = db.reads.lock().unwrap();
+        let chunks = count.div_ceil(AUTHORITY_QUERY_CHUNK);
+        assert_eq!(
+            reads.count,
+            2 * chunks,
+            "states + owner edges per chunk (count={count})"
+        );
+    }
+}
+
+/// A failed chunk statement fails the whole batch (never a silent
+/// `None` page) — pinned at store level through a poisoned edge table.
+#[tokio::test]
+async fn ownerships_for_storage_failure_is_not_none() {
+    let fixture = new_fixture_with_db(
+        "ownfail",
+        Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap()),
+    )
+    .await;
+    fixture.seed_bot("ownfail", "bot", 1).await;
+    fixture
+        .grant_edge("ownfail", "bot", "human_owner", BotAccessRelation::Owner)
+        .await;
+    fixture
+        .db
+        .execute(DbStatement::new("DROP TABLE edge_grants"))
+        .await
+        .expect("drop edge_grants to simulate storage failure");
+    assert!(
+        fixture.store.ownerships_for(&["bot".to_string()]).await.is_err(),
+        "storage failure must error, never degrade to None"
+    );
+}
+
 #[tokio::test]
 async fn sparse_pairs_do_not_read_unrequested_cross_product_edges() {
     let db = Arc::new(CountingDb { inner: Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap()),
