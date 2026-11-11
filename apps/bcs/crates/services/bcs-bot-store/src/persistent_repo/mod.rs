@@ -33,6 +33,7 @@ use super::{BotInfo, RegisteredBotInner};
 mod agent_registration;
 mod bot_repo_port;
 mod caller_config;
+mod candidate_friend_set;
 mod control_plane;
 mod profile;
 mod registration_create;

@@ -7,9 +7,9 @@ LLMRouter 协议测试
 import pytest
 from typing import Protocol
 
-from src.domain.services.llm_router import LLMRouter
-from src.domain.models.model_profile import ModelProfile, ModelTier
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.services.llm_router import LLMRouter
+from app.domain.models.model_profile import ModelProfile, ModelTier
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
 
 class TestLLMRouterProtocol:

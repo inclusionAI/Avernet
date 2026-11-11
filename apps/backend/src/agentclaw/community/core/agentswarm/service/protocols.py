@@ -27,6 +27,12 @@ class SubmitRunRequest:
     idempotency_key: str | None = None
     owner_id: str = ""
     run_options: RunOptions = field(default_factory=RunOptions)
+    identity_bot_id: str | None = None
+    """The Bot whose passport identity this run's Bot agents inherit.
+
+    ``None`` keeps the ordinary flow, where each Bot agent applies for its own
+    passport and may park at the human authorization gate.
+    """
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,16 @@ class BotAuthorizationSource(Protocol):
     descriptor the host adapter reports, so there is exactly one
     source of truth and zero copied state.
     """
+
+    @abstractmethod
+    def identity_source(self, *, owner_id: str, bot_id: str) -> str | None:
+        """The agent code of a Bot that may serve as an identity source.
+
+        ``None`` when the Bot does not exist, is not owned by ``owner_id``, or
+        holds no issued passport. The service uses this to refuse a submit
+        before any agent row is written, without importing the bot repository
+        itself (D17/D35).
+        """
 
     @abstractmethod
     def authorization(self, *, owner_id: str, bot_id: str) -> BotAuthorizationDescriptor | None:
@@ -253,6 +269,35 @@ class AgentSwarmRunNotFoundError(Exception):
 
 class AgentSwarmConfigError(Exception):
     """Fail-clear submit refusal: the LLM config is missing/empty (400-class)."""
+
+
+class IdentitySourceRequired(Exception):
+    """A submit named no identity source (400-class).
+
+    Every agentswarm Bot agent runs under an existing Bot's passport
+    identity, so a submit without one cannot be served at all — there is no
+    approval-gated path. Refused before any row is written.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "agentswarm submit requires identity_bot_id: name the Bot whose "
+            "passport identity this run's Bot agents inherit"
+        )
+
+
+class IdentitySourceInvalid(Exception):
+    """A named identity source cannot supply identity (422-class).
+
+    The Bot does not exist, is not owned by the run's owner, or holds no
+    issued passport. Distinct from :class:`IdentitySourceRequired`, which is
+    about the field being absent rather than wrong.
+    """
+
+    def __init__(self, bot_id: str, reason: str) -> None:
+        self.bot_id = bot_id
+        self.reason = reason
+        super().__init__(f"identity source {bot_id!r} {reason}")
 
 
 class TenantRunLimitExceeded(Exception):

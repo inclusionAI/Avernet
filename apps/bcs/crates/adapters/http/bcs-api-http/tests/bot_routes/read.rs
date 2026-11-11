@@ -65,10 +65,8 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
         );
     }
     assert_eq!(candidates_status, StatusCode::OK);
-    assert_eq!(
-        response_json(candidates).await["data"]["items"][0]["bot"]["kind"],
-        "bot"
-    );
+    let candidates_body = response_json(candidates).await;
+    assert_eq!(candidates_body["data"]["items"][0]["bot"]["kind"], "bot");
 
     let eligible_candidates = app
         .clone()
@@ -80,6 +78,11 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
         .await
         .expect("eligible candidates response");
     assert_eq!(eligible_candidates.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(eligible_candidates).await["data"],
+        candidates_body["data"],
+        "the deprecated alias must return the canonical candidates DTO"
+    );
 
     let searched = app
         .clone()
@@ -240,6 +243,38 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     let mine = mine.as_ref().expect("mine command");
     assert_eq!(mine.kind, Some(BotKind::Human));
     assert_eq!(mine.reachability, Some(BotReachability::Unreachable));
+}
+
+#[tokio::test]
+async fn candidate_routes_reject_a_missing_principal() {
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
+
+    for uri in [
+        "/openapi/v1/collaboration/bots/human_staff-1/candidates",
+        "/openapi/v1/collaboration/bots/human_staff-1/eligible-candidates",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(anonymous_request("GET", uri, Value::Null))
+            .await
+            .expect("anonymous candidate response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+        assert_eq!(
+            response_json(response).await["data"]["error_code"],
+            "unauthenticated",
+            "{uri}"
+        );
+    }
+
+    assert!(service.candidates.lock().expect("candidates lock").is_none());
+    assert!(
+        service
+            .eligible_candidates
+            .lock()
+            .expect("eligible candidates lock")
+            .is_none()
+    );
 }
 
 #[tokio::test]

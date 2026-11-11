@@ -1,6 +1,8 @@
+import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type { PublicGroup, PublicGroupMember } from '@/domain/collaborationSquare/types';
 
 interface GroupMembersModalProps {
@@ -26,17 +28,14 @@ function getRoleBadge(role: string, typeLabel?: string): { label: string; tone: 
   return { label: '成员', tone: 'primary' };
 }
 
-/** 与 MemberList 一致的首字母圆标头像：bot 主色软底、human brand 软底。 */
+/** 优先展示详情头像；Bot 缺省头像与 Bot 管理共用固定种子，用户仍回退首字母。 */
 function MemberAvatar({ member }: { member: PublicGroupMember }) {
+  const avatarUrl =
+    member.type === 'bot' ? resolveBotAvatarUrl(member.avatarUrl, member.id) : member.avatarUrl?.trim();
+  if (avatarUrl) return <Avatar name={member.displayName} src={avatarUrl} size={28} />;
   const symbol = member.displayName?.trim().charAt(0) || '?';
   return (
-    <div
-      className={
-        member.type === 'bot'
-          ? 'grid size-7 flex-none place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary'
-          : 'grid size-7 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand'
-      }
-    >
+    <div className="grid size-7 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand">
       {symbol}
     </div>
   );

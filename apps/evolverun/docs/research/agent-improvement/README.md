@@ -40,3 +40,7 @@ The accepted decisions remain authoritative:
 
 Future notes should extend or map these decisions rather than introduce a
 parallel Genome, promotion path, or experiment ledger.
+
+- [`benchmark/taxonomy-versioning.md`](benchmark/taxonomy-versioning.md): taxonomy
+  snapshot binding, reviewed migration, and unique-question versus label-hit
+  coverage accounting.

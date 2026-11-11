@@ -23,7 +23,8 @@ export function analysisWorkflowSnapshot(row: {scope_json: string; workflow_snap
 export async function hasAnalysisSnapshotColumn(db: IDatabase): Promise<boolean> {
   try { await db.query('SELECT workflow_snapshot_json FROM workflow_evolution_analysis_runs WHERE 1 = 0'); return true; }
   catch (error) {
-    if (/no such column: workflow_snapshot_json|unknown column ['`]?workflow_snapshot_json/i.test(String(error))) return false;
+    const message = String(error).toLowerCase();
+    if (message.includes('workflow_snapshot_json') && (message.includes('no such column') || message.includes('unknown column'))) return false;
     throw error;
   }
 }

@@ -159,6 +159,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 40, name: "bot_avatar" },
     SqliteMigration { version: 41, name: "group_agent_cards" },
     SqliteMigration { version: 42, name: "auth_session_version" },
+    SqliteMigration { version: 43, name: "delivery_session_lookup" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -550,6 +551,14 @@ async fn apply_sqlite_migration_body(
         // `session_id` / `session_revision` / `session_expires_at` columns plus
         // the one-time historical token/expiry clear.
         42 => add_sqlite_auth_session_version_schema(db).await,
+        // Session-scoped lookup of unfinished deliveries (Session deletion).
+        43 => {
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/043_delivery_session_lookup.sql"
+            )))
+            .await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }

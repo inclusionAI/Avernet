@@ -514,9 +514,9 @@ it.each([null, 0, -1, 1.5, '1', Number.MAX_SAFE_INTEGER + 1])('rejects invalid c
   expect((await repo.getGroup('parent', 'fanout')).group).toBeNull();
 });
 
-it.each([null, -2, 1.5, '1', Number.MAX_SAFE_INTEGER + 1])('still rejects an invalid explicit spec.version %s', async version => {
+it.each([null, -2, 1.5, '1', Number.MAX_SAFE_INTEGER + 1])('preserves opaque spec.version metadata %s', async version => {
   const g = group(); g.childWorkflow.version = version;
-  await expect(save(g)).rejects.toMatchObject({ statusCode: 400 });
+  expect((await save(g)).group).toEqual(g);
 });
 
 it('does not let a valid CAS replace the published version of a frozen group', async () => {

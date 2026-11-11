@@ -1,6 +1,7 @@
 import { recoveryTargetSnapshot } from "../agent-service.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRecoveryError } from "../errors.js";
+import { DingTalkCardNotDispatchedError } from "../../../notifications/dingtalk-sender.js";
 import type { RecoveryStoredTask, RecoveryTaskStore } from "../task-contracts.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { parseRequest } from "../validation.js";
@@ -41,6 +42,56 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
+  it.each(["none", "unknown", "performed", "accepted", "unknown_delivery", "missing_read"] as const)(
+    "closes an assessment as unnecessary only with verified evidence and no possible intervention (%s)", async scenario => {
+      const { service, records, agent } = setup();
+      const { task_id } = await service.create(request, actor);
+      const task = records.get(task_id)!;
+      task.interventionStatus = scenario === "unknown" || scenario === "performed" ? scenario : "none";
+      if (scenario === "accepted" || scenario === "unknown_delivery") {
+        task.delivery = { delivery: { status: scenario === "accepted" ? "accepted" : "unknown" } } as NonNullable<RecoveryStoredTask["delivery"]>;
+      }
+      task.evidence.push({ evidence_id: "read", tool_call_id: "read-call", source: "session_read",
+        location: "original session", excerpt: "等待审批人确认" });
+      if (scenario !== "missing_read") {
+        task.timeline.push({ event_id: "read-call", at_ms: 10, kind: "operation", actor: "agent",
+          summary: "检查原会话", payload: { raw_tool_call_id: "read-call", status: "succeeded" } });
+      }
+      const assessed = service.assess(task_id, task.version, { decision: "no_recovery_needed",
+        summary: "原会话按业务规则等待审批人确认", evidence_ids: ["read"] });
+
+      if (scenario !== "none") {
+        await expect(assessed).rejects.toMatchObject({ status: 422 });
+        expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", pending_results: [] });
+        expect(agent.release).not.toHaveBeenCalled();
+        return;
+      }
+      await assessed;
+      expect(records.get(task_id)).toMatchObject({
+        status: "completed", phase: "assess", completionReason: "no_recovery_needed",
+        judgment: { effect: "unknown", evidence_ids: ["read"] },
+        pending_results: [{ status: "completed", completion_reason: "no_recovery_needed", intervention_status: "none", effect: "unknown" }],
+      });
+      expect(agent.release).toHaveBeenCalledOnce();
+    });
+  it("retries card creation if the first request never left the notifier", async () => {
+    let now = 40000;
+    const { service, records, deps } = setup(false, () => now);
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.status = "waiting_owner";
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    const notify = vi.fn().mockRejectedValueOnce(new DingTalkCardNotDispatchedError(new Error("token unavailable"))).mockResolvedValueOnce(true);
+    deps.notifier.notifyOwnerRequest = notify;
+    await service.maintenance(); await flush();
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", dispatched: false });
+
+    now += 61000;
+    await service.maintenance(); await flush();
+    expect(notify.mock.calls.map(([input]) => input.updateOnly)).toEqual([false, false]);
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", state: "sent" });
+  });
+
   it("reconciles a crashed card send with bounded updates of the same instance, retaining unknown delivery", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);
@@ -314,6 +365,22 @@ describe("self-healing task orchestration", () => {
   it("does not reveal another Owner's task", async () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
+  });
+  it("lets a current Bot collaborator read a private task without granting operations or public sharing", async () => {
+    const { service, deps, records } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const canReadAsBotCollaborator = vi.fn().mockResolvedValue(true);
+    const reader = new SessionRecoveryTaskService({ ...deps, canReadAsBotCollaborator });
+    const collaborator = { userId: "member", isAdmin: false };
+    expect(await reader.detail(task_id, collaborator)).toMatchObject({
+      shared: false, canOperate: false, canManageShare: false,
+    });
+    expect(canReadAsBotCollaborator).toHaveBeenCalledExactlyOnceWith("member", request.target);
+    await expect(reader.setTaskShared(task_id, true, collaborator)).rejects.toMatchObject({ status: 403 });
+    await expect(reader.terminate(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
+    expect(records.get(task_id)?.shared).toBe(false);
+    canReadAsBotCollaborator.mockResolvedValue(false);
+    await expect(reader.detail(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
   });
   it("lists private linked tasks for administrators without exposing them to other users", async () => {
     const { service } = setup(); const { task_id } = await service.create(request, actor);

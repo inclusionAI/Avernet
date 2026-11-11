@@ -75,8 +75,12 @@ impl BcsServer {
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
+        let card_changes = (config.bcsfuse.enabled
+            && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2)
+            .then(|| Arc::new(bcs_fusion::CardChangeQueue::default()));
         let bot_core_arc=super::a2a_wiring::build_bot_core(
-            bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone());
+            bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone(),
+            card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -110,7 +114,7 @@ impl BcsServer {
                 crate::eventing_wiring::event_record_factory(&config, event_repo.clone());
             (
                 Arc::new(
-                    GroupCore::with_repo(repo.clone()).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
+                    GroupCore::with_repo(repo.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
                 ),
                 repo.clone() as Arc<dyn GroupMetricsSnapshotPort>,
                 repo as Arc<dyn GroupRepoPort>,
@@ -121,7 +125,8 @@ impl BcsServer {
         let router = Arc::new(MessageRouter::new());
 
         let (fusion, fuse_client) = create_fusion_service(&config);
-        register_late_lifecycles(&lifecycle, fuse_client.as_ref());
+        register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
+            control_plane_repo.clone(), sessions.clone(), &config);
 
         // F.1/F.2 dual-write wiring: relation_svc MUST be constructed BEFORE
         // friend_svc so it can be injected via `with_relation(...)`.
@@ -144,7 +149,7 @@ impl BcsServer {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -156,7 +161,7 @@ impl BcsServer {
                 outbound_url_guard.clone(),
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
-                build_bot_catalog_cleanup(&config),
+                build_bot_catalog_cleanup(&config, card_changes.as_ref()),
             );
         let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
@@ -734,7 +739,7 @@ impl BcsServer {
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
-        ));
+        ).with_message_flow(message_flow.clone()));
         let session_launch = Arc::new(SessionLaunchApplication::new(
             bot_registry.clone(),
             sessions.clone(),
@@ -792,6 +797,7 @@ impl BcsServer {
         .await?;
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
+            card_changes.clone(),
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,

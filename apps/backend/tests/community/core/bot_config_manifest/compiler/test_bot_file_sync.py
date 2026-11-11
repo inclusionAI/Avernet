@@ -35,7 +35,7 @@ def test_returns_none_when_entries_are_stored_content_only() -> None:
 
 
 def test_collects_a_bot_source_entry_with_path_and_excludes() -> None:
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "src_1"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "src_1", "owner_id": "u1"}})
     declared = compile_bot_file_sync(
         session,
         [{"path": "workspace/", "from": "from_bot", "excludes": ["secrets/", "large.bin"]}],
@@ -44,6 +44,7 @@ def test_collects_a_bot_source_entry_with_path_and_excludes() -> None:
     (entry,) = declared.entries
     assert entry == DesiredBotFileSync(
         source_bot_id="src_1",
+        source_owner_id="u1",
         path="workspace/",
         excludes=("secrets/", "large.bin"),
     )
@@ -53,7 +54,7 @@ def test_collects_a_bot_source_entry_with_path_and_excludes() -> None:
 def test_a_mixed_list_lands_only_the_bot_source_in_this_declaration() -> None:
     # A resources list with both a stored-content entry and a bot-source entry
     # walks both compilers; each owns only its own entry.
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s", "owner_id": "u1"}})
     declared = compile_bot_file_sync(
         session,
         [
@@ -70,7 +71,7 @@ def test_a_mixed_list_lands_only_the_bot_source_in_this_declaration() -> None:
 def test_a_non_mapping_entry_is_reported_as_a_failure_skipped() -> None:
     # A malformed entry never reaches DesiredBotFileSync; the compiler carries
     # the misuse as an EntryFailure rather than fetching from it.
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s", "owner_id": "u1"}})
     declared = compile_bot_file_sync(session, ["not-a-mapping"])
     assert declared is not None
     assert declared.entries == ()
@@ -79,7 +80,7 @@ def test_a_non_mapping_entry_is_reported_as_a_failure_skipped() -> None:
 
 
 def test_a_bot_source_entry_without_a_path_is_reported() -> None:
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s", "owner_id": "u1"}})
     declared = compile_bot_file_sync(session, [{"from": "from_bot"}])
     assert declared is not None
     assert declared.entries == ()
@@ -90,7 +91,7 @@ def test_a_bot_source_entry_without_a_path_is_reported() -> None:
 def test_a_bot_source_entry_whose_path_refuses_locally_is_reported() -> None:
     # ``resource_path_refusal`` rejects an absolute/escape path; the compiler
     # surfaces the refusal as an entry failure on that path.
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s", "owner_id": "u1"}})
     declared = compile_bot_file_sync(session, [{"path": "/abs/path", "from": "from_bot"}])
     assert declared is not None
     assert declared.entries == ()
@@ -102,7 +103,7 @@ def test_a_bot_source_entry_referencing_an_undeclared_name_is_skipped_not_failed
     # it as ``None`` and the entry is skipped whole — the undeclared-name
     # refusal belongs to the resources validator / schema, not this compiler,
     # which only reclassifies entries it can already see are bot-sourced.
-    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s"}})
+    session, _, _ = rig(sources={"from_bot": {"protocol": "bot", "bot_id": "s", "owner_id": "u1"}})
     assert compile_bot_file_sync(
         session, [{"path": "workspace/", "from": "absent_source"}]
     ) is None
@@ -114,7 +115,7 @@ def test_an_inline_bot_source_carries_its_bot_id_straight_through() -> None:
     session, _, _ = rig()
     declared = compile_bot_file_sync(
         session,
-        [{"path": "workspace/", "source": {"protocol": "bot", "bot_id": "inline_1"}}],
+        [{"path": "workspace/", "source": {"protocol": "bot", "bot_id": "inline_1", "owner_id": "u1"}}],
     )
     assert declared is not None
     (entry,) = declared.entries

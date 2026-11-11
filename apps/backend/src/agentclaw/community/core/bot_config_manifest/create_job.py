@@ -371,7 +371,13 @@ class BotCreateWithManifestHandler:
             return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
-            return self._before_the_bot_exists(payload)
+            # An inheriting Bot applied for no passport, so the authorization
+            # wait is skipped -- and only that: the pre-container phase must
+            # still land before creation.
+            return self._before_the_bot_exists(
+                payload,
+                authorized=bool(payload["spec"].get("identity_bot_id")),
+            )
         if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             return self._after_the_record_exists(payload, bot)
         return self._after_the_bot_exists(payload, bot)
@@ -392,7 +398,9 @@ class BotCreateWithManifestHandler:
 
     # ── before there is a bot ───────────────────────────────────────────────
 
-    def _before_the_bot_exists(self, payload: dict) -> TaskOutcome:
+    def _before_the_bot_exists(
+        self, payload: dict, *, authorized: bool = False
+    ) -> TaskOutcome:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
         user_id = str(payload["user_id"])
@@ -407,14 +415,19 @@ class BotCreateWithManifestHandler:
                 return self._cleanup_did_not_land(bot_id)
             return Fail(AUTHORIZATION_WINDOW_ELAPSED)
 
-        status = self._authorization_status(bot_id=bot_id, user_id=user_id)
-        if status is None:
+        # ``authorized`` -- an identity-inheriting Bot -- skips the poll only.
+        status = None if authorized else self._authorization_status(
+            bot_id=bot_id, user_id=user_id
+        )
+        if authorized:
+            pass
+        elif status is None:
             # Passport has no answer yet — the apply is still propagating. A
             # wait, not a fault.
             return Reschedule(POLL_DELAY_SECONDS)
-        if status == "PENDING":
+        if not authorized and status == "PENDING":
             return Reschedule(POLL_DELAY_SECONDS)
-        if status != "ISSUED":
+        if not authorized and status != "ISSUED":
             # Declined, expired, or anything else terminal the service reports.
             # Nothing was created, so the rows submission wrote are orphans that
             # only this can reach.

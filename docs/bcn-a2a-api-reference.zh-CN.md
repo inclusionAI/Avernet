@@ -221,18 +221,19 @@ Card URL 需允许无 Provider 凭据的读取，返回 JSON；BCN 不会把下�
 | 操作 | 接口 | 请求 |
 | --- | --- | --- |
 | 注册 | POST /a2a/agents | owners、可选 summary，以及 agent_card_url 或 agent_card 二选一；Provider 从管理 token 确定 |
-| 查询 Card | GET /a2a/agent-card | query：agent_name |
-| 更新 Card | PUT /a2a/agent-card | body：当前 agent_name，以及新 Card 来源二选一；不传 expected_revision |
-| 刷新 Card | POST /a2a/agent-card/refresh | body：agent_name；要求已有 URL 来源 |
-| 调用 | POST /a2a/providers/{provider_name}/bots/{bot_name}/chat-async | 与第 6 节聊天请求相同 |
+| 找回 Bot ID | GET /a2a/agents?provider_bot_ref=... | token 所属 Provider 下精确匹配平台稳定键 provider_bot_ref，返回 items（0 或 1 项） |
+| 查询 Card | GET /a2a/agents/{bot_id}/agent-card | 路径：注册返回的 bot_id |
+| 更新 Card | PUT /a2a/agents/{bot_id}/agent-card | body：完整 Card 来源二选一和/或 visibility；不重复传 bot_id，不传 expected_revision |
+| 刷新 Card | POST /a2a/agents/{bot_id}/agent-card:refresh | 空 body 或 {}；要求已有 URL 来源 |
+| 调用 | POST /a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async | 与第 6 节聊天请求相同 |
 | 查询运行 | GET /a2a/chat/runs/{run_id} | 支持原运行查询的等待参数 |
 | 取消运行 | POST /a2a/chat/runs/{run_id}/cancel | 无业务请求体 |
 
-provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。四个管理接口统一返回 provider_name、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。完整字段和错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表聊天调用接口的 bot_name 路径段使用同一个 Card.name。
+provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。四个管理接口统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。完整字段和错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
 
 取消是异步流程：请求后继续查询运行，直到 state 为 cancelled 或其他终态；不能把一次取消响应中的 cancelled=false 当作远端拒绝的充分依据。当前注册适用于 StaticBearer Provider；AgentPass 身份映射仍使用原身份感知注册入口。
 
-显式更新、刷新和注册均原子保存 Card 与 Bot 名称；同 Provider 名称冲突返回 409。旧 Bot 名称不保留占位，改名和软删除后可复用；改名后用新名称查询和调用，已有运行仍用 run_id。
+显式更新、刷新和注册均原子保存 Card 与 Bot 名称；Card.name 允许重复，Provider/ref 重复注册返回 409。旧 Bot 名称不保留占位，改名和软删除后可复用；改名后管理查询/更新/刷新继续用原 bot_id；Provider chat 调用使用稳定 provider_bot_ref，已有运行仍用 run_id。
 
 
 ### 4.1 兼容 ID 入口：Provider Admin 注册
@@ -264,7 +265,7 @@ curl --fail-with-body -sS "$BCN_BASE/providers/$PROVIDER_ID/bots" \
 
 | 请求字段 | 类型 | A2A 注册规则 |
 | --- | --- | --- |
-| `provider_bot_ref` | string，必填 | Provider 内稳定引用，唯一；1–256 字节，仅 ASCII 字母、数字、`_`、`-`、`.`、`:`；部分平台身份模式另有归一化规则 |
+| `provider_bot_ref` | string，必填 | Provider 内稳定引用，唯一；1–128 字节，仅 ASCII 字母、数字、`_`、`-`、`.`、`:`；部分平台身份模式另有归一化规则 |
 | `owners` | string[]，必填 | 当前必须恰好一个非空的有效所有者身份；不从 Card 推导 |
 | `agent_card_url` | string，条件必填 | 与 `agent_card` 二选一；非空，无首尾空白 |
 | `agent_card` | object，条件必填 | 完整原始 Card 对象；不能是字符串或 JSON 数组 |

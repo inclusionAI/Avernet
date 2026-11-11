@@ -1,5 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
-import BotCopyRetryAction from '@/components/BotWorkshop/BotCard/BotCopyRetryAction';
+import { BotCopyActionsCell } from '@/components/BotWorkshop/BotCard/BotCopyActionsCell';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
@@ -140,10 +140,9 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         align: 'end',
         sticky: 'right',
         cell: (bot) => {
-          // 复制失败(gated):仅 FAILED 折叠为重试入口；中间态不占用操作列，也不误导可重试。
-          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
-          if (copyState?.status === 'FAILED' && onRetryCopy)
-            return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,见 BotCopyActionsCell
+          if (copyState)
+            return <BotCopyActionsCell bot={bot} copyState={copyState} onRetryCopy={onRetryCopy} onAction={onAction} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (

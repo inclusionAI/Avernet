@@ -12,9 +12,7 @@ jest.mock('@umijs/max', () => ({ useNavigate: () => mockNavigate }));
 
 let mockRecent: NotificationSummary[] = [];
 let mockUnreadCount = 0;
-let mockNotifications:
-  | { loadRecent: jest.Mock; markOneRead: jest.Mock }
-  | undefined;
+let mockNotifications: { loadRecent: jest.Mock; markOneRead: jest.Mock } | undefined;
 jest.mock('@/hooks/useNotifications', () => {
   const loadRecent = jest.fn().mockResolvedValue(undefined);
   const markOneRead = jest.fn().mockResolvedValue(true);
@@ -109,5 +107,16 @@ describe('NotificationBell 规格透传', () => {
     mockUnreadCount = 0;
     const view = render(<NotificationBell />);
     expect(view.getByRole('button', { name: '通知中心' })).toHaveClass('h-8', 'w-8');
+  });
+});
+
+describe('通知弹层设计尺寸', () => {
+  it('使用原稿 353px 宽度，空列表下保留禁用的全部已读入口', async () => {
+    mockRecent = [];
+    mockUnreadCount = 0;
+    const view = render(<NotificationBell />);
+    openBell(view);
+    expect(await screen.findByRole('dialog')).toHaveClass('w-[353px]', 'rounded-xl');
+    expect(screen.getByRole('button', { name: '全部已读' })).toBeDisabled();
   });
 });

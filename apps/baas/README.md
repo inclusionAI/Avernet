@@ -1,5 +1,27 @@
 # secbaas-community
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BaaS owns the community lifecycle services and provider contracts; the OCB enterprise overlay registers enterprise providers and routers.
+
+- [Architecture decisions](docs/adr/README.md)
+- [E2E architecture](docs/e2e/architecture.md)
+- [Tests](tests/README.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 **SecBaaS Community Edition** — the open-source, single-box runtime of the TeamClaw AI bot platform.
 
 This package provides the core server that manages AI bot lifecycles: creation, sandbox provisioning, runtime scheduling, session management, API gateway, billing control, and third-party integrations.
@@ -158,6 +180,6 @@ test pipeline without the coverage gate.
 ## Project Conventions
 
 - **Python**: 3.12+, strict static typing (mypy + pyright)
-- **Imports**: Private modules (`_module`) never imported cross-package from public `__init__.py` files — see [src/secbaas/CLAUDE.md](src/secbaas/CLAUDE.md)
+- **Imports**: Consult the [architecture tests](tests/architecture/) for enforced import and export boundaries.
 - **Tests**: pytest with markers for `unit`, `integration`, `e2e`, `architecture`
 - **Config**: YAML-based with env-specific overlays

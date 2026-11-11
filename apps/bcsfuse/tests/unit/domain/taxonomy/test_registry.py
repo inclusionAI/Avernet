@@ -11,14 +11,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.domain.taxonomy.models import (
+from app.domain.taxonomy.models import (
     TaxonomyConfig,
     DomainsConfig,
     RiskSignalsConfig,
     RiskLevelKeywords,
     RiskSignalDefinition,
 )
-from src.domain.taxonomy.registry import (
+from app.domain.taxonomy.registry import (
     TaxonomyRegistry,
     get_taxonomy_registry,
     reset_taxonomy_registry,

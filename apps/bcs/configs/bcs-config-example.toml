@@ -406,6 +406,16 @@ client_secret_secret = "bcs-api-github-client-secret"
 # client_id = "example-github-client-id"
 # client_secret_secret = "bcs-api-github-client-secret"
 
+# --- BCS-only deployment: browser sessions without a Gateway Principal ------
+# When BCS runs standalone (no Gateway in front), the browser HttpOnly
+# bcs_session cookie authenticates V1 routes directly: use the OAuth-only shape
+# above, and list in `chain` only the providers this deployment actually runs.
+# The legacy [auth] chain and its config are NOT inherited by [api.auth]
+# (a present [api.auth] fully defines the V1 chain), with one documented
+# exception: the shared-cookie session key must still equal
+# auth.oauth.jwt_secret as described above. Secret fields remain logical
+# [secret] backend key names; never inline credential material here.
+
 # =============================================================================
 # Speaking Lease (spec §10.13.9)
 # Workbench speaking-lease idle window, granted at acquire/preempt and
@@ -444,6 +454,8 @@ client_secret_secret = "bcs-api-github-client-secret"
 # public_pem = "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
 
 [bcsfuse]
+# Switch registration and discovery together: v1 workers / v2 Cards.
+api_version = "v1"
 enabled = false
 url = "https://bcsfuse.example.com"
 # Secret-provider key containing the same value as BCSFuse's BCSFUSE_AUTH_TOKEN.

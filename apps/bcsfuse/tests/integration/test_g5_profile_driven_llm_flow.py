@@ -17,17 +17,17 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import Mock
-from src.domain.models.llm_response import LLMResponse, FinishReason
+from app.domain.models.llm_response import LLMResponse, FinishReason
 
-from src.domain.models.fusion_result import Perspective, FusionResult
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.services.g5_expert_enhancer import G5ExpertEnhancer
-from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.domain.models.fusion_result import Perspective, FusionResult
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.services.g5_expert_enhancer import G5ExpertEnhancer
+from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
 
 # =============================================================================
@@ -340,8 +340,8 @@ class TestG1G2BehaviorUnchanged:
         fake_profile_source,
     ):
         """测试 G5 enhancer 注入后 G1 行为不变"""
-        from src.application.services.group_fusion_service import GroupFusionService
-        from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+        from app.application.services.group_fusion_service import GroupFusionService
+        from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 
         # 创建 G5Enhancer
         enhancer = G5ExpertEnhancerImpl(
@@ -373,7 +373,7 @@ class TestG1G2BehaviorUnchanged:
         )
 
         # 执行 G1 模式
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="Test question",
@@ -399,8 +399,8 @@ class TestG1G2BehaviorUnchanged:
         fake_profile_source,
     ):
         """测试 G5 enhancer 注入后 G2 行为不变"""
-        from src.application.services.group_fusion_service import GroupFusionService
-        from src.application.services.conflict_alignment_service import ConflictAlignmentService
+        from app.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.conflict_alignment_service import ConflictAlignmentService
 
         # 创建 G5Enhancer
         enhancer = G5ExpertEnhancerImpl(
@@ -416,7 +416,7 @@ class TestG1G2BehaviorUnchanged:
         )
 
         # 创建 G2 用的 mock - 返回 FusionResult 而不是 Mock
-        from src.domain.models.fusion_result import FusionTiming
+        from app.domain.models.fusion_result import FusionTiming
         from datetime import datetime
 
         mock_conflict_service = Mock(spec=ConflictAlignmentService)
@@ -464,7 +464,7 @@ class TestG1G2BehaviorUnchanged:
         )
 
         # 执行 G2 模式
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="Test question",

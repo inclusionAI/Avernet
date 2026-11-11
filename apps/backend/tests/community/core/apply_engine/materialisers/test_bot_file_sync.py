@@ -44,7 +44,9 @@ def _ctx() -> ApplyContext:
 
 
 def _entry(path: str = "workspace/") -> DesiredBotFileSync:
-    return DesiredBotFileSync(source_bot_id="b_src", path=path, excludes=("secrets/",))
+    return DesiredBotFileSync(
+        source_bot_id="b_src", source_owner_id="o", path=path, excludes=("secrets/",)
+    )
 
 
 class _FakePort(BotFileSyncPort):
@@ -59,9 +61,10 @@ class _FakePort(BotFileSyncPort):
         self.excludes: tuple[str, ...] | None = None
         self.calls = 0
 
-    async def sync(self, *, target, source_bot_id, path, excludes) -> BotFileSyncResult:
+    async def sync(self, *, target, source_bot_id, source_owner_id, path, excludes) -> BotFileSyncResult:
         self.target = target
         self.source_bot_id = source_bot_id
+        self.source_owner_id = source_owner_id
         self.path = path
         self.excludes = excludes
         self.calls += 1

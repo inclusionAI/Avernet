@@ -978,8 +978,8 @@ class BotConfigManifestConfig:
             endpoint resolving to an internal address stays registrable
             (exact-host matches, sorted for a stable order). The name is the
             fetch road's; the value now serves the endpoint guard alone.
-        content_store_dir: The content store's blob root — relative paths
-            resolve against the process working directory, ``~`` expands.
+        content_store_dir: The local blob store's root (test / singlebox) — relative
+            paths resolve against the process working directory, ``~`` expands.
         teclaw_delivery_mode: The W8 delivery shape (see the field comment).
     """
 

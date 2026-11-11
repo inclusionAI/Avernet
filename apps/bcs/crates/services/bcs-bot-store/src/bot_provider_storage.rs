@@ -123,17 +123,14 @@ impl DbProviderStore {
         }
         if let Some(card) = card { crate::a2a::validate_registration_card(&record, card)?; }
         let env = resolve_env();
-        crate::a2a::ensure_provider_name_available(self.db.as_ref(), self.flavor, &env,
-            &record.provider_id, capabilities.name.as_deref().unwrap_or(&record.bot_uuid), None).await?;
+        if card.is_none() {
+            crate::a2a::ensure_provider_name_available(self.db.as_ref(), self.flavor, &env,
+                &record.provider_id, capabilities.name.as_deref().unwrap_or(&record.bot_uuid), None).await?;
+        }
         let info = serde_json::to_string(&capabilities)
             .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
         let mode = record.connection_mode.as_str();
         let mut steps = Vec::new();
-        if let Some(card)=card {
-            crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&env,card).await?;
-            steps.push(crate::a2a_source::provider_lock(self.flavor,&env,&record.provider_id));
-            steps.push(DbTransactionStep::Query(crate::a2a_source::conflict_query(self.flavor,&env,card)?));
-        }
         let insert=DbStatement::with_params(
                 "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \
                  visibility, status, actor_kind, is_deleted, registered_at, updated_at, agent_code, \
@@ -145,11 +142,6 @@ impl DbProviderStore {
                     capabilities.agent_code.clone().into(),
                     record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
                     env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]);
-        let insert=if card.is_some() {
-            let mut params=crate::a2a_source::bound_params(insert.params().to_vec());
-            params.push(crate::a2a_source::conflict_param(1));
-            DbStatement::with_transaction_params(format!("{} AND ?=0",insert.sql()),params)
-        } else {insert};
         steps.push(DbTransactionStep::ExecuteChecked {statement:insert,expected_affected_rows:1});
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
@@ -181,8 +173,7 @@ impl DbProviderStore {
             .await
         {
             Ok(_) => {}
-            Err(error) => { if let Some(card)=card {crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&env,card).await?;}
-                match error {
+            Err(error) => { match error {
                 DbError::Timeout => {
                     return Err(ServiceError::InternalError(format!(
                         "{}: the trusted Provider registration transaction \
@@ -617,6 +608,15 @@ impl BotProviderRepoPort for DbProviderStore {
         initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
     ) -> ServiceResult<()> {
         self.create_provider_bot_composite(record, capabilities, owner, token, &initialization, None, RegistrationAuthority::HumanToken).await
+    }
+
+    async fn create_provider_admin_bot_with_ownership(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities,
+        owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        self.create_provider_bot_composite(record, capabilities, owner, token, &initialization,
+            None, RegistrationAuthority::ProviderAdmin).await
     }
 
     async fn create_a2a_provider_bot_with_ownership(

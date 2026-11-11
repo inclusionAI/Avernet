@@ -41,10 +41,11 @@ class _RecordingPort(BotFileSyncPort):
         self._answer = answer
         self.calls = 0
 
-    async def sync(self, *, target, source_bot_id, path, excludes) -> BotFileSyncResult:
+    async def sync(self, *, target, source_bot_id, source_owner_id, path, excludes) -> BotFileSyncResult:
         self.calls += 1
         self.last_target = target
         self.last_source_bot_id = source_bot_id
+        self.last_source_owner_id = source_owner_id
         self.last_path = path
         self.last_excludes = excludes
         return self._answer
@@ -87,6 +88,7 @@ def test_the_delegating_port_calls_the_strategy_named_by_the_destination_engine(
         delegate.sync(
             target=_target("openclaw"),
             source_bot_id="b_src",
+            source_owner_id="o",
             path="workspace/",
             excludes=("secrets/",),
         )
@@ -95,6 +97,7 @@ def test_the_delegating_port_calls_the_strategy_named_by_the_destination_engine(
     assert result.ok is True
     assert openclaw.calls == 1
     assert openclaw.last_source_bot_id == "b_src"
+    assert openclaw.last_source_owner_id == "o"
     assert openclaw.last_path == "workspace/"
     assert openclaw.last_excludes == ("secrets/",)
     assert openclaw.last_target.engine_type == "openclaw"
@@ -111,6 +114,7 @@ def test_the_delegating_port_refuses_an_unregistered_dst_engine_via_noop() -> No
         delegate.sync(
             target=_target("teclaw"),
             source_bot_id="b_src",
+            source_owner_id="o",
             path="workspace/",
             excludes=(),
         )

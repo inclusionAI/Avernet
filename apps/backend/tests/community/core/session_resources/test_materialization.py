@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.session_resources.materialization import (
@@ -204,3 +207,64 @@ def test_handler_retries_when_engine_does_not_accept():
     result = handler.handle(_payload())
 
     assert isinstance(result, Retry)
+
+
+@pytest.mark.parametrize(
+    ("stored_time", "expected"),
+    [
+        (datetime(2026, 11, 10, 17, 48, 35), "2026-11-10T09:48:35Z"),
+        (datetime(2026, 1, 1, 0, 5, 0), "2025-12-31T16:05:00Z"),
+        (datetime(2026, 11, 10, 17, 48, 35, 123456), "2026-11-10T09:48:35.123456Z"),
+        (datetime(2026, 11, 10, 9, 48, 35, tzinfo=UTC), "2026-11-10T09:48:35Z"),
+        (
+            datetime(2026, 11, 10, 17, 48, 35, tzinfo=timezone(timedelta(hours=8))),
+            "2026-11-10T09:48:35Z",
+        ),
+        (
+            datetime(2026, 11, 10, 4, 48, 35, tzinfo=timezone(timedelta(hours=-5))),
+            "2026-11-10T09:48:35Z",
+        ),
+        (None, None),
+    ],
+)
+def test_handler_serializes_database_upload_time_as_utc(stored_time, expected, caplog):
+    vault = TokenVault(master_key="test-master-key")
+    transport = _Transport()
+    handler = SessionResourceMaterializeHandler(
+        _Resolver({"headers": {"Authorization": "Bearer private-token"}}),
+        transport,
+        _Repo(replace(_record(vault), gmt_create=stored_time)),
+        vault,
+    )
+    with caplog.at_level(logging.INFO, logger="session_resource.materialization"):
+        result = handler.handle(_payload())
+
+    assert isinstance(result, Complete)
+    assert transport.calls[0][1:3] == ("POST", "/api/resource-materializations")
+    assert transport.calls[0][3]["uploaded_at"] == expected
+    if stored_time is not None and stored_time.tzinfo is None:
+        assert "session_resource.materialize.upload_time.normalized" in caplog.text
+        assert "resource_id=sr_001" in caplog.text
+        assert "source_timezone=Asia/Shanghai" in caplog.text
+        assert f"uploaded_at={expected}" in caplog.text
+    assert "session_resource.materialize.dispatch.accepted" in caplog.text
+    assert "private-token" not in caplog.text
+    assert "test-master-key" not in caplog.text
+
+
+def test_handler_preserves_retry_after_normalizing_upload_time(caplog):
+    vault = TokenVault(master_key="test-master-key")
+    transport = _Transport(accepted=False)
+    handler = SessionResourceMaterializeHandler(
+        _Resolver(), transport,
+        _Repo(replace(_record(vault), gmt_create=datetime(2026, 11, 10, 17, 48, 35))),
+        vault,
+    )
+    with caplog.at_level(logging.INFO, logger="session_resource.materialization"):
+        result = handler.handle(_payload())
+
+    assert isinstance(result, Retry)
+    assert transport.calls[0][3]["uploaded_at"] == "2026-11-10T09:48:35Z"
+    assert "session_resource.materialize.upload_time.normalized" in caplog.text
+    assert "session_resource.materialize.dispatch.retry" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text

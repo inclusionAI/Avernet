@@ -481,6 +481,11 @@ pub trait ManagedMessageDeliveryService: Send + Sync {
     async fn lane_blocked(&self, row: &PersistedMessageDelivery) -> Result<bool, ManagedDeliveryError>;
     async fn queued_heads(&self, bot: &str, after: &str, limit: usize) -> Result<Vec<crate::core::message_delivery::DeliveryScheduleEntry>, ManagedDeliveryError>;
     async fn work_batch(&self, kind: crate::port::repo::message_delivery::DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError>;
+    /// `work_batch` that leaves out rows the scheduler has isolated.
+    async fn work_batch_excluding(&self, kind: crate::port::repo::message_delivery::DeliveryWorkBatch, now_ms: i64, after: &str, limit: usize, exclude: &[String]) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> {
+        let _ = exclude;
+        self.work_batch(kind, now_ms, after, limit).await
+    }
     async fn queue_statistics(&self) -> Result<Vec<crate::port::repo::message_delivery::DeliveryQueueStatistic>, ManagedDeliveryError>;
     async fn unfinished(&self) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError>;
     async fn update_wait_reasons(

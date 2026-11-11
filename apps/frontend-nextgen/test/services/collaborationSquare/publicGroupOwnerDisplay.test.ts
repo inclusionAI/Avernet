@@ -99,3 +99,26 @@ test('旧接口名称反查失败仍展示 UUID', async () => {
   const result = await new CollaborationSquareApiAdapter().listGroups();
   expect(result[0]?.ownerBotName).toBe('bot-1');
 });
+
+// 公开成员使用详情接口已提供的头像，不再另查 owner-only 头像接口。
+test.each(['bot', 'human'] as const)('成员映射保留 %s 的 avatar_url', async (actor_kind) => {
+  jest.spyOn(groups, 'getGroup').mockResolvedValue({
+    code: 20000,
+    data: group({
+      participants: [
+        {
+          actor_id: 'member-1',
+          actor_kind,
+          name: '成员',
+          role: 'consultant',
+          mode: 'auto',
+          avatar_url: 'https://example.com/member.png',
+        },
+      ],
+    }),
+  });
+  const result = await new CollaborationSquareApiAdapter().listGroupMembers('group-1');
+  expect(result.members).toEqual([
+    expect.objectContaining({ id: 'member-1', avatarUrl: 'https://example.com/member.png' }),
+  ]);
+});

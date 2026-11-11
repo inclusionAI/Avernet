@@ -12,7 +12,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from io import StringIO
 
-from src.infra.public.observability.storage_logging import (
+from app.infra.public.observability.storage_logging import (
     mask_value,
     mask_host,
     mask_user,
@@ -335,7 +335,7 @@ class TestNoInternalDependencies:
 
     def test_no_bcsfuse_internal_import(self):
         """Test that storage_logging doesn't import bcsfuse_internal."""
-        from src.infra.public.observability import storage_logging
+        from app.infra.public.observability import storage_logging
 
         module_file = storage_logging.__file__
         with open(module_file, 'r') as f:
@@ -350,8 +350,8 @@ class TestNoInternalDependencies:
             'mist',
             'mist_client',
             'layotto',
-            'src.infra.config.zdas_settings',
-            'src.infra.adapters.zdas_',
+            'app.infra.config.zdas_settings',
+            'app.infra.adapters.zdas_',
         ]
 
         for forbidden in forbidden_imports:
@@ -359,7 +359,7 @@ class TestNoInternalDependencies:
 
     def test_no_forbidden_imports_in_utility_module(self):
         """Test that bootstrap.oss_diagnostics doesn't have forbidden imports."""
-        from src.bootstrap import oss_diagnostics
+        from app.bootstrap import oss_diagnostics
 
         module_file = oss_diagnostics.__file__
         with open(module_file, 'r') as f:
@@ -384,7 +384,7 @@ class TestLoggingWithoutRealResources:
     def test_mysql_connection_failure_logging_masks_password(self, caplog, phase):
         """Driver errors must not expose configured credentials in logs/errors."""
         from mysql.connector import Error
-        from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+        from app.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
 
         secret = "not-a-real-token"
         pool = MySQLConnectionPoolProvider(
@@ -395,7 +395,7 @@ class TestLoggingWithoutRealResources:
             pool._pool = Mock()
             pool._pool.get_connection.side_effect = driver_error
         with patch(
-            "src.infra.public.database.mysql_connection_pool.pooling.MySQLConnectionPool",
+            "app.infra.public.database.mysql_connection_pool.pooling.MySQLConnectionPool",
             side_effect=driver_error,
         ), caplog.at_level(logging.ERROR):
             with pytest.raises(RuntimeError) as raised:
@@ -407,7 +407,7 @@ class TestLoggingWithoutRealResources:
 
     def test_qdrant_init_failure_logging_masks_secrets(self, caplog):
         """Test that Qdrant initialization logs don't expose secrets."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 
@@ -434,7 +434,7 @@ class TestRequiredFieldsPresence:
 
     def test_mysql_logs_include_all_required_fields(self, caplog):
         """Test that MySQL logs include all required fields from policy."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
 
@@ -466,7 +466,7 @@ class TestRequiredFieldsPresence:
 
     def test_qdrant_logs_include_all_required_fields(self, caplog):
         """Test that Qdrant logs include all required fields from policy."""
-        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+        from app.infra.public.vectorstores.qdrant_local_vector_store import (
             QdrantLocalVectorStore,
         )
 

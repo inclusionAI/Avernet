@@ -83,6 +83,15 @@ from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry 
 from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
     NasBotFileSyncPort,
 )
+from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+    BotConfigKindRegistry,
+)
+from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
+    RenderScreenSyncHandler,
+)
+from agentclaw.community.core.bot_management.render_screen_service_protocol import (
+    RenderScreenServiceProtocol,
+)
 from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.apply_engine.resource_files import (
@@ -214,6 +223,9 @@ class ApplyEngineModule(Module):
                 # dispatches; ARCA (openclaw) reaches the NAS-rsync strategy,
                 # every other engine the noop refusal.
                 file_sync=injector.get(BotFileSyncPort),
+                # The kind registry is engine-agnostic — every engine uses the
+                # same kind set, one unconditional registration on both bundles.
+                bot_config=injector.get(BotConfigKindRegistry),
             )
 
         return device_ports
@@ -279,6 +291,8 @@ class ApplyEngineModule(Module):
                 # capabilities table already refuses BOT_FILE_SYNC on teclaw at
                 # PUT; this is the same verdict the apply path honours.
                 file_sync=injector.get(BotFileSyncPort),
+                # Engine-agnostic kind registry — the same one device binds.
+                bot_config=injector.get(BotConfigKindRegistry),
             )
 
         return platform_ports
@@ -521,6 +535,26 @@ class ApplyEngineModule(Module):
         BOT_FILE_SYNC on teclaw at PUT, this is the belt-and-braces second
         refusal the apply path also honours)."""
         return DelegatingBotFileSyncPort(registry)
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_kind_registry(
+        self,
+        render_screen_service: RenderScreenServiceProtocol,
+    ) -> BotConfigKindRegistry:
+        """One handler per bot_config kind that has a real implementation.
+
+        v1 registers the ``render_screen`` handler only — the schema kind table
+        matches it, so a manifest naming any other kind is refused at PUT and
+        never reaches apply. Bot config sync is engine-agnostic, so the handler
+        is bound once and the same registry answers on both the ARCA and
+        teclaw port bundles. A future ``task_nav`` kind is one more row here
+        plus a handler module — the kind set is the registry's, not the
+        construct's."""
+        return BotConfigKindRegistry({
+            "render_screen": RenderScreenSyncHandler(render_screen_service),
+        })
 
     # ── who hears how an apply ended ───────────────────────────────────────
 

@@ -406,10 +406,35 @@ def _stand_in_for_provisioning(world) -> list[dict]:
                 "status": "ACTIVE",
                 "active_engine": kwargs.get("engine_type") or "openclaw",
                 "binding_id": bind_id,
+                # What the real create_bot stores: the agent code the run
+                # named (inherited from its source) and the identity source
+                # itself, so the assertions can prove both.
+                "ext": kwargs.get("ext"),
+                "identity_bot_id": kwargs.get("identity_bot_id"),
             }
         )
         created.append(record)
         return record
+
+    # A real identity source: the platform validates the run's source against
+    # the live row and its issued passport, so the stand-in world needs one.
+    source = bot_repo.insert(
+        {
+            "bot_id": IDENTITY_SOURCE,
+            "bot_name": IDENTITY_SOURCE,
+            "owner_id": OWNER,
+            "owner_name": OWNER,
+            "entity_id": OWNER,
+            "entity_type": "staff",
+            "creator_id": OWNER,
+            "bot_type": "personal",
+            "status": "ACTIVE",
+            "active_engine": "openclaw",
+            "ext": {"passport": {"agent_code": SOURCE_AGENT_CODE,
+                                 "status": "ISSUED"}},
+        }
+    )
+    assert source is not None
 
     from agentclaw.community.api.bot_service import BotServiceProtocol
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -526,6 +551,7 @@ class TestBotKindEndToEnd:
 
         service, worker, repos = _build_swarm(swarm_db, platform)
         req = SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
             tenant=TENANT,
             goal="e2e: a bot-kind agent answers through the platform",
             owner_id=OWNER,
@@ -534,6 +560,9 @@ class TestBotKindEndToEnd:
                     name="surveyor", role="swarm surveyor persona",
                     instructions="Be a concise surveyor.",
                     kind=dm.AgentKind.BOT,
+                    # The per-agent source the router populates from the
+                    # run-level field; this test builds the request directly.
+                    identity_bot_id=IDENTITY_SOURCE,
                 ),
             ),
         )
@@ -578,6 +607,19 @@ class TestBotKindEndToEnd:
         assert [a.name.split("_", 1)[0] for a in agents] == ["surveyor"]
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents), agents
 
+        # The gate never opens: the Bot inherited an existing identity, so
+        # there was no authorization for a human to grant. This is the whole
+        # point of the run-level identity source.
+        assert all(
+            a.bot_state is not dm.BotState.AWAITING_AUTHORIZATION
+            for a in agents
+        ), [a.bot_state for a in agents]
+        detail = service.get_run_detail(run_id, TENANT)
+        assert [
+            d for d in getattr(detail, "agents", ())
+            if getattr(d, "authorization", None) is not None
+        ] == []
+
         results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
         assert len(results) == 1
         assert results[0].payload == {"answer": "survey ok"}
@@ -600,6 +642,14 @@ class TestBotKindEndToEnd:
         assert bot["bot_desc"].startswith("surveyor-")
         # Id-format naming contract: bot_name IS the derived persona id.
         assert bot["bot_name"] == expected_id
+
+        # The agent's Bot runs under the SOURCE's code, recorded on the row --
+        # never one derived from its own id, which would fabricate an
+        # identity nothing issued.
+        assert bot["identity_bot_id"] == IDENTITY_SOURCE
+        code = ((bot.get("ext") or {}).get("passport") or {}).get("agent_code")
+        assert code == SOURCE_AGENT_CODE
+        assert code != expected_id
 
         job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
         assert job is not None and job.status is TaskStatus.SUCCEEDED
@@ -625,3 +675,11 @@ class TestBotKindEndToEnd:
         assert reset_frame["params"]["key"] == "agent:main:default"
         assert chat_frame["params"]["sessionKey"] == "agent:main:default"
         assert ws.closed
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"
+#: The agent code that source's passport carries; a Bot that inherits it must
+#: record exactly this, never one derived from its own id.
+SOURCE_AGENT_CODE = "fcfab821-6751-4d90-aa5d-7b988cb4189d"

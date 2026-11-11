@@ -55,6 +55,11 @@ pub struct RegisterProviderBotParams {
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
+    /// Ordinary ProviderBotCoreService identity registration accepts exactly one
+    /// owner; it does NOT initialize authority and rejects multi-user snapshots.
+    /// ProviderManagement splits its public snapshot before calling that Core.
+    /// A2aProviderRegistrationCoreService instead consumes the entire 1..=101
+    /// snapshot in its atomic identity/Card/authority composite.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     pub domains: Vec<String>,
@@ -326,12 +331,30 @@ pub trait ProviderBotCoreService: Send + Sync {
             request_id: None,
         })
     }
+    /// Create/replay identity and delivery metadata only. Requires exactly one
+    /// `params.owners` entry; use ProviderManagement for owner/manager initialization.
+    /// Multi-user input is InvalidOperation before any Bot writes, never ignored.
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,
         provider_admin_token: &str,
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)>;
+
+    /// Create a fresh multi-user registration atomically with its initial authority.
+    /// Initialized replays never synchronize managers. An existing version-0 Bot
+    /// with a nonempty snapshot conflicts: its earlier admission needs explicit
+    /// reconciliation, not a race with legacy owner-only migration.
+    /// Empty snapshots retain the identity-only compatibility entry above.
+    async fn register_provider_bot_with_initial_managers(
+        &self, provider_id: &str, provider_admin_token: &str,
+        params: RegisterProviderBotParams, initial_managers: Vec<String>,
+    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
+        if !initial_managers.is_empty() {
+            return Err(ServiceError::InternalError("atomic Provider authority registration is not configured".into()));
+        }
+        self.register_provider_bot_with_bot_uuid(provider_id, provider_admin_token, params).await
+    }
 
     async fn list_provider_bots(
         &self,

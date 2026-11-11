@@ -101,8 +101,8 @@ impl ProviderManagement {
 
     /// Authority ownership initialization for a freshly created admin Bot
     /// (spec §10.3 trusted delegation): the Provider-admin credential
-    /// authenticates the identity authority, so its declared single owner
-    /// initializes the owner edge the same way the trusted register chain
+    /// authenticates the identity authority, so its declared first owner and initial managers
+    /// initialize the authority edges the same way the trusted register chain
     /// does — but the audit actor records `Provider { provider_id }`
     /// (the Provider credential is its own principal), never the claimed
     /// Human. The Provider-registration legacy guard already refuses
@@ -114,6 +114,7 @@ impl ProviderManagement {
         bot_uuid: &str,
         owner: &str,
         provider_id: &str,
+        initial_managers: Vec<String>,
     ) -> ServiceResult<()> {
         let mutation = bcs_service_api::types::bot_authority::AuthorityMutation {
             mutation_id: uuid::Uuid::new_v4().to_string(),
@@ -122,7 +123,9 @@ impl ProviderManagement {
             },
         };
         self.registry
-            .initialize_ownership(bot_uuid, owner, mutation)
+            .initialize_provider_authority(bot_uuid, bcs_service_api::types::bot_authority::OwnershipInitialization {
+                owner_user_id: owner.to_string(), initial_manager_user_ids: initial_managers, mutation,
+            })
             .await?;
         Ok(())
     }
@@ -403,11 +406,8 @@ impl ProviderManagementService for ProviderManagement {
             )
             .await?;
         }
-        let owner = command
-            .owners
-            .first()
-            .map(|owner| owner.trim().to_string())
-            .unwrap_or_default();
+        let (owner, initial_managers) =
+            bcs_service_api::types::bot_authority::normalize_provider_owners(&command.owners)?;
         let duplicate_registration = self
             .provider_bot_core
             .get_provider_bot_binding_by_ref(&command.provider_id, &identity.provider_bot_ref)
@@ -415,14 +415,14 @@ impl ProviderManagementService for ProviderManagement {
             .is_some();
         let (binding, bot_runtime_token) = self
             .provider_bot_core
-            .register_provider_bot_with_bot_uuid(
+            .register_provider_bot_with_initial_managers(
                 &command.provider_id,
                 &command.provider_admin_token,
                 RegisterProviderBotParams {
                     webhook_url: command.webhook_url,
                     bot_name: command.name,
                     summary: command.summary,
-                    owners: command.owners,
+                    owners: vec![owner.clone()],
                     provider_bot_ref: command.provider_bot_ref,
                     domains: command.domains,
                     skills: command.skills,
@@ -431,33 +431,22 @@ impl ProviderManagementService for ProviderManagement {
                     connection_mode: command.connection_mode,
                     initial_caller: None,
                 },
+                initial_managers.clone(),
             )
             .await?;
-        // A duplicate binding only proves the Bot and binding rows
-        // committed — never that the authority composite survived its
-        // post-commit steps. A first attempt that failed between
-        // commit and the ensures leaves an uninitialized Bot behind,
-        // and the replay's `duplicate_registration = true` would then
-        // record success around ownership_version = 0. Retries must
-        // complete what the first attempt missed; `initialize_ownership`
-        // is idempotent with a creator-match guard and a plain owner
-        // echo for the agreeing state, so completing ONLY at
-        // ownership_version = 0 never pushes a completed (possibly
-        // transferred) Bot back at the original owner.
-        let complete_ownership = if !duplicate_registration {
-            true
-        } else {
-            self.registry
-                .ownership_governance_state(&binding.bot_uuid)
-                .await?
-                .map(|state| state.ownership_version == 0)
-                // No governance row is typed the same as unknown: the
-                // composite decides (it classifies never-creates).
-                .unwrap_or(true)
-        };
+        // A binding is not an authority-completion marker (Plugin Bots have no
+        // Gateway binding). Only version 0 can accept the creation snapshot;
+        // retries of initialized Bots preserve transfers and manager revocations.
+        let complete_ownership = self.registry
+            .ownership_governance_state(&binding.bot_uuid)
+            .await?
+            .map(|state| state.ownership_version == 0)
+            .unwrap_or(true);
+        // Atomic multi-user admission already committed the Human/authority
+        // lifecycle, like A2A. Do not append retired creator-relation writes.
         if complete_ownership {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
-            self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id)
+            self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id, initial_managers)
                 .await?;
         }
         // Explicit avatar after the registration and ownership composite

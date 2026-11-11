@@ -3,7 +3,7 @@ import copy
 import uuid
 from urllib.parse import urlencode
 
-SOURCE = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v1.md"
+SOURCE = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md"
 
 
 def exercise(story, provider, original):
@@ -15,38 +15,35 @@ def exercise(story, provider, original):
     card["iconUrl"] = "https://example.test/icon.png"
     card["futureData"] = {"nested": [1, "preserved"]}
     card["capabilities"]["extensions"] = [{"uri": SOURCE, "required": False,
-        "params": {"agentId": uuid.uuid4().hex, "party": "first_party", "future": True}}]
+        "params": {"party": "first_party", "future": True}}]
 
-    def register(value, status=201):
-        return story.request("POST", "/a2a/agents", {"owners": [story.owner], "agent_card": value},
+    reference = "managed-" + uuid.uuid4().hex
+
+    def register(value, status=201, ref=None):
+        return story.request("POST", "/a2a/agents", {"provider_bot_ref": ref or reference, "owners": [story.owner], "agent_card": value},
                              token=admin, status=status)
 
     created = register(card)
     assert created["agent_card"] == card
     bindings = story.request("GET", "/providers/" + provider["provider_id"] + "/bots", token=admin)
     story.bots.append((provider, next(item for item in bindings["items"] if item["bot_uuid"] == created["bot_id"])))
-    assert register(card, 409)["error"]["code"] == "BOT_NAME_CONFLICT"
-    duplicate = copy.deepcopy(card)
-    duplicate["name"] += "-duplicate"
-    assert register(duplicate, 409)["error"]["code"] == "SOURCE_AGENT_CONFLICT"
-    names = {"agent_name": card["name"]}
-    for change in ("remove", "replace"):
-        changed = copy.deepcopy(card)
-        if change == "remove":
-            changed["capabilities"]["extensions"] = []
-        else:
-            changed["capabilities"]["extensions"][0]["params"]["agentId"] = uuid.uuid4().hex
-        response = story.request("PUT", "/a2a/agent-card", {**names, "agent_card": changed}, token=admin, status=409)
-        assert response["error"]["code"] == "SOURCE_AGENT_CHANGE_NOT_ALLOWED"
+    assert register(card, 409)["error"]["code"] == "PROVIDER_BOT_REF_CONFLICT"
+    other = register(card, ref=reference + "-other")
+    assert other["bot_id"] != created["bot_id"]
+    bindings = story.request("GET", "/providers/" + provider["provider_id"] + "/bots", token=admin)
+    story.bots.append((provider, next(item for item in bindings["items"] if item["bot_uuid"] == other["bot_id"])))
+    control = "/a2a/agents/" + created["bot_id"] + "/agent-card"
     changed = copy.deepcopy(card)
     changed["name"] += "-renamed"
     changed["capabilities"]["extensions"][0]["params"]["party"] = "third_party"
-    updated = story.request("PUT", "/a2a/agent-card", {**names, "agent_card": changed}, token=admin)
+    updated = story.request("PUT", control, {"agent_card": changed}, token=admin)
     assert updated["bot_id"] == created["bot_id"] and updated["agent_card"] == changed
-    story.request("GET", "/a2a/agent-card?" + urlencode(names), token=admin, status=404)
-    fetched = story.request("GET", "/a2a/agent-card?" + urlencode({"agent_name": changed["name"]}), token=admin)
+    fetched = story.request("GET", control, token=admin)
     assert fetched == updated
-    story.request("GET", "/a2a/agent-card?bot_name=legacy", token=admin, status=400)
+    found = story.request("GET", "/a2a/agents?" + urlencode({"provider_bot_ref": reference}), token=admin)
+    assert len(found["items"]) == 1 and found["items"][0]["bot_id"] == created["bot_id"]
+    story.request("PUT", control, {"agent_name": changed["name"], "agent_card": changed}, token=admin, status=400)
+    story.request("GET", control + "?bot_name=legacy", token=admin, status=400)
 
     # Each case isolates one invalid declaration; none may create a Bot.
     for key, value, code in [
@@ -86,8 +83,8 @@ def exercise(story, provider, original):
     bad = copy.deepcopy(card)
     bad["supportedInterfaces"][0]["protocolVersion"] = "9.9"
     assert register(bad, 422)["error"]["code"] == "CARD_INTERFACE_UNSUPPORTED"
-    result = story.request("POST", "/a2a/agents", {"owners": [], "agent_card": card}, token=admin, status=422)
+    result = story.request("POST", "/a2a/agents", {"provider_bot_ref": reference + "-invalid", "owners": [], "agent_card": card}, token=admin, status=422)
     assert result["error"]["code"] == "INVALID_OWNER"
-    result = story.request("POST", "/a2a/agents", {"owners": [story.owner], "agent_card": card,
+    result = story.request("POST", "/a2a/agents", {"provider_bot_ref": reference + "-invalid", "owners": [story.owner], "agent_card": card,
         "agent_card_url": story.peer.base + "/agent-card.json"}, token=admin, status=422)
     assert result["error"]["code"] == "CARD_SOURCE_INVALID"

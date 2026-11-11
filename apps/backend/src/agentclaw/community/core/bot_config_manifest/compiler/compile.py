@@ -36,6 +36,9 @@ from agentclaw.community.core.bot_config_manifest.compiler.baselines import (
 from agentclaw.community.core.bot_config_manifest.compiler.declared import declared_entries
 from agentclaw.community.core.bot_config_manifest.compiler.entries.cli_tools import compile_cli_tools
 from agentclaw.community.core.bot_config_manifest.compiler.entries.engine_config import compile_engine_config
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_config import (
+    compile_bot_config,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
@@ -165,6 +168,14 @@ class ManifestCompiler(DesiredStateCompiler):
             and isinstance(manifest, Mapping)
             and "engine_config" in manifest
         )
+        # ``bot_config`` is a mapping-valued Category like ``engine_config``:
+        # its own gate, not the list categories' ``declared(construct)``, and
+        # carries the whole kind mapping on one entry.
+        bot_config_declared = (
+            (only is None or Category.BOT_CONFIG in only)
+            and isinstance(manifest, Mapping)
+            and "bot_config" in manifest
+        )
         # Compiled in apply order, so fetches happen in the order the report lists.
         kwargs = dict(resolver=self._resolver, content=self._content)
         return DesiredState(
@@ -184,6 +195,7 @@ class ManifestCompiler(DesiredStateCompiler):
             ),
             mcp=compile_mcp(mcp) if mcp is not None else None,
             engine_config=compile_engine_config(manifest.get("engine_config")) if engine_config_declared else None,
+            bot_config=compile_bot_config(manifest.get("bot_config")) if bot_config_declared else None,
             cli_tools=await compile_cli_tools(session, cli_tools, **kwargs) if cli_tools is not None else None,
         )
 

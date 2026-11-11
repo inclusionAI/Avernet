@@ -61,8 +61,13 @@ pub(super) fn build_use_case_bundle(
     // gates (F4, spec §8.3).
     session_authorization: Arc<dyn bcs_service_api::core::SessionAuthorizationCoreService>,
 ) -> UseCaseBundle {
-    let candidate_search =
-        build_candidate_search_bindings(config, bot_registry.clone(), friend.clone(), fuse_client);
+    let candidate_search = build_candidate_search_bindings(
+        config,
+        bot_registry.clone(),
+        friend.clone(),
+        fuse_client,
+        Some(provider_control_plane.clone()),
+    );
     let actor_directory = bcs_bot::ActorDirectory::new(
         bot_registry.clone(),
         friend.clone(),

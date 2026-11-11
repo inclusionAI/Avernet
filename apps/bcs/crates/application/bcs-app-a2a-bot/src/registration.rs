@@ -12,8 +12,8 @@ impl A2aBotManagement {
     pub(super) async fn register_admin(&self, command: RegisterProviderBotCommand,
         source: A2aCardSource, now_ms: i64) -> ServiceResult<RegisterProviderBotOutcome> {
         self.authorize(&command.provider_id, &command.provider_admin_token).await?;
+        bcs_service_api::types::bot_authority::normalize_provider_owners(&command.owners)?;
         if command.connection_mode != ProviderBotConnectionMode::Gateway || command.webhook_url.is_some()
-            || command.owners.len() != 1 || command.owners[0].trim().is_empty()
             || (!command.name.is_empty() && (!(2..=64).contains(&command.name.chars().count()) || command.name!=command.name.trim()))
             || now_ms < 0 {
             return Err(invalid("A2A registration requires gateway, one owner and a valid Card source without webhook_url"));

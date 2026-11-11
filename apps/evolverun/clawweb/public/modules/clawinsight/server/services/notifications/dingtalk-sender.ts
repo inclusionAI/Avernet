@@ -23,6 +23,13 @@ function describeNetworkError(error: unknown): string {
   return detail ? `${error.message} (${detail})` : error.message;
 }
 
+export class DingTalkCardNotDispatchedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "DingTalk card request could not be prepared", { cause });
+    this.name = "DingTalkCardNotDispatchedError";
+  }
+}
+
 export class DingTalkNotificationSender {
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
@@ -96,12 +103,19 @@ export class DingTalkNotificationSender {
   }
 
   private async cardRequest(method: string, path: string, input: Record<string, unknown>, params: Record<string, string>): Promise<Record<string, unknown>> {
-    if (!this.enabled) throw new Error("DingTalk notification is not configured");
-    if (Object.entries(params).some(([key, value]) => Buffer.byteLength(key) > 100 || typeof value !== "string" || Buffer.byteLength(value) > 1024)) throw new Error("DingTalk card parameters exceed platform limits");
-    const token = await this.getAccessToken();
+    let token: string;
+    let payload: string;
+    try {
+      if (!this.enabled) throw new Error("DingTalk notification is not configured");
+      if (Object.entries(params).some(([key, value]) => Buffer.byteLength(key) > 100 || typeof value !== "string" || Buffer.byteLength(value) > 1024)) throw new Error("DingTalk card parameters exceed platform limits");
+      payload = JSON.stringify(input);
+      token = await this.getAccessToken();
+    } catch (error) {
+      throw new DingTalkCardNotDispatchedError(error);
+    }
     const response = await fetch(`${this.config.apiBaseUrl}${path}`, { method,
       headers: { "Content-Type": "application/json", "x-acs-dingtalk-access-token": token },
-      body: JSON.stringify(input), signal: AbortSignal.timeout(10000) });
+      body: payload, signal: AbortSignal.timeout(10000) });
     const body = await response.json() as Record<string, unknown>;
     if (!response.ok || body.success === false) throw new Error(`DingTalk card request failed (HTTP ${response.status})`);
     return body;

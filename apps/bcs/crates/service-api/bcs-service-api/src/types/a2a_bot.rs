@@ -38,10 +38,11 @@ pub enum A2aRegistrationVisibility {
     #[default]
     Protected,
     Public,
+    Private,
 }
 impl A2aRegistrationVisibility {
     pub fn as_str(self) -> &'static str {
-        match self { Self::Protected => "protected", Self::Public => "public" }
+        match self { Self::Protected => "protected", Self::Public => "public", Self::Private => "private" }
     }
 }
 

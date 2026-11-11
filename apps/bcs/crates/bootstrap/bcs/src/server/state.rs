@@ -211,12 +211,15 @@ impl Default for BcsServerState {
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
+        let card_changes = (config.bcsfuse.enabled
+            && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2)
+            .then(|| Arc::new(bcs_fusion::CardChangeQueue::default()));
         let bot_core_arc: Arc<BotCore> = Arc::new(BotCore::with_provider_repos(
             bot_repo,
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
         // friend_store and provider_management so it can be injected into both.
@@ -228,7 +231,7 @@ impl Default for BcsServerState {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -240,7 +243,7 @@ impl Default for BcsServerState {
                 outbound_url_guard.clone(),
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
-                build_bot_catalog_cleanup(&config),
+                build_bot_catalog_cleanup(&config, card_changes.as_ref()),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -259,7 +262,7 @@ impl Default for BcsServerState {
         let group_metrics_snapshot: Arc<dyn GroupMetricsSnapshotPort> = group_repo.clone();
         let group_repo_for_session: Arc<dyn GroupRepoPort> = group_repo.clone();
         let sessions = Arc::new(
-            GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
+            GroupCore::with_repo(group_repo).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
         let fusion = Arc::new(LocalFusionService::new(config.bots_base_dir.clone()));
@@ -576,7 +579,7 @@ impl Default for BcsServerState {
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
-        ));
+        ).with_message_flow(message_flow.clone()));
         let session_launch = Arc::new(SessionLaunchApplication::new(
             bot_registry.clone(),
             sessions.clone(),
@@ -604,6 +607,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             friend_store.clone(),
             None,
+            Some(provider_control_plane.clone()),
         );
         let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> =
             Arc::new(bcs_bot::ActorDirectory::new(
@@ -629,6 +633,7 @@ impl Default for BcsServerState {
         .expect("default Eventing configuration must initialize");
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
+            card_changes.clone(),
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,

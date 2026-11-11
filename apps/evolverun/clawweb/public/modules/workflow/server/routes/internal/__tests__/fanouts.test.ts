@@ -32,7 +32,12 @@ const save = () => request(groupUrl, { group: group(), expectedRevision: null, p
 it('mounts strict group reads and writes with revision conflict status', async () => {
   expect(await request(groupUrl)).toEqual({ status: 200, body: { success: true, data: { group: null, parentStatus: 'running' } } });
   expect(await save()).toMatchObject({ status: 200, body: { success: true, data: { group: { revision: 0 }, parentStatus: 'running' } } });
-  expect(await save()).toMatchObject({ status: 409, body: { success: false } });
+  expect(await save()).toMatchObject({ status: 200, body: { success: true } });
+  const changed = group(); changed.children[0].status = 'running';
+  expect(await request(groupUrl, { group: changed, expectedRevision: null })).toMatchObject({ status: 409, body: { success: false } });
+  const rows = f.raw.prepare("SELECT message FROM run_logs WHERE flow_id='parent' AND node_id='fanout' ORDER BY id").all() as Array<{ message: string }>;
+  expect(rows.map(row => JSON.parse(row.message).recovery)).toEqual(['reloaded_equivalent_state', 'conflict_retained']);
+  expect(JSON.parse(rows[1].message)).toMatchObject({ httpStatus: 409, code: 'FANOUT_REVISION_CONFLICT', stage: 'save_group' });
   expect(await request(groupUrl, { group: group() })).toMatchObject({ status: 400, body: { success: false } });
 });
 

@@ -47,7 +47,7 @@ BCN 使用的 A2A 方法、请求格式及流式处理要求见第 5 节。
 
 本文使用 Provider 管理接口完成注册，不需要另外申请注册链接或 scoped 注册 token。
 
-`provider_name` 使用小写英文字母、数字、连字符或下划线，以字母开头，长度 1～64，在部署环境内唯一，注册后保持稳定。`agent_name` 直接取 AgentCard.name，支持中文，长度 2～64 个字符，不含首尾空白或控制字符，在同一 Provider 内区分大小写且唯一，无需单独填写；实际 Agent 调用地址由 AgentCard 提供。
+`provider_name` 使用小写英文字母、数字、连字符或下划线，以字母开头，长度 1～64，在部署环境内唯一，注册后保持稳定。`agent_name` 直接取 AgentCard.name，支持中文，长度 2～64 个字符，不含首尾空白或控制字符，保留大小写、允许同名，无需单独填写；实际 Agent 调用地址由 AgentCard 提供。
 
 ### 准备 AgentCard
 
@@ -112,36 +112,21 @@ Card 地址和 A2A 调用接口均需允许 BCN 不携带应用层凭据访问�
 
 如果一个服务部署了多个 Agent，请给每个 Agent 配置可区分的接口路径，或使用双方约定的 tenant 路由。不要只靠共享凭据判断请求发给哪个 Agent。
 
-### 保留来源平台的 Agent ID
+### 平台身份与来源分类
 
-如果 Agent 在原平台已有 ID，可以通过以下数据扩展登记，放在 `capabilities.extensions` 数组中。它不替代 BCN 内部 Bot ID，也不替代 Card.name。
+注册外层必填 provider_bot_ref（同一 Provider 唯一），不要放进 Card。Card.name 只用于展示，允许重复。BCS 返回 bot_id 与 provider_bot_ref；之后按 bot_id 管理，按 provider_bot_ref 找回或使用 Provider/ref 聊天入口。
+
+分类继续使用 capabilities.extensions 中的可选数据扩展，见 [source-agent/v2](specs/a2a/extensions/source-agent/v2.md)：
 
 ```json
 {
-  "uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v1.md",
+  "uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md",
   "required": false,
-  "params": {
-    "agentId": "agent-001",
-    "party": "first_party"
-  }
+  "params": {"party": "first_party"}
 }
 ```
 
-| 字段 | 填写说明 |
-| --- | --- |
-| uri | BCN 统一发布的扩展标识，所有接入平台原样填写同一个值；不是 Agent 服务地址或平台标识 |
-| required | 固定填写 false；不了解此扩展的客户端仍可调用 Agent |
-| params | 扩展数据对象 |
-| params.agentId | 来源平台分配的 Agent ID，1～256 个 Unicode 字符，无首尾空白或控制字符，保留大小写和前导零；同一 BCN Provider 下唯一 |
-| params.party | 可选来源分类：first_party（一方）、second_party（二方）、third_party（三方）；省略表示未分类 |
-
-以上 URI 是固定的扩展标识，对应 [来源扩展 v1 规范](specs/a2a/extensions/source-agent/v1.md)。所有接入方及部署环境使用同一值，不要求运行时访问该地址，Agent 升级也不需要修改它。
-
-来源分类以所属 Provider 为参照：一方为 Provider 自身提供，二方为与该 Provider 有直接合作关系的合作方提供，三方为该 Provider 接入的其他外部 Agent。分类由接入方声明，不代表 BCN 的认证、信任或权限等级。分类可随 Card 更新，agentId 仍保持稳定。
-
-注册接口无需另传 agentId：URL 注册从远端 Card 读取，内联注册从提交的 Card 读取。这个扩展可选，没有来源平台 ID 的 Agent 可以省略整个扩展；如声明则必须填写有效 agentId。Agent 改名不改变来源 ID。
-
-BCN 查询响应外层返回 `provider_name`、`agent_name`、`bot_id` 和 `agent_card`。Provider 归属取自 BCN 注册关联，不写进原始 Card；查询方通过外层 provider_name 和扩展中的 agentId 区分来源 Agent。不同 Provider 的 agentId 可以相同，agentId 单独不保证全局唯一，也不作为访问凭据。
+party 可省略，支持 first_party、second_party、third_party；不表示权限或信任等级，可修改或删除。通用 agentId 和旧 v1 扩展不再接受。
 
 ## 3. 注册 Agent
 
@@ -159,6 +144,7 @@ Content-Type: application/json
 
 ```json
 {
+  "provider_bot_ref": "order-agent-001",
   "owners": [
     "owner-user-id"
   ],
@@ -199,14 +185,15 @@ Content-Type: application/json
 
 | 字段 | 是否必填 | 说明 |
 | --- | --- | --- |
+| `provider_bot_ref` | 是 | Provider 内稳定唯一键，不从 Card 推导 |
 | `owners` | 是 | 当前填写一个有效的 BCN 所有者 ID |
 | `agent_card_url` | 与 agent_card 二选一 | BCN 从此地址读取 Card |
 | `agent_card` | 与 agent_card_url 二选一 | 直接提交完整 Card 对象，适合不单独发布 Card URL 的场景 |
 | `summary` | 否 | BCN 展示摘要；省略时初始值取 Card.description |
 
-BCN 会检查 Card 和接口声明，并从 Card.name 获取 Bot 名称；注册成功后返回 **`provider_name`、`agent_name` 和 `bot_id`**。Provider 管理 token 唯一绑定一个 Provider，BCN 从有效 token 确定注册归属；注册请求不传 provider_name。后续管理仅需填写 agent_name，无需获取内部 Provider/Bot ID。
+BCN 会检查 Card 和接口声明，并从 Card.name 获取 Bot 名称；注册成功后返回 **`provider_name`、`agent_name` 和 `bot_id`**。Provider 管理 token 唯一绑定一个 Provider，BCN 从有效 token 确定注册归属；注册请求不传 provider_name。接入方必须保存 bot_id，后续查询、更新、刷新使用该 ID；不按名称定位。丢失 ID 可用 provider_bot_ref 查询 `/a2a/agents?provider_bot_ref=...`。
 
-重启 Agent 服务时复用已有 Bot，不要重复注册。同一个 Provider 下提交的 Card.name 与已有 Bot 重名 会返回冲突。修改服务信息使用第 4 节的更新接口。
+重启 Agent 服务时复用已有 Bot，不要重复注册。同一 Provider 下重复 provider_bot_ref 返回冲突，不隐式覆盖；Card.name 可以重复。修改服务信息使用第 4 节的更新接口。
 
 ## 4. 更新 Agent 信息
 
@@ -214,18 +201,19 @@ Agent 升级或能力介绍变化后，可以更新 BCN 登记的 Card。这些�
 
 | 需要做什么 | 接口 |
 | --- | --- |
-| 查看已登记的 Card | GET /a2a/agent-card，名称放在查询参数中 |
-| 提交新的 Card URL 或完整 Card | PUT /a2a/agent-card，名称和 Card 来源放在 JSON 请求体中 |
-| 从已保存的 URL 立即重新读取 Card | POST /a2a/agent-card/refresh，名称放在 JSON 请求体中 |
+| 查看已登记的 Card | GET /a2a/agents/{bot_id}/agent-card，ID 放在路径中 |
+| 提交新的 Card URL 或完整 Card | PUT /a2a/agents/{bot_id}/agent-card，body 放 Card 来源和/或 visibility，不重复填写 ID |
+| 从已保存的 URL 立即重新读取 Card | POST /a2a/agents/{bot_id}/agent-card:refresh，空 body 或 {} |
+| 按平台键找回 ID | GET /a2a/agents?provider_bot_ref=...，返回 items（0 或 1 项），限定当前 Provider |
 
-查询示例（中文查询参数由 HTTP 客户端进行 URL 编码）：
+查询示例（bot_id 使用注册返回值）：
 
 ```http
-GET /a2a/agent-card?agent_name=订单助手
+GET /a2a/agents/{bot_id}/agent-card
 Authorization: Bearer <provider_admin_token>
 ```
 
-查询、更新和刷新均从 Provider 管理 token 确定归属，只需用必填的 `agent_name` 选择该 Provider 下的当前 Bot，不传 `provider_name`。这些接口只管理 token 所属 Provider；跨 Provider 的发现、搜索和业务调用仍按各自的目标选择及授权规则执行。
+查询、更新和刷新均从 Provider 管理 token 确定归属，使用路径中的 `bot_id` 选择该 Provider 下的 Bot，不传 `provider_name`。这些接口只管理 token 所属 Provider；跨 Provider 的发现、搜索和业务调用仍按各自的目标选择及授权规则执行。
 
 如果使用 URL 登记，只修改原地址的内容后，可以调用刷新接口；BCN 也会周期性重新读取。需要发布后立即生效时，请主动刷新。
 
@@ -233,7 +221,7 @@ Authorization: Bearer <provider_admin_token>
 
 ```json
 {
-  "agent_name": "订单助手",
+  "visibility": "protected",
   "agent_card_url": "https://agent.example.org/a2a/order-agent/agent-card.json"
 }
 ```
@@ -242,7 +230,7 @@ Authorization: Bearer <provider_admin_token>
 
 ```json
 {
-  "agent_name": "订单助手",
+  "visibility": "protected",
   "agent_card": {
     "name": "订单助手",
     "description": "查询订单状态",
@@ -263,19 +251,19 @@ Authorization: Bearer <provider_admin_token>
 }
 ```
 
-从已登记 URL 刷新时，向 `POST /a2a/agent-card/refresh` 提交：
+从已登记 URL 刷新时，向 `POST /a2a/agents/{bot_id}/agent-card:refresh` 提交：
 
 ```json
-{
-  "agent_name": "订单助手"
-}
+{}
 ```
+
+也可以省略请求体；不传 agent_name 或 bot_id。
 
 `agent_card_url` 和 `agent_card` 每次只能选一个。并发提交更新时，以最后成功写入的内容为准。
 
 直接提交 Card 是完整替换，不是部分字段修改。切换成内联 Card 后，旧 URL 会被清除，也不再自动刷新。这里更新的是 BCN 保存的信息，不会修改 Agent 服务端的文件。
 
-更新或刷新 Card 时，BCN 同步将 Bot 名称更新为 Card.name。若新名称与同一 Provider 下其他 Bot 重名，整个更新失败，保留原名称和 Card。改名成功后，后续请求需使用新名称；旧名称不再用于选择该 Bot，并可由其他 Bot 使用；软删除后名称同样释放。同一环境、同一 Provider 下的所有有效 Bot（包括非 A2A Bot）名称唯一。已有任务仍通过内部关联查询和取消，不会切换到新地址。
+更新或刷新 Card 时，BCN 同步将 Bot 名称更新为 Card.name。新名称可以与同一 Provider 下其他 Bot 重复。改名成功后，后续管理请求仍使用原 bot_id；旧名称可由其他 Bot 使用；软删除后名称同样释放。AgentCard 名称不承担唯一定位；平台身份 provider_bot_ref 不变。已有任务仍通过内部关联查询和取消，不会切换到新地址。
 
 ## 5. BCN 支持的 A2A 方法
 

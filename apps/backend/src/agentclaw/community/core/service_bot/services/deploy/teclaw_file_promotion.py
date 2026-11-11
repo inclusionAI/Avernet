@@ -151,6 +151,7 @@ class TeclawFilePromotion:
         # Stage-scoped per-bot segment isolates each publish snapshot.
         rel_root = f"{entity_type}_{entity_id}/{bot_id}_{publish_id}_{stage}/teclaw"
         out = PromotedRefs()
+        skipped_unreadable = 0
 
         for ns in self.NAMESPACES:
             entries = await device_fs.list_dir(ns, recursive=True)
@@ -180,20 +181,23 @@ class TeclawFilePromotion:
                         "out-of-namespace path %r; skipping", ns, engine_path,
                     )
                     continue
-                # Regenerable dependency/build dirs (``node_modules``) are not
-                # content and their symlinked entries (``*.js.map`` etc.) list but
-                # do not read — skip them so promotion neither bloats OSS nor
-                # hard-fails on an unreadable non-content file. No per-file log: a
-                # node_modules tree can hold tens of thousands of entries; the
-                # end-of-sweep summary covers what was actually staged.
+                # Regenerable dependency/build/cache dirs (``node_modules``,
+                # ``__pycache__``, ``.pytest_cache``) are not content and their
+                # entries may list but not read — skip them so promotion neither
+                # bloats OSS nor hard-fails on an unreadable non-content file.
+                # No per-file log: these trees can hold tens of thousands of
+                # entries; the end-of-sweep summary covers what was actually staged.
                 if _has_excluded_segment(engine_path):
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
                 if content is None:
-                    raise TeclawFilePromotionError(
-                        f"teclaw promotion: source file unreadable: {engine_path}"
+                    logger.warning(
+                        "[TeclawFilePromotion] skipping unreadable file: %s",
+                        engine_path,
                     )
+                    skipped_unreadable += 1
+                    continue
                 rel = logical[len(ns):].lstrip("/")  # "sub/x.csv"
                 ref_path = f"{rel_root}/{ns}/{rel}"
                 oss_key = f"{store_base}/{ref_path}"
@@ -223,9 +227,10 @@ class TeclawFilePromotion:
 
         logger.info(
             "[TeclawFilePromotion] staged bot=%s publish_id=%s stage=%s: "
-            "%d resource(s), %d identity file(s), %d cli tool(s)",
+            "%d resource(s), %d identity file(s), %d cli tool(s)%s",
             bot_id, publish_id, stage, len(out.resources), len(out.identity_files),
             len(out.cli_tools),
+            f", {skipped_unreadable} unreadable file(s) skipped" if skipped_unreadable else "",
         )
         return out
 

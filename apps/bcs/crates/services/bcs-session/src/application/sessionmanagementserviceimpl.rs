@@ -17,7 +17,7 @@ pub struct SessionManagementServiceImpl {
 pub struct SessionManagementWithRuntimeCleanup {
     pub(super) inner: Arc<dyn SessionManagementService>,
     pub(super) collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
-
+    pub(super) message_flow: Option<Arc<dyn bcs_service_api::MessageFlowService>>,
 }
 
 impl SessionManagementWithRuntimeCleanup {
@@ -29,7 +29,14 @@ pub fn new(
         Self {
             inner,
             collaboration_runtime,
+            message_flow: None,
         }
+    }
+
+    /// Session deletion also settles the Session's unfinished delivery queue.
+    pub fn with_message_flow(mut self, message_flow: Arc<dyn bcs_service_api::MessageFlowService>) -> Self {
+        self.message_flow = Some(message_flow);
+        self
     }
 }
 
@@ -192,6 +199,11 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
+        // Only an existing Session has a queue to settle.
+        let exists = match &self.message_flow {
+            Some(_) => self.inner.get(session_id).await?.is_some(),
+            None => false,
+        };
         self.collaboration_runtime
             .cancel_session_runs(session_id, "session_deleted")
             .await
@@ -200,6 +212,15 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                     "Failed to cancel active state-machine runs for deleted session '{session_id}': {error}"
                 )))
             })?;
+        // Settle the queue BEFORE removing the Session: a cleanup failure
+        // must fail the delete while the Session still exists, so retrying
+        // the delete retries the cleanup.
+        if let (true, Some(flow)) = (exists, &self.message_flow) {
+            flow.cancel_session_deliveries(session_id, "session_deleted").await
+                .map_err(|error| SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to cancel queued deliveries for deleted session '{session_id}': {error}"
+                ))))?;
+        }
         self.inner.delete(session_id).await
     }
 

@@ -17,24 +17,24 @@ import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from src.application.services.conflict_alignment_service import (
+from app.application.services.conflict_alignment_service import (
     ConflictAlignmentService,
     AnalysisResult,
 )
-from src.application.services.llm_conflict_analyzer import LLMConflictAnalyzer
-from src.application.services.llm_stance_extractor import LLMStanceExtractor
-from src.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.llm_conflict_analysis import (
+from app.application.services.llm_conflict_analyzer import LLMConflictAnalyzer
+from app.application.services.llm_stance_extractor import LLMStanceExtractor
+from app.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.llm_conflict_analysis import (
     LLMConflictAnalysis,
     LLMConflict,
     LLMAlignmentPoint,
     LLMConclusion,
     StanceAnalysis,
 )
-from src.domain.models.structured_conflict_analysis import StructuredConflictAnalysis
-from src.domain.models.stance_signal import StanceSignal
-from src.infra.observability.g2_metrics import reset_g2_metrics
+from app.domain.models.structured_conflict_analysis import StructuredConflictAnalysis
+from app.domain.models.stance_signal import StanceSignal
+from app.infra.observability.g2_metrics import reset_g2_metrics
 
 
 # ============================================
@@ -200,7 +200,7 @@ class TestThreeLayerFallback:
         )
 
         # When: 执行分析，所有层都启用
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             mock_ff.side_effect = lambda flag: flag in [
                 "ENABLE_G2_LLM_CONFLICT_ANALYSIS",
                 "ENABLE_G2_CONFLICT_DIMENSIONS",
@@ -261,7 +261,7 @@ class TestThreeLayerFallback:
         )
 
         # When: 执行分析
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             mock_ff.side_effect = lambda flag: flag in [
                 "ENABLE_G2_LLM_CONFLICT_ANALYSIS",
                 "ENABLE_G2_LLM_STANCE_EXTRACTION",
@@ -304,7 +304,7 @@ class TestThreeLayerFallback:
         )
 
         # When: 执行分析
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             mock_ff.side_effect = lambda flag: flag in [
                 "ENABLE_G2_LLM_CONFLICT_ANALYSIS",
                 "ENABLE_G2_CONFLICT_DIMENSIONS",
@@ -351,7 +351,7 @@ class TestThreeLayerFallback:
         )
 
         # When: 执行分析，Layer1禁用
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             # Layer1禁用，Layer2启用
             mock_ff.side_effect = lambda flag: flag == "ENABLE_G2_CONFLICT_DIMENSIONS"
             result = service.align(
@@ -383,7 +383,7 @@ class TestThreeLayerFallback:
         )
 
         # When: 所有高级层都禁用
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
             result = service.align(
                 question="产品希望快速上线，技术担忧质量",
                 perspectives=sample_perspectives,
@@ -417,7 +417,7 @@ class TestAnalysisResultFormat:
             signal_extractor=mock_signal_extractor,
         )
 
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             mock_ff.side_effect = lambda flag: flag in [
                 "ENABLE_G2_LLM_CONFLICT_ANALYSIS",
                 "ENABLE_G2_CONFLICT_DIMENSIONS",
@@ -455,7 +455,7 @@ class TestMetricsRecording:
         sample_perspectives,
     ):
         """测试Layer1成功时记录指标"""
-        from src.infra.observability.g2_metrics import get_g2_metrics
+        from app.infra.observability.g2_metrics import get_g2_metrics
 
         reset_g2_metrics()
 
@@ -465,7 +465,7 @@ class TestMetricsRecording:
             llm_analyzer=mock_llm_analyzer,
         )
 
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled') as mock_ff:
             mock_ff.side_effect = lambda flag: flag in [
                 "ENABLE_G2_LLM_CONFLICT_ANALYSIS",
                 "ENABLE_G2_CONFLICT_DIMENSIONS",
@@ -503,7 +503,7 @@ class TestEdgeCases:
             conflict_analyzer=mock_conflict_analyzer,
         )
 
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
             result = service.align(
                 question="测试问题",
                 perspectives=[],
@@ -539,7 +539,7 @@ class TestEdgeCases:
             conflict_analyzer=mock_conflict_analyzer,
         )
 
-        with patch('src.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
+        with patch('app.application.services.conflict_alignment_service.FeatureFlags.is_enabled', return_value=False):
             result = service.align(
                 question="测试问题",
                 perspectives=single_perspective,

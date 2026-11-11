@@ -8,6 +8,14 @@ user_config:
   task_dispatch:
     backend_url: "http://localhost:8888"
 
+  # The content store's bytes (core/content_store): this profile's object
+  # storage is a test double that keeps nothing, so its blob store is the
+  # local tree under this directory (di/modules/infrastructure/test/
+  # content_blob_store.py). Deployments keep the bytes in object storage and
+  # do not read this key.
+  bot_config_manifest:
+    content_store_dir: "./data/manifest_content"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests only. Real
   # employee ids never ship in community source; corp overlays carry production
   # ids. Endpoint tests authorize with "100000" (the doc-example placeholder).

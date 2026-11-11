@@ -9,6 +9,11 @@
 
 ## Ownership extension (2026-11-01)
 
+Current operational knowledge is maintained in the
+[manager-sync runbook](../../docs/flows/bot-manager-sync.md) and its linked
+Owner extension. This spec retains its recorded change baseline and validation
+history; read it for those decisions, not as evidence of the current deployment.
+
 The [ownership sync specification](../2026-11-01-bcs-ownership-sync/spec.md) and
 [operations guide](../../docs/bot-ownership-sync-operations.md) extend this
 managers-only baseline. Historical validation evidence below remains specific to

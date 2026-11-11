@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.domain.models.profiling_input import DocType
-from src.domain.models.profiling_result import (
+from app.domain.models.profiling_input import DocType
+from app.domain.models.profiling_result import (
     CapabilityLevel,
     ConstraintPolicy,
     SkillSource,

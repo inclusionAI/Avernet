@@ -180,6 +180,8 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
         "result_kind": "bot",
         "environment": "same_as_acting_bot",
         "exclude_self": True,
+        "viewer_visibility": {"human": "user_visibility", "bot": "visibility"},
+        "friend_source": "approved_connect_edge",
         "purpose_visibility": {
             "discovery": ["public", "protected"],
             "collaboration": ["public", "friend"],
@@ -196,6 +198,89 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
     assert candidate["properties"]["bot"]["properties"]["kind"]["const"] == "bot"
 
 
+def test_candidates_publish_viewer_visibility_and_edge_friend_source() -> None:
+    candidates = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"
+    )
+    alias = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+    )
+    description = candidates["description"]
+
+    assert candidates["x-avernet-behavior"]["friend_source"] == "approved_connect_edge"
+    assert candidates["x-avernet-behavior"]["viewer_visibility"] == {
+        "human": "user_visibility",
+        "bot": "visibility",
+    }
+    assert "applies before pagination" in description
+    assert "approved Connect edges" in description
+    assert "only recommended candidate entry point" in description
+    assert candidates["x-avernet-security"] == {
+        "user": "required",
+        "app": "required",
+    }
+    assert "deprecated" not in candidates
+    assert alias["deprecated"] is True
+
+
+def test_eligible_candidates_is_a_deprecated_compatibility_alias() -> None:
+    candidates = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"
+    )
+    alias = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+    )
+    candidate_parameters = _parameters(candidates)
+    alias_parameters = _parameters(alias)
+
+    assert alias["deprecated"] is True
+    assert alias["operationId"] == "list_eligible_bot_candidates"
+    assert "delegates" in alias["description"]
+    assert "/openapi/v1/collaboration/bots/{bot_id}/candidates" in alias["description"]
+    assert set(alias_parameters) == set(candidate_parameters)
+    for name, parameter in candidate_parameters.items():
+        assert alias_parameters[name]["schema"] == parameter["schema"], name
+    assert (
+        alias["responses"]["200"]["content"]
+        == candidates["responses"]["200"]["content"]
+    )
+    assert alias["x-avernet-behavior"] == candidates["x-avernet-behavior"]
+
+
+def test_candidate_search_allows_authenticated_read_only_human_browsers() -> None:
+    operation = _internal_operation(
+        "get", "/api/v1/collaboration/bots/{bot_id}/candidates/search"
+    )
+    description = operation["description"]
+
+    assert "read-only consumer" in description
+    assert "authenticated Human browser" in description
+    assert "no /openapi/v1 alias" in description
+    assert "at most one provider recall of up to 20" in description
+    assert "authorized subset" in description
+    assert "provider order" in description
+    assert "no top-up query" in description
+    assert "falls back" in description
+    assert operation["x-avernet-security"] == {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
+    behavior = operation["x-avernet-behavior"]
+    assert behavior["friend_source"] == "approved_connect_edge"
+    assert behavior["viewer_visibility"] == {
+        "human": "user_visibility",
+        "bot": "visibility",
+    }
+    assert behavior["primary_ordering"] == "provider_order"
+    data = _success_data(operation)
+    assert data["properties"]["search_mode"]["enum"] == [
+        "empty_query",
+        "semantic",
+        "name_fallback",
+    ]
+
+
 def test_eligible_candidates_contract_uses_the_new_route_name() -> None:
     operation = _public_operation(
         "get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
@@ -208,7 +293,8 @@ def test_eligible_candidates_contract_uses_the_new_route_name() -> None:
         "user": "required",
         "app": "required",
     }
-    assert "edge-permission" in operation["summary"]
+    assert operation["summary"].startswith("Deprecated compatibility alias of")
+    assert "candidate list" in operation["summary"]
     assert operation["responses"]["403"]["x-error-codes"] == ["forbidden"]
     candidate = _success_data(operation)["properties"]["items"]["items"]
     assert set(candidate["required"]) == {"bot", "is_friend"}
@@ -260,7 +346,12 @@ def test_candidate_search_contract_matches_legacy_search_semantics() -> None:
             "collaboration": {"cooperatable_only": True},
         },
         "top_k": 20,
-        "primary_ordering": "recommendation_score_desc",
+        "primary_ordering": "provider_order",
+        "friend_source": "approved_connect_edge",
+        "viewer_visibility": {
+            "human": "user_visibility",
+            "bot": "visibility",
+        },
         "fallback": "trimmed_case_insensitive_name_substring",
         "empty_query": {
             "equivalent_inputs": ["omitted", "empty", "whitespace"],
@@ -387,7 +478,7 @@ def test_mine_filters_both_kinds_without_an_all_enum_value() -> None:
         "owner_value": "current_staff_no",
         "omitted_kind": "all",
         "reachability_applies_to": "bot",
-        "ordering": ["created_at_desc", "bot_id_asc"],
+        "ordering": ["human_self_first", "reachable_first", "created_at_desc", "bot_id_asc"],
     }
 
     data = _success_data(operation)

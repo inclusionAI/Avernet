@@ -5062,7 +5062,8 @@ def action_load_baseline_opt(args):
     if not isinstance(state, dict):
         state = {}
     manifest = dict(manifest or {})
-    expected_round = 0 if args.round == 1 else manifest.get("last_accepted_round")
+    # Until a candidate is accepted, the baseline remains the task-start Round 0.
+    expected_round = 0 if args.round == 1 else (manifest.get("last_accepted_round") or 0)
     artifact_path = _baseline_artifact_path(args, paths, manifest, state)
     if artifact_path is None:
         raise SystemExit(f"baseline artifact is required before baseline evaluation for Round {args.round}")
@@ -7153,10 +7154,8 @@ def action_upload_clawweb(args):
     try:
         if stop:
             reason = f"已接受候选的测试 Bench 分数达到 objective 目标 {float(target_score):.3f}，停止优化"
-        elif round_id >= int(getattr(args, "max_rounds", 0) or 0):
-            reason = f"测试 Bench 分数为 {float(validation_score):.3f}，已到最后一轮"
-        elif round_id == int(getattr(args, "max_rounds", 0) or 0) - 1:
-            reason = f"测试 Bench 分数为 {float(validation_score):.3f}，继续最后一轮"
+        elif decision == "tune_failed":
+            reason = acceptance["reason"]
         elif accepted is not True:
             reason = f"候选未被接受（{decision}），继续优化"
         elif objective_criterion.get("automatic_stop"):
@@ -7167,8 +7166,9 @@ def action_upload_clawweb(args):
         stop = False
         reason = acceptance.get("reason") or stop_reason
 
-    max_rounds = int(getattr(args, "max_rounds", 0) or 0)
-    next_action = "停止优化" if stop else ("已到最后一轮" if max_rounds and round_id >= max_rounds else "继续最后一轮" if max_rounds and round_id == max_rounds - 1 else "继续下一轮")
+    summary = f"第 {round_id} 轮优化完成" + ("，达到目标，停止优化" if stop else "")
+    if decision == "tune_failed":
+        summary = f"第 {round_id} 轮 Tune 执行失败，本轮未接受"
 
     changed_files = _parse_changed_files_file(round_dir / "tune" / "changed_files.txt")[:100]
 
@@ -7197,6 +7197,9 @@ def action_upload_clawweb(args):
         {"key": metric_key, "name": f"测试 Bench {metric_name}", "role": "candidate_test", "value": test_score, "unit": metric_unit, "target": target_score, "passed": score_target_passed(test_score), "baselineValue": baseline_test_score, "delta": test_score - baseline_test_score if baseline_test_score is not None else None, "ownerUserId": bench_owner(args, "test"), "domainId": str(getattr(args, "test_bench_domain_id", "") or ""), "benchRunId": (bench.get("validation") or {}).get("benchRunId") or ""},
     ]
 
+    if decision == "tune_failed":
+        metrics_list = []
+
     def baseline_output(role: str, registry: dict, cache_record: dict) -> dict:
         summary = registry.get("summary") if isinstance(registry.get("summary"), dict) else {}
         producer_step_id = str(registry.get("producer_step_id") or "")
@@ -7218,7 +7221,7 @@ def action_upload_clawweb(args):
 
     payload = {
         "status": "succeeded" if decision != "failed" else "failed",
-        "summary": f"第 {round_id} 轮优化完成，{next_action}",
+        "summary": summary,
         "output": {
             "diff": {"summary": diff_summary, "files": changed_files},
             "metrics": metrics_list,
@@ -8869,7 +8872,7 @@ WATCHDOG_STEP_POLICIES = {
     "candidate-opt-gate": {"max_attempts": 1, "fatal": True, "fallback": None},
     "bench-full-opt": {"max_attempts": 3, "fatal": True, "fallback": None},
     "bench-opt":      {"max_attempts": 3, "fatal": True,   "fallback": None},
-    "ensure-tune":    {"max_attempts": 3, "fatal": False, "fallback": "noop_tune"},
+    "ensure-tune":    {"max_attempts": 3, "fatal": True, "fallback": "reject_tune"},
     "bench-val":      {"max_attempts": 3, "fatal": False, "fallback": "bench_val_reject_round"},
     "accept":         {"max_attempts": 1, "fatal": False, "fallback": "reject_round"},
     "replicate-validation": {"max_attempts": 2, "fatal": False, "fallback": "reject_round"},
@@ -9073,12 +9076,12 @@ def _fallback_bench_failed_summary(args, kind: str, error: dict) -> dict:
     return {"ok": True, "fallback": f"{kind}_bench_failed_summary"}
 
 
-def _fallback_noop_tune(args, error: dict) -> dict:
+def _fallback_reject_tune(args, error: dict) -> dict:
     paths = resolve_paths(args)
     tune_dir = paths["tune_dir"]
     tune_dir.mkdir(parents=True, exist_ok=True)
     (tune_dir / "tune_report.md").write_text(
-        "# Tune Fallback\n\nclawevolve-tune 未能成功完成，watchdog 自动生成 noop tune。\n\n本轮不会主动修改 workspace。\n\n"
+        "# Tune 执行失败，本轮未接受\n\n自动重试耗尽，跳过候选评测，按不接受轮次恢复工作区并保留上一有效版本。\n\n"
         "## Error\n\n```json\n" + json.dumps(error, ensure_ascii=False, indent=2) + "\n```\n",
         encoding="utf-8",
     )
@@ -9091,13 +9094,14 @@ def _fallback_noop_tune(args, error: dict) -> dict:
         "edits": [],
         "fallback": True,
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"ok": True, "fallback": "noop_tune"}
+    return _fallback_reject_round(args, error, tune_failed=True)
 
 
-def _fallback_reject_round(args, error: dict) -> dict:
+def _fallback_reject_round(args, error: dict, *, tune_failed: bool = False) -> dict:
     """Record a watchdog failure without inventing a second acceptance gate.
 
-    The Bench decision stays score-based.  If Tune may have touched the live
+    Tune exhaustion has no valid candidate Bench and cannot pass. Otherwise
+    the Bench decision stays score-based. If Tune may have touched the live
     Workspace, Restore is driven exclusively by this Round's rollback snapshot,
     never by the effective evaluation baseline.
     """
@@ -9119,7 +9123,9 @@ def _fallback_reject_round(args, error: dict) -> dict:
         manifest.get("last_accepted_validation_score") if isinstance(manifest, dict) else None
     )
     candidate_score = _finite_number(val_summary.get("score"))
-    if baseline_score is None:
+    if tune_failed:
+        decision = "bench_failed"
+    elif baseline_score is None:
         decision = "baseline_unavailable"
     elif candidate_score is None:
         decision = "bench_failed"
@@ -9152,24 +9158,26 @@ def _fallback_reject_round(args, error: dict) -> dict:
         "baseline": {"round_id": manifest.get("last_accepted_round") if isinstance(manifest, dict) else None, "validation_score": baseline_score},
         "current": {"validation_score": candidate_score, "optimization_score": opt_summary.get("score")},
         "delta": {"validation_score": candidate_score - baseline_score if baseline_score is not None and candidate_score is not None else None},
-        "reason": "watchdog recorded a failed step; Bench decision remains score-based",
+        "reason": "Tune 重试耗尽，未执行候选评测，本轮不接受" if tune_failed else "watchdog recorded a failed step; Bench decision remains score-based",
         "review_status": "pending",
         "restore_required": bool(restore_required and not effect_passed),
         "promote_to_baseline": False,
         "error": error,
         "created_at": _now(),
     }
+    if tune_failed:
+        report["decision"] = "tune_failed"
     # Avoid any accidental dependency on a temporary helper in serialized data.
     report["delta"]["validation_score"] = report["score"]["delta"]
     (acc_dir / "acceptance_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     state["acceptance"] = report
     state["accepted"] = False
     state["promotion_status"] = promotion_status
-    state["acceptance_decision"] = decision
+    state["acceptance_decision"] = report["decision"]
     state["bench_decision"] = decision
     state["restore_required"] = report["restore_required"]
     (round_dir / "round_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"ok": True, "fallback": "record_bench_decision", "accepted": False, "promotion_status": promotion_status, "restore_required": report["restore_required"], "decision": decision}
+    return {"ok": True, "fallback": "record_bench_decision", "accepted": False, "promotion_status": promotion_status, "restore_required": report["restore_required"], "decision": report["decision"]}
 
 
 def _fallback_copy_previous_spec(args, error: dict) -> dict:
@@ -9198,8 +9206,10 @@ def _fallback_copy_previous_spec(args, error: dict) -> dict:
     rendered = _render_spec_v1_markdown(_load_json(output_json, {}))
     rendered, _ = _fit_utf8_budget(rendered, 8192)
     output_spec.write_text(rendered, encoding="utf-8")
+    acceptance = _load_json(paths["accept_dir"] / "acceptance_report.json", {})
+    carry_reason = "Tune 执行失败，本轮不接受，沿用上一版 Spec。" if acceptance.get("decision") == "tune_failed" else "clawevolve-review 未能成功完成，watchdog 复制上一版 spec 作为下一轮输入。"
     (spec_dir / "spec_update_report.md").write_text(
-        "# Spec Fallback\n\nclawevolve-review 未能成功完成，watchdog 复制上一版 spec 作为下一轮输入。\n\n策略未更新。\n\n"
+        "# Spec Fallback\n\n" + carry_reason + "\n\n策略未更新。\n\n"
         "## Error\n\n```json\n" + json.dumps(error, ensure_ascii=False, indent=2) + "\n```\n",
         encoding="utf-8",
     )
@@ -9329,8 +9339,8 @@ def _apply_step_fallback(args, step: str, fallback: str, error: dict) -> dict:
             b = _fallback_bench_failed_summary(args, "validation", error)
             r = _fallback_reject_round(args, error)
             return {"ok": bool(b.get("ok") and r.get("ok")), "fatal": bool(r.get("fatal")), "fallback": fallback, "bench": b, "acceptance": r}
-        if fallback == "noop_tune":
-            return _fallback_noop_tune(args, error)
+        if fallback == "reject_tune":
+            return _fallback_reject_tune(args, error)
         if fallback == "reject_round":
             return _fallback_reject_round(args, error)
         if fallback == "copy_previous_spec":
@@ -9593,6 +9603,20 @@ def action_watchdog_run_round(args):
     step_results = []
     try:
         for name, fn in _round_sequence(args):
+            paths = resolve_paths(args)
+            acceptance = _load_json(paths["accept_dir"] / "acceptance_report.json", {})
+            if acceptance.get("decision") == "tune_failed" and name in {
+                "bench-full-opt", "bench-val", "accept", "pack", "ensure-review",
+            }:
+                if name == "ensure-review":
+                    carried = _fallback_copy_previous_spec(args, acceptance.get("error") or {})
+                    if not carried.get("ok"):
+                        raise RuntimeError(f"cannot carry previous Spec after Tune failure: {carried}")
+                result = {"action": name, "status": "SKIPPED", "reason": "Tune failed; round rejected"}
+                _mark_step(args, name, "SKIPPED", result)
+                _log(args, name, result["reason"])
+                step_results.append(result)
+                continue
             result = _call_action_for_round_watchdog(args, name, fn, round_started_at=round_started_at)
             step_results.append(result)
         paths = resolve_paths(args)

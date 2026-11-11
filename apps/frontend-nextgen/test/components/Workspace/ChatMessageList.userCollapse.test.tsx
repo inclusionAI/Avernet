@@ -6,6 +6,7 @@
 // 见 OpenSpec change `add-long-user-message-collapse`(design D2–D4)。
 import type { Block, ChatMessage } from '@tc-chat/core';
 import React from 'react';
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 
 // 部分mock:保留真实 Bubble/MessageRenderer/Button 链,桩掉列表壳与重依赖。
 // 桩函数都在工厂内 jest.fn(),断言侧 import 回被模模块取同实例。
@@ -65,7 +66,12 @@ jest.mock('@/components/Workspace/ChatPanel/ChatMessageSkeleton', () => ({
   ChatMessageSkeleton: () => null,
 }));
 jest.mock('@/components/Workspace/MessageInteractionToolbar', () => ({
-  MessageCopyAction: () => null,
+  MessageCopyAction: ({ onCopy, onEdit }: { onCopy: () => void; onEdit: () => void }) => {
+    return <div>
+      <button type="button" onClick={onCopy}>copy</button>
+      <button type="button" onClick={onEdit}>edit</button>
+    </div>;
+  },
   MessageInteractionToolbar: () => null,
   MessageSelectionToolbar: () => null,
 }));
@@ -85,7 +91,7 @@ jest.mock('@/pages/Workspace/hooks/useStickToBottom', () => ({
   useStickToBottom: () => undefined,
 }));
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ChatMessageList } from '@/components/Workspace/ChatPanel/ChatMessageList';
 
 const LONG_MSG =
@@ -107,14 +113,16 @@ function buildInteractions() {
 }
 
 function renderList(messages: ChatMessage[], isRequesting = false) {
+  const interactions = buildInteractions();
+  const edit = jest.fn();
   render(
     <ChatMessageList
       messages={messages}
       isRequesting={isRequesting}
       isLoadingMessages={false}
-      interactions={buildInteractions() as never}
+      interactions={interactions as never}
       onStop={jest.fn()}
-      onEditMessage={jest.fn()}
+      onEditMessage={edit}
       onQuoteSelected={jest.fn()}
       onExplainSelected={jest.fn()}
       resolveSender={() => ({ name: '我', avatar: <span /> })}
@@ -122,6 +130,7 @@ function renderList(messages: ChatMessage[], isRequesting = false) {
       getMessageBlocks={(message: ChatMessage) => (message.blocks ?? []) as Block[]}
     />,
   );
+  return { interactions, edit };
 }
 
 /** jsdom 无真实布局:把量高节点的 scrollHeight 垫到阈值以上。 */
@@ -134,6 +143,7 @@ function mockScrollHeight(px: number) {
 
 describe('ChatMessageList × 用户消息折叠集成', () => {
   afterEach(() => {
+    extendCapabilities({ getUserMessagePresentation: defaultCapabilities.getUserMessagePresentation });
     delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
   });
 
@@ -193,5 +203,36 @@ describe('ChatMessageList × 用户消息折叠集成', () => {
       } as unknown as ChatMessage,
     ]);
     expect(screen.queryByText(/展开全部/)).toBeNull();
+  });
+});
+
+
+describe('user reference presentation through the real SDK Bubble', () => {
+  afterEach(() => extendCapabilities({ getUserMessagePresentation: defaultCapabilities.getUserMessagePresentation }));
+  it.each([false, true])('presents single/multimodal user text, preserving copy/edit originals (multimodal=%s)', (multimodal) => {
+    const raw = 'reference template\nquestion';
+    extendCapabilities({ getUserMessagePresentation: () => ({ status: 'available', value: () => ({
+      content: 'question', header: <span>reference card</span>,
+    }) }) });
+    const message = { id: 'presented', role: 'user', content: raw, blocks: [
+      ...(multimodal ? [{ type: 'image', data: 'data:image/png;base64,x', name: '图.png', mimeType: 'image/png' }] : []),
+      { type: 'text', content: raw },
+    ] } as unknown as ChatMessage;
+    const { interactions, edit } = renderList([message]);
+    expect(screen.getByText('reference card')).toBeTruthy();
+    expect(screen.getByText('question')).toBeTruthy();
+    expect(screen.queryByText(raw)).toBeNull();
+    fireEvent.click(screen.getByText('copy'));
+    expect(interactions.copyText).toHaveBeenCalledWith(raw);
+    fireEvent.click(screen.getByText('edit'));
+    expect(edit).toHaveBeenCalledWith(message);
+    expect(message.content).toBe(raw);
+  });
+  it('never projects assistant text', () => {
+    const presenter = jest.fn(() => ({ content: 'wrong', header: <span>wrong</span> }));
+    extendCapabilities({ getUserMessagePresentation: () => ({ status: 'available', value: presenter }) });
+    renderList([{ id: 'assistant', role: 'assistant', content: 'answer', blocks: [{ type: 'text', content: 'answer' }] } as unknown as ChatMessage]);
+    expect(presenter).not.toHaveBeenCalled();
+    expect(screen.getByText('answer')).toBeTruthy();
   });
 });
