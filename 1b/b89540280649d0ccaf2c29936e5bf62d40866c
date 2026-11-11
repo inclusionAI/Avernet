@@ -1,0 +1,21 @@
+.gitmodules
+  s_620fb772f449f4::t_4956617251ebb7 4
+submodules/avernet
+  s_620fb772f449f4::t_80986ac79af61a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1bb89540280649d0ccaf2c29936e5bf62d40866c",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
