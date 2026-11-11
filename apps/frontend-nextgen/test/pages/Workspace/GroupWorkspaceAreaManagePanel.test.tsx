@@ -149,10 +149,9 @@ jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
     </div>
   ),
 }));
-// SessionFilesSidebar 桩件按 open 渲染标记元素（内联副屏常挂、open 开合）：
-// 守护 resources 面板接线（接线断裂时标记不出现；未激活时 open=false 不出现）。
+// SessionFilesSidebar 桩件渲染标记元素：守护 resources 面板接线（接线断裂时标记不出现）。
 jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesSidebar', () => ({
-  SessionFilesSidebar: ({ open }: { open?: boolean }) => (open ? <div data-testid="session-files-sidebar" /> : null),
+  SessionFilesSidebar: () => <div data-testid="session-files-sidebar" />,
 }));
 jest.mock('@/pages/Workspace/components/GroupMembersPanelSlot', () => ({
   GroupMembersPanelSlot: () => null,
@@ -230,7 +229,7 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
   });
 
-  it('右缘面板内联于对话区流内（无蒙层抽屉），不再抬高整个会话遮挡持久副屏', () => {
+  it('本地覆盖层通过 Portal 定位，不再抬高整个会话遮挡持久副屏', () => {
     sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
     renderArea();
     const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
@@ -239,8 +238,6 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     fireEvent.click(screen.getByRole('button', { name: '打开会话管理面板' }));
     expect(conversation).toHaveClass('isolate');
     expect(conversation).not.toHaveClass('z-20');
-    // 内联副屏：面板容器（桩件）渲染在对话区流内，非 portal 悬浮蒙层抽屉。
-    expect(conversation).toContainElement(screen.getByRole('button', { name: '生成群分享链接' }));
     fireEvent.click(screen.getByRole('button', { name: '关闭临时面板' }));
     expect(conversation).not.toHaveClass('z-20');
   });

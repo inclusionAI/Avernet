@@ -16,9 +16,6 @@ export interface PublicBotCatalogDto {
   status: string;
   /** Search 返回的当前 Human→Bot 好友关系；缺失时由 Domain 安全降级为 none。 */
   is_friend?: boolean;
-  /** BCS 当前在线状态；独立于 Backend 生命周期 status（如 ACTIVE）。 */
-  is_online?: boolean;
-  actor_kind?: 'bot' | 'human';
   friend_ext?: Record<string, unknown>;
   friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
   /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）；缺失时按未知处理。 */

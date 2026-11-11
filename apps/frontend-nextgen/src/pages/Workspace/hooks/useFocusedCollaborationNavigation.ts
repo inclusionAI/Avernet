@@ -1,5 +1,5 @@
 import { fullCollaborationUrl, type CollaborationPresentation } from '@/domain/collaborationPresentation';
-import { serializeWorkspaceRoute, serializeWorkspaceRoutePreserving } from '@/domain/workspaceRoute';
+import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 import type { CollaborationScope } from '@/services/workspace/collaborationScopeService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useLocation } from '@umijs/max';
@@ -23,16 +23,9 @@ export function useFocusedCollaborationNavigation(
     : '';
   useEffect(() => {
     // 单会话链接绝不随删除/退出回落；单群页只投影群内选择，保留当前 pathname。
-    if (mode !== 'group' || !valid) return;
-    const merged = serializeWorkspaceRoutePreserving(location.search, {
-      currentIdentityId,
-      groupId,
-      sessionId: validSessionId,
-      membership,
-    });
-    if (location.search.replace(/^\?/, '') === merged) return;
-    if (projectedQuery) projectedQuery.current = merged;
-    history.replace(`${location.pathname}?${merged}`);
+    if (mode !== 'group' || !valid || location.search.replace(/^\?/, '') === query) return;
+    if (projectedQuery) projectedQuery.current = query;
+    history.replace(`${location.pathname}?${query}`);
   }, [location.pathname, location.search, mode, query, valid, projectedQuery]);
   const returnUrl = valid
     ? fullCollaborationUrl({ currentIdentityId, groupId, sessionId: validSessionId, membership })

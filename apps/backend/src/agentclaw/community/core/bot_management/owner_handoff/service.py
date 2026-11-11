@@ -23,7 +23,6 @@ from agentclaw.community.core.bot_management.owner_handoff.contracts import (
     OwnerHandoffPolicy,
     OwnerHandoffRepositoryProtocol,
 )
-from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.errors import SpaceNotFoundError
 from agentclaw.community.core.spaces.models import SpaceType
@@ -70,7 +69,6 @@ class OwnerHandoffService:
         spaces: SpaceServiceProtocol,
         space_access: SpaceAccessServiceProtocol,
         ownership_sync: BotOwnershipSyncProtocol,
-        preflight: OwnerHandoffPreflight,
     ):
         self._repo, self._passport, self._runtime = repository, passport, runtime
         self._staff, self._queue, self._policy = staff, queue, policy
@@ -78,7 +76,6 @@ class OwnerHandoffService:
         self._manager_sync = manager_sync
         self._ownership_sync = ownership_sync
         self._spaces, self._space_access = spaces, space_access
-        self._preflight = preflight
 
     @staticmethod
     def _public(row):
@@ -110,29 +107,22 @@ class OwnerHandoffService:
             or request_key != request_key.strip()
         ):
             raise HandoffError("INVALID_REQUEST_KEY")
-        prior = self._repo.find_by_request(
-            bot_pk=bot_pk, actor_id=actor_id, new_owner_id=new_owner_id,
-            request_key=request_key,
-        )
-        if prior is not None:
-            if prior["phase"] not in {"SUCCEEDED", "CANCELLED"}:
-                self._enqueue(prior)
-            return self._public(prior)
         bot = self._bots.get_by_pk(bot_pk)
         if bot is None:
             raise HandoffError("BOT_NOT_FOUND")
-        if actor_id != bot["owner_id"] and actor_id not in self._policy.administrators:
-            raise HandoffError("OWNER_REQUIRED")
-        if bot.get("bot_type") != "service" or bot["bot_id"] == "default":
-            raise HandoffError("SERVICE_BOT_REQUIRED")
-        if not bot.get("entity_id") or new_owner_id == bot["owner_id"]:
-            raise HandoffError("INVALID_OWNER_HANDOFF")
         # A directory record is identity validation, NOT proof of employment status.
         profile = self._staff.get_user_by_work_no(work_no=new_owner_id)
         name = profile.display_name or profile.full_name or profile.username
         if profile.work_no != new_owner_id or not name:
             raise HandoffError("NEW_OWNER_NOT_FOUND")
-        self._preflight.check(bot)
+        # Capability negotiation precedes freezing. Old deployments must not
+        # silently ignore the correlation ID or selected-generation fence.
+        if not self._passport.owner_handoff_supported(
+            bot_id=bot["bot_id"],
+            owner_workno=bot["owner_id"],
+            entity_id=bot["entity_id"],
+        ):
+            raise HandoffError("PASSPORT_HANDOFF_UNSUPPORTED")
         self._prepare_personal_space(bot, actor_id, new_owner_id)
         row = self._repo.begin(
             bot_pk=bot_pk,
@@ -241,34 +231,6 @@ class OwnerHandoffService:
             raise HandoffError("PASSPORT_GENERATION_CONFLICT")
         return metadata
 
-    def _adopt_verified_renewal(self, row, worker):
-        """Only the trusted Passport provider may attest renewal ancestry."""
-        current = self._metadata(row)
-        if current.get("credential_id") == row["credential_id"]:
-            return False
-        ancestors = current.get("handoff_ancestor_credential_ids")
-        if (
-            not self._matches(row, current)
-            or not row["agent_id"]
-            or current.get("agent_id") != row["agent_id"]
-            or current.get("entity_id") != row["entity_id"]
-            or not isinstance(ancestors, list)
-            or not ancestors
-            or len(ancestors) > 64
-            or any(not isinstance(value, str) or not value for value in ancestors)
-            or row["credential_id"] not in ancestors
-        ):
-            raise HandoffError("PASSPORT_GENERATION_CONFLICT")
-        # Re-authorize and update every runtime again. An earlier ACK belongs
-        # to the previous credential, including in retirement/commit phases.
-        self._repo.advance(
-            row["operation_id"], worker, "WAITING_AUTHORIZATION",
-            credential_id=str(current["credential_id"]),
-            authorization_id=current.get("authorization_id"),
-            error_code=None,
-        )
-        return True
-
     def step(self, operation_id):
         if not self._policy.recovery_enabled:
             return False
@@ -278,11 +240,6 @@ class OwnerHandoffService:
             return self._repo.get(operation_id)["phase"] in {"SUCCEEDED", "CANCELLED"}
         phase = row["phase"]
         try:
-            if phase in {
-                "WAITING_AUTHORIZATION", "UPDATING_RUNTIME",
-                "RETIRING_OLD_CREDENTIALS", "COMMITTING_OWNER",
-            } and self._adopt_verified_renewal(row, worker):
-                return False
             if phase == "QUEUED":
                 old = self._metadata(row)
                 old_id = old.get("credential_id")
@@ -382,7 +339,6 @@ class OwnerHandoffService:
                     )
                 ):
                     raise HandoffError("RUNTIME_ACK_REQUIRED")
-                self._selected(row)  # Never carry an ACK across a concurrent renewal.
                 self._repo.advance(
                     operation_id, worker, "RETIRING_OLD_CREDENTIALS", error_code=None
                 )

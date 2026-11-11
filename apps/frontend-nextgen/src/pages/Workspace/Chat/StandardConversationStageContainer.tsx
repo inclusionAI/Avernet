@@ -127,8 +127,6 @@ export function StandardConversationStageContainer({
     if (interactiveModel.fileFeature.fileDrawerOpen) interactiveModel.fileFeature.closeFileDrawer();
     else {
       headerPanels.closePanel();
-      // 副屏让位：副屏为 AppShell 悬浮层，展开时整条覆盖右缘面板让位区（chat-header-panels 互斥）。
-      headerPanels.dismissSidePaneForPanels();
       interactiveModel.fileFeature.openFileDrawer();
     }
   };

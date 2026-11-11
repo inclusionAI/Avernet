@@ -3,8 +3,6 @@ import type { PendingSkillSetToggle } from '@/hooks/useSkillSetActivation';
 
 export interface CapabilitySetManagerProps {
   botId?: string;
-  /** 当前登录用户；未解析身份时仅保留本次编辑内的选择。 */
-  authenticatedUserId?: string;
   ownerId?: string;
   sets: BotCapabilitySet[];
   mySkills: BotEditorSkill[];

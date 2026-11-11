@@ -1,4 +1,3 @@
-import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { Button } from '@/components/ui';
 import { Modal, ModalContent } from '@/components/ui/Modal';
 import type { IdentityView } from '@/domain/collaboration';
@@ -61,13 +60,13 @@ function LoadedDraftDialog({ draft, bots }: { draft: CollaborationDraft; bots: I
                 options={bots.map((bot) => ({
                   id: bot.id,
                   name: bot.displayName,
-                  avatarUrl: resolveBotAvatarUrl(bot.avatarUrl, bot.id),
+                  avatarUrl: bot.avatarUrl,
                   current: bot.id === activeId,
                   description: `${bot.online ? '在线' : '离线'} · ${bot.id}`,
                 }))}
               />
             ) : (
-              <p className="text-xs text-muted-foreground">暂无可发起协作的自有 Bot，请先创建或绑定 Bot。</p>
+              <p className="text-sm text-muted-foreground">暂无可发起协作的自有 Bot，请先创建或绑定 Bot。</p>
             )
           }
         />
@@ -86,13 +85,13 @@ function DraftDialog({ reference }: { reference: CollaborationDraftReference }) 
         <div className="space-y-3 p-6">
           {error ? (
             <>
-              <p role="alert" className="text-xs text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {error}
               </p>
               <Button onClick={retry}>重试</Button>
             </>
           ) : (
-            <p role="status" className="text-xs text-muted-foreground">
+            <p role="status" className="text-sm text-muted-foreground">
               正在读取协作版本和自有 Bot…
             </p>
           )}

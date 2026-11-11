@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from typing import Any
@@ -137,7 +136,7 @@ class TaskServiceRelayMixin:
         return self._report_fact("NODE_PATCH", {"patch": patch})
 
     async def search_bots(
-        self, *, query: str, task_id: str, node_id: str, relay_token: str,
+        self, *, query: str, task_id: str, node_id: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
     ) -> list[BotCandidate]:
@@ -145,7 +144,6 @@ class TaskServiceRelayMixin:
         if not query.strip() or not task_id or not node_id:
             raise TaskStateError("relay search requires query, task_id and node_id")
         viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
-        relay_token_fingerprint = hashlib.sha256(relay_token.encode()).hexdigest()
         try:
             raw = await self._relay_adapter.search.search_catalog(query, **viewer)
         except Exception as exc:
@@ -158,7 +156,6 @@ class TaskServiceRelayMixin:
                     "action_result": "failed",
                     "query": query,
                     "error": f"{type(exc).__name__}: {exc}",
-                    "relay_token_fingerprint": relay_token_fingerprint,
                 },
             )
             raise
@@ -188,7 +185,6 @@ class TaskServiceRelayMixin:
                 "phase": "search",
                 "action_result": "search",
                 "query": query,
-                "relay_token_fingerprint": relay_token_fingerprint,
                 "candidate_count": len(candidates),
                 "candidates": [
                     {

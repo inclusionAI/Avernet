@@ -36,11 +36,9 @@ export function DetailPanelContent({
   currentSpaceId,
   runtimeStage,
   ownerId,
-  authenticatedUserId,
   onOpenFolder,
 }: {
   bot: BotDomain;
-  authenticatedUserId?: string;
   editor: ReturnType<typeof useBotEditor>;
   advanced: ReturnType<typeof useBotAdvancedConfig>;
   desktopPolicy: ReturnType<typeof desktopCapabilityPolicy>;
@@ -112,7 +110,6 @@ export function DetailPanelContent({
     <DwsHostingPanel key={`${bot.id}:${bot.ownerId}`} botId={bot.id} />
   ) : tab === 'capability' ? (
     <CapabilityPanel
-      authenticatedUserId={authenticatedUserId}
       compact={compact}
       desktop={bot.deployment === 'local'}
       onLocalToggle={editor.toggleSkill}
