@@ -1,15 +1,17 @@
+import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
+import { EvaluationHistoryCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard';
+import { EvaluationSubmissionCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard';
+import { evaluationStatusLabel } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
-import { Empty } from '@/components/ui/Empty';
 import { Segmented } from '@/components/ui/Segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import { Textarea } from '@/components/ui/Textarea';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
-import { History, RefreshCw } from 'lucide-react';
 import { history, useParams, useSearchParams } from '@umijs/max';
+import { RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 type EvalTab = 'simple_cert_submit' | 'restart_eval' | 'eval_history';
@@ -20,22 +22,6 @@ const resolveEvalTab = (value: string | null): EvalTab => {
 };
 type GoalType = 'json' | 'semantic';
 
-const statusTone = (status?: string) => {
-  if (!status) return 'neutral' as const;
-  if (status.toUpperCase() === 'PASS' || status.toUpperCase() === 'SUCCESS') return 'success' as const;
-  if (status.toUpperCase() === 'FAIL' || status.toUpperCase() === 'FAILED') return 'error' as const;
-  if (['INIT', 'RUNNING', 'PENDING'].includes(status.toUpperCase())) return 'warning' as const;
-  return 'neutral' as const;
-};
-
-const statusLabel = (status?: string) => {
-  if (!status) return '待处理';
-  if (status.toUpperCase() === 'PASS' || status.toUpperCase() === 'SUCCESS') return '通过';
-  if (status.toUpperCase() === 'FAIL' || status.toUpperCase() === 'FAILED') return '未通过';
-  if (['INIT', 'RUNNING', 'PENDING'].includes(status.toUpperCase())) return '处理中';
-  return status;
-};
-
 const EvaluationPage: React.FC = () => {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -44,7 +30,9 @@ const EvaluationPage: React.FC = () => {
   const ownerId = searchParams.get('owner_id') ?? undefined;
   const evaluation = useServiceBotEval(botId, botVersion, ownerId);
   const detail = evaluation.detail as Record<string, any> | undefined;
-  const tabs = detail?.tabs as Record<string, { enabled?: boolean; visible?: boolean; visible_reason?: string }> | undefined;
+  const tabs = detail?.tabs as
+    | Record<string, { enabled?: boolean; visible?: boolean; visible_reason?: string }>
+    | undefined;
   const certState = detail?.cert_state as Record<string, unknown> | undefined;
   const initialTab = resolveEvalTab(searchParams.get('tab'));
   const [activeTab, setActiveTab] = useState<EvalTab>(initialTab);
@@ -104,10 +92,16 @@ const EvaluationPage: React.FC = () => {
           <CardHeader>
             <div>
               <CardTitle>评测详情</CardTitle>
-              <p className="mt-1 text-xs text-muted-foreground">提供评测数据上报认证、重新发起评测和历史评测记录入口。</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                提供评测数据上报认证、重新发起评测和历史评测记录入口。
+              </p>
             </div>
             <Badge tone={certResult?.toUpperCase() === 'PASS' ? 'success' : 'neutral'}>
-              {certResult ? statusLabel(certResult) : certStatus ? statusLabel(certStatus) : '未认证'}
+              {certResult
+                ? evaluationStatusLabel(certResult)
+                : certStatus
+                ? evaluationStatusLabel(certStatus)
+                : '未认证'}
             </Badge>
           </CardHeader>
           <CardContent>
@@ -158,10 +152,17 @@ const EvaluationPage: React.FC = () => {
                 <div className="mt-4 rounded-lg border border-border p-4">
                   {effectiveTab === 'simple_cert_submit' ? (
                     <div className="space-y-4">
-                      <p className="m-0 text-xs text-muted-foreground">已有评测样本集和结果报告时，可直接上传并提交认证审核。</p>
+                      <p className="m-0 text-xs text-muted-foreground">
+                        已有评测样本集和结果报告时，可直接上传并提交认证审核。
+                      </p>
                       <div className="grid gap-3 md:grid-cols-2">
                         <EvalFileInput label="评测样本集" file={sampleFile} onSelect={setSampleFile} />
-                        <EvalFileInput label="评测结果报告" accept=".json,.pdf,.md" file={reportFile} onSelect={setReportFile} />
+                        <EvalFileInput
+                          label="评测结果报告"
+                          accept=".json,.pdf,.md"
+                          file={reportFile}
+                          onSelect={setReportFile}
+                        />
                       </div>
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button onClick={() => void submitSimple()} disabled={!hasSimpleFiles || evaluation.submitting}>
@@ -216,65 +217,19 @@ const EvaluationPage: React.FC = () => {
                         />
                       ) : null}
                       <div className="flex flex-wrap justify-end gap-2">
-                        <Button onClick={() => void submitRestart()} disabled={!hasRestartFiles || evaluation.submitting}>
+                        <Button
+                          onClick={() => void submitRestart()}
+                          disabled={!hasRestartFiles || evaluation.submitting}
+                        >
                           {evaluation.submitting ? '提交中…' : '上报评测数据并认证'}
                         </Button>
                       </div>
                     </div>
                   ) : (
-                    <div>
-                      {evaluation.history?.records?.length ? (
-                        <div className="overflow-hidden rounded-lg border border-border">
-                          {evaluation.history.records.map((item, index) => (
-                            <div
-                              key={item.id ?? String(index)}
-                              className="flex flex-wrap items-center justify-between gap-3 border-border px-4 py-3 text-xs odd:bg-background even:bg-muted/20"
-                            >
-                              <div>
-                                <p className="m-0 font-medium text-foreground">{item.mode ?? '统一评测'}</p>
-                                <p className="m-0 mt-1 text-muted-foreground">
-                                  {item.evaluated_at ?? '时间未知'} · {item.summary ?? '暂无摘要'}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
-                                {item.report_url ? (
-                                  <a
-                                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                                    href={item.report_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                  >
-                                    <History className="size-3.5" />
-                                    查看报告
-                                  </a>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <Empty title="暂无历史评测记录" description="完成评测后在查看到历史结论与报告。" />
-                      )}
-                    </div>
+                    <EvaluationHistoryCard records={evaluation.history?.records} />
                   )}
                 </div>
-                {evaluation.submission ? (
-                  <div className="mt-4 grid gap-2 rounded-lg border border-border bg-muted/30 p-4 text-xs md:grid-cols-3">
-                    <div>
-                      <p className="font-medium text-muted-foreground">提交编号</p>
-                      <p className="mt-1 truncate font-medium">{evaluation.submission.submission_id || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-muted-foreground">状态</p>
-                      <p className="mt-1 font-medium">{statusLabel(evaluation.submission.task_status)}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-muted-foreground">说明</p>
-                      <p className="mt-1">{evaluation.submission.message ?? '等待认证结果'}</p>
-                    </div>
-                  </div>
-                ) : null}
+                <EvaluationSubmissionCard submission={evaluation.submission} />
               </>
             )}
           </CardContent>
