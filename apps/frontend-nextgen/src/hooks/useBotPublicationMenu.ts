@@ -16,6 +16,8 @@ export const publicationActionLabel: Record<PublicationMenuAction, string> = {
   retry: '重试',
   upgrade: '创建升级草稿',
 };
+export type PublicationMenuRunResult = 'success' | 'blocked' | 'failed';
+
 export const publicationStatusLabel: Record<ServicePublication['status'], string> = {
   draft: '草稿',
   deploying: '部署中',
@@ -46,7 +48,6 @@ export function useBotPublicationMenu(
   bot: BotDomain,
   open: boolean,
   onChanged?: () => Promise<void>,
-  onPublicationGateBlocked?: (bot: BotDomain) => void,
 ) {
   const [items, setItems] = useState<ServicePublication[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,8 +84,11 @@ export function useBotPublicationMenu(
       ++request.current;
     };
   }, [open, reload]);
-  const run = async (action: PublicationMenuAction, item: ServicePublication) => {
-    if (submitting.current) return false;
+  const run = async (
+    action: PublicationMenuAction,
+    item: ServicePublication,
+  ): Promise<PublicationMenuRunResult> => {
+    if (submitting.current) return 'failed';
     submitting.current = true;
     setPending(true);
     try {
@@ -96,10 +100,7 @@ export function useBotPublicationMenu(
       }
       if (action === 'publish_staging') {
         const gate = await serviceBotEvalService.precheck(bot.id, String(item.version), bot.ownerId);
-        if (!gate.allowed) {
-          onPublicationGateBlocked?.(bot);
-          return false;
-        }
+        if (!gate.allowed) return 'blocked';
         Tracert.click(Points.botWorkshop.publishPre, { bot_id: bot.id });
       }
       if (action === 'publish_online') Tracert.click(Points.botWorkshop.publishOnline, { bot_id: bot.id });
@@ -136,10 +137,10 @@ export function useBotPublicationMenu(
       } catch {
         toast.error('操作已提交，列表刷新失败，请刷新列表查看最新状态。');
       }
-      return true;
+      return 'success';
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '发布操作失败，请稍后重试');
-      return false;
+      return 'failed';
     } finally {
       submitting.current = false;
       setPending(false);

@@ -66,6 +66,7 @@ const mockFileFeature: UseBotSessionFilesFeatureResult = {
   closeFileDrawer: () => {},
   fileDrawerOpen: false,
   openUpload: () => {},
+  cancelUploads: () => {},
   capabilitySets: null,
 };
 

@@ -1,5 +1,6 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
 import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
@@ -29,6 +30,8 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
+  /** Cancel pending uploads when the owning debug input scope unmounts. */
+  cancelUploads: () => void;
   /** 「通用协作能力」能力集只读查看装配（我的/团队空间 Bot 非空；好友 Bot 为 null，
    *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
   capabilitySets: ComposerCapabilitySetsState | null;
@@ -39,15 +42,16 @@ export function useBotSessionFilesFeature(
   session: BotChatSessionView | null,
   userId: string | null,
   onClear: () => Promise<void>,
+  stageOverride?: BotRuntimeStage,
 ): UseBotSessionFilesFeatureResult {
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
-  // 在线服务 Bot 的文件与会话使用同一运行阶段；草稿调试及个人 Bot 保留既有请求形态。
-  const stage =
+  // Debug input supplies its exact stage; ordinary callers retain their existing request shape.
+  const stage = stageOverride ?? (
     bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot || bot.runtimeStage === 'online')
       ? resolveChatRuntimeStage(bot)
-      : undefined;
+      : undefined);
 
   const files = useBotSessionFiles(
     botId,
@@ -169,6 +173,7 @@ export function useBotSessionFilesFeature(
     closeFileDrawer,
     fileDrawerOpen: drawerOpen,
     openUpload,
+    cancelUploads: upload.cancelAll,
     capabilitySets,
   };
 }
