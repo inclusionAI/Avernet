@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.9</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.10</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -100,7 +100,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <ul>
 <li><b>大量 Agent 没有标准 A2A 接口。</b>它们以各自的 RPC 接口或 HTTP 接口提供服务，要接入就得各自写适配。</li>
 <li><b>适配结果不一致。</b>A2A 标准留了很多自由度（是否返回 Task、文本是追加还是替换、何时算结束、断流后怎么恢复）。BCS 对这些有明确的行为前提，目前只写在接入文档里，没有可检验的标准。</li>
-<li><b>BCS 的扩展没有统一实现。</b>工具观察、exec 审批、提交去重等扩展，目前只有 Harness adapter 一份实现，且不在本仓库。</li>
+<li><b>BCS 的扩展没有统一实现。</b>工具观察、exec 审批等扩展，目前只有 Harness adapter 一份实现，且不在本仓库。</li>
 <li><b>多实例没有答案。</b>现有文档明确说明内存 TaskStore 不支持多实例，而公司的 SOFABoot 应用默认多实例部署。</li>
 </ul>
 <p>现有约定散落在接入指南、接口参考和各扩展文档中。本设计把它们收敛成一份标准，并提供参考实现。</p>
@@ -171,6 +171,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D3</span></td><td>多实例只提供跨实例存储的 SPI 和参考实现</td><td>Task 始终在接收它的实例上执行。其他实例只读写共享存储。</td><td>基于消息队列的事件复制（a2a-java 的 replicated queue manager）。引入额外中间件依赖。</td></tr>
 <tr><td><span class="tag d">D4</span></td><td>接受 D3 带来的三项降级</td><td>跨实例订阅为轮询合成，粒度约 1 秒；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复。</td><td>—</td></tr>
 <tr><td><span class="tag d">D5</span></td><td>以进程内 SDK（API + SPI）作为本期唯一的交付形态</td><td>公司 90% 以上技术栈是 Java。业务引入 starter、实现 SPI、自己运维存储。标准靠窄 SPI、TCK 准入和版本治理保证（8.11）。</td><td>BCN 托管的协议适配层。多一跳，所有流式流量经过一个中心服务；本期不做，但核心保持可托管。</td></tr>
+<tr><td><span class="tag d">D6</span></td><td>Profile 不包含提交去重扩展</td><td>标准里没有提交幂等。初始提交结果未知时调用方不重发、报告结果未知。存储只需要一张表和三个原语。没有历史依赖，不需要兼容。</td><td>保留原 BCS 的提交去重扩展。它要求永久保留占位记录、跨语言一致的请求摘要，并带来“占位成功但未执行”的失败窗口，复杂度与收益不相称。以后确有需要可以作为新扩展加回，不影响现有 Agent。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -201,12 +202,11 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>调用上下文扩展</td><td>—</td><td>—</td><td>必须</td><td>必须</td></tr>
 <tr><td>工具观察扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
 <tr><td>exec 审批扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
-<tr><td>提交去重扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
 <tr><td>推送通知（6.12）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>文本以外的模态（6.13）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>多实例正确性（第 9 节）</td><td colspan="4">所有等级都必须满足，除非 Agent 明确以单实例部署</td></tr>
 </table></div>
-<p>L3 的三项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商工具观察和 exec 审批，因此这两项要求 L1 以上。</p>
+<p>L3 的两项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商这两项，因此它们要求 L1 以上。</p>
 
 <h3 id="s6-4"><span class="n">6.4</span>AgentCard</h3>
 <p>字段要求沿用 Provider AgentCard 管理接口 v0.1，以下是 Profile 追加或收紧的部分。</p>
@@ -258,9 +258,6 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
        "params": {"jsonschema_draft": "2020-12",
                   "bcs_exec_profile": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/structured-input-exec/v1.md"}},
 
-      {"uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/message-dedup/v1.md",
-       "required": false, "description": "提交去重"},
-
       {"uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md",
        "required": false, "params": {"party": "first_party"}},
 
@@ -292,7 +289,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><code>pushNotifications: false</code></td><td>推送本期只定义语义，SDK 不声明（6.12）。声明为 true 就必须实现四个配置方法</td></tr>
 <tr><td>profile 声明，<code>level: "L3"</code></td><td>P-15、7.1</td></tr>
 <tr><td>调用上下文，<code>required: true</code></td><td>L2 能力。未协商或缺少用户时拒绝（P-102）</td></tr>
-<tr><td>工具观察、exec 审批、提交去重</td><td>L3 的三项，可分别声明（6.3、7.3）</td></tr>
+<tr><td>工具观察、exec 审批</td><td>L3 的两项，可分别声明（6.3、7.3）</td></tr>
 <tr><td>来源分类</td><td>可选的 Card 描述数据，扩展点 E1</td></tr>
 <tr><td>订单 UI 扩展</td><td>业务扩展，必须 <code>required: false</code>（P-124）；使用的扩展点与登记描述一致（7.6）</td></tr>
 <tr><td><code>defaultInputModes</code>、技能级 <code>inputModes</code> 和 <code>outputModes</code></td><td>多模态声明（P-160）。文本始终在列表中（P-13）</td></tr>
@@ -339,7 +336,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-24</span></td><td><code>SendMessage</code> 且未设置 <code>returnImmediately</code> 时，等待到终态或中断态再返回。</td></tr>
 <tr><td><span class="tag p">P-25</span></td><td>L0 Agent 可以直接返回 <code>message</code>。此时没有 Task，不可查询、不可取消。L1 以上必须返回 Task。</td></tr>
 <tr><td><span class="tag p">P-26</span></td><td>带 <code>taskId</code> 的消息是对已有 Task 的续交，只在 Task 处于 <code>INPUT_REQUIRED</code> 且消息符合对应扩展时接受。<code>contextId</code> 必须与该 Task 一致。其他情况必须拒绝，不得开启新 Task。</td></tr>
-<tr><td><span class="tag p">P-27</span></td><td><code>messageId</code> 相同不等于幂等。只有协商了提交去重扩展，Agent 才承诺同一 <code>messageId</code> 只执行一次。</td></tr>
+<tr><td><span class="tag p">P-27</span></td><td><code>messageId</code> 不是幂等键。Profile 不定义提交幂等（<span class="tag d">D6</span>）：每次不带 <code>taskId</code> 的提交都开启新 Task，Agent 不得因 <code>messageId</code> 相同而合并或拒绝请求。</td></tr>
 <tr><td><span class="tag p">P-28</span></td><td>客户端断开流不得取消 Task。Task 继续执行并写入存储。</td></tr>
 </table></div>
 
@@ -468,7 +465,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><th>条款</th><th>内容</th></tr>
 <tr><td><span class="tag p">P-110</span></td><td>Client 在 <code>a2a-extensions</code> 中只能列出自己真正实现的扩展。</td></tr>
 <tr><td><span class="tag p">P-111</span></td><td>调用声明了必需扩展的 Agent 之前，Client 必须实现该扩展。未实现的 Client 会被拒绝，不得通过省略协商绕过。</td></tr>
-<tr><td><span class="tag p">P-112</span></td><td>初始提交结果未知时，只有协商了提交去重扩展才可以用相同的 <code>messageId</code> 和相同的请求重发。否则必须报告结果未知。</td></tr>
+<tr><td><span class="tag p">P-112</span></td><td>初始提交结果未知时（还没收到 Task 就断开或超时），Client 不得自动重发，必须报告结果未知。是否重新发起由用户或上层业务决定（<span class="tag d">D6</span>）。</td></tr>
 <tr><td><span class="tag p">P-113</span></td><td>已获得 Task 后断流：先 GetTask；未终结再 SubscribeToTask。不得重新提交。</td></tr>
 <tr><td><span class="tag p">P-114</span></td><td>只有 CancelTask 的响应状态为 <code>CANCELED</code> 才能视为已取消。其他响应必须通过 GetTask 核对。</td></tr>
 <tr><td><span class="tag p">P-115</span></td><td>终态后的 GetTask 快照是权威文本。流上收到的文本与它不一致时，以快照为准补齐后缀。</td></tr>
@@ -546,7 +543,6 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>解析后通过 <code>CallerContext</code> 提供</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ToolEventEmitter</code></td></tr>
 <tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ApprovalHandler</code></td></tr>
-<tr><td>提交去重 <code>message-dedup/v1</code></td><td>行为承诺</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>TaskStore.reserveSubmission</code></td></tr>
 <tr><td>来源分类 <code>source-agent/v2</code></td><td>Card 数据</td><td>可选</td><td><span class="tag ok">已有</span></td><td>配置项写入 Card</td></tr>
 </table></div>
 
@@ -599,12 +595,11 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="box q"><p><b>这是授权的输入，不是认证。</b>Profile 不做应用层鉴权（<span class="tag d">D1</span>），改为由 BCN 带上来源信息，Agent 通过 SDK 的 <code>AgentAuthorizer</code>（8.5）自己决定是否接受。这对三种绑定都有效，包括拿不到调用方应用名的 HTTP 绑定。</p><p><b>需要评审确认的后果。</b>来源信息没有签名。能直接访问 Agent 端点的内部应用可以绕过 BCS、自己构造 <code>userId</code> 和 <code>source</code>。如果这不可接受，有两条路：在网络层限制只有 BCS 能访问 Agent 端点；或启用预留的 <code>proof</code> 字段，由 BCS 签发、SDK 验证。见 <span class="tag q">Q8</span>。</p></div>
 
 <h3 id="s7-3"><span class="n">7.3</span>已有扩展的要点</h3>
-<p>这三项的线上格式不变，以各自的规范文档为准。这里只列出与 SDK 设计有关的要点。</p>
+<p>这两项的线上格式不变，以各自的规范文档为准。这里只列出与 SDK 设计有关的要点。</p>
 <div class="tw"><table>
 <tr><th>扩展</th><th>要点</th></tr>
 <tr><td>工具观察</td><td>记录放在 <code>statusUpdate.status.message</code> 的 DataPart 中，分 <code>start</code> 和 <code>result</code> 两个阶段，以 <code>toolCallId</code> 关联。发出记录时保持真实的 Task 状态。它只用于展示，不表示审批。</td></tr>
 <tr><td>exec 审批</td><td>Task 进入 <code>INPUT_REQUIRED</code>，状态消息带 JSON Schema，每个工具接受 <code>allow_once</code> 或 <code>deny</code>。BCS 通过带 <code>taskId</code> 的 SendMessage 续交。已接受的决定必须先持久化到 <code>Task.metadata</code>，再恢复执行。一批最多 64 个工具。</td></tr>
-<tr><td>提交去重</td><td>协商后，同一 Agent 下相同 <code>messageId</code> 且请求内容相同的初始提交只执行一次，跨实例、跨重启有效。内容不同则拒绝。它提供的是"至多执行一次"，不是"恰好一次"。</td></tr>
 </table></div>
 
 <h3 id="s7-4"><span class="n">7.4</span>扩展模型</h3>
@@ -635,7 +630,6 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>调用上下文</td><td>E2</td></tr>
 <tr><td>工具观察</td><td>E4</td></tr>
 <tr><td>exec 审批</td><td>请求在 <code>INPUT_REQUIRED</code> 的状态消息中（E4 的载体，但因 Task 暂停而保留在快照里）；回复为 E2；已接受的决定为 E3</td></tr>
-<tr><td>提交去重</td><td>不携带数据，只是行为承诺</td></tr>
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
@@ -960,7 +954,6 @@ sink.complete();</code></pre>
 <li><div><span class="who">core</span>校验版本和请求结构；通过 <code>AgentResolver</code> 找到 Agent。失败直接返回协议错误，不创建 Task。</div></li>
 <li><div><span class="who">core</span>计算协商结果：请求列出的扩展与 Card 声明的交集。必需扩展缺失则返回 <code>EXTENSION_SUPPORT_REQUIRED</code>。</div></li>
 <li><div><span class="who">core</span>解析调用上下文扩展，得到 <code>userId</code> 和 <code>source</code>；执行 <code>AgentAuthorizer</code>。拒绝则返回权限错误，不创建 Task。</div></li>
-<li><div><span class="who">core</span>如果协商了提交去重：调用 <code>reserveSubmission</code>。已存在且内容相同，转为订阅已有 Task；内容不同，返回参数错误。</div></li>
 <li><div><span class="who">core</span>生成 <code>taskId</code>、<code>contextId</code>，以 <code>SUBMITTED</code> 状态写入 TaskStore，本实例成为执行实例并写入租约。写入失败返回内部错误。</div></li>
 <li><div><span class="who">core</span>向流写出 <code>task</code> 事件，然后把执行提交到执行线程池。线程池已满则 Task 置为 <code>REJECTED</code>。</div></li>
 <li><div><span class="who">core</span>执行线程把状态改为 <code>WORKING</code>，调用 <code>BcnAgent.execute</code>。</div></li>
@@ -1063,9 +1056,6 @@ sink.complete();</code></pre>
 
     /** 当存储中的 version 等于 expectedVersion 时写入 next（next.version = expectedVersion + 1）。 */
     boolean compareAndSet(TaskRecord next, long expectedVersion);
-
-    /** 提交去重占位。首次返回 RESERVED；已存在返回已有的 taskId 和摘要。 */
-    Reservation reserveSubmission(String agentKey, String messageId, String requestDigest, String taskId);
 }</code></pre>
 <div class="tw"><table>
 <tr><th>实现约束</th><th>说明</th></tr>
@@ -1169,8 +1159,7 @@ sink.complete();</code></pre>
 <tr><td>完成与取消同时发生</td><td>先成功的 CAS 生效。完成先写入：取消方读到终态，返回 <code>TASK_NOT_CANCELABLE</code> 或该终态。取消标记先写入：执行实例写终态时 CAS 失败，重读后发现执行已实际完成，仍写入 <code>COMPLETED</code></td><td>不会把已完成的执行报告为已取消</td></tr>
 <tr><td>执行实例只是变慢，被其他实例判为租约过期并置为 FAILED</td><td>执行实例下一次 CAS 失败，重读到终态，立即停止执行并关闭本地订阅流</td><td>Task 为 FAILED；执行被终止。靠 5 秒容忍和 15 秒租约降低发生概率</td></tr>
 <tr><td>两个实例同时回收同一个过期 Task</td><td>只有一个 CAS 成功，另一个重读到终态</td><td>一致</td></tr>
-<tr><td>提交去重：同一 <code>messageId</code> 同时到达两个实例</td><td><code>reserveSubmission</code> 只有一个成功，另一个得到已有 <code>taskId</code>，转为订阅</td><td>只执行一次</td></tr>
-<tr><td>提交去重：占位成功后、<code>create</code> 之前实例宕机</td><td>重试方得到已有 <code>taskId</code>，但记录不存在；SDK 以该 <code>taskId</code> 创建一条 FAILED 记录并返回</td><td>不执行，对外可见失败。这是"至多一次"的取舍</td></tr>
+<tr><td>初始提交的响应丢失：Task 已创建，调用方没有收到</td><td>不做特殊处理。Task 照常执行到终态，按保留期清理。调用方报告结果未知，不自动重发（P-112）</td><td>可能存在一次调用方不知道结果的执行。这是不做提交去重的取舍（<span class="tag d">D6</span>）</td></tr>
 <tr><td>订阅者在快照和第一次轮询之间错过更新</td><td>轮询基于已发送长度计算后缀，不依赖事件</td><td>不丢文本</td></tr>
 <tr><td>存储短暂不可用</td><td>执行实例的节流写入重试到租约剩余时间的一半；仍失败则终止执行。终态写入失败时不对外发终态</td><td>Task 最终由租约过期回收为 FAILED</td></tr>
 </table></div>
@@ -1179,7 +1168,7 @@ sink.complete();</code></pre>
 <p>以一次持续 30 秒、输出 4 KB 文本的流式 Task 为例。</p>
 <div class="tw"><table>
 <tr><th>阶段</th><th>写入次数</th><th>读取次数</th><th>单次数据量</th></tr>
-<tr><td>创建（含去重占位）</td><td>1 到 2</td><td>0</td><td>约 1 KB</td></tr>
+<tr><td>创建</td><td>1</td><td>0</td><td>约 1 KB</td></tr>
 <tr><td>执行中</td><td>最多 30（每秒一次）</td><td>0，除非 CAS 冲突</td><td>累计全文，最终约 5 KB</td></tr>
 <tr><td>终态</td><td>1</td><td>0</td><td>约 5 KB</td></tr>
 <tr><td>BCS 终态后的 GetTask 核对</td><td>0</td><td>1</td><td>约 5 KB</td></tr>
@@ -1212,27 +1201,12 @@ sink.complete();</code></pre>
   PRIMARY KEY (id),
   UNIQUE KEY uk_task (agent_key, task_id),
   KEY idx_expire (expire_at_ms)
-);
-
-CREATE TABLE bcn_a2a_submission (
-  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  gmt_create      DATETIME(3)  NOT NULL,
-  gmt_modified    DATETIME(3)  NOT NULL,
-  agent_key       VARCHAR(128) NOT NULL,
-  message_id      VARCHAR(256) NOT NULL,
-  request_digest  CHAR(64)     NOT NULL,
-  task_id         VARCHAR(64)  NOT NULL,
-  expire_at_ms    BIGINT       NOT NULL,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_submission (agent_key, message_id),
-  KEY idx_expire (expire_at_ms)
 );</code></pre>
 <div class="tw"><table>
 <tr><th>操作</th><th>SQL</th></tr>
 <tr><td><code>get</code></td><td>按 <code>uk_task</code> 的一次 SELECT</td></tr>
 <tr><td><code>create</code></td><td>一次 INSERT；唯一键冲突返回 false</td></tr>
 <tr><td><code>compareAndSet</code></td><td>一次 <code>UPDATE ... WHERE agent_key=? AND task_id=? AND version=?</code>；影响行数为 0 返回 false</td></tr>
-<tr><td><code>reserveSubmission</code></td><td>一次 INSERT；冲突时一次 SELECT</td></tr>
 <tr><td>清理</td><td>宿主的定时任务按 <code>idx_expire</code> 分批删除，每批有上限。SDK 提供语句，不内置调度。</td></tr>
 </table></div>
 <p>标识列使用区分大小写的排序规则。读取必须走主库。连接池由宿主提供。</p>
@@ -1275,7 +1249,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td>断流恢复</td><td>断开后 Task 继续、订阅首帧为快照、不重复文本、终态订阅报错</td><td>L1</td></tr>
 <tr><td>协商与错误</td><td>版本不支持、必需扩展缺失、未协商扩展不出数据、错误原因</td><td>全部</td></tr>
 <tr><td>调用上下文</td><td>有 <code>userId</code>、缺失拒绝、续交不一致拒绝</td><td>L2</td></tr>
-<tr><td>扩展</td><td>工具记录格式；审批允许、拒绝、分批、过期、重复；去重同内容与不同内容</td><td>L3</td></tr>
+<tr><td>扩展</td><td>工具记录格式；审批允许、拒绝、分批、过期、重复</td><td>L3</td></tr>
 <tr><td>多实例</td><td>两个实例共用存储：9.5 表中每一格；终止执行实例后的回收；并发续交只恢复一次</td><td>全部</td></tr>
 <tr><td>隔离</td><td>不同 tenant 的 Task 互不可见</td><td>全部</td></tr>
 </table></div>
@@ -1295,7 +1269,7 @@ CREATE TABLE bcn_a2a_submission (
 <p>建议各平台先以 L1 接入并通过 TCK，再根据业务需要升级。</p>
 <h3>接入步骤</h3>
 <ol>
-<li>引入 starter 和存储实现；多实例部署创建 9.8 的两张表。</li>
+<li>引入 starter 和存储实现；多实例部署创建 9.8 的 Task 表。</li>
 <li>实现 <code>BcnAgent</code>（或 <code>AgentResolver</code>）。</li>
 <li>配置接口地址，由平台确认 MOSN 路由。</li>
 <li>本地运行 TCK 的对应等级。</li>
@@ -1355,7 +1329,7 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的 L0、L1；内存存储；starter 的 GRPC 端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>示例 Agent 单实例通过 TCK L1；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
 <tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；JDBC 参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
 <tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
-<tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；多模态的附件与文件块（6.13）；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；提交去重；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
+<tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；多模态的附件与文件块（6.13）；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
 <tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
 <tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
 </table></div>
@@ -1394,7 +1368,7 @@ CREATE TABLE bcn_a2a_submission (
 <li><code>docs/bcn-a2a-integration-guide.zh-CN.md</code>：接入指南</li>
 <li><code>docs/bcn-a2a-api-reference.zh-CN.md</code>：接口参考，BCS 下行行为的现行描述</li>
 <li><code>docs/bcn-provider-agent-card-api-v0.1.zh-CN.md</code>：Provider AgentCard 管理接口</li>
-<li><code>docs/specs/a2a/extensions/</code>：工具观察、提交去重、来源分类扩展</li>
+<li><code>docs/specs/a2a/extensions/</code>：工具观察、来源分类扩展。同目录的提交去重扩展不属于 Profile</li>
 <li><code>docs/specs/a2a/structured-input-exec/v1.md</code>：exec 审批 profile</li>
 <li><code>docs/specs/a2a/todo.zh-CN.md</code>：A2A 适配待办（A2A-003 调用上下文）</li>
 <li><code>docs/specs/2026-10-28-bcs-a2a-grpc/plan.md</code>：Harness 联调与 GRPC、MOSN 链路</li>

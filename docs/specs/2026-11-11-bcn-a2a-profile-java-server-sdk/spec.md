@@ -42,6 +42,8 @@ BCS 已作为公司级 A2A 注册中心和 A2A Client：Agent 注册 AgentCard�
 | D2 | 多实例是一等约束 | SDK 的默认行为必须在多实例下正确，不能以单实例为前提 |
 | D3 | 多实例只提供跨实例存储的 SPI 和参考实现 | 任务始终在接收它的实例上执行；其他实例只通过共享存储协作，见第 6 节 |
 | D4 | 接受 D3 带来的三项降级 | 跨实例订阅为轮询合成；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复 |
+| D5 | 以进程内 SDK（API + SPI）作为本期唯一的交付形态 | 业务引入 starter、实现 SPI、自己运维存储；标准靠窄 SPI、TCK 准入和版本治理保证 |
+| D6 | Profile 不包含提交去重扩展 | 初始提交结果未知时调用方不重发、报告结果未知；存储只需要一张表和三个原语 |
 
 ## 4. Profile
 
@@ -67,7 +69,7 @@ BCS 继续兼容不使用 SDK、但符合 Profile 的第三方 Server。
 | L0 | 非流式文本 | `SendMessage`（支持 `returnImmediately`）、`GetTask`、`CancelTask` |
 | L1 | 流式文本与断流恢复 | L0，加 `SendStreamingMessage`、`SubscribeToTask`，Card 声明 `streaming: true` |
 | L2 | 调用上下文 | L1，加调用上下文扩展（第 4.7 节） |
-| L3 | 工具观察、exec 审批、提交去重 | L2，加第 4.6 节中声明的可选扩展；三项可分别声明 |
+| L3 | 工具观察、exec 审批 | L2，加第 4.6 节中声明的可选扩展；两项可分别声明 |
 
 ### 4.4 AgentCard 要求
 
@@ -99,7 +101,6 @@ BCS 继续兼容不使用 SDK、但符合 Profile 的第三方 Server。
 | 调用上下文 | L2 | 新增，待定义 | 本文第 4.7 节 |
 | 工具观察 | L3 | 已有 | [tools/v1](../a2a/extensions/tools/v1.md) |
 | exec 审批 | L3 | 已有 | [structured-input-exec/v1](../a2a/structured-input-exec/v1.md) |
-| 提交去重 | L3 | 已有 | [message-dedup/v1](../a2a/extensions/message-dedup/v1.md) |
 | 来源分类 | 可选 | 已有 | [source-agent/v2](../a2a/extensions/source-agent/v2.md) |
 
 #### 4.6.1 profile 声明扩展
@@ -185,7 +186,6 @@ SDK 负责：创建并持久化 Task、首帧返回 Task、把 `append` 转成�
 | `CallerContextProvider` | 从 RPC 上下文取得调用方应用名 | SOFARPC 实现在 starter 中 |
 | `ToolEventEmitter` | 发出工具观察记录 | 由 SDK 提供，Agent 调用 |
 | `ApprovalHandler` | 发起 exec 审批、接收决定、恢复执行 | 无；不实现则不声明该扩展 |
-| `SubmissionDedupStore` | 提交去重的原子占位 | 基于 `TaskStore` |
 | `AgentRegistrar` | 启动时向 BCS 注册或更新 Card | 关闭 |
 
 ### 5.4 starter 的装配
@@ -212,8 +212,6 @@ public interface TaskStore {
     Optional<TaskRecord> get(String agentKey, String taskId);
     boolean create(TaskRecord record);                    // 不存在才写入
     boolean compareAndSet(TaskRecord next, long expectedVersion);
-    boolean reserveSubmission(String agentKey, String messageId,
-                              String requestDigest, String taskId);
 }
 ```
 
@@ -227,7 +225,6 @@ public interface TaskStore {
 
 - 不需要发布订阅，不需要跨实例锁。
 - 写入失败必须作为错误返回；不得吞掉失败后继续对外报告成功。
-- `reserveSubmission` 的记录保留期不短于 Task 记录。
 
 ### 6.3 各操作的行为
 
@@ -245,7 +242,6 @@ public interface TaskStore {
 - **轮询合成订阅**。由于文本只追加，快照差异就是新增后缀。粒度等于写入间隔。工具观察记录不保证补齐，这与现有 `GetTask` 的约定一致。
 - **跨实例取消**。执行实例在下一次写入时读到 `cancelRequested` 并取消。接到请求的实例等待终态，等待上限须小于 BCS 的取消超时（当前清理路径为 15 秒）。超时则返回当前的非终态 Task；BCS 会把它视为取消未确认。
 - **宕机**。任一实例读到租约过期的非终态 Task 时，通过 CAS 把它置为 `FAILED`。不重跑。
-- **提交去重**。声明该扩展时，先 `reserveSubmission` 再启动引擎；重复提交返回已有 Task。
 
 ### 6.4 访问成本
 
@@ -253,7 +249,7 @@ public interface TaskStore {
 
 | 阶段 | 写 | 读 |
 | --- | --- | --- |
-| 创建 | 1 次插入（声明去重时再加 1 次占位） | 0 |
+| 创建 | 1 次插入 | 0 |
 | 执行中 | 每秒最多 1 次 CAS 更新，约 30 次 | 0（取消标记随 CAS 结果带回） |
 | 终态 | 1 次 CAS 更新 | 0 |
 | 跨实例订阅 | 0 | 每秒 1 次按主键读取 |
@@ -263,7 +259,7 @@ public interface TaskStore {
 
 ### 6.5 JDBC 参考实现
 
-- 面向 MySQL 和 OceanBase。一张 Task 表，主键 `(agent_key, task_id)`，`version` 列用于 CAS；一张提交占位表，主键 `(agent_key, message_id)`。
+- 面向 MySQL 和 OceanBase。一张 Task 表，主键 `(agent_key, task_id)`，`version` 列用于 CAS。
 - 所有访问按主键，不做范围扫描。
 - 提供建表语句，不自动建表。
 - 过期清理由宿主负责；参考实现提供按时间分批删除的语句。
@@ -284,7 +280,7 @@ public interface TaskStore {
 | P1 | Profile 文本；`bcn-a2a-spec`；`server-core` 的 L0/L1；内存存储；starter 的 GRPC 端点 | 单实例下 BCS 到示例 Agent 的流式、非流式、取消闭环；TCK 的 L0/L1 通过 |
 | P2 | `TaskStore` 多实例语义；JDBC 参考实现 | 两实例下第 6.3 节全部行为通过 TCK |
 | P3 | 调用上下文扩展；BCS 下行侧生成 `userId` | L2 用例通过；未协商时拒绝 |
-| P4 | 工具观察、exec 审批、提交去重的 SPI | L3 用例通过；审批续交在两实例下验证 |
+| P4 | 工具观察、exec 审批的 SPI | L3 用例通过；审批续交在两实例下验证 |
 
 ## 9. 与现状的差异
 
