@@ -34,7 +34,7 @@ CREATE TABLE `ac_context_collab_event` (
   `visibility` varchar(32) DEFAULT NULL,
   `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; nullable for partial rows',
   `context_version_after` bigint(20) DEFAULT NULL,
-  `occurred_at` datetime NOT NULL,
+  `occurred_at` timestamp NOT NULL,
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_context_collab_event` (`avernet_tenant`, `env`, `collab_context_id`, `event_id`) GLOBAL,

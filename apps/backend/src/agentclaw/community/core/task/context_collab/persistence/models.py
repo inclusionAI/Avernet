@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TIMESTAMP,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func, text as sql_text
@@ -143,7 +144,7 @@ class ContextCollabEventModel(Base):
     visibility = Column(String(32), nullable=True)
     payload = Column(_medium_text(), nullable=True)
     context_version_after = Column(BigInteger, nullable=True)
-    occurred_at = Column(DateTime, nullable=False)
+    occurred_at = Column(TIMESTAMP, nullable=False)
     # Append-only table: the DDL carries no gmt_modified, so take only the
     # first three axis columns (env, avernet_tenant, gmt_create).
     env, avernet_tenant, gmt_create = _base_axes()[:3]
