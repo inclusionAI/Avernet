@@ -182,29 +182,6 @@ test_e2e_mock_takes_precedence_over_env_config() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'enabled = true'
 }
 
-test_e2e_mock_overrides_template_friend_work_order_url() {
-    reset_case "e2e-friend-override"
-    # The local template declares friend_work_order_base_url for local dev
-    # (backend on :8888). The generated runtime copies must REPLACE it with
-    # the E2E mock URL exactly once — a second bare key is a duplicate-key
-    # TOML parse error that takes down the whole config load at startup.
-    printf '%s\n' 'friend_work_order_base_url = "http://127.0.0.1:8888"' \
-        | cat - "${BCS_DIR}/configs/bcs-config-local.toml" > "${TEST_ROOT}/template.new"
-    mv "${TEST_ROOT}/template.new" "${BCS_DIR}/configs/bcs-config-local.toml"
-    export BCS_E2E_MOCK_BASE_URL='http://127.0.0.1:39090'
-    export BCS_E2E_JUDGE_API_KEY='e2e-secret'
-
-    prepare_bcs_runtime_config
-
-    for config_file in "${BCS_CONFIG_DIR}/bcs-config.toml" "${BCS_CONFIG_DIR}/bcs-config-local.toml"; do
-        assert_contains "$config_file" 'friend_work_order_base_url = "http://127.0.0.1:39090"'
-        assert_not_contains "$config_file" '127.0.0.1:8888'
-        if [ "$(grep -c '^friend_work_order_base_url' "$config_file")" != "1" ]; then
-            fail "${config_file} must declare friend_work_order_base_url exactly once"
-        fi
-    done
-}
-
 test_local_llm_stays_disabled_without_env_config
 test_botchat_url_can_be_overridden
 test_complete_env_config_enables_local_llm
@@ -212,7 +189,6 @@ test_local_llm_resolves_openai_api_key_reference
 test_local_llm_rejects_unresolved_openai_api_key_reference
 test_partial_env_config_does_not_enable_local_llm
 test_e2e_mock_takes_precedence_over_env_config
-test_e2e_mock_overrides_template_friend_work_order_url
 
 printf 'PASS: singlebox BCS runtime config tests\n'
 

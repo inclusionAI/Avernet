@@ -30,9 +30,6 @@ group_chat_delay_min_ms = 0
 group_chat_delay_max_ms = 0
 
 bcs_endpoint = "http://127.0.0.1:21000"
-# Backend base URL for friend-connect work-order notifications and friend auth
-# sync. The local backend listens on 8888; leave it loopback-only here.
-friend_work_order_base_url = "http://127.0.0.1:8888"
 botchat_url = "http://localhost:8000"
 register_path = "/bcn/register"
 default_visibility = "protected"
