@@ -87,21 +87,24 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
   if (pairByKey.size === 0) return bots;
 
   // 逐批 ≤100 组精确身份对；响应按稳定引用（bcn_bot_id，缺失时回退 bot_id:owner_id 复合引用）
-  // 匹配，不按响应数组顺序拼接。
+  // 匹配，不按响应数组顺序拼接。匹配到记录的候选回填 owner_name 到卡片 ownerName，
+  // 未匹配记录或 owner_name 空白的候选保持「未公开」。
   const unavailableReferences = new Set<string>();
+  const ownerNameByReference = new Map<string, string>();
   try {
     const pairs = [...pairByKey.values()];
     for (let start = 0; start < pairs.length; start += BOT_METADATA_QUERY_CHUNK_SIZE) {
       const chunk = pairs.slice(start, start + BOT_METADATA_QUERY_CHUNK_SIZE);
       const records = await fetchMetadata(userId, chunk, signal);
       for (const record of Array.isArray(records) ? records : []) {
-        if (!isServiceUnavailableRecord(record)) continue;
         const bcnBotId = record.bcn_bot_id?.trim();
         const botId = record.bot_id?.trim();
         const ownerId = record.owner_id?.trim();
-        if (bcnBotId) unavailableReferences.add(bcnBotId);
-        else if (botId && ownerId) unavailableReferences.add(botOwnerKey(botId, ownerId));
-        else if (botId) unavailableReferences.add(botId);
+        const reference = bcnBotId || (botId && ownerId ? botOwnerKey(botId, ownerId) : botId) || '';
+        if (!reference) continue;
+        const ownerName = record.owner_name?.trim();
+        if (ownerName) ownerNameByReference.set(reference, ownerName);
+        if (isServiceUnavailableRecord(record)) unavailableReferences.add(reference);
       }
     }
   } catch (error) {
@@ -115,9 +118,18 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
   }
 
   // 候选以其完整对象参与筛选：保留原顺序与输入引用，不改写 bcsStatus/推荐分数/短画像等字段。
-  return bots.filter((bot) => {
-    const pair = toBotMetadataPair(bot.id);
-    if (pair && unavailableReferences.has(botOwnerKey(pair.bot_id, pair.owner_id))) return false;
-    return !unavailableReferences.has(bot.id.trim());
-  });
+  return bots
+    .filter((bot) => {
+      const pair = toBotMetadataPair(bot.id);
+      if (pair && unavailableReferences.has(botOwnerKey(pair.bot_id, pair.owner_id))) return false;
+      return !unavailableReferences.has(bot.id.trim());
+    })
+    .map((bot) => {
+      const pair = toBotMetadataPair(bot.id);
+      const ownerName =
+        (pair ? ownerNameByReference.get(botOwnerKey(pair.bot_id, pair.owner_id)) : undefined) ??
+        ownerNameByReference.get(bot.id.trim());
+      // 仅命中非空 owner_name 时生成新对象；其余候选保留原引用与「未公开」默认值。
+      return ownerName ? { ...bot, ownerName } : bot;
+    });
 }

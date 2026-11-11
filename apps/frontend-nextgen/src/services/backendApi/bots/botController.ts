@@ -98,6 +98,8 @@ export interface BotMetadataDto {
   template_type?: string;
   template_name?: string;
   bot_type?: string;
+  /** Owner 展示名；用于公开 Bot 卡片 ownerName 回填，未匹配到记录的候选保持「未公开」。 */
+  owner_name?: string;
   /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
   online_available?: boolean | null;
   status?: string;

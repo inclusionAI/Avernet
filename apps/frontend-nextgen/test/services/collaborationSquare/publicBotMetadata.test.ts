@@ -55,6 +55,65 @@ describe('filterPublicBotsByMetadata', () => {
     useErrorNotifyStore.getState().reset();
   });
 
+  it('匹配到 metadata 的候选回填 owner_name，未匹配候选保持「未公开」', async () => {
+    const matched = compoundBot(0);
+    const unmatched = compoundBot(1);
+    fetchMetadata.mockResolvedValue([
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-0' }, { owner_name: '张三' }),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [matched, unmatched],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    expect(kept[0].ownerName).toBe('张三');
+    expect(kept[1].ownerName).toBe('未公开');
+    // 无 owner_name 可回填的候选保留原对象引用（其余字段原样）。
+    expect(kept[1]).toBe(unmatched);
+  });
+
+  it('owner_name 空白时保持「未公开」并保留原对象引用', async () => {
+    const bot = compoundBot(0);
+    fetchMetadata.mockResolvedValue([
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-0' }, { owner_name: '  ' }),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [bot],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    expect(kept[0].ownerName).toBe('未公开');
+    expect(kept[0]).toBe(bot);
+  });
+
+  it('bcn_bot_id 与 bot_id:owner_id 不一致时按 bcn 稳定引用回填 owner_name', async () => {
+    const bot = { ...compoundBot(0), id: 'botA:provider-ref' };
+    fetchMetadata.mockResolvedValue([
+      metadataRecord(
+        { bot_id: 'botA', owner_id: '900003' },
+        { bcn_bot_id: 'botA:provider-ref', owner_name: '李四' },
+      ),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [bot],
+      userId: '7',
+      backendEnabled: true,
+      fetchMetadata,
+      signal,
+    });
+
+    expect(kept[0].ownerName).toBe('李四');
+  });
+
   it('backendEnabled=false 时不发任何 metadata 请求，原样保留整批候选', async () => {
     const bots = [compoundBot(0), compoundBot(1), compoundBot(2)];
 
