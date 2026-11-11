@@ -30,10 +30,7 @@ export function TodoInteractionPanel({ interactions, enabled, loading, onSubmit 
       {interactions.length > 0 ? (
         <div className="space-y-2">
           {interactions.map((item) => (
-            <Card
-              key={item.eventId || `${item.executionId}-${item.eventSeq}`}
-              className="rounded-lg bg-muted/20 p-3"
-            >
+            <Card key={item.eventId || `${item.executionId}-${item.eventSeq}`} className="rounded-lg bg-muted/20 p-3">
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>{item.actorType === 'bot' ? 'Bot' : '我'}</span>
                 <span>{formatDateTime(item.createdAt)}</span>

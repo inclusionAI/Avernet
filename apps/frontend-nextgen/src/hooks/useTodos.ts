@@ -1,7 +1,7 @@
 import { notifySuccess } from '@/components/ui/notify';
 import type { TodoStatus } from '@/domain/todos/models';
-import { addTodo, editTodo, loadTodos } from '@/services/backendApi/todos/todoService';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { addTodo, editTodo, loadTodos } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useRef, useState } from 'react';

@@ -94,8 +94,8 @@
           "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#TodoRepository.create_todo/list_todos/get_todo/update_draft",
           "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py#list_todos/create_todo/get_todo/update_todo",
           "apps/frontend-nextgen/src/hooks/useTodos.ts#useTodos",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoTable.tsx#TodoTable",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoCreateModal.tsx#TodoCreateModal"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoTable.tsx#TodoTable",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoCreateModal.tsx#TodoCreateModal"
         ],
         "verification": {
           "method": "integration",
@@ -127,8 +127,8 @@
         "implementation_refs": [
           "apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py#TodoService._resolve_bot",
           "apps/backend/tests/community/core/task/todos/test_todo_service.py#Bot scope tests",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/botScope.ts#botBelongsToCurrentSpace/uniqueBots",
-          "apps/frontend-nextgen/test/pages/Lab/Tasks/botScope.test.ts#Bot scope tests"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/botScope.ts#botBelongsToCurrentSpace/uniqueBots",
+          "apps/frontend-nextgen/test/pages/Lab/Todos/botScope.test.ts#Bot scope tests"
         ],
         "verification": {
           "method": "integration",
@@ -162,7 +162,7 @@
           "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#TodoRepository.create_interaction_if_pending/list_interactions",
           "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py#create_todo_interaction/list_todo_interactions",
           "apps/frontend-nextgen/src/hooks/useTodoDetail.ts#useTodoDetail.interact",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoInteractionPanel.tsx#TodoInteractionPanel"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionPanel.tsx#TodoInteractionPanel"
         ],
         "verification": {
           "method": "integration",
@@ -196,7 +196,7 @@
           "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#TodoRepository.accept_if_pending",
           "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py#submit_todo_acceptance",
           "apps/frontend-nextgen/src/hooks/useTodoDetail.ts#useTodoDetail.accept",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoAcceptanceActions.tsx#TodoAcceptanceActions"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoAcceptanceActions.tsx#TodoAcceptanceActions"
         ],
         "verification": {
           "method": "integration",
@@ -260,14 +260,14 @@
           "docs/specs/backend/2026-11-10-todo-workbench/design.md"
         ],
         "implementation_refs": [
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/index.tsx#LabTasksPage",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoCreateModal.tsx#TodoCreateModal",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoDetailDrawer.tsx#TodoDetailDrawer",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/index.tsx#LabTodosPage",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoCreateModal.tsx#TodoCreateModal",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoDetailDrawer.tsx#TodoDetailDrawer",
           "apps/frontend-nextgen/src/hooks/useTodos.ts#useTodos",
           "apps/frontend-nextgen/src/hooks/useTodoDetail.ts#useTodoDetail",
-          "apps/frontend-nextgen/src/services/backendApi/todos/todoService.ts#Todo service facade",
+          "apps/frontend-nextgen/src/services/todos/todoService.ts#Todo service facade",
           "apps/frontend-nextgen/src/stores/todoStore.ts#useTodoStore",
-          "apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx#Todo workbench page tests"
+          "apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx#Todo workbench page tests"
         ],
         "verification": {
           "method": "e2e",
@@ -411,7 +411,7 @@
         "checked_at": "2026-11-10T12:36:58.101453Z",
         "command": "cd apps/frontend-nextgen && npm test",
         "result": "failed",
-        "failure_reason": "Legacy Lab Tasks tests still assert the replaced multi-Bot/collaboration-group task experience instead of the confirmed Todo workbench. Test Suites: 1 failed, 714 passed; Tests: 7 failed, 5825 passed."
+        "failure_reason": "The Todo workbench was implemented on the existing Task route, so the preserved multi-Bot/collaboration-group Task regression suite failed. Test Suites: 1 failed, 714 passed; Tests: 7 failed, 5825 passed."
       },
       {
         "allowed": false,
@@ -422,7 +422,7 @@
           "AC-006"
         ],
         "checked_at": "2026-11-10T12:40:15.296179Z",
-        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand",
+        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand",
         "result": "failed",
         "failure_reason": "The migrated Todo page suite passed 7 of 8 tests; one detail assertion used findByRole for a title rendered twice inside the drawer and was ambiguous."
       },
@@ -436,7 +436,7 @@
           "AC-006"
         ],
         "checked_at": "2026-11-10T12:42:05Z",
-        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand",
+        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand",
         "result": "passed",
         "evidence": "8 passed"
       },
@@ -507,7 +507,7 @@
           "AC-006"
         ],
         "checked_at": "2026-11-10T12:48:50Z",
-        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand",
+        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand",
         "result": "failed",
         "failure_reason": "New draft-edit test cannot find the 编辑待办 action; 11 existing page tests pass and the new AC-006 slice is red as expected."
       },
@@ -523,7 +523,7 @@
           "AC-006"
         ],
         "checked_at": "2026-11-10T12:50:33Z",
-        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand",
+        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand",
         "result": "failed",
         "failure_reason": "Draft edit behavior reached editTodo and updated the drawer, but the test used an unnamed dialog query and mistook the intentionally still-open detail drawer for the closed edit form."
       },
@@ -537,7 +537,7 @@
           "AC-006"
         ],
         "checked_at": "2026-11-10T12:54:56Z",
-        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand",
+        "command": "cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand",
         "result": "passed",
         "evidence": "12 passed"
       },
@@ -907,7 +907,7 @@
           }
         ],
         "failure_type": "verification_failed",
-        "failure_reason": "The full frontend suite found seven stale assertions in test/pages/Lab/Tasks.test.tsx for the removed multi-Bot and collaboration-group task page.",
+        "failure_reason": "The full frontend suite exposed that Todo had replaced the existing multi-Bot/collaboration-group Task page instead of being added as an independent capability.",
         "missing_evidence": [
           "Passing Todo workbench page regression tests",
           "Passing full frontend test suite"
@@ -915,21 +915,21 @@
         "auto_fixable": true,
         "detected_by": "npm test",
         "ai_claimed_done": false,
-        "actual_problem": "The production page implements the confirmed Todo workbench, but its legacy page-level test still verifies the superseded product contract.",
+        "actual_problem": "The Todo page and tests were placed under Lab/Tasks, replacing the existing Task contract instead of adding an independent Lab/Todos route.",
         "action": "return_to_implement_or_verification",
-        "allowed_scope": "Only migrate apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx to the confirmed Todo workbench behavior; do not restore multi-Bot, collaboration-group, or legacy static task behavior.",
+        "allowed_scope": "Move the Todo page and tests to Lab/Todos, restore the existing Lab/Tasks page and tests unchanged, and keep backend Todo contracts additive.",
         "rework_plan": [
           "Replace legacy myTask/dashboard mocks with Todo and current-space mocks",
           "Verify title, current space, search/status filters, create flow, detail event/artifact display, and pending-acceptance interaction/acceptance behavior",
           "Run the targeted page test, then the full frontend test/typecheck/lint gates"
         ],
         "actions_taken": [
-          "Migrated the legacy Lab Tasks page test from multi-Bot/collaboration-group assertions to the confirmed Todo workbench contract",
+          "Restored the existing Lab Tasks page and regression suite unchanged from the base branch",
           "Added coverage for current-space Bot scope, search and status filtering, creation plus run handoff, B event/artifact rendering, snapshot-bound interaction, acceptance rejection rerun, and non-acceptance state restrictions",
           "Resolved the final duplicate-heading query ambiguity without changing production behavior"
         ],
         "changed_files": [
-          "apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx"
+          "apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx"
         ],
         "verification_evidence": [
           "command: cd apps/frontend-nextgen && npm test => 715 suites, 5833 tests passed",
@@ -982,7 +982,7 @@
         "ai_claimed_done": false,
         "actual_problem": "A migrated test assertion is ambiguous because the drawer intentionally repeats the Todo title in its header and content summary.",
         "action": "return_to_verification",
-        "allowed_scope": "Only disambiguate the duplicate title assertion in apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx; do not change production behavior or other tests.",
+        "allowed_scope": "Only disambiguate the duplicate title assertion in apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx; do not change production behavior or other tests.",
         "rework_plan": [
           "Use a plural heading assertion for the repeated Todo title",
           "Rerun the targeted Todo page suite"
@@ -991,10 +991,10 @@
           "Replaced the singular duplicate-heading lookup with a plural assertion matching the intentional drawer header and summary title"
         ],
         "changed_files": [
-          "apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx"
+          "apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx"
         ],
         "verification_evidence": [
-          "command: cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand => 8 passed"
+          "command: cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand => 8 passed"
         ],
         "before_blockers": [
           "AC-006"
@@ -1060,13 +1060,13 @@
           "Disambiguated edit modal from the intentionally open detail drawer"
         ],
         "changed_files": [
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/index.tsx",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoCreateModal.tsx",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoDetailDrawer.tsx",
-          "apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/index.tsx",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoCreateModal.tsx",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoDetailDrawer.tsx",
+          "apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx"
         ],
         "verification_evidence": [
-          "command: cd apps/frontend-nextgen && npm test -- test/pages/Lab/Tasks.test.tsx --runInBand => 12 passed",
+          "command: cd apps/frontend-nextgen && npm test -- test/pages/Lab/Todos.test.tsx --runInBand => 12 passed",
           "command: cd apps/frontend-nextgen && npm test => 715 suites, 5837 tests passed",
           "command: cd apps/frontend-nextgen && npm run typecheck => passed",
           "command: cd apps/frontend-nextgen && npm run lint => passed"
@@ -1191,7 +1191,7 @@
         "finding": "Todo 的后端和前端 Bot 范围校验在 bot.space_id 与当前个人空间相同时直接通过，未同时校验 bot.owner_id、当前 actor 和 personal_owner_id 一致；异常或历史数据可使其他用户的 Bot 被选中。",
         "evidence": [
           "apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py#TodoService._resolve_bot",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/botScope.ts#botBelongsToCurrentSpace",
+          "apps/frontend-nextgen/src/pages/Lab/Todos/botScope.ts#botBelongsToCurrentSpace",
           "Current tests cover matching/mismatching spaceId and owner fallback only, not same personal spaceId with a foreign owner."
         ],
         "required_action": "在个人空间边界 fail closed：同时校验 Bot owner、actor 和 personal space owner，并补充后端及前端回归测试。",
@@ -1232,7 +1232,7 @@
         "finding": "前端先调用 A 将 rejected Todo 原子改为 in_progress，再调用 B /run；若 /run 失败，A 不回滚，而当前 UI 对 in_progress 不提供重试、互动或再次验收入口，Todo 可能永久卡住。",
         "evidence": [
           "apps/frontend-nextgen/src/hooks/useTodoDetail.ts",
-          "apps/frontend-nextgen/src/pages/Lab/Tasks/components/TodoDetailDrawer.tsx"
+          "apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoDetailDrawer.tsx"
         ],
         "required_action": "确认 /run 幂等和失败恢复契约：允许 in_progress 重试、调整调用顺序，或提供可靠异步补偿。",
         "blocking": false,

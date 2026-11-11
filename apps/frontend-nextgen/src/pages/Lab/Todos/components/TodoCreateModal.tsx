@@ -1,13 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import {
-  Modal,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
-} from '@/components/ui/Modal';
+import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import type { TodoBotOption } from '@/domain/todos/models';
@@ -65,7 +58,9 @@ export function TodoCreateModal({
         <ModalHeader>
           <ModalTitle>{editing ? '编辑待办' : '创建待办'}</ModalTitle>
           <ModalDescription>
-            {editing ? '仅草稿可以修改，保存后不会自动启动执行。' : '待办会绑定当前空间和一个 Bot，创建后保持草稿，可手动启动执行。'}
+            {editing
+              ? '仅草稿可以修改，保存后不会自动启动执行。'
+              : '待办会绑定当前空间和一个 Bot，创建后保持草稿，可手动启动执行。'}
           </ModalDescription>
         </ModalHeader>
         <div className="space-y-4">
@@ -103,7 +98,9 @@ export function TodoCreateModal({
             </Select>
           </label>
           {bots.length === 0 ? (
-            <p className="m-0 text-xs text-muted-foreground">当前空间没有可用 Bot，暂时无法{editing ? '编辑' : '创建'}待办。</p>
+            <p className="m-0 text-xs text-muted-foreground">
+              当前空间没有可用 Bot，暂时无法{editing ? '编辑' : '创建'}待办。
+            </p>
           ) : null}
         </div>
         <ModalFooter>

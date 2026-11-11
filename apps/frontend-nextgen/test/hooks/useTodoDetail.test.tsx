@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
-import { useTodoDetail } from '@/hooks/useTodoDetail';
 import type { TodoEvent, TodoRecord } from '@/domain/todos/models';
-import * as todoService from '@/services/backendApi/todos/todoService';
+import { useTodoDetail } from '@/hooks/useTodoDetail';
+import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-jest.mock('@/services/backendApi/todos/todoService');
+jest.mock('@/services/todos/todoService');
 jest.mock('@/components/ui/notify', () => ({ notifySuccess: jest.fn() }));
 jest.mock('@/utils/errorToast', () => ({ safeReportError: jest.fn() }));
 

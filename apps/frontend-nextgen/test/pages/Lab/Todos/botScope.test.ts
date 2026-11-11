@@ -1,5 +1,5 @@
 import type { Space } from '@/domain/admin/models';
-import { botBelongsToCurrentSpace, eligibleTodoBots } from '@/pages/Lab/Tasks/botScope';
+import { botBelongsToCurrentSpace, eligibleTodoBots } from '@/pages/Lab/Todos/botScope';
 
 const personalSpace: Space = {
   spaceId: 10,
@@ -15,7 +15,7 @@ const personalSpace: Space = {
 
 const teamSpace: Space = { ...personalSpace, spaceType: 'TEAM' };
 
-describe('Lab Tasks Bot scope', () => {
+describe('Lab Todos Bot scope', () => {
   it('personal space only accepts the current human own bot', () => {
     const ownBot = { id: 'bot-1', name: '我的 Bot', ownerId: 'u-1' };
     const foreignBot = { id: 'bot-2', name: '他人 Bot', ownerId: 'u-2' };

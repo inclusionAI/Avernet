@@ -57,34 +57,68 @@ export function TodoTable({
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="p-0"><Spin tip="加载待办中…" className="py-16" /></td>
+                  <td colSpan={5} className="p-0">
+                    <Spin tip="加载待办中…" className="py-16" />
+                  </td>
                 </tr>
               ) : error ? (
                 <tr>
                   <td colSpan={5} className="p-0">
-                    <Empty title="待办加载失败" description={error} action={<Button variant="secondary" onClick={onRetry}>重试</Button>} />
+                    <Empty
+                      title="待办加载失败"
+                      description={error}
+                      action={
+                        <Button variant="secondary" onClick={onRetry}>
+                          重试
+                        </Button>
+                      }
+                    />
                   </td>
                 </tr>
               ) : todos.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-0"><Empty title="暂无待办" description="创建一个待办，让当前空间的 Bot 开始处理。" /></td>
+                  <td colSpan={5} className="p-0">
+                    <Empty title="暂无待办" description="创建一个待办，让当前空间的 Bot 开始处理。" />
+                  </td>
                 </tr>
               ) : (
                 todos.map((todo) => (
                   <tr key={todo.todoId} className="border-b border-divider text-xs transition-colors hover:bg-muted/50">
                     <td className="max-w-[28rem] border-t border-divider px-4 py-3 align-top">
-                      <button type="button" className="block max-w-full text-left" onClick={() => onSelect(todo.todoId)}>
-                        <div className="truncate font-medium text-foreground hover:text-primary">{todo.title}</div>
-                        <div className="mt-1 line-clamp-2 text-muted-foreground">{todo.description || '暂无描述'}</div>
-                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto w-full max-w-full flex-col items-start justify-start gap-0 rounded-none border-0 p-0 text-left font-normal hover:bg-transparent"
+                        onClick={() => onSelect(todo.todoId)}
+                      >
+                        <div className="w-full truncate text-left font-medium text-foreground hover:text-primary">
+                          {todo.title}
+                        </div>
+                        <div className="mt-1 w-full line-clamp-2 text-left text-muted-foreground">
+                          {todo.description || '暂无描述'}
+                        </div>
+                      </Button>
                     </td>
-                    <td className="border-t border-divider px-4 py-3 align-top text-muted-foreground">{todo.botName || todo.botId || '—'}</td>
+                    <td className="border-t border-divider px-4 py-3 align-top text-muted-foreground">
+                      {todo.botName || todo.botId || '—'}
+                    </td>
                     <td className="border-t border-divider px-4 py-3 align-top">
-                      <Badge className={cn('border', TODO_STATUS_CLASS[todo.status])}>{TODO_STATUS_LABEL[todo.status]}</Badge>
+                      <Badge className={cn('border', TODO_STATUS_CLASS[todo.status])}>
+                        {TODO_STATUS_LABEL[todo.status]}
+                      </Badge>
                     </td>
-                    <td className="border-t border-divider px-4 py-3 align-top text-muted-foreground">{formatDateTime(todo.updatedAt)}</td>
+                    <td className="border-t border-divider px-4 py-3 align-top text-muted-foreground">
+                      {formatDateTime(todo.updatedAt)}
+                    </td>
                     <td className="border-t border-divider px-4 py-3 text-right align-top">
-                      <Button variant="ghost" size="sm" onClick={() => onSelect(todo.todoId)} leftIcon={<Eye className="size-4" aria-hidden />}>查看</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSelect(todo.todoId)}
+                        leftIcon={<Eye className="size-4" aria-hidden />}
+                      >
+                        查看
+                      </Button>
                     </td>
                   </tr>
                 ))

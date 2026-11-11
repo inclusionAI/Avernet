@@ -2,16 +2,16 @@ import { PageHeader } from '@/components/Common/PageHeader';
 import { BotBrowseConfigButton } from '@/components/Community/BotBrowseConfigButton';
 import { FeedbackModal } from '@/components/Community/FeedbackModal';
 import { Button } from '@/components/ui/Button';
+import { Points } from '@/tracking/points';
+import { TrackExpo } from '@/tracking/TrackExpo';
+import { Tracert } from '@/utils/tracert';
 import { history } from '@umijs/max';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowRight, MessagesSquare, Target } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, MessagesSquare, Target } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
-import { TrackExpo } from '@/tracking/TrackExpo';
 
-/** 实验室功能卡内容（社区 + 任务）。文案对齐原型 TeamClaw-demo …/Lab(最新任务产品 PRD)。 */
+/** 实验室功能卡内容（社区 + 待办 + 任务）。文案与入口对齐实验室原型。 */
 interface LabFeature {
   id: string;
   title: string;
@@ -33,6 +33,14 @@ const FEATURES: LabFeature[] = [
     headerExtra: <BotBrowseConfigButton />,
   },
   {
+    id: 'todos',
+    title: '待办',
+    description:
+      '让 Bot 服务团队、帮助完成团队工作,并跟进待办进度。支持手动或 AI 创建,过程对空间内成员公开,结案沉淀进团队知识库让它越来越懂团队。',
+    icon: ClipboardCheck,
+    href: '/lab/todos',
+  },
+  {
     id: 'tasks',
     title: '任务',
     description: '查看跨Bot、跨群的协同任务，可在对话或协作群中发起此类任务。',
@@ -52,9 +60,9 @@ function LabFeatureCard({
   const Icon = feature.icon;
   return (
     <article
-    aria-label={feature.title}
-    className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
-  >
+      aria-label={feature.title}
+      className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden>
@@ -90,10 +98,10 @@ function LabFeatureCard({
 }
 
 /**
- * 实验室落地页：功能卡网格（承载社区与任务）。
+ * 实验室落地页：功能卡网格（承载社区、待办与任务）。
  * 一级导航「实验室」(/lab) 进入此落地页；点卡片的「开始体验」进入对应功能页。
  * 社区卡的「Bot 访问社区配置」齿轮置于进入社区前的此页右上角，避免进入社区后才可配置。
- * 任务卡进入 /lab/tasks：跨Bot、跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
+ * 待办卡进入 /lab/todos；任务卡继续进入 /lab/tasks，两个能力相互独立。
  */
 export default function LabLandingPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);

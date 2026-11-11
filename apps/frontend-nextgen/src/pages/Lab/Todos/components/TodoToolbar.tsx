@@ -1,9 +1,9 @@
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Button } from '@/components/ui/Button';
-import { TODO_STATUS_OPTIONS } from '@/domain/todos/status';
-import type { TodoStatus } from '@/domain/todos/models';
 import type { Space } from '@/domain/admin/models';
+import type { TodoStatus } from '@/domain/todos/models';
+import { TODO_STATUS_OPTIONS } from '@/domain/todos/status';
 import { Plus, Search } from 'lucide-react';
 
 interface TodoToolbarProps {
@@ -15,14 +15,7 @@ interface TodoToolbarProps {
   onCreate: () => void;
 }
 
-export function TodoToolbar({
-  space,
-  keyword,
-  status,
-  onKeywordChange,
-  onStatusChange,
-  onCreate,
-}: TodoToolbarProps) {
+export function TodoToolbar({ space, keyword, status, onKeywordChange, onStatusChange, onCreate }: TodoToolbarProps) {
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -40,7 +33,10 @@ export function TodoToolbar({
       </div>
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
         <div className="relative min-w-0">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
           <Input
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}

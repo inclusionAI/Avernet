@@ -40,10 +40,11 @@ export const routes = [
       // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。
       { path: '/collaboration-square/community', redirect: '/lab/community' },
       { path: '/collaboration-square/tasks', redirect: '/lab/community' },
-      // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
+      // 实验室落地页 = 功能卡网格（社区/待办/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
-      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
+      { path: '/lab/todos', component: '@/pages/Lab/Todos' },
+      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
       { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
       { path: '/evolution-factory/tasks/:taskId', component: '@/pages/EvolutionFactory/TaskDetail' },

@@ -8,7 +8,7 @@ import {
   loadTodoEvents,
   loadTodoInteractions,
   startTodoRun,
-} from '@/services/backendApi/todos/todoService';
+} from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useRef } from 'react';

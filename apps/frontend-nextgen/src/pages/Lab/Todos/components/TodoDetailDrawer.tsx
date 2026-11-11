@@ -69,12 +69,7 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
 
   return (
     <Drawer open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DrawerContent
-        side="right"
-        size="lg"
-        className="bg-background text-foreground"
-        closeLabel="关闭待办详情"
-      >
+      <DrawerContent side="right" size="lg" className="bg-background text-foreground" closeLabel="关闭待办详情">
         <DrawerHeader className="mb-5 border-b border-divider pb-4">
           <DrawerTitle className="pr-8 text-lg font-semibold tracking-tight text-foreground">
             {selectedTodo?.title ?? '待办详情'}
@@ -112,19 +107,31 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
               </div>
 
               <div className="grid gap-4 border-t border-divider pt-4 sm:grid-cols-2">
-                <InfoItem icon={<Bot className="size-3.5" />} label="Bot" value={selectedTodo.botName || selectedTodo.botId} />
-                <InfoItem icon={<FileText className="size-3.5" />} label="当前空间" value={currentSpace?.spaceName || `空间 ${selectedTodo.spaceId}`} />
-                <InfoItem icon={<CalendarClock className="size-3.5" />} label="创建时间" value={formatDateTime(selectedTodo.createdAt)} />
-                <InfoItem icon={<History className="size-3.5" />} label="更新时间" value={formatDateTime(selectedTodo.updatedAt)} />
+                <InfoItem
+                  icon={<Bot className="size-3.5" />}
+                  label="Bot"
+                  value={selectedTodo.botName || selectedTodo.botId}
+                />
+                <InfoItem
+                  icon={<FileText className="size-3.5" />}
+                  label="当前空间"
+                  value={currentSpace?.spaceName || `空间 ${selectedTodo.spaceId}`}
+                />
+                <InfoItem
+                  icon={<CalendarClock className="size-3.5" />}
+                  label="创建时间"
+                  value={formatDateTime(selectedTodo.createdAt)}
+                />
+                <InfoItem
+                  icon={<History className="size-3.5" />}
+                  label="更新时间"
+                  value={formatDateTime(selectedTodo.updatedAt)}
+                />
               </div>
 
               {selectedTodo.status === 'draft' ? (
                 <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={onEdit}
-                    leftIcon={<Pencil className="size-4" aria-hidden />}
-                  >
+                  <Button variant="outline" onClick={onEdit} leftIcon={<Pencil className="size-4" aria-hidden />}>
                     编辑待办
                   </Button>
                   <Button
@@ -146,12 +153,7 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
                 </div>
                 {eventsLoading ? <span className="text-xs text-muted-foreground">刷新中…</span> : null}
               </div>
-              <TodoEventTimeline
-                events={events}
-                loading={eventsLoading}
-                error={eventsError}
-                onRetry={refreshEvents}
-              />
+              <TodoEventTimeline events={events} loading={eventsLoading} error={eventsError} onRetry={refreshEvents} />
             </section>
 
             <TodoInteractionPanel
@@ -161,9 +163,15 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
               onSubmit={interact}
             />
 
-            {canInteractWithTodo(selectedTodo.status) ? <TodoAcceptanceActions loading={mutationLoading} onAccept={accept} /> : null}
+            {canInteractWithTodo(selectedTodo.status) ? (
+              <TodoAcceptanceActions loading={mutationLoading} onAccept={accept} />
+            ) : null}
 
-            {error ? <p className="m-0 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p> : null}
+            {error ? (
+              <p className="m-0 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {error}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -178,7 +186,9 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onEdit, onList
               <CheckCircle2 className="size-3.5" aria-hidden /> 已完成
             </span>
           ) : null}
-          <Button variant="outline" onClick={onClose}>关闭</Button>
+          <Button variant="outline" onClick={onClose}>
+            关闭
+          </Button>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
