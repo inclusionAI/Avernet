@@ -268,5 +268,37 @@ class WorkspaceCliFuseTests(unittest.TestCase):
                     validate_workspace_cli_fuse_profile(profile_value(mutate=mutate))
 
 
+    def test_default_profile_three_segment_perspective_owner_is_exact(self):
+        # The station builds participant ids as f"{bot_id}:{profile_id}" with
+        # the fusion profile id defaulting to "default" (bcs-fuse
+        # fuse_backed.rs), so a default-profile warm perspective travels back
+        # as the three-segment "<bot>:default". Admit exactly that suffix.
+        execution, _, _, _ = self.run_case(fusion=fusion_output(perspectives=[
+            {"bot_uuid": f"{DRIVER}:default", "name": "driver", "emoji": "robot",
+             "summary": "driver workspace context"},
+            {"bot_uuid": f"{MEMBER}:default", "name": "member", "emoji": "robot",
+             "summary": "member workspace context"}]))
+        self.assertEqual(execution.status, "PASS")
+        data = execution.snapshot()["steps"][0]["data"]
+        self.assertEqual(data["participant_bot_ids"],
+                         [f"{DRIVER}:default", f"{MEMBER}:default"])
+        self.assertEqual(data["perspectives_count"], 2)
+        self.assertFalse(data["cold_context"])
+
+    def test_nondefault_profile_extra_segment_stays_inexact(self):
+        # Only the default profile segment may be elided; any other suffix
+        # fails closed.
+        execution, _, _, _ = self.run_case(fusion=fusion_output(perspectives=[
+            {"bot_uuid": f"{DRIVER}:custom", "name": "driver", "emoji": "robot",
+             "summary": "driver workspace context"},
+            {"bot_uuid": f"{MEMBER}:custom", "name": "member", "emoji": "robot",
+             "summary": "member workspace context"}]))
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertEqual(execution.completed_count, 0)
+        step = execution.snapshot()["steps"][0]
+        self.assertEqual(step["error_type"], "RunStateError")
+        self.assertIn("warm perspectives are not exact", step["error_gap"] or "")
+
+
 if __name__ == "__main__":
     unittest.main()

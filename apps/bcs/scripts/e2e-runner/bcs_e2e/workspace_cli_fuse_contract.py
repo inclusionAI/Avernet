@@ -113,6 +113,18 @@ def _validate_created(group_id: str, data: object, driver: str, member: str) -> 
         raise RunStateError("workspace CLI fusion Group create output is not exact")
 
 
+def _station_perspective_owner(row: object, expected: str) -> bool:
+    # Station builds the participant id as f"{bot_id}:{profile_id}" with the
+    # fusion profile id defaulting to "default" (bcs-fuse
+    # src/core/fuse_backed.rs), so a default-profile perspective travels back
+    # as the three-segment "<bot>:default". Admit exactly that suffix; any
+    # other extra segment stays inexact and fails closed.
+    if not isinstance(row, dict):
+        return False
+    value = row.get("bot_uuid")
+    return value == expected or value == expected + ":default"
+
+
 def _validate_fusion(group_id: str, data: object, driver: str, member: str) -> None:
     # Station fusion response (bcs-protocol FusionResponse plus the adapter
     # Group binding): exact key set, object arrays for perspectives/conflicts,
@@ -143,7 +155,9 @@ def _validate_fusion(group_id: str, data: object, driver: str, member: str) -> N
         raise RunStateError("workspace CLI fusion extra differs from the station result")
     perspectives = data["perspectives"]
     if perspectives:
-        if ([row.get("bot_uuid") for row in perspectives] != [driver, member]
+        if (len(perspectives) != 2
+                or not _station_perspective_owner(perspectives[0], driver)
+                or not _station_perspective_owner(perspectives[1], member)
                 or any(not isinstance(row.get("summary"), str) or not row["summary"]
                        for row in perspectives)
                 or perspectives[0]["summary"] == perspectives[1]["summary"]):
