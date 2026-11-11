@@ -125,11 +125,15 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
         query: BotTaskModesQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>>;
 
-    /// Apply the patch atomically. An explicit Open strategy without explicit
-    /// visibility promotes protected to public regardless of organization scope.
-    /// Evaluate live visibility inside the write boundary, never against a
-    /// separate read snapshot. Derivation does not modify friend_ext.
-    /// Explicit visibility wins; other strategies do not derive visibility.
+    /// Apply the patch atomically. Patching visibility, check-in strategy or
+    /// friend_ext normalizes the effective configuration: private stays private;
+    /// public/protected become public iff strategy is Open and the active agent
+    /// scope is missing, null or an empty array, otherwise protected. Malformed
+    /// scopes never authorize public. Explicit public/protected express visible
+    /// intent, not an override. Supplied fields win over stored fields; omitted
+    /// fields are read inside the write boundary. Pending approval sub-blocks do
+    /// not determine active scope. Other attribute-only patches leave visibility
+    /// unchanged. Normalization never edits friend_ext itself.
     async fn patch_control_plane(
         &self,
         bot_id: &str,

@@ -220,10 +220,12 @@ remain unchanged. Initialized replays never synchronize managers. The new Core
 entry fails closed on unsupported nonempty snapshots; its empty default delegates
 the legacy method for source-compatible implementations.
 
-## Open friend check-in visibility
+## Effective Bot visibility
 
-Control-plane patches delegate Open-to-public derivation to the repository's
-atomic patch boundary. Core must not pre-read visibility and synthesize an
-unconditional public patch: a concurrent private update must remain effective.
-Protected rows promote regardless of organization scope; derivation does not
-modify `friend_ext`. Catalog notification still follows the successful write.
+Control-plane privacy patches delegate visibility normalization to the
+repository's atomic write boundary. Private stays private; otherwise only
+Open strategy plus an empty active organization scope becomes public. All
+other visible configurations are protected, including when restrictions are
+introduced on a formerly public Bot. Explicit public/protected are visible
+intent, not overrides. Core must not synthesize unconditional visibility from
+a pre-read. Catalog notification follows successful writes as before.

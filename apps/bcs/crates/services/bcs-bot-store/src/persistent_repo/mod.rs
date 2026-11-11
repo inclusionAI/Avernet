@@ -75,7 +75,8 @@ pub struct PersistentBotRepo {
     /// and server-owned coordination profile.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
 
-    /// Card-renamed Bots read durable metadata; live connections stay in memory.
+    /// Card-renamed Bots and uncertain privacy writes read durable metadata;
+    /// live connections stay in memory.
     registry_metadata_bypass: RwLock<std::collections::HashSet<(String, String)>>,
 
     // Layer 2: Database
@@ -124,7 +125,7 @@ impl PersistentBotRepo {
         }
     }
 
-    pub(crate) async fn invalidate_card_metadata(&self, env: &str, bot_id: &str) {
+    pub(crate) async fn invalidate_registry_metadata(&self, env: &str, bot_id: &str) {
         self.registry_metadata_bypass.write().await.insert((env.into(), bot_id.into()));
     }
 

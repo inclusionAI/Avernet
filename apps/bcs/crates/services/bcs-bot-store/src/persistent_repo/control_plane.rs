@@ -604,9 +604,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             return Ok(None);
         }
 
-        let derive_visibility = patch.friend_check_in_strategy
-            == Some(bcs_service_api::FriendCheckInStrategy::Open)
-            && patch.visibility.is_none();
+        let derive_visibility = crate::control_plane_visibility::should_normalize(&patch);
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
@@ -627,17 +625,12 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             assignments.push("name = CASE WHEN agent_card IS NULL THEN ? ELSE name END".to_string());
             params.push(Value::from(name));
         }
-        if let Some(visibility) = patch.visibility.as_deref() {
-            assignments.push("visibility = ?".to_string());
-            params.push(Value::from(visibility));
-        } else if derive_visibility {
-            // Check the live visibility in the same UPDATE as the strategy.
-            // Organization scope does not gate promotion. Preserve the legacy
-            // NULL/empty default used by control-plane reads.
-            assignments.push(
-                "visibility = CASE WHEN COALESCE(NULLIF(visibility, ''), 'protected') = 'protected' \
-                 THEN 'public' ELSE visibility END".to_string(),
-            );
+        if derive_visibility {
+            // Normalization uses the live row plus this patch in ONE UPDATE.
+            let (assignment, visibility_params) =
+                crate::control_plane_visibility::sql_assignment(&patch, self.flavor);
+            assignments.push(assignment);
+            params.extend(visibility_params);
         }
         if let Some(status) = patch.status {
             assignments.push("status = ?".to_string());
@@ -704,7 +697,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .db_execute_affected(&sql, params)
             .await
             .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        if affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
+        if !derive_visibility && affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
             return Ok(None);
         }
 
@@ -714,7 +707,19 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         // cache publication guard through this read so another local patch
         // cannot publish its privacy update between our read and publication.
         let derived_record = if derive_visibility {
-            self.get_control_plane(bot_id, env).await?
+            match self.get_control_plane(bot_id, env).await {
+                Ok(Some(record)) => Some(record),
+                Ok(None) => {
+                    self.invalidate_registry_metadata(env, bot_id).await;
+                    return Ok(None);
+                }
+                Err(error) => {
+                    // The UPDATE already committed. Never serve a stale public
+                    // cache entry after a failed read-back of a restriction.
+                    self.invalidate_registry_metadata(env, bot_id).await;
+                    return Err(error);
+                }
+            }
         } else {
             None
         };
@@ -722,9 +727,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             if let Some(name) = patch.name {
                 bot.capabilities.name = Some(name);
             }
-            if let Some(visibility) = patch.visibility {
-                bot.capabilities.visibility = visibility;
-            } else if let Some(record) = &derived_record {
+            if let Some(record) = &derived_record {
                 bot.capabilities.visibility = record.visibility.clone();
             }
             if let Some(status) = patch.status {

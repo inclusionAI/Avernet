@@ -2,9 +2,10 @@
  * 外部 Bot 对 Bot 可见性的领域语义（bcs-frontend-external-bot-config）。
  *
  * 外部 Bot 只通过 PATCH /openapi/v1/collaboration/bots/{botId} 直改可见性，不走 publish 审批链路：
- * - public 只提交 visibility，后端可能保留陈旧的 view_scope_agent_friend_deps，展示必须忽略并按全部可见回显；
+ * - 全部可见提交非 private 意图并清空顶层范围，最终 visibility 由 BCS 决定；历史 public 陈旧范围仍兼容回显；
  * - protected 的部门范围是组织完整名称字符串（BCS 按精确/前缀匹配），读写都按名称原样处理，绝不用部门编码；
- * - 外部 Bot 没有审批态：展示时清空 pendingPublications，避免遗留审批字段渲染链接或拦截保存。
+ * - protected + 空范围表示全部可见（仍可能需要好友审批），不等于限定组织；
+ * - 外部 Bot 没有发布审批态：清空 pendingPublications，避免遗留发布审批字段拦截保存；好友审批独立保留。
  */
 import type { CollaborationBot, PublicConfig } from './types';
 
@@ -35,7 +36,7 @@ export function readExternalViewScopeNames(friendExt: unknown): string[] {
 
 /**
  * 把外部 Bot 的 visibility + friend_ext 归一为协作权限域的对 Bot 可见性配置。
- * public 忽略陈旧部门范围（切回全部可见时后端可能保留旧 key）；protected 空范围按全部可见回显。
+ * public 忽略历史陈旧部门范围；protected 空范围按全部可见回显，不推断或改写好友审批策略。
  */
 export function normalizeExternalViewScopeConfig(
   visibility: ExternalBotVisibility | undefined,
@@ -60,7 +61,7 @@ export function buildExternalViewScopeFriendExt(currentFriendExt: unknown, names
   return nextFriendExt;
 }
 
-/** 应用外部 Bot 语义到协作域 Bot：覆写对 Bot 可见性，并清空审批态（外部 Bot 无审批流）。 */
+/** 应用外部 Bot 语义到协作域 Bot：覆写对 Bot 可见性，并清空审批态（外部 Bot 无发布审批流）。 */
 export function applyExternalViewScopeToBot(
   bot: CollaborationBot,
   source: ExternalBotVisibilitySource,

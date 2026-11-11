@@ -391,26 +391,46 @@ history is retained and upgraded by 044, never checksum-rewritten. MySQL tests
 cover real retained rows, the fresh chain and the original-history upgrade;
 compatible engines without utf8mb4_0900_bin are unsupported, not silently folded.
 
-## Atomic Open friend check-in patches
+## Atomic effective Bot visibility
 
-`patch_control_plane` evaluates the Open-to-public rule inside the write boundary:
-no explicit visibility, effective protected visibility (including the existing
-NULL/empty legacy read default). Organization scope never gates promotion:
-missing, empty, nonempty or malformed scope values are irrelevant. Derivation
-does not modify `friend_ext`; an explicit replacement keeps its usual semantics.
-Explicit visibility wins, and non-Open writes do not derive.
-SQL writes strategy and conditional visibility in one UPDATE over the live row;
-Memory checks under the existing record-write mutex before durable replacement.
-There is no post-write promotion, new cache, migration or retry loop.
+`patch_control_plane` normalizes privacy writes (visibility, check-in strategy
+or friend_ext) from their effective target state. Private stays private;
+public/protected (including the existing NULL/empty legacy default) become
+public iff strategy is Open and the active top-level agent view scope is
+missing/null/an empty array. Otherwise they become protected. Malformed scope
+values cannot authorize public. This supports both editing directions and
+downgrades when approval or a department restriction is introduced. Explicit
+public/protected express visible intent rather than bypassing this rule.
 
-The SQL path retains its existing precheck, one UPDATE and read-back (three
-single-row DB round trips normally), eliminating the prior extra Core read.
-The derived path holds the existing live-bot publication guard during read-back
-so it publishes the actual SQL visibility rather than an assumed public value.
-This is a bounded configuration write; no scans, batching or external delivery.
-An unchanged MySQL update retains the existing missing-row recheck.
+Supplied fields replace stored values; omitted fields use the live row. Pending
+approval sub-blocks are not active scope. Replacing friend_ext preserves its
+existing whole-object semantics; normalization itself never changes its data.
+Name/status/user-visibility-only patches do not normalize Bot visibility, and
+there is no bulk backfill. Existing public Group membership is not rewritten
+by a Bot patch; public participant admission guards still apply separately.
 
-Tests: `open_check_in_visibility` (Memory, full SQLite migration chain and
-controlled concurrent SQL writes), application `open_check_in_concurrency`,
-and the shared `support/open_check_in_contract.rs` mounted in bcs-admin's
-native full MySQL migration-chain gate.
+SQL evaluates the policy within the one UPDATE for both dialects, without a
+read/derive/write gap or dependence on SET assignment order. Memory computes
+it after merging the patch under the existing record-write mutex and publishes
+only after durable replacement. No schema change, retry loop or new cache.
+
+The normal SQL cost remains a precheck, one UPDATE and read-back (three bounded
+single-row DB round trips). The authoritative privacy read-back also handles
+MySQL unchanged-row results without a redundant existence read. Read-back is
+under the existing live-bot cache publication guard; the cache receives actual
+normalized visibility, never the raw requested public/protected value. If this
+post-commit read fails or the row disappears, the existing metadata-bypass set
+invalidates the old cache entry before returning. Subsequent single/batch reads
+use persistence or propagate its error, never stale public permissions. Like
+Card invalidation, this bypass lasts for the process lifetime for affected Bots;
+healthy writes add no queries. Legacy active/discovery/skill/domain/scope lists
+also refresh invalidated candidates through the existing 100-ID batch loader;
+healthy candidates add no DB reads, and failed refreshes omit affected Bots
+rather than exposing stale public entries. The existing active-list tombstone
+query is unchanged. There are no new scans or external delivery.
+
+Tests: `open_check_in_visibility` (shared effective-state matrix on Memory and
+the full SQLite chain, controlled concurrent visibility/strategy/scope writes,
+failed-write publication), `privacy_readback_failure` (committed restrictions,
+read-back failure/deletion and cache bypass), application `open_check_in_concurrency`, and the
+same `support/open_check_in_contract.rs` in bcs-admin's native MySQL chain gate.

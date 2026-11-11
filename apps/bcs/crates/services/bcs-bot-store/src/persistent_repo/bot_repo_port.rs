@@ -417,11 +417,13 @@ impl BotRepoPort for PersistentBotRepo {
         };
 
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| active_bot_ids.contains(&b.bot_uuid))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn list_all_bots(&self) -> Vec<RegisteredBot> {
@@ -541,7 +543,7 @@ impl BotRepoPort for PersistentBotRepo {
         let bots = self.bots.read().await;
         let query_lower = query.to_lowercase();
 
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| {
                 b.capabilities
@@ -569,34 +571,42 @@ impl BotRepoPort for PersistentBotRepo {
                     || b.bot_uuid.to_lowercase().contains(&query_lower)
             })
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_skills(&self, skills: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| skills.iter().all(|s| b.has_skill(s)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_domains(&self, domains: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| domains.iter().all(|d| b.has_domain(d)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_scopes(&self, scopes: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| scopes.iter().all(|s| b.has_scope(s)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn list_bots_by_name_and_cooperatable_with(

@@ -291,7 +291,7 @@ async fn open_strategy_promotes_protected_without_agent_view_scope_to_public() {
 }
 
 #[tokio::test]
-async fn open_strategy_promotes_protected_with_agent_view_scope() {
+async fn open_strategy_keeps_protected_with_agent_view_scope() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-2").await;
     service
         .patch(PatchBotInternalAttributes {
@@ -311,15 +311,15 @@ async fn open_strategy_promotes_protected_with_agent_view_scope() {
         .await
         .expect("open friend check-in");
 
-    assert_eq!(attributes.visibility, "public");
+    assert_eq!(attributes.visibility, "protected");
     assert_eq!(attributes.friend_ext, scoped_agent_friend_ext());
 }
 
 #[tokio::test]
-async fn open_strategy_promotes_regardless_of_patch_agent_view_scope() {
+async fn open_strategy_uses_the_effective_patch_scope() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-3").await;
 
-    // 同一次 patch 自带组织范围也升级，且保留传入的 friend_ext。
+    // 同次 patch 设置组织范围，最终必须是 protected。
     let attributes = service
         .patch(PatchBotInternalAttributes {
             bot_id: "bot-open-3".to_string(),
@@ -329,10 +329,10 @@ async fn open_strategy_promotes_regardless_of_patch_agent_view_scope() {
         })
         .await
         .expect("open with scoped friend_ext");
-    assert_eq!(attributes.visibility, "public");
+    assert_eq!(attributes.visibility, "protected");
     assert_eq!(attributes.friend_ext, scoped_agent_friend_ext());
 
-    // 重新设为 protected + APPROVAL，清范围与否都不影响下一次 OPEN 升级。
+    // 清除组织范围并设置 OPEN 后，最终才是 public。
     service
         .patch(PatchBotInternalAttributes {
             bot_id: "bot-open-3".to_string(),
@@ -398,7 +398,7 @@ async fn open_strategy_leaves_private_and_public_visibility_untouched() {
 }
 
 #[tokio::test]
-async fn explicit_visibility_wins_over_open_strategy_promotion() {
+async fn explicit_protected_is_normalized_when_open_and_unscoped() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-5").await;
 
     let attributes = service
@@ -411,11 +411,11 @@ async fn explicit_visibility_wins_over_open_strategy_promotion() {
         .await
         .expect("explicit protected with open strategy");
 
-    assert_eq!(attributes.visibility, "protected");
+    assert_eq!(attributes.visibility, "public");
 }
 
 #[tokio::test]
-async fn patches_without_strategy_change_never_touch_visibility() {
+async fn unrelated_attribute_patches_do_not_normalize_bot_visibility() {
     let (service, _temp) = control_plane_service_with_bot("bot-open-6").await;
 
     let attributes = service

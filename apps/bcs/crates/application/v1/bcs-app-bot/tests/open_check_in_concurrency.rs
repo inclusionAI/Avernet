@@ -108,7 +108,7 @@ async fn open_patch_must_preserve_concurrent_private_visibility() {
     );
 }
 #[tokio::test]
-async fn open_patch_promotes_and_preserves_concurrent_department_data() {
+async fn open_patch_preserves_concurrent_department_restriction() {
     let record = run_interleaving(BotControlPlanePatch {
         visibility: Some("protected".into()),
         friend_ext: Some(
@@ -127,7 +127,7 @@ async fn open_patch_promotes_and_preserves_concurrent_department_data() {
             .is_empty()
     );
     assert_eq!(
-        record.visibility, "public",
-        "department data must not block protected-to-public promotion"
+        record.visibility, "protected",
+        "concurrent active scope must prevent public visibility"
     );
 }

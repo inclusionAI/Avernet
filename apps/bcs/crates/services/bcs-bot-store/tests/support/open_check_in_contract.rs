@@ -1,6 +1,6 @@
 use bcs_service_api::{
-    BotCapabilities, BotControlPlanePatch, BotControlPlaneRepoPort, BotRepoPort,
-    FriendCheckInStrategy,
+    BotCapabilities, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort,
+    BotRepoPort, FriendCheckInStrategy,
 };
 use serde_json::{Map, Value, json};
 
@@ -8,193 +8,382 @@ fn ext(value: Value) -> Map<String, Value> {
     serde_json::from_value(value).unwrap()
 }
 
-/// The same cases run against Memory, SQLite and the native MySQL gate.
-/// A strategy change is one write; omitted visibility is derived from the live
-/// row regardless of organization scope, while explicit visibility always wins.
+async fn seed(
+    repo: &(impl BotRepoPort + BotControlPlaneRepoPort),
+    id: &str,
+    visibility: &str,
+    strategy: FriendCheckInStrategy,
+    scope: Value,
+) {
+    repo.register_with_owner_and_token(
+        id.to_string(),
+        BotCapabilities {
+            name: Some(id.to_string()),
+            ..Default::default()
+        },
+        "normalization-owner",
+        &format!("token-{id}"),
+    )
+    .await
+    .unwrap();
+    repo.patch_control_plane(
+        id,
+        &bcs_config::resolve_env_str(),
+        BotControlPlanePatch {
+            visibility: Some(visibility.into()),
+            friend_check_in_strategy: Some(strategy),
+            friend_ext: Some(ext(scope)),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+}
+
+async fn assert_state(
+    repo: &(impl BotRepoPort + BotControlPlaneRepoPort),
+    record: BotControlPlaneRecord,
+    visibility: &str,
+    strategy: FriendCheckInStrategy,
+    scope: Value,
+) {
+    assert_eq!(record.visibility, visibility, "{}", record.bot_id);
+    assert_eq!(
+        record.friend_check_in_strategy, strategy,
+        "{}",
+        record.bot_id
+    );
+    assert_eq!(record.friend_ext, ext(scope), "{}", record.bot_id);
+    assert_eq!(
+        repo.try_get(&record.bot_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .capabilities
+            .visibility,
+        visibility,
+        "registry: {}",
+        record.bot_id
+    );
+    assert_eq!(
+        repo.get_control_plane(&record.bot_id, &bcs_config::resolve_env_str())
+            .await
+            .unwrap()
+            .unwrap(),
+        record
+    );
+}
+
+/// The same effective-state matrix runs against Memory, SQLite and native MySQL.
+/// Non-private means public only for OPEN + empty active scope, otherwise protected.
 pub async fn verify(repo: &(impl BotRepoPort + BotControlPlaneRepoPort)) {
     let env = bcs_config::resolve_env_str();
     let scopes = [
-        json!({}),
-        json!({"view_scope_agent_friend_deps": null}),
-        json!({"view_scope_agent_friend_deps": []}),
-        json!({"view_scope_agent_friend_deps": [{"deptNo": "D1"}]}),
-        json!({"view_scope_agent_friend_deps": {}}),
-        json!({"view_scope_agent_friend_deps": "[]"}),
-        json!({"view_scope_agent_friend_deps": false}),
-        json!({"view_scope_agent_friend_deps": 0}),
+        (json!({}), true),
+        (json!({"view_scope_agent_friend_deps": null}), true),
+        (json!({"view_scope_agent_friend_deps": []}), true),
+        (
+            json!({"view_scope_agent_friend_deps": [{"deptNo": "D1"}]}),
+            false,
+        ),
+        (json!({"view_scope_agent_friend_deps": {}}), false),
+        (json!({"view_scope_agent_friend_deps": "[]"}), false),
+        (json!({"view_scope_agent_friend_deps": false}), false),
+        (json!({"view_scope_agent_friend_deps": 0}), false),
     ];
-    for (index, scope) in scopes.into_iter().enumerate() {
-        for use_patch_scope in [false, true] {
-            let id = format!("open-scope-{index}-{use_patch_scope}");
-            repo.register_with_owner_and_token(
-                id.clone(),
-                BotCapabilities {
-                    name: Some(id.clone()),
-                    ..Default::default()
-                },
-                "open-check-in-owner",
-                &format!("token-{id}"),
-            )
-            .await
-            .unwrap();
-            repo.patch_control_plane(
-                &id,
-                &env,
-                BotControlPlanePatch {
-                    visibility: Some("protected".into()),
-                    // Neither persisted nor replacement scope gates promotion.
-                    friend_ext: Some(ext(if use_patch_scope {
-                        json!({"view_scope_agent_friend_deps": ["old-scope"]})
-                    } else {
-                        scope.clone()
-                    })),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            let updated = repo
-                .patch_control_plane(
+    for (scope_index, (scope, empty)) in scopes.into_iter().enumerate() {
+        for (strategy_index, strategy) in [
+            FriendCheckInStrategy::Open,
+            FriendCheckInStrategy::Approval,
+            FriendCheckInStrategy::DeptFree,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for visibility in ["private", "protected", "public"] {
+                let id = format!("normalize-{scope_index}-{strategy_index}-{visibility}");
+                seed(
+                    repo,
                     &id,
-                    &env,
-                    BotControlPlanePatch {
-                        friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
-                        friend_ext: use_patch_scope.then(|| ext(scope.clone())),
-                        ..Default::default()
-                    },
+                    "private",
+                    FriendCheckInStrategy::Approval,
+                    json!({}),
                 )
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(updated.visibility, "public", "{id}");
-            assert_eq!(
-                updated.friend_check_in_strategy,
-                FriendCheckInStrategy::Open
-            );
-            assert_eq!(updated.friend_ext, ext(scope.clone()));
-            let registered = repo.try_get(&id).await.unwrap().unwrap();
-            assert_eq!(
-                registered.capabilities.visibility, "public",
-                "registry: {id}"
-            );
-            assert_eq!(
-                repo.get_control_plane(&id, &env).await.unwrap().unwrap(),
-                updated
-            );
-            let repeated = repo
-                .patch_control_plane(
-                    &id,
-                    &env,
-                    BotControlPlanePatch {
-                        friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(repeated.visibility, "public", "idempotent: {id}");
+                .await;
+                let record = repo
+                    .patch_control_plane(
+                        &id,
+                        &env,
+                        BotControlPlanePatch {
+                            visibility: Some(visibility.into()),
+                            friend_check_in_strategy: Some(strategy),
+                            friend_ext: Some(ext(scope.clone())),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let expected = if visibility == "private" {
+                    "private"
+                } else if strategy == FriendCheckInStrategy::Open && empty {
+                    "public"
+                } else {
+                    "protected"
+                };
+                assert_state(repo, record, expected, strategy, scope.clone()).await;
+                // Repeating OPEN is not required: use the current strategy, including
+                // MySQL unchanged-row behavior, to verify idempotence for each state.
+                let repeated = repo
+                    .patch_control_plane(
+                        &id,
+                        &env,
+                        BotControlPlanePatch {
+                            friend_check_in_strategy: Some(strategy),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_state(repo, repeated, expected, strategy, scope.clone()).await;
+            }
         }
     }
+    verify_single_field_transitions(repo).await;
+    verify_pending_approval_is_not_effective_scope(repo).await;
+    // Legacy registry writes can leave a noncanonical row. A profile/user-only
+    // patch must not act as an unrelated privacy migration.
+    seed(repo, "unrelated-patch", "protected", FriendCheckInStrategy::Approval, json!({})).await;
+    repo.update_visibility("unrelated-patch", "public").await.unwrap();
+    let record = repo.patch_control_plane("unrelated-patch", &env, BotControlPlanePatch {
+        name: Some("Renamed only".into()),
+        user_visibility: Some(bcs_service_api::UserVisibility::Public),
+        ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_state(repo, record, "public", FriendCheckInStrategy::Approval, json!({})).await;
+}
 
-    for (index, (initial, explicit, strategy, expected)) in [
+async fn verify_single_field_transitions(repo: &(impl BotRepoPort + BotControlPlaneRepoPort)) {
+    use FriendCheckInStrategy::{Approval, DeptFree, Open};
+    let scoped = json!({"view_scope_agent_friend_deps": ["D1"], "unrelated": {"keep": true}});
+    let all = json!({"view_scope_agent_friend_deps": [], "unrelated": {"keep": true}});
+    let cases = [
         (
-            "private",
-            None,
-            Some(FriendCheckInStrategy::Open),
-            "private",
-        ),
-        ("public", None, Some(FriendCheckInStrategy::Open), "public"),
-        (
+            "strategy-open",
             "protected",
-            Some("protected"),
-            Some(FriendCheckInStrategy::Open),
-            "protected",
-        ),
-        (
-            "protected",
-            Some("private"),
-            Some(FriendCheckInStrategy::Open),
-            "private",
-        ),
-        (
-            "private",
-            Some("public"),
-            Some(FriendCheckInStrategy::Open),
-            "public",
-        ),
-        (
-            "protected",
-            None,
-            Some(FriendCheckInStrategy::Approval),
-            "protected",
-        ),
-        (
-            "protected",
-            None,
-            Some(FriendCheckInStrategy::DeptFree),
-            "protected",
-        ),
-        ("protected", None, None, "protected"),
-        (
-            "public",
-            None,
-            Some(FriendCheckInStrategy::Approval),
-            "public",
-        ),
-        (
-            "public",
-            None,
-            Some(FriendCheckInStrategy::DeptFree),
-            "public",
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let id = format!("open-visibility-{index}");
-        repo.register_with_owner_and_token(
-            id.clone(),
-            BotCapabilities {
-                name: Some(id.clone()),
-                visibility: initial.into(),
-                ..Default::default()
-            },
-            "open-check-in-owner",
-            &format!("token-{id}"),
-        )
-        .await
-        .unwrap();
-        repo.patch_control_plane(
-            &id,
-            &env,
+            Approval,
+            all.clone(),
             BotControlPlanePatch {
-                visibility: Some(initial.into()),
+                friend_check_in_strategy: Some(Open),
                 ..Default::default()
             },
+            "public",
+            Open,
+            all.clone(),
+        ),
+        (
+            "strategy-approval",
+            "public",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                friend_check_in_strategy: Some(Approval),
+                ..Default::default()
+            },
+            "protected",
+            Approval,
+            all.clone(),
+        ),
+        (
+            "strategy-dept-free",
+            "public",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                friend_check_in_strategy: Some(DeptFree),
+                ..Default::default()
+            },
+            "protected",
+            DeptFree,
+            all.clone(),
+        ),
+        (
+            "visibility-public",
+            "private",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                visibility: Some("public".into()),
+                ..Default::default()
+            },
+            "public",
+            Open,
+            all.clone(),
+        ),
+        (
+            "visibility-protected",
+            "private",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                visibility: Some("protected".into()),
+                ..Default::default()
+            },
+            "public",
+            Open,
+            all.clone(),
+        ),
+        (
+            "public-needs-approval",
+            "private",
+            Approval,
+            all.clone(),
+            BotControlPlanePatch {
+                visibility: Some("public".into()),
+                ..Default::default()
+            },
+            "protected",
+            Approval,
+            all.clone(),
+        ),
+        (
+            "public-with-scope",
+            "protected",
+            Open,
+            scoped.clone(),
+            BotControlPlanePatch {
+                visibility: Some("public".into()),
+                ..Default::default()
+            },
+            "protected",
+            Open,
+            scoped.clone(),
+        ),
+        (
+            "scope-cleared",
+            "protected",
+            Open,
+            scoped.clone(),
+            BotControlPlanePatch {
+                friend_ext: Some(ext(all.clone())),
+                ..Default::default()
+            },
+            "public",
+            Open,
+            all.clone(),
+        ),
+        (
+            "scope-added",
+            "public",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                friend_ext: Some(ext(scoped.clone())),
+                ..Default::default()
+            },
+            "protected",
+            Open,
+            scoped.clone(),
+        ),
+        (
+            "private-wins",
+            "public",
+            Open,
+            all.clone(),
+            BotControlPlanePatch {
+                visibility: Some("private".into()),
+                ..Default::default()
+            },
+            "private",
+            Open,
+            all.clone(),
+        ),
+        (
+            "private-open",
+            "private",
+            Approval,
+            all.clone(),
+            BotControlPlanePatch {
+                friend_check_in_strategy: Some(Open),
+                ..Default::default()
+            },
+            "private",
+            Open,
+            all.clone(),
+        ),
+        (
+            "private-clear-scope",
+            "private",
+            Open,
+            scoped.clone(),
+            BotControlPlanePatch {
+                friend_ext: Some(ext(all.clone())),
+                ..Default::default()
+            },
+            "private",
+            Open,
+            all,
+        ),
+    ];
+    for (id, initial, strategy, scope, patch, expected, expected_strategy, expected_scope) in cases
+    {
+        seed(repo, id, initial, strategy, scope).await;
+        let record = repo
+            .patch_control_plane(id, &bcs_config::resolve_env_str(), patch)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_state(repo, record, expected, expected_strategy, expected_scope).await;
+    }
+}
+
+async fn verify_pending_approval_is_not_effective_scope(
+    repo: &(impl BotRepoPort + BotControlPlaneRepoPort),
+) {
+    for (id, initial, scope, expected) in [
+        ("pending-private", "private", json!({}), "private"),
+        (
+            "pending-scoped",
+            "protected",
+            json!({"view_scope_agent_friend_deps": ["D1"]}),
+            "protected",
+        ),
+        ("pending-restriction", "public", json!({}), "public"),
+    ] {
+        seed(
+            repo,
+            id,
+            initial,
+            FriendCheckInStrategy::Open,
+            scope.clone(),
         )
-        .await
-        .unwrap()
-        .unwrap();
-        let updated = repo
+        .await;
+        let mut next = ext(scope);
+        next.insert("public_agent_approval".into(), json!({
+            "puid": "pending-1", "status": "PROCESSING", "visibility": "public",
+            "view_friend_deps": if id == "pending-restriction" { json!(["D2"]) } else { json!([]) }
+        }));
+        let record = repo
             .patch_control_plane(
-                &id,
-                &env,
+                id,
+                &bcs_config::resolve_env_str(),
                 BotControlPlanePatch {
-                    visibility: explicit.map(str::to_owned),
-                    friend_check_in_strategy: strategy,
-                    friend_ext: Some(Map::new()),
+                    friend_ext: Some(next.clone()),
                     ..Default::default()
                 },
             )
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(updated.visibility, expected, "{id}");
-        assert_eq!(
-            updated.friend_check_in_strategy,
-            strategy.unwrap_or_default()
-        );
+        assert_state(
+            repo,
+            record,
+            expected,
+            FriendCheckInStrategy::Open,
+            Value::Object(next),
+        )
+        .await;
     }
 }

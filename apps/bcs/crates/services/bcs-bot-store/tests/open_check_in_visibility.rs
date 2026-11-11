@@ -78,6 +78,21 @@ async fn update_after_concurrent_write(
     expected: &str,
     initial_scope: serde_json::Value,
 ) -> BotControlPlaneRecord {
+    let record = execute_patch_after_concurrent_write(sql, expected, initial_scope,
+        FriendCheckInStrategy::Approval, BotControlPlanePatch {
+            friend_check_in_strategy: Some(FriendCheckInStrategy::Open), ..Default::default()
+        }).await;
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
+    record
+}
+
+async fn execute_patch_after_concurrent_write(
+    sql: &'static str,
+    expected: &str,
+    initial_scope: serde_json::Value,
+    initial_strategy: FriendCheckInStrategy,
+    patch: BotControlPlanePatch,
+) -> BotControlPlaneRecord {
     let (db, _) = fixture::sqlite_repo().await;
     let wrapped = Arc::new(BeforeUpdateDb {
         inner: db.clone(),
@@ -104,6 +119,7 @@ async fn update_after_concurrent_write(
         &env,
         BotControlPlanePatch {
             visibility: Some("protected".into()),
+            friend_check_in_strategy: Some(initial_strategy),
             friend_ext: Some(serde_json::from_value(initial_scope).unwrap()),
             ..Default::default()
         },
@@ -118,19 +134,12 @@ async fn update_after_concurrent_write(
         .patch_control_plane(
             "race",
             &env,
-            BotControlPlanePatch {
-                friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
-                ..Default::default()
-            },
+            patch,
         )
         .await
         .unwrap()
         .unwrap();
     assert_eq!(updated.visibility, expected);
-    assert_eq!(
-        updated.friend_check_in_strategy,
-        FriendCheckInStrategy::Open
-    );
     assert_eq!(
         wrapped.writes.load(Ordering::SeqCst),
         1,
@@ -159,7 +168,7 @@ async fn update_after_concurrent_write(
     assert_eq!(rows[0].get("visibility"), Some(&DbValue::from(expected)));
     assert_eq!(
         rows[0].get("friend_check_in_strategy"),
-        Some(&DbValue::from("OPEN"))
+        Some(&DbValue::from(serde_json::to_value(updated.friend_check_in_strategy).unwrap().as_str().unwrap()))
     );
     updated
 }
@@ -175,10 +184,10 @@ async fn sqlite_open_patch_preserves_private_committed_after_precheck() {
 }
 
 #[tokio::test]
-async fn sqlite_open_patch_promotes_despite_scope_committed_after_precheck() {
+async fn sqlite_open_patch_respects_scope_committed_after_precheck() {
     let updated = update_after_concurrent_write(
         "UPDATE bcs_bots SET friend_ext = '{\"view_scope_agent_friend_deps\":[\"D1\"]}' WHERE bot_uuid = 'race'",
-        "public", serde_json::json!({})
+        "protected", serde_json::json!({})
     ).await;
     assert_eq!(updated.friend_ext["view_scope_agent_friend_deps"], serde_json::json!(["D1"]));
 }
@@ -257,4 +266,35 @@ async fn sqlite_failed_open_patch_publishes_neither_visibility_nor_strategy() {
             .visibility,
         "protected"
     );
+}
+
+#[tokio::test]
+async fn visibility_patch_observes_concurrently_enabled_approval() {
+    let record = execute_patch_after_concurrent_write(
+        "UPDATE bcs_bots SET friend_check_in_strategy = 'APPROVAL' WHERE bot_uuid = 'race'",
+        "protected", serde_json::json!({}), FriendCheckInStrategy::Open,
+        BotControlPlanePatch { visibility: Some("public".into()), ..Default::default() },
+    ).await;
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Approval);
+}
+
+#[tokio::test]
+async fn visibility_patch_observes_concurrently_opened_strategy() {
+    let record = execute_patch_after_concurrent_write(
+        "UPDATE bcs_bots SET friend_check_in_strategy = 'OPEN' WHERE bot_uuid = 'race'",
+        "public", serde_json::json!({}), FriendCheckInStrategy::Approval,
+        BotControlPlanePatch { visibility: Some("protected".into()), ..Default::default() },
+    ).await;
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
+}
+
+#[tokio::test]
+async fn clearing_scope_observes_concurrently_enabled_approval() {
+    let record = execute_patch_after_concurrent_write(
+        "UPDATE bcs_bots SET friend_check_in_strategy = 'APPROVAL' WHERE bot_uuid = 'race'",
+        "protected", serde_json::json!({"view_scope_agent_friend_deps": ["D1"]}), FriendCheckInStrategy::Open,
+        BotControlPlanePatch { friend_ext: Some(serde_json::Map::new()), ..Default::default() },
+    ).await;
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Approval);
+    assert!(record.friend_ext.is_empty());
 }

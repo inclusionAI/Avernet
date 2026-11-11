@@ -13,7 +13,7 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort,
-    FriendCheckInStrategy, ServiceResult, UserVisibility,
+    ServiceResult, UserVisibility,
 };
 use bcs_service_api::port::repo::bot_control_plane::{
     BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
@@ -451,15 +451,6 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             )
         };
 
-        // The write guard covers the snapshot, derivation, durable replacement
-        // and publication. Never derive public from a snapshot taken in Core.
-        let promote_visibility = patch.friend_check_in_strategy == Some(FriendCheckInStrategy::Open)
-            && patch.visibility.is_none()
-            && matches!(capabilities.visibility.as_str(), "protected" | "");
-        if promote_visibility {
-            capabilities.visibility = "public".to_string();
-        }
-
         if let Some(name) = patch.name.as_ref() {
             capabilities.name = Some(name.clone());
         }
@@ -488,6 +479,14 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         }
         if let Some(value) = patch.friend_check_in_strategy {
             friend_check_in_strategy = value;
+        }
+
+        // Normalize the merged target state while the record-write guard is
+        // held. Both upgrades and restrictions commit with the other fields.
+        if crate::control_plane_visibility::should_normalize(&patch) {
+            capabilities.visibility = crate::control_plane_visibility::normalize(
+                &capabilities.visibility, friend_check_in_strategy, &friend_ext,
+            );
         }
 
         let now = unix_millis();

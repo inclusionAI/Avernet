@@ -465,3 +465,38 @@ impl PersistentBotRepo {
             .flatten()
     }
 }
+
+impl PersistentBotRepo {
+    /// Legacy discovery keeps healthy cached candidates fast, but never returns
+    /// metadata invalidated after a committed privacy change or Card update.
+    /// Only invalidated IDs use the existing 100-ID batched registry loader.
+    pub(super) async fn refresh_invalidated_metadata(
+        &self,
+        candidates: Vec<bcs_service_api::RegisteredBot>,
+    ) -> Vec<bcs_service_api::RegisteredBot> {
+        let env = resolve_env();
+        let stale: std::collections::HashSet<String> = {
+            let invalidated = self.registry_metadata_bypass.read().await;
+            if invalidated.is_empty() { return candidates; }
+            candidates.iter()
+                .filter(|bot| invalidated.contains(&(env.clone(), bot.bot_uuid.clone())))
+                .map(|bot| bot.bot_uuid.clone()).collect()
+        };
+        if stale.is_empty() { return candidates; }
+        let ids = stale.iter().cloned().collect::<Vec<_>>();
+        let refreshed = match bcs_service_api::BotRepoPort::try_get_many(self, &ids).await {
+            Ok(records) => records,
+            Err(error) => {
+                warn!(request_id = %bcs_observability::CurrentRequestId, %error,
+                    "discovery: invalidated metadata unavailable; omitting affected Bots");
+                Vec::new()
+            }
+        };
+        let mut refreshed = refreshed.into_iter()
+            .map(|bot| (bot.bot_uuid.clone(), bot)).collect::<std::collections::HashMap<_, _>>();
+        candidates.into_iter().filter_map(|bot| {
+            if stale.contains(&bot.bot_uuid) { refreshed.remove(&bot.bot_uuid) }
+            else { Some(bot) }
+        }).collect()
+    }
+}
