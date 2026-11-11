@@ -327,3 +327,87 @@ def test_friend_connection_rejects_instance_selection(client, connections):
     response = client.get(URL, params={"f_user_id": "friend", "session_id": "s1", "device_uuid": "device-a"})
     assert response.status_code == 404
     assert connections.calls == []
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (404, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 409),
+        (503, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 409),
+        (404, {"detail": {"error": "BOT_NOT_FOUND"}}, 502),
+        (503, {"detail": {"error": "OTHER"}}, 502),
+        (500, {"detail": {"error": "NO_ACTIVE_DEVICES"}}, 502),
+        (None, None, 502),
+    ],
+)
+def test_baas_http_failure_through_device_router_and_public_api(
+    status, body, expected, friendships, expert
+):
+    """Exercise parsing, provider wrapping, router, core mapping and HTTP envelope."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import httpx
+
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    from agentclaw.community.core.devices.services.baas_device_service import BaasDeviceService
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+
+    repo = Mock()
+    repo.get_by_id.return_value = SimpleNamespace(
+        device_id="BOT-test", device_provider="baas", status="ACTIVE"
+    )
+    repo.get_active_by_bot_and_owner.return_value = SimpleNamespace(id=42)
+    request = httpx.Request("GET", "https://baas.example/ws-info")
+    http = Mock()
+    if status is None:
+        http.get.side_effect = httpx.ReadTimeout("timeout", request=request)
+    else:
+        http.get.return_value = httpx.Response(status, json=body, request=request)
+    baas = BaasService(
+        baas_api_base="https://baas.example", tenant="test", template_uuid="test",
+        bot_repo=Mock(), bot_publish_repo=Mock(), system_config_service=Mock(),
+        storage_path=Mock(), device_binding_repo=repo, default_ttl_minutes=60,
+        sandbox_registry=Mock(), http_client=http, general_http_client=Mock(),
+        secret_resolver=Mock(), common_whitelist_service=Mock(),
+        outbound_rule_provider=Mock(), startup_script_reader=Mock(), deploy_composer=Mock(),
+    )
+    bot_query = Mock()
+    device = BaasDeviceService(
+        repository=repo, baas_service=baas, bot_query=bot_query, bot_sync=Mock(),
+        oss_record_repo=Mock(), mcp_sync=Mock(), template_resolver=Mock(),
+        layout_confirmation=Mock(),
+    )
+    router_service = DeviceServiceRouter(
+        repository=repo, bot_query=bot_query, providers={"baas": device},
+        default_provider_key="baas",
+    )
+    bots = Mock()
+    bots.get_bot_by_address.return_value = {
+        "id": 1, "bot_id": BOT, "owner_id": OWNER, "bot_type": "personal",
+        "active_engine": "openclaw", "public": "0",
+    }
+    collaborators = Mock()
+    collaborators.get_operable_permission_level.return_value = PermissionLevel.OWNER
+    connection_service = EngineConnectionService(
+        bots, repo, router_service, GatewayEndpoint(base_url="https://gw.example"),
+        collaborators, Mock(), desktop_connections=Mock(),
+    )
+
+    class _M(Module):
+        def configure(self, binder):
+            binder.bind(EngineConnectionServiceProtocol, to=connection_service)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
+            binder.bind(GatewayEndpoint, to=GatewayEndpoint(base_url="https://gw.example"))
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
+    attach_injector(app, Injector([_M()]))
+    response = user_scoped_client(app, OWNER).get(URL)
+    assert response.status_code == expected
+    assert "NO_ACTIVE_DEVICES" not in response.text
+    assert "baas.example" not in response.text
