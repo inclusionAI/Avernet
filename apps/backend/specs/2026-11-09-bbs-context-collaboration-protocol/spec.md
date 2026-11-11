@@ -20,7 +20,7 @@
   └─ GET 查询协作上下文最新状态
        │
        ├─ L4 Collet：保存上下文和当前任务快照
-       └─ G2 Event record：保存追加事件、parent_event 和幂等信息
+       └─ G2 Event record：保存追加事件与 parent_event 因果链（不承载幂等键）
 
 北向 Service API / HTTP / OpenAPI Delivery（不属于 L1-L6）：面向前端提供三个接口
 L1：协议交互归一化，只接收 Delivery 转换后的协议 DTO，不承载前端 API
@@ -179,7 +179,7 @@ ACCS 公共合同中的 `EventEnvelope` 用于封装被接纳的事实，字段�
 - 当前 L4 `Task` 的状态、目标、负责人和指定执行 Agent；
 - 已接纳的 `Activity`、`Message`、`Artifact` 相关事实；
 - 当前事件和事件 DAG；每个 event 都有 `parent_event`；
-- `trunk_events=true` 时仅返回 DAG 主事件，默认返回全部可见事件。
+- `trunk_events=true` 时仅返回主事件（查询时由活动链推导：自 `current_event_id` 沿 `parent_event` 回溯到根），默认返回全部可见事件。
 
 ### 3.5 L5：Compose Primitives into Methods
 
@@ -514,7 +514,7 @@ GET /api/v1/collaboration/task/context_collab/{collab_context_id}?trunk_events=t
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
 | `collab_context_id` | path | string | 是 | L4 Collet ID |
-| `trunk_events` | query | boolean | 否 | 默认 `false`；`true` 只返回事件 DAG 主事件 |
+| `trunk_events` | query | boolean | 否 | 默认 `false`；`true` 只返回主事件（活动链推导） |
 
 #### 响应示例
 
@@ -797,7 +797,7 @@ experiment_ledger.py         # G3 演进实验不在当前范围
 - L1 只负责 A2A 协议交付桥接，不接管前端 API。
 - L2/L3 只保存外部身份、授权和资源的稳定引用，不复制其实现。
 - L4 负责 Collet 和协作事实，不直接调用外部执行系统；L5/L6 只提供方法和 Profile 组合。
-- G1 在写入和读取前提供授权判断；G2 负责幂等、并发和事件 DAG；G3 只生成查询投影；G4 负责 schema、版本、状态机和 conformance。
+- G1 在写入和读取前提供授权判断；G2 负责并发恢复（`expected_version`）与事件 DAG（防重责任由调用方承担）；G3 只生成查询投影；G4 负责 schema、版本、状态机和 conformance。
 - `plugin_api`、`task/forum`、`task/bbs` 不新增或修改文件；`context_collab/` 下不创建 `source/` 子目录。
 
 ## 9. 数据库表与持久化层设计
@@ -813,7 +813,7 @@ experiment_ledger.py         # G3 演进实验不在当前范围
 
 | 表 | 必要原因 | 不再单独建表的内容 |
 | --- | --- | --- |
-| `ac_context_collab_collet` | 保存 `collab_context_id`、创建幂等键、创建参数、当前任务/方法/运行/进度快照和 `context_version` | Task、方法、执行者、资源引用和当前进度都保存在 JSON 字段 |
+| `ac_context_collab_collet` | 保存 `collab_context_id`、创建参数、当前任务/方法/运行/进度快照和 `context_version` | Task、方法、执行者、资源引用和当前进度都保存在 JSON 字段；`current_snapshot` 可空 |
 | `ac_context_collab_event` | 保存事件、`parent_event` 和 payload | 用户互动、进度、交付和验收信息都只是事件 payload，不是表；主干预算不落库 |
 
 明确不新增：独立任务表、消息表、参与者表、角色表、方法表、状态迁移表、租约表、审计表、幂等表、产物表、Outcome 表。
@@ -837,7 +837,7 @@ apps/backend/src/agentclaw/community/core/task/context_collab/persistence/reposi
 ```text
 create_context(request) -> created context + initial event
 append_event(collab_context_id, request) -> accepted event + new snapshot
-get_current_status(collab_context_id, trunk_events) -> current status
+get_current_status(collab_context_id) -> current status   # 全量返回，trunk 过滤在服务投影层
 ```
 
 不拆分 ColletRepository、TaskRepository、MessageRepository、EventRepository 等没有独立 API 消费者的 Repository。
@@ -864,7 +864,7 @@ CREATE TABLE `ac_context_collab_collet` (
   `env` varchar(20) NOT NULL,
   `collab_context_id` varchar(128) NOT NULL,
   `context_spec` mediumtext NOT NULL COMMENT 'JSON: create request references and method fields',
-  `current_snapshot` mediumtext NOT NULL COMMENT 'JSON: current objective, status, executor and progress',
+  `current_snapshot` mediumtext DEFAULT NULL COMMENT 'JSON: current objective, status, executor and progress; nullable for spec-only rows',
   `current_event_id` varchar(128) DEFAULT NULL,
   `context_version` bigint(20) NOT NULL DEFAULT 1,
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -884,10 +884,10 @@ CREATE TABLE `ac_context_collab_event` (
   `parent_event` varchar(128) DEFAULT NULL,
   `event_kind` varchar(128) NOT NULL,
   `primitive_type` varchar(64) NOT NULL,
-  `actor_ref` mediumtext NOT NULL COMMENT 'JSON actor reference',
-  `visibility` varchar(32) NOT NULL,
-  `payload` mediumtext NOT NULL COMMENT 'JSON event payload; user interaction uses payload.content',
-  `context_version_after` bigint(20) NOT NULL,
+  `actor_ref` mediumtext DEFAULT NULL COMMENT 'JSON actor reference; nullable for partial rows',
+  `visibility` varchar(32) DEFAULT NULL,
+  `payload` mediumtext DEFAULT NULL COMMENT 'JSON event payload; user interaction uses payload.content; nullable for partial rows',
+  `context_version_after` bigint(20) DEFAULT NULL,
   `occurred_at` datetime NOT NULL,
   `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -961,7 +961,7 @@ CREATE TABLE `ac_context_collab_event` (
 - L4：Collet 的创建、快照更新和事件 payload 语义；不测试独立 L4 对象表。
 - L5：Single/Open/Group 方法配置和 executor 引用；不测试独立 lease。
 - L6：`product_kind` / `workflow_kind` 字段值合法性。
-- G1-G4：Authorization、幂等、查询投影、Schema、Version 和有限状态值；治理规则不新增表，状态相关领域对象仍保留在 L4。
+- G1-G4：Authorization、并发 (`expected_version` 冲突)、查询投影、Schema、Version 和有限状态值；治理规则不新增表，状态相关领域对象仍保留在 L4。
 
 ### 12.2 三个接口验收
 
