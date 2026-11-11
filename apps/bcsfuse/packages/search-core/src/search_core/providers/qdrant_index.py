@@ -29,6 +29,7 @@ class QdrantRetrievalIndex:
         connection: QdrantConnection = LOCAL_QDRANT,
         read_timeout_seconds: float = 0.0,
         keyword_index_fields: frozenset[str] = frozenset(),
+        keyword_hit_payload_fields: tuple[str, ...] | None = None,
     ):
         if not math.isfinite(read_timeout_seconds) or read_timeout_seconds < 0:
             raise ValueError("read timeout must be finite and nonnegative")
@@ -43,6 +44,7 @@ class QdrantRetrievalIndex:
         self._keyword = QdrantKeywordIndex(
             connection=connection,
             collection_name=collection_name + "_keywords",
+            hit_payload_fields=keyword_hit_payload_fields,
         )
         self._dense = dense_store(
             connection=connection,
