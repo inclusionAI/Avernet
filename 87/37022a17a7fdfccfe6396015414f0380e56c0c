@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/converter_creation.py
+  s_620fb772f449f4::t_a718e4f4aba831 1,4-5,8-12,14,16-45,47,49-51,53,58-114
+engine/adapter/src/engine/community/plugin_api/openclaw/README.md
+  s_620fb772f449f4::t_a718e4f4aba831 61-67
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_620fb772f449f4::t_a718e4f4aba831 52,267-270
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_creation_compat.py
+  s_620fb772f449f4::t_2be8d336a83432 1-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8737022a17a7fdfccfe6396015414f0380e56c0c",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

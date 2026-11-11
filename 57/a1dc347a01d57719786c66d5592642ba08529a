@@ -1,0 +1,42 @@
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  h_059e888e5e4e82 54,68-69,129-134,234
+apps/frontend-nextgen/src/hooks/useComposerSend.ts
+  h_059e888e5e4e82 6
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 72-75,83-85,87-89,93,95
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  h_059e888e5e4e82 20-21,25,43-45,74-98,194,197,217-218
+apps/frontend-nextgen/src/pages/Lab/index.tsx
+  h_059e888e5e4e82 67
+apps/frontend-nextgen/src/pages/MyTask/components/ViewSessionButton.tsx
+  h_059e888e5e4e82 4,44-48
+apps/frontend-nextgen/src/services/tasks/taskMapper.ts
+  h_059e888e5e4e82 115,123
+apps/frontend-nextgen/src/services/workspace/botSkillService.ts
+  h_059e888e5e4e82 14-16,32-35,38-46,48-53,60-62
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  h_059e888e5e4e82 25-26,87-105
+apps/frontend-nextgen/test/hooks/useComposerSend.test.ts
+  h_059e888e5e4e82 19-20,78,102
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 104-125
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  h_059e888e5e4e82 6,15-21,24-25,66-67,71-103,155-158,171,173,186,188,200,202
+apps/frontend-nextgen/test/pages/Lab/LabLandingPage.test.tsx
+  h_059e888e5e4e82 20,24-31
+apps/frontend-nextgen/test/pages/MyTask/ViewSessionButton.test.tsx
+  h_059e888e5e4e82 1-33
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationPage.test.tsx
+  h_059e888e5e4e82 93-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "57a1dc347a01d57719786c66d5592642ba08529a",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

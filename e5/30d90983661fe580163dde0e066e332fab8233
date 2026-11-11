@@ -1,0 +1,28 @@
+apps/backend/tests/community/core/resources/test_resource_file_service.py
+  s_3bb0886c0ac8e9::t_a5e455b290fae7 26,505-534
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_resources_handlers.py
+  s_3bb0886c0ac8e9::t_9778ca86ecf64f 911-914,1486-1495,1508
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_3bb0886c0ac8e9::t_78719d94865dcd 82-99,109-112,116-117
+  s_3bb0886c0ac8e9::t_e796ba07dfbbf7 113-115
+apps/backend/tests/community/endpoints/test_resources_device_fs_sync.py
+  s_3bb0886c0ac8e9::t_d189fb5a8d2f5a 231-264
+apps/backend/tests/community/endpoints/test_resource_file_router_local.py
+  s_3bb0886c0ac8e9::t_03e5be210f6e99 170-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e530d90983661fe580163dde0e066e332fab8233",
+  "prompts": {},
+  "sessions": {
+    "s_3bb0886c0ac8e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac2-4a20-7c03-a8e1-58d613b0b8dd",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

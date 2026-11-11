@@ -1,0 +1,14 @@
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  h_dac96fb4da302f 279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f24fe878e6f218ed54163af0e73f58ae1cd1b6b",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

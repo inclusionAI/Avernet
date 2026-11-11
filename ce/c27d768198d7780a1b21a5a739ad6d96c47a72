@@ -1,0 +1,178 @@
+apps/backend/docs/openapi-v1/README.md
+  h_059e888e5e4e82 1845,1848,1850-1853
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  h_059e888e5e4e82 1074,1077,1079-1082
+apps/backend/docs/openapi-v1/engine-surface.md
+  h_059e888e5e4e82 637-691
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  h_059e888e5e4e82 528-563
+apps/backend/specs/2026-11-03-relay-session-task-panel/spec.md
+  h_059e888e5e4e82 131,133-135,138
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/router.py
+  h_059e888e5e4e82 38,362-373,382
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/schemas.py
+  h_059e888e5e4e82 59-65,81-84
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/deprecated/routines.py
+  h_059e888e5e4e82 45,114-119,125
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/converter.py
+  h_059e888e5e4e82 1-160
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/owner_router.py
+  h_059e888e5e4e82 3,40,42,61,88
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/params.py
+  h_059e888e5e4e82 1-53
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/relay.py
+  h_059e888e5e4e82 1-84
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/router.py
+  h_059e888e5e4e82 1,5,25,27-32,36-39,63,79-83,90,94,107,114,119,147,152-153,170-173,185-187,195,205-208,239,245,247-248,264-267,275,281-283,289-290,302,311-314,329-336,348-350,355,366-370,382-384,386,388-389
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/schemas.py
+  h_059e888e5e4e82 12-15,112-114,137-138,219-231,288-293,322-363
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  h_059e888e5e4e82 65-66,248
+apps/backend/src/agentclaw/community/api/task/task_grant_service.py
+  h_059e888e5e4e82 5
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  h_059e888e5e4e82 610-614,628,632,636,707-772
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  h_059e888e5e4e82 88
+apps/backend/src/agentclaw/community/core/task/task_dispatch/dispatcher.py
+  h_059e888e5e4e82 307,626,662
+apps/backend/src/agentclaw/community/core/task/task_dispatch/rationale.py
+  h_059e888e5e4e82 13-14
+apps/backend/src/agentclaw/community/core/task/task_dispatch/task_settings.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/task_grant_service_protocol.py
+  h_059e888e5e4e82 5
+apps/backend/src/agentclaw/community/core/task/task_harness/centralized_recovery.py
+  h_059e888e5e4e82 375
+apps/backend/src/agentclaw/community/core/task/task_runner/client/candidate_search.py
+  h_059e888e5e4e82 4
+apps/backend/src/agentclaw/community/core/task/task_runner/client/open_api_bot_adapter.py
+  h_059e888e5e4e82 208
+apps/backend/src/agentclaw/community/core/task/task_runner/modal_executor/task_executor.py
+  h_059e888e5e4e82 247
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 27,564
+apps/backend/tests/community/adapters/http/openapi_v1/bot_public/test_bot_public_router.py
+  h_059e888e5e4e82 75-79,732
+apps/backend/tests/community/adapters/http/openapi_v1/routines/test_routines_handlers.py
+  h_059e888e5e4e82 3,26,36-39,49,55,58,60-62,267-268,281,384,637,728,979,1072,1169,1257,1418,1453
+apps/backend/tests/community/adapters/http/openapi_v1/routines/test_runtime_target_contract.py
+  h_059e888e5e4e82 1-196
+apps/backend/tests/community/adapters/http/openapi_v1/test_app_only_bot_not_on_the_wire.py
+  h_059e888e5e4e82 192-200,202-208,346-352
+apps/backend/tests/community/adapters/http/task/test_settings_router.py
+  h_059e888e5e4e82 1-81
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_059e888e5e4e82 2281-2300,2326-2329,2342-2344,2348-2350,2377,2435,2439-2469
+apps/backend/tests/community/core/task/task_dispatch/test_search_candidates.py
+  h_059e888e5e4e82 22,45,52
+apps/backend/tests/community/core/task/task_dispatch/test_task_settings.py
+  h_059e888e5e4e82 1,5,84-97
+apps/backend/tests/community/core/task/task_runner/integration/test_dispatch_single_bot.py
+  h_059e888e5e4e82 235
+apps/backend/tests/community/core/task/task_trajectory/test_trajectory_gates_dispatch.py
+  h_059e888e5e4e82 215,577
+apps/backend/tests/community/di/test_task_module.py
+  h_059e888e5e4e82 41
+apps/backend/tests/community/endpoints/test_openapi_bot_public_catalog.py
+  h_059e888e5e4e82 186,217-219
+apps/backend/tests/community/endpoints/test_openapi_routine_targets.py
+  h_059e888e5e4e82 1-353
+apps/backend/tests/community/endpoints/test_task_internal_router.py
+  h_059e888e5e4e82 662
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarEditor.tsx
+  h_059e888e5e4e82 4,13-18,20,44,51-55,72-113
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarSettings.tsx
+  h_059e888e5e4e82 6-7,11-13,17-22,26-34,38-42,44-55,64-67,69-70,73
+apps/frontend-nextgen/src/components/BotWorkshop/BotBasicInfoDialog.tsx
+  h_059e888e5e4e82 1,5-12,14-18,20,23-37,57-61,67-68,71-78,80-97,100-120,123-136,139,141-174,176-185,187,191,194-201,203,207-208,211,214-216,220-221
+apps/frontend-nextgen/src/components/BotWorkshop/BotChatLogs/BotChatList.tsx
+  h_059e888e5e4e82 165-167
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityMembers.tsx
+  h_059e888e5e4e82 7,15-16,43,74-76
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilitySetManager.tsx
+  h_059e888e5e4e82 29,172,181,193
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/capabilitySetManagerTypes.ts
+  h_059e888e5e4e82 14-15
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  h_059e888e5e4e82 17-19,85-87,90,92,178-180,184,186
+apps/frontend-nextgen/src/components/CollaborationSquare/BotProfileModal/index.tsx
+  h_059e888e5e4e82 10-11,17,32-38
+apps/frontend-nextgen/src/components/CollaborationSquare/FriendRequestDialog/index.tsx
+  h_059e888e5e4e82 1,8,13,15-18,39,41-54,74,76-77,82-83,104-133,135,143,146-147,149,155-160
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  h_059e888e5e4e82 74-76,181-182,194
+apps/frontend-nextgen/src/components/CollaborationSquare/SquarePageShell/index.tsx
+  h_059e888e5e4e82 61
+apps/frontend-nextgen/src/components/ui/Modal.tsx
+  h_059e888e5e4e82 35-39
+apps/frontend-nextgen/src/components/ui/PaneDialog.tsx
+  h_059e888e5e4e82 1-71
+apps/frontend-nextgen/src/components/ui/index.ts
+  h_059e888e5e4e82 15
+apps/frontend-nextgen/src/components/ui/sonner.tsx
+  h_059e888e5e4e82 2,10-20
+apps/frontend-nextgen/src/domain/collaborationSquare/mapper.ts
+  h_059e888e5e4e82 28,301-306,323
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  h_059e888e5e4e82 188-189,292-293
+apps/frontend-nextgen/src/hooks/useBotAvatar.ts
+  h_059e888e5e4e82 3,27
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  h_059e888e5e4e82 139-142
+apps/frontend-nextgen/src/hooks/useCollaborationSquare.ts
+  h_059e888e5e4e82 86-87,89,91-93,98
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 34-44,69,82,109,111,127-129,139,141-148,152
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/DetailPanelContent.tsx
+  h_059e888e5e4e82 114
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/ExpertDetails.tsx
+  h_059e888e5e4e82 3,5-7,10,16-98,108-114,118,120-130,134-163,167,170-181,187,189-201,205,207-215,219,221,226,228-235
+apps/frontend-nextgen/src/pages/EvolutionFactory/DomainList.tsx
+  h_059e888e5e4e82 122-124
+apps/frontend-nextgen/src/pages/EvolutionFactory/TaskListColumns.tsx
+  h_059e888e5e4e82 123-125
+apps/frontend-nextgen/src/pages/EvolutionFactory/VersionListColumns.tsx
+  h_059e888e5e4e82 110-112
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks.tsx
+  h_059e888e5e4e82 2-12,73,80,107-109,111,117-118,124,126,130,201-203
+apps/frontend-nextgen/src/services/backendApi/collaboration/publicBotController.ts
+  h_059e888e5e4e82 158-163,173-174
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiHelpers.ts
+  h_059e888e5e4e82 7,27-31,45
+apps/frontend-nextgen/src/stores/collaborationSquareStore.ts
+  h_059e888e5e4e82 18-19,41,66-71,76,98,100-102,112,127,137
+apps/frontend-nextgen/test/collaborationSquarePage.test.tsx
+  h_059e888e5e4e82 167,169-170,177,193
+apps/frontend-nextgen/test/collaborationSquareService.test.ts
+  h_059e888e5e4e82 31
+apps/frontend-nextgen/test/components/BotWorkshop/BotBasicInfoDialog.test.tsx
+  h_059e888e5e4e82 3-4,9-21,23-30,33,35-50,53-54,56,58,60-85,100,103-104
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityMembers.test.tsx
+  h_059e888e5e4e82 65-72,74-76
+apps/frontend-nextgen/test/components/CollaborationSquare/FriendRequestConfirmation.test.tsx
+  h_059e888e5e4e82 19,69
+apps/frontend-nextgen/test/components/CollaborationSquare/FriendRequestDialog.test.tsx
+  h_059e888e5e4e82 24,29,47-50,78,84-105,107-127,129,132-134,165,175,183-220
+apps/frontend-nextgen/test/components/CollaborationSquare/PublicBotCatalogPanel.test.tsx
+  h_059e888e5e4e82 55
+apps/frontend-nextgen/test/components/ui/sonner.test.tsx
+  h_059e888e5e4e82 1-3,5-7,21,32-47
+apps/frontend-nextgen/test/hooks/useCollaborationSquare.test.tsx
+  h_059e888e5e4e82 1255,1257-1258,1277,1296
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 6,65-72,91,104,117,123-127,131,139,176-200,250,253
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  h_059e888e5e4e82 11,1216-1219,1233,1257-1258,1271-1296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cec27d768198d7780a1b21a5a739ad6d96c47a72",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

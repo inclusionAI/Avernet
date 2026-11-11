@@ -1,0 +1,42 @@
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/caller_config.rs
+  s_c69c8cf24b8942::t_8842f75a89f193 12-19
+  s_c69c8cf24b8942::t_fd1a9a20f7968b 212-216,218
+  s_c69c8cf24b8942::t_f6d8eeb04f5817 303-333,336-339,341,347-353
+  s_c69c8cf24b8942::t_71c9dc64629415 177
+  s_c69c8cf24b8942::t_4a3d2917c7aff9 193
+apps/bcs/scripts/e2e-test/caller_config_storage_story.sh
+  s_c69c8cf24b8942::t_58caf0c61f80f2 1-13
+apps/bcs/scripts/e2e-test/e2e.sh
+  s_c69c8cf24b8942::t_465fc132c8d675 102
+apps/bcs/docs/caller-identity-configuration.md
+  s_c69c8cf24b8942::t_21d7875e731ca1 129-140
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_caller_configuration.rs
+  s_c69c8cf24b8942::t_455c580ceed4a7 412
+  s_c69c8cf24b8942::t_6c9af788ce8a58 326-401,403-411,413-432,434-462
+  s_c69c8cf24b8942::t_7c2e20bb8b9fc9 433
+  s_c69c8cf24b8942::t_bf73c951e101ce 402
+apps/bcs/scripts/e2e-test/caller_config_storage_story.py
+  s_c69c8cf24b8942::t_4a3b6e90789be7 141
+  s_c69c8cf24b8942::t_1ffe41d2826ccf 202-203
+  s_c69c8cf24b8942::t_2e5640f5223062 118
+  s_c69c8cf24b8942::t_23674b13613509 128
+  s_c69c8cf24b8942::t_1fcf99b6f7006d 99
+  s_c69c8cf24b8942::t_0d51afb5293478 1-98,100-112,114-117,119-127,129-140,142-201,204-240
+  s_c69c8cf24b8942::t_6fbc4d5b1b5276 113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "11e09b342ec0b120265bbc9c34d812d156542121",
+  "prompts": {},
+  "sessions": {
+    "s_c69c8cf24b8942": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "9942bc77-e30f-4902-8f9c-c23f995d3333",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": null
+    }
+  }
+}

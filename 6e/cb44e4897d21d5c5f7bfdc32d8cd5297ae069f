@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-git-prepared.test.ts
+  h_43af82e14600e4 466-472
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ecb44e4897d21d5c5f7bfdc32d8cd5297ae069f",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

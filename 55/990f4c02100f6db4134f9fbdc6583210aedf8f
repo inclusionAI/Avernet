@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-version-metadata.integration.test.ts
+  s_0205332b370112::t_0ff45611b58b41 1-130
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  s_0205332b370112::t_0ff45611b58b41 517,519
+apps/evolverun/clawweb/public/modules/workflow/docs/internal-version-contract.md
+  s_0205332b370112::t_ab77c49b709094 38-47
+  s_0205332b370112::t_f2b10744f61eb1 25-37,48-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55990f4c02100f6db4134f9fbdc6583210aedf8f",
+  "prompts": {},
+  "sessions": {
+    "s_0205332b370112": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba4a-731b-7000-a7f8-4bb745bc25cf",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

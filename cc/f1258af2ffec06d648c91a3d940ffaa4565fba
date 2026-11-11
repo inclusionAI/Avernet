@@ -1,0 +1,32 @@
+apps/evolverun/clawweb/public/modules/workflow/web/pages/RunDetail.tsx
+  h_43af82e14600e4 20-21,149-163
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailAnalysisProgress.test.tsx
+  h_43af82e14600e4 64
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailHistoricalDag.test.tsx
+  h_43af82e14600e4 6,17,19,37,67-88
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailRecoveredNodes.test.tsx
+  h_43af82e14600e4 1-127
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailSubworkflow.test.tsx
+  h_43af82e14600e4 18
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailSuggestionLink.test.tsx
+  h_43af82e14600e4 77
+apps/evolverun/clawweb/public/modules/workflow/web/utils/__tests__/recovered-node-executions.test.ts
+  h_43af82e14600e4 1-178
+apps/evolverun/clawweb/public/modules/workflow/web/utils/__tests__/use-recovered-flow-events.test.tsx
+  h_43af82e14600e4 1-27
+apps/evolverun/clawweb/public/modules/workflow/web/utils/recovered-node-executions.ts
+  h_43af82e14600e4 1-198
+apps/evolverun/clawweb/public/modules/workflow/web/utils/use-recovered-flow-events.ts
+  h_43af82e14600e4 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ccf1258af2ffec06d648c91a3d940ffaa4565fba",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

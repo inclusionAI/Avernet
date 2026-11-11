@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/checks.py
+  s_cecdc98e721f4b::t_7cd7fe109bd206 14,26,28,32,34,67-100
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_checks.py
+  s_cecdc98e721f4b::t_885ef39bf74c76 10-11,16,61-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c21859bf58bddf0ef03bf701c037f0e02edd253",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
