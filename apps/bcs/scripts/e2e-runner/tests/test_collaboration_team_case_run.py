@@ -24,6 +24,9 @@ from bcs_e2e.collaboration_team_case_run import (
     REPORT_CONTRACT,
     dual_collaboration_team_cli_case_run,
 )
+from bcs_e2e.collaboration_team_profile import (
+    validate_collaboration_team_profile,
+)
 from bcs_e2e.profile import ConfigError
 from bcs_e2e.run_state import read
 
@@ -79,10 +82,11 @@ class CollaborationTeamCaseRunTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def invoke(self, *, gateway=False):
+    def invoke(self, *, gateway=False, profile=None):
         profile_path = self.root / "profile.json"
         profile_path.write_text(
-            json.dumps(profile_value(gateway=gateway)), encoding="utf-8")
+            json.dumps(profile if profile is not None
+                       else profile_value(gateway=gateway)), encoding="utf-8")
         state_dir = self.root / "run-state"
         expected = execution(gateway=gateway)
 
@@ -151,6 +155,24 @@ class CollaborationTeamCaseRunTests(unittest.TestCase):
         serialized = json.dumps(report, sort_keys=True)
         self.assertNotIn("private-human-cookie-value", serialized)
         self.assertNotIn("human-cookie", serialized)
+
+    def test_preprod_role_token_profile_records_role_credential_kind(self):
+        value = profile_value(gateway=True)
+        value["auth"] = {
+            "kind": "human-cookie-with-owned-role-bot-token",
+            "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+            "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+            "engineering_token_env": "BCS_E2E_ENG_BOT_TOKEN",
+            "customer_service_token_env": "BCS_E2E_CS_BOT_TOKEN",
+        }
+        profile = validate_collaboration_team_profile(value)
+        report, _, _ = self.invoke(gateway=True, profile=profile)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(
+            report["credential_kind"], "human_cookie_with_owned_role_bot_token")
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("private-human-cookie-value", serialized)
+        self.assertNotIn("private-driver-token", serialized)
 
     def test_permissions_and_fresh_state_are_enforced(self):
         profile_path = self.root / "guard-profile.json"

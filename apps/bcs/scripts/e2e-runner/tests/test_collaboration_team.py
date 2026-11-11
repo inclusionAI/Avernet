@@ -436,6 +436,100 @@ class CollaborationTeamContractTests(unittest.TestCase):
 
 
 
+class CollaborationTeamPreprodRoleTokenTests(unittest.TestCase):
+    """Preprod owned per-role Bot token credential; dual-environment symmetry."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        self.binary = self.root / "bcs-cli"
+        self.binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.binary.chmod(0o700)
+        self.digest = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        self.state = self.root / "state"
+        self.state.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def role_profile(self) -> dict:
+        value = profile_value(gateway=True)
+        value["auth"] = {
+            "kind": "human-cookie-with-owned-role-bot-token",
+            "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+            "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+            "engineering_token_env": "BCS_E2E_ENG_BOT_TOKEN",
+            "customer_service_token_env": "BCS_E2E_CS_BOT_TOKEN",
+        }
+        return validate_collaboration_team_profile(value)
+
+    def test_validator_admits_role_token_shape_and_rejects_drift(self):
+        value = profile_value(gateway=True)
+        value["auth"] = {
+            "kind": "human-cookie-with-owned-role-bot-token",
+            "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+            "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+            "engineering_token_env": "BCS_E2E_ENG_BOT_TOKEN",
+            "customer_service_token_env": "BCS_E2E_CS_BOT_TOKEN",
+        }
+        validate_collaboration_team_profile(value)
+        value["auth"]["qa_token_env"] = "BCS_E2E_QA_BOT_TOKEN"
+        validate_collaboration_team_profile(value)
+        value["auth"]["mystery_env"] = "BCS_E2E_X"
+        with self.assertRaises(ConfigError):
+            validate_collaboration_team_profile(value)
+        value["auth"].pop("mystery_env")
+        value["auth"].pop("qa_token_env")
+        value["auth"].pop("engineering_token_env")
+        value["auth"].pop("customer_service_token_env")
+        with self.assertRaises(ConfigError):
+            validate_collaboration_team_profile(value)
+
+    def test_credential_resolves_owned_role_token_with_cookie_fallback(self):
+        runner = CollaborationTeamRunner(
+            self.role_profile(), binary=self.binary,
+            binary_sha256=self.digest, state_dir=self.state)
+        env = {"BCS_E2E_ENG_BOT_TOKEN": "eng-role-token",
+               "BCS_E2E_CS_BOT_TOKEN": "cs-role-token",
+               "BCS_E2E_DRIVER_BOT_TOKEN": DRIVER_TOKEN,
+               "BCS_E2E_HUMAN_COOKIE": COOKIE}
+        with patch.dict("os.environ", env):
+            self.assertEqual(
+                runner._credential("engineering", "visibility.protected"),
+                ("human_cookie_with_owned_role_bot_token", "eng-role-token"))
+            self.assertEqual(
+                runner._credential("customer_service", "friend.requests.select"),
+                ("human_cookie_with_owned_role_bot_token", "cs-role-token"))
+            empty = dict(env)
+            empty["BCS_E2E_ENG_BOT_TOKEN"] = ""
+            with patch.dict("os.environ", empty):
+                self.assertEqual(
+                    runner._credential("engineering", "friend.list"),
+                    ("human_cookie", COOKIE))
+            self.assertEqual(
+                runner._credential("driver", "group.status"),
+                ("human_cookie_with_owned_driver_bot_token", DRIVER_TOKEN))
+            self.assertEqual(
+                runner._credential("driver", "group.add-member"),
+                ("human_cookie_with_owned_role_bot_token", DRIVER_TOKEN))
+
+    def test_role_context_carries_owned_token_and_cookie(self):
+        profile = self.role_profile()
+        with patch.dict("os.environ", {"BCS_E2E_HUMAN_COOKIE": COOKIE}):
+            root, context, environment = CollaborationTeamRunner._context(
+                profile, profile["entrypoint"]["origin"], "engineering",
+                "human_cookie_with_owned_role_bot_token", "eng-role-token",
+                self.state)
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        session = json.loads(context.read_text(encoding="utf-8"))
+        self.assertEqual(session["token"], "eng-role-token")
+        self.assertEqual(session["bot_uuid"], ENG)
+        self.assertEqual(session["api_base_url"],
+                         profile["entrypoint"]["origin"])
+        self.assertEqual(environment["BCS_COOKIE"], COOKIE)
+        self.assertEqual(environment["tc_sdb_nenv"], "production")
+
+
 if __name__ == "__main__":
     unittest.main()
 

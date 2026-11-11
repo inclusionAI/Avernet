@@ -147,10 +147,28 @@ def validate_channel_cli_profile(raw: object) -> dict:
         for key in ("driver_token_env", "member_token_env", "eng_token_env"):
             _env_ref(auth[key], f"auth.{key}")
     else:
-        auth = object_keys(profile["auth"], {"kind", "cookie_env"}, "auth")
-        if auth["kind"] != "human-cookie":
+        auth = profile["auth"]
+        if not isinstance(auth, dict):
+            raise ConfigError("channel CLI auth: expected an object")
+        base = {"kind", "cookie_env"}
+        role_envs = {"driver_token_env", "member_token_env", "eng_token_env"}
+        kind = auth.get("kind")
+        if kind == "human-cookie":
+            object_keys(auth, base, "auth")
+        elif kind == "human-cookie-with-owned-role-bot-token":
+            keys = set(auth)
+            if not base <= keys <= base | role_envs:
+                raise ConfigError("channel CLI auth: missing or unknown fields")
+            if not keys & role_envs:
+                raise ConfigError(
+                    "channel CLI auth: owned role Bot token credential declares "
+                    "no per-role Bot token environment")
+        else:
             raise ConfigError("auth.kind: preprod channel CLI requires a Human Cookie")
         _env_ref(auth["cookie_env"], "auth.cookie_env")
+        for role in ("driver", "member", "eng"):
+            if f"{role}_token_env" in auth:
+                _env_ref(auth[f"{role}_token_env"], f"auth.{role}_token_env")
 
     relationships = object_keys(
         profile["relationships"], set(PROFILE_EFFECTS[CHANNEL_CLI_PROFILE_CONTRACT]),

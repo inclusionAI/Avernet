@@ -76,7 +76,13 @@ class ChannelCliRunner:
                 raise ChannelCliRunnerError(
                     f"channel CLI owned {role} Bot credential is absent")
             return "owned_local_bot_token", value
-        value = os.environ.get(self.profile["auth"]["cookie_env"], "")
+        auth = self.profile["auth"]
+        role_token_env = auth.get(f"{role}_token_env", "")
+        if role_token_env:
+            role_token = os.environ.get(role_token_env, "")
+            if role_token:
+                return "human_cookie_with_owned_role_bot_token", role_token
+        value = os.environ.get(auth["cookie_env"], "")
         if not value:
             raise ChannelCliRunnerError("channel CLI Human Cookie is absent")
         return "human_cookie", value
@@ -146,7 +152,12 @@ class ChannelCliRunner:
             (root / name).mkdir(mode=0o700)
         context = root / "bot" / ".bcs" / "session.json"
         data = {
-            "token": credential if credential_kind == "owned_local_bot_token" else "",
+            "token": (
+                credential
+                if credential_kind in {"owned_local_bot_token",
+                                        "human_cookie_with_owned_role_bot_token"}
+                else ""
+            ),
             "bot_uuid": self.roles[role],
             "api_base_url": self.origin,
         }
@@ -155,8 +166,14 @@ class ChannelCliRunner:
         environment = {"PATH": "/usr/bin:/bin", "HOME": base + "/home",
                        "BOT_DATA_DIR": base + "/bot", "TMPDIR": base + "/tmp",
                        "LANG": "C"}
-        if credential_kind == "human_cookie":
-            environment["BCS_COOKIE"] = credential
+        if credential_kind in {"human_cookie",
+                               "human_cookie_with_owned_role_bot_token"}:
+            cookie = (credential if credential_kind == "human_cookie"
+                      else os.environ.get(
+                          self.profile["auth"]["cookie_env"], ""))
+            if not cookie:
+                raise ChannelCliRunnerError("channel CLI Human Cookie is absent")
+            environment["BCS_COOKIE"] = cookie
             environment["tc_sdb_nenv"] = "production"
         return root, context, environment
 
@@ -295,6 +312,10 @@ class ChannelCliRunner:
         role, method, path, arguments = self._contract(
             operation, group_id=group_id, session_id=session_id, secret=secret)
         credential_kind, credential = self._credentials(role)
+        bound_cookie = ("" if credential_kind
+                        != "human_cookie_with_owned_role_bot_token"
+                        else os.environ.get(
+                            self.profile["auth"]["cookie_env"], ""))
         root = context = environment = None
         primary: BaseException | None = None
         cleanup_status = "NOT_WRITTEN"
@@ -312,15 +333,17 @@ class ChannelCliRunner:
                 collect_stderr=True,
             )
             raw = result.stdout
-            if (credential.encode() in raw
-                    or credential.encode() in result.stderr):
+            scrub = [credential.encode()] if credential else []
+            if bound_cookie:
+                scrub.append(bound_cookie.encode())
+            if any(value in raw or value in result.stderr for value in scrub):
                 raise ChannelCliRunnerError(
                     "channel product CLI emitted its credential")
             if (operation != CHANNEL_CLI_BIND_OPERATION
                     and result.returncode != 0):
                 raise ChannelCliRunnerError(
                     "channel product CLI returned nonzero: "
-                    + (stderr_failure_detail(result, [credential.encode()])
+                    + (stderr_failure_detail(result, scrub)
                        or "<no stderr>"))
             if operation == CHANNEL_CLI_BIND_OPERATION:
                 data = self._parse_bind_output(result, secret)

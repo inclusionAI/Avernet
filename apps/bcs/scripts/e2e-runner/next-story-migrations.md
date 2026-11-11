@@ -4222,3 +4222,31 @@ with the refreshed trio Cookie/token material and the reviewed convergence
 budgets, the ledger rebuild for the retained parent stories, and
 `remote_validation=NOT_RUN` / `grants_release_credit=false` stay in force until
 that evidence lands.
+
+## 2026-11-11 preprod owned per-role Bot token credentials (collaboration-team + channel CLI)
+
+The preprod branch of these two dual-environment product-CLI stories carried only
+the Human Cookie for non-driver roles, so the product CLI's station identity
+bootstrap failed on preprod (`Current Bot identity request failed`) whenever a
+non-driver role invoked a written leaf, and the whole case reported BLOCKED
+before its first obligation. The preprod branch is now symmetric with the owned
+Singlebox branch: a Profile may declare `auth.kind`
+`human-cookie-with-owned-role-bot-token` with optional per-role
+`{role}_token_env` entries. When the referenced environment holds a value, the
+CLI context carries that owned Bot token in `session.json` alongside the bound
+Human Cookie, exactly like the local tier; declared-but-empty role environments
+fail closed to the reviewed cookie-only context. The legacy
+`human-cookie-with-owned-driver-bot-token` (collaboration-team) and
+`human-cookie` (channel) kinds remain admitted and behave unchanged. Case
+reports derive `credential_kind` from the Profile, and the product-CLI output
+scrub additionally removes the bound Human Cookie for role-token contexts.
+Profile contracts `dual-collaboration-team-cli-profile-v1` and
+`dual-channel-cli-profile-v1` are unchanged (auth shape extension only).
+`tests/test_collaboration_team*.py` and `tests/test_channel_cli_case_run.py`
+cover validator admission/rejection, credential resolution with cookie
+fallback, context emission, report mapping, and default-profile compatibility.
+Live preprod execution evidence for the acct2 five-Bot roster lands under
+`~/.codex/bcs-e2e/preprod-live-evidence/20261111-acct2-a2r5-*`. The station
+legacy `/friends` CLI faces rejecting Bot-token identity contexts (and the
+401 on `/friends/requests`) are product defects disclosed separately and are
+re-checked every regression instead of being waived silently.

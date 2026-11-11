@@ -135,7 +135,10 @@ def dual_collaboration_team_cli_case_run(
         "credential_kind": (
             "owned_local_bot_token"
             if profile["environment"]["tier"] == "local"
-            else "human_cookie_with_owned_driver_bot_token"
+            else ("human_cookie_with_owned_role_bot_token"
+                  if profile["auth"]["kind"]
+                  == "human-cookie-with-owned-role-bot-token"
+                  else "human_cookie_with_owned_driver_bot_token")
         ),
     }
     write(state_dir / REPORT_FILE, report)

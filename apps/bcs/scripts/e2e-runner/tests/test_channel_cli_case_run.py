@@ -26,6 +26,8 @@ from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.profile import ConfigError
 from bcs_e2e.run_state import read
 from test_remote_channel_cli_adapter import channel_profile_value
+from bcs_e2e.channel_cli_profile import validate_channel_cli_profile
+from bcs_e2e.channel_cli_runner import ChannelCliRunner
 
 RUN_ID = "channel-cli-run-1"
 
@@ -82,8 +84,9 @@ class ChannelCliCaseRunTests(unittest.TestCase):
         self.cli_binary.chmod(0o700)
         self.cli_sha256 = hashlib.sha256(self.cli_binary.read_bytes()).hexdigest()
 
-    def invoke(self, *, preprod=False):
-        profile = preprod_profile() if preprod else local_profile()
+    def invoke(self, *, preprod=False, profile=None):
+        profile = (profile if profile is not None
+                   else (preprod_profile() if preprod else local_profile()))
         profile_path = self.root / f"profile-{'preprod' if preprod else 'local'}.json"
         profile_path.write_text(json.dumps(profile), encoding="utf-8")
         state_dir = self.root / f"state-{'preprod' if preprod else 'local'}"
@@ -131,6 +134,16 @@ class ChannelCliCaseRunTests(unittest.TestCase):
         self.assertEqual(report["environment"]["entrypoint_kind"], "gateway")
         self.assertNotIn("human-cookie", json.dumps(report, sort_keys=True))
 
+    def test_preprod_role_token_profile_records_role_credential_kind(self):
+        report, _, _ = self.invoke(preprod=True,
+                                   profile=role_token_preprod_profile())
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(
+            report["credential_kind"], "human_cookie_with_owned_role_bot_token")
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("human-cookie", serialized)
+        self.assertNotIn("driver-role-token", serialized)
+
     def test_permissions_and_fresh_state_are_enforced(self):
         state_dir = self.root / "state"
         profile_path = self.root / "profile.json"
@@ -177,6 +190,89 @@ class ChannelCliCaseRunTests(unittest.TestCase):
             confirm_run_id=RUN_ID,
         )
         self.assertEqual(json.loads(stdout.getvalue())["status"], "PASS")
+
+
+class ChannelCliPreprodRoleTokenTests(unittest.TestCase):
+    """Preprod owned per-role Bot token credential; dual-environment symmetry."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(
+            self.root, ignore_errors=True))
+        self.cli_binary = self.root / "bcs-cli"
+        self.cli_binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.cli_binary.chmod(0o700)
+        self.cli_sha256 = hashlib.sha256(
+            self.cli_binary.read_bytes()).hexdigest()
+        self.state = self.root / "state"
+        self.state.mkdir()
+
+    def test_validator_admits_role_token_shape_and_rejects_drift(self):
+        value = channel_profile_value(preprod=True)
+        value["auth"] = {
+            "kind": "human-cookie-with-owned-role-bot-token",
+            "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+            "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+            "member_token_env": "BCS_E2E_MEMBER_BOT_TOKEN",
+        }
+        validate_channel_cli_profile(value)
+        value["auth"]["eng_token_env"] = "BCS_E2E_ENG_BOT_TOKEN"
+        validate_channel_cli_profile(value)
+        value["auth"]["mystery_env"] = "BCS_E2E_X"
+        with self.assertRaises(ConfigError):
+            validate_channel_cli_profile(value)
+
+    def test_credentials_and_context_carry_owned_role_token(self):
+        profile = role_token_preprod_profile()
+        runner = ChannelCliRunner(
+            profile, binary=self.cli_binary, binary_sha256=self.cli_sha256,
+            state_dir=self.state)
+        env = {"BCS_E2E_DRIVER_BOT_TOKEN": "driver-role-token",
+               "BCS_E2E_MEMBER_BOT_TOKEN": "member-role-token",
+               "BCS_E2E_ENG_BOT_TOKEN": "eng-role-token",
+               "BCS_E2E_HUMAN_COOKIE": "human-cookie"}
+        with patch.dict("os.environ", env):
+            for role in ("driver", "member", "eng"):
+                kind, credential = runner._credentials(role)
+                self.assertEqual(
+                    kind, "human_cookie_with_owned_role_bot_token")
+                self.assertEqual(credential, f"{role}-role-token")
+            root, context, environment = runner._context(
+                "member", "human_cookie_with_owned_role_bot_token",
+                "member-role-token")
+            empty = dict(env)
+            empty["BCS_E2E_ENG_BOT_TOKEN"] = ""
+            with patch.dict("os.environ", empty):
+                self.assertEqual(
+                    runner._credentials("eng"),
+                    ("human_cookie", "human-cookie"))
+        session = json.loads(context.read_text(encoding="utf-8"))
+        self.assertEqual(session["token"], "member-role-token")
+        self.assertEqual(
+            session["bot_uuid"], profile["actors"]["member"]["bot_id"])
+        self.assertEqual(environment["BCS_COOKIE"], "human-cookie")
+        self.assertEqual(environment["tc_sdb_nenv"], "production")
+
+    def test_default_preprod_profile_keeps_cookie_only_context(self):
+        profile = preprod_profile()
+        runner = ChannelCliRunner(
+            profile, binary=self.cli_binary, binary_sha256=self.cli_sha256,
+            state_dir=self.state)
+        with patch.dict("os.environ", {"BCS_E2E_HUMAN_COOKIE": "human-cookie"}):
+            self.assertEqual(
+                runner._credentials("driver"), ("human_cookie", "human-cookie"))
+
+
+def role_token_preprod_profile() -> dict:
+    value = channel_profile_value(preprod=True)
+    value["auth"] = {
+        "kind": "human-cookie-with-owned-role-bot-token",
+        "cookie_env": "BCS_E2E_HUMAN_COOKIE",
+        "driver_token_env": "BCS_E2E_DRIVER_BOT_TOKEN",
+        "member_token_env": "BCS_E2E_MEMBER_BOT_TOKEN",
+        "eng_token_env": "BCS_E2E_ENG_BOT_TOKEN",
+    }
+    return validate_channel_cli_profile(value)
 
 
 if __name__ == "__main__":

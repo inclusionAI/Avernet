@@ -86,15 +86,33 @@ def validate_collaboration_team_profile(raw: object) -> dict:
         for role in ("engineering", "customer_service", "driver", "qa"):
             _env_ref(auth[f"{role}_token_env"], f"auth.{role}_token_env")
     else:
-        auth = object_keys(
-            profile["auth"],
-            {"kind", "cookie_env", "driver_token_env"}, "auth")
-        if auth["kind"] != "human-cookie-with-owned-driver-bot-token":
+        auth = profile["auth"]
+        if not isinstance(auth, dict):
+            raise ConfigError("collaboration-team auth: expected an object")
+        kind = auth.get("kind")
+        if kind == "human-cookie-with-owned-driver-bot-token":
+            object_keys(auth, {"kind", "cookie_env", "driver_token_env"}, "auth")
+        elif kind == "human-cookie-with-owned-role-bot-token":
+            base = {"kind", "cookie_env", "driver_token_env"}
+            role_envs = {f"{role}_token_env" for role in
+                         ("engineering", "customer_service", "qa")}
+            keys = set(auth)
+            if not base <= keys <= base | role_envs:
+                raise ConfigError(
+                    "collaboration-team auth: missing or unknown fields")
+            if not keys & role_envs:
+                raise ConfigError(
+                    "collaboration-team auth: owned role Bot token credential "
+                    "declares no per-role Bot token environment")
+        else:
             raise ConfigError(
                 "auth.kind: preprod collaboration-team requires a Human Cookie "
                 "and the owned driver Bot token")
         _env_ref(auth["cookie_env"], "auth.cookie_env")
         _env_ref(auth["driver_token_env"], "auth.driver_token_env")
+        for role in ("engineering", "customer_service", "qa"):
+            if f"{role}_token_env" in auth:
+                _env_ref(auth[f"{role}_token_env"], f"auth.{role}_token_env")
 
     relationships = object_keys(
         profile["relationships"],

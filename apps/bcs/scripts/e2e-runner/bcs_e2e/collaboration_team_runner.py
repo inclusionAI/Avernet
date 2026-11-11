@@ -132,6 +132,11 @@ class CollaborationTeamRunner:
             return (
                 "human_cookie_with_owned_driver_bot_token", value,
             )
+        role_token_env = self.profile["auth"].get(f"{role}_token_env", "")
+        if role_token_env:
+            role_token = os.environ.get(role_token_env, "")
+            if role_token:
+                return "human_cookie_with_owned_role_bot_token", role_token
         value = os.environ.get(self.profile["auth"]["cookie_env"], "")
         if not value:
             raise CollaborationTeamRunnerError("Human Cookie is absent")
@@ -151,6 +156,7 @@ class CollaborationTeamRunner:
                 if credential_kind in {
                     "owned_local_bot_token", "owned_driver_bot_token",
                     "human_cookie_with_owned_driver_bot_token",
+                    "human_cookie_with_owned_role_bot_token",
                 }
                 else ""
             ),
@@ -162,7 +168,8 @@ class CollaborationTeamRunner:
             "PATH": "/usr/bin:/bin", "HOME": base + "/home",
             "BOT_DATA_DIR": base + "/bot", "TMPDIR": base + "/tmp", "LANG": "C",
         }
-        if credential_kind in {"human_cookie", "human_cookie_with_owned_driver_bot_token"}:
+        if credential_kind in {"human_cookie", "human_cookie_with_owned_driver_bot_token",
+                               "human_cookie_with_owned_role_bot_token"}:
             cookie = (credential if credential_kind == "human_cookie"
                       else os.environ.get(profile["auth"]["cookie_env"], ""))
             if not cookie:
@@ -388,13 +395,19 @@ class CollaborationTeamRunner:
                              timeout_seconds=self.timeout,
                              max_output_bytes=self.max_response_bytes,
                              collect_stderr=True)
+            scrub = [credential.encode()] if credential else []
+            if credential_kind == "human_cookie_with_owned_role_bot_token":
+                bound_cookie = os.environ.get(
+                    self.profile["auth"]["cookie_env"], "")
+                if bound_cookie:
+                    scrub.append(bound_cookie.encode())
             if result.returncode != 0:
                 raise CollaborationTeamRunnerError(
                     "collaboration-team product CLI returned nonzero: "
-                    + (stderr_failure_detail(result, [credential.encode()])
+                    + (stderr_failure_detail(result, scrub)
                        or "<no stderr>"))
-            if (credential.encode() in result.stdout
-                    or credential.encode() in result.stderr):
+            if any(value in result.stdout or value in result.stderr
+                   for value in scrub):
                 raise CollaborationTeamRunnerError(
                     "collaboration-team CLI emitted its credential")
             if operation in ("group.create", "termination.group.create",
