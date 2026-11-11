@@ -196,7 +196,7 @@ class CardUpdates(CardManagementService):
         previous = self._eligibility.get(card.agent_id)
         entry = (revision, card.deleted, filters)
         if previous != entry and (previous is None or revision >= previous[0]):
-            with self._on_change():
+            with self._on_change((card.agent_id,)):
                 self._eligibility = {**self._eligibility, card.agent_id: entry}
 
     def status(self, agent_id):
@@ -231,7 +231,7 @@ class CardUpdates(CardManagementService):
         ]
         if not documents:
             return
-        with self._on_change():
+        with self._on_change(tuple({source_id(d) for d in documents})):
             self._apply_changed_documents(documents)
 
     def _apply_changed_documents(self, changed):
@@ -437,7 +437,7 @@ class CardUpdates(CardManagementService):
         key = row.card.agent_id
         if self._operations_observed.get(key, 0) >= row.revision:
             return
-        with self._on_change():
+        with self._on_change((key,)):
             self._publish_pending(row)
 
     def _publish_pending(self, row):

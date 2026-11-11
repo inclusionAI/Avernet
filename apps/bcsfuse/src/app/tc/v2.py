@@ -75,7 +75,7 @@ class CardOperations:
         if not data.get("name"):
             raise ValueError("TC Card name is required")
         TcCatalog.validate(data)
-        with runtime.caches.changing():
+        with runtime.caches.changing((agent_id,)):
             return runtime.updates.upsert(
                 agent_id,
                 data if not current and legacy_worker else fields,
@@ -86,7 +86,7 @@ class CardOperations:
 
     def remove(self, agent_id):
         _catalog, runtime = services(self.app)
-        with runtime.caches.changing():
+        with runtime.caches.changing((agent_id,)):
             runtime.updates.remove(agent_id)
 
     def read(self, agent_id):

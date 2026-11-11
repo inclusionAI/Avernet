@@ -118,3 +118,18 @@ Retrieval tests require an isolated Qdrant Server >=1.20:
 QDRANT_TEST_URL=http://127.0.0.1:6333 QDRANT_TEST_GRPC_PORT=6334 \
   python -m pytest -c pyproject.toml packages/search-core/tests tests/contract -q
 ```
+
+### Card metadata cache
+
+Card metadata cache invalidation is scoped to changed Card IDs and cached
+entries that declare those IDs as dependencies. Search result and default
+candidate caches still invalidate globally because updates may change ranking
+or eligibility. Legacy unscoped mutation calls continue to clear all metadata.
+
+On natural metadata expiry, one request refreshes the shared load while followers
+may use the retained value for up to `min(5000, ttl_ms)` additional milliseconds.
+Reads and failed refreshes do not extend that deadline. Explicit invalidation
+removes retained values immediately, and revision checks prevent late old loads
+from repopulating the cache. Empty or hard-expired entries wait for the shared
+load. This coordination is process-local; retained values and dependencies count
+toward the existing capacity limits. Other cache types keep strict TTL expiry.
