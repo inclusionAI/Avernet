@@ -214,20 +214,22 @@ Card URL 需允许无 Provider 凭据的读取，返回 JSON；BCN 不会把下�
 
 ## 4. 注册 Bot
 
+BCS 控制面 A2A 接口统一使用 `/api/v1/collaboration/a2a/` 前缀。旧 `/a2a/` 路径保留为兼容入口，凭据、请求及响应合同相同；注册响应的 `Location` 保持调用入口的前缀。网关透传原始 Bearer，由 BCS 校验 Provider 管理或 Bot 凭据。远端 AgentCard 声明的 A2A 协议地址不受此迁移影响。
+
 ### 名称入口
 
 新接入使用以下接口；后文的 ID 接口保留兼容。Provider 管理 Bearer 用于注册及 Card 管理，调用方 Bot 凭据用于发起聊天、查询及取消运行。
 
 | 操作 | 接口 | 请求 |
 | --- | --- | --- |
-| 注册 | POST /a2a/agents | owners、可选 summary，以及 agent_card_url 或 agent_card 二选一；Provider 从管理 token 确定 |
-| 找回 Bot ID | GET /a2a/agents?provider_bot_ref=... | token 所属 Provider 下精确匹配平台稳定键 provider_bot_ref，返回 items（0 或 1 项） |
-| 查询 Card | GET /a2a/agents/{bot_id}/agent-card | 路径：注册返回的 bot_id |
-| 更新 Card | PUT /a2a/agents/{bot_id}/agent-card | body：完整 Card 来源二选一和/或 visibility；不重复传 bot_id，不传 expected_revision |
-| 刷新 Card | POST /a2a/agents/{bot_id}/agent-card:refresh | 空 body 或 {}；要求已有 URL 来源 |
-| 调用 | POST /a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async | 与第 6 节聊天请求相同 |
-| 查询运行 | GET /a2a/chat/runs/{run_id} | 支持原运行查询的等待参数 |
-| 取消运行 | POST /a2a/chat/runs/{run_id}/cancel | 无业务请求体 |
+| 注册 | POST /api/v1/collaboration/a2a/agents | owners、可选 summary，以及 agent_card_url 或 agent_card 二选一；Provider 从管理 token 确定 |
+| 找回 Bot ID | GET /api/v1/collaboration/a2a/agents?provider_bot_ref=... | token 所属 Provider 下精确匹配平台稳定键 provider_bot_ref，返回 items（0 或 1 项） |
+| 查询 Card | GET /api/v1/collaboration/a2a/agents/{bot_id}/agent-card | 路径：注册返回的 bot_id |
+| 更新 Card | PUT /api/v1/collaboration/a2a/agents/{bot_id}/agent-card | body：完整 Card 来源二选一和/或 visibility；不重复传 bot_id，不传 expected_revision |
+| 刷新 Card | POST /api/v1/collaboration/a2a/agents/{bot_id}/agent-card:refresh | 空 body 或 {}；要求已有 URL 来源 |
+| 调用 | POST /api/v1/collaboration/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async | 与第 6 节聊天请求相同 |
+| 查询运行 | GET /api/v1/collaboration/a2a/chat/runs/{run_id} | 支持原运行查询的等待参数 |
+| 取消运行 | POST /api/v1/collaboration/a2a/chat/runs/{run_id}/cancel | 无业务请求体 |
 
 provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。四个管理接口统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。完整字段和错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
 
