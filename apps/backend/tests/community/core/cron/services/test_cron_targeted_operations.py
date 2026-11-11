@@ -663,3 +663,58 @@ async def test_unsupported_caller_engine_is_not_resolved_or_queried():
     assert result["data"] == [] and result["failed_targets"] == []
     svc._runtime_bindings.resolve.assert_not_called()
     svc._transport.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bot_filter", ["bot", "all"])
+@pytest.mark.parametrize("stage_filter", [None, "draft", "verify", "online"])
+async def test_teclaw_caller_lists_service_stage_bindings(bot_filter, stage_filter, caplog):
+    svc = service(caller=True, provider="teclaw", devices=("instance-a",))
+    bot = svc._bot_provider.get_bot.return_value
+    bot["active_engine"] = "teclaw"
+    svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [bot]}
+    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+        lambda **kwargs: SimpleNamespace(
+            id=8, status=kwargs["status"], ext={"binding": {"verify": 2, "online": 3}}
+        )
+    )
+    svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 1})
+    svc._resolver.resolve_for_binding.side_effect = lambda binding, *args, **kwargs: SimpleNamespace(
+        conn_info={"binding": binding}
+    )
+    svc._resolver.resolve_for_binding_invoke.side_effect = svc._resolver.resolve_for_binding.side_effect
+    svc._transport.invoke.side_effect = lambda conn, *args, **kwargs: {
+        "success": True, "data": [{"id": "job", "binding": conn["binding"]}]
+    }
+    with caplog.at_level("INFO"):
+        result = await svc.list_all_crons(
+            user_id="owner", nick_name="Owner", bot_id=bot_filter,
+            runtime_stage=stage_filter, authenticated_user_id="viewer",
+        )
+    expected = {"draft": 1, "verify": 2, "online": 3}
+    if stage_filter:
+        expected = {stage_filter: expected[stage_filter]}
+    assert {row["runtime_stage"]: row["binding"] for row in result["data"]} == expected
+    assert result["failed_targets"] == []
+    svc._runtime_bindings.resolve.assert_not_called()
+    assert "cron.list.teclaw_stage_targets" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
+async def test_teclaw_caller_targeted_stage_reads_are_allowed(stage):
+    svc = service(caller=True, provider="teclaw")
+    svc._bot_provider.get_bot.return_value["active_engine"] = "teclaw"
+    svc._runtime_bindings.resolve.return_value = ResolvedRuntimeBinding(
+        99, RuntimeBindingSource.SERVICE_DRAFT if stage == "draft" else
+        RuntimeBindingSource.SERVICE_VERIFY if stage == "verify" else RuntimeBindingSource.SERVICE_ONLINE,
+    )
+    svc._transport.invoke.return_value = {"success": True, "data": [{"id": "job"}]}
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", runtime_stage=stage,
+        device_uuid="instance-a", authenticated_user_id="owner",
+    )
+    assert result["data"][0]["runtime_stage"] == stage
+    svc._resolver.resolve_for_binding.assert_called_once_with(
+        99, "owner", bot_id="bot", device_uuid="instance-a"
+    )
