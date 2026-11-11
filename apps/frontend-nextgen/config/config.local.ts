@@ -68,6 +68,8 @@ export default defineConfig({
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,
     TEAMCLAW_OPENAPI_USER_ID: '',
+    // agentswarm 的 tenant 是必填请求参数(不来自登录主体);本版本固定为 teamclaw。
+    TEAMCLAW_AGENTSWARM_TENANT: process.env.TEAMCLAW_AGENTSWARM_TENANT || 'teamclaw',
     TEAMCLAW_GW_BASE: gateway,
     TEAMCLAW_ADMIN_BASE: admin,
     TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE: privateChatManagement,

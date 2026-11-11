@@ -483,6 +483,27 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
     )
 
 
+_GOAL_EXCERPT_CHARS = 160
+"""How much of the goal a list row carries.
+
+Long enough to identify a run at a glance; the full goal is one detail read
+away. Chosen rather than computed from the row width, so the API contract does
+not change with the frontend's layout.
+"""
+
+
+def _goal_excerpt(goal: str) -> str:
+    """A goal shortened for listing, cut on a word boundary where one is near.
+
+    Whitespace — newlines in particular — collapses to single spaces: a goal is
+    free text and a list row must stay one line.
+    """
+    collapsed = " ".join((goal or "").split())
+    if len(collapsed) <= _GOAL_EXCERPT_CHARS:
+        return collapsed
+    return collapsed[:_GOAL_EXCERPT_CHARS].rstrip() + "…"
+
+
 def _to_summary(run) -> RunSummaryDTO:
     return RunSummaryDTO(
         run_id=run.run_id,
@@ -492,6 +513,7 @@ def _to_summary(run) -> RunSummaryDTO:
         error=run.error,
         started_at=run.started_at,
         ended_at=run.ended_at,
+        goal_excerpt=_goal_excerpt(run.goal),
     )
 
 
