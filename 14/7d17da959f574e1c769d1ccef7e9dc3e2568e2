@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_502dbf3f3ce405::t_7b72950b16575d 4,32-34,41,59,68-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "147d17da959f574e1c769d1ccef7e9dc3e2568e2",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
