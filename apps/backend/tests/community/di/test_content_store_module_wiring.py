@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.core.content_store import ContentStoreProtocol, ContentStoreService
 from agentclaw.community.core.repository.implementations.bot.content_store import ContentStoreRepository
@@ -12,6 +13,7 @@ from agentclaw.community.core.repository.protocols.bot import ContentStoreReposi
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.container import build_injector
 from agentclaw.community.di.profile import DeployProfile
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
 def test_the_store_resolves_over_the_repository_and_the_configured_root() -> None:
@@ -32,85 +34,36 @@ def test_the_store_is_a_singleton_the_genome_registry_shares() -> None:
     assert injector.get(GenomeRegistryProtocol)._content is store
 
 
-class _Resolver:
-    """Stands in for the injector: hands out one object storage, or refuses to be asked."""
-
-    def __init__(self, storage=None) -> None:
-        self._storage = storage
-
-    def get(self, interface):
-        if self._storage is None:
-            raise AssertionError("the fs backend must not resolve the object storage")
-        return self._storage
-
-
-def _provide(config: cfg.BotConfigManifestConfig, storage=None) -> ContentStoreService:
-    """The module's provider, called directly over a given config and (optionally) object storage."""
-    from agentclaw.community.di.modules.content_store_module import ContentStoreModule
-
-    return ContentStoreModule().content_store(object(), config, _Resolver(storage))
-
-
-def test_the_test_profile_keeps_the_local_tree() -> None:
-    from agentclaw.community.core.content_store.blobs import LocalBlobStore
+def test_the_test_profile_wires_the_local_blob_store() -> None:
+    from agentclaw.community.testing.content_blob_store import LocalBlobStore
 
     injector = build_injector(profile=DeployProfile.TEST)
-    assert injector.get(cfg.BotConfigManifestConfig).content_store_backend == "fs"
     assert isinstance(injector.get(ContentStoreProtocol)._blobs, LocalBlobStore)
 
 
-def test_backend_fs_wires_local_store(tmp_path) -> None:
-    from agentclaw.community.core.content_store.blobs import LocalBlobStore
-
-    config = cfg.BotConfigManifestConfig(content_store_backend="fs", content_store_dir=str(tmp_path))
-    store = _provide(config)
-    assert isinstance(store._blobs, LocalBlobStore)
-    assert store._blobs.root == tmp_path / "blobs"
-
-
-def test_backend_object_storage_wires_object_store_with_legacy_tree(tmp_path) -> None:
-    from agentclaw.community.core.content_store.blobs import LocalBlobStore, ObjectStorageBlobStore
+def test_the_default_binding_is_the_object_storage_blob_store(tmp_path) -> None:
+    """A deployment's column leaves ``BlobStore`` alone, so it gets the object storage every instance shares."""
+    from agentclaw.community.core.content_store import BlobStore, ObjectStorageBlobStore
+    from agentclaw.community.di.modules.content_store_module import ContentStoreModule
     from agentclaw.community.plugins.community.object_storage import CommunityFsObjectStorage
 
     storage = CommunityFsObjectStorage(str(tmp_path / "objstore"))
-    config = cfg.BotConfigManifestConfig(content_store_dir=str(tmp_path / "old"))
-    assert config.content_store_backend == "object_storage"
-    store = _provide(config, storage)
 
-    assert isinstance(store._blobs, ObjectStorageBlobStore)
-    assert store._blobs._storage is storage
-    assert isinstance(store._blobs._legacy, LocalBlobStore)
-    assert store._blobs._legacy.root == tmp_path / "old" / "blobs"
-    # Round trip through the filesystem object storage a community install binds by default.
-    digest = "sha256:" + __import__("hashlib").sha256(b"bytes").hexdigest()
-    store._blobs.write(digest, b"bytes")
-    assert store.read(digest) == b"bytes"
+    class _Infra(Module):
+        @singleton
+        @provider
+        def object_storage(self) -> ObjectStoragePlugin:
+            return storage
+
+    blobs = Injector([_Infra(), ContentStoreModule()]).get(BlobStore)
+    assert isinstance(blobs, ObjectStorageBlobStore)
+    assert blobs._storage is storage
 
 
-def test_unknown_backend_fails_at_startup() -> None:
-    from agentclaw.community.core.content_store.settings import (
-        DEFAULT_CONTENT_STORE_BACKEND,
-        content_store_backend_from_config,
-    )
+@pytest.mark.parametrize("profile", [DeployProfile.TEST, DeployProfile.SINGLEBOX])
+def test_profiles_whose_object_storage_is_a_mock_override_the_blob_store(profile) -> None:
+    """test and singlebox bind MockObjectStoragePlugin, which keeps nothing: their column wires the local tree."""
+    from agentclaw.community.di.modules.infrastructure.test.content_blob_store import TestContentBlobStoreModule
+    from agentclaw.community.di.profile_modules import modules_for
 
-    assert content_store_backend_from_config({}) == DEFAULT_CONTENT_STORE_BACKEND == "object_storage"
-    assert content_store_backend_from_config({"bot_config_manifest": None}) == "object_storage"
-    assert content_store_backend_from_config({"bot_config_manifest": {}}) == "object_storage"
-    assert content_store_backend_from_config({"bot_config_manifest": {"content_store_backend": "fs"}}) == "fs"
-    for bad in ("nas", "", None, 3):
-        with pytest.raises(ValueError, match="content_store_backend"):
-            content_store_backend_from_config({"bot_config_manifest": {"content_store_backend": bad}})
-    with pytest.raises(ValueError, match="mapping"):
-        content_store_backend_from_config({"bot_config_manifest": "fs"})
-
-
-@pytest.mark.parametrize("overlay", ["application-test.yaml", "application-singlebox.yaml"])
-def test_profiles_whose_object_storage_is_a_mock_keep_the_local_tree(overlay) -> None:
-    """test and singlebox bind MockObjectStoragePlugin, which keeps nothing: their overlays must say fs."""
-    import yaml
-
-    import agentclaw.community.configs as configs
-    from agentclaw.community.core.content_store.settings import content_store_backend_from_config
-
-    tree = yaml.safe_load((Path(configs.__path__[0]) / overlay).read_text(encoding="utf-8"))
-    assert content_store_backend_from_config(tree["user_config"]) == "fs"
+    assert any(isinstance(module, TestContentBlobStoreModule) for module in modules_for(profile))

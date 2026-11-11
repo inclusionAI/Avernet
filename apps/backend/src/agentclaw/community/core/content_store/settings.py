@@ -1,6 +1,6 @@
 """Config seam for the content store (W11, #1510).
 
-The store's medium and its root directory are ``application.yaml`` decisions, kept
+The local blob store's root directory is an ``application.yaml`` decision, kept
 config-borne per the review ruling on the transport allowlist (the same
 reasoning, one wave later): an env var is image-involving and implicit, and
 raw environment access belongs to config loading and composition roots
@@ -16,30 +16,14 @@ from typing import Any, Mapping
 
 #: The blob root's neutral default, relative to the process working
 #: directory — the same shape as ``user_config.skill_scan.storage_dir``.
-#: This is the store itself only under the ``fs`` backend (where a
-#: deployment with several instances must point it at a volume they all
-#: mount); under ``object_storage`` it is the tree read through for blobs an
-#: earlier version wrote.
+#: Read only by the local blob store the test and singlebox profiles wire;
+#: a deployment keeps its bytes in object storage and has no use for it.
 DEFAULT_CONTENT_STORE_DIR = "./data/manifest_content"
 
 #: Where the key lives in the YAML tree, as one constant: the block name
 #: under ``user_config`` and the key inside it.
 _MANIFEST_BLOCK = "bot_config_manifest"
 _CONTENT_STORE_DIR_KEY = "content_store_dir"
-_CONTENT_STORE_BACKEND_KEY = "content_store_backend"
-
-#: The two media the blobs can live on (``blobs.py``): the deployment's
-#: object storage, which every backend instance shares, or the local tree
-#: under ``content_store_dir``, which only the instance that wrote it reads
-#: unless the directory is a volume all of them mount.
-BACKEND_OBJECT_STORAGE = "object_storage"
-BACKEND_FS = "fs"
-CONTENT_STORE_BACKENDS = (BACKEND_OBJECT_STORAGE, BACKEND_FS)
-
-#: Object storage by default: a deployment with more than one backend
-#: instance is correct without an overlay line, and a single-machine install
-#: lands on its filesystem object storage. ``fs`` is the explicit opt-out.
-DEFAULT_CONTENT_STORE_BACKEND = BACKEND_OBJECT_STORAGE
 
 
 def content_store_root_from_config(settings: Mapping[str, Any]) -> Path:
@@ -68,27 +52,3 @@ def content_store_root_from_config(settings: Mapping[str, Any]) -> Path:
             f"must be a non-empty string, got {root!r}"
         )
     return Path(root)
-
-
-def content_store_backend_from_config(settings: Mapping[str, Any]) -> str:
-    """Where the blobs live, from the merged ``user_config`` tree: ``"object_storage"`` or ``"fs"``.
-
-    The key is optional and defaults to :data:`DEFAULT_CONTENT_STORE_BACKEND`.
-    Any other value raises ``ValueError``: a typo must stop the process at
-    startup rather than quietly choose a medium.
-    """
-    block = settings.get(_MANIFEST_BLOCK)
-    if block is None:
-        return DEFAULT_CONTENT_STORE_BACKEND
-    if not isinstance(block, Mapping):
-        raise ValueError(
-            f"user_config.{_MANIFEST_BLOCK} must be a mapping, "
-            f"got {type(block).__name__}"
-        )
-    backend = block.get(_CONTENT_STORE_BACKEND_KEY, DEFAULT_CONTENT_STORE_BACKEND)
-    if backend not in CONTENT_STORE_BACKENDS:
-        raise ValueError(
-            f"user_config.{_MANIFEST_BLOCK}.{_CONTENT_STORE_BACKEND_KEY} "
-            f"must be one of {', '.join(CONTENT_STORE_BACKENDS)}, got {backend!r}"
-        )
-    return backend

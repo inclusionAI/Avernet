@@ -11,7 +11,6 @@ transport stack into importers that only want to store).
 from __future__ import annotations
 
 from abc import abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.content_store.reader import ContentReader
@@ -44,14 +43,11 @@ class ContentStoreProtocol(ContentReader, Protocol):
     def __init__(
         self,
         repository: ContentStoreRepositoryProtocol,
-        root: Optional[Path] = None,
-        *,
-        blobs: Optional[BlobStore] = None,
+        blobs: BlobStore,
     ) -> None:
-        """Where the bytes live is a constructor value — a config-borne
-        deployment decision handed in by the composition root, never an
-        environment read inside core. ``blobs`` is the medium; ``root`` is
-        shorthand for the local tree under that directory.
+        """Where the bytes live is a constructor value — the blob store the
+        deployment's profile wired, handed in by the composition root, never
+        an environment read inside core.
         """
         ...
 
@@ -118,11 +114,14 @@ class ContentStoreProtocol(ContentReader, Protocol):
     def ensure_stored(self, data: bytes) -> str:
         """Make ``data`` readable under its digest and return the digest; files no provenance row.
 
-        For a caller that holds bytes a row already answers for: a row can
-        outlive its blob (a store moved, an instance's disk replaced), and
-        the caller with the bytes in hand is the one that can put them
-        back. A no-op when the store already holds the blob. Raises
-        ``ContentStoreFault`` when the bytes could not be stored.
+        Transitional. Rows filed while the blobs lived on each backend
+        instance's own disk have no object behind them now that the bytes
+        live in object storage; a caller holding the bytes for such a row
+        (the Manifest compiler on a re-apply, the inline backfill) puts
+        them back through this. A no-op when the store already holds the
+        blob. Raises ``ContentStoreFault`` when the bytes could not be
+        stored. Remove once those rows have been backfilled: after that a
+        row implies its blob.
         """
         ...
 

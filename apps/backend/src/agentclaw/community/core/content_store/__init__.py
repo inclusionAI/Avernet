@@ -17,7 +17,7 @@ filed. See each module for its half:
   root to inject.
 - ``errors.py`` — the refusal vocabulary.
 """
-from agentclaw.community.core.content_store.blobs import BlobStore, LocalBlobStore
+from agentclaw.community.core.content_store.blobs import BlobStore, ObjectStorageBlobStore
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
@@ -62,9 +62,9 @@ __all__ = [
     "ContentStoreService",
     "DEFAULT_CONTENT_STORE_DIR",
     "DIGEST_RE",
-    "LocalBlobStore",
     "MAX_AUDIT_ACTOR_CHARS",
     "ManifestContentModel",
+    "ObjectStorageBlobStore",
     "StoredContentRecord",
     "TREE_MAGIC",
     "canonical_tree_bytes",

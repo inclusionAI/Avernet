@@ -105,8 +105,8 @@ async def file_produced(
                 entry_identity=identity,
             )
         else:
-            # A row answers for the digest; make sure the bytes do too. A row can outlive its blob,
-            # and the materialiser reads the blob.
+            # Transitional: a row filed before the bytes moved to object storage has no object
+            # behind it, and the materialiser reads the blob. Remove with ``ensure_stored``.
             _ensure_stored(content, data)
 
     await asyncio.to_thread(_file)

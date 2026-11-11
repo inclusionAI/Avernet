@@ -1180,12 +1180,10 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
   （技能或目录资源）是一个 blob：其文件的 `acm-tree-v1` 编码（`canonical_tree_bytes`），
   它是确定性的、未压缩的，并且可以解码回各个文件。因此编辑目录中的一个文件会为整棵树
   存储一个新的 blob；每个文件一个 blob 可以避免这一点，这是已记录的后续工作（待定决策
-  G-1，对 v1 已关闭）。存储介质由
-  `user_config.bot_config_manifest.content_store_backend` 决定：`object_storage`（默认），
-  或 `fs`，即 `content_store_dir`（默认 `./data/manifest_content`）下的本地目录树
-  `<root>/blobs/<hex[:2]>/<hex64>`；除非该目录是所有实例都挂载的卷，否则只有写入它的实例
-  能读到。在 `object_storage` 下，仍会读取这棵目录树中由早期版本写入的 blob，并在首次读取时
-  将其复制到对象存储。
+  G-1，对 v1 已关闭）。运行哪种 blob 存储由部署的 profile 装配决定：默认是对象存储；
+  test 与 singlebox 两个 profile 的对象存储是测试替身，它们绑定
+  `user_config.bot_config_manifest.content_store_dir` 下的本地目录树
+  `<root>/blobs/<hex[:2]>/<hex64>`。
 - **来源**存放在 `ac_manifest_content` 中，这是一个仅追加的存储事件日志（Bot、
   来源 URL、凭据*名称*、应用）。该表不保存字节。
 - **保留策略**在 v1 中是无条件的：不删除、不清扫、无 TTL。

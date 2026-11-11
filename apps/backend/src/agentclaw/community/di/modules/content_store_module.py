@@ -6,37 +6,33 @@ Registry files what it produces and reads it back scoped by the rows it filed.
 Both inject :class:`ContentStoreProtocol`, so the store binds once, here,
 rather than inside either consumer's module.
 
-Where the blobs live is a ``user_config.bot_config_manifest`` decision:
-``content_store_backend`` picks the medium and ``content_store_dir`` is the
-local tree. The one yaml read stays in ``ManifestFetchModule.bot_config_manifest``
-(the typed ``cfg.BotConfigManifestConfig`` cluster, parsed by the store's own
-``settings`` readers); this module only consumes the parsed values, so the
-keys keep their names and their deployment overlays keep working.
+Where the bytes live is the :class:`BlobStore` contract. This module binds the
+default — the deployment's object storage, which every backend instance
+shares. A profile whose object storage is a test double overrides the key in
+its own column (``infrastructure/test/content_blob_store.py``); nothing here
+branches on a profile or a setting.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-from injector import Binder, Injector, Module, inject, provider, singleton
+from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.content_store import (
+    BlobStore,
     ContentStoreProtocol,
     ContentStoreService,
-    LocalBlobStore,
+    ObjectStorageBlobStore,
 )
-from agentclaw.community.core.content_store.blobs import ObjectStorageBlobStore
-from agentclaw.community.core.content_store.settings import BACKEND_FS
 from agentclaw.community.core.repository.implementations.bot.content_store import (
     ContentStoreRepository,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     ContentStoreRepositoryProtocol,
 )
-from agentclaw.community.di import config as cfg
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
 class ContentStoreModule(Module):
-    """Bind the provenance-log repository and provide the store over it."""
+    """Bind the provenance-log repository, the default blob store, and the store over them."""
 
     def configure(self, binder: Binder) -> None:
         # The append-only provenance log behind the store: one ORM body, the
@@ -50,25 +46,17 @@ class ContentStoreModule(Module):
     @singleton
     @provider
     @inject
+    def blob_store(self, storage: ObjectStoragePlugin) -> BlobStore:
+        """The default medium: the deployment's object storage."""
+        return ObjectStorageBlobStore(storage)
+
+    @singleton
+    @provider
+    @inject
     def content_store(
         self,
         repository: ContentStoreRepositoryProtocol,
-        manifest_config: cfg.BotConfigManifestConfig,
-        injector: Injector,
+        blobs: BlobStore,
     ) -> ContentStoreProtocol:
-        """The store over the configured medium, from the typed config cluster, never an environment read.
-
-        The local tree is the store under ``fs``. Under ``object_storage``
-        it is what the object store reads through to, for blobs an earlier
-        version wrote to this instance's disk. The object storage plugin is
-        resolved only when it is the chosen medium.
-        """
-        local = LocalBlobStore(Path(manifest_config.content_store_dir))
-        if manifest_config.content_store_backend == BACKEND_FS:
-            return ContentStoreService(repository, blobs=local)
-        from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-
-        return ContentStoreService(
-            repository,
-            blobs=ObjectStorageBlobStore(injector.get(ObjectStoragePlugin), legacy=local),
-        )
+        """The store over whichever blob store the profile wired."""
+        return ContentStoreService(repository, blobs)

@@ -1316,14 +1316,11 @@ moved out as its own component in #3064):
   which is deterministic, uncompressed, and decodable back into the files.
   Editing one file of a directory therefore stores a new blob for the whole
   tree; per-file blobs would avoid that and are the recorded follow-up (open
-  decision G-1, closed for v1). The medium is
-  `user_config.bot_config_manifest.content_store_backend`: `object_storage`
-  (default), or `fs` for a local tree `<root>/blobs/<hex[:2]>/<hex64>` under
-  `content_store_dir` (default `./data/manifest_content`), which only the
-  instance that wrote it can read unless the directory is a volume all
-  instances mount. Under `object_storage` that tree is still read for blobs an
-  earlier version stored there, and they are copied to the object storage on
-  first read.
+  decision G-1, closed for v1). Which blob store runs is wired by the
+  deployment's profile: the object storage by default; the test and singlebox
+  profiles, whose object storage is a test double, bind a local tree
+  `<root>/blobs/<hex[:2]>/<hex64>` under
+  `user_config.bot_config_manifest.content_store_dir`.
 - **Provenance** lives in `ac_manifest_content`, an append-only log of store
   events (bot, source URL, credential *name*, apply). The table holds no
   bytes.

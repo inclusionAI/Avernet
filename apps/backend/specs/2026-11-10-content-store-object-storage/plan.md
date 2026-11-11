@@ -256,3 +256,13 @@ def test_unknown_backend_fails_at_startup(): ...
 ```
 
 Gate: `DEPLOY_PROFILE=test uv run pytest tests/community/core/content_store tests/community/core/bot_genome tests/community/core/bot_config_manifest tests/community/core/apply_engine tests/community/di -q`, then `./scripts/ci_test.sh` (changed-line coverage ≥ 80%).
+
+## Revision after human review (2026-11-11)
+
+Review on the PR changed four decisions above; the code follows this section where the two differ.
+
+- **Wiring by profile, not by a config key.** `content_store_backend` is gone. `BlobStore` is the contract; `ContentStoreModule` binds the default (`ObjectStorageBlobStore`), and the test/singlebox column overrides it with the local tree (`di/modules/infrastructure/test/content_blob_store.py`). No `if` on a profile or a setting.
+- **No legacy read-through.** `ObjectStorageBlobStore` reads and writes object storage only. Data left on instance disks is not carried over.
+- **`LocalBlobStore` is test support.** It lives in `agentclaw/community/testing/content_blob_store.py`; `content_store_dir` is set only in the test and singlebox overlays.
+- **`ensure_stored` is transitional.** Rows filed before the move have no object behind them; inline Manifest content has no source to re-fetch from. `ensure_stored` (used by `file_produced` and by the backfill below) stays until those rows are backfilled, then is removed.
+- **Backfill endpoint (new).** `POST /api/system/content-store/manifest-inline/backfill`, super-admin only, takes an `ac_manifest_content` row (`entity_id`, `bot_id`, `digest`), re-reads the bot's stored Manifest and stores every inline body it declares (`core/bot_config_manifest/services/inline_backfill.py`).

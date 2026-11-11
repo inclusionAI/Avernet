@@ -8,7 +8,7 @@ import time
 import pytest
 
 from agentclaw.community.core.content_store.blobs import (
-    LocalBlobStore,
+    BlobStore,
     ObjectStorageBlobStore,
     object_key,
 )
@@ -19,7 +19,7 @@ from agentclaw.community.plugin_api.object_storage import (
     ObjectReadStatus,
 )
 from agentclaw.community.plugins.community.object_storage import CommunityFsObjectStorage
-from agentclaw.community.core.content_store.service import ContentStoreService
+from agentclaw.community.testing.content_blob_store import LocalBlobStore
 
 BODY = b"blob-bytes" * 32
 DIGEST = "sha256:" + hashlib.sha256(BODY).hexdigest()
@@ -53,13 +53,6 @@ def test_local_blob_store_sweeps_only_stale_tmp_files(tmp_path):
     os.utime(stale, (old, old))
     store.write(DIGEST, BODY)
     assert not stale.exists() and fresh.exists()
-
-
-def test_service_takes_exactly_one_of_root_and_blobs(tmp_path):
-    with pytest.raises(ValueError):
-        ContentStoreService(object())
-    with pytest.raises(ValueError):
-        ContentStoreService(object(), tmp_path, blobs=LocalBlobStore(tmp_path))
 
 
 class _BaseSurfaceStorage:
@@ -136,38 +129,7 @@ def test_object_store_read_failed_status_raises_fault_not_missing(tmp_path, monk
     storage = _fs_storage(tmp_path)
     monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FAILED))
     with pytest.raises(ContentStoreFault):
-        ObjectStorageBlobStore(storage, legacy=LocalBlobStore(tmp_path / "old")).read(DIGEST)
-
-
-def test_legacy_read_through_serves_and_copies_forward(tmp_path):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    store = ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=legacy)
-    assert store.read(DIGEST) == BODY
-    # Now in the object storage: an instance with no local tree reads it.
-    assert ObjectStorageBlobStore(_fs_storage(tmp_path)).read(DIGEST) == BODY
-
-
-def test_legacy_blob_failing_its_digest_is_not_copied_forward(tmp_path):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    legacy.path(DIGEST).write_bytes(b"damaged")
-    store = ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=legacy)
-    assert store.read(DIGEST) == b"damaged"  # the service's hash check refuses it
-    assert ObjectStorageBlobStore(_fs_storage(tmp_path)).read(DIGEST) is None
-
-
-def test_legacy_copy_forward_failure_does_not_fail_the_read(tmp_path):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    storage = _BaseSurfaceStorage()
-    storage.fail_put = True
-    assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY
-
-
-def test_legacy_miss_is_none(tmp_path):
-    store = ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=LocalBlobStore(tmp_path / "old"))
-    assert store.read(DIGEST) is None
+        ObjectStorageBlobStore(storage).read(DIGEST)
 
 
 def test_object_store_skips_create_when_the_object_exists(tmp_path, monkeypatch):
@@ -196,48 +158,6 @@ def test_object_store_found_without_content_is_a_fault(tmp_path, monkeypatch):
         ObjectStorageBlobStore(storage).read(DIGEST)
 
 
-def test_legacy_tree_answers_through_a_storage_outage_without_copying(tmp_path, monkeypatch):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    storage = _fs_storage(tmp_path)
-    monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FAILED))
-    monkeypatch.setattr(storage, "create_object_if_absent", lambda key, content: pytest.fail("copied during an outage"))
-    assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY
-
-
-def test_storage_outage_with_a_damaged_legacy_blob_stays_a_fault(tmp_path, monkeypatch):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    legacy.path(DIGEST).write_bytes(b"damaged")
-    storage = _fs_storage(tmp_path)
-    monkeypatch.setattr(storage, "read_object", lambda key: ObjectReadResult(ObjectReadStatus.FAILED))
-    with pytest.raises(ContentStoreFault):
-        ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST)
-
-
-def test_an_unreadable_legacy_tree_is_a_fault_not_an_oserror(tmp_path, monkeypatch):
-    legacy = LocalBlobStore(tmp_path / "old")
-
-    def _unreadable(digest):
-        raise PermissionError("denied")
-
-    monkeypatch.setattr(legacy, "read", _unreadable)
-    with pytest.raises(ContentStoreFault):
-        ObjectStorageBlobStore(_fs_storage(tmp_path), legacy=legacy).read(DIGEST)
-
-
-def test_any_exception_while_copying_forward_does_not_fail_the_read(tmp_path, monkeypatch):
-    legacy = LocalBlobStore(tmp_path / "old")
-    legacy.write(DIGEST, BODY)
-    storage = _fs_storage(tmp_path)
-
-    def _boom(key):
-        raise RuntimeError("sdk error")
-
-    monkeypatch.setattr(storage, "get_etag", _boom)
-    assert ObjectStorageBlobStore(storage, legacy=legacy).read(DIGEST) == BODY
-
-
 def test_a_damaged_object_is_not_repaired_by_a_later_write(tmp_path):
     """Pinned limit: the existence check cannot see damage, so an operator deletes the object to heal it."""
     storage = _fs_storage(tmp_path)
@@ -252,3 +172,8 @@ def test_a_damaged_object_is_not_repaired_by_a_later_write(tmp_path):
     damaged.unlink()
     store.write(DIGEST, BODY)
     assert store.read(DIGEST) == BODY
+
+
+def test_both_media_satisfy_the_blob_contract(tmp_path):
+    assert isinstance(LocalBlobStore(tmp_path), BlobStore)
+    assert isinstance(ObjectStorageBlobStore(_fs_storage(tmp_path)), BlobStore)

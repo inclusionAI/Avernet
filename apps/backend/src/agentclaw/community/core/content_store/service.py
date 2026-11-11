@@ -12,8 +12,8 @@ source is down; one store, one addressing, no second copy).
 Two halves:
 
 - **Bytes** live in a :class:`~agentclaw.community.core.content_store.blobs.BlobStore`
-  (``blobs.py``): a content-addressed tree on local disk, or the
-  deployment's object storage. The digest (``sha256:<hex>``, the fetcher's
+  (``blobs.py``): the deployment's object storage, or a local tree under
+  the profiles that run against test doubles. The digest (``sha256:<hex>``, the fetcher's
   own vocabulary) IS the address; identical bytes are written once, ever.
   Reading verifies the hash here, whatever the medium — the store hands
   back bytes it can prove, or it fails.
@@ -34,12 +34,11 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import httpx
 
-from agentclaw.community.core.content_store.blobs import BlobStore, LocalBlobStore
+from agentclaw.community.core.content_store.blobs import BlobStore
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
@@ -184,22 +183,15 @@ class ContentStoreService(ContentStoreProtocol):
     def __init__(
         self,
         repository: ContentStoreRepositoryProtocol,
-        root: Optional[Path] = None,
-        *,
-        blobs: Optional[BlobStore] = None,
+        blobs: BlobStore,
     ) -> None:
         """Args:
             repository: the provenance log (``ac_manifest_content``).
-            root: shorthand for ``blobs=LocalBlobStore(root)`` — the blob
-                tree's root on local disk. Relative paths resolve against
-                the process working directory and ``~`` expands.
-            blobs: where the bytes live. Exactly one of ``root`` and
-                ``blobs`` is given.
+            blobs: where the bytes live — a wiring decision of the
+                deployment's profile, handed in by the composition root.
         """
-        if (root is None) == (blobs is None):
-            raise ValueError("the content store takes exactly one of root and blobs")
         self._repository = repository
-        self._blobs: BlobStore = blobs if blobs is not None else LocalBlobStore(Path(root))
+        self._blobs = blobs
 
     def store(
         self,

@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import
 from agentclaw.community.core.content_store.errors import ContentMissingError, ContentStoreFault
 from agentclaw.community.core.content_store.models import ContentScope
 from agentclaw.community.core.content_store.service import ContentStoreService
+from agentclaw.community.testing.content_blob_store import LocalBlobStore
 
 SCOPE = ContentScope(env="dev", entity_id="ent_a", bot_id="bot_1")
 SESSION = SimpleNamespace(scope=SCOPE, actor_id="user_1")
@@ -47,11 +48,11 @@ def _file(content) -> str:
 def test_file_produced_restores_missing_bytes_when_row_exists(tmp_path):
     """The apply that runs on an instance that never held the blob: the row exists, the bytes do not."""
     rows = _Rows()
-    first = ContentStoreService(rows, tmp_path / "pod-a")
+    first = ContentStoreService(rows, LocalBlobStore(tmp_path / "pod-a"))
     digest = _file(first)
     assert len(rows.rows) == 1
 
-    second = ContentStoreService(rows, tmp_path / "pod-b")
+    second = ContentStoreService(rows, LocalBlobStore(tmp_path / "pod-b"))
     with pytest.raises(ContentMissingError):
         second.read(digest)
 
@@ -62,7 +63,7 @@ def test_file_produced_restores_missing_bytes_when_row_exists(tmp_path):
 
 def test_a_store_fault_while_restoring_is_the_entrys_failure(tmp_path):
     rows = _Rows()
-    content = ContentStoreService(rows, tmp_path / "pod-a")
+    content = ContentStoreService(rows, LocalBlobStore(tmp_path / "pod-a"))
     _file(content)
 
     def _fault(data):
@@ -75,7 +76,7 @@ def test_a_store_fault_while_restoring_is_the_entrys_failure(tmp_path):
 
 def test_a_local_write_failure_while_restoring_is_the_entrys_failure(tmp_path):
     rows = _Rows()
-    content = ContentStoreService(rows, tmp_path / "pod-a")
+    content = ContentStoreService(rows, LocalBlobStore(tmp_path / "pod-a"))
     _file(content)
 
     def _disk_full(data):
