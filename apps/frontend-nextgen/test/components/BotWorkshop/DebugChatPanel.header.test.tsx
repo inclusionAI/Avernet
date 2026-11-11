@@ -12,6 +12,7 @@ jest.mock('@/pages/Workspace/hooks/useBotChat');
 jest.mock('@/pages/Workspace/hooks/useBotCapabilitySets');
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
 jest.mock('@/services/workspace/botSessionService', () => ({
+  ...jest.requireActual('@/services/workspace/botSessionService'),
   botSessionService: { listSessions: jest.fn(), listModels: jest.fn(), createSession: jest.fn() },
 }));
 jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({

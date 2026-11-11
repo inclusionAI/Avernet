@@ -30,11 +30,12 @@ jest.mock('@/pages/BotWorkshop/Detail/DetailNavigation', () => ({ DetailNavigati
 jest.mock('@/pages/BotWorkshop/Detail/DetailPanelContent', () => ({ DetailPanelContent: () => null }));
 jest.mock('@/pages/Workspace/hooks/useBotChat');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFilesFeature', () => ({
-  useBotSessionFilesFeature: jest.fn(() => ({ capabilitySets: null, featureNode: null })),
+  useBotSessionFilesFeature: jest.fn(() => ({ capabilitySets: null, featureNode: null, cancelUploads: jest.fn() })),
 }));
 jest.mock('@/pages/Workspace/hooks/useBotCapabilitySets', () => ({ useBotCapabilitySets: () => null }));
 jest.mock('@/pages/Workspace/hooks/useBotModels', () => ({ useBotModels: () => ({ models: [], loading: false }) }));
 jest.mock('@/services/workspace/botSessionService', () => ({
+  ...jest.requireActual('@/services/workspace/botSessionService'),
   botSessionService: { listSessions: jest.fn(), listModels: jest.fn() },
 }));
 jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
@@ -67,6 +68,6 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
     null, undefined, expect.any(Function), 'viewer');
   expect(screen.getByTestId('composer')).toBeInTheDocument();
   expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
-    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), null, 'viewer', expect.any(Function),
+    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), null, 'viewer', expect.any(Function), expected,
   );
 });
