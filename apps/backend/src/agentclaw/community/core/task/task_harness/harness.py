@@ -1,7 +1,7 @@
 """TaskHarness 旁路常驻:周期巡检 SLA 超时/崩溃 → 复位 PENDING 重投。对齐 plan §3.6。
 
 harness 三路巡检——① RUNNING 真执行叶子超 SLA → 复位重投(bbs 走 lease-expire 终态不重派);② status=FAILED(执行层失败)真执行叶子 → re-dispatch 重试;③ PENDING 未派发超时 → 重搜推。acceptance-FAIL 不入 harness:验收 verdict FAILED 经 on_report 记录为节点 DONE(内容未通过验收,不重派),故 Scan② 扫到的 FAILED 仅执行层失败、不含验收不通过。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
-不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
+不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。Relay 早退只做“6 小时未进终态”的硬兜底,不属于这条重试链路。
 Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不变编排口。
 """
 
@@ -52,6 +52,7 @@ _DEFAULT_SLA_TIMEOUT = 900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
 _DEFAULT_COOP_GROUP_SLA_TIMEOUT = 900.0  # coop_group RUNNING:15 分钟
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0  # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
+_RELAY_STALE_CUTOFF_MS = 6 * 3600 * 1000  # 正常任务约 10 分钟;6 小时未收敛视为不可恢复
 
 class TaskHarness:
     """旁路常驻巡检器。
@@ -189,6 +190,40 @@ class TaskHarness:
     def _is_relay_mode(self, graph) -> bool:
         """Return True for a Relay-mode task graph."""
         return bool(graph.is_relay)
+
+    def _is_stale_for_early_exit(self, graph, node) -> bool:
+        """Relay execution nodes have one hard stale cutoff.
+
+        This rule is intentionally narrower than the ordinary timer/reset path:
+        it only governs *Relay* execution leaves (``single_bot``/``coop_group``),
+        and a node is considered stale only when its persisted ``start_time`` is
+        already older than the 6h cutoff. Centralized tasks are untouched.
+        """
+        if not graph.is_relay:
+            return False
+        if effective_run_mode(node) not in {"single_bot", "coop_group"}:
+            return False
+        start_time = node.run_info.start_time
+        if not start_time:
+            return False
+        return self._wall_clock_ms() - int(start_time) >= _RELAY_STALE_CUTOFF_MS
+
+    def _stale_early_exit_patch(self, task_id: str, node: TaskNode) -> TaskNodePatch:
+        """Build the terminal patch for an over-stale Relay execution node."""
+        elapsed_ms = max(0, self._wall_clock_ms() - int(node.run_info.start_time or 0))
+        return TaskNodePatch(
+            task_id=task_id,
+            node_id=node.node_id,
+            status=Status.HUNG,
+            failure_reason="harness_early_exit: stale_6h",
+            extend_props_patch={
+                "harness_early_exit": {
+                    "reason": "stale_6h",
+                    "stale_seconds": elapsed_ms // 1000,
+                    "cutoff_seconds": _RELAY_STALE_CUTOFF_MS // 1000,
+                }
+            },
+        )
 
     async def _relay_runtime_harness(
         self,
@@ -467,6 +502,11 @@ class TaskHarness:
             ]
             now = self._clock()
             for n in nodes:
+                if self._is_stale_for_early_exit(task_graph, n):
+                    patch = self._stale_early_exit_patch(task_id, n)
+                    self._report_node_patch(patch)
+                    relay_patches.append(patch)
+                    continue
                 sla = self._sla_timeout(task_id, n)
                 key = (task_id, n.node_id)
                 seen.add(key)
