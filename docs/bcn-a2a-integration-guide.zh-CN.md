@@ -130,10 +130,12 @@ party 可省略，支持 first_party、second_party、third_party；不表示权
 
 ## 3. 注册 Agent
 
+BCS 控制面 A2A 接口统一使用 `/api/v1/collaboration/a2a/` 前缀。旧 `/a2a/` 路径保留为兼容入口，凭据、请求及响应合同相同；注册响应的 `Location` 保持调用入口的前缀。网关透传原始 Bearer，由 BCS 校验 Provider 管理或 Bot 凭据。远端 AgentCard 声明的 A2A 协议地址不受此迁移影响。
+
 调用以下管理接口：
 
 ```http
-POST /a2a/agents
+POST /api/v1/collaboration/a2a/agents
 Authorization: Bearer <provider_admin_token>
 Content-Type: application/json
 ```
@@ -191,7 +193,7 @@ Content-Type: application/json
 | `agent_card` | 与 agent_card_url 二选一 | 直接提交完整 Card 对象，适合不单独发布 Card URL 的场景 |
 | `summary` | 否 | BCN 展示摘要；省略时初始值取 Card.description |
 
-BCN 会检查 Card 和接口声明，并从 Card.name 获取 Bot 名称；注册成功后返回 **`provider_name`、`agent_name` 和 `bot_id`**。Provider 管理 token 唯一绑定一个 Provider，BCN 从有效 token 确定注册归属；注册请求不传 provider_name。接入方必须保存 bot_id，后续查询、更新、刷新使用该 ID；不按名称定位。丢失 ID 可用 provider_bot_ref 查询 `/a2a/agents?provider_bot_ref=...`。
+BCN 会检查 Card 和接口声明，并从 Card.name 获取 Bot 名称；注册成功后返回 **`provider_name`、`agent_name` 和 `bot_id`**。Provider 管理 token 唯一绑定一个 Provider，BCN 从有效 token 确定注册归属；注册请求不传 provider_name。接入方必须保存 bot_id，后续查询、更新、刷新使用该 ID；不按名称定位。丢失 ID 可用 provider_bot_ref 查询 `/api/v1/collaboration/a2a/agents?provider_bot_ref=...`。
 
 重启 Agent 服务时复用已有 Bot，不要重复注册。同一 Provider 下重复 provider_bot_ref 返回冲突，不隐式覆盖；Card.name 可以重复。修改服务信息使用第 4 节的更新接口。
 
@@ -201,15 +203,15 @@ Agent 升级或能力介绍变化后，可以更新 BCN 登记的 Card。这些�
 
 | 需要做什么 | 接口 |
 | --- | --- |
-| 查看已登记的 Card | GET /a2a/agents/{bot_id}/agent-card，ID 放在路径中 |
-| 提交新的 Card URL 或完整 Card | PUT /a2a/agents/{bot_id}/agent-card，body 放 Card 来源和/或 visibility，不重复填写 ID |
-| 从已保存的 URL 立即重新读取 Card | POST /a2a/agents/{bot_id}/agent-card:refresh，空 body 或 {} |
-| 按平台键找回 ID | GET /a2a/agents?provider_bot_ref=...，返回 items（0 或 1 项），限定当前 Provider |
+| 查看已登记的 Card | GET /api/v1/collaboration/a2a/agents/{bot_id}/agent-card，ID 放在路径中 |
+| 提交新的 Card URL 或完整 Card | PUT /api/v1/collaboration/a2a/agents/{bot_id}/agent-card，body 放 Card 来源和/或 visibility，不重复填写 ID |
+| 从已保存的 URL 立即重新读取 Card | POST /api/v1/collaboration/a2a/agents/{bot_id}/agent-card:refresh，空 body 或 {} |
+| 按平台键找回 ID | GET /api/v1/collaboration/a2a/agents?provider_bot_ref=...，返回 items（0 或 1 项），限定当前 Provider |
 
 查询示例（bot_id 使用注册返回值）：
 
 ```http
-GET /a2a/agents/{bot_id}/agent-card
+GET /api/v1/collaboration/a2a/agents/{bot_id}/agent-card
 Authorization: Bearer <provider_admin_token>
 ```
 
@@ -251,7 +253,7 @@ Authorization: Bearer <provider_admin_token>
 }
 ```
 
-从已登记 URL 刷新时，向 `POST /a2a/agents/{bot_id}/agent-card:refresh` 提交：
+从已登记 URL 刷新时，向 `POST /api/v1/collaboration/a2a/agents/{bot_id}/agent-card:refresh` 提交：
 
 ```json
 {}

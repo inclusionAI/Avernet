@@ -261,8 +261,9 @@ def visible_text(value):
 
 
 class A2aStory(Story):
-    def __init__(self, base, owner, peer):
+    def __init__(self, base, owner, peer, a2a_prefix="/a2a"):
         super().__init__(base, owner)
+        self.a2a_prefix = a2a_prefix
         self.peer = peer
         self.original_policy = None
         self.policy_revision = None
@@ -277,7 +278,7 @@ class A2aStory(Story):
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
-        registered = self.request("POST", "/a2a/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
+        registered = self.request("POST", self.a2a_prefix + "/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
         assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card"}
         assert registered["agent_name"] == self.peer.card["name"]
@@ -289,7 +290,7 @@ class A2aStory(Story):
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] == self.peer.base + "/agent-card.json"
         assert record["revision"] == 1
-        card_path = "/a2a/agents/" + bot_id + "/agent-card"
+        card_path = self.a2a_prefix + "/agents/" + bot_id + "/agent-card"
         named = self.request("GET", card_path, token=admin)
         assert named["agent_card"] == record["agent_card"]
         assert not ({"provider_id", "bot_uuid", "revision"} & named.keys())
@@ -442,7 +443,7 @@ class A2aStory(Story):
         reference = "story-" + uuid.uuid4().hex
         registration_body = {"provider_bot_ref": reference, "owners": [self.owner], "agent_card": card}
         admin = provider["provider_admin_token"]
-        registration = self.request("POST", "/a2a/providers/" + provider_name + "/bots",
+        registration = self.request("POST", self.a2a_prefix + "/providers/" + provider_name + "/bots",
             registration_body, token=admin, status=201)
         assert registration["bot_name"] == card["name"]
         assert registration["provider_bot_ref"] == reference
@@ -460,13 +461,13 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
+        path = self.a2a_prefix + "/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
             assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
-            run_path = "/a2a/chat/runs/" + accepted["run_id"]
+            run_path = self.a2a_prefix + "/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 result = self.request("GET", run_path + "?wait_ms=500", token=token)
@@ -595,11 +596,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--owner", required=True)
+    parser.add_argument("--a2a-prefix", default="/a2a",
+                        choices=("/a2a", "/api/v1/collaboration/a2a"))
     args = parser.parse_args()
     for binding in ("HTTP+JSON", "JSONRPC"):
         peer = Peer(binding)
         peer.start()
-        story = A2aStory(args.base_url, args.owner, peer)
+        story = A2aStory(args.base_url, args.owner, peer, args.a2a_prefix)
         try:
             story.run()
             with story.http.open(args.base_url + "/metrics", timeout=15) as response:

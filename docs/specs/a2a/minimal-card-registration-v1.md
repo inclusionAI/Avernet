@@ -203,3 +203,15 @@ index or data migration is introduced. Provider chat resolves provider_bot_ref, 
 The optional source extension is now [v2](extensions/source-agent/v2.md), containing
 mutable party classification, not agentId. Owners remain required under existing policy.
 See the [public contract](../../bcn-provider-agent-card-api-v0.1.zh-CN.md) for input limits.
+
+
+### Versioned BCS HTTP entry point
+
+The canonical control-plane entry point prefixes the existing `/a2a/...` route
+patterns with `/api/v1/collaboration`. This covers Agent registration, ID recovery,
+Card read/update/refresh, Provider-name registration/chat and run query/cancel.
+Root `/a2a/...` paths remain compatible aliases with identical authentication,
+request and response contracts. Registration `Location` stays under the entry
+point used by the caller. Gateway identity parsing is bypassed only for this
+namespace; BCS validates the original Provider-admin or Bot Bearer per operation.
+Remote AgentCard interface URLs and A2A wire bindings are unchanged.

@@ -343,6 +343,9 @@ user_config:
       user: optional
       app: optional
       bot: optional
+    # A2A routes validate Provider-admin / Bot Bearer credentials in BCS.
+    # Do not interpret those credentials as Gateway User, App or Bot identities.
+    "/api/v1/collaboration/a2a/**": {}
     # BCS verifies Agent identity here, including agents with no Bot registration.
     "GET /api/v1/collaboration/bots/me": {}
     "/api/v1/collaboration/sessions/{session_id}/files/**":
