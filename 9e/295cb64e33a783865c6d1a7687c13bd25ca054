@@ -1,0 +1,37 @@
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_4202150a7369ed::t_348d9594d2d508 58
+autocoding/skills/teamclaw-clarify/references/gate-a-delivery.md
+  s_4202150a7369ed::t_f37c37b6f06b5b 65
+autocoding/skills/teamclaw-clarify/references/show-me.md
+  s_4202150a7369ed::t_6cd8df943016f8 9,59,72-75
+autocoding/skills/teamclaw-implement/SKILL.md
+  s_4202150a7369ed::t_9150c549c3673a 45
+autocoding/skills/teamclaw-implement/references/show-me.md
+  s_4202150a7369ed::t_89ec03d6942f4c 9,59,72-75
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_4202150a7369ed::t_16eba159e8199d 52-53
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_4202150a7369ed::t_e9e2717dd05d51 44
+autocoding/skills/teamclaw-plan/references/show-me.md
+  s_4202150a7369ed::t_3a3c68ddfbe2e5 9,59,72-75
+autocoding/skills/teamclaw-pr-debate/SKILL.md
+  s_4202150a7369ed::t_f90bef84fbcf60 38-39
+autocoding/skills/teamclaw-pr-debate/references/show-me.md
+  s_4202150a7369ed::t_b49d3521b6af6c 55,68-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e295cb64e33a783865c6d1a7687c13bd25ca054",
+  "prompts": {},
+  "sessions": {
+    "s_4202150a7369ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c134-fe02-75c3-8ffd-aab4b5b66147",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

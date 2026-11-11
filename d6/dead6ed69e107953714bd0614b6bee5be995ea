@@ -1,0 +1,37 @@
+apps/bcs-internal/docs/bcn-zcache-verification.md
+  s_83eaf4a5bf0412::t_051e5346294380 1-2,6,101-270
+  s_83eaf4a5bf0412::t_5a646257e6dd26 61-64,84-92
+  s_83eaf4a5bf0412::t_aab7d5c271903d 3-5,7-52,94-99
+  s_83eaf4a5bf0412::t_7acbc1ff96d7fd 53-60,100
+  s_83eaf4a5bf0412::t_3c4f30197d130d 65-83
+  s_83eaf4a5bf0412::t_7b5d2ee7e5a97e 93
+apps/bcs-internal/docs/leader-election.md
+  s_83eaf4a5bf0412::t_9f7136115e9d7c 16-37,43-49
+  s_83eaf4a5bf0412::t_051e5346294380 38-42
+apps/agentclawscs/docker/bcn/tests/test_health.py
+  s_83eaf4a5bf0412::t_b1c2ff8665c4b5 1-5,8-9,11-45,47-52,54-81,97-106
+  s_83eaf4a5bf0412::t_f2ac3381feb8e6 6-7,10,46,53,82-96
+apps/agentclawscs/docker/bcn/scripts/admin/bin/health.sh
+  s_83eaf4a5bf0412::t_25157902e87bfc 22-27,35-39,41-42
+apps/bcs-internal/bcn-configs/bcs-config-pre.toml
+  s_83eaf4a5bf0412::t_25157902e87bfc 16-17,20-22,105
+apps/bcs-internal/configs/bcs-config-pre.toml
+  s_83eaf4a5bf0412::t_25157902e87bfc 16-17,20-21
+  s_83eaf4a5bf0412::t_db20457c89f3f0 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d6dead6ed69e107953714bd0614b6bee5be995ea",
+  "prompts": {},
+  "sessions": {
+    "s_83eaf4a5bf0412": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a4b1-6c88-7b43-a5ea-62db37597854",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
