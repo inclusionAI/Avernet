@@ -193,21 +193,35 @@ def _build_manifest_document(
     ``render_screen_rows`` carries the source bot's render-screen set as the
     v1 ``bot_config.render_screen`` kind. Each row is the ``(name, cdn_url)``
     pair the RenderScreenService writes, serialised verbatim — an empty tuple
-    omits the ``bot_config`` key, so a source with no screens produces a
-    document with no ``bot_config``, which the validator and compiler treat as
-    undeclared (untouched) rather than as an overwrite-to-empty. ``identity``
-    / ``skills`` / ``mcp`` are still deferred (能力集 stage).
+    omits the ``render_screen`` key, so a source with no screens leaves that
+    kind undeclared (untouched) rather than as an overwrite-to-empty.
+
+    ``bot_config.task_nav`` is **always emitted** (one entry, ``type: "bot"``
+    referencing the source bot) so every copy converges the destination's
+    workflow-permission grants from the source — the clawweb clone endpoint
+    handles a source with no grants gracefully (``no_source_grants``), so
+    always-emit needs no probe; the handler is fire-and-log and never aborts
+    the copy on the clone outcome. ``identity`` / ``skills`` / ``mcp`` are
+    still deferred (能力集 stage).
     """
     resources_entry: dict[str, Any] = {"path": _FILE_SYNC_PATH, "from": "from_bot"}
     if excludes:
         resources_entry["excludes"] = list(excludes)
-    manifest: dict[str, Any] = {
-        "resources": [resources_entry],
+    bot_config: dict[str, Any] = {
+        "task_nav": [
+            {
+                "type": "bot",
+                "source_bot_id": source_bot_id,
+                "source_owner_id": source_owner_id,
+            }
+        ],
     }
     if render_screen_rows:
-        manifest["bot_config"] = {
-            "render_screen": [dict(row) for row in render_screen_rows],
-        }
+        bot_config["render_screen"] = [dict(row) for row in render_screen_rows]
+    manifest: dict[str, Any] = {
+        "resources": [resources_entry],
+        "bot_config": bot_config,
+    }
     document: dict[str, Any] = {
         "schema_version": 1,
         "script": {"body": script_body},

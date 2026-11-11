@@ -44,7 +44,7 @@ of the enum, by ``tests/community/di/test_apply_engine_module_wiring.py``.
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import Annotated, Callable
 
 import subprocess
 
@@ -89,8 +89,19 @@ from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registr
 from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
     RenderScreenSyncHandler,
 )
+from agentclaw.community.core.apply_engine.materialisers.bot_config_task_nav_handler import (
+    TaskNavSyncHandler,
+)
+from agentclaw.community.core.bot_management.bot_workflow_permissions_clone_port import (
+    BotWorkflowPermissionsClonePort,
+    HttpBotWorkflowPermissionsClonePort,
+)
 from agentclaw.community.core.bot_management.render_screen_service_protocol import (
     RenderScreenServiceProtocol,
+)
+from agentclaw.community.plugin_api.http_client import (
+    HttpClient,
+    QUALIFIER_CLAWWEB,
 )
 from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
@@ -539,21 +550,37 @@ class ApplyEngineModule(Module):
     @singleton
     @provider
     @inject
+    def bot_workflow_permissions_clone_port(
+        self,
+        clawweb_http: Annotated[HttpClient, QUALIFIER_CLAWWEB],
+    ) -> BotWorkflowPermissionsClonePort:
+        """The clawweb clone Port the ``task_nav`` handler reaches.
+
+        One impl; the env switch lives in the ``clawweb`` HttpClient binding
+        the Port injects (prod / pre / simulator clawweb / a no-network
+        ``LocalHttpClient`` in test), never here — Rule 14.
+        """
+        return HttpBotWorkflowPermissionsClonePort(clawweb_http)
+
+    @provider
+    @inject
     def bot_config_kind_registry(
         self,
         render_screen_service: RenderScreenServiceProtocol,
+        clone_port: BotWorkflowPermissionsClonePort,
     ) -> BotConfigKindRegistry:
         """One handler per bot_config kind that has a real implementation.
 
-        v1 registers the ``render_screen`` handler only — the schema kind table
-        matches it, so a manifest naming any other kind is refused at PUT and
-        never reaches apply. Bot config sync is engine-agnostic, so the handler
-        is bound once and the same registry answers on both the ARCA and
-        teclaw port bundles. A future ``task_nav`` kind is one more row here
-        plus a handler module — the kind set is the registry's, not the
-        construct's."""
+        v1 registers ``render_screen`` (in-process service converge) and
+        ``task_nav`` (the cross-service clawweb clone, fire-and-log) — the
+        schema kind table matches both, so a manifest naming any other kind is
+        refused at PUT and never reaches apply. Bot config sync is
+        engine-agnostic, so each handler is bound once and the same registry
+        answers on both the ARCA and teclaw port bundles. The kind set is the
+        registry's, not the construct's."""
         return BotConfigKindRegistry({
             "render_screen": RenderScreenSyncHandler(render_screen_service),
+            "task_nav": TaskNavSyncHandler(clone_port),
         })
 
     # ── who hears how an apply ended ───────────────────────────────────────

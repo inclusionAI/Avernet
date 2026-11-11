@@ -76,7 +76,8 @@ def _mocks(script_body="echo hello", source_render_screens=None):
         numeric_id=100, kind="personal"
     )
     render_screen_service = MagicMock()
-    # Default to an empty list — a screenless source omits bot_config, the
+    # Default to an empty list — a screenless source omits the ``render_screen``
+    # kind but still emits ``task_nav`` (both live under ``bot_config``), the
     # path the existing tests exercise. Tests that carry screens pass rows.
     render_screen_service.list_render_screens.return_value = source_render_screens or []
     bot_service = MagicMock()
@@ -216,22 +217,43 @@ def test_submit_copy_serializes_source_render_screens_into_bot_config():
     document = manifest_seam.persist.call_args.kwargs["document"]
     assert "bot_config:" in document
     assert "render_screen:" in document
+    # task_nav is always-emit alongside render_screen (both bot_config kinds).
+    assert "task_nav:" in document
     assert "lib-a" in document
     assert "https://cdn/a.js" in document
     assert "lib-b" in document
 
 
-def test_submit_copy_a_screenless_source_omits_bot_config_entirely():
-    # No render screens → the ``bot_config`` key is omitted, so the validator
-    # and compiler treat it as undeclared (untouched) rather than overwrite-to-empty.
+def test_submit_copy_a_screenless_source_emits_task_nav_but_omits_render_screen():
+    # No render screens → the ``render_screen`` kind is omitted (untouched, not
+    # overwrite-to-empty); the ``task_nav`` kind is still emitted, because every
+    # copy converges the destination's workflow-permission grants from the
+    # source (always-emit — clawweb clone handles a grant-less source itself).
     mocks = _mocks(source_render_screens=[])
     bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     _call({}, {}, mocks=mocks)
     document = manifest_seam.persist.call_args.kwargs["document"]
-    assert "bot_config" not in document
+    assert "bot_config:" in document
+    assert "task_nav:" in document
+    assert "render_screen:" not in document
 
+
+def test_submit_copy_always_emits_task_nav_referencing_the_source_bot():
+    # ``bot_config.task_nav`` is always-emit: one ``type: "bot"`` row referencing
+    # the copy's source bot, so the destination's workflow-permission grants
+    # converge from the source regardless of what else the source carries.
+    mocks = _mocks(source_render_screens=[])
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
+    bot_repo.get_by_id.return_value = _source_bot()
+
+    _call({}, {}, mocks=mocks)
+    document = manifest_seam.persist.call_args.kwargs["document"]
+    assert "task_nav:" in document
+    assert "type: bot" in document
+    assert _SOURCE_BOT_ID in document
+    assert _OWNER in document
 
 
 def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
