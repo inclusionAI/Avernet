@@ -2529,7 +2529,7 @@ class TestTeclawSharedChatRuntime:
             SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})
         ]
         with caplog.at_level("INFO"):
-            result = await svc.create_chat_session("user1", "bot1", "owner1", iam_token="secret-iam-value")
+            result = await svc.create_chat_session("user1", "bot1", "owner1", iam_token="test-token")
         assert result["session_key"] == "agent:main:new-session"
         assert result.get("need_poll", False) is False
         instance.get_caller_connection.assert_not_awaited()
@@ -2538,7 +2538,7 @@ class TestTeclawSharedChatRuntime:
         mock_repository.save_session.assert_called_once_with("user1", "bot1", "owner1", "agent:main:new-session")
         assert transport.invoke.await_args_list[0].args[1:3] == ("POST", "/api/sessions")
         assert "expert_chat.runtime.shared_teclaw" in caplog.text
-        assert "secret-iam-value" not in caplog.text
+        assert "test-token" not in caplog.text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("engine,bot_type", [("openclaw", "service"), ("aicoding", "service"), ("teclaw", "personal")])
