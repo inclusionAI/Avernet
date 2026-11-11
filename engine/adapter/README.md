@@ -26,6 +26,9 @@ pip install .            # or: uv sync
 CHAT_ENGINE=claude_code ENGINE_PROFILE=community python start.py --port 20003
 ```
 
+See the [file upload error contract](docs/file-upload-api.md) for the
+read-only filesystem response and compatibility guarantees.
+
 ## Layout
 
 ```

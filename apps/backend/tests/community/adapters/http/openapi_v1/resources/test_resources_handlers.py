@@ -1170,6 +1170,19 @@ async def test_upload_502_when_the_device_write_fails():
 
 
 @pytest.mark.asyncio
+async def test_upload_maps_explicit_device_read_only_error():
+    from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
+
+    with pytest.raises(HTTPException) as excinfo:
+        await upload_resource(
+            path="a.txt", content=b"x", user_id="u1", owner_id="u1", bot_id="bot-a",
+            bot_repo=_StubBotRepo(), file_svc=_StubFileService(raises=DeviceFileSystemReadOnlyError()),
+            request=_request_without_trace(),
+        )
+    assert excinfo.value.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
     env = await upload_resource(
         path="hello.txt",
@@ -1567,6 +1580,22 @@ async def test_mkdir_creates_a_directory_without_a_record():
     assert env.data.path == "docs/spec"
     assert env.data.name == "spec"
     assert file_svc.made_dirs == ["docs/spec"]
+
+
+@pytest.mark.asyncio
+async def test_mkdir_maps_explicit_device_read_only_error():
+    from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
+
+    class ReadOnlyService:
+        async def create_directory(self, **kwargs):
+            raise DeviceFileSystemReadOnlyError()
+
+    with pytest.raises(HTTPException) as exc:
+        await create_directory(
+            path="docs/spec", user_id="u1", owner_id="u1", bot_id="bot-x",
+            bot_repo=_StubBotRepo(), file_svc=ReadOnlyService(), request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 403
 
 
 # ── End-to-end integration ──────────────────────────────────────────
