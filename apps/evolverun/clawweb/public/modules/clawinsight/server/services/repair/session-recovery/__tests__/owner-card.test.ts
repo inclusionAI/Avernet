@@ -28,14 +28,17 @@ it("does not claim card delivery when disabled, not configured for the control p
   await expect(notifier.notifyOwnerRequest({ task, updateOnly: false })).rejects.toThrow("unknown");
 });
 
-it("updates the single permission button after Owner feedback", async () => {
+it.each([
+  ["permission", "请处理权限申请", "已获取权限，继续任务"],
+  ["configuration", "请补齐任务配置", "已补齐配置，继续核验"],
+] as const)("updates the same %s card after Owner feedback", async (reason, title, label) => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre");
-  const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "permission" } };
+  const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason } };
   await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
   const initial = sender.sendCard.mock.calls[0][0];
-  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已获取权限，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
+  expect(initial.cardParamMap).toMatchObject({ title, confirm_label: label, confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
   expect(Object.keys(initial.cardParamMap)).toHaveLength(14);
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
   expect(initial.cardParamMap).not.toHaveProperty("config");

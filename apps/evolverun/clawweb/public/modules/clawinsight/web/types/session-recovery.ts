@@ -3,7 +3,7 @@ export type SessionRecoveryOwnerRequest = {
   requestId: string;
   revision: number;
   status: 'pending' | 'confirmed';
-  reason: 'permission';
+  reason: 'permission' | 'configuration';
   summary: string;
   instructions: string;
   evidence_ids: string[];

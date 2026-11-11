@@ -12,9 +12,10 @@ export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_in
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 /** Owner-facing business handoff, separate from the full investigation report. */
 export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
+export const RECOVERY_OWNER_REQUEST_REASONS = ["permission", "configuration"] as const;
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
-  reason: "permission";
+  reason: typeof RECOVERY_OWNER_REQUEST_REASONS[number];
   summary: string;
   instructions: string;
   evidence_ids: string[];
