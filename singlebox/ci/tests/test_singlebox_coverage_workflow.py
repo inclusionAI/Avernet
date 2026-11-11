@@ -55,6 +55,17 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert "--bcs-cli-min 100" in workflow
 
 
+def test_system_dependency_install_retries_transient_apt_failures():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    install_step = workflow.split("- name: Install system dependencies", 1)[1].split(
+        "- name: Install uv", 1
+    )[0]
+
+    assert "for attempt in 1 2 3" in install_step
+    assert install_step.count("Acquire::Retries=3") == 2
+    assert "Failed to install protobuf-compiler after ${attempt} attempts." in install_step
+
+
 def test_bcs_changed_line_threshold_has_no_branch_waiver():
     import yaml
 
