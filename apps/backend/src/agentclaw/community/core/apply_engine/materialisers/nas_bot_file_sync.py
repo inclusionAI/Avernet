@@ -105,6 +105,8 @@ class NasBotFileSyncPort(BotFileSyncPort):
 
         engine_type = target.engine_type
         # Scope the lookup to the source owner: bot IDs are not globally unique.
+        # Keep this before the converge try block so lookup failures are named
+        # and traced instead of being swallowed as a generic sync failure.
         try:
             source = self._bot_repo.get_by_id_and_owner(source_bot_id, source_owner_id)
         except Exception:  # noqa: BLE001 — composed, never raw in the report
