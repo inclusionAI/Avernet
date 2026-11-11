@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.16</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.17</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -582,7 +582,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>profile 声明</td><td>Card 数据</td><td>全部</td><td><span class="tag q">新增</span></td><td>starter 自动写入 Card</td></tr>
 <tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>解析后通过 <code>CallerContext</code> 提供</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ToolEventEmitter</code></td></tr>
-<tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ApprovalHandler</code></td></tr>
+<tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>AdvancedBcnAgent</code> 的 <code>requestApproval</code> 和 <code>resume</code></td></tr>
 <tr><td>协作（群协作感知）</td><td>请求 metadata 加 Task 字段</td><td>可选</td><td><span class="tag q">待设计</span></td><td>后续阶段，见 7.8</td></tr>
 <tr><td>来源分类 <code>source-agent/v2</code></td><td>Card 数据</td><td>可选</td><td><span class="tag ok">已有</span></td><td>配置项写入 Card</td></tr>
 </table></div>
@@ -938,7 +938,7 @@ public class OrderAgent implements BcnAgent {
 <tr><td><code>CallerContextProvider</code></td><td>从 RPC 上下文提取调用方应用名</td><td>starter 提供 SOFARPC 实现</td><td>非 SOFARPC 环境</td></tr>
 <tr><td><code>AgentAuthorizer</code></td><td>根据 <code>CallerContext</code>（用户、来源、调用方应用名）和目标 Agent 决定是否接受调用。拒绝时 SDK 返回权限错误，不创建 Task</td><td>全部接受</td><td>需要按来源、用户或场景限制调用</td></tr>
 <tr><td><code>ToolEventEmitter</code></td><td>发出工具观察记录</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
-<tr><td><code>ApprovalHandler</code></td><td>exec 审批的发起、接受和恢复</td><td>无</td><td>声明 exec 审批扩展时必须实现</td></tr>
+<tr><td><code>AdvancedBcnAgent</code></td><td>需要工具观察或 exec 审批的 Agent 实现它，代替 <code>BcnAgent</code>。包含审批后的恢复入口</td><td>无</td><td>L3 的 Agent</td></tr>
 <tr><td><code>AgentRegistrar</code></td><td>启动时向 BCS 注册或更新 Card</td><td>关闭</td><td>通常使用 SDK 提供的实现并配置开启</td></tr>
 <tr><td><code>TaskIdGenerator</code></td><td>生成 <code>taskId</code>、<code>contextId</code></td><td>随机 UUID</td><td>需要自定义格式</td></tr>
 <tr><td><code>ExtensionChannel</code></td><td>业务扩展在五个扩展点上的读写通道（7.4）。简易层和完整层都可以使用</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
@@ -1039,6 +1039,201 @@ ui.closeBlock("order-1");
 ui.setTaskField(usageJson(tokens));
 sink.append("需要我帮你联系客服吗？");
 sink.complete();</code></pre>
+
+<h4>完整层的完整示例</h4>
+<p>下面用一个 L3 的订单 Agent 把完整层的各个接口串起来。它有流式文本、工具观察、退款前的人工审批、订单卡片和用量统计。业务原有的引擎只需要能"逐步产出步骤"和"保存、恢复状态"。</p>
+<h4>补充的接口定义</h4>
+<pre><code>public interface AdvancedBcnAgent extends BcnAgent {
+    void execute(AgentRequest request, AgentExecution execution) throws Exception;
+    void resume(AgentRequest original, ApprovalResult result, AgentExecution execution) throws Exception;
+
+    /** SDK 对 AdvancedBcnAgent 只调用上面两个方法，简易层的入口不会被调用。 */
+    @Override
+    default void execute(AgentRequest request, AgentResponseSink sink) {
+        throw new UnsupportedOperationException();
+    }
+}
+
+public interface AgentAuthorizer {
+    AuthzResult authorize(CallerContext caller, AgentDescriptor agent);   // AuthzResult.allow() / deny(reason)
+}
+
+public record CallSource(String platform, String app, String botId, String scene) {}
+public record ToolCall(String toolCallId, String name, Map&lt;String, Object&gt; args) {}
+public enum Decision { ALLOW_ONCE, DENY }</code></pre>
+<h4>示例一：L3 订单 Agent</h4>
+<pre><code>@Component
+public class OrderAgent implements AdvancedBcnAgent {
+
+    private final OrderEngine engine;          // 业务原有的 Agent 引擎
+    private final CheckpointStore checkpoints; // 业务自己的存储，用于跨实例恢复
+
+    @Override
+    public AgentDescriptor descriptor() {
+        return AgentDescriptor.builder()
+                .name("订单助手").description("查询订单、核对发票、办理退款").version("2.1.0")
+                .skill("query_order", "查询订单", "根据订单号查询订单状态和物流", "orders")
+                .skill("refund", "办理退款", "为订单发起退款，执行前需要用户确认", "orders")
+                .inputModes("text/plain", "image/png", "image/jpeg")
+                .requireUserId(true)             // L2：调用上下文为必需扩展
+                .toolObservation(true)           // L3：声明工具观察扩展
+                .execApproval(true)              // L3：声明 exec 审批扩展
+                .approvalResumableAcrossInstances(true)
+                .businessExtension(OrderUi.URI, OrderUi.CARD_PARAMS)
+                .build();
+    }
+
+    @Override
+    public void execute(AgentRequest request, AgentExecution exec) {
+        String userId = request.caller().userId().orElseThrow();
+        EngineRun run = engine.start(userId, request.contextId(), request.text(), request.attachments());
+        drive(run, request, exec);
+    }
+
+    /** 审批全部完成后由 SDK 调用。可能在另一个实例上，所以只依赖存储里的状态。 */
+    @Override
+    public void resume(AgentRequest original, ApprovalResult result, AgentExecution exec) {
+        Checkpoint cp = checkpoints.take(original.taskId());
+        EngineRun run = engine.restore(cp.engineState());
+        ToolStep step = cp.pendingTool();
+
+        if (result.decisions().get(step.id()) == Decision.DENY) {
+            exec.tools().result(step.id(), step.name(), true, "用户拒绝执行");
+            run.feedDenied(step);
+        } else {
+            invokeTool(step, run, exec);
+        }
+        drive(run, original, exec);
+    }
+
+    /** 把引擎的步骤逐个翻译成 SDK 调用。 */
+    private void drive(EngineRun run, AgentRequest request, AgentExecution exec) {
+        var ui = exec.extension(OrderUi.URI);
+
+        while (run.hasNext()) {
+            if (request.cancelled()) {
+                return;                                   // SDK 把 Task 置为 CANCELED
+            }
+            Step step = run.next();
+
+            if (step instanceof TextStep text) {
+                exec.append(text.delta());                // 流式文本
+
+            } else if (step instanceof ToolStep tool &amp;&amp; tool.needsApproval()) {
+                // 先保存可恢复的状态，再请求审批，然后立即返回
+                checkpoints.save(request.taskId(), new Checkpoint(run.snapshot(), tool));
+                exec.requestApproval(new ApprovalRequest(
+                        "approval-" + tool.id(),
+                        System.currentTimeMillis() + Duration.ofMinutes(10).toMillis(),
+                        List.of(new ToolCall(tool.id(), tool.name(), tool.args()))));
+                return;                                   // Task 进入 INPUT_REQUIRED，线程释放
+
+            } else if (step instanceof ToolStep tool) {
+                invokeTool(tool, run, exec);
+
+            } else if (step instanceof OrderCardStep card) {
+                ui.putBlock(card.blockId(), OrderUi.CARD_TYPE, card.json(), card.fallbackText());
+                ui.closeBlock(card.blockId());
+            }
+        }
+        ui.setTaskField(run.usageJson());                 // E3：用量统计，随 Task 持久化
+        exec.complete();
+    }
+
+    private void invokeTool(ToolStep tool, EngineRun run, AgentExecution exec) {
+        exec.tools().start(tool.id(), tool.name(), tool.args());
+        ToolOutput out = engine.invoke(tool);
+        exec.tools().result(tool.id(), tool.name(), out.failed(), out.summary());
+        run.feed(tool, out);                              // 工具失败不等于 Task 失败，交给引擎决定下一步
+    }
+
+    @Override
+    public void cancel(String taskId) {
+        engine.abort(taskId);
+    }
+}</code></pre>
+<div class="tw"><table>
+<tr><th>代码中的位置</th><th>对应的设计</th></tr>
+<tr><td><code>descriptor()</code></td><td>决定 Card 的内容和等级。声明了什么扩展，SDK 就在 Card 里写什么（8.9）</td></tr>
+<tr><td><code>exec.append</code></td><td>文本块，只追加（6.7）</td></tr>
+<tr><td><code>exec.tools().start / result</code></td><td>工具观察，扩展点 E4。未协商时 SDK 丢弃，代码不用判断</td></tr>
+<tr><td><code>checkpoints.save</code> 然后 <code>requestApproval</code> 然后 <code>return</code></td><td>审批的固定写法：先保存可恢复状态，再请求，立即返回。Task 进入 <code>INPUT_REQUIRED</code>，不占线程</td></tr>
+<tr><td><code>resume</code></td><td>全部工具有决定后调用一次。可能在另一个实例上（9.5）。SDK 保证并发续交只调用一次</td></tr>
+<tr><td><code>ui.putBlock</code></td><td>结构化块，扩展点 E5。未协商时 SDK 改为输出降级文本（7.5）</td></tr>
+<tr><td><code>ui.setTaskField</code></td><td>结果字段，扩展点 E3，随 Task 持久化</td></tr>
+<tr><td><code>request.cancelled()</code> 和 <code>cancel()</code></td><td>协作式取消。跨实例取消时由 SDK 在读到取消标记后触发（9.5）</td></tr>
+</table></div>
+<h4>示例二：动态 Agent 的平台</h4>
+<pre><code>/** 平台上的 Agent 由用户在控制台创建，数量和配置随时变化。一个进程承载全部，以 tenant 区分。 */
+@Component
+public class PlatformAgentResolver implements AgentResolver {
+
+    private final AgentConfigRepository configs;
+    private final PlatformEngine engine;
+
+    @Override
+    public Optional&lt;BcnAgent&gt; resolve(String tenant) {
+        return configs.findPublished(tenant)              // tenant 即平台上的 Agent 标识
+                .map(cfg -&gt; new ConfiguredAgent(cfg, engine));
+    }
+
+    @Override
+    public Collection&lt;AgentDescriptor&gt; list() {
+        return configs.allPublished().stream().map(ConfiguredAgent::describe).toList();
+    }
+}</code></pre>
+<p><code>ConfiguredAgent</code> 是平台自己的一个 <code>BcnAgent</code> 或 <code>AdvancedBcnAgent</code> 实现，按配置驱动同一个引擎。<code>list()</code> 的结果用于 Card 发布和注册。</p>
+<h4>示例三：按来源授权</h4>
+<pre><code>@Component
+public class OrderAuthorizer implements AgentAuthorizer {
+
+    private final Set&lt;String&gt; directCallers = Set.of("order-console", "after-sales-agent");
+
+    @Override
+    public AuthzResult authorize(CallerContext caller, AgentDescriptor agent) {
+        CallSource source = caller.source().orElse(null);
+        if (source == null) {
+            return AuthzResult.deny("missing call source");
+        }
+        if ("bcn".equals(source.platform())) {
+            return AuthzResult.allow();                   // 经 BCS 的调用全部接受
+        }
+        return directCallers.contains(source.app())       // 直连只接受名单内的应用
+                ? AuthzResult.allow()
+                : AuthzResult.deny("caller not allowed");
+    }
+}</code></pre>
+<h4>配置</h4>
+<pre><code>bcn.a2a.server.bindings=GRPC,HTTP+JSON
+bcn.a2a.server.grpc.interface-url=https://order-agent.example.internal
+bcn.a2a.server.http.base-url=https://order-agent.example.internal
+bcn.a2a.server.store=redis
+bcn.a2a.server.execution.max-concurrent=128
+bcn.a2a.server.execution.timeout=5m</code></pre>
+<h4>单元测试</h4>
+<p><code>bcn-a2a-server-test</code> 提供内存运行器，不启动端口，直接驱动 Agent 并返回 Task 的视图。</p>
+<pre><code>@Test
+void refund_waits_for_approval_and_runs_once() {
+    var runner = BcnAgentTestRunner.of(orderAgent)
+            .userId("2088000000000001")
+            .negotiate(BcnExtensions.TOOLS, BcnExtensions.EXEC_APPROVAL);
+
+    TaskView task = runner.send("给订单 ORD-001 退款");
+    assertThat(task.state()).isEqualTo(TaskState.INPUT_REQUIRED);
+    assertThat(task.pendingApproval().tools()).extracting(ToolCall::name).containsExactly("refund");
+
+    task = runner.approve(task, Map.of("tool-refund-1", Decision.ALLOW_ONCE));
+    assertThat(task.state()).isEqualTo(TaskState.COMPLETED);
+    assertThat(task.text()).contains("退款已提交");
+    assertThat(refundGateway.calls()).hasSize(1);         // 工具只执行一次
+}
+
+@Test
+void without_ui_extension_falls_back_to_text() {
+    TaskView task = BcnAgentTestRunner.of(orderAgent).userId("2088000000000001").send("查询订单 ORD-001");
+    assertThat(task.blocks()).allMatch(TaskView.Block::isText);
+    assertThat(task.text()).contains("订单 ORD-001：已发货");
+}</code></pre>
 
 <h3 id="s8-6"><span class="n">8.6</span>请求处理</h3>
 <h4>初始提交（SendStreamingMessage）</h4>
