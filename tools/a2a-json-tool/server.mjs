@@ -2,12 +2,14 @@ import { createServer as createHttpServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 const routes = new Map([
   ['/', ['index.html', 'text/html']],
   ['/index.html', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/json-editor.js', ['json-editor.js', 'text/javascript']],
   ['/converter.js', ['converter.js', 'text/javascript']],
   ['/examples.js', ['examples.js', 'text/javascript']],
   ['/input-parser.js', ['input-parser.js', 'text/javascript']],
@@ -21,7 +23,8 @@ export function createServer() {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    const nonce = randomBytes(18).toString('base64');
+    response.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
     const send = (status, body, type = 'text/plain') => {
       response.writeHead(status, {
         'Content-Type': `${type}; charset=utf-8`,
@@ -47,7 +50,8 @@ export function createServer() {
       return;
     }
     try {
-      const body = await readFile(new URL(`./web/${route[0]}`, import.meta.url));
+      let body = await readFile(new URL(`./web/${route[0]}`, import.meta.url));
+      if (route[0] === 'index.html') body = body.toString('utf8').replace('__CSP_NONCE__', nonce);
       send(200, body, route[1]);
     } catch (error) {
       console.error(`读取页面文件失败：${error.message}`);

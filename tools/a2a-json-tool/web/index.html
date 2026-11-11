@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <meta name="csp-nonce" content="__CSP_NONCE__">
   <meta name="description" content="在本地将 JSON 转换为 A2A 1.0 AgentCard 或 SendMessage 请求。">
   <title>JSON → A2A 1.0 · 本地转换工具</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%232845d2'/%3E%3Cpath d='M12 24h24m-9-9 9 9-9 9' stroke='white' stroke-width='4' fill='none'/%3E%3C/svg%3E">
@@ -50,16 +51,18 @@
 
         <div class="editors">
           <section class="editor-panel input-panel" aria-label="输入 JSON">
-            <div class="editor-heading"><div><span class="step">01</span><label for="json-input">输入 JSON</label></div><span class="file-label" id="input-file-label">agent-config.json</span></div>
+            <div class="editor-heading"><div><span class="step">01</span><span class="editor-label">输入 JSON</span></div><span class="file-label" id="input-file-label">agent-config.json</span></div>
             <div class="editor-tools"><button type="button" id="import-button">导入文件</button><button type="button" id="format-button">格式化</button><span class="tool-spacer"></span><button type="button" id="clear-button" class="subtle">清空</button><input type="file" id="file-input" accept=".json,.txt,.log,application/json,text/plain" hidden></div>
-            <textarea id="json-input" class="code-editor" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="input-help" aria-label="输入 JSON"></textarea>
+            <div class="fold-tools" aria-label="输入 JSON 折叠控制"><span>折叠层级</span><button type="button" data-editor="input" data-fold="1" aria-label="输入 JSON：折叠第 1 层">1</button><button type="button" data-editor="input" data-fold="2" aria-label="输入 JSON：折叠第 2 层">2</button><button type="button" data-editor="input" data-fold="3" aria-label="输入 JSON：折叠第 3 层">3</button><button type="button" data-editor="input" data-fold="0">全部展开</button><span class="bracket-hint">光标靠近括号可查看配对</span></div>
+            <div id="json-input" class="json-editor" aria-describedby="input-help"></div>
             <div class="editor-footer"><span id="input-help">示例接口仅为占位，请替换为真实地址。</span><span id="input-count"></span></div>
           </section>
 
           <section class="editor-panel output-panel" aria-label="转换结果">
-            <div class="editor-heading"><div><span class="step">02</span><label for="json-output">转换结果</label></div><span class="file-label" id="output-file-label">agent-card.json</span></div>
+            <div class="editor-heading"><div><span class="step">02</span><span class="editor-label">转换结果</span></div><span class="file-label" id="output-file-label">agent-card.json</span></div>
             <div class="editor-tools"><span id="output-state" class="output-state">等待转换</span><span class="tool-spacer"></span><button type="button" id="copy-button" disabled>复制</button><button type="button" id="download-button" disabled>下载 JSON</button></div>
-            <div class="output-editor"><div class="highlight-viewport" aria-hidden="true"><pre id="output-highlight" class="code-editor highlight-code"></pre></div><textarea id="json-output" class="code-editor output-code" readonly spellcheck="false" aria-label="转换结果" aria-describedby="output-help field-link" placeholder="转换后的 A2A JSON 将显示在这里。"></textarea></div>
+            <div class="fold-tools" aria-label="转换结果折叠控制"><span>折叠层级</span><button type="button" data-editor="output" data-fold="1" aria-label="转换结果：折叠第 1 层">1</button><button type="button" data-editor="output" data-fold="2" aria-label="转换结果：折叠第 2 层">2</button><button type="button" data-editor="output" data-fold="3" aria-label="转换结果：折叠第 3 层">3</button><button type="button" data-editor="output" data-fold="0">全部展开</button><span class="bracket-hint">光标靠近括号可查看配对</span></div>
+            <div id="json-output" class="json-editor output-editor" aria-describedby="output-help field-link"></div>
             <div class="editor-footer"><span id="output-help">双击输入中的字段名或值，联动定位对应字段。</span><span id="output-count"></span></div>
           </section>
         </div>

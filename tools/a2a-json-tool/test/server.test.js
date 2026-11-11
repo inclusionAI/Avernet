@@ -26,11 +26,27 @@ test('本地页面与脚本可读取，使用正确类型与安全响应头', as
   assert.match(page.headers.get('cache-control'), /no-store/);
   assert.match(page.headers.get('content-security-policy'), /connect-src 'none'/);
   assert.match(await page.text(), /A2A/);
-  for (const file of ['converter.js', 'input-parser.js', 'message-mapper.js', 'convert-input.js', 'field-links.js']) {
+  for (const file of ['converter.js', 'input-parser.js', 'message-mapper.js', 'convert-input.js', 'field-links.js', 'json-editor.js']) {
     const script = await fetch(`${origin}/${file}`);
     assert.equal(script.status, 200, file);
     assert.match(script.headers.get('content-type'), /javascript/);
   }
+});
+
+test('编辑器样式 nonce 与页面匹配且每次请求独立，保持脚本同源和禁止联网', async () => {
+  const first = await fetch(origin);
+  const policy = first.headers.get('content-security-policy');
+  const html = await first.text();
+  const nonce = html.match(/name="csp-nonce" content="([A-Za-z0-9+/=]+)"/)?.[1];
+  assert.ok(nonce);
+  assert.ok(policy.includes(`style-src 'self' 'nonce-${nonce}'`));
+  assert.ok(policy.includes("script-src 'self'"));
+  assert.ok(policy.includes("connect-src 'none'"));
+  assert.ok(!policy.includes('unsafe-inline'));
+  assert.ok(!html.includes('__CSP_NONCE__'));
+  const second = await fetch(`${origin}/index.html`);
+  const secondHtml = await second.text();
+  assert.ok(!secondHtml.includes(`content="${nonce}"`));
 });
 
 test('HEAD 返回元数据而不返回正文', async () => {

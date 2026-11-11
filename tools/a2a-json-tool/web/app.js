@@ -2,10 +2,14 @@ import { convertInput } from './convert-input.js';
 import { parseInput } from './input-parser.js';
 import { examples, demoExamples } from './examples.js';
 import { findFieldAtSelection, resolveFieldPath } from './field-links.js';
+import { createJsonEditor } from './json-editor.js';
 
 const $ = (id) => document.getElementById(id);
-const input = $('json-input');
-const output = $('json-output');
+const input = createJsonEditor($('json-input'), {
+  label: '输入 JSON', onChange: invalidate,
+  onDoubleClick: highlightField, onConvert: convert
+});
+const output = createJsonEditor($('json-output'), { label: '转换结果', readOnly: true, onConvert: convert });
 const tabs = [...document.querySelectorAll('[data-mode]')];
 const optionInputs = [...document.querySelectorAll('#message-options input')];
 const drafts = Object.fromEntries(Object.entries(examples).map(([key, value]) => [key, JSON.stringify(value, null, 2)]));
@@ -15,13 +19,9 @@ let importGeneration = 0;
 let fieldIndex = null;
 
 function clearFieldHighlight() {
-  $('output-highlight').replaceChildren();
+  output.clearHighlight();
   $('field-link').textContent = '';
   $('field-link').hidden = true;
-}
-
-function syncHighlightScroll() {
-  $('output-highlight').style.transform = `translate(${-output.scrollLeft}px, ${-output.scrollTop}px)`;
 }
 
 function fieldPathLabel(path) {
@@ -44,18 +44,9 @@ function highlightField() {
     $('field-link').textContent = `${fieldPathLabel(sourceField.path)}：输出中没有对应字段，该字段已省略。`;
     return;
   }
-  const mark = document.createElement('mark');
-  mark.textContent = output.value.slice(target.start, target.end);
-  $('output-highlight').replaceChildren(
-    document.createTextNode(output.value.slice(0, target.start)), mark,
-    document.createTextNode(output.value.slice(target.end))
-  );
+  output.highlightRange(target.start, target.end);
   $('field-link').textContent = `${fieldPathLabel(sourceField.path)} → ${fieldPathLabel(targetPath)}`;
-  const lineHeight = parseFloat(getComputedStyle(output).lineHeight);
-  output.scrollTop = Math.max(0, mark.offsetTop - (output.clientHeight - lineHeight) / 2);
-  output.scrollLeft = Math.max(0, mark.offsetLeft - output.clientWidth / 4);
-  syncHighlightScroll();
-  output.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  $('json-output').scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 const content = {
@@ -96,7 +87,7 @@ function invalidate() {
   $('notes').hidden = true;
   $('parsed-preview').hidden = true;
   $('normalized-input').value = '';
-  input.removeAttribute('aria-invalid');
+  input.setInvalid(false);
   countInput();
 }
 
@@ -121,7 +112,7 @@ function showError(error) {
   feedback.append(title, list);
   feedback.className = 'feedback';
   feedback.hidden = false;
-  input.setAttribute('aria-invalid', 'true');
+  input.setInvalid(true);
   feedback.focus({ preventScroll: true });
   $('output-state').textContent = '输入需要调整';
 }
@@ -236,9 +227,14 @@ for (const tab of tabs) {
     next.focus();
   });
 }
-input.addEventListener('input', invalidate);
-input.addEventListener('dblclick', () => requestAnimationFrame(highlightField));
-output.addEventListener('scroll', syncHighlightScroll);
+for (const button of document.querySelectorAll('[data-fold]')) {
+  button.addEventListener('click', () => {
+    const editor = button.dataset.editor === 'input' ? input : output;
+    const depth = Number(button.dataset.fold);
+    if (depth) editor.foldLevel(depth);
+    else editor.unfoldAll();
+  });
+}
 optionInputs.forEach((field) => field.addEventListener('input', invalidate));
 $('convert-button').addEventListener('click', convert);
 $('clear-button').addEventListener('click', () => { input.value = ''; invalidate(); input.focus(); });
@@ -285,7 +281,7 @@ $('download-button').addEventListener('click', () => {
   notify('已生成 JSON 下载文件');
 });
 document.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); convert(); }
+  if (!event.defaultPrevented && (event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); convert(); }
 });
 
 input.value = drafts[mode];

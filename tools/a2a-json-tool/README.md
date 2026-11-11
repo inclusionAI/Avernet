@@ -23,6 +23,8 @@ PORT=4174 npm start
 
 在“输入 JSON”中双击字段名或字段值，“转换结果”会高亮对应字段并滚动定位，下方显示完整映射路径。支持同名字段、数组、JSON 片段及对象打印文本；字段值根据原始位置关联到所属字段，不按相同文本查找。输入修改后会清除旧高亮，再次双击时会自动转换；窄屏下会将输出滚动进页面视口。
 
+输入和结果编辑区支持层级折叠：点击行号旁的箭头折叠对象或数组，也可点击上方的 `1`、`2`、`3` 折叠指定层级（最外层为第 1 层），点击“全部展开”恢复。光标放到 `{}`、`[]` 等括号旁会高亮配对，字符串内的括号不会误亮。双击字段联动会自动展开目标；折叠只影响展示，转换、复制和下载始终包含完整 JSON。
+
 ## 非标准 JSON 与片段
 
 可以直接粘贴无外层括号的字段片段，以及类似 Java `toString()` 的对象打印文本，例如：
@@ -181,6 +183,20 @@ npm test
 
 服务测试覆盖静态文件白名单、HTTP 方法和响应；命令行与转换测试覆盖有效输入、错误退出和输出结构。7 个网页 Demo 同样纳入自动测试。测试会临时监听回环端口，运行环境需允许本地监听。
 
+## 编辑器资源维护
+
+网页随工具包含已打包的 CodeMirror 6，不访问 CDN；普通使用仍直接 `npm start`，无需安装依赖。转换核心和 CLI 不依赖 CodeMirror。
+
+仅在修改编辑器源码或升级固定版本依赖时运行：
+
+```bash
+npm ci
+npm run build:editor
+npm test
+```
+
+提交 `editor/json-editor.js`、构建脚本及必要的 `package.json`/锁文件更新，同时提交重新生成的 `web/json-editor.js` 和 `web/EDITOR-LICENSES.txt`。服务通过每次 HTML 请求独立的样式 nonce 加载编辑器样式，保持同源脚本和禁止外部连接。
+
 ## 维护入口
 
 本工具独立于 Avernet 的产品前端、BCS 服务及 A2A SDK，不需要启动产品环境。
@@ -191,6 +207,8 @@ npm test
 | `web/input-parser.js`、`web/convert-input.js` | 片段解析与网页/CLI 共享入口 |
 | `web/field-links.js` | 原始字段到输出字段的路径关联 |
 | `web/app.js`、`web/index.html`、`web/style.css` | 网页交互与展示 |
+| `editor/json-editor.js`、`scripts/build-editor.mjs` | 编辑器适配源码和本地资源构建 |
+| `web/json-editor.js`、`web/EDITOR-LICENSES.txt` | 已打包编辑器及依赖许可证 |
 | `web/examples.js` | 两种模式的合成示例 |
 | `server.mjs`、`cli.mjs` | 静态服务与命令行入口 |
 | `test/` | 转换、解析、示例、CLI 和 HTTP 回归 |
