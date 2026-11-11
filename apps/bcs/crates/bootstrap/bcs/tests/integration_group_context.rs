@@ -734,6 +734,10 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
     }
 
+    let response = post(update, json!({"name":"timeline","new_name":"events"})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(response).await["status"], "not_found");
+
     for (uri, body) in [
         (add, json!({"name":"timeline"})),
         (update, json!({"name":"timeline","new_name":"events","description":"Key events"})),
@@ -742,10 +746,17 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response_json(response).await["status"], "ok");
     }
+    let response = post(add, json!({"name":"events","description":"Duplicate"})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response_json(response).await["status"], "conflict");
+
+    let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
     let presets = repo.list_presets("preset-group").await.unwrap();
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].name, "events");
-    assert_eq!(presets[0].description, "Key events");
+    assert_eq!(presets[0].description, "Updated events");
     assert_eq!(presets[0].creator, "human_preset-owner");
     assert_eq!(presets[0].modifier, "human_preset-owner");
     assert!(presets[0].gmt_modified >= presets[0].gmt_create);

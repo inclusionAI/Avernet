@@ -493,3 +493,26 @@ fn get_item_management_fields_are_owner_only_and_omitted_when_missing() {
         json!({ "userIds": ["judge_bot"] })
     );
 }
+
+#[tokio::test]
+async fn service_without_preset_support_rejects_preset_operations() {
+    use bcs_service_api::application::v1::AuthenticatedCaller;
+
+    let service = NoopGroupContextService;
+    let caller = AuthenticatedCaller {
+        tenant: None,
+        user: None,
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+    let errors = [
+        service.list_presets("group", &caller, None).await.unwrap_err(),
+        service.add_preset("group", "actor", "timeline".into(), String::new()).await.unwrap_err(),
+        service.update_preset("group", "actor", "timeline".into(), None, Some("events".into())).await.unwrap_err(),
+        service.delete_preset("group", "actor", "timeline".into()).await.unwrap_err(),
+    ];
+    for error in errors {
+        assert!(matches!(error, ApplicationError::Internal(message) if message == "presets unavailable"));
+    }
+}
