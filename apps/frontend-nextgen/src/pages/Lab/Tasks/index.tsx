@@ -1,146 +1,159 @@
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import type { UserTaskOwnerBotOption } from '@/pages/MyTask/components/userTaskFilters';
-import { UserTaskTab } from '@/pages/MyTask/components/UserTaskTab';
-import { useMyTaskTasks } from '@/pages/MyTask/hooks/useMyTaskTasks';
-import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
-import { useConversationTeamDirectory } from '@/pages/Workspace/Chat/hooks/useConversationTeamDirectory';
-import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
+import { useSpaceContext, useSpaceContextActions } from '@/hooks/useSpaceContext';
+import { useTodos } from '@/hooks/useTodos';
+import { botWorkshopService } from '@/services/botWorkshop';
+import type { TodoBotOption } from '@/domain/todos/models';
+import { useTodoStore } from '@/stores/todoStore';
+import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
-import { useMemo, useState } from 'react';
-import { TaskArtifactsDrawer } from './TaskArtifactsDrawer';
+import { useEffect, useState } from 'react';
+import { eligibleTodoBots } from './botScope';
+import { TodoCreateModal } from './components/TodoCreateModal';
+import { TodoDetailDrawer } from './components/TodoDetailDrawer';
+import { TodoTable } from './components/TodoTable';
+import { TodoToolbar } from './components/TodoToolbar';
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 10;
-
-function normalizeBotNameKey(value?: string | null): string {
-  return value?.trim().toLowerCase() ?? '';
-}
-
-/**
- * 实验室「任务」体验页(PRD:TeamClaw-demo /tasks):
- * 查看跨Bot、跨群的协同任务,可在对话或协作群中发起此类任务。
- * 与「我的任务」不同,本页不做身份切换(定时任务是 Bot 管理侧能力,与本页无关),
- * 恒以登录人工号拉取用户协同任务;表格/类别筛选复用 MyTask 现有组件，
- * 仅在实验室展示模式下调整列布局，并通过 TaskPanel 产物组件展示任务产物。
- */
+/** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
 export default function LabTasksPage() {
+  const { init } = useSpaceContextActions();
+  const currentSpace = useSpaceContext((state) => state.currentSpace);
+  const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
+  const spaceInitialized = useSpaceContext((state) => state.initialized);
   const { identity: humanIdentity } = useHumanIdentity();
-  const ownerUserId = humanIdentity?.userId.trim() ?? '';
+  const currentUserId = humanIdentity?.userId.trim() || undefined;
+  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [bots, setBots] = useState<TodoBotOption[]>([]);
+  const [botsLoading, setBotsLoading] = useState(false);
 
-  const [page, setPage] = useState(DEFAULT_PAGE);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [statusFilter, setStatusFilter] = useState<UserTaskStatusFilter>('all');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const todos = useTodos();
+  const selectedTodo = useTodoStore((state) => state.selectedTodo);
+  const setSelectedTodo = useTodoStore((state) => state.setSelectedTodo);
 
-  const { taskRecords, total, loading, error, refresh } = useMyTaskTasks(
-    ownerUserId,
-    page,
-    pageSize,
-    statusFilter,
-    Boolean(ownerUserId),
-  );
-  const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
-  const { teamBots, teamLoading: teamBotsLoading } = useConversationTeamDirectory(ownerUserId || null);
-  const conversationBots = useMemo(() => [
-    ...chatBots,
-    ...teamBots.map((item) => item.bot),
-  ], [chatBots, teamBots]);
-  const botNameMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    conversationBots.forEach((bot) => {
-      const botName = bot.displayName || bot.botId;
-      const botIdKey = normalizeBotNameKey(bot.botId);
-      const realBotIdKey = normalizeBotNameKey(bot.realBotId);
-      if (botIdKey) map[botIdKey] = botName;
-      if (realBotIdKey) map[realBotIdKey] = botName;
-    });
-    return map;
-  }, [conversationBots]);
-  const ownerBotUserIdMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    conversationBots.forEach((bot) => {
-      const ownerId = bot.ownerId?.trim();
-      if (!ownerId) return;
-      const botIdKey = normalizeBotNameKey(bot.botId);
-      const realBotIdKey = normalizeBotNameKey(bot.realBotId);
-      if (botIdKey) map[botIdKey] = ownerId;
-      if (realBotIdKey) map[realBotIdKey] = ownerId;
-    });
-    return map;
-  }, [conversationBots]);
-  const ownerBotOptions = useMemo<UserTaskOwnerBotOption[]>(() => {
-    const options = new Map<string, UserTaskOwnerBotOption>();
-    conversationBots.forEach((bot) => {
-      const botId = normalizeBotNameKey(bot.botId);
-      const realBotId = normalizeBotNameKey(bot.realBotId);
-      const value = realBotId || botId;
-      if (!value) return;
-      const aliases = Array.from(new Set([botId, realBotId].filter(Boolean)));
-      options.set(value, {
-        value,
-        label: bot.displayName || bot.botId,
-        aliases,
+  useEffect(() => {
+    if (!spaceInitialized) void init();
+  }, [init, spaceInitialized]);
+
+  useEffect(() => {
+    const isTeamSpace = currentSpace?.spaceType === 'TEAM';
+    const personalScopeReady = currentSpace?.spaceType === 'PERSONAL' && Boolean(currentUserId);
+    if (!spaceInitialized || !currentSpace || currentSpaceId === undefined || (!isTeamSpace && !personalScopeReady)) {
+      setBots([]);
+      return;
+    }
+    let aborted = false;
+    setBotsLoading(true);
+    botWorkshopService
+      .list({ spaceId: String(currentSpaceId), page: 1, pageSize: 100 })
+      .then((result) => {
+        if (aborted) return;
+        setBots(eligibleTodoBots(result.items, currentSpace, currentUserId));
+      })
+      .catch((cause) => {
+        if (aborted) return;
+        setBots([]);
+        safeReportError(cause, { title: '当前空间 Bot 加载失败' });
+      })
+      .finally(() => {
+        if (!aborted) setBotsLoading(false);
       });
-    });
-    return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
-  }, [conversationBots]);
+    return () => {
+      aborted = true;
+    };
+  }, [currentSpace, currentSpaceId, currentUserId, spaceInitialized]);
+
+  useEffect(() => {
+    if (selectedTodoId && currentSpaceId !== undefined && selectedTodo && selectedTodo.spaceId !== currentSpaceId) {
+      setEditOpen(false);
+      setSelectedTodoId(null);
+    }
+  }, [currentSpaceId, selectedTodo, selectedTodoId]);
+
+  useEffect(() => {
+    if (!selectedTodo || selectedTodo.status !== 'draft') setEditOpen(false);
+  }, [selectedTodo]);
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
         <PageHeader
-          title="任务"
-          description={
-            <span>
-              查看跨Bot、跨群的协同任务，可在
-              <Button
-                variant="link"
-                className="h-auto px-1 py-0 text-[13px] leading-5"
-                onClick={() => history.push('/workspace/chat')}
-              >
-                对话
-              </Button>
-              或
-              <Button
-                variant="link"
-                className="h-auto px-1 py-0 text-[13px] leading-5"
-                onClick={() => history.push('/workspace/collaboration')}
-              >
-                协作群
-              </Button>
-              中发起此类任务
-            </span>
+          title="待办"
+          description="当前空间的 Bot 待办。启动后查看事件过程，待验收时互动并提交验收结果。"
+          actions={
+            <Button variant="link" className="h-auto px-0 text-xs" onClick={() => history.push('/workspace/chat')}>
+              去对话中发起
+            </Button>
           }
         />
-        <UserTaskTab
-          taskRecords={taskRecords}
-          total={total}
-          page={page}
-          pageSize={pageSize}
-          loading={loading || ownedBotsLoading || teamBotsLoading}
-          error={error}
-          statusFilter={statusFilter}
-          onStatusFilterChange={(status) => {
-            setStatusFilter(status);
-            setPage(DEFAULT_PAGE);
-          }}
-          onRetry={() => void refresh()}
-          onSelectTask={setSelectedTaskId}
-          selectedTaskId={selectedTaskId}
-          onPageChange={setPage}
-          onPageSizeChange={(next) => {
-            setPageSize(next);
-            setPage(DEFAULT_PAGE);
-          }}
-          botNameMap={botNameMap}
-          ownerBotUserIdMap={ownerBotUserIdMap}
-          ownerBotOptions={ownerBotOptions}
-          displayVariant="lab"
+
+        <TodoToolbar
+          space={currentSpace}
+          keyword={todos.keyword}
+          status={todos.status}
+          onKeywordChange={todos.setKeyword}
+          onStatusChange={todos.setStatus}
+          onCreate={() => setCreateOpen(true)}
+        />
+
+        <TodoTable
+          todos={todos.todos}
+          total={todos.total}
+          page={todos.page}
+          pageSize={todos.pageSize}
+          loading={todos.loading || !spaceInitialized}
+          error={todos.error}
+          onRetry={() => void todos.refresh()}
+          onSelect={setSelectedTodoId}
+          onPageChange={todos.setPage}
+          onPageSizeChange={todos.setPageSize}
         />
       </div>
-      <TaskArtifactsDrawer taskId={selectedTaskId} ownerUserId={ownerUserId} onClose={() => setSelectedTaskId(null)} />
+
+      <TodoCreateModal
+        open={createOpen}
+        bots={bots}
+        loading={botsLoading}
+        onOpenChange={setCreateOpen}
+        onSubmit={async (input) => Boolean(await todos.create(input))}
+      />
+
+      <TodoCreateModal
+        open={editOpen}
+        bots={bots}
+        loading={botsLoading}
+        mode="edit"
+        initialValues={
+          selectedTodo
+            ? {
+                title: selectedTodo.title,
+                description: selectedTodo.description,
+                botId: selectedTodo.botId,
+              }
+            : undefined
+        }
+        onOpenChange={setEditOpen}
+        onSubmit={async (input) => {
+          if (!selectedTodo || selectedTodo.status !== 'draft') return false;
+          const updatedTodo = await todos.update(selectedTodo.todoId, input);
+          if (!updatedTodo) return false;
+          setSelectedTodo(updatedTodo);
+          return true;
+        }}
+      />
+
+      <TodoDetailDrawer
+        todoId={selectedTodoId}
+        currentSpace={currentSpace}
+        onClose={() => {
+          setEditOpen(false);
+          setSelectedTodoId(null);
+        }}
+        onEdit={() => setEditOpen(true)}
+        onListRefresh={todos.refresh}
+      />
     </main>
   );
 }

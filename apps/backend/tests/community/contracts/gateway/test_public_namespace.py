@@ -47,6 +47,9 @@ _DECLARED_PREFIXES = (
     # out of the broad collaboration→bcs namespace). Declared with its gateway
     # domain + route_security entry.
     "/openapi/v1/collaboration/tasks",
+    # Human Todo workbench — the verified caller's self-service surface.
+    # Declared with its own backend domain and user-required route_security entry.
+    "/openapi/v1/todos",
     # Tenant source credentials (W3, #1471) ride the `bots` domain — a
     # literal group under /openapi/v1/bots, forward-verified by the same
     # entry, with its own app-required route_security rule (the group no

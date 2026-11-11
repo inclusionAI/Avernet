@@ -156,3 +156,35 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"
     ),
 }
+
+
+#: Human self-service Todo workbench; Space and Bot scope are service-enforced.
+TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/todos"): NoCheck(
+        "Todo list is Space-scoped and service-enforced; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/todos"): NoCheck(
+        "Todo creation validates Space membership and Bot eligibility in the service"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}"): NoCheck(
+        "Todo detail derives the human actor and verifies the Todo Space in the service"
+    ),
+    ("PATCH", "/openapi/v1/todos/{todo_id}"): NoCheck(
+        "draft Todo edit derives the human actor and verifies Space and Bot scope"
+    ),
+    ("POST", "/openapi/v1/todos/{todo_id}/run"): NoCheck(
+        "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}/events"): NoCheck(
+        "event projection inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+        "interaction history inherits the Todo Space membership check"
+    ),
+    ("POST", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+        "human interaction inherits Todo Space and pending-acceptance checks"
+    ),
+    ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): NoCheck(
+        "human acceptance inherits Todo Space and pending-acceptance checks"
+    ),
+}

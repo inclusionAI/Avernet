@@ -1,0 +1,31 @@
+{
+  "pipeline": {
+    "tier1": {
+      "max_rounds": 4,
+      "max_fix_attempts": 3,
+      "difficulty": "medium",
+      "checkpoint": false,
+      "allow_degraded_review_continuation": false,
+      "reviewer": {
+        "backend": "codex-cli",
+        "model": "gpt-5.5",
+        "reasoning_effort": "high"
+      }
+    },
+    "tier2": {
+      "coverage_threshold": 80,
+      "max_rounds": 2,
+      "checkpoint": false,
+      "test_command": "",
+      "lint_command": "",
+      "format_command": "",
+      "typecheck_command": ""
+    },
+    "acceptance_rework": {
+      "max_total_attempts": 6,
+      "max_attempts_per_ac": 3,
+      "max_same_failure_repeats": 2,
+      "max_no_progress_rounds": 2
+    }
+  }
+}

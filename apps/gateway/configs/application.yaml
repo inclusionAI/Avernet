@@ -239,6 +239,9 @@ user_config:
       app: optional
       bot: optional
 
+    "/openapi/v1/todos/**":
+      user: required
+
     "/openapi/v1/bots/**":
       user: optional
       app: optional
@@ -466,6 +469,14 @@ user_config:
           path: schemas/bots.openapi.json
           refresh_seconds: 300
       bots:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      # Human Todo workbench: roots at /openapi/v1/todos and forwards verbatim
+      # to the backend's public OpenAPI artifact.
+      todos:
         server: backend
         schema:
           source: file
