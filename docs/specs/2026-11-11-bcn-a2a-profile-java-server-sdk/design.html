@@ -76,7 +76,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
-<a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
+<a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 存储选型</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
 
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.14</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.15</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -152,7 +152,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <rect class="s" x="545" y="90" width="310" height="30" rx="6"/><text x="700" y="110" text-anchor="middle">server-core：Task 生命周期、Profile 约束</text>
 <rect class="w" x="545" y="126" width="310" height="30" rx="6"/><text x="700" y="146" text-anchor="middle">BcnAgent（平台实现的 SPI）</text>
 <rect class="b" x="610" y="190" width="260" height="80" rx="8"/><text x="625" y="212" font-weight="600">SOFABoot 应用 · 实例 B</text><text class="m" x="625" y="234">同样的三层。处理跨实例的查询、</text><text class="m" x="625" y="252">订阅、取消时只读写共享存储</text>
-<rect class="a" x="590" y="320" width="220" height="60" rx="8"/><text x="700" y="346" text-anchor="middle" font-weight="600">共享存储</text><text class="m" x="700" y="365" text-anchor="middle">TaskStore SPI · JDBC 参考实现</text>
+<rect class="a" x="590" y="320" width="220" height="60" rx="8"/><text x="700" y="346" text-anchor="middle" font-weight="600">共享存储</text><text class="m" x="700" y="365" text-anchor="middle">TaskStore SPI · 分布式缓存参考实现</text>
 <path class="ln" marker-end="url(#ar)" d="M130 180H178"/><path class="ln" marker-end="url(#ar)" d="M350 180H398"/>
 <path class="ln" marker-end="url(#ar)" d="M480 170C505 150 505 100 528 95"/><path class="ln" marker-end="url(#ar)" d="M480 190C520 205 560 225 608 230"/>
 <path class="ln" marker-end="url(#ar)" d="M570 170V350H588"/><path class="ln" marker-end="url(#ar)" d="M760 270V318"/>
@@ -211,6 +211,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D4</span></td><td>接受 D3 带来的三项降级</td><td>跨实例订阅为轮询合成，粒度约 1 秒；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复。</td><td>—</td></tr>
 <tr><td><span class="tag d">D5</span></td><td>以进程内 SDK（API + SPI）作为本期唯一的交付形态</td><td>公司 90% 以上技术栈是 Java。业务引入 starter、实现 SPI、自己运维存储。标准靠窄 SPI、TCK 准入和版本治理保证（8.11）。</td><td>BCN 托管的协议适配层。多一跳，所有流式流量经过一个中心服务；本期不做，但核心保持可托管。</td></tr>
 <tr><td><span class="tag d">D6</span></td><td>Profile 不包含提交去重扩展</td><td>标准里没有提交幂等。初始提交结果未知时调用方不重发、报告结果未知。存储只需要一张表和三个原语。没有历史依赖，不需要兼容。</td><td>保留原 BCS 的提交去重扩展。它要求永久保留占位记录、跨语言一致的请求摘要，并带来“占位成功但未执行”的失败窗口，复杂度与收益不相称。以后确有需要可以作为新扩展加回，不影响现有 Agent。</td></tr>
+<tr><td><span class="tag d">D7</span></td><td>TaskStore 的参考实现以分布式缓存为默认，JDBC 为备选</td><td>Task 记录是短生命周期、高频写入、到期清理的数据，适合缓存。业务接入只需要一个不淘汰数据的缓存实例，不用建表和清理任务。代价是主备切换时可能丢失个别 Task 的最近写入，按 9.8 的规则处理。</td><td>只提供 JDBC。每秒整行更新占用业务库资源，接入要建表和配置清理，对多数 Agent 过重。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -855,7 +856,8 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><th>模块</th><th>内容</th><th>依赖</th></tr>
 <tr><td><code>bcn-a2a-spec</code></td><td>扩展 URI 常量、扩展数据模型及编解码、Card 的 Profile 校验器</td><td>a2a-java spec</td></tr>
 <tr><td><code>bcn-a2a-server-core</code></td><td>五个方法的处理、Task 生命周期、文本流约束、SPI 定义、内存 TaskStore</td><td><code>bcn-a2a-spec</code></td></tr>
-<tr><td><code>bcn-a2a-server-store-jdbc</code></td><td>TaskStore 的 JDBC 参考实现和建表语句</td><td><code>server-core</code>、JDBC</td></tr>
+<tr><td><code>bcn-a2a-server-store-redis</code></td><td>TaskStore 的分布式缓存参考实现（Redis 协议），默认推荐</td><td><code>server-core</code>、Redis 客户端</td></tr>
+<tr><td><code>bcn-a2a-server-store-jdbc</code></td><td>TaskStore 的 JDBC 备选实现和建表语句</td><td><code>server-core</code>、JDBC</td></tr>
 <tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、GRPC（Triple）端点、HTTP+JSON 和 JSONRPC 端点（含 SSE）、调用方身份提取、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
 <tr><td><code>bcn-a2a-server-test</code></td><td>单元测试辅助：内存运行器、断言工具</td><td><code>server-core</code></td></tr>
 <tr><td><code>bcn-a2a-tck</code></td><td>一致性测试套件（第 10 节）</td><td><code>bcn-a2a-spec</code></td></tr>
@@ -933,7 +935,7 @@ public class OrderAgent implements BcnAgent {
 <div class="tw"><table>
 <tr><th>SPI</th><th>职责</th><th>默认实现</th><th>何时需要自己实现</th></tr>
 <tr><td><code>AgentResolver</code></td><td>按接口路由或 <code>tenant</code> 选择 <code>BcnAgent</code></td><td>容器内所有 <code>BcnAgent</code>，按 <code>tenant</code> 匹配</td><td>Agent 是动态配置的（例如平台上由用户创建）</td></tr>
-<tr><td><code>TaskStore</code></td><td>跨实例存储（9.2）</td><td>内存</td><td>多实例部署时选择 JDBC 实现或自行实现</td></tr>
+<tr><td><code>TaskStore</code></td><td>跨实例存储（9.2）</td><td>内存</td><td>多实例部署时选择缓存实现、JDBC 实现或自行实现</td></tr>
 <tr><td><code>CallerContextProvider</code></td><td>从 RPC 上下文提取调用方应用名</td><td>starter 提供 SOFARPC 实现</td><td>非 SOFARPC 环境</td></tr>
 <tr><td><code>AgentAuthorizer</code></td><td>根据 <code>CallerContext</code>（用户、来源、调用方应用名）和目标 Agent 决定是否接受调用。拒绝时 SDK 返回权限错误，不创建 Task</td><td>全部接受</td><td>需要按来源、用户或场景限制调用</td></tr>
 <tr><td><code>ToolEventEmitter</code></td><td>发出工具观察记录</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
@@ -1073,7 +1075,7 @@ sink.complete();</code></pre>
 <tr><td><code>bcn.a2a.server.grpc.interface-url</code></td><td>开启 GRPC 时必填</td><td>写入 Card 的 GRPC 接口地址，即 MOSN 路由匹配的接口标识</td></tr>
 <tr><td><code>bcn.a2a.server.http.base-url</code></td><td>开启 HTTP+JSON 或 JSONRPC 时必填</td><td>写入 Card 的内部域名地址，例如 <code>https://order-agent.example.internal</code></td></tr>
 <tr><td><code>bcn.a2a.server.http.base-path</code></td><td><code>/a2a</code></td><td>HTTP 端点前缀。HTTP+JSON 位于 <code>{base-path}/{tenant}</code>，JSONRPC 位于 <code>{base-path}/{tenant}/jsonrpc</code></td></tr>
-<tr><td><code>bcn.a2a.server.store</code></td><td><code>memory</code></td><td><code>memory</code> 或 <code>jdbc</code>，或自定义实现的 Bean 名</td></tr>
+<tr><td><code>bcn.a2a.server.store</code></td><td><code>memory</code></td><td><code>memory</code>、<code>redis</code> 或 <code>jdbc</code>，或自定义实现的 Bean 名</td></tr>
 <tr><td><code>bcn.a2a.server.single-instance</code></td><td><code>false</code></td><td>为 <code>false</code> 且存储为 <code>memory</code> 时启动告警；生产环境启动失败</td></tr>
 <tr><td><code>bcn.a2a.server.execution.max-concurrent</code></td><td>64</td><td>并发 Task 上限</td></tr>
 <tr><td><code>bcn.a2a.server.execution.timeout</code></td><td>10 分钟</td><td>单个 Task 最长执行时间，不含审批等待</td></tr>
@@ -1109,7 +1111,7 @@ sink.complete();</code></pre>
 <p>API + SPI 是接口形态：API 是业务调用的部分（<code>AgentResponseSink</code>、<code>ToolEventEmitter</code>、注册接口），SPI 是业务实现的部分（<code>BcnAgent</code>、<code>TaskStore</code>）。它本身不保证各业务的实现一致。协议实现放在哪里运行，有两种形态。</p>
 <div class="tw"><table>
 <tr><th></th><th>进程内 SDK（本期）</th><th>BCN 托管适配层（不做）</th></tr>
-<tr><td>业务要做的</td><td>引入 starter，实现 SPI，建表并运维存储</td><td>只实现一个简单的 SOFARPC 流式接口</td></tr>
+<tr><td>业务要做的</td><td>引入 starter，实现 SPI，准备共享存储</td><td>只实现一个简单的 SOFARPC 流式接口</td></tr>
 <tr><td>协议升级</td><td>每个业务升级 SDK 并发布</td><td>BCN 团队发布一次</td></tr>
 <tr><td>多实例与存储</td><td>每个业务各自部署，SDK 提供统一实现</td><td>BCN 统一解决一次</td></tr>
 <tr><td>非 Java 技术栈</td><td>不支持，按 Profile 自行实现并通过 TCK</td><td>支持</td></tr>
@@ -1153,6 +1155,7 @@ sink.complete();</code></pre>
 <tr><th>实现约束</th><th>说明</th></tr>
 <tr><td>原子性</td><td><code>create</code> 和 <code>compareAndSet</code> 必须是原子的。</td></tr>
 <tr><td>读己之写</td><td>成功写入后，任何实例的读取都必须能看到。不得使用可能读到旧值的从库或缓存。</td></tr>
+<tr><td>不淘汰</td><td>记录在过期时间之前不得被存储主动丢弃。</td></tr>
 <tr><td>失败语义</td><td>存储不可用时抛出异常；不得返回 <code>false</code> 或空来表示故障。</td></tr>
 <tr><td>不要求的能力</td><td>发布订阅、分布式锁、范围查询、事务跨多条记录。</td></tr>
 <tr><td>一致性测试</td><td>SDK 提供 TaskStore 的合同测试，自定义实现必须通过。</td></tr>
@@ -1268,13 +1271,58 @@ sink.complete();</code></pre>
 </table></div>
 <ul>
 <li>稳态下每个在途 Task 对存储的压力是每秒 1 次按主键的更新。1000 个并发 Task 约为每秒 1000 次更新。</li>
-<li>每次更新写入累计全文，因此写入总字节数随输出长度平方增长。文本上限（P-74）约束了最坏情况。如果压测显示这是瓶颈，可以在参考实现中把文本拆到追加写的分片表，SPI 不变。</li>
+<li>缓存实现对文本只写增量，写入字节数与输出长度成正比。JDBC 实现每次更新写入累计全文，写入总字节数随输出长度平方增长，文本上限（P-74）约束了最坏情况。</li>
 <li>不逐 token 写入。所有访问都按主键，没有扫描。</li>
 <li>没有事务跨越 Agent 执行或网络调用。</li>
 </ul>
 
-<h3 id="s9-8"><span class="n">9.8</span>JDBC 参考实现</h3>
-<p>面向 MySQL 和 OceanBase。提供建表语句，不自动建表。</p>
+<h3 id="s9-8"><span class="n">9.8</span>存储选型与缓存参考实现</h3>
+<p>Task 记录有四个特点：生命周期短（执行期加保留期）；执行期间每秒写一次；到期后应自动清理；不是业务的权威数据，对话的权威记录在 BCS 和 Agent 自己的会话存储里。这是典型的缓存负载。</p>
+<div class="tw"><table>
+<tr><th>维度</th><th>分布式缓存</th><th>关系数据库（JDBC）</th></tr>
+<tr><td>写入负载</td><td>适合高频小写。文本可以用追加命令，每次只写增量</td><td>每秒一次整行更新，产生大量日志，占用业务库的资源</td></tr>
+<tr><td>过期清理</td><td>原生的过期时间</td><td>需要定时清理任务</td></tr>
+<tr><td>接入成本</td><td>申请一个缓存实例</td><td>建表、评审、配置清理任务</td></tr>
+<tr><td>原子比较并写入</td><td>需要脚本或带版本号的写入命令</td><td>一条带版本条件的 UPDATE</td></tr>
+<tr><td>持久性</td><td>取决于实例类型；主备切换时可能丢失最近的写入</td><td>强</td></tr>
+<tr><td>保留期成本</td><td>按内存计，保留期长时成本高</td><td>按磁盘计，便宜</td></tr>
+</table></div>
+<p>参考实现以分布式缓存为默认（<span class="tag d">D7</span>），JDBC 作为备选（9.9）。两者实现同一个 TaskStore SPI，通过同一套合同测试。</p>
+<h4>对缓存实例的要求</h4>
+<div class="tw"><table>
+<tr><th>要求</th><th>原因</th></tr>
+<tr><td>不淘汰数据：使用持久型实例，或关闭内存淘汰</td><td>Task 记录被淘汰等于 Task 丢失。普通的可淘汰缓存不能使用</td></tr>
+<tr><td>读写都走主节点</td><td>保证写入后任何实例都能读到</td></tr>
+<tr><td>支持原子的比较并写入：脚本，或原生的版本号写入</td><td>CAS 是多实例协作的基础</td></tr>
+<tr><td>同一 Task 的所有键落在同一分片</td><td>一次脚本内完成读写</td></tr>
+</table></div>
+<h4>数据布局（Redis 协议的参考实现）</h4>
+<div class="tw"><table>
+<tr><th>键</th><th>类型</th><th>内容</th></tr>
+<tr><td><code>bcn:a2a:{agentKey:taskId}:meta</code></td><td>哈希</td><td><code>version</code>、状态、执行实例、租约、取消标记、截止时间，以及不含文本的记录内容</td></tr>
+<tr><td><code>bcn:a2a:{agentKey:taskId}:text:&lt;blockId&gt;</code></td><td>字符串</td><td>一个文本块的累计内容，用追加命令写入</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>操作</th><th>实现</th></tr>
+<tr><td><code>get</code></td><td>一次脚本读取元数据和各文本块</td></tr>
+<tr><td><code>create</code></td><td>一次脚本：元数据不存在才写入，并设置过期时间</td></tr>
+<tr><td><code>compareAndSet</code></td><td>一次脚本：比较 <code>version</code>；写入元数据；对文本块只追加新增部分；刷新过期时间</td></tr>
+<tr><td>清理</td><td>过期时间到后自动删除。终态时把过期时间设为保留期</td></tr>
+</table></div>
+<p>文本只追加（P-70），所以实现内部只写增量，不需要每秒重写全文。SPI 不变，差量由实现根据上次写入的长度计算。公司内部的缓存产品由内部仓库提供实现，接入同一个 SPI。</p>
+<h4>记录丢失时的行为</h4>
+<p>缓存在主备切换时可能丢失最近的写入。SDK 的处理原则是：可以恢复的就恢复，不能恢复的如实报告，任何情况下都不重复执行。</p>
+<div class="tw"><table>
+<tr><th>情况</th><th>处理</th></tr>
+<tr><td>执行实例写入时发现记录不存在</td><td>执行实例持有完整状态，重建记录后继续。丢失的取消标记由调用方重试取消来恢复</td></tr>
+<tr><td>记录丢失，且执行实例已不在</td><td>查询返回 <code>TASK_NOT_FOUND</code>，调用方按失去跟踪处理</td></tr>
+<tr><td>等待审批的 Task 记录丢失</td><td>续交返回 <code>TASK_NOT_FOUND</code>，本次审批失效，调用方报告失败。工具不会被执行</td></tr>
+<tr><td>终态记录在保留期内丢失</td><td>调用方无法再核对最终文本，以流上已收到的为准</td></tr>
+</table></div>
+<p>审批等待时间很长、或不能接受上述丢失的 Agent，应使用 JDBC 实现。</p>
+
+<h3 id="s9-9"><span class="n">9.9</span>JDBC 备选实现</h3>
+<p>适用于需要强持久性，或没有可用缓存实例的应用。面向 MySQL 和 OceanBase。提供建表语句，不自动建表。</p>
 <pre><code>CREATE TABLE bcn_a2a_task (
   id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   gmt_create           DATETIME(3)  NOT NULL,
@@ -1303,7 +1351,7 @@ sink.complete();</code></pre>
 </table></div>
 <p>标识列使用区分大小写的排序规则。读取必须走主库。连接池由宿主提供。</p>
 
-<h3 id="s9-9"><span class="n">9.9</span>明确不保证的事项</h3>
+<h3 id="s9-10"><span class="n">9.10</span>明确不保证的事项</h3>
 <ul>
 <li>执行实例宕机或被发布终止后，Task 不会在其他实例上继续，结果是 <code>FAILED</code>。</li>
 <li>跨实例订阅不保证工具观察记录完整。</li>
@@ -1361,7 +1409,7 @@ sink.complete();</code></pre>
 <p>建议各平台先以 L1 接入并通过 TCK，再根据业务需要升级。</p>
 <h3>接入步骤</h3>
 <ol>
-<li>引入 starter 和存储实现；多实例部署创建 9.8 的 Task 表。</li>
+<li>引入 starter 和存储实现；多实例部署准备一个不淘汰数据的缓存实例（9.8），或按 9.9 建表。</li>
 <li>实现 <code>BcnAgent</code>（或 <code>AgentResolver</code>）。</li>
 <li>配置接口地址，由平台确认 MOSN 路由。</li>
 <li>本地运行 TCK 的对应等级。</li>
@@ -1405,7 +1453,7 @@ sink.complete();</code></pre>
 <tr><th>风险</th><th>影响</th><th>应对</th></tr>
 <tr><td>发布和宕机导致在途 Task 失败</td><td>长任务在发布窗口失败</td><td>停机等待；文档明确说明；后续可评估执行迁移</td></tr>
 <tr><td>存储成为每个 Task 的必经路径</td><td>存储抖动直接影响 Agent 可用性</td><td>写入重试有上限；失败可见；压测确定容量</td></tr>
-<tr><td>累计全文重复写入的成本</td><td>长输出时写入量大</td><td>文本上限；必要时在参考实现中改为分片追加</td></tr>
+<tr><td>缓存主备切换丢失最近的写入</td><td>个别 Task 失去跟踪，或等待中的审批失效</td><td>执行实例重建记录；其余情况如实报告，不重复执行（9.8）；不能接受的 Agent 使用 JDBC 实现</td></tr>
 <tr><td>修订式输出的引擎无法满足"只追加"</td><td>这类 Agent 只能输出最终文本，失去流式体验</td><td>P-73 给出转换方式；BCS 支持文本替换是后续课题</td></tr>
 <tr><td>审批要求引擎状态可恢复</td><td>部分引擎无法达到 L3 审批</td><td>允许声明为不可跨实例恢复，此时跨实例续交返回错误</td></tr>
 <tr><td><code>userId</code> 可被内部应用构造</td><td>越权访问个人数据</td><td>网络层限制只有 BCS 能访问敏感 Agent；或启用预留的 <code>proof</code>；见 <span class="tag q">Q8</span></td></tr>
@@ -1419,7 +1467,7 @@ sink.complete();</code></pre>
 <tr><th>阶段</th><th>交付</th><th>验收</th></tr>
 <tr><td class="nw">P0 评审</td><td>本设计评审通过；待确认问题有结论</td><td>第 16 节全部关闭或明确延后</td></tr>
 <tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的 L0、L1；内存存储；starter 的 GRPC 端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>示例 Agent 单实例通过 TCK L1；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
-<tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；JDBC 参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
+<tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；分布式缓存参考实现；JDBC 备选实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
 <tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
 <tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；多模态的附件与文件块（6.13）；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
 <tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
@@ -1435,11 +1483,11 @@ sink.complete();</code></pre>
 <tr><td><span class="tag q">Q4</span></td><td>现有 Harness adapter 的去向</td><td>扩展编解码和审批逻辑迁入 SDK；Harness 改为基于 SDK 的一个 <code>AdvancedBcnAgent</code> 实现</td><td>P4</td></tr>
 <tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>方案 B</td><td>8.2，决定 P1 工作量</td></tr>
 <tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的接口形态分布（同步、流式、是否带工具和审批）。技术栈已确认 90% 以上为 Java</td><td>需要各平台提供</td><td>简易层是否需要更多便捷形式；L3 的优先级</td></tr>
-<tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>文本 1 MiB；保留 7 天</td><td>P-74、9.8</td></tr>
+<tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>文本 1 MiB；保留期在缓存实现下默认 24 小时（按内存计费），JDBC 实现下默认 7 天</td><td>P-74、9.8</td></tr>
 <tr><td><span class="tag q">Q8</span></td><td>来源信息未签名，能直连 Agent 的内部应用可以伪造。是否接受；不接受时选网络层限制还是启用 <code>proof</code></td><td>首版接受，与 <span class="tag d">D1</span> 一致；敏感 Agent 用网络层限制；<code>proof</code> 留作后续版本</td><td>7.2、第 13 节</td></tr>
 <tr><td><span class="tag q">Q9</span></td><td>停机等待时间的默认值，以及是否需要与发布系统联动</td><td>30 秒</td><td>8.7</td></tr>
 <tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.9</td></tr>
-<tr><td><span class="tag q">Q11</span></td><td>参考存储是否需要除 JDBC 外的实现（例如 Tair）</td><td>首期只提供 JDBC；其他实现通过 TaskStore 合同测试后可自行使用</td><td>9.8</td></tr>
+<tr><td><span class="tag q">Q11</span></td><td>已有结论：参考实现以分布式缓存为默认，JDBC 备选（<span class="tag d">D7</span>）。遗留：公司内部缓存产品的实现由谁提供；它是否满足不淘汰、主节点读写、原子比较并写入三项要求</td><td>开源仓库提供 Redis 协议的实现；内部缓存产品的实现放内部仓库，通过 TaskStore 合同测试</td><td>9.8</td></tr>
 <tr><td><span class="tag q">Q12</span></td><td>已结论：三种绑定都保留并可用于生产，都不鉴权。遗留问题：SDK 是否默认同时开启三种，还是由业务显式选择</td><td>由业务在 <code>bindings</code> 中显式选择，不设默认</td><td>P-03</td></tr>
 <tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
 <tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
