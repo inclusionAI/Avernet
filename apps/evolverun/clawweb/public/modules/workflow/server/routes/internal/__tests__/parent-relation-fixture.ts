@@ -6,13 +6,13 @@ import { FlowRunRepository } from '../../../repositories/flow-run-repository.js'
 import { createInternalRunsRouter } from '../runs.js';
 import { group } from '../../../repositories/__tests__/fanout-state-fixture.js';
 
-export async function parentRelationFixture(fanout = false) {
+export async function parentRelationFixture(fanout = false, itemId = 'one') {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
   await runMigrations(db, 'sqlite');
   const repo = new FlowRunRepository(db);
   const relation = { kind: 'subworkflow.v1', parent_flow_id: 'parent', parent_node_id: 'call', parent_attempt: 2,
-    ...(fanout ? { fanout: { group_execution_id: 'execution-call', item_id: 'one', item_attempt: 1,
+    ...(fanout ? { fanout: { group_execution_id: 'execution-call', item_id: itemId, item_attempt: 1,
       dispatch_claim_token: 'claim-token' } } : {}) };
   const executor = { type: 'subworkflow', workflowId: 'child-wf', ...(fanout ? { fanout: { schemaVersion: 'fanout.v1' } } : {}) };
   const spec = { id: 'parent-wf', nodes: [{ id: 'call', executor }] };
@@ -26,6 +26,7 @@ export async function parentRelationFixture(fanout = false) {
   const execution = raw.prepare("SELECT id FROM node_executions WHERE flow_id='parent' AND node_id='call' AND attempt=2").get() as { id: number };
   let claimed = group('call');
   if (fanout) {
+    claimed.children[0].itemId = itemId;
     claimed.invocation = { schemaVersion: 'subworkflow.single.v1', parentAttempt: 2, parentExecutionId: String(execution.id), onFailure: 'skip' };
     claimed.children[0].status = 'queued';
     await repo.fanoutState.saveGroup('parent', 'call', { group: claimed, expectedRevision: null });

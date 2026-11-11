@@ -27,10 +27,10 @@ const conflict = (message = 'Parent relation is not authorized') => new ParentRe
 const unavailable = (message = 'Parent relation persistence unavailable') => new ParentRelationError(503, message);
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,255}$/.test(value);
-// Fanout item IDs are generated from encodeURIComponent and may contain
-// percent-escaped delimiters/unicode (for example `%2F`).
+// ClawMind builds composite fanout item IDs from encodeURIComponent'd values
+// joined with a literal `/`; percent escapes may also occur (for example `%2F`).
 const validItemId = (value: unknown): value is string => typeof value === 'string'
-  && value.length > 0 && value.length <= 255 && /^(?:[A-Za-z0-9_.:~%-]|%[0-9A-Fa-f]{2})+$/.test(value)
+  && value.length > 0 && value.length <= 255 && /^(?:[A-Za-z0-9_.:~\/%-]|%[0-9A-Fa-f]{2})+$/.test(value)
   && !/%(?![0-9A-Fa-f]{2})/.test(value);
 const validToken = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512
   && !/[\s\x00-\x1f\x7f/\\]/u.test(value);
