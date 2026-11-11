@@ -41,7 +41,7 @@ export const botAdvancedConfigService = {
       updatedAt: item.updated_at ?? undefined,
     }));
   },
-  createChannel: (botId: string, input: BotChannelInput) => {
+  createChannel: (botId: string, input: BotChannelInput, ownerId?: string) => {
     const common = {
       client_id: input.clientId,
       client_secret: input.clientSecret,
@@ -66,15 +66,19 @@ export const botAdvancedConfigService = {
             aix_enable: input.aixEnable,
             include_sender_name: input.includeSenderName,
           };
-    return botEditorController.createChannel(botId, {
-      type: 'dingding',
-      binding_mode: input.bindingMode,
-      ...(input.bindingMode === 'plugin' && input.stage ? { stage: input.stage } : {}),
-      description: input.description || null,
-      config,
-    });
+    return botEditorController.createChannel(
+      botId,
+      {
+        type: 'dingding',
+        binding_mode: input.bindingMode,
+        ...(input.bindingMode === 'plugin' && input.stage ? { stage: input.stage } : {}),
+        description: input.description || null,
+        config,
+      },
+      ownerId,
+    );
   },
-  updateChannel: (botId: string, channelId: number, input: BotChannelInput) => {
+  updateChannel: (botId: string, channelId: number, input: BotChannelInput, ownerId?: string) => {
     const common = {
       client_id: input.clientId,
       client_secret: input.clientSecret.trim() || null,
@@ -99,13 +103,24 @@ export const botAdvancedConfigService = {
             aix_enable: input.aixEnable,
             include_sender_name: input.includeSenderName,
           };
-    return botEditorController.updateChannel(botId, channelId, {
-      description: input.description || null,
-      binding_mode: input.bindingMode,
-      config,
-    });
+    return botEditorController.updateChannel(
+      botId,
+      channelId,
+      {
+        description: input.description || null,
+        binding_mode: input.bindingMode,
+        config,
+      },
+      ownerId,
+    );
   },
-  setChannelStatus: (botId: string, channel: BotChannel) =>
-    botEditorController.setChannelStatus(botId, channel.id, channel.status === 'active' ? 'inactive' : 'active'),
-  deleteChannel: (botId: string, channelId: number) => botEditorController.deleteChannel(botId, channelId),
+  setChannelStatus: (botId: string, channel: BotChannel, ownerId?: string) =>
+    botEditorController.setChannelStatus(
+      botId,
+      channel.id,
+      channel.status === 'active' ? 'inactive' : 'active',
+      ownerId,
+    ),
+  deleteChannel: (botId: string, channelId: number, ownerId?: string) =>
+    botEditorController.deleteChannel(botId, channelId, ownerId),
 };

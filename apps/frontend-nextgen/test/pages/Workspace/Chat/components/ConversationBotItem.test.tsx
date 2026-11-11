@@ -408,8 +408,10 @@ describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', ()
 
   it.each([
     ['managed', 'OFFLINE', '该 Bot 已下线，暂时无法发起会话'],
+    ['managed', 'RECYCLED', '该 Bot 已回收，暂时无法发起会话'],
     ['managed', 'RELEASED', '该 Bot 已回收，暂时无法发起会话'],
     ['team', 'OFFLINE', '该 Bot 已下线，暂时无法发起会话'],
+    ['team', 'RECYCLED', '该 Bot 已回收，暂时无法发起会话'],
     ['team', 'RELEASED', '该 Bot 已回收，暂时无法发起会话'],
   ] as const)('%s 分组的 %s Bot 整行置灰禁用并提示原因', async (section, status, reason) => {
     const { onToggle } = renderBotItem({ section, bot: { status }, expanded: true });

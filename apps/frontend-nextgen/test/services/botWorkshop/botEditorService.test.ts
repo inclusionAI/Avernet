@@ -214,13 +214,19 @@ it('打开添加 MCP 时只按需加载市场 MCP，不加载 Skill 候选接口
     data: { total: 1, items: [{ server_code: 'mcp.weather', name: '天气 MCP' }] },
   });
 
-  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', 'mcp', {
-    source: 'open-platform',
-    keyword: '天气',
-  });
+  const result = await botEditorService.loadCapabilityCandidates(
+    'bot-1',
+    '12',
+    'mcp',
+    {
+      source: 'open-platform',
+      keyword: '天气',
+    },
+    'owner-1',
+  );
 
   expect(result.availableMcps).toEqual([expect.objectContaining({ serverCode: 'mcp.weather' })]);
-  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
+  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(controller.searchMarketMcpServers).toHaveBeenCalledWith({ keyword: '天气', tenants: ['THIRD_PARTNER'] });
   expect(controller.listRepositorySkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
@@ -276,9 +282,10 @@ it('上传本地 Skill 目录后只返回我的 Skill，不立即绑定能力集
     data: { operation: 'created', skill: { skill_id: 'skill-local', name: '本地 Skill', active: true } },
   });
 
-  await expect(botEditorService.uploadSkillFolder('bot-1', [])).resolves.toEqual(
+  await expect(botEditorService.uploadSkillFolder('bot-1', [], 'owner-1')).resolves.toEqual(
     expect.objectContaining({ id: 'skill-local', source: 'local' }),
   );
+  expect(controller.uploadSkillFolder).toHaveBeenCalledWith('bot-1', [], 'owner-1');
   expect(controller.setSkillSetMcp).not.toHaveBeenCalled();
 });
 
