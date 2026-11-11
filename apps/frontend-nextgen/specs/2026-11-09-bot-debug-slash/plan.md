@@ -30,3 +30,27 @@ getUserMessagePresentation: () => CapabilityResult<UserMessagePresenter | null>;
 ```
 
 验证：默认/unsupported/null 透传；两个消息面一致；实时与历史同内容同结果；多模态 user 的 text block 不遗漏；assistant 不装饰；特殊字符由 React 安全转义；现有文件与 Markdown/长文测试回归。内部解析完整匹配现有模板的固定头、引用清单和固定尾，异常原样回退；不擅自引入新的消息协议。
+
+## Release integration amendment (2026-11-11)
+复用现有两个 Host，不恢复被发布线替换的直传上传实现，不增加知识协议或依赖。
+```tsx
+// Editor/DebugChatComposer.tsx: extension decorates before file-options conversion
+<ConversationComposerHost bot={bot} session={session} command={command} onSend={send}>
+  {(composer) => <Sender command={composer.command} slots={{ header: composer.header }}
+    placeholder={composer.placeholder} onSubmit={composer.onSend} />}
+</ConversationComposerHost>
+```
+```tsx
+// Editor/DebugChatPanel.tsx: one keyed owner for release file feature and composer
+<DebugChatInput key={JSON.stringify([botId, ownerId, engineOwnerId, userId, stage, sessionId])} />
+// DebugChatInput owns useBotSessionFilesFeature(..., stage) and cancels on unmount.
+// User messages reuse DebugUserMessage, not a second inline file renderer.
+```
+```ts
+// Workspace/hooks/useBotSessionFilesFeature.tsx: ordinary callers retain default requests
+stageOverride?: BotRuntimeStage;
+// result adds cancelUploads, backed by upload.cancelAll
+// useBotSessionFileUpload ignores cancelled generations, including late finally/callbacks.
+```
+替代方案：恢复原 dev 的整套 Composer 会违背发布线选型；直接在面板加 Host 无法覆盖 Sender 的提交上下文及 feature 生命周期，故采用薄的 keyed input 边界。
+验证先覆盖 Composer capability 到 Sender/send 的接口及实际 Sender，随后组装内部扩展验证；mock 接口阶段回归不等同真实后端草稿/线上差异验收。
