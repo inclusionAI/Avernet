@@ -1,5 +1,6 @@
 import { RunStatusBadge } from './RunStatusBadge';
 import { Button } from '@/components/ui/Button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/cn';
 import type { RunSummaryDTO } from '@/services/agentswarm/types';
 
@@ -27,7 +28,7 @@ export function RunCard({ run, selected = false, onSelect }: RunCardProps) {
   const started = formatTime(run.started_at);
   const ended = formatTime(run.ended_at);
   const title = run.goal_excerpt?.trim();
-  return (
+  const card = (
     <Button
       type="button"
       variant="outline"
@@ -40,11 +41,8 @@ export function RunCard({ run, selected = false, onSelect }: RunCardProps) {
       <div className="flex items-start justify-between gap-2">
         {/* The goal is what tells two runs apart; the id is the identifier.
             Clamped to two lines so a long goal cannot push the row out of the
-            list; the full text is in the expanded detail and the title tooltip. */}
-        <span
-          title={title || undefined}
-          className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-medium text-foreground"
-        >
+            list; the full text is one tooltip (or detail read) away. */}
+        <span className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-medium text-foreground">
           {title || <span className="font-normal text-muted-foreground">未命名运行</span>}
         </span>
         <RunStatusBadge status={run.status} />
@@ -57,5 +55,16 @@ export function RunCard({ run, selected = false, onSelect }: RunCardProps) {
       </div>
       {run.error ? <p className="line-clamp-2 text-xs text-destructive">{run.error}</p> : null}
     </Button>
+  );
+
+  // Only the clamped goal needs a tooltip; an untitled row has nothing to show.
+  if (!title) return card;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{card}</TooltipTrigger>
+        <TooltipContent className="max-w-sm break-words">{title}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
