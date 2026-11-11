@@ -20,6 +20,7 @@
 import { Router, type Request, type Response } from 'express';
 import { asyncHandler } from '@avernet/clawweb-shared/server/middleware/async-handler';
 import { FanoutStateRepository, FanoutStorageError, type FanoutChildRecord } from '../../repositories/fanout-state-repository.js';
+import { saveFanoutGroupWithDiagnostics } from '../../services/fanout-group-save-service.js';
 
 function childBody(body: unknown): unknown {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new FanoutStorageError(400, 'Invalid child body');
@@ -37,7 +38,10 @@ function childBody(body: unknown): unknown {
 }
 const wireRun = (run: FanoutChildRecord) => ({ ...run, stateJson: JSON.stringify(run.stateJson) });
 
-export function createInternalFanoutsRouter(repository: FanoutStateRepository | null): Router {
+export function createInternalFanoutsRouter(
+  repository: FanoutStateRepository | null,
+  runLogRepository: Pick<import('../../repositories/run-log-repository.js').RunLogRepository, 'insertBatch'> | null = null,
+): Router {
   const router = Router();
   const handle = (operation: (repo: FanoutStateRepository, req: Request, res: Response) => Promise<void>) =>
     asyncHandler(async (req: Request, res: Response) => {
@@ -58,7 +62,7 @@ export function createInternalFanoutsRouter(repository: FanoutStateRepository | 
     res.json({ success: true, data });
   }));
   router.put('/:flowId/fanouts/:nodeId', handle(async (repo, req, res) => {
-    const data = await repo.saveGroup(String(req.params.flowId), String(req.params.nodeId), req.body);
+    const data = await saveFanoutGroupWithDiagnostics(repo, runLogRepository, String(req.params.flowId), String(req.params.nodeId), req.body);
     res.json({ success: true, data });
   }));
   router.get('/:parentFlowId/fanout-children/:childFlowId', handle(async (repo, req, res) => {

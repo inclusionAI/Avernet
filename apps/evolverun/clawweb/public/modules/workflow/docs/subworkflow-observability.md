@@ -147,3 +147,36 @@ The engine may have resolved a different version before registration. The UI
 labels the result accordingly and does not include runtime-injected nodes.
 A cross-component execution digest contract and integration test are required
 before claiming this is the exact executed DAG.
+
+## Fanout group save conflict diagnostics
+
+`PUT /api/internal/runs/:flowId/fanouts/:nodeId` records every storage 409 in
+`run_logs` after the save transaction finishes or rolls back. Entries use
+`source = 'fanout-server'`, `level = 'warn'`, and a JSON `message` with
+`event = 'fanout.save.conflict'`. The payload includes an event ID, stage,
+diagnostic code, original HTTP status, parent/node IDs, expected/submitted/observed
+revisions, parent status, safe child-state summaries, error message, possible
+cause, recovery action and recovery outcome. Observed state is read **after**
+the conflict, not an atomic snapshot of the rejected write. A failed reload is
+explicitly marked. Filter by `flow_id`/`node_id` and order by `timestamp, id`;
+server diagnostics use `seq = 0`, independently of engine log sequence numbers.
+
+For a revision conflict, the server reloads current state. If the normalized
+payloads are canonically equal except for revision, the current revision is at
+least the submitted revision, the parent is running, the group is non-terminal
+and its deadline has not expired, an ordinary save returns the current group
+without another mutation (`reloaded_equivalent_state`). Groups containing a
+dispatch claim are excluded. Non-equivalent state, one-shot claims and other
+conflicts keep 409; stale state is never blindly written with a refreshed revision.
+`httpStatus` describes the original storage conflict even when recovery returns 200.
+
+Diagnostics allowlist IDs/statuses and claim-presence booleans, never raw group
+bodies, parameters, workflow snapshots, child results/errors or claim tokens.
+Strings are capped at 256 UTF-16 code units; at most 20 children per summary are
+included, further reduced as needed to keep valid JSON below 60,000 UTF-8 bytes.
+`childCount` and `childrenOmitted` make sampling explicit. Log insertion is tried
+once and a positive affected-row count confirms success. If it fails, a safe
+structured server log is emitted without raw database errors; no ambiguous
+insert is retried and the original save/recovery outcome is preserved. Database
+unavailability therefore cannot guarantee a `run_logs` row; use the server log's
+event ID to reconcile that case. This covers group saves, not unrelated APIs.

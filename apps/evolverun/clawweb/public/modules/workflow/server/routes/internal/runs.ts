@@ -49,7 +49,7 @@ export function createInternalRunsRouter(
   ordinaryAuth?: OrdinaryRequestAuth,
 ): Router {
   const router = Router();
-  router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null));
+  router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null, flowRunRepo?.runLogs ?? null));
 
   const ready = () => !!flowRunRepo && !!ordinaryAuth && typeof ordinaryAuth.authenticate === "function"
     && typeof ordinaryAuth.authorize === "function";
