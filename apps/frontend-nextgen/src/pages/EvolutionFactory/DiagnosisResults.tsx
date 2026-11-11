@@ -1,4 +1,3 @@
-import { CaseSessionSource } from './CaseSessionSource';
 import type { JsonObject } from '@/domain/evolution/types';
 import { array, object, present, ResultCard, text } from './OutputPrimitives';
 
@@ -24,7 +23,6 @@ export function DiagnosisResults({ output }: { output: JsonObject }) {
         <span className="min-w-0 break-all font-mono text-xs leading-5">{text(item.caseId)}</span>
       </div>
       <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">{text(item.summary)}</p>
-      <CaseSessionSource sourceSessionId={typeof item.sourceSessionId === 'string' ? item.sourceSessionId : undefined} sourceSessionKey={typeof item.sourceSessionKey === 'string' ? item.sourceSessionKey : undefined} />
     </div>
   );
   return (
