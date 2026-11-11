@@ -99,3 +99,13 @@ require native Editor standing; online keeps native conversation admission.
 Neither interface substitutes draft data for unknown historical state. Snapshots
 are always intersected with current grants and conversation-ready metadata.
 No new URL, runtime retrieval policy, ACL or native publish transaction is added.
+
+## Authorization activity display snapshots
+
+Grant writes forward a bounded `bot_name` from the existing scoped Bot display
+read to the provider. The browser cannot set that display snapshot. Missing
+metadata on retained-grant revocation sends an empty name; native authorization,
+CAS revision and composite Bot/Owner identity are unchanged. The authenticated
+actor stays separate from the target Owner. This adds no display lookup or
+per-target I/O. Activity responses remain provider-owned and pass through the
+content adapter without reconstructing historical names locally.

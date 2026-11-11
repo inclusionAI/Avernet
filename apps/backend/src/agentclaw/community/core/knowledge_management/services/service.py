@@ -302,6 +302,8 @@ class KnowledgeManagementService:
             actor_id=actor_id,
             bot_id=bot_id,
             owner_id=owner_id,
+            # Display-only snapshot from the existing scoped Bot read, never HTTP input.
+            bot_name=(display.get(identity, {}).get("bot_name") or "")[:200],
             granted=granted,
             expected_revision=expected_revision,
         )

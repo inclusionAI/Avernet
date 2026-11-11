@@ -242,6 +242,7 @@ def test_revoke_retained_grant_after_bot_soft_delete_uses_ecb_state(world):
         owner_id="owner",
         granted=False,
         expected_revision=2,
+        bot_name="",
     )
 
 
