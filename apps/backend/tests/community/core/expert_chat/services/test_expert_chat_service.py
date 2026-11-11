@@ -2504,3 +2504,92 @@ class TestChatEngineResolution:
         await svc._delete_adapter_session(bot, "session:old", "owner1")
 
         transport.invoke.assert_not_awaited()
+
+
+class TestTeclawSharedChatRuntime:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("engine", ["teclaw", "TECLAW"])
+    async def test_create_uses_published_binding_without_caller_provisioning(
+        self, mock_repository, mock_bot_repo, mock_device_provider, caplog, engine
+    ):
+        from types import SimpleNamespace
+        bot = dict(ACTIVE_BOT, id=42, bot_type="service", call_type="caller", active_engine=engine)
+        mock_bot_repo.get_by_id_and_owner.return_value = bot
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        instance = MagicMock()
+        instance.get_caller_connection = AsyncMock(return_value={"need_poll": True})
+        transport = MagicMock()
+        transport.invoke = AsyncMock(side_effect=[
+            {"data": {"id": "new-session"}},
+            {"data": [{"id": "agent:main:new-session"}]},
+        ])
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider,
+                            mock_instance_service=instance, mock_transport=transport)
+        svc._publish_repository.list_by_source_bot.return_value = [
+            SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})
+        ]
+        with caplog.at_level("INFO"):
+            result = await svc.create_chat_session("user1", "bot1", "owner1", iam_token="secret-iam-value")
+        assert result["session_key"] == "agent:main:new-session"
+        assert result.get("need_poll", False) is False
+        instance.get_caller_connection.assert_not_awaited()
+        svc._resolver.resolve_for_binding.assert_called_once_with(987, "user1", bot_id="bot1")
+        mock_repository.add_owned_session.assert_called_once_with("user1", "bot1", "owner1", "agent:main:new-session")
+        mock_repository.save_session.assert_called_once_with("user1", "bot1", "owner1", "agent:main:new-session")
+        assert transport.invoke.await_args_list[0].args[1:3] == ("POST", "/api/sessions")
+        assert "expert_chat.runtime.shared_teclaw" in caplog.text
+        assert "secret-iam-value" not in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("engine,bot_type", [("openclaw", "service"), ("aicoding", "service"), ("teclaw", "personal")])
+    async def test_other_caller_runtimes_keep_provisioning(
+        self, mock_repository, mock_bot_repo, mock_device_provider, engine, bot_type
+    ):
+        from types import SimpleNamespace
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(
+            ACTIVE_BOT, id=42, bot_type=bot_type, call_type="caller", active_engine=engine
+        )
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        instance = MagicMock()
+        instance.get_caller_connection = AsyncMock(return_value={"need_poll": True})
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider,
+                            mock_instance_service=instance)
+        svc._publish_repository.list_by_source_bot.return_value = [
+            SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})
+        ]
+        result = await svc.create_chat_session("user1", "bot1", "owner1")
+        assert result["need_poll"] is True
+        instance.get_caller_connection.assert_awaited_once()
+        mock_repository.add_owned_session.assert_not_called()
+        svc._resolver.resolve_for_binding.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("allowed,published", [(False, True), (True, False)])
+    async def test_teclaw_rejects_invalid_access_or_publication_before_runtime(
+        self, mock_repository, mock_bot_repo, mock_device_provider, allowed, published
+    ):
+        from types import SimpleNamespace
+        from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(
+            ACTIVE_BOT, id=42, bot_type="service", call_type="caller", active_engine="teclaw"
+        )
+        mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+        collaborators = MagicMock()
+        collaborators.check_collaborator_permission.return_value = {"has_permission": allowed}
+        instance = MagicMock()
+        instance.get_caller_connection = AsyncMock()
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider,
+                            mock_instance_service=instance, mock_transport=transport,
+                            mock_collaborator_service=collaborators)
+        svc._publish_repository.list_by_source_bot.return_value = (
+            [SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})]
+            if published else []
+        )
+        with pytest.raises(ChatPermissionError if not allowed else EngineStageNotLiveError):
+            await svc.create_chat_session("user1", "bot1", "owner1")
+        instance.get_caller_connection.assert_not_awaited()
+        svc._resolver.resolve_for_binding.assert_not_called()
+        transport.invoke.assert_not_awaited()
+        mock_repository.add_owned_session.assert_not_called()

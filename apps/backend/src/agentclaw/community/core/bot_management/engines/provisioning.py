@@ -218,6 +218,10 @@ class EngineProvisioningStrategy(ABC):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         """Return the token value that should be forwarded to container init."""
 
+    def requires_caller_chat_instance(self, ctx: BotProvisioningContext) -> bool:
+        """Whether Caller chat allocates an independent runtime before sessions."""
+        return True
+
     @abstractmethod
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         """Whether ExpertChat should manage chat sessions through Adapter APIs.
