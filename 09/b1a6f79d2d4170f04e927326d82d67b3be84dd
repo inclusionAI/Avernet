@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/cron/services/cron_runtime_operations.py
+  s_3829018997cfde::t_f26ea8c9ee7467 108-124
+apps/backend/tests/community/core/cron/services/test_cron_runtime_device_active.py
+  s_06de7966a37327::t_914a32af78825e 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09b1a6f79d2d4170f04e927326d82d67b3be84dd",
+  "prompts": {},
+  "sessions": {
+    "s_06de7966a37327": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce5-46d8-7183-94f4-d00757c9e05f",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_3829018997cfde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-fe9d-7333-a924-df073e247434",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

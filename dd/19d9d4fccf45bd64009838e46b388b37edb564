@@ -1,0 +1,46 @@
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 317-322,463-471,517-521,748-751
+apps/bcsfuse/docs/qdrant-modes.md
+  h_5686002b4ce7b9 85-89,92-95
+apps/bcsfuse/src/app/application/agent_search_service.py
+  h_5686002b4ce7b9 35,534,656-659,661,779,870-873,875
+apps/bcsfuse/src/app/application/services/agent_search_terminal_fallback.py
+  h_5686002b4ce7b9 5,24-47
+apps/bcsfuse/src/app/application/services/retrieval_dependency_circuit.py
+  h_5686002b4ce7b9 82-91
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  h_5686002b4ce7b9 3,5,396,407,410-423,431-433,435-440,442,455-459,461,463-464,467-468,470-474,502-526,536,539-544
+apps/bcsfuse/src/app/bootstrap/index_backfill_worker.py
+  h_5686002b4ce7b9 1-53
+apps/bcsfuse/src/app/bootstrap/retrieval_dependency_health.py
+  h_5686002b4ce7b9 1-107
+apps/bcsfuse/src/app/bootstrap/search_capacity.py
+  h_5686002b4ce7b9 43-45,67-78,86-88,138-161,170-172,219-228,288,292,305-309,353-356,364,386-396,486,489-491
+apps/bcsfuse/src/app/providers/public/vector_index_startup_provider.py
+  h_5686002b4ce7b9 17-23,25-26,28,31-32,44,48,59-107,109
+apps/bcsfuse/tests/contract/test_dual_qdrant_outage_circuit_tdd.py
+  h_5686002b4ce7b9 5,230-301
+apps/bcsfuse/tests/contract/test_index_backfill_readiness_tdd.py
+  h_5686002b4ce7b9 177-183,258-264
+apps/bcsfuse/tests/contract/test_index_recovery_availability_tdd.py
+  h_5686002b4ce7b9 1-157
+apps/bcsfuse/tests/contract/test_readiness_availability_tdd.py
+  h_5686002b4ce7b9 108-111,124
+apps/bcsfuse/tests/contract/test_retrieval_dependency_health_monitor_tdd.py
+  h_5686002b4ce7b9 1-114
+apps/bcsfuse/tests/contract/test_search_capacity_outage_route_tdd.py
+  h_5686002b4ce7b9 1-175
+apps/bcsfuse/tests/contract/test_search_resilience_composition_tdd.py
+  h_5686002b4ce7b9 223-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd19d9d4fccf45bd64009838e46b388b37edb564",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/backend/specs/failed-draft-restart/001-spec-output.md
+  s_f2e14d16b90bc1::t_a16b8920931bc8 137-142
+apps/backend/specs/failed-draft-restart/002b-ci-fix-report.md
+  s_f2e14d16b90bc1::t_def8f51cb7a136 1-42
+apps/backend/tests/community/core/agentswarm/runtime/worker/test_drain_breaker.py
+  s_f2e14d16b90bc1::t_8448b492ff6273 572-579,598-599,601-612,614-615,617-622
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c10f84881a864bca3bc2e10b13ca4087ea4b671",
+  "prompts": {},
+  "sessions": {
+    "s_f2e14d16b90bc1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a6a5-92f3-7341-9c8f-7f07ca39c2de",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

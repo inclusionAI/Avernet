@@ -1,0 +1,108 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 330-348
+apps/bcs/Cargo.toml
+  h_f4a73db4ad12be 3,155
+apps/bcs/crates/application/bcn-runtime-app/Cargo.toml
+  h_f4a73db4ad12be 1-26
+apps/bcs/crates/application/bcn-runtime-app/README.md
+  h_f4a73db4ad12be 1-93
+apps/bcs/crates/application/bcn-runtime-app/src/connector.rs
+  h_f4a73db4ad12be 1-761
+apps/bcs/crates/application/bcn-runtime-app/src/gateway.rs
+  h_f4a73db4ad12be 1-484
+apps/bcs/crates/application/bcn-runtime-app/src/lib.rs
+  h_f4a73db4ad12be 1-77
+apps/bcs/crates/application/bcn-runtime-app/src/projection.rs
+  h_f4a73db4ad12be 1-121
+apps/bcs/crates/application/bcn-runtime-app/src/recovery.rs
+  h_f4a73db4ad12be 1-78
+apps/bcs/crates/application/bcn-runtime-app/src/results.rs
+  h_f4a73db4ad12be 1-61
+apps/bcs/crates/application/bcn-runtime-app/src/timers.rs
+  h_f4a73db4ad12be 1-66
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  h_f4a73db4ad12be 1-615
+apps/bcs/crates/application/bcn-runtime-app/tests/admission_access.rs
+  h_f4a73db4ad12be 1-159
+apps/bcs/crates/application/bcn-runtime-app/tests/common/faults.rs
+  h_f4a73db4ad12be 1-149
+apps/bcs/crates/application/bcn-runtime-app/tests/common/group.rs
+  h_f4a73db4ad12be 1-82
+apps/bcs/crates/application/bcn-runtime-app/tests/common/mod.rs
+  h_f4a73db4ad12be 1-301
+apps/bcs/crates/application/bcn-runtime-app/tests/direct_flow.rs
+  h_f4a73db4ad12be 1-137
+apps/bcs/crates/application/bcn-runtime-app/tests/results.rs
+  h_f4a73db4ad12be 1-102
+apps/bcs/crates/application/bcn-runtime-app/tests/shutdown.rs
+  h_f4a73db4ad12be 1-73
+apps/bcs/crates/application/bcn-runtime-app/tests/takeover.rs
+  h_f4a73db4ad12be 1-407
+apps/bcs/crates/application/bcn-runtime-app/tests/uncertain_delivery.rs
+  h_f4a73db4ad12be 1-389
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 19-31
+apps/bcs/crates/contracts/bcn-runtime-model/src/connector.rs
+  h_f4a73db4ad12be 56-61,74-75
+apps/bcs/crates/contracts/bcn-runtime-model/src/runner.rs
+  h_f4a73db4ad12be 103,106-108
+apps/bcs/crates/contracts/bcn-runtime-model/src/storage.rs
+  h_f4a73db4ad12be 197-210
+apps/bcs/crates/contracts/bcn-runtime-model/src/task.rs
+  h_f4a73db4ad12be 16-22
+apps/bcs/crates/contracts/bcn-runtime-model/tests/application_compatibility.rs
+  h_f4a73db4ad12be 1-50
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 42-61
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/mod.rs
+  h_f4a73db4ad12be 61-70
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 14-17,36-37,53,79-82
+apps/bcs/crates/services/bcn-runtime-store/README.md
+  h_f4a73db4ad12be 147,191-207
+apps/bcs/crates/services/bcn-runtime-store/src/commands.rs
+  h_f4a73db4ad12be 33,43
+apps/bcs/crates/services/bcn-runtime-store/src/dispatch.rs
+  h_f4a73db4ad12be 28
+apps/bcs/crates/services/bcn-runtime-store/src/events.rs
+  h_f4a73db4ad12be 90-99
+apps/bcs/crates/services/bcn-runtime-store/src/inbox.rs
+  h_f4a73db4ad12be 24-27
+apps/bcs/crates/services/bcn-runtime-store/src/lib.rs
+  h_f4a73db4ad12be 22-24
+apps/bcs/crates/services/bcn-runtime-store/src/liveness_adapter.rs
+  h_f4a73db4ad12be 1-32
+apps/bcs/crates/services/bcn-runtime-store/src/persistence.rs
+  h_f4a73db4ad12be 20
+apps/bcs/crates/services/bcn-runtime-store/src/recovery.rs
+  h_f4a73db4ad12be 1-38
+apps/bcs/crates/services/bcn-runtime-store/src/session.rs
+  h_f4a73db4ad12be 8-13,49,110-112
+apps/bcs/crates/services/bcn-runtime-store/tests/conformance_repositories.rs
+  h_f4a73db4ad12be 17
+apps/bcs/crates/services/bcn-runtime-store/tests/quarantine.rs
+  h_f4a73db4ad12be 1-89
+apps/bcs/crates/services/bcn-runtime-store/tests/recovery.rs
+  h_f4a73db4ad12be 16,40,78,118,121-122,124,127-135
+apps/bcs/crates/services/bcn-session-runner/src/direct.rs
+  h_f4a73db4ad12be 145-147
+apps/bcs/crates/services/bcn-session-runner/src/failure.rs
+  h_f4a73db4ad12be 1-101
+apps/bcs/crates/services/bcn-session-runner/src/lib.rs
+  h_f4a73db4ad12be 3,129-131,387,417
+apps/bcs/crates/services/bcn-session-runner/tests/direct.rs
+  h_f4a73db4ad12be 314,390,672,680,685-694
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 305-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cef05d3106b47eb9f3952503036d78e294b560ca",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

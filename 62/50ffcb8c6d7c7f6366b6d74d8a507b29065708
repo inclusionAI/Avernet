@@ -1,0 +1,14 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/flat_module_budget.json
+  h_12dd6d063428b2 3,24-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6250ffcb8c6d7c7f6366b6d74d8a507b29065708",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

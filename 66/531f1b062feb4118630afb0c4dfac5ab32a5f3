@@ -1,0 +1,43 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_4935ccf3fa4dff 11,146-151
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_case.py
+  s_cecdc98e721f4b::t_efb58e5609b112 1,3,5,8,28,31
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_core.py
+  s_cecdc98e721f4b::t_9794271a68e825 1-598
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_cli.py
+  s_cecdc98e721f4b::t_7fac48b616b0e3 17
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_986ead45dfaa8c 210-211
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_case_run.py
+  s_cecdc98e721f4b::t_f23e8bca52842f 37-48
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_shared.py
+  s_cecdc98e721f4b::t_80e50a55369dc7 26
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_group_invite.py
+  s_cecdc98e721f4b::t_f534586f415e82 1-323
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_http_evidence.py
+  s_cecdc98e721f4b::t_4c73da33f2e03a 1-37
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_runner.py
+  s_cecdc98e721f4b::t_ee5e3c437305db 5
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_session_invite.py
+  s_cecdc98e721f4b::t_63446bc967db80 1-307
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_group_invite.py
+  s_cecdc98e721f4b::t_831e5a5a10771c 21-22
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_session_invite.py
+  s_cecdc98e721f4b::t_48a5069058258d 20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66531f1b062feb4118630afb0c4dfac5ab32a5f3",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
