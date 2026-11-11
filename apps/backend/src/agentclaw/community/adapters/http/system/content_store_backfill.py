@@ -48,13 +48,18 @@ class ManifestInlineBackfillResponse(BaseModel):
     digest: str
     document_found: bool = Field(..., description="False when the bot has no stored Manifest any more.")
     row_digest_restored: bool = Field(
-        ..., description="Whether the row's own digest is among the inline bodies the stored Manifest declares."
+        ...,
+        description=(
+            "Whether the row's own digest is among the inline bodies stored. False with a document present "
+            "means the Manifest no longer declares that inline content, or the row is not an inline one "
+            "(manifest/tree, manifest/receipt): a re-apply restores those."
+        ),
     )
     entries: list[ManifestInlineBackfillEntry] = Field(..., description="Every inline body stored.")
 
 
 @content_store_router.post("/manifest-inline/backfill", response_model=ManifestInlineBackfillResponse)
-async def backfill_manifest_inline_content(
+def backfill_manifest_inline_content(
     request: ManifestInlineBackfillRequest,
     user: AuthenticatedUser = Depends(require_super_admin),  # COSEC: writes platform storage for any bot.
     service: ManifestInlineBackfillProtocol = Injected(ManifestInlineBackfillProtocol),
@@ -64,6 +69,10 @@ async def backfill_manifest_inline_content(
     Reads the bot's stored Manifest and writes every inline ``content`` body
     it declares (identity files and file resources) to the content store,
     skipping any the store already holds. Idempotent.
+
+    A plain ``def``: the backfill reads the database and makes one storage
+    request per inline body, so it runs in the thread pool rather than on
+    the event loop.
     """
     logger.info(
         "content_store.manifest_inline_backfill.request actor_id=%s entity_id=%s bot_id=%s digest=%s",

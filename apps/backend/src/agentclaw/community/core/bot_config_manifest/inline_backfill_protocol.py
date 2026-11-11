@@ -31,9 +31,10 @@ class InlineBackfillReport:
 
     ``document_found`` is ``False`` when the bot no longer has a stored
     Manifest. ``row_digest_restored`` says whether the row's own digest is
-    among the bodies stored: ``False`` with a document present means the
-    Manifest has changed since the row was filed and no longer declares
-    that content, so there is nothing left to restore it from.
+    among the bodies stored. ``False`` with a document present means either
+    that the Manifest no longer declares that inline content (nothing is left
+    to restore it from), or that the row is not an inline one
+    (``manifest/tree``, ``manifest/receipt``): a re-apply restores those.
     """
 
     entity_id: str
