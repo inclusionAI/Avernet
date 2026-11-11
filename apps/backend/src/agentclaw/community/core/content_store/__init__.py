@@ -1,12 +1,13 @@
 """The content store: the platform's own copy of what it fetched or produced.
 
-Bytes in a content-addressed blob tree, provenance in ``ac_manifest_content``,
+Bytes in a content-addressed blob store, provenance in ``ac_manifest_content``,
 one component behind every consumer: the Bot Config Manifest files what it
 fetches and reads the copy for delivery, audit and ``keep_last``; the Genome
 Registry files what it produces and reads it back scoped by the rows it
 filed. See each module for its half:
 
 - ``service.py`` — the one funnel: store/read/records, digest as address.
+- ``blobs.py`` — where the bytes live: the blob seam and its media.
 - ``service_protocol.py`` — the contract both consumers inject.
 - ``reader.py`` — the read half alone, for consumers that only read back.
 - ``models.py`` — ORM row + records + the bot scope.
@@ -16,6 +17,7 @@ filed. See each module for its half:
   root to inject.
 - ``errors.py`` — the refusal vocabulary.
 """
+from agentclaw.community.core.content_store.blobs import BlobStore, ObjectStorageBlobStore
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
@@ -49,6 +51,7 @@ from agentclaw.community.core.content_store.tree import (
 )
 
 __all__ = [
+    "BlobStore",
     "ContentIntegrityError",
     "ContentMissingError",
     "ContentReader",
@@ -61,6 +64,7 @@ __all__ = [
     "DIGEST_RE",
     "MAX_AUDIT_ACTOR_CHARS",
     "ManifestContentModel",
+    "ObjectStorageBlobStore",
     "StoredContentRecord",
     "TREE_MAGIC",
     "canonical_tree_bytes",

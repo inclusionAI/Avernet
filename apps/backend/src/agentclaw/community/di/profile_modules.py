@@ -27,6 +27,9 @@ def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
     ``corp_test``. Imports are function-local so this helper stays corp-free.
     """
     from agentclaw.community.di.modules.infrastructure.test.cache import TestCacheModule
+    from agentclaw.community.di.modules.infrastructure.test.content_blob_store import (
+        TestContentBlobStoreModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.health import (
         TestHealthModule,
     )
@@ -95,6 +98,7 @@ def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
         TestingMcpModule(),
         # Decomposed per-concern test modules.
         TestCacheModule(),
+        TestContentBlobStoreModule(),
         TestSecretModule(),
         TestIdentityModule(),
         TestHealthModule(),

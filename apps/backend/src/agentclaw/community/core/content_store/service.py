@@ -11,12 +11,12 @@ source is down; one store, one addressing, no second copy).
 
 Two halves:
 
-- **Bytes** live in a content-addressed blob directory —
-  ``<root>/blobs/<hex[:2]>/<hex64>``. The digest (``sha256:<hex>``, the
-  fetcher's own vocabulary) IS the address; identical bytes are written
-  once, ever. Writing is atomic (temp + ``os.replace`` in the same
-  directory), and reading verifies the hash on the same pass — the store
-  hands back bytes it can prove, or it fails.
+- **Bytes** live in a :class:`~agentclaw.community.core.content_store.blobs.BlobStore`
+  (``blobs.py``): the deployment's object storage, or a local tree under
+  the profiles that run against test doubles. The digest (``sha256:<hex>``, the fetcher's
+  own vocabulary) IS the address; identical bytes are written once, ever.
+  Reading verifies the hash here, whatever the medium — the store hands
+  back bytes it can prove, or it fails.
 - **Provenance** lives in ``ac_manifest_content`` (append-only, one row per
   store event) via :class:`ContentStoreRepositoryProtocol`.
 
@@ -33,15 +33,12 @@ secret's value is ciphertext in another table and never crosses here.
 from __future__ import annotations
 
 import hashlib
-import os
-import tempfile
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import httpx
 
+from agentclaw.community.core.content_store.blobs import BlobStore
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
@@ -91,20 +88,6 @@ _MODIFIER_MAX = MAX_AUDIT_ACTOR_CHARS
 _APPLY_ID_MAX = 64
 _CATEGORY_MAX = 32
 _ENTRY_IDENTITY_MAX = 256
-
-#: Blob IO granularity. Big enough that a 200-MiB archive is a few hundred
-#: reads, small enough that「流式」stays honest on the byte cap's scale.
-_CHUNK_BYTES = 1024 * 1024
-
-#: How old a ``.tmp-*`` staging leftover must be before a store into the same
-#: shard collects it — old enough that no live concurrent writer owns it,
-#: young enough that a crashed write's 200-MiB orphan cannot sit on a NAS for
-#: months. The one sanctioned exception to the no-delete retention (see the
-#: DDL).
-_TMP_SWEEP_AGE_S = 3600.0
-
-#: Where the blob tree sits under the configured root.
-_BLOBS_DIRNAME = "blobs"
 
 
 def _require_valid_digest(digest: str) -> str:
@@ -200,20 +183,15 @@ class ContentStoreService(ContentStoreProtocol):
     def __init__(
         self,
         repository: ContentStoreRepositoryProtocol,
-        root: Path,
+        blobs: BlobStore,
     ) -> None:
         """Args:
             repository: the provenance log (``ac_manifest_content``).
-            root: the blob tree's root. Relative paths resolve against the
-                process working directory and ``~`` expands — a deployment's
-                overlay says ``/mnt/nas/...``, the neutral default says
-                ``./data/manifest_content``, and both arrive here as a Path.
+            blobs: where the bytes live — a wiring decision of the
+                deployment's profile, handed in by the composition root.
         """
         self._repository = repository
-        expanded = Path(root).expanduser()
-        self._blobs = (
-            expanded if expanded.is_absolute() else Path.cwd() / expanded
-        ) / _BLOBS_DIRNAME
+        self._blobs = blobs
 
     def store(
         self,
@@ -298,7 +276,7 @@ class ContentStoreService(ContentStoreProtocol):
             entry_identity=stored_identity,
             modifier=stored_modifier,
         )
-        self._write_blob(digest, fetched.bytes)
+        self._blobs.write(digest, fetched.bytes)
         stored = self._repository.add(record)
         # Host only, never the URL: query strings are where signed-source
         # tokens live — same posture as the fetcher's own log line.
@@ -348,12 +326,18 @@ class ContentStoreService(ContentStoreProtocol):
             entry_identity=stored_identity,
             modifier=stored_modifier,
         )
-        self._write_blob(digest, data)
+        self._blobs.write(digest, data)
         # Dedupe within the producer: a row the Manifest fetched does not stand in for the
         # registry's own, which is what makes the digest reachable through the registry.
         if self.is_reachable(scope, digest, produced_by=origin.split("/", 1)[0]):
             return record
         return self._repository.add(record)
+
+    def ensure_stored(self, data: bytes) -> str:
+        """The blob write alone: the same idempotent write ``store_produced`` makes, with no row."""
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        self._blobs.write(digest, data)
+        return digest
 
     def is_reachable(self, scope: ContentScope, digest: str, *, produced_by: Optional[str] = None) -> bool:
         """A provenance row for this bot and digest exists (filed by ``produced_by`` when given)."""
@@ -368,36 +352,27 @@ class ContentStoreService(ContentStoreProtocol):
     def read(self, digest: str) -> bytes:
         """The one read path, shared by delivery and audit (§2.8).
 
-        The blob is read in chunks with the hash computed on the same pass,
-        and returned whole: the store hands back bytes it can prove, or it
-        raises — a re-delivery that "mostly" matches its address would
-        defeat the receipt contract exactly where it matters. A missing
+        The blob store hands back whatever the address holds and this
+        method hashes it, on every medium: the store hands back bytes it can
+        prove, or it raises — a re-delivery that "mostly" matches its address
+        would defeat the receipt contract exactly where it matters. A missing
         address is terminal (``ContentMissingError``); this layer never
         re-fetches.
 
         Whole-bytes on purpose, at a stated cost: at the schema §5 cap
-        (100–200 MiB an entry) the peak is ~2× the blob (the chunk list and
-        the joined return). Apply is rare, and the read's consumer — W4's
-        delivery — materialises the full payload into the artifact anyway;
-        a chunk-wise contract is a decision for when a consumer exists that
-        wants one, not a default to speculate at now.
+        (100–200 MiB an entry) the blob is held in memory once. Apply is
+        rare, and the read's consumer — W4's delivery — materialises the full
+        payload into the artifact anyway; a chunk-wise contract is a decision
+        for when a consumer exists that wants one, not a default to speculate
+        at now.
         """
         digest = _require_valid_digest(digest)
-        blob = self._blob_path(digest)
-        if not blob.is_file():
+        data = self._blobs.read(digest)
+        if data is None:
             raise ContentMissingError(f"no stored content for digest: {digest}")
-        hasher = hashlib.sha256()
-        chunks: list[bytes] = []
-        with open(blob, "rb") as handle:
-            while True:
-                chunk = handle.read(_CHUNK_BYTES)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-                chunks.append(chunk)
-        if "sha256:" + hasher.hexdigest() != digest:
+        if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
             raise ContentIntegrityError(f"stored blob fails its own digest: {digest}")
-        return b"".join(chunks)
+        return data
 
     def records(
         self,
@@ -436,80 +411,3 @@ class ContentStoreService(ContentStoreProtocol):
             bot_id=scope.bot_id,
             source_url=_sanitized_url(source_url),
         )
-
-    # --- the blob tree ----------------------------------------------------
-
-    def _blob_path(self, digest: str) -> Path:
-        hex_digest = digest.partition(":")[2]
-        return self._blobs / hex_digest[:2] / hex_digest
-
-    def _write_blob(self, digest: str, data: bytes) -> None:
-        """Write once, atomically and **durable before visible**.
-
-        Same-address races converge by construction: every writer of a given
-        address writes the same bytes (the address is their hash), so
-        whichever ``os.replace`` lands last leaves identical content.
-
-        The data is fsynced **before** the rename: ``os.replace`` buys the
-        atomicity of the name change, not the durability of the bytes, and a
-        power loss between the two would otherwise leave the address visible
-        holding zero or partial bytes — exactly the corruption this layer
-        exists to make impossible, and one an in-flight retry cannot heal
-        because this store never re-fetches. (The directory entry itself is
-        not fsynced; that is the accepted residue — a lost link loses the
-        *name*, and the bytes are re-written by the next store of the same
-        content, which dedup re-runs by size.)
-
-        The existing-address shortcut trusts a **size match**, not a full
-        re-hash — a stat instead of a read, on this dedup path only (the
-        audit read path pays the full hash unconditionally, in ``read``).
-        Truncation and appends — the corruption modes that leave a file
-        claiming the same name, including a torn write survived from an
-        unfsynced predecessor — are caught at near-zero cost, and the correct
-        bytes are then rewritten over the damage while they are in hand.
-        Same-size bit rot stays for ``read`` to detect loudly. Note the
-        boundary this leaves: on this shortcut ``store`` succeeds and files
-        its provenance row **without re-verifying the bytes already on
-        disk** — "hands back bytes it can prove, or fails" is a ``read``
-        guarantee; ``store`` guarantees what it wrote itself, when it wrote.
-        """
-        blob = self._blob_path(digest)
-        self._sweep_stale_tmp_files(blob.parent)
-        if blob.is_file() and blob.stat().st_size == len(data):
-            return
-        blob.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=blob.parent, prefix=".tmp-")
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp, blob)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-
-    def _sweep_stale_tmp_files(self, shard: Path) -> None:
-        """Collect ``.tmp-*`` leftovers from crashed writes in one shard.
-
-        The only thing the otherwise absolute no-delete retention permits
-        (stated in the DDL): a temp file is staging that never became an
-        audit fact. Age-based, not eager — a *recent* tmp may belong to a
-        concurrent store in another process sharing the root, so only files
-        older than :data:`_TMP_SWEEP_AGE_S` go; a crashed write's leftovers
-        are collected by the next store into the same shard, and shards that
-        are never written again keep their orphans until an operator names an
-        audit horizon for the blob layer — the exit was deliberately left
-        visible rather than speculative.
-        """
-        if not shard.is_dir():
-            return
-        now = time.time()
-        for leftover in shard.glob(".tmp-*"):
-            try:
-                age = now - leftover.stat().st_mtime
-            except OSError:
-                continue
-            if age >= _TMP_SWEEP_AGE_S:
-                leftover.unlink(missing_ok=True)
