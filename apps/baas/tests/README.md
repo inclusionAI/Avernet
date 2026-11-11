@@ -11,8 +11,9 @@ tests/
 ├── e2e/                   # 端到端测试（需启动完整应用）
 ├── architecture/          # 架构合规测试（结构、层级、命名等约束）
 ├── contract/              # SPI 契约测试（插件实现与 Protocol 接口一致性）
+├── community/             # 社区版运行时场景测试
 ├── utils/                 # 测试工具函数（非测试用例）
-└── test_process_manager_env.py  # 独立环境变量测试
+└── conftest.py            # 全局 fixture
 ```
 
 ## 各目录详细说明
@@ -22,17 +23,20 @@ tests/
 **定位**: 隔离的业务逻辑测试，所有外部依赖通过 mock 替换。运行速度快，不需要任何外部服务。
 
 **放置规则**:
-- 目录结构**镜像** `src/secbaas/` 源码结构
+- 目录结构**镜像** `src/secbaas/community/` 源码结构
 - 每个源码模块对应一个同路径的测试目录
 
 **示例映射**:
 
 | 源码路径 | 测试路径 |
 |---------|---------|
-| `src/secbaas/core/service/bot_manage/` | `tests/unit/core/service/bot_manage/` |
-| `src/secbaas/adapters/web/` | `tests/unit/adapters/web/` |
-| `src/secbaas/plugins/auth/` | `tests/unit/plugins/auth/` |
-| `src/secbaas/infra/utils/` | `tests/unit/infra/utils/` |
+| `src/secbaas/community/core/service/bot_manage/` | `tests/unit/core/service/bot_manage/` |
+| `src/secbaas/community/adapters/web/` | `tests/unit/adapters/web/` |
+| `src/secbaas/community/plugins/auth/` | `tests/unit/plugins/auth/` |
+| `src/secbaas/community/core/utils/` | `tests/unit/infra/utils/` |
+
+`tests/unit/infra/` 是历史目录名：其 `utils/` 覆盖 `community/core/utils/`，`k8s/` 覆盖
+`community/plugins/sandbox/k8s/`；新增测试按源码路径放置。
 
 **何时放这里**:
 - 测试单个函数或类的逻辑，依赖通过 mock 注入
@@ -54,19 +58,19 @@ tests/
 **运行方式**: 需显式指定 marker，`uv run pytest tests/integration/ -v -m integration`
 
 **放置规则**:
-- 目录结构同样**镜像** `src/secbaas/`
+- 目录结构同样**镜像** `src/secbaas/community/`
 - repository 集成测试按领域拆分：`test_<domain>_repository.py`（通用）和 `test_<domain>_sqlite.py`（SQLite 特定）
 
 **示例结构**:
 ```
 integration/
 ├── core/
-│   ├── repository/          # Repository 集成测试（32 个文件）
+│   ├── repository/          # Repository 集成测试（36 个测试文件）
 │   │   ├── conftest.py      # 动态生成 17 个 Protocol 类型 repository fixture
 │   │   ├── test_bot_repository.py
 │   │   ├── test_bot_sqlite.py
 │   │   └── ...
-│   └── service/             # Service 集成测试（12 个文件）
+│   └── service/             # Service 集成测试（15 个测试文件）
 │       ├── conftest.py      # 实体追踪 + 会话级清理
 │       └── ...
 ├── bootstrap/               # 容器初始化与插件选择器测试
@@ -101,14 +105,15 @@ integration/
 ```
 e2e/
 ├── conftest.py              # http_client、APITestHelper、实体追踪与清理
-├── crud/                    # 基础 CRUD API 测试
-│   ├── test_bot_api.py
-│   ├── test_session_api.py
-│   └── ...
-├── mock_paas_success/       # PaaS 成功场景
-│   ├── async/               # 异步 hook 流程（create/destroy/restart/scale 等）
-│   └── sync/                # 同步操作
-└── mock_paas_failure/       # PaaS 失败场景
+├── asgi/                    # 进程内 ASGI 链路测试
+│   ├── baseline/            # 基线场景
+│   ├── bot_run_concurrency/ # Bot 运行并发
+│   ├── bot_run_lifecycle/   # Bot 运行生命周期（start → run → stop）
+│   ├── health_check/        # 健康检查 provider
+│   ├── mock_paas_failure/   # PaaS 失败场景
+│   └── paas_operations/     # PaaS 服务层操作
+├── boot/                    # 启动流程
+└── session_file_sharing/    # 会话文件共享
 ```
 
 **何时放这里**:
@@ -116,11 +121,14 @@ e2e/
 - 验证 API 端点的请求/响应格式
 - 验证 Hook 回调和异步生命周期流程
 
-**可用 marker**:
+**可用 marker**（见 `pytest.ini`）:
 - `@pytest.mark.e2e` — 标记为 E2E 测试（必须）
-- `@pytest.mark.crud` — CRUD 基础操作
-- `@pytest.mark.sync` — 同步操作
-- `@pytest.mark.async_hook` — 异步 hook 流程
+- `@pytest.mark.e2e_asgi` — 进程内 ASGI transport
+- `@pytest.mark.e2e_boot` — 启动级测试
+- `@pytest.mark.paas_operations` — PaaS 服务层操作
+- `@pytest.mark.bot_run_lifecycle` / `bot_run_concurrency` — Bot 运行生命周期 / 并发
+- `@pytest.mark.health_check` — 健康检查 provider
+- `@pytest.mark.dispatcher` / `start` — dispatcher 集成 / Bot start 流程
 - `@pytest.mark.mock_paas_hook_failure` — Hook 执行失败场景
 - `@pytest.mark.mock_paas_create_failure` — 创建失败场景
 - `@pytest.mark.mock_paas_destroy_failure` — 销毁失败场景
@@ -171,8 +179,8 @@ architecture/
 **示例**（`check_bot_runner.py`）:
 
 ```python
-from secbaas.api.bot_runtime import BotRunner as BotRunnerProtocol  # Protocol 定义
-from secbaas.core.service.bot_run import BotRunner                  # 具体实现
+from secbaas.community.api.bot_runtime import BotRunner as BotRunnerProtocol  # Protocol 定义
+from secbaas.community.core.service.bot_run import BotRunner                  # 具体实现
 
 # mypy 会检查 BotRunner 是否满足 BotRunnerProtocol 的所有方法签名
 _bot_runner: BotRunnerProtocol = BotRunner(
@@ -187,7 +195,7 @@ _bot_runner: BotRunnerProtocol = BotRunner(
 **为何使用 MagicMock**: `BotRunner.__init__` 需要真实依赖，通过 `MagicMock(spec=...)` 构造满足类型签名的假对象，使文件能通过 mypy 的构造函数参数检查，同时不引入真实基础设施。
 
 **放置规则**:
-- 目录结构**镜像** `src/secbaas/` 中的 Protocol 定义路径，方便定位
+- 目录结构**镜像** `src/secbaas/community/` 中的 Protocol 定义路径，方便定位
 - 每个文件以 `check_<protocol_name>.py` 命名
 - 文件中 **不包含** pytest 测试函数，仅通过类型注解触发 mypy 检查
 
@@ -210,22 +218,21 @@ _bot_runner: BotRunnerProtocol = BotRunner(
 **现有契约测试**:
 ```
 contract/spi/
+├── test_bot_engine_adapter.py
 ├── test_cache_plugin.py
-├── test_crypto_plugin.py
 ├── test_database_plugin.py
 ├── test_docker_sandbox_plugin.py
-├── test_identity_plugin.py
+├── test_file_transfer_backend.py
 ├── test_k8s_sandbox_plugin.py
 ├── test_poolab_sandbox_plugin.py
-├── test_runner_plugin.py
-├── test_scheduler_plugin.py
-└── test_secret_plugin.py
+├── test_secret_plugin.py
+└── test_session_file_url_projector.py
 ```
 
 **何时放这里**:
 - 新增 Protocol 接口时，需同时新增对应契约测试
 - 验证 `local/` 和 `prod/` 实现均满足 Protocol 定义
-- 参考 [docs/arch/protocol-contract-tests.md](../../docs/arch/protocol-contract-tests.md)
+- 参考 [docs/arch/protocol-contract-tests.md](../../../docs/arch/protocol-contract-tests.md)
 
 ---
 
