@@ -154,13 +154,16 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 
 - `documents`：数据库当前 index_key 下该 Card 的所有 Doc，包括主 Doc、扩展问题 Doc 和删除记录。每条包含 `id`、`doc_version`、`deleted`、完整 `search_text`、`filters` 和向量摘要 `vector`。
 - `qdrant.vector_documents`：本实例实际向量集合中的点，包含实际 `index_key`、`search_text`、`filters` 和 `vector`。
-- `qdrant.keyword_documents`：本实例实际关键词集合中的点，包含实际 `index_key`、`search_text` 和 `filters`。不返回稀疏向量。
+- `qdrant.keyword_documents`：本实例实际关键词集合中的点，保留 `index_key`、`search_text` 和 `filters`，并返回原生 BM25 的 `name`、`text`、`name_grams`。三者直接读取实际 payload 的 `_bm25_name`、`_bm25_text`、`_bm25_name_grams`；`name_grams` 是空格分隔的原始名称片段字符串，保留顺序与重复项，不重新分词。
+- BM25 字段缺失时返回 `null`，已存储的空字符串仍返回 `""`。不会从 Card、Doc 或 `search_text` 补值；`text` 是实际 BM25 正文，可能与已有 `search_text` 不同。它们展示存储内容，不是 Qdrant 分词器生成的全部正文词项或某次查询的分数。
 - `vector` 只包含 `dimension`（实际向量长度）和 `preview`（前 8 个数值）。Qdrant 可能归一化向量，预览数值不同不一定表示出错；预览也不能证明语义质量。
 - `filters` 展示本索引声明的前置标签和 Doc 中记录的标签；不把业务 Card 的所有字段都当作过滤条件。
 - `qdrant.status=ok` 表示这次读取成功，列表为空才表示没有找到点。`unavailable` 表示读取失败，`error=QDRANT_READ_FAILED`；`unsupported` 表示宿主索引不支持此诊断。失败时列表不代表实际数量，数据库内容仍可查看。
 - 顶层 `index_key` 是本实例选定的版本；`qdrant` 每个点的 `index_key` 来自实际 payload，缺失时为 null，不会拿配置值填充。即使 `indexed_*` 与当前版本一致，这里仍可能发现外部删除或错误写入。
 
 本次查询不重新构建 Doc、不调用 embedding 模型，也不修复数据。数据库与两个 Qdrant 集合分别读取，不保证并发更新期间是同一时刻的快照。
+
+TC 和支付宝复用此详细状态响应，原有字段及接口路径保持不变。只增加诊断字段，不改变检索、重建、鉴权或数据库结构。
 
 内容片段示例：
 
@@ -180,7 +183,9 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
     }],
     "keyword_documents": [{
       "id": "test:billing", "index_key": "default",
-      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]}
+      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]},
+      "name": "账单助手", "text": "账单助手\n查询消费账单",
+      "name_grams": "账单助 单助手"
     }]
   }
 }
