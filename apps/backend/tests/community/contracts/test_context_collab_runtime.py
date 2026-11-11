@@ -67,6 +67,7 @@ class RecordingContextRepository:
                 resource_refs=(ResourceRef("todo", "todo_1", None),),
                 product_kind="team_todo",
                 workflow_kind="team_todo_execution",
+                executor_owner_id="another_user",
             ),
             current_snapshot=CurrentSnapshot(
                 objective="Run the Todo",
@@ -130,6 +131,7 @@ async def test_context_run_reaches_runtime_plugin_and_persists_started_event():
     assert request.collab_context_id == "context_1"
     assert request.executor_id == "bot_1"
     assert request.principal_id == "user_1"
+    assert request.executor_owner_id == "another_user"
     assert request.objective == "Run the Todo"
     assert request.todo_id == "todo_1"
     assert result.run_id == "run_1"

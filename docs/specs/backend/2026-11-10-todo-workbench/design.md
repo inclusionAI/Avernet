@@ -26,40 +26,69 @@
 - `ac_todo_acceptance`
   - 不可覆盖的验收结论、意见、作者和时间。
 
-A 不创建 `ac_todo_interaction`。Human 互动和验收正文是 B 协作事件；A 的 `/interactions` 接口只是从 B 事件流中筛选 `human_interaction` 与 `human_acceptance`。
+A 不创建 `ac_todo_interaction`。Human 互动是 B 协作事件，A 的 `/interactions` 接口从 B 事件流中筛选 `user_interaction.posted`；验收是 Todo 产品状态，只在 A 持久化。
 
 所有索引和 ORM tenant guard 包含 `avernet_tenant/env`。状态更新使用行锁和数据库状态条件，避免并发双写。
 
 ## 协作插件
 
-`TodoCollaborationPlugin` 是唯一的 B 边界：
+`TodoCollaborationPlugin` 是 Todo Core 消费 ContextCollab 的唯一边界：
 
 ```text
-create_context(...) -> collab_context_id
+create_context(request) -> context
+get_context(collab_context_id, actor_id) -> context
+run_context(collab_context_id, actor_id) -> context
 append_event(collab_context_id, request) -> event
-list_events(collab_context_id) -> events
 ```
 
-生产实现 `HttpTodoCollaborationPlugin` 通过配置的 B base URL 调用协作 HTTP API。`LocalTodoCollaborationPlugin` 提供离线开发与契约测试模拟。B 不可用或返回不可解析数据时抛出 `TodoCollaborationError`，映射为 503。
+A、B 当前部署在同一 Backend 进程。生产实现
+`InProcessTodoCollaborationPlugin` 直接依赖 transport-agnostic 的
+`ContextCollabServiceProtocol`，负责 Todo DTO、`ActorContext` 与 B 命令/投影之间的
+适配，不经过内部 HTTP 自调用。`LocalTodoCollaborationPlugin` 仅提供离线开发与契约测试模拟。
+
+身份字段必须分离：`principal_id` 是创建或操作 Todo 的 Human，`executor_id` 是
+Bot 产品 ID，`executor_owner_id` 来自已解析 Bot 记录的 `owner_id`，用于组合真实运行时
+地址 `bot_id:owner_id`。不得用 Todo 创建人的 `principal_id` 代替 Bot owner。
 
 ## 服务流程
 
+### 创建 Todo 与 Context
+
+创建 Todo 时先校验 Space member 与 Bot scope，从 Bot 记录读取并校验 owner，然后创建
+B Context 并把 `collab_context_id` 绑定回 Todo。Context 创建时不自动 Run。本阶段不提供
+跨 Todo/Context 两次写入的事务一致性，失败会显式返回错误，不伪装成功。
+
 ### Draft -> in_progress
 
-`POST /run` 校验 `draft` 后调用 B `context_collab`，保存返回的 `collab_context_id`，并原子转 `in_progress`。重复 Run 非 `draft` 返回 409。
+`POST /run` 仅允许 B Context 投影为 `created` 的 Todo。A 通过同进程插件调用 B
+`run_context`；B 调用 Bot runtime 并写入 `task.started` 后，A 将 B 的 `in_progress`
+状态投影为公开 Todo 状态。重复 Run 返回 409。
 
 ### in_progress -> pending_acceptance
 
-前端在详情打开且状态为 `in_progress` 时轮询事件。A 读取 B 完整事件流；若在最近的 `human_interaction` 事件序号之后出现新的完成类事件，则原子更新 `pending_acceptance`。旧完成事件不会跨越新的互动边界再次生效。
+除 A 已持久化的 `completed` 外，Todo 状态在读取时直接由 B Context 状态投影：
+`created -> draft`，`in_progress/reviewing/blocked -> in_progress`，
+`done/cancelled -> pending_acceptance`。其中 `reviewing` 是 B 内部运行时评审，不替代 A 的
+Human 验收；B 进入成功或取消等终态后，都交由 A 的验收流程决定 Todo 是否关闭。A 不另存一份
+运行时状态。
 
-### pending_acceptance -> in_progress
+### pending_acceptance 互动
 
-`POST /interactions` 仅接受 message。A 读取 B 当前最大事件序号作为边界，追加 `human_interaction`，再原子转 `in_progress`。B 负责 Context 重建与 resume。
+`POST /interactions` 仅在投影为 `pending_acceptance` 时追加
+`user_interaction.posted` 事件。A 不创建互动表，也不在本阶段支持 Todo 编辑。
 
-### pending_acceptance -> completed / in_progress
+### pending_acceptance -> completed / pending_acceptance
 
-`POST /acceptance` 先向 B 追加 `human_acceptance`，再写入 A 验收历史并原子更新状态。通过置 `completed`，拒绝置 `in_progress`。
+`POST /acceptance` 只在 A 持久化 Todo 验收结论，不修改 B Context 状态。通过后 A 状态置为
+`completed`；拒绝后 Todo 保持 `pending_acceptance`。
 
 ## 错误与兼容
 
-新增接口和表没有旧 API 兼容负担。回滚时停止 A 路由流量后删除新增表；B 事件数据由 B 自行保留。配置缺少 B base URL 时 Run/互动/验收不可用，但草稿 CRUD 可继续使用。
+新增 Todo 接口和表没有旧 API 兼容负担。回滚时停止 A 路由流量后删除新增表；B 事件数据由 ContextCollab 自行保留。生产装配不再依赖 B base URL；若 Context runtime 缺少可用的 Bot delivery port，Run 会 fail closed，Todo 读与草稿创建仍保持可诊断。
+
+同进程适配器不得把 ContextCollab 的领域异常直接泄漏到 Todo HTTP 语义。已知的 B
+校验、版本冲突、父事件错误、Context 缺失以及 runtime 启动失败统一转换为
+`TodoCollaborationError`，由 Todo 路由返回稳定的 503；Todo 自身的参数校验和状态冲突仍由
+Todo Core 决定，例如非草稿状态执行 `/run` 返回 409。Bot delivery port 通过
+transport-neutral 的 `OpenApiBotError` 暴露已知投递失败，Context runtime 再转换为
+`ContextCollabRuntimeError`；未声明的编程错误不被宽泛捕获。

@@ -231,13 +231,14 @@ def _bind_todo_world(
                 workflow_kind="team_todo_execution",
                 method_kind="Single",
                 executor_id=_BOT_ID,
+                executor_owner_id=_USER_ID,
                 objective="Build the Todo workbench",
                 todo_id="todo_1",
             )
         )
         assert context.collab_context_id == "context_todo_1"
         if status in {TodoStatus.IN_PROGRESS, TodoStatus.PENDING_ACCEPTANCE}:
-            context = collaboration.run_context(
+            context = collaboration.start_context_for_test(
                 collab_context_id=context.collab_context_id
             )
         if status is TodoStatus.PENDING_ACCEPTANCE:

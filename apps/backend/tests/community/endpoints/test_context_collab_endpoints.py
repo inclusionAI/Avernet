@@ -96,9 +96,11 @@ class RecordingContextCollabService:
     def __init__(self, inner):
         self._inner = inner
         self.calls = []
+        self.create_commands = []
 
     def create_context(self, command, context):
         self.calls.append("create_context")
+        self.create_commands.append(command)
         return self._inner.create_context(command, context)
 
     def append_event(self, collab_context_id, command, context):
@@ -234,6 +236,16 @@ def test_create_happy_path_envelope_and_snapshot(client_world):
     assert current_event["parent_event"] is None
     assert current_event["event_kind"] == "task.created"
     assert current_event["primitive_type"] == "Task"
+
+
+def test_create_carries_executor_owner_identity_into_context_spec(client_world):
+    response = client_world.client.post(
+        f"{PREFIX}/context_collab",
+        json={**create_body(), "executor_owner_id": "bot_owner_1"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert client_world.service.create_commands[-1].executor_owner_id == "bot_owner_1"
 
 
 def test_create_route_path_is_singular_task(client_world):

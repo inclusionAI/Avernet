@@ -102,9 +102,9 @@ class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
         self.context_calls += 1
         return super().create_context(request)
 
-    def run_context(self, **kwargs):
+    async def run_context(self, **kwargs):
         self.run_calls += 1
-        return super().run_context(**kwargs)
+        return await super().run_context(**kwargs)
 
     def append_event(self, **kwargs):
         self.append_calls += 1
@@ -124,7 +124,10 @@ def bind_consumer_contract(
     return world.get(TodoServiceProtocol), repository, collaboration
 
 
-def test_todo_create_run_and_interaction_route_through_collaboration_plugin(world):
+@pytest.mark.asyncio
+async def test_todo_create_run_and_interaction_route_through_collaboration_plugin(
+    world,
+):
     service, repository, collaboration = bind_consumer_contract(world)
 
     created = service.create_todo(
@@ -134,7 +137,10 @@ def test_todo_create_run_and_interaction_route_through_collaboration_plugin(worl
         description="Exercise B boundary",
         bot_id="bot_1",
     )
-    started = service.start_todo(todo_id=created.todo_id, actor_id="user_1")
+    started = await service.start_todo(
+        todo_id=created.todo_id,
+        actor_id="user_1",
+    )
     collaboration.complete_context(started.collab_context_id)
     pending = service.get_todo(todo_id=started.todo_id, actor_id="user_1")
     event = service.create_interaction(
@@ -154,7 +160,10 @@ def test_todo_create_run_and_interaction_route_through_collaboration_plugin(worl
     assert event.event_type == "user_interaction.posted"
 
 
-def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(world):
+@pytest.mark.asyncio
+async def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(
+    world,
+):
     service, _repository, collaboration = bind_consumer_contract(world)
     created = service.create_todo(
         space_id=7,
@@ -163,9 +172,13 @@ def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(worl
         description="Exercise B boundary",
         bot_id="bot_1",
     )
-    started = service.start_todo(todo_id=created.todo_id, actor_id="user_1")
+    started = await service.start_todo(
+        todo_id=created.todo_id,
+        actor_id="user_1",
+    )
     before = collaboration.get_context(
-        collab_context_id=started.collab_context_id
+        collab_context_id=started.collab_context_id,
+        actor_id="user_1",
     ).events
 
     with pytest.raises(TodoStateConflictError):
@@ -177,7 +190,8 @@ def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(worl
         )
 
     after = collaboration.get_context(
-        collab_context_id=started.collab_context_id
+        collab_context_id=started.collab_context_id,
+        actor_id="user_1",
     ).events
     assert collaboration.append_calls == 0
     assert after == before

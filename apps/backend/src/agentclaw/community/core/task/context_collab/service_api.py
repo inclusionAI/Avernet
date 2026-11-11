@@ -26,7 +26,7 @@ class ActorContext:
     """已认证调用者上下文;由 delivery 从 auth 信息构造,核心不解析 HTTP。"""
 
     actor: PrincipalRef
-    source: str  # "api" | "openapi"
+    source: str  # "api" | "openapi" | "todo"
 
 
 @dataclass
@@ -44,6 +44,7 @@ class ContextCreateCommand:
     executor_ref: AgentRef | None
     objective: str
     resource_refs: list[ResourceRef]
+    executor_owner_id: str | None = None
 
 
 @dataclass

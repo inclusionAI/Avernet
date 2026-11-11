@@ -124,7 +124,7 @@ class _RecordedService:
         self._record("create_todo", **kwargs)
         return _todo(status=TodoStatus.DRAFT)
 
-    def start_todo(self, **kwargs):
+    async def start_todo(self, **kwargs):
         self._record("start_todo", **kwargs)
         return _todo()
 

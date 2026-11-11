@@ -48,7 +48,7 @@ class TodoServiceProtocol(Protocol):
     ) -> TodoRecord: ...
 
     @abstractmethod
-    def start_todo(
+    async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> TodoRecord: ...
 

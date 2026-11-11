@@ -173,8 +173,8 @@ class FakeCollaboration:
     def __init__(self, contexts: tuple[TodoCollaborationContext, ...] = ()) -> None:
         self.contexts = {context.collab_context_id: context for context in contexts}
         self.create_calls: list[TodoCollaborationContextRequest] = []
-        self.get_calls: list[str] = []
-        self.run_calls: list[str] = []
+        self.get_calls: list[tuple[str, str]] = []
+        self.run_calls: list[tuple[str, str]] = []
         self.append_calls: list[tuple[str, TodoCollaborationEventRequest]] = []
 
     def create_context(
@@ -185,12 +185,16 @@ class FakeCollaboration:
         self.contexts[context.collab_context_id] = context
         return context
 
-    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
-        self.get_calls.append(collab_context_id)
+    def get_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        self.get_calls.append((collab_context_id, actor_id))
         return self.contexts[collab_context_id]
 
-    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
-        self.run_calls.append(collab_context_id)
+    async def run_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        self.run_calls.append((collab_context_id, actor_id))
         current = self.contexts[collab_context_id]
         refreshed = replace(
             current,
@@ -267,6 +271,7 @@ def test_create_todo_creates_and_binds_context_immediately():
     assert request.environment == ""
     assert request.principal_id == "user_1"
     assert request.executor_id == "bot_1"
+    assert request.executor_owner_id == "another_user"
     assert request.objective == "Detailed request"
     assert request.todo_id == "todo_created"
     assert repository.calls[-1] == {
@@ -369,26 +374,28 @@ def test_list_todos_projects_b_status_then_filters_and_paginates_without_writes(
     ]
 
 
-def test_start_todo_runs_existing_context_without_creating_another():
+@pytest.mark.asyncio
+async def test_start_todo_runs_existing_context_without_creating_another():
     service, repository, _, _, collaboration = _service(
         contexts=(_context(status="created"),)
     )
 
-    started = service.start_todo(todo_id="todo_1", actor_id="user_1")
+    started = await service.start_todo(todo_id="todo_1", actor_id="user_1")
 
     assert started.status is TodoStatus.IN_PROGRESS
-    assert collaboration.run_calls == ["context_todo_1"]
+    assert collaboration.run_calls == [("context_todo_1", "user_1")]
     assert collaboration.create_calls == []
     assert [call["operation"] for call in repository.calls] == ["get_todo"]
 
 
-def test_start_todo_rejects_projected_non_draft_context():
+@pytest.mark.asyncio
+async def test_start_todo_rejects_projected_non_draft_context():
     service, _, _, _, collaboration = _service(
         contexts=(_context(status="in_progress"),)
     )
 
     with pytest.raises(TodoStateConflictError):
-        service.start_todo(todo_id="todo_1", actor_id="user_1")
+        await service.start_todo(todo_id="todo_1", actor_id="user_1")
 
     assert collaboration.run_calls == []
 
@@ -416,7 +423,7 @@ def test_list_events_is_pure_read_and_maps_artifacts():
     assert result[0].context_version == 3
     assert result[0].artifacts[0].name == "report.docx"
     assert [call["operation"] for call in repository.calls] == ["get_todo"]
-    assert collaboration.get_calls == ["context_todo_1"]
+    assert collaboration.get_calls == [("context_todo_1", "user_1")]
 
 
 def test_create_interaction_appends_b_event_and_remains_pending_acceptance():
@@ -489,6 +496,27 @@ def test_submit_acceptance_writes_only_a_side(verdict, target):
         "message": "looks good",
         "author_id": "user_1",
     }
+
+
+@pytest.mark.parametrize(
+    "context_status,todo_status",
+    [
+        ("created", TodoStatus.DRAFT),
+        ("in_progress", TodoStatus.IN_PROGRESS),
+        ("reviewing", TodoStatus.IN_PROGRESS),
+        ("blocked", TodoStatus.IN_PROGRESS),
+        ("done", TodoStatus.PENDING_ACCEPTANCE),
+        ("cancelled", TodoStatus.PENDING_ACCEPTANCE),
+    ],
+)
+def test_all_b_context_statuses_have_an_explicit_todo_projection(
+    context_status, todo_status
+):
+    service, _, _, _, _ = _service(contexts=(_context(status=context_status),))
+
+    result = service.get_todo(todo_id="todo_1", actor_id="user_1")
+
+    assert result.status is todo_status
 
 
 def test_completed_a_status_wins_over_b_projection():

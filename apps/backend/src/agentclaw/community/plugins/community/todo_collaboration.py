@@ -1,11 +1,34 @@
-"""HTTP implementation of Todo's B-side collaboration Plugin API."""
+"""In-process adapter from Todo's collaboration contract to ContextCollab."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-import httpx
-
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+    SpaceRef,
+)
+from agentclaw.community.core.task.context_collab.service_api import (
+    ActorContext,
+    ContextCollabCreatedResult,
+    ContextCollabServiceProtocol,
+    ContextCollabStatusProjection,
+    ContextCreateCommand,
+    EventAppendCommand,
+)
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRuntimeError,
+)
 from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationArtifact,
@@ -17,137 +40,172 @@ from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationPlugin,
 )
 
-_CONTEXT_PATH = "/api/v1/collaboration/task/context_collab"
+
+_CONTEXT_COLLAB_DOMAIN_ERRORS = (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
+)
 
 
 @plugin_impl(
     mode=Mode.PROD,
-    rationale="direct HTTP adapter for the collaboration Context service",
+    rationale="adapt Todo directly to the in-process ContextCollab Service API",
 )
-class HttpTodoCollaborationPlugin(TodoCollaborationPlugin):
-    """Synchronous B adapter with no retries or local event cache."""
+class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
+    """Translate Todo requests without routing an internal call through HTTP."""
 
-    def __init__(self, *, base_url: str, timeout_seconds: float = 10.0) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._timeout_seconds = timeout_seconds
+    def __init__(self, service: ContextCollabServiceProtocol) -> None:
+        self._service = service
 
     def create_context(
         self, request: TodoCollaborationContextRequest
     ) -> TodoCollaborationContext:
-        data = self._request(
-            "POST",
-            _CONTEXT_PATH,
-            {
-                "space": {
-                    "space_id": request.space_id,
-                    "environment": request.environment,
-                },
-                "principal_ref": {
-                    "principal_type": "human",
-                    "principal_id": request.principal_id,
-                },
-                "product_kind": request.product_kind,
-                "workflow_kind": request.workflow_kind,
-                "method_kind": request.method_kind,
-                "executor_ref": {
-                    "agent_type": "bot",
-                    "agent_id": request.executor_id,
-                },
-                "objective": request.objective,
-                "resource_refs": [
-                    {
-                        "resource_type": "todo",
-                        "resource_id": request.todo_id,
-                        "revision": None,
-                    }
-                ],
-            },
+        try:
+            result = self._service.create_context(
+                ContextCreateCommand(
+                    space=SpaceRef(request.space_id, request.environment),
+                    principal_ref=PrincipalRef("human", request.principal_id),
+                    product_kind=request.product_kind,
+                    workflow_kind=request.workflow_kind,
+                    method_kind=request.method_kind,
+                    executor_ref=AgentRef("bot", request.executor_id),
+                    objective=request.objective,
+                    resource_refs=[
+                        ResourceRef(
+                            resource_type="todo",
+                            resource_id=request.todo_id,
+                            revision=None,
+                        ),
+                    ],
+                    executor_owner_id=request.executor_owner_id,
+                ),
+                _actor_context(request.principal_id, "human"),
+            )
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
+            raise TodoCollaborationError(
+                "ContextCollab rejected Todo context creation"
+            ) from exc
+        return _created_context(result)
+
+    def get_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        projection = self._get_projection(
+            collab_context_id,
+            _actor_context(actor_id, "human"),
         )
-        return _parse_context(_dict(data))
+        return _projected_context(projection)
 
-    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
-        data = self._request("GET", f"{_CONTEXT_PATH}/{collab_context_id}")
-        return _parse_context(_dict(data))
-
-    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
-        self._request("POST", f"{_CONTEXT_PATH}/{collab_context_id}/run")
-        return self.get_context(collab_context_id=collab_context_id)
+    async def run_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        actor = _actor_context(actor_id, "human")
+        try:
+            await self._service.run_context(collab_context_id, actor)
+        except ContextCollabRuntimeError as exc:
+            raise TodoCollaborationError(
+                "ContextCollab runtime could not start the Todo executor"
+            ) from exc
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
+            raise TodoCollaborationError(
+                "ContextCollab rejected the Todo run request"
+            ) from exc
+        return _projected_context(self._get_projection(collab_context_id, actor))
 
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:
-        accepted = _dict(
-            self._request(
-                "POST",
-                f"{_CONTEXT_PATH}/{collab_context_id}/events",
-                {
-                    "expected_version": request.expected_version,
-                    "event_kind": request.event_kind,
-                    "primitive_type": request.primitive_type,
-                    "actor_ref": {
-                        "principal_type": request.actor_type,
-                        "principal_id": request.actor_id,
-                    },
-                    "parent_event": request.parent_event,
-                    "visibility": request.visibility,
-                    "payload": request.payload,
-                },
+        actor = _actor_context(request.actor_id, request.actor_type)
+        try:
+            accepted = self._service.append_event(
+                collab_context_id,
+                EventAppendCommand(
+                    expected_version=request.expected_version,
+                    event_kind=request.event_kind,
+                    primitive_type=request.primitive_type,
+                    actor_ref=actor.actor,
+                    parent_event=request.parent_event,
+                    visibility=request.visibility,
+                    payload=request.payload,
+                ),
+                actor,
             )
-        )
-        event_id = _required_string(accepted.get("event_id"), "event_id")
-        context = self.get_context(collab_context_id=collab_context_id)
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
+            raise TodoCollaborationError(
+                "ContextCollab rejected the Todo event"
+            ) from exc
+        context = _projected_context(self._get_projection(collab_context_id, actor))
         for event in context.events:
-            if event.event_id == event_id:
+            if event.event_id == accepted.event_id:
                 return event
         raise TodoCollaborationError(
-            f"B accepted event {event_id!r} but did not project it"
+            f"ContextCollab accepted event {accepted.event_id!r} but did not project it"
         )
 
-    def _request(self, method: str, path: str, json: dict | None = None) -> object:
-        if not self._base_url:
-            raise TodoCollaborationError("Todo collaboration service is not configured")
+    def _get_projection(
+        self,
+        collab_context_id: str,
+        actor: ActorContext,
+    ) -> ContextCollabStatusProjection:
         try:
-            with httpx.Client(
-                base_url=self._base_url, timeout=self._timeout_seconds
-            ) as client:
-                response = (
-                    client.post(path, json=json)
-                    if method == "POST"
-                    else client.get(path)
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except httpx.HTTPError as exc:
-            raise TodoCollaborationError("B collaboration request failed") from exc
-        except ValueError as exc:
+            return self._service.get_status(
+                collab_context_id,
+                trunk_events=False,
+                context=actor,
+            )
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
             raise TodoCollaborationError(
-                "B collaboration response is not JSON"
+                "ContextCollab could not project the Todo context"
             ) from exc
-        data = payload.get("data") if isinstance(payload, dict) else payload
-        if data is None:
-            raise TodoCollaborationError("B collaboration response is malformed")
-        return data
 
 
-def _parse_context(record: dict) -> TodoCollaborationContext:
-    snapshot = _dict(record.get("current_snapshot"))
+def _actor_context(actor_id: str, actor_type: str) -> ActorContext:
+    return ActorContext(
+        actor=PrincipalRef(actor_type, actor_id),
+        source="todo",
+    )
+
+
+def _created_context(result: ContextCollabCreatedResult) -> TodoCollaborationContext:
+    snapshot = _dict(result.current_snapshot)
     progress = _dict(snapshot.get("progress"))
-    current_event = _dict(record.get("current_event"))
-    task_progress = _dict(record.get("task_progress"))
-    raw_events = task_progress.get("events", [])
-    if not isinstance(raw_events, list):
-        raise TodoCollaborationError(
-            "B collaboration response has invalid task_progress.events"
-        )
-    current_event_id = progress.get("current_event_id")
-    if current_event_id is None:
-        current_event_id = current_event.get("event_id")
+    current_event = _dict(result.current_event)
+    current_event_id = progress.get("current_event_id") or current_event.get("event_id")
     return TodoCollaborationContext(
         collab_context_id=_required_string(
-            record.get("collab_context_id"), "collab_context_id"
+            result.collab_context_id,
+            "collab_context_id",
         ),
         status=_required_string(snapshot.get("status"), "current_snapshot.status"),
-        context_version=_required_int(record.get("context_version"), "context_version"),
+        context_version=_required_int(result.context_version, "context_version"),
+        current_event_id=_optional_string(current_event_id),
+    )
+
+
+def _projected_context(
+    projection: ContextCollabStatusProjection,
+) -> TodoCollaborationContext:
+    snapshot = _dict(projection.current_snapshot)
+    progress = _dict(snapshot.get("progress"))
+    current_event = _dict(projection.current_event)
+    current_event_id = progress.get("current_event_id") or current_event.get("event_id")
+    raw_events = projection.task_progress.events
+    if not isinstance(raw_events, list):
+        raise TodoCollaborationError(
+            "ContextCollab projection has invalid task_progress.events"
+        )
+    return TodoCollaborationContext(
+        collab_context_id=_required_string(
+            projection.collab_context_id,
+            "collab_context_id",
+        ),
+        status=_required_string(snapshot.get("status"), "current_snapshot.status"),
+        context_version=_required_int(
+            projection.context_version,
+            "context_version",
+        ),
         current_event_id=_optional_string(current_event_id),
         events=tuple(_parse_event(_dict(item)) for item in raw_events),
     )
@@ -206,7 +264,7 @@ def _string(value: object, fallback: str = "") -> str:
 def _required_string(value: object, field: str) -> str:
     normalized = _string(value)
     if not normalized:
-        raise TodoCollaborationError(f"B collaboration response has invalid {field}")
+        raise TodoCollaborationError(f"ContextCollab projection has invalid {field}")
     return normalized
 
 
@@ -218,12 +276,12 @@ def _optional_string(value: object) -> str | None:
 
 def _required_int(value: object, field: str) -> int:
     if isinstance(value, bool):
-        raise TodoCollaborationError(f"B collaboration response has invalid {field}")
+        raise TodoCollaborationError(f"ContextCollab projection has invalid {field}")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise TodoCollaborationError(
-            f"B collaboration response has invalid {field}"
+            f"ContextCollab projection has invalid {field}"
         ) from exc
 
 

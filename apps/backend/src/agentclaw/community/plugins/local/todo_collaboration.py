@@ -67,12 +67,25 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         self._contexts[context_id] = local
         return self._snapshot(context_id, local)
 
-    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+    def get_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
         return self._snapshot(
             collab_context_id, self._require_context(collab_context_id)
         )
 
-    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+    async def run_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        return self._run_context(collab_context_id)
+
+    def start_context_for_test(
+        self, *, collab_context_id: str
+    ) -> TodoCollaborationContext:
+        """Synchronously seed a started Context in endpoint fixtures."""
+        return self._run_context(collab_context_id)
+
+    def _run_context(self, collab_context_id: str) -> TodoCollaborationContext:
         local = self._require_context(collab_context_id)
         if local.status != "created":
             raise TodoCollaborationError("Context can run only from created")

@@ -89,6 +89,13 @@ def _required_str(value: object, field: str) -> str:
     return value
 
 
+def _optional_str(value: object, field: str) -> str | None:
+    """Validate an optional identifier without inventing a fallback value."""
+    if value is None:
+        return None
+    return _required_str(value, field)
+
+
 def _optional_enum_value(value: object, allowed: set[str], field: str) -> str | None:
     """可空枚举校验;非 None 时必须命中已注册 wire 值。"""
     if value is None:
@@ -253,6 +260,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 {kind.value for kind in WorkflowKind},
                 "workflow_kind",
             ),
+            executor_owner_id=_optional_str(
+                command.executor_owner_id,
+                "executor_owner_id",
+            ),
         )
         self._authorizer.check_create(spec, context)
 
@@ -393,6 +404,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 principal_id=collet.context_spec.principal_ref.principal_id,
                 objective=collet.context_spec.objective,
                 todo_id=todo_refs[0].resource_id,
+                executor_owner_id=collet.context_spec.executor_owner_id,
             )
         )
         payload = {"run_id": runtime_result.run_id}

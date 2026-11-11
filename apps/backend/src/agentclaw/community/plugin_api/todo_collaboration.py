@@ -2,8 +2,9 @@
 
 Todo owns the product record and Human acceptance. B owns Context execution,
 its authoritative runtime status, and the append-only event stream. The
-contract below is transport-neutral; HTTP paths and envelope parsing belong to
-the concrete plugin implementation.
+contract below is transport-neutral; transport-specific adaptation belongs to
+concrete implementations. The production composition currently uses the
+in-process ContextCollab Service API.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ class TodoCollaborationContextRequest:
     workflow_kind: str
     method_kind: str
     executor_id: str
+    executor_owner_id: str
     objective: str
     todo_id: str
 
@@ -94,11 +96,15 @@ class TodoCollaborationPlugin(Plugin, Protocol):
         """Create, but do not run, the Context bound to a new Todo."""
         ...
 
-    def get_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+    def get_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
         """Read the current Context status and complete visible event stream."""
         ...
 
-    def run_context(self, *, collab_context_id: str) -> TodoCollaborationContext:
+    async def run_context(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
         """Start the configured executor and return the refreshed Context."""
         ...
 

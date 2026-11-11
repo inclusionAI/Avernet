@@ -26,6 +26,7 @@ class ContextCollabRunRequest:
     principal_id: str
     objective: str
     todo_id: str
+    executor_owner_id: str | None = None
 
 
 @dataclass(frozen=True)

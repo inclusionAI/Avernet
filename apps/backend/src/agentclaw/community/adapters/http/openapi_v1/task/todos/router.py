@@ -170,8 +170,7 @@ async def run_todo(
 ) -> Envelope[TodoResponse]:
     """Start the B collaboration Context already bound to a draft Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
-    result = await run_in_threadpool(
-        service.start_todo,
+    result = await service.start_todo(
         todo_id=todo_id,
         actor_id=actor_id,
     )

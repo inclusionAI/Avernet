@@ -50,7 +50,10 @@ _HUMAN_INTERACTION_EVENT = "user_interaction.posted"
 _CONTEXT_STATUS_TO_TODO = {
     "created": TodoStatus.DRAFT,
     "in_progress": TodoStatus.IN_PROGRESS,
+    "reviewing": TodoStatus.IN_PROGRESS,
+    "blocked": TodoStatus.IN_PROGRESS,
     "done": TodoStatus.PENDING_ACCEPTANCE,
+    "cancelled": TodoStatus.PENDING_ACCEPTANCE,
 }
 
 
@@ -98,7 +101,10 @@ class TodoService(TodoServiceProtocol):
             keyword=self._search_text(keyword),
             bot_id=self._optional_text(bot_id, "bot_id", MAX_BOT_ID_LENGTH),
         )
-        projected = tuple(self._project_todo(todo) for todo in candidates)
+        projected = tuple(
+            self._project_todo(todo, actor_id=normalized_actor_id)
+            for todo in candidates
+        )
         if normalized_status is not None:
             projected = tuple(
                 todo for todo in projected if todo.status is normalized_status
@@ -112,8 +118,10 @@ class TodoService(TodoServiceProtocol):
     def get_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> TodoRecord:
-        todo = self._load_todo(todo_id=todo_id, actor_id=actor_id, env=env)
-        return self._project_todo(todo)
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
+        )
+        return self._project_todo(todo, actor_id=normalized_actor_id)
 
     def create_todo(
         self,
@@ -144,6 +152,11 @@ class TodoService(TodoServiceProtocol):
             actor_id=normalized_actor_id,
             bot_id=normalized_bot_id,
         )
+        executor_owner_id = self._required_text(
+            bot.get("owner_id"),
+            "bot.owner_id",
+            MAX_ACTOR_ID_LENGTH,
+        )
         todo = self._repository.create_todo(
             space_id=normalized_space_id,
             title=normalized_title,
@@ -161,6 +174,7 @@ class TodoService(TodoServiceProtocol):
                 workflow_kind="team_todo_execution",
                 method_kind="Single",
                 executor_id=normalized_bot_id,
+                executor_owner_id=executor_owner_id,
                 objective=normalized_description or normalized_title,
                 todo_id=todo.todo_id,
             )
@@ -174,27 +188,46 @@ class TodoService(TodoServiceProtocol):
             todo_id=todo.todo_id,
             collab_context_id=context_id,
         )
-        return self._project_todo(bound, context=context)
+        return self._project_todo(
+            bound,
+            actor_id=normalized_actor_id,
+            context=context,
+        )
 
-    def start_todo(
+    async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> TodoRecord:
-        todo = self._load_todo(todo_id=todo_id, actor_id=actor_id, env=env)
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
+        )
         context_id = self._require_context(todo)
-        context = self._collaboration.get_context(collab_context_id=context_id)
+        context = self._collaboration.get_context(
+            collab_context_id=context_id,
+            actor_id=normalized_actor_id,
+        )
         if self._project_status(todo, context) is not TodoStatus.DRAFT:
             raise TodoStateConflictError("Only draft Todos can run")
-        refreshed = self._collaboration.run_context(collab_context_id=context_id)
-        return self._project_todo(todo, context=refreshed)
+        refreshed = await self._collaboration.run_context(
+            collab_context_id=context_id,
+            actor_id=normalized_actor_id,
+        )
+        return self._project_todo(
+            todo,
+            actor_id=normalized_actor_id,
+            context=refreshed,
+        )
 
     def list_events(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> tuple[TodoEventRecord, ...]:
-        todo = self._load_todo(todo_id=todo_id, actor_id=actor_id, env=env)
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
+        )
         if not todo.collab_context_id:
             return ()
         context = self._collaboration.get_context(
-            collab_context_id=todo.collab_context_id
+            collab_context_id=todo.collab_context_id,
+            actor_id=normalized_actor_id,
         )
         return self._to_event_records(context.events)
 
@@ -216,16 +249,18 @@ class TodoService(TodoServiceProtocol):
         message: str,
         env: str | None = None,
     ) -> TodoEventRecord:
-        todo = self._load_todo(todo_id=todo_id, actor_id=actor_id, env=env)
-        normalized_actor_id = self._required_text(
-            actor_id, "actor_id", MAX_ACTOR_ID_LENGTH
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
         )
         normalized_author_name = self._optional_text(
             author_name, "author_name", MAX_ACTOR_NAME_LENGTH
         )
         normalized_message = self._required_text(message, "message", MAX_MESSAGE_LENGTH)
         context_id = self._require_context(todo)
-        context = self._collaboration.get_context(collab_context_id=context_id)
+        context = self._collaboration.get_context(
+            collab_context_id=context_id,
+            actor_id=normalized_actor_id,
+        )
         if self._project_status(todo, context) is not TodoStatus.PENDING_ACCEPTANCE:
             raise TodoStateConflictError("Interactions require pending acceptance")
         payload: dict[str, Any] = {"content": normalized_message}
@@ -255,9 +290,8 @@ class TodoService(TodoServiceProtocol):
         message: str | None,
         env: str | None = None,
     ) -> TodoRecord:
-        todo = self._load_todo(todo_id=todo_id, actor_id=actor_id, env=env)
-        normalized_actor_id = self._required_text(
-            actor_id, "actor_id", MAX_ACTOR_ID_LENGTH
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
         )
         normalized_verdict = self._verdict(verdict)
         normalized_message = (
@@ -266,7 +300,8 @@ class TodoService(TodoServiceProtocol):
             else self._text_allow_empty(message, "message", MAX_MESSAGE_LENGTH)
         )
         context = self._collaboration.get_context(
-            collab_context_id=self._require_context(todo)
+            collab_context_id=self._require_context(todo),
+            actor_id=normalized_actor_id,
         )
         if self._project_status(todo, context) is not TodoStatus.PENDING_ACCEPTANCE:
             raise TodoStateConflictError("Todo is not pending acceptance")
@@ -277,19 +312,22 @@ class TodoService(TodoServiceProtocol):
             author_id=normalized_actor_id,
         )
 
-    def _load_todo(self, *, todo_id: str, actor_id: str, env: str | None) -> TodoRecord:
+    def _load_todo(
+        self, *, todo_id: str, actor_id: str, env: str | None
+    ) -> tuple[TodoRecord, str]:
         normalized_todo_id = self._required_text(todo_id, "todo_id", MAX_TODO_ID_LENGTH)
         normalized_actor_id = self._required_text(
             actor_id, "actor_id", MAX_ACTOR_ID_LENGTH
         )
         todo = self._repository.get_todo(todo_id=normalized_todo_id)
         self._require_todo_space_member(todo, normalized_actor_id, env)
-        return todo
+        return todo, normalized_actor_id
 
     def _project_todo(
         self,
         todo: TodoRecord,
         *,
+        actor_id: str,
         context: TodoCollaborationContext | None = None,
     ) -> TodoRecord:
         if todo.status is TodoStatus.COMPLETED:
@@ -297,7 +335,8 @@ class TodoService(TodoServiceProtocol):
         if todo.collab_context_id is None:
             return replace(todo, status=TodoStatus.DRAFT)
         current = context or self._collaboration.get_context(
-            collab_context_id=todo.collab_context_id
+            collab_context_id=todo.collab_context_id,
+            actor_id=actor_id,
         )
         return replace(todo, status=self._project_status(todo, current))
 

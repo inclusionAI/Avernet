@@ -23,6 +23,14 @@ class BotSendResult:
     session_id: str | None = None
 
 
+class OpenApiBotError(RuntimeError):
+    """A Bot port operation failed at its external delivery boundary.
+
+    Implementations may expose more specific subclasses, but consumers should
+    depend on this transport-neutral error rather than an adapter exception.
+    """
+
+
 @runtime_checkable
 class OpenApiBotPort(Protocol):
     @property
@@ -34,7 +42,9 @@ class OpenApiBotPort(Protocol):
     async def send_message(
         self, *, bot_id: str, message: str, metadata: dict[str, Any],
         message_id: str | None = None,
-    ) -> BotSendResult: ...
+    ) -> BotSendResult:
+        """Start a Bot run or raise ``OpenApiBotError`` on delivery failure."""
+        ...
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
     async def get_session_messages(

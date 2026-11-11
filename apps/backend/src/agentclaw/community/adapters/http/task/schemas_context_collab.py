@@ -156,6 +156,15 @@ class ContextSpec(BaseModel):
         description="Required when method_kind is Single: the L2 agent "
         "executing the collaboration.",
     )
+    executor_owner_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Owner identity used to address a Bot executor at runtime. "
+            "Optional for legacy direct Context creation; Bot execution "
+            "fails closed when it is absent."
+        ),
+    )
     objective: str = Field(
         min_length=1,
         description="Current collaboration objective.",
@@ -176,6 +185,7 @@ class ContextSpec(BaseModel):
             executor_ref=(self.executor_ref.to_domain() if self.executor_ref else None),
             objective=self.objective,
             resource_refs=[ref.to_domain() for ref in self.resource_refs],
+            executor_owner_id=self.executor_owner_id,
         )
 
 

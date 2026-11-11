@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.ports import (
+    OpenApiBotError,
+    OpenApiBotPort,
+)
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimeError,
     ContextCollabRunRequest,
@@ -26,16 +29,25 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
     async def run(
         self, request: ContextCollabRunRequest
     ) -> ContextCollabRunResult:
-        result = await self._openapi_bot.send_message(
-            bot_id=compose_bot_identity(
-                request.executor_id, request.principal_id
-            ),
-            message=request.objective,
-            metadata={
-                "biz_task_id": request.todo_id,
-                "collab_context_id": request.collab_context_id,
-            },
-        )
+        if not request.executor_owner_id:
+            raise ContextCollabRuntimeError(
+                "Context executor owner is required for Bot runtime addressing"
+            )
+        try:
+            result = await self._openapi_bot.send_message(
+                bot_id=compose_bot_identity(
+                    request.executor_id, request.executor_owner_id
+                ),
+                message=request.objective,
+                metadata={
+                    "biz_task_id": request.todo_id,
+                    "collab_context_id": request.collab_context_id,
+                },
+            )
+        except OpenApiBotError as exc:
+            raise ContextCollabRuntimeError(
+                "Context executor delivery failed"
+            ) from exc
         return ContextCollabRunResult(
             run_id=result.run_id,
             session_id=result.session_id,

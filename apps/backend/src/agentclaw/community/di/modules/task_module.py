@@ -185,7 +185,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.plugins.community.todo_collaboration import (
-    HttpTodoCollaborationPlugin,
+    InProcessTodoCollaborationPlugin,
 )
 from agentclaw.community.plugins.community.context_collab_runtime import (
     CommunityContextCollabRuntimePlugin,
@@ -348,17 +348,10 @@ class TaskModule(Module):
     @provider
     @inject
     def todo_collaboration_plugin(
-        self, task_dispatch: TaskDispatchConfig
+        self, context_collab: ContextCollabServiceProtocol
     ) -> TodoCollaborationPlugin:
-        """B-side collaboration adapter selected by the task_dispatch config.
-
-        An empty ``todo_collab_base_url`` leaves the feature unusable but keeps
-        Todo CRUD and acceptance testable without a B deployment.
-        """
-        return HttpTodoCollaborationPlugin(
-            base_url=task_dispatch.todo_collab_base_url,
-            timeout_seconds=task_dispatch.todo_collab_timeout_seconds,
-        )
+        """Adapt Todo to the ContextCollab Service API in the same process."""
+        return InProcessTodoCollaborationPlugin(context_collab)
 
     @singleton
     @provider

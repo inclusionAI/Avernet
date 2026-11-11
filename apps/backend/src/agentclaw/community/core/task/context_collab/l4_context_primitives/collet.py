@@ -99,6 +99,7 @@ class ContextSpec:
     resource_refs: tuple[ResourceRef, ...]
     product_kind: str | None
     workflow_kind: str | None
+    executor_owner_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "ContextSpec":
@@ -118,10 +119,13 @@ class ContextSpec:
             ),
             product_kind=_optional_str(data, "product_kind", "ContextSpec"),
             workflow_kind=_optional_str(data, "workflow_kind", "ContextSpec"),
+            executor_owner_id=_optional_str(
+                data, "executor_owner_id", "ContextSpec"
+            ),
         )
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "space": self.space.to_dict(),
             "principal_ref": self.principal_ref.to_dict(),
             "method_kind": self.method_kind,
@@ -133,6 +137,9 @@ class ContextSpec:
             "product_kind": self.product_kind,
             "workflow_kind": self.workflow_kind,
         }
+        if self.executor_owner_id is not None:
+            data["executor_owner_id"] = self.executor_owner_id
+        return data
 
 
 @dataclass
