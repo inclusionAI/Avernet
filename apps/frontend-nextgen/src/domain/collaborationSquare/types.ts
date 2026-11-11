@@ -210,6 +210,8 @@ export interface PublicGroupMembersDetail {
 
 export interface PublicGroupMember {
   id: string;
+  /** 群详情 participants 的头像；缺省时 Bot 使用 id 作为固定种子，与 Bot 管理一致。 */
+  avatarUrl?: string | null;
   displayName: string;
   type: PublicMemberType;
   role: string;

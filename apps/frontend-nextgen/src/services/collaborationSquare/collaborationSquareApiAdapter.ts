@@ -280,6 +280,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
       const participants = resp.data?.participants ?? [];
       const members = participants.map((p) => ({
         id: p.actor_id,
+        avatarUrl: p.avatar_url,
         displayName: p.name?.trim() || p.actor_id,
         type: (p.actor_kind === 'human' ? 'human' : 'bot') as PublicGroupMember['type'],
         role: p.role,
