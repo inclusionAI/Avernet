@@ -73,8 +73,8 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <nav class="toc" aria-label="目录">
 <b>目录</b>
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
-<a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a>
-<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a>
+<a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a>
+<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展治理</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.2</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.3</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -386,6 +386,21 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-95</span></td><td>扩展的不兼容变更使用新的 URI。Profile 自身的不兼容变更提升 <code>profileVersion</code>。</td></tr>
 </table></div>
 
+<h3 id="s6-11"><span class="n">6.11</span>Client 侧要求</h3>
+<p>Profile 是双边的。前面各节是对 Agent（Server）的要求，本节是对调用方（Client）的要求。BCS 是目前唯一的 Client；BCS 对外提供 A2A 服务后，client SDK 实现同一组条款。使用官方 a2a-java client 直接调用的业务方也必须满足。</p>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-110</span></td><td>Client 在 <code>a2a-extensions</code> 中只能列出自己真正实现的扩展。</td></tr>
+<tr><td><span class="tag p">P-111</span></td><td>调用声明了必需扩展的 Agent 之前，Client 必须实现该扩展。未实现的 Client 会被拒绝，不得通过省略协商绕过。</td></tr>
+<tr><td><span class="tag p">P-112</span></td><td>初始提交结果未知时，只有协商了提交去重扩展才可以用相同的 <code>messageId</code> 和相同的请求重发。否则必须报告结果未知。</td></tr>
+<tr><td><span class="tag p">P-113</span></td><td>已获得 Task 后断流：先 GetTask；未终结再 SubscribeToTask。不得重新提交。</td></tr>
+<tr><td><span class="tag p">P-114</span></td><td>只有 CancelTask 的响应状态为 <code>CANCELED</code> 才能视为已取消。其他响应必须通过 GetTask 核对。</td></tr>
+<tr><td><span class="tag p">P-115</span></td><td>终态后的 GetTask 快照是权威文本。流上收到的文本与它不一致时，以快照为准补齐后缀。</td></tr>
+<tr><td><span class="tag p">P-116</span></td><td>遇到不认识的 metadata 键、DataPart 或扩展 URI 必须忽略。不得报错，不得据此路由或授权。</td></tr>
+<tr><td><span class="tag p">P-117</span></td><td>不得依赖 <code>history</code>，不得假设工具观察记录完整。</td></tr>
+<tr><td><span class="tag p">P-118</span></td><td>调用上下文的字段只能来自 Client 已认证的来源，不得来自用户输入或模型输出。</td></tr>
+</table></div>
+
 <h2 id="s7"><span class="n">7</span>扩展目录</h2>
 <div class="tw"><table>
 <tr><th>扩展</th><th>类型</th><th>等级</th><th>状态</th><th>SDK 支持方式</th></tr>
@@ -440,6 +455,25 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>exec 审批</td><td>Task 进入 <code>INPUT_REQUIRED</code>，状态消息带 JSON Schema，每个工具接受 <code>allow_once</code> 或 <code>deny</code>。BCS 通过带 <code>taskId</code> 的 SendMessage 续交。已接受的决定必须先持久化到 <code>Task.metadata</code>，再恢复执行。一批最多 64 个工具。</td></tr>
 <tr><td>提交去重</td><td>协商后，同一 Agent 下相同 <code>messageId</code> 且请求内容相同的初始提交只执行一次，跨实例、跨重启有效。内容不同则拒绝。它提供的是"至多执行一次"，不是"恰好一次"。</td></tr>
 </table></div>
+
+<h3 id="s7-4"><span class="n">7.4</span>扩展治理</h3>
+<p>各业务会有自己的定制需求。Profile 允许通过 A2A 的扩展机制定制，但扩展是双边约定，定义方式必须统一，否则每个扩展都会变成一套私有协议。</p>
+<div class="tw"><table>
+<tr><th>级别</th><th>定义方</th><th>可否 <code>required: true</code></th><th>BCS 的处理</th><th>SDK 支持</th></tr>
+<tr><td>平台扩展</td><td>BCN</td><td>可以</td><td>理解并处理</td><td>Server 和 Client 两侧内置</td></tr>
+<tr><td>业务扩展</td><td>业务方，在 BCN 扩展目录登记</td><td>不可以</td><td>不解释内容；是否转发见 <span class="tag q">Q15</span></td><td>通用读写接口</td></tr>
+<tr><td>未登记扩展</td><td>任意</td><td>不可以</td><td>Card 中原样保存；不协商</td><td>通用读写接口</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-120</span></td><td>每个扩展有一个稳定的、带版本的 URI，对应一份规范文档。不兼容变更使用新的 URI。</td></tr>
+<tr><td><span class="tag p">P-121</span></td><td>规范文档必须写明：数据放在哪里、Server 的义务、Client 的义务、未协商时的行为、大小限制。</td></tr>
+<tr><td><span class="tag p">P-122</span></td><td>扩展数据只能使用三种载体：Card 的 <code>capabilities.extensions[].params</code>；请求、消息或 Task 的 <code>metadata</code>，以扩展 URI 为键；DataPart，并在 Part 的 <code>metadata</code> 中以扩展 URI 标记。</td></tr>
+<tr><td><span class="tag p">P-123</span></td><td>扩展不得在标准对象上增加顶层字段，不得新增 RPC 方法，不得改变 Task 状态机（6.6）和文本流规则（6.7）。</td></tr>
+<tr><td><span class="tag p">P-124</span></td><td>业务扩展和未登记扩展必须是 <code>required: false</code>，并且可降级：未协商时 Agent 仍能以纯文本完成任务。</td></tr>
+<tr><td><span class="tag p">P-125</span></td><td>扩展数据不得携带凭据。业务扩展的数据不得用于 BCS 的路由和授权。</td></tr>
+</table></div>
+<div class="box q"><p><b>BCS 在中间时的问题。</b>业务扩展是业务调用方和业务 Agent 之间的约定，但调用经过 BCS。BCS 目前只协商自己理解的扩展，因此业务扩展经过 BCS 时不生效。倾向的做法是：对已登记的业务扩展，BCS 原样转发对应的 metadata 和 DataPart，不解释内容（<span class="tag q">Q15</span>）。这要到 BCS 提供 A2A 服务时才能落地，但登记规则需要现在确定（<span class="tag q">Q16</span>）。</p></div>
 
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
@@ -549,6 +583,7 @@ public class OrderAgent implements BcnAgent {
 <tr><td><code>ApprovalHandler</code></td><td>exec 审批的发起、接受和恢复</td><td>无</td><td>声明 exec 审批扩展时必须实现</td></tr>
 <tr><td><code>AgentRegistrar</code></td><td>启动时向 BCS 注册或更新 Card</td><td>关闭</td><td>通常使用 SDK 提供的实现并配置开启</td></tr>
 <tr><td><code>TaskIdGenerator</code></td><td>生成 <code>taskId</code>、<code>contextId</code></td><td>随机 UUID</td><td>需要自定义格式</td></tr>
+<tr><td><code>ExtensionAccess</code></td><td>按扩展 URI 读取请求中的扩展数据、发出带 URI 标记的 DataPart，供业务扩展使用（7.4）。未协商时读取为空、发出被丢弃</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
 </table></div>
 
 <h4>动态 Agent：AgentResolver</h4>
@@ -1006,6 +1041,8 @@ CREATE TABLE bcn_a2a_submission (
 <tr><td><span class="tag q">Q12</span></td><td>GRPC 之外，HTTP+JSON 端点是否需要在生产环境开放</td><td>默认关闭，仅用于调试</td><td>P-03</td></tr>
 <tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.11、第 12 节</td></tr>
 <tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.11</td></tr>
+<tr><td><span class="tag q">Q15</span></td><td>BCS 是否转发已登记的业务扩展数据，以及转发的大小和频率限制</td><td>转发，不解释内容；落地时间跟随 BCS 提供 A2A 服务的阶段</td><td>7.4</td></tr>
+<tr><td><span class="tag q">Q16</span></td><td>业务扩展的登记流程：在哪里登记、谁评审、规范文档放在哪里</td><td>规范文档放仓库 <code>docs/specs/a2a/extensions/</code>，以合并请求方式登记，BCN 团队评审是否满足 P-120 到 P-125</td><td>7.4</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
