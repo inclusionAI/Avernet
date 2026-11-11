@@ -180,8 +180,8 @@ PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 # aggregate failure.
 _CALLER_REFRESH_MAX_WORKERS = 5
 
-# Rollout gate: enable only after the scheduled credential provider is deployed.
-SCHEDULED_CALLER_REFRESH_ENABLED = False
+# Enable best-effort scheduled Caller refresh after a successful Owner update.
+SCHEDULED_CALLER_REFRESH_ENABLED = True
 
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:

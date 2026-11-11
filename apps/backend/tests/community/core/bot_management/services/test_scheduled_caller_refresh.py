@@ -147,8 +147,8 @@ def test_default_service_bot_keeps_stable_entity_for_caller_refresh():
     assert service._scheduled_caller_refresh.refresh.call_args.kwargs["entity_id"] == "stable-entity"
 
 
-def test_scheduled_caller_refresh_ships_disabled(enabled_refresh):
-    assert enabled_refresh is False
+def test_scheduled_caller_refresh_ships_enabled(enabled_refresh):
+    assert enabled_refresh is True
 
 
 @pytest.mark.parametrize("configured", [True, False])
