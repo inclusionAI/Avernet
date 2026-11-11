@@ -58,7 +58,13 @@ class ExpertChatServiceProtocol(Protocol):
         iam_token: Optional[str] = None,
         *,
         bcn_friend_authorized: bool = False,
-    ) -> Dict[str, Any]: ...
+    ) -> Dict[str, Any]:
+        """Create a session after authorization and runtime stage selection.
+
+        Raises EngineStageNotLiveError when a service Bot has no online
+        runtime; no session is created in that case.
+        """
+        ...
 
     async def connect_chat_session(
         self,

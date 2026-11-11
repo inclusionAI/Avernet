@@ -39,6 +39,7 @@ from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
 from agentclaw.community.core.access.admin_scopes import super_admin
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.di import Injected
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -343,6 +344,8 @@ async def create_chat_session(
         return ApiResponse(
             success=False, message=str(error), error_code=4001
         )
+    except EngineStageNotLiveError:
+        return ApiResponse(success=False, message="Bot服务未发布", error_code=4001)
     except ChatPermissionError as error:
         return ApiResponse(
             success=False, message=str(error), error_code=403

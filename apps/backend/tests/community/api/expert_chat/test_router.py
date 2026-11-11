@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
     BotNotActiveError,
@@ -617,6 +618,7 @@ class TestMultiChatSessions:
             (BotNotFoundError("missing"), 404),
             (BotNotActiveError("inactive"), 400),
             (BotNotPublishedError("unpublished"), 4001),
+            (EngineStageNotLiveError("internal detail"), 4001),
             (ChatPermissionError("forbidden"), 403),
             (SessionCreateError("failed", error_code="5003"), 5003),
             (RuntimeError("unexpected"), 5999),
@@ -632,6 +634,35 @@ class TestMultiChatSessions:
 
         assert response.status_code == 200
         assert response.json()["error_code"] == expected_code
+
+    def test_create_session_with_unpublished_service_bot(self, client_with_mock):
+        from types import SimpleNamespace
+        from tests.community.core.expert_chat.services.test_expert_chat_uses_resolver import _make_service
+
+        client, mock_service = client_with_mock
+        resolver = MagicMock()
+        service = _make_service(resolver=resolver)
+        service._get_authorized_chat_bot = MagicMock(return_value={
+            "id": 5, "bot_id": "test_bot", "owner_id": "test_owner",
+            "bot_type": "service", "call_type": "owner", "binding_id": 11,
+        })
+        service._publish_repository.list_by_source_bot.return_value = [
+            SimpleNamespace(status="draft"), SimpleNamespace(status="released")
+        ]
+        service._create_session = AsyncMock()
+        mock_service.create_chat_session = service.create_chat_session
+
+        response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")
+
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert response.json()["error_code"] == 4001
+        assert response.json()["message"] == "Bot服务未发布"
+        resolver.resolve_for_binding.assert_not_called()
+        service._instance_service.get_caller_connection.assert_not_called()
+        service._create_session.assert_not_awaited()
+        service._repo.add_owned_session.assert_not_called()
+        service._repo.save_session.assert_not_called()
 
     @pytest.mark.parametrize(
         ("error", "expected_code"),
