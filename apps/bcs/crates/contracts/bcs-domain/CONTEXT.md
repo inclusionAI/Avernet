@@ -17,3 +17,15 @@ Service API re-exports the policy; HTTP adapters and application orchestration
 consume it, and repositories enforce immutable source identities at writes.
 
 Custom interface addresses are deferred to deployment binding admission; standard bindings still require URLs. The internal `Custom` binding is a selected-route representation, not an accepted wire declaration.
+
+HTTP+JSON and JSONRPC interfaces accept both HTTP and HTTPS beyond loopback.
+The shared `a2a::http_interface_address_allowed` policy rejects missing hosts,
+non-HTTP schemes, userinfo, fragments and surrounding whitespace. Admission,
+Card fetch and route derivation share that policy; the outbound adapter still
+applies deployment network policy and DNS/IP pinning on each attempt. HTTP does
+not encrypt traffic or credentials, so deployments must use trusted networks or
+HTTPS. Private-network access remains configuration-controlled, not implicitly
+authorized by an HTTP URL. This is an additive admission change for existing
+consumers, requiring no wire, persistence or configuration-schema migration.
+See the [outbound adapter boundary](../../external-clients/bcs-a2a-http/CONTEXT.md)
+and the `a2a_http_address` and `conformance_card_fetch` tests.
