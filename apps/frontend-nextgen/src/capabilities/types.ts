@@ -256,8 +256,11 @@ export interface ProductBrand {
    * 页头品牌视觉组件（接收 className 控制尺寸）。
    * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
    * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
+   * markOnly：仅渲染图形 mark、不渲染字标——收起态 rail（w-14 容器宽度低于
+   * compact 锁版预算）等图标位使用；带字标锁版的形态必须消费该语义，
+   * 否则字标被容器挤压 truncate 成省略号残迹。
    */
-  Logo: ComponentType<{ className?: string; compact?: boolean }>;
+  Logo: ComponentType<{ className?: string; compact?: boolean; markOnly?: boolean }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
