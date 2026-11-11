@@ -318,7 +318,10 @@ async fn mine_page_drift_retries_once_and_returns_the_fresh_page() {
             .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
             .await;
     }
-    // Page (sorted ids): [bot-other]; its backfill
+    fixture.set_created_at("bot-other", 2_000).await;
+    fixture.set_created_at("bot-page", 1_000).await;
+    // Page (created desc: bot-other 2000 > bot-page
+    // 1000): [bot-other]; its backfill
     // loses `bot-other` once -> drift; the ONE retry
     // re-samples, the page reproduces exactly and is
     // returned.
@@ -345,6 +348,11 @@ async fn mine_persistent_drift_reports_bot_list_changed() {
             .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
             .await;
     }
+    // Page [bot-paged] pinned by created desc
+    // (2000 > 1000) regardless of the registration
+    // clock resolution.
+    fixture.set_created_at("bot-paged", 2_000).await;
+    fixture.set_created_at("bot-spare", 1_000).await;
 
     let error = list_mine_at(&fixture.service, None, Some(BotKind::Bot), 0, 1)
         .await
@@ -373,9 +381,12 @@ async fn mine_role_drift_between_samplings_reports_bot_list_changed() {
             .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
             .await;
     }
-
-    // Sorted ids: `bot-replacement` < `bot-revoked`
-    // < `bot-stable`. The FIRST sampling's page
+    fixture.set_created_at("bot-replacement", 3_000).await;
+    fixture.set_created_at("bot-revoked", 2_000).await;
+    fixture.set_created_at("bot-stable", 1_000).await;
+    // Created-desc pins the page composition:
+    // bot-replacement (3000) > bot-revoked (2000)
+    // > bot-stable (1000). The FIRST sampling's page
     // (offset 0, limit 2) is
     // [bot-replacement, bot-revoked]; its page-backfill
     // ROLE re-derivation (the second candidate read)
@@ -411,9 +422,13 @@ async fn mine_transient_role_drift_stabilizes_and_serves_the_page() {
             .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
             .await;
     }
+    fixture.set_created_at("bot-replacement", 3_000).await;
+    fixture.set_created_at("bot-revoked", 2_000).await;
+    fixture.set_created_at("bot-stable", 1_000).await;
 
-    // Attempt 1: page [bot-replacement, bot-revoked];
-    // the role re-derivation sees `bot-revoked`
+    // Attempt 1: page [bot-replacement, bot-revoked]
+    // (created-desc pins); the role re-derivation sees
+    // `bot-revoked`
     // revoked → drift. Attempt 2: the edge is back,
     // the page reproduces exactly and is served.
     let page = list_mine_at(&fixture.service, None, Some(BotKind::Bot), 0, 2)
@@ -483,5 +498,128 @@ async fn steady_state_mine_does_not_rescan_initialized_bots() {
         fixture.counting_repo.governance_reads.load(Ordering::SeqCst) - reads_before,
         0,
         "no per-Bot governance rescan once everything is migrated"
+    );
+}
+
+/// Unfiltered page order: the Human self entry pinned
+/// FIRST, reachable physical Bots before unreachable
+/// ones (over the SAME §8.0 observation), `created_at`
+/// descending inside each group. Seeded ids
+/// deliberately contradict the created order in both
+/// reachability groups so the assertions separate the
+/// created-desc key from the legacy id order.
+#[tokio::test]
+async fn mine_unfiltered_orders_self_reachable_created_desc() {
+    let fixture = Fixture::new_with_drift(None, None).await;
+    for bot_id in ["bot-r-aaa", "bot-r-bbb", "bot-u-aaa", "bot-u-zzz"] {
+        fixture
+            .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
+            .await;
+    }
+    fixture.connect_ws("bot-r-aaa").await;
+    fixture.connect_ws("bot-r-bbb").await;
+    fixture.set_created_at("bot-r-aaa", 1_000).await;
+    fixture.set_created_at("bot-r-bbb", 3_000).await;
+    fixture.set_created_at("bot-u-aaa", 2_000).await;
+    fixture.set_created_at("bot-u-zzz", 9_000).await;
+
+    let page = list_mine(&fixture.service, None).await.expect("all");
+    let ordered: Vec<String> = page
+        .items
+        .iter()
+        .map(|bot| bot.bot_id().to_string())
+        .collect();
+    assert_eq!(
+        ordered,
+        vec![
+            "human_mine-owner".to_string(),
+            "bot-r-bbb".to_string(),
+            "bot-r-aaa".to_string(),
+            "bot-u-zzz".to_string(),
+            "bot-u-aaa".to_string(),
+        ],
+        "self first, reachable before unreachable, created_at desc inside each group"
+    );
+    assert_eq!(page.total, 5);
+}
+
+/// The order is applied BEFORE pagination: the oldest
+/// but reachable Bot leads page 1 ahead of
+/// newly-created unreachable Bots.
+#[tokio::test]
+async fn mine_reachable_group_precedes_pagination() {
+    let fixture = Fixture::new_with_drift(None, None).await;
+    for bot_id in ["bot-page-a", "bot-page-b", "bot-page-c"] {
+        fixture
+            .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
+            .await;
+    }
+    fixture.connect_ws("bot-page-c").await;
+    fixture.set_created_at("bot-page-a", 9_000).await;
+    fixture.set_created_at("bot-page-b", 8_000).await;
+    fixture.set_created_at("bot-page-c", 1_000).await;
+
+    let page = list_mine_at(&fixture.service, None, Some(BotKind::Bot), 0, 2)
+        .await
+        .expect("page 1");
+    assert_eq!(page.total, 3);
+    assert_eq!(
+        physicals(&page),
+        vec!["bot-page-c".to_string(), "bot-page-a".to_string()],
+        "the reachable group leads page 1; unreachable Bots follow created-desc"
+    );
+}
+
+/// An explicit reachability filter makes the group key
+/// constant: the page degenerates to plain `created_at`
+/// descending and still excludes the Human self entry.
+#[tokio::test]
+async fn mine_reachable_filter_orders_by_created_desc() {
+    let fixture = Fixture::new_with_drift(None, None).await;
+    for bot_id in ["bot-f-aaa", "bot-f-bbb"] {
+        fixture
+            .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
+            .await;
+    }
+    fixture.connect_ws("bot-f-aaa").await;
+    fixture.connect_ws("bot-f-bbb").await;
+    fixture.set_created_at("bot-f-aaa", 1_000).await;
+    fixture.set_created_at("bot-f-bbb", 3_000).await;
+
+    let page = list_mine(&fixture.service, Some(BotReachability::Reachable))
+        .await
+        .expect("reachable page");
+    assert_eq!(page.total, 2);
+    assert_eq!(
+        physicals(&page),
+        vec!["bot-f-bbb".to_string(), "bot-f-aaa".to_string()]
+    );
+    assert!(
+        humans(&page).is_empty(),
+        "a specified reachability still excludes the Human self entry"
+    );
+}
+
+/// Equal `created_at` values inside one group resolve
+/// by bot id ascending — the page order stays exact
+/// and repeatable.
+#[tokio::test]
+async fn mine_sort_created_ties_break_by_bot_id() {
+    let fixture = Fixture::new_with_drift(None, None).await;
+    for bot_id in ["bot-t-bbb", "bot-t-aaa"] {
+        fixture
+            .add_controlled_bot(bot_id, "mine-owner", ActorStatus::Online)
+            .await;
+    }
+    fixture.set_created_at("bot-t-bbb", 5_000).await;
+    fixture.set_created_at("bot-t-aaa", 5_000).await;
+
+    let page = list_mine_at(&fixture.service, None, Some(BotKind::Bot), 0, 20)
+        .await
+        .expect("tie page");
+    assert_eq!(
+        physicals(&page),
+        vec!["bot-t-aaa".to_string(), "bot-t-bbb".to_string()],
+        "a created_at tie keeps the deterministic id order"
     );
 }

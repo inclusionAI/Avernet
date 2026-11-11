@@ -1,6 +1,6 @@
 # Minimal AgentCard registration and storage v1
 
-Updated: 2026-11-03. Internal BCS registration/management contract; not an A2A
+Updated: 2026-11-06. Internal BCS registration/management contract; not an A2A
 extension. This replaces the earlier eight-column Card-management draft.
 
 ## Sources, names and authorization
@@ -15,8 +15,14 @@ extension. This replaces the earlier eight-column Card-management draft.
 
 Both fields absent/null selects the existing legacy Provider registration.
 Both supplied, malformed/empty URL, nonobject Card, A2A plugin mode or mixed
-webhook_url are rejected. Provider/ref, exactly one owner and existing admission
-rules remain required. Provider Admin Bearer is authenticated before external
+webhook_url are rejected. Provider/ref, a nonempty `owners` initialization snapshot
+and existing admission rules remain required. The first user becomes owner; the
+remaining distinct users become initial managers (1–101 raw input entries, trimmed
+and validated before Card fetch). This extends the Provider ID registration
+contract; the separate public v0.1 registration retains its single-owner policy.
+Identity comparison is byte-exact, including case/accent distinctions. MySQL
+requires corrected migration 043 and additive 044 (NO PAD utf8mb4_0900_bin) for actor-key uniqueness before accepting these snapshots;
+SQLite and Memory already have the required semantics. Provider Admin Bearer is authenticated before external
 access. Core repeats Provider/credential/admission checks before atomic creation.
 
 A2A Bot names always equal Card.name, including the legacy registration entry.
@@ -40,7 +46,8 @@ are rejected. A v1 register token cannot select either A2A source. Legacy
 non-A2A registrations still require their existing name.
 
 Duplicate Provider/ref returns 409; no credential replay or implicit update.
-All Bot/binding/owner/profile/audit/Card writes stay in one transaction. No
+All Bot/binding/owner/initial-manager-Human/manager-edge/profile/audit/Card writes
+stay in one transaction. No
 transaction spans network validation, and failed writes propagate as errors.
 
 ## Three persisted Bot columns
@@ -148,7 +155,10 @@ Harness rerun/deployment is claimed; the existing import-rule gate still fails
 identically on HEAD and this worktree.
 
 
-## Provider Bot name preflight (no new migration)
+## Provider Bot name preflight (historical, superseded for Card registration)
+
+The provider-ref revision below supersedes A2A name/source uniqueness and related
+preflight query budgets in this document. Ordinary non-Card Bot admission is unchanged.
 
 Registration rejects names already used by an active Bot in the same environment
 and Provider, including legacy non-A2A Bots. Different Providers may reuse names.
@@ -163,11 +173,15 @@ column shortening are deferred until existing data is corrected. The undeployed
 Development databases that already applied an earlier 040 must use a fresh disposable
 schema or an explicit reviewed repair, never silently rewrite migration history.
 
-Name-only management routes are `/a2a/providers/{provider_name}/bots` and
-`/a2a/agent-card` (GET query / PUT body), plus `/a2a/agent-card/refresh` (POST body).
-The management responses use names and omit internal identity/revision fields.
-The legacy ID routes remain compatible. New behavior requires
-fresh validation; the historical evidence file above does not validate them.
+Public management uses GET/PUT `/a2a/agents/{bot_id}/agent-card` and POST
+`/a2a/agents/{bot_id}/agent-card:refresh`. POST `/a2a/agents` returns the stable
+`bot_id` and Location points to the ID resource. PUT body contains only Card
+source and/or visibility; refresh body is empty or {}. Old name-management routes
+are removed, not aliased. GET `/a2a/agents?provider_bot_ref=...` recovers zero or
+one Provider-scoped result by exact platform reference in the existing binding. No version
+history or PATCH is introduced. Existing Provider-ID management remains ID-based;
+Provider-name registration also exposes bot_id. Named chat is a separate contract.
+Fresh validation is required; historical evidence above does not validate these changes.
 
 ### Anonymous-policy rollout
 
@@ -177,3 +191,15 @@ if appropriate, or update the Card to declare the Bearer authentication the Agen
 actually enforces. Having an old Provider downlink token does not by itself make
 an anonymous Card authenticated. Never repair this by silently downgrading a
 failed authenticated request.
+
+
+## Provider-ref registration revision
+
+Public registration requires caller-supplied provider_bot_ref and returns it with bot_id.
+Same Provider/ref conflicts rather than updating; existing atomic binding uniqueness and
+rollback remain authoritative. Names are display-only and may repeat. Card admission and
+updates no longer perform name or source-agent uniqueness reads/locks. No new table,
+index or data migration is introduced. Provider chat resolves provider_bot_ref, never name.
+The optional source extension is now [v2](extensions/source-agent/v2.md), containing
+mutable party classification, not agentId. Owners remain required under existing policy.
+See the [public contract](../../bcn-provider-agent-card-api-v0.1.zh-CN.md) for input limits.

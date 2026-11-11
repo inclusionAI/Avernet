@@ -64,6 +64,10 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # The acli CLI rows of app.py's domain-error status map, split out
     # because app.py is at the 1000-line module cap. A status table only.
     "acli_cli_status.py",
+    # The BBS context-collab rows of the same status map, split out at the
+    # same cap. Same shape as acli_cli_status.py: a status table only, no
+    # HTTP stack; concrete-service imports remain checked.
+    "context_collab_status.py",
     # The collaboration-task half of that table, split from authorization_rules
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
@@ -79,6 +83,9 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
     "authorization_rules_metadata.py",
+    # The service-Bot evaluation rows of that table, split from authorization_rules
+    # at the 1000-line module cap. Policy rows only, no HTTP stack.
+    "authorization_rules_service_eval.py",
 
     "__init__.py",
 })

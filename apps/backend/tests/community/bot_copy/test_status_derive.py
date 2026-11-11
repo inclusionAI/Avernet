@@ -47,9 +47,12 @@ def test_created_when_pre_container_apply_running():
     assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status=None) == BotCopyStatus.CREATED
 
 
-def test_file_synced_when_pre_container_terminal_and_provisioning():
+def test_created_when_pre_terminal_and_device_not_yet_active():
+    # pre done, device not yet ACTIVE (on_container not started) → CREATED.
+    # File sync is an on_container signal, so a pre-only terminal state is
+    # never FILE_SYNCED (no on_container progress to report yet).
     recs = [_apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value)]
-    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="PENDING") == BotCopyStatus.FILE_SYNCED
+    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="PENDING") == BotCopyStatus.CREATED
 
 
 def test_bot_started_when_pre_terminal_and_device_active():
@@ -72,6 +75,20 @@ def test_converged_when_on_container_succeeded_and_bot_active():
         _apply(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value),
     ]
     assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs, dst_bot_status="ACTIVE") == BotCopyStatus.CONVERGED
+
+
+def test_converged_when_on_container_partial_and_bot_active():
+    # on_container PARTIAL is a terminal state where some entries did not land
+    # but the phase finished — same convergence semantics as SUCCEEDED: with the
+    # dst device ACTIVE the copy itself is converged (the bot is up and usable;
+    # the partial remainder converges via the detail-page manifest apply, not
+    # the copy retry endpoint). Bot not yet ACTIVE → still BOT_STARTED.
+    recs_failed_after = [
+        _apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value),
+        _apply(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.PARTIAL.value),
+    ]
+    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs_failed_after, dst_bot_status="ACTIVE") == BotCopyStatus.CONVERGED
+    assert compute_copy_status(copy_row=_copy_row(), dst_apply_records=recs_failed_after, dst_bot_status="PROVISIONING") == BotCopyStatus.BOT_STARTED
 
 
 def test_pre_container_failed_is_failed_not_mistaken_for_on_success():  # Review Focus #5

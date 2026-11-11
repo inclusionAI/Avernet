@@ -202,6 +202,13 @@ class BbsResultDTO(BaseModel):
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
 
 
+class TaskStopRequestDTO(BaseModel):
+    """POST /api/v1/collaboration/tasks/{task_id}/stop 请求体(人工停止任务为 CANCELLED)。"""
+
+    reason: str = Field(default="manual_stop", description="停止原因")
+    operator: str = Field(default="manual_stop", description="操作者账号/工号")
+
+
 class TaskNodeUpdateDTO(BaseModel):
     """POST /api/v1/collaboration/tasks/nodes/update 请求体(内部节点写口:直接更新节点 run_info)。
 
@@ -932,7 +939,7 @@ def op_result_to_dto(result) -> TaskOpResultDTO:
 class TaskGrantRequestDTO(BaseModel):
     """前端开启「任务认领」grant 公共 api-key 给某 Bot 的请求体。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     bcs_bot_id: str = Field(
         ...,
@@ -953,7 +960,7 @@ class TaskGrantResultDTO(BaseModel):
 class TaskRevokeRequestDTO(BaseModel):
     """关闭「任务认领」撤销授权的请求体。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     bcs_bot_id: str = Field(..., description="撤销授权 Bot 的 real:entity")
 
@@ -979,7 +986,7 @@ TaskSettingType = Literal[
 class TaskSettingRequestDTO(BaseModel):
     """设置一种任务开关。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     setting_type: TaskSettingType = Field(..., description="任务开关类型")
     enabled: bool = Field(..., description="是否启用")

@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.task_understanding_input import TaskUnderstandingInput
-from src.domain.models.planning_input import PlanningInput
-from src.domain.models.retrieval_input import RetrievalInput
-from src.domain.models.composition_input import CompositionInput
-from src.domain.models.workspace_assembly_input import WorkspaceAssemblyInput
-from src.domain.models.compiler_input import CompilerInput
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.candidate_bundle import CandidateBundle
-from src.domain.models.worker import (
+from app.domain.models.task_understanding_input import TaskUnderstandingInput
+from app.domain.models.planning_input import PlanningInput
+from app.domain.models.retrieval_input import RetrievalInput
+from app.domain.models.composition_input import CompositionInput
+from app.domain.models.workspace_assembly_input import WorkspaceAssemblyInput
+from app.domain.models.compiler_input import CompilerInput
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.candidate_bundle import CandidateBundle
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -28,19 +28,19 @@ from src.domain.models.worker import (
     TrustLevel,
 )
 
-from src.application.services.task_understanding_service import TaskUnderstandingService
-from src.application.services.planning_service import PlanningService
-from src.application.services.retrieval_service import RetrievalService
-from src.application.services.team_composition_service import TeamCompositionService
-from src.application.services.workspace_assembly_service import WorkspaceAssemblyService
-from src.application.services.execution_packet_service import ExecutionPacketService
+from app.application.services.task_understanding_service import TaskUnderstandingService
+from app.application.services.planning_service import PlanningService
+from app.application.services.retrieval_service import RetrievalService
+from app.application.services.team_composition_service import TeamCompositionService
+from app.application.services.workspace_assembly_service import WorkspaceAssemblyService
+from app.application.services.execution_packet_service import ExecutionPacketService
 
-from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-from src.infra.planners.baseline_planner import BaselinePlanner
-from src.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
-from src.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
-from src.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
-from src.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
+from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+from app.infra.planners.baseline_planner import BaselinePlanner
+from app.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
+from app.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
+from app.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
+from app.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
 
 
 # =============================================================================

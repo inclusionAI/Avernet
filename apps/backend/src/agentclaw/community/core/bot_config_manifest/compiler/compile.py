@@ -36,11 +36,17 @@ from agentclaw.community.core.bot_config_manifest.compiler.baselines import (
 from agentclaw.community.core.bot_config_manifest.compiler.declared import declared_entries
 from agentclaw.community.core.bot_config_manifest.compiler.entries.cli_tools import compile_cli_tools
 from agentclaw.community.core.bot_config_manifest.compiler.entries.engine_config import compile_engine_config
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_config import (
+    compile_bot_config,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_file_sync import (
+    compile_bot_file_sync,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
 from agentclaw.community.core.bot_config_manifest.binding import (
@@ -162,12 +168,26 @@ class ManifestCompiler(DesiredStateCompiler):
             and isinstance(manifest, Mapping)
             and "engine_config" in manifest
         )
+        # ``bot_config`` is a mapping-valued Category like ``engine_config``:
+        # its own gate, not the list categories' ``declared(construct)``, and
+        # carries the whole kind mapping on one entry.
+        bot_config_declared = (
+            (only is None or Category.BOT_CONFIG in only)
+            and isinstance(manifest, Mapping)
+            and "bot_config" in manifest
+        )
         # Compiled in apply order, so fetches happen in the order the report lists.
         kwargs = dict(resolver=self._resolver, content=self._content)
         return DesiredState(
             script=compile_script(session, script) if script is not None else None,
             identity=await compile_identity(session, identity, **kwargs) if identity is not None else None,
             resources=await compile_resources(session, resources, **kwargs) if resources is not None else None,
+            # ``BOT_FILE_SYNC`` reclassifies the ``protocol: bot`` entries that sit
+            # under ``manifest.resources``: the same raw entries, scanned by a
+            # different compiler that owns a different convergence model. Reads
+            # them as-is — no resolver/content, because the sync builds paths and
+            # never fetches bytes through the content store.
+            bot_file_sync=compile_bot_file_sync(session, resources) if resources is not None else None,
             skills=(
                 await compile_skills(session, skills, validator=self._validator, **kwargs)
                 if skills is not None
@@ -175,6 +195,7 @@ class ManifestCompiler(DesiredStateCompiler):
             ),
             mcp=compile_mcp(mcp) if mcp is not None else None,
             engine_config=compile_engine_config(manifest.get("engine_config")) if engine_config_declared else None,
+            bot_config=compile_bot_config(manifest.get("bot_config")) if bot_config_declared else None,
             cli_tools=await compile_cli_tools(session, cli_tools, **kwargs) if cli_tools is not None else None,
         )
 

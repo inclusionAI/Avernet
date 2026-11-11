@@ -3,6 +3,8 @@
 pub mod authority;
 pub mod authority_policy;
 mod bot_self;
+mod candidate_friends;
+mod candidate_search;
 mod mine;
 pub use authority::BotAuthorityServiceImpl;
 pub use bot_self::BotSelfServiceImpl;
@@ -14,11 +16,10 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::bot_authority::ERROR_BOT_LIST_CHANGED;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
-    BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
-    BotKind, BotProvider, BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot,
-    HumanBot, InternalBotAttributesService, ListBotCandidates, ListMyBots, Page,
-    PatchBotInternalAttributes, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
-    require_authenticated_user,
+    BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider, BotReachability, BotService,
+    BotSkill, BotStatus, BotVisibility, GetBot, HumanBot, InternalBotAttributesService,
+    ListBotCandidates, ListMyBots, Page, PatchBotInternalAttributes, PhysicalBot, QueryBots,
+    SearchBotCandidates, UpdateBot, require_authenticated_user,
 };
 use bcs_service_api::application::ConnectService;
 use bcs_service_api::port::bot_authority::BotAuthorityPort;
@@ -27,7 +28,6 @@ use bcs_service_api::types::bot_authority::{
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
-    BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
     BotRegistryCoreService, ControllableCandidateQuery, ControlledBotCandidate,
@@ -42,6 +42,12 @@ pub struct BotServiceConfig {
 pub struct BotServiceImpl {
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    /// Legacy friend store retained by the constructor contract; the v1
+    /// candidate lists read approved Connect/edge relationships only.
+    /// Remove together with the constructor parameter when the remaining v1
+    /// friend-connections flows move off the legacy store (edge-cutover plan,
+    /// candidate-search task).
+    #[allow(dead_code)]
     friends: Arc<dyn FriendCoreService>,
     connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
@@ -503,6 +509,7 @@ impl BotServiceImpl {
                     BotCandidatePurpose::Discovery => BotCandidateVisibility::Discovery,
                     BotCandidatePurpose::Collaboration => BotCandidateVisibility::Collaboration,
                 },
+                viewer_kind: acting.kind,
                 friend_ids,
                 name: normalize_optional_name(command.name),
                 offset: command.offset,
@@ -548,12 +555,7 @@ impl BotService for BotServiceImpl {
             .authorize_candidate_perspective(&staff_no, &command.bot_id)
             .await?;
 
-        let friend_ids = self
-            .friends
-            .list_friends(&command.bot_id)
-            .await
-            .into_iter()
-            .collect();
+        let friend_ids = self.approved_bot_friend_ids(&command.bot_id).await?;
         self.list_candidates_with_friend_ids(command, acting, friend_ids)
             .await
     }
@@ -562,103 +564,14 @@ impl BotService for BotServiceImpl {
         &self,
         command: ListBotCandidates,
     ) -> Result<Page<BotCandidate>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.caller)?;
-        Self::validate_bot_id(&command.bot_id)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let acting = self
-            .authorize_candidate_perspective(&staff_no, &command.bot_id)
-            .await?;
-
-        let friend_ids = self
-            .connect_service
-            .list_friends(&command.bot_id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .filter(|entry| entry.kind == ActorKind::Bot)
-            .map(|entry| entry.actor_id)
-            .collect();
-        self.list_candidates_with_friend_ids(command, acting, friend_ids)
-            .await
+        self.list_candidates(command).await
     }
 
     async fn search_candidates(
         &self,
         command: SearchBotCandidates,
     ) -> Result<BotCandidateSearchResult, ApplicationError> {
-        const CANDIDATE_SEARCH_LIMIT: usize = 20;
-
-        let staff_no = Self::human_staff_no(&command.caller)?;
-        Self::validate_bot_id(&command.bot_id)?;
-        let acting = self
-            .authorize_candidate_perspective(&staff_no, &command.bot_id)
-            .await?;
-        let search = self
-            .candidate_search
-            .search_candidates(BotCandidateSearchQuery {
-                query: command
-                    .query
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string(),
-                acting_actor_id: command.bot_id,
-                visibility: match command.purpose {
-                    BotCandidatePurpose::Discovery => BotCandidateVisibility::Discovery,
-                    BotCandidatePurpose::Collaboration => BotCandidateVisibility::Collaboration,
-                },
-                limit: CANDIDATE_SEARCH_LIMIT,
-            })
-            .await;
-        let search_mode = search.mode;
-        let searched_ids = search
-            .hits
-            .iter()
-            .map(|hit| hit.bot.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let projected = self
-            .project_records(
-                self.control_plane
-                    .get_by_ids(&searched_ids, &acting.env)
-                    .await
-                    .map_err(map_service_error)?,
-            )
-            .await?;
-        let mut projected_by_id = projected
-            .into_iter()
-            .map(|bot| (bot.bot_id().to_string(), bot))
-            .collect::<HashMap<_, _>>();
-        let mut items = Vec::with_capacity(search.hits.len());
-        for hit in search.hits {
-            let Some(bot) = projected_by_id.remove(&hit.bot.bot_uuid) else {
-                continue;
-            };
-            let Bot::Physical(bot) = bot else {
-                return Err(ApplicationError::internal(
-                    "Actor search returned a Human record",
-                ));
-            };
-            let (score, short_profile) = if search_mode == CoreCandidateSearchMode::Semantic {
-                (hit.score, hit.short_profile)
-            } else {
-                (None, None)
-            };
-            items.push(BotCandidateSearchItem {
-                bot,
-                is_friend: hit.is_friend,
-                tags: hit.tags,
-                score,
-                short_profile,
-            });
-        }
-        Ok(BotCandidateSearchResult {
-            items,
-            search_mode: match search_mode {
-                CoreCandidateSearchMode::EmptyQuery => BotCandidateSearchMode::EmptyQuery,
-                CoreCandidateSearchMode::Semantic => BotCandidateSearchMode::Semantic,
-                CoreCandidateSearchMode::NameFallback => BotCandidateSearchMode::NameFallback,
-            },
-        })
+        self.search_candidates_impl(command).await
     }
 
     async fn query(&self, command: QueryBots) -> Result<Vec<Bot>, ApplicationError> {

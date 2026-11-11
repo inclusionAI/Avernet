@@ -13,19 +13,19 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import json
 
-from src.application.services.llm_conflict_analyzer import (
+from app.application.services.llm_conflict_analyzer import (
     LLMConflictAnalyzer,
     CONFLICT_ANALYSIS_PROMPT,
 )
-from src.domain.models.llm_conflict_analysis import (
+from app.domain.models.llm_conflict_analysis import (
     LLMConflictAnalysis,
     StanceAnalysis,
     LLMConflict,
     LLMAlignmentPoint,
     LLMConclusion,
 )
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.llm_response import LLMResponse, LLMUsage, FinishReason
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.llm_response import LLMResponse, LLMUsage, FinishReason
 
 
 # ============================================
@@ -61,7 +61,7 @@ def mock_llm_provider():
 @pytest.fixture(autouse=True)
 def enable_feature_flag():
     """自动启用Feature Flag"""
-    with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+    with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
         yield
 
 
@@ -262,7 +262,7 @@ class TestLLMConflictAnalyzer:
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
 
         # When: 分析冲突
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="产品团队希望快速上线，技术团队担忧质量，如何平衡？",
                 perspectives=sample_perspectives,
@@ -312,7 +312,7 @@ class TestLLMConflictAnalyzer:
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
 
         # When: 分析冲突
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="业务希望推出创新产品，合规认为有风险，如何决策？",
                 perspectives=perspectives,
@@ -360,7 +360,7 @@ class TestLLMConflictAnalyzer:
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
 
         # When: 分析冲突
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="项目是否应该推进？",
                 perspectives=perspectives,
@@ -397,7 +397,7 @@ class TestLLMConflictAnalyzer:
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
 
         # When: 分析冲突
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="测试问题",
                 perspectives=sample_perspectives,
@@ -438,7 +438,7 @@ class TestLLMConflictAnalyzer:
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
 
         # When: 分析冲突
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="测试问题",
                 perspectives=sample_perspectives,
@@ -463,7 +463,7 @@ class TestLLMConflictAnalyzer:
         mock_llm_provider.generate.return_value = create_llm_response(simple_conflict_response)
 
         analyzer = LLMConflictAnalyzer(llm_provider=mock_llm_provider)
-        with patch('src.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
+        with patch('app.application.services.llm_conflict_analyzer.FeatureFlags.is_enabled', return_value=True):
             result = analyzer.analyze(
                 question="测试问题",
                 perspectives=sample_perspectives,
@@ -483,7 +483,7 @@ class TestLLMConflictAnalyzer:
 
         assert result is None  # 无视角数据
 
-    @patch('src.application.services.llm_conflict_analyzer.FeatureFlags')
+    @patch('app.application.services.llm_conflict_analyzer.FeatureFlags')
     def test_analyze_feature_disabled(self, mock_feature_flags, mock_llm_provider, sample_perspectives):
         """测试Feature Flag禁用时跳过分析"""
         mock_feature_flags.is_enabled.return_value = False

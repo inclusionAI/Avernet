@@ -81,6 +81,11 @@ async def search_bots(
         query=body.query,
         task_id=body.task_id,
         node_id=body.node_id,
+        relay_token=body.relay_token,
+        **(
+            {"viewer_actor_type": body.viewer_actor_type, "viewer_actor_id": body.viewer_actor_id}
+            if body.viewer_actor_type is not None else {}
+        ),
     )
     return envelope(
         TaskSearchResultDTO(

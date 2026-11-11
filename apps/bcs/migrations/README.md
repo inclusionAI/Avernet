@@ -35,6 +35,13 @@ Apply remote DDL before enabling the updated queue path; SQLite bootstrap applie
 its migration automatically. Rollback binaries must retain history filtering for
 `run_reply` so internal summaries/diagnostic metadata are not exposed as chat.
 
+Session-scoped delivery lookup adds MySQL `045_delivery_session_lookup.sql` and SQLite `043_delivery_session_lookup.sql`:
+an additive `(env, session_id, source_message_id, kind, status)` index on
+`bcs_message_deliveries`. Session deletion uses it to cancel every unfinished
+lane of the Session, including Bots that are no longer participants. Apply the
+remote DDL before new server code; SQLite bootstrap applies it automatically.
+No backfill.
+
 The open-source v1 baseline starts from a single MySQL/OceanBase init schema.
 001 is the starting schema, not a snapshot of the latest schema. Fresh databases
 must apply the subsequent numbered migrations in order as well.
@@ -103,6 +110,21 @@ remains fail-closed; this rebase does not modify any running local database.
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
 added after the baseline as `002_xxx.sql`, `003_xxx.sql`, and so on.
+
+## Bot authority generated columns (MySQL/OceanBase 036)
+
+The explicitly requested OceanBase compatibility correction keeps
+`authority_owner_log` and `pending_log` on column-level
+`CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`. Their CASE expressions return
+`to_id` / `bot_id` directly (or NULL), without expression-level
+`CONVERT(... USING utf8mb4) COLLATE ...`, which was reported to cause OceanBase
+schema errors. The owner/pending unique keys and their predicates are unchanged.
+
+The original 036 is archived outside migration discovery, and the runner accepts
+only its exact archived/current checksum pair without rewriting applied records.
+This does not repair an already deployed schema or retry a partial migration.
+Follow the [compatibility and repair guidance](reconciliation/bot-authority-generated-columns.md)
+before changing a retained database.
 
 ## Schema Version Table
 

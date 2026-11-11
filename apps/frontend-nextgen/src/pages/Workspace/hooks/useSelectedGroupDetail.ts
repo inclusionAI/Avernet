@@ -1,21 +1,16 @@
 import type { GroupView } from '@/domain/collaboration';
+import { groupService } from '@/services/workspace/groupService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-/**
- * useSelectedGroupDetail —— selectedGroupId 直接写入（URL/邀请/去发言）时的成员视角兜底：
- * 若群不在「固定协作成员」列表中，切换到「仅参与临时会话」列表，而不是补拉群详情。
- *
- * 跨身份/初始空列表竞态修正（新开页 target=_blank 全新挂载）：
- * 全新挂载、身份切到人类 me 后,首个 commit 内 sessionGroups 可能仍是初始空 [] 或上一身份
- * 陈旧列表,若此刻放任“漏选即纠正”会把 membership 从 direct 错切到 session_only;
- * 而单向纠正(仅 direct→session_only)此后再也回不去,群被 session_only 视角筛掉 → 右栏空态。
- *
- * 守卫:仅当 listReadyForCurrentIdentity(由调用方 useGroupWorkspace 在 loadGroups 成功回填
- * sessionGroups、且列表仍属于当前活动身份时置 true)为真时,才按漏选纠正 membership。
- * 这保证当前可见列表确实是“为当前身份加载完成”的列表(非初始 [] 也非上一身份陈旧列表),
- * 堵住同提交竞态 cursor 抢跑。
- */
+interface SelectedGroupDetail {
+  identityId: string;
+  groupId: string;
+  group: GroupView | null;
+  error: string | null;
+}
+
+/** A sidebar page/search miss is not a membership decision: resolve the selected group by id. */
 export function useSelectedGroupDetail(
   selectedGroupId: string | null,
   sessionGroups: GroupView[],
@@ -23,46 +18,48 @@ export function useSelectedGroupDetail(
   listReadyForCurrentIdentity: boolean,
 ) {
   const activeIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
-  const membership = useWorkspaceStore((s) => s.membership);
-  const setMembership = useWorkspaceStore((s) => s.setMembership);
-
-  // 身份切换/挂载后标记恢复中，loadGroups 完成并稳定一帧后解除。
-  // 恢复期间跳过 membership 自动纠正，避免覆盖用户之前选择的视角。
-  // 初值必须为 true：暖重挂载（store 已有 selectedGroupId、列表 hook 局部 state 为空）时，
-  // 首个 effect flush 中 isGroupsLoading 闭包仍为 false（loadGroups 同步置位发生在同一 flush），
-  // 若初值为 false 三个守卫全部失守，membership 会被误翻转为 session_only。
-  const [isRestoringList, setIsRestoringList] = useState(true);
-  useEffect(() => {
-    setIsRestoringList(true);
-    if (isGroupsLoading) return;
-    // 列表已加载，下一帧解除恢复标记。
-    const timer = setTimeout(() => {
-      setIsRestoringList(false);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [activeIdentityId, isGroupsLoading]);
+  const identities = useWorkspaceStore((s) => s.identities);
+  const viewBotId = identities.find((identity) => identity.id === activeIdentityId)?.kind === 'bot'
+    ? activeIdentityId ?? undefined
+    : undefined;
+  const listed = listReadyForCurrentIdentity && sessionGroups.some((group) => group.groupId === selectedGroupId);
+  const [detail, setDetail] = useState<SelectedGroupDetail | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const retry = useCallback(() => setRetryCount((count) => count + 1), []);
+  const enabled = Boolean(selectedGroupId && activeIdentityId && !listed);
 
   useEffect(() => {
-    if (!selectedGroupId) return;
-    // 群已在当前筛选列表中：列表项已含侧边栏与聊天头部展示所需字段。
-    if (sessionGroups.some((group) => group.groupId === selectedGroupId)) {
+    // Do not use the previous identity's list, or infer permissions from a partial page.
+    if (!enabled || !listReadyForCurrentIdentity || isGroupsLoading) {
+      setDetail(null);
       return;
     }
-    // 当前可见列表尚未为当前身份加载完成(初始空 [] 或上一身份陈旧列表)——
-    // 不能据此判漏选,待当前身份列表加载完(listReadyForCurrentIdentity 翻真)再纠正。
-    if (!listReadyForCurrentIdentity) return;
-    // 列表加载/身份恢复期间等待，避免暂空列表被误判为群不属于当前视角。
-    if (isGroupsLoading || isRestoringList) return;
-    // 深链/会话邀请进入的群可能只出现在 session_only 列表；切换视角复用列表接口。
-    // 群详情 participants/owner/driver 仍由管理面板打开时按需拉取。
-    if (membership === 'direct') setMembership('session_only');
-  }, [
-    isGroupsLoading,
-    isRestoringList,
-    listReadyForCurrentIdentity,
-    membership,
-    selectedGroupId,
-    sessionGroups,
-    setMembership,
-  ]);
+    const groupId = selectedGroupId!;
+    const identityId = activeIdentityId!;
+    let cancelled = false;
+    setDetail(null);
+    const finish = (group: GroupView | null, error: string | null) => {
+      if (!cancelled) setDetail({ identityId, groupId, group, error });
+    };
+    void groupService.loadGroupDetailOrBcs(groupId, viewBotId).then((result) => {
+      if (!result.ok) {
+        finish(null, result.error.friendlyMessage);
+      } else if (result.data.groupId !== groupId || result.data.status === 'dissolved') {
+        finish(null, '指定协作群不存在、已解散或无权访问。');
+      } else {
+        finish(result.data, null);
+      }
+    }).catch(() => finish(null, '加载指定协作群失败，请稍后重试。'));
+    // Selection/identity changes, list refreshes and unmount invalidate every late response.
+    return () => { cancelled = true; };
+  }, [activeIdentityId, enabled, isGroupsLoading, listReadyForCurrentIdentity, retryCount, selectedGroupId, viewBotId]);
+
+  const current = enabled && detail?.identityId === activeIdentityId && detail.groupId === selectedGroupId
+    ? detail : null;
+  return {
+    group: current?.group ?? null,
+    error: current?.error ?? null,
+    loading: enabled && !current,
+    retry,
+  };
 }

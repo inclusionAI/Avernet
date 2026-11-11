@@ -86,6 +86,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification[_group]
     import agentclaw.community.core.agentswarm.repository.registry  # noqa: F401  ac_agent_swarm_* (run/agent/message/result_shard/round/guard_event/job/audit)
+    import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401  ac_context_collab_*
 
 
 def _metadatas() -> list[MetaData]:
@@ -103,6 +104,28 @@ def _metadatas() -> list[MetaData]:
     from agentclaw.community.core.base import Base
 
     return [Base.metadata, bot_chat_models.Base.metadata]
+
+
+def schema_signature() -> tuple:
+    """Fingerprint of the table layout :func:`create_all` would emit.
+
+    Lets a store that re-creates the same schema many times in one process
+    (the in-memory SQLite plugin, once per test) reuse an earlier result only
+    while the registered tables are unchanged. It tracks table names and their
+    column / index / constraint counts per registry, so a model module imported
+    later (or a table added to the metadata) yields a different signature.
+    """
+    import_all_models()
+    return tuple(
+        (
+            id(metadata),
+            tuple(
+                (name, len(table.columns), len(table.indexes), len(table.constraints))
+                for name, table in sorted(metadata.tables.items())
+            ),
+        )
+        for metadata in _metadatas()
+    )
 
 
 # InnoDB caps an index key at 3072 bytes (MySQL 8, DYNAMIC row format), and

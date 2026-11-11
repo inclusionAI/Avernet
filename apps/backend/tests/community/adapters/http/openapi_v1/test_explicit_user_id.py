@@ -435,6 +435,20 @@ _NO_USER_DIMENSION = {
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/by_session"),
+    # Context collab public surface (spec §6.1 openapi twin): the operator is
+    # the L2 accountability subject the delivery binds to the verified
+    # principal — admission is REFUSED, so the caller always names an end
+    # user, and the actor is reconciled server-side. No caller-supplied
+    # user_id dimension exists on the wire.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}/events",
+    ),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
+    ),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -643,7 +657,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The owner-scoped collaboration repair adds one path-addressed, user-scoped
 # operation; the non-user Bot overview stays path-addressed in the same total.
 # The relay-session task read is account-level and carries no bot_id parameter.
-_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 153}
+# Context collab contributes three bot-independent operations; service-Bot
+# evaluation contributes six bot-addressed operations. The nine Todo operations
+# add one query placement (the optional list filter) and eight operations with no
+# bot_id parameter.
+_BOT_ID_PLACEMENT = {"path": 226, "query": 2, "none": 155}
 
 
 
@@ -857,7 +875,10 @@ def test_the_pinned_number_of_operations_take_it():
     # The default-model read adds one Bot-addressed user-scoped operation.
     # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
-    assert len(taking) == 301
+    # The incoming surface has 298 user-scoped operations. All nine Todo routes
+    # are also user-scoped, so the merged surface has 307. Context-collab derives
+    # its actor from the verified principal and therefore adds no user_id query.
+    assert len(taking) == 307
 
 
 def test_the_exempt_operations_take_none():

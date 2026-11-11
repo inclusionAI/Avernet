@@ -51,18 +51,30 @@ from agentclaw.community.core.apply_engine.capabilities import (
 class SourceKind(StrEnum):
     """The protocol an entry's content travels by.
 
-    Three members, and the two that fetch are the whole extensible axis:
+    Four members. The first three fetch or carry bytes; the fourth is bot
+    copy's file-sync protocol, which converges through a sync step rather
+    than the fetch→store→write chain:
 
     * ``CONTENT`` — inline in the document. No fetch, no credential, no URL.
     * ``OSS`` — an object addressed over https, signed or plain. A public CDN
       file and a private bucket object are the same protocol; the credential
       (or its absence) is what differs.
     * ``GIT`` — a repository resolved to one commit, delivered as a tree.
+    * ``BOT`` — another bot's workspace, addressed by ``bot_id`` on the
+      source. Bot copy's file sync rides this: the entry's ``path`` is a
+      literal constant the copy serializer writes (``workspace/``), and a
+      per-engine strategy builds the real source/target paths at sync time.
+      Sync builds paths only and does not read entry bytes through the
+      content store, so this cell is open for ``resources`` only — every
+      other category's ``BOT`` cell is closed, because a bot-to-bot sync is
+      meaningful for workspace files and not for, say, an mcp registry
+      reference.
     """
 
     CONTENT = "content"
     OSS = "oss"
     GIT = "git"
+    BOT = "bot"
 
 
 @dataclass(frozen=True)
@@ -107,34 +119,69 @@ _CLI_TOOL_IS_AN_EXECUTABLE = SourceRefusal(
     "'protocol: oss'",
 )
 
+#: A bot source is bot copy's file-sync protocol: it converges another bot's
+#: workspace files to this one through a per-engine sync step, not by fetching
+#: bytes into the content store. Only ``resources`` is meaningful that way — a
+#: workspace tree is what a bot-to-bot sync moves. Every other category's
+#: ``BOT`` cell is closed with this one reason, stated once rather than per
+#: cell, because the question "why can I not reach an mcp/skill/identity/...
+#: over a bot source" has the same single answer: those are not workspace
+#: file trees and a bot source moves workspace file trees.
+_BOT_SOURCE_IS_RESOURCES_ONLY = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "a 'protocol: bot' source moves another bot's workspace files, and only "
+    "a 'resources' entry names a workspace path; declare it under 'resources' "
+    "with a 'from: <bot-source>' entry",
+)
+
+#: ``bot_config`` is a copy-only mapping a copy serialises from the source
+#: bot's live configuration rows; no entry names a source, and no protocol
+#: fetches one — the materialiser reads the source bot's rows directly. Stated
+#: once rather than per cell, the same way ``mcp``'s "no source" is: the
+#: question "why can I not reach a bot_config over content/oss/git/bot" has one
+#: answer.
+_BOT_CONFIG_HAS_NO_SOURCE = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "a bot_config entry is the copy-serialised mapping of a source bot's "
+    "configuration rows; it names no source, and no protocol fetches one",
+)
+
 #: Every cell, written out. Listed rather than defaulted: a table whose
 #: unwritten cells mean anything at all is a table that answers questions
 #: nobody ruled on.
 _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     # Identity files are single text bodies. Every protocol can carry one, and
-    # inline is the common case.
+    # inline is the common case — except a bot source, which moves workspace
+    # trees and is not a single identity body.
     (Category.IDENTITY, SourceKind.CONTENT): None,
     (Category.IDENTITY, SourceKind.OSS): None,
     (Category.IDENTITY, SourceKind.GIT): None,
+    (Category.IDENTITY, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
     # Workspace files and trees. ``git`` is what this change opens (D1): a
     # tree arrives as a tree, with no packaging step in the middle.
+    # ``bot`` is what bot copy opens: one bot's workspace files converge to
+    # another through a per-engine sync step.
     (Category.RESOURCES, SourceKind.CONTENT): None,
     (Category.RESOURCES, SourceKind.OSS): None,
     (Category.RESOURCES, SourceKind.GIT): None,
-    # A skill is a package; only a fetch can deliver one.
+    (Category.RESOURCES, SourceKind.BOT): None,
+    # A skill is a package; only a fetch can deliver one — never a bot source.
     (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
     (Category.SKILLS, SourceKind.OSS): None,
     (Category.SKILLS, SourceKind.GIT): None,
+    (Category.SKILLS, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
     # A tool is an executable file; same reasoning, different noun.
     (Category.CLI_TOOLS, SourceKind.CONTENT): _CLI_TOOL_IS_AN_EXECUTABLE,
     (Category.CLI_TOOLS, SourceKind.OSS): None,
     (Category.CLI_TOOLS, SourceKind.GIT): None,
+    (Category.CLI_TOOLS, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
     # Neither of these has a source axis at all, for two different reasons —
     # both stated, because "unsupported" without the reason is what sends a
     # caller looking for a workaround that does not exist.
     (Category.MCP, SourceKind.CONTENT): _MCP_HAS_NO_SOURCE,
     (Category.MCP, SourceKind.OSS): _MCP_HAS_NO_SOURCE,
     (Category.MCP, SourceKind.GIT): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.BOT): _MCP_HAS_NO_SOURCE,
     (Category.ENGINE_CONFIG, SourceKind.CONTENT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
@@ -144,6 +191,21 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.ENGINE_CONFIG, SourceKind.GIT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
+    # The whole category is closed (no materialiser), so its ``bot`` cell
+    # carries the category's own reason — the same way ``mcp``'s ``bot`` cell
+    # carries ``_MCP_HAS_NO_SOURCE``. The capabilities resolver intersects the
+    # category verdict first and would otherwise publish a cell whose message
+    # disagreed with the ``unsupported_category`` violation the document earns.
+    (Category.ENGINE_CONFIG, SourceKind.BOT): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
+    # bot_config is copy-only: a mapping the copy serializer writes from the
+    # source bot's live rows, never a source a protocol fetches. Every cell is
+    # closed with the one reason, exactly like ``mcp``'s four cells are.
+    (Category.BOT_CONFIG, SourceKind.CONTENT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.OSS): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.GIT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.BOT): _BOT_CONFIG_HAS_NO_SOURCE,
 }
 
 

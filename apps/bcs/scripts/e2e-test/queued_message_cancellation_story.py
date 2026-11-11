@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import time
 import uuid
 
 from caller_identity_story import WorkbenchSocket
@@ -104,6 +105,67 @@ class QueuedMessageCancellationStory(ResultQueueStory):
             if bot is not None:
                 self.callback(request, bot, "NO_REPLY")
 
+    def exercise_session_delete(self, ws: WorkbenchSocket) -> None:
+        """Deleting a Session settles its queue: queued work is never sent."""
+        kept_session = self.session_id
+        self.set_paused(True)
+        self.session_id = self.post(f"/groups/{segment(self.group_id)}/sessions", {
+            "session_title": "Deleted while its messages are queued",
+        })["session_id"]
+        doomed_session = self.session_id
+        doomed_ws = WorkbenchSocket(self.args.base_url, self.args.human, self.group_id, doomed_session)
+        try:
+            assert doomed_ws.receive(doomed_ws.connect_id).get("ok") is True, "Workbench must join the Session"
+            _, doomed_id = self.send(doomed_ws, self.bots)
+            rows = self.deliveries(doomed_id)
+            assert len(rows) == 2 and all(row["status"] == "queued" for row in rows)
+        finally:
+            doomed_ws.close()
+        self.request(f"/sessions/{segment(doomed_session)}?bot_id={segment(self.args.driver)}", method="DELETE")
+        self.session_id = kept_session
+
+        # Resume dispatch and prove the scheduler is live with a probe in the
+        # kept Session; the deleted Session's queued work must never reach
+        # the Provider, before or after the probe is dispatched. Earlier
+        # phases can leave Bot-to-Bot replies in flight on the same lanes
+        # (max_running=1), so keep completing other dispatched work while
+        # waiting instead of assuming the lanes are idle.
+        self.post("/control/provider/clear", mock=True)
+        self.set_paused(False)
+        _, probe_id = self.send(ws, [self.driver])
+        probe_run = next(row for row in self.deliveries(probe_id) if row["kind"] == "send")["run_id"]
+        bots = {bot["provider_bot_ref"]: bot for bot in self.bots}
+        completed: set[str] = set()
+
+        def complete_kept(skip: str | None) -> list[dict]:
+            # Each run is called back exactly once; the probe is skipped
+            # until it has been observed dispatching.
+            for request in self.captured():
+                body = request["body"]
+                run_id = body.get("id")
+                if (body.get("method") != "chat.send" or body.get("session_id") != kept_session
+                        or run_id == skip or run_id in completed):
+                    continue
+                bot = bots.get(body.get("to_bot", {}).get("provider_bot_ref"))
+                if bot is not None:
+                    self.callback(request, bot, "NO_REPLY")
+                    completed.add(run_id)
+            return self.deliveries(probe_id)
+
+        self.wait("probe dispatched after the delete", lambda: complete_kept(probe_run),
+                  lambda rows: any(row["kind"] == "send" and row["status"] in ("dispatching", "running")
+                                   for row in rows))
+        self.wait("Provider receives the probe", self.captured,
+                  lambda requests: any(item["body"].get("id") == probe_run for item in requests))
+        for _ in range(10):
+            assert not any(item["body"].get("session_id") == doomed_session for item in self.captured()), \
+                "Queued messages of a deleted Session must be cancelled, not dispatched"
+            time.sleep(0.1)
+        self.wait("probe work completes", lambda: complete_kept(None),
+                  lambda rows: bool(rows) and all(row["status"] in ("completed", "cancelled")
+                                                for row in rows if row["kind"] == "send"))
+        print("  PASS: deleting a Session cancels its queued messages", flush=True)
+
     def exercise(self) -> None:
         group = self.post("/groups", {
             "driver_bot": self.args.driver, "label": "Queue cancellation E2E",
@@ -193,6 +255,7 @@ class QueuedMessageCancellationStory(ResultQueueStory):
                                                         for row in rows if row["kind"] == "send"))
                 assert self.history_contains(retained_id), "Sent siblings must keep canonical history visible"
             print("  PASS: whole-message cancellation and sent-sibling/unsupported-abort safety", flush=True)
+            self.exercise_session_delete(ws)
         finally:
             ws.close()
 

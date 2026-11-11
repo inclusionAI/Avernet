@@ -29,14 +29,14 @@ class TestBaselinePlannerBasics:
 
     def test_planner_importable(self):
         """测试 Planner 可导入"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.infra.planners.baseline_planner import BaselinePlanner
 
         assert BaselinePlanner is not None
 
     def test_planner_implements_protocol(self):
         """测试 Planner 实现 Planner 协议"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.services.planner import Planner
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.services.planner import Planner
 
         planner = BaselinePlanner()
         assert isinstance(planner, Planner)
@@ -47,8 +47,8 @@ class TestPlanDraftGeneration:
 
     def test_planner_generates_plan_draft_from_task_spec(self):
         """测试从 TaskSpec 生成 PlanDraft"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -63,8 +63,8 @@ class TestPlanDraftGeneration:
 
     def test_planner_generates_strategy_summary(self):
         """测试生成策略摘要"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -79,8 +79,8 @@ class TestPlanDraftGeneration:
 
     def test_planner_generates_steps_from_subtasks(self):
         """测试从 TaskSpec.subtasks 生成步骤"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -95,8 +95,8 @@ class TestPlanDraftGeneration:
 
     def test_planner_generates_steps_from_goal_when_no_subtasks(self):
         """测试当没有 subtasks 时从 goal 生成步骤"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -115,8 +115,8 @@ class TestRequirementsInference:
 
     def test_planner_infers_role_requirements(self):
         """测试推断角色需求"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_team_composition_task_spec
 
         planner = BaselinePlanner()
@@ -131,8 +131,8 @@ class TestRequirementsInference:
 
     def test_planner_infers_knowledge_requirements(self):
         """测试推断知识需求"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -148,8 +148,8 @@ class TestRequirementsInference:
 
     def test_planner_infers_resource_requirements(self):
         """测试推断资源需求"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -168,8 +168,8 @@ class TestDependenciesGeneration:
 
     def test_planner_generates_dependencies_from_subtask_dependencies(self):
         """测试从 subtask.dependencies 生成依赖关系"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -185,8 +185,8 @@ class TestDependenciesGeneration:
 
     def test_planner_generates_sequential_dependencies_for_steps(self):
         """测试为步骤生成顺序依赖"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -206,8 +206,8 @@ class TestRisksAndQuestions:
 
     def test_planner_identifies_risks_from_high_risk_task(self):
         """测试识别高风险任务的风险"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_high_risk_task_spec
 
         planner = BaselinePlanner()
@@ -222,8 +222,8 @@ class TestRisksAndQuestions:
 
     def test_planner_identifies_risks_from_task_constraints(self):
         """测试从任务约束识别风险"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_high_risk_task_spec
 
         planner = BaselinePlanner()
@@ -239,8 +239,8 @@ class TestRisksAndQuestions:
 
     def test_planner_identifies_open_questions_from_unknowns(self):
         """测试从 TaskSpec.unknowns 识别待确认问题"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_vague_task_spec
 
         planner = BaselinePlanner()
@@ -255,8 +255,8 @@ class TestRisksAndQuestions:
 
     def test_planner_generates_assumptions(self):
         """测试生成假设"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -275,8 +275,8 @@ class TestFallbacks:
 
     def test_planner_generates_fallbacks_for_high_risk_task(self):
         """测试为高风险任务生成备选方案"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_high_risk_task_spec
 
         planner = BaselinePlanner()
@@ -291,8 +291,8 @@ class TestFallbacks:
 
     def test_planner_may_not_generate_fallbacks_for_simple_task(self):
         """测试简单任务可能不需要备选方案"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -311,8 +311,8 @@ class TestHandoffStrategy:
 
     def test_planner_generates_handoff_strategy(self):
         """测试生成交接策略"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -326,8 +326,8 @@ class TestHandoffStrategy:
 
     def test_planner_generates_escalation_points_for_high_risk(self):
         """测试为高风险任务生成升级点"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_high_risk_task_spec
 
         planner = BaselinePlanner()
@@ -346,8 +346,8 @@ class TestConfidence:
 
     def test_planner_calculates_confidence(self):
         """测试计算置信度"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -361,8 +361,8 @@ class TestConfidence:
 
     def test_planner_lower_confidence_for_vague_task(self):
         """测试模糊任务置信度较低"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import (
             get_simple_design_task_spec,
             get_vague_task_spec,
@@ -389,9 +389,9 @@ class TestRobustness:
 
     def test_planner_handles_missing_required_capabilities(self):
         """测试处理缺失的必需能力"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
-        from src.domain.models.task_spec import TaskSpec, RiskLevel
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
+        from app.domain.models.task_spec import TaskSpec, RiskLevel
 
         planner = BaselinePlanner()
         task_spec = TaskSpec(
@@ -416,8 +416,8 @@ class TestRobustness:
 
     def test_planner_handles_empty_subtasks(self):
         """测试处理空的 subtasks"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -432,8 +432,8 @@ class TestRobustness:
 
     def test_planner_handles_vague_task_spec(self):
         """测试处理模糊的 TaskSpec"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_vague_task_spec
 
         planner = BaselinePlanner()
@@ -448,8 +448,8 @@ class TestRobustness:
 
     def test_planner_generates_warning_for_unknowns(self):
         """测试为 unknowns 生成警告"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_vague_task_spec
 
         planner = BaselinePlanner()
@@ -467,8 +467,8 @@ class TestUnderstandingContext:
 
     def test_planner_aggregates_understanding_warnings(self):
         """测试聚合 understanding warnings"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import (
             get_simple_design_task_spec,
             get_understanding_warnings,
@@ -490,8 +490,8 @@ class TestUnderstandingContext:
 
     def test_planner_uses_source_prompt(self):
         """测试使用 source_prompt"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -512,8 +512,8 @@ class TestPlanningHints:
 
     def test_planner_uses_planning_hints(self):
         """测试使用 planning_hints"""
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.planning_input import PlanningInput
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()

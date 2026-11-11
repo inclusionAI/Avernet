@@ -144,15 +144,23 @@ def test_script_is_alone_in_the_phase_that_needs_no_container():
 
 
 def test_phase_b_keeps_the_declared_category_order():
-    """``identity → resources → skills → mcp``, per work-items §5."""
+    """``identity → resources → bot_file_sync → bot_config → skills → mcp``, the
+    on-container walk order. ``bot_file_sync`` sits right after ``resources``: a
+    workspace sync moves the same roots the resources materialiser owns, so it
+    runs next; ``bot_config`` sits right after ``bot_file_sync`` because its
+    render-screen handler writes dst rows through RenderScreenService, whose
+    bot-existence check needs the row ``_create_the_bot`` wrote — so it lands in
+    the on-container window, after the file roots it shares with resources."""
     on_container = [
         step.construct
         for step in sorted(order.APPLY_ORDER, key=lambda s: s.position)
         if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.ON_CONTAINER
     ]
-    assert on_container[:4] == [
+    assert on_container[:6] == [
         Category.IDENTITY,
         Category.RESOURCES,
+        Section.BOT_FILE_SYNC,
+        Category.BOT_CONFIG,
         Category.SKILLS,
         Category.MCP,
     ]

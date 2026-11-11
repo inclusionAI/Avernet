@@ -287,6 +287,7 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, BindingChannel, BindingChannels,
+    AuthorizedCandidateSearchQuery,
     BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate, RuntimeActivitySnapshot,
@@ -319,6 +320,7 @@ pub use core::{
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
     SystemMessageRecipientResult, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
+    WorkerRecommendationScope,
 };
 
 pub use core::interaction::{

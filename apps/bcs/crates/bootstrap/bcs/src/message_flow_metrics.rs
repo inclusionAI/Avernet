@@ -142,6 +142,14 @@ impl MessageFlowService for InstrumentedMessageFlowService {
         self.inner.cancel_latest_queued_message(cmd).await
     }
 
+    async fn cancel_session_deliveries(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> ServiceResult<()> {
+        self.inner.cancel_session_deliveries(session_id, reason).await
+    }
+
     async fn rebind_channel_source_message(
         &self,
         source_run_id: &str,
@@ -212,5 +220,38 @@ impl MessageFlowService for InstrumentedMessageFlowService {
             result.is_ok(),
         );
         result
+    }
+}
+
+#[cfg(all(test, feature = "prometheus-metrics"))]
+mod tests {
+    use super::*;
+    use bcs_test_support::NoopMessageFlowService;
+
+    /// Records Session queue cleanup; everything else is the Noop flow.
+    #[derive(Default)]
+    struct RecordingFlow(std::sync::Mutex<Vec<(String, String)>>);
+
+    #[async_trait::async_trait]
+    impl MessageFlowService for RecordingFlow {
+        async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> { NoopMessageFlowService.handle_web_send(cmd).await }
+        async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> { NoopMessageFlowService.handle_bot_event(cmd).await }
+        async fn handle_group_callback(&self, cmd: GroupCallbackCommand) -> ServiceResult<GroupCallbackOutcome> { NoopMessageFlowService.handle_group_callback(cmd).await }
+        async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> { NoopMessageFlowService.handle_chat_abort(cmd).await }
+        async fn register_task_run_alias(&self, task_id: &str, run_id: &str, bot_id: &str) -> ServiceResult<TaskRunAliasRegistration> { NoopMessageFlowService.register_task_run_alias(task_id, run_id, bot_id).await }
+        async fn handle_task_dispatch(&self, cmd: TaskDispatchCommand) -> ServiceResult<TaskDispatchOutcome> { NoopMessageFlowService.handle_task_dispatch(cmd).await }
+        async fn handle_task_complete(&self, cmd: TaskCompleteCommand) -> ServiceResult<TaskCompleteOutcome> { NoopMessageFlowService.handle_task_complete(cmd).await }
+        async fn cancel_session_deliveries(&self, session_id: &str, reason: &str) -> ServiceResult<()> {
+            self.0.lock().unwrap().push((session_id.into(), reason.into()));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn session_queue_cleanup_is_forwarded_not_swallowed_by_the_default() {
+        let inner = Arc::new(RecordingFlow::default());
+        let instrumented = InstrumentedMessageFlowService::new(inner.clone(), Arc::from("test"));
+        instrumented.cancel_session_deliveries("session-1", "session_deleted").await.unwrap();
+        assert_eq!(*inner.0.lock().unwrap(), vec![("session-1".to_string(), "session_deleted".to_string())]);
     }
 }

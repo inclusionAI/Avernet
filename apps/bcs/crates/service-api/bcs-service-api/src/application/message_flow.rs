@@ -533,6 +533,18 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
         Err(service_not_configured("latest queued message cancellation"))
     }
+    /// Settle the unfinished queue of a Session being deleted: never-sent rows
+    /// are cancelled, maybe-sent rows get a durable cancel intent that the
+    /// delivery scheduler aborts asynchronously. Every lane of the Session is
+    /// covered, including Bots that are no longer participants. No network
+    /// I/O happens in the caller's path.
+    async fn cancel_session_deliveries(
+        &self,
+        _session_id: &str,
+        _reason: &str,
+    ) -> ServiceResult<()> {
+        Ok(())
+    }
     async fn resolve_chat_abort_scope(
         &self,
         _group_id: &str,

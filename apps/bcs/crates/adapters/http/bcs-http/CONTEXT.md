@@ -139,6 +139,17 @@ saved source. Both extract a Provider-admin Bearer and call
 service. Memory-only test servers may omit this durable capability and return
 503 explicitly. Neither route submits a probe task or exposes credential values.
 
+Public AgentCard management uses POST `/a2a/agents`, GET/PUT
+`/a2a/agents/{bot_id}/agent-card` and POST `.../agent-card:refresh`. Location
+uses the ID resource. PUT accepts complete Card source and/or visibility, without
+a body identity; refresh accepts empty body or {}. GET `/a2a/agents` requires
+provider_bot_ref and returns items (zero or one), scoped by Provider credentials.
+Public registration requires provider_bot_ref, returns it alongside bot_id, and permits
+duplicate Card display names. Owners remain required. Old source_agent_id is rejected.
+Old name-management URLs are not aliased; no versions or PATCH endpoint exists.
+Provider-name registration also requires/returns provider_bot_ref. Chat uses
+`/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async`; it does not resolve Card.name.
+
 `GET /bots/{id}/agent-card` calls the same authorized Bot detail use case and
 returns the registered source Card, or 404 for a legacy Bot. It does not advertise
 BCS as an A2A server. Detail, discovery, search and batched query views carry the

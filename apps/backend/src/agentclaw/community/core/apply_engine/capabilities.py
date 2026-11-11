@@ -108,6 +108,10 @@ _REASON_DESKTOP = (
     "desktop bots are outside this feature's scope; no manifest category is "
     "delivered to one"
 )
+_REASON_TECLAW_FILE_SYNC = (
+    "bot file sync copies another openclaw bot's workspace; teclaw's container "
+    "is composed by its artifact at provision, not by a workspace sync step"
+)
 _REASON_UNKNOWN_ENGINE = (
     "unrecognised engine type: nothing here can say how a category would be "
     "delivered to it"
@@ -305,6 +309,21 @@ def resolve_capabilities(
         # platform-managed, independent of the teclaw switch, as ``mcp`` is.
         Category.CLI_TOOLS: None,
         Section.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
+        # Bot file sync is copy-only and openclaw-only (``copy.py``'s
+        # ``_COPYABLE_ENGINES`` already gates the surface); on teclaw the
+        # workspace is composed by the artifact, not synced. Desktop is out of
+        # scope for every category, this one included.
+        Section.BOT_FILE_SYNC: (
+            _REASON_TECLAW_FILE_SYNC if teclaw
+            else _REASON_DESKTOP if desktop
+            else None
+        ),
+        # bot config sync is engine-agnostic by the 2026-11-09 constraint —
+        # every engine uses the same kind set, so a single unconditional verdict
+        # (supported) holds for every bot, teclaw and desktop included. There is
+        # no per-engine gate here: ``copy.py``'s ``_COPYABLE_ENGINES`` narrows
+        # the copy *surface*, but the construct itself never refuses by engine.
+        Category.BOT_CONFIG: None,
         # Whether a *form* can be resolved at all. Which (category, protocol)
         # COMBINATIONS are open is a different question, answered by
         # ``source_matrix`` below — these flat rows structurally cannot express

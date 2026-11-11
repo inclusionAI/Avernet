@@ -1,49 +1,16 @@
 import { useTaskUpdateAttentionStore } from '@/stores/taskUpdateAttentionStore';
 import { create } from 'zustand';
+import type { TaskLinkedSessionTarget, TaskNavRecord, TaskNavTarget } from './taskSidePanelStoreTypes';
 
 /**
  * 任务副屏 V2 导航 Store —— 面包屑两级栈 / 选中节点 / 待消费会话跳转。
  * 状态按 task 分片（聊天内每任务一个面板 tab，共享单份下钻栈会串场）。
  * src/assets 不直接 import 本文件：宿主（extensions / 抽屉）经 props 注入资产层
  * （模式同 TaskPanelAdapterWithUser）。
+ * 数据契约拆到 taskSidePanelStoreTypes.ts；此处 re-export 保持调用方 import 面不变。
  * 守卫：Store ≤ 150 行。
  */
-export interface TaskNavRecord {
-  /** 下钻栈：空 = Level1 任务总览；顶 = 当前 Level2 节点 */
-  drillStack: string[];
-  /** 总览层选中节点（高亮 + 跳转信号源），《drillInto 不改》 */
-  selectedNodeId: string | null;
-}
-
-/**
- * 节点选中 / 下钻附带的会话跳转目标。
- * kind/groupId/botId 供 P4 宿主消费（group 需先选群再选会话）；
- * startTime/endTime 为节点执行时间窗（毫秒），消息定位用，允许 null。
- */
-export interface TaskNavTarget {
-  taskId?: string;
-  sessionId: string;
-  /** 根节点恢复原宿主会话时使用的精确站内地址。 */
-  routeUrl?: string;
-  kind: 'group' | 'bot' | 'friend' | 'unknown';
-  groupId?: string | null;
-  botId?: string | null;
-  nodeId?: string;
-  startTime?: number | null;
-  endTime?: number | null;
-}
-
-/**
- * 任务节点对应的联动会话目标。
- *
- * 旧版 ChatArea 原位联动目标，保留用于兼容已挂载状态；新节点导航统一切真实路由。
- */
-export interface TaskLinkedSessionTarget {
-  sessionId: string;
-  kind: 'group' | 'bot' | 'friend' | 'unknown';
-  groupId?: string | null;
-  botId?: string | null;
-}
+export type { TaskLinkedSessionTarget, TaskNavRecord, TaskNavTarget } from './taskSidePanelStoreTypes';
 
 export interface TaskSidePanelState {
   /** 焦点任务：副屏当前渲染/用户当前关注的任务；同一会话可承载多个任务但不并发展示。 */
@@ -59,6 +26,8 @@ export interface TaskSidePanelState {
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
+  /** 关闭 panel 时释放旧任务焦点，但不清理显式打开 intent。 */
+  clearActiveTask: (taskId?: string) => void;
   markTaskPanelOpenIntent: (taskId: string) => void;
   consumeTaskPanelOpenIntent: (taskId: string) => boolean;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
@@ -96,6 +65,11 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
       return { activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null, navByTask };
     });
   },
+  clearActiveTask: (taskId) =>
+    set((s) => ({
+      activeTaskId:
+        taskId === undefined || s.activeTaskId === taskId ? null : s.activeTaskId,
+    })),
   markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
   consumeTaskPanelOpenIntent: (taskId) => {
     const matched = get().taskPanelOpenIntentTaskId === taskId;

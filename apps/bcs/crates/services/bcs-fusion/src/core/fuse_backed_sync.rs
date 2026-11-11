@@ -16,10 +16,10 @@ use super::fuse_backed::build_participant_id;
 /// With the default `sync_retry_base_ms = 1000` and `MAX_SYNC_BACKOFF = 8s`,
 /// this gives roughly a 60-second retry window, which covers local singlebox
 /// deployments where bcsfuse may still be starting when bots first onboard.
-const MAX_SYNC_RETRIES: u32 = 10;
+pub(super) const MAX_SYNC_RETRIES: u32 = 10;
 
 /// Maximum backoff between sync retries.
-const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(8);
+pub(super) const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvailabilitySyncOutcome {

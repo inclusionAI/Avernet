@@ -92,6 +92,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import (
 from agentclaw.community.core.task.repository.task_intake_repository import (
     TaskIntakeRepository, TaskIntakeRepositoryProtocol,
 )
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    ContextCollabRepository,
+    ContextCollabRepositoryProtocol,
+)
 from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
     BcsBotTokenProvider,
 )
@@ -122,6 +126,13 @@ class TaskPersistenceModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(TaskIntakeRepositoryProtocol, to=TaskIntakeRepository, scope=singleton)
+        # Context collab(BBS context collaboration protocol spec 2026-11-09):
+        # Collet/Event 两表 ORM 仓储,与上面的 intake 绑定同款 singleton。
+        binder.bind(
+            ContextCollabRepositoryProtocol,
+            to=ContextCollabRepository,
+            scope=singleton,
+        )
         binder.bind(
             TaskActionLogRepositoryProtocol, to=TaskActionLogRepository, scope=singleton
         )

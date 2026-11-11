@@ -26,11 +26,21 @@ use serde_json::{Value, json};
 pub struct GroupCore {
     policy_gate: Option<Arc<tokio::sync::RwLock<()>>>,
     repo: Arc<dyn GroupRepoPort>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
     collaboration_registry: Option<Arc<dyn bcs_service_api::BotRegistryCoreService>>,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
 }
 
 impl GroupCore {
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
+    fn catalog_changed(&self, id: &str) {
+        if let Some(port) = &self.catalog_changes { port.group_changed(id); }
+    }
+
     async fn require_public_scope(&self, id: &str) -> ServiceResult<()> {
         if let Some(registry) = &self.collaboration_registry {
             let group = self.repo.try_get(id).await?.ok_or_else(|| ServiceError::GroupNotFound(id.into()))?;
@@ -66,6 +76,7 @@ impl GroupCore {
         Self {
             policy_gate: None,
             repo,
+            catalog_changes: None,
             collaboration_registry: None,
             event_record_factory: None,
         }
@@ -100,7 +111,10 @@ impl GroupCoreService for GroupCore {
                 return Err(ServiceError::Forbidden("same_owner groups must remain private".into()));
             }
         }
-        self.repo.upsert(group).await
+        let id = group.id.clone();
+        self.repo.upsert(group).await?;
+        self.catalog_changed(&id);
+        Ok(())
     }
 
     /// Strict authorization snapshot read; the Core forwards
@@ -121,7 +135,10 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
-        self.repo.finalize_provisioning(command).await
+        let id = command.group_id.clone();
+        self.repo.finalize_provisioning(command).await?;
+        self.catalog_changed(&id);
+        Ok(())
     }
 
     async fn mutate(&self, command: GroupMutationCommand) -> ServiceResult<Group> {
@@ -183,7 +200,7 @@ impl GroupCoreService for GroupCore {
                 .map_err(|error| ServiceError::InternalError(error.to_string()))?,
             _ => None,
         };
-        self.repo
+        let result = self.repo
             .commit_eventful_mutation(CommitGroupEventfulMutation {
                 group_id: current.id.clone(),
                 expected_version: current.version,
@@ -191,7 +208,9 @@ impl GroupCoreService for GroupCore {
                 mutation: prepared.mutation,
                 event,
             })
-            .await
+            .await?;
+        self.catalog_changed(&current.id);
+        Ok(result)
     }
 
     async fn patch_mutable_fields(
@@ -203,7 +222,9 @@ impl GroupCoreService for GroupCore {
         if patch.visibility.as_deref() == Some("public") {
             self.require_public_scope(id).await?;
         }
-        self.repo.patch_mutable_fields(id, patch).await
+        self.repo.patch_mutable_fields(id, patch).await?;
+        self.catalog_changed(id);
+        Ok(())
     }
 
     async fn get(&self, id: &str) -> Option<Group> {
@@ -264,7 +285,9 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
-        self.repo.update_label(id, label).await
+        self.repo.update_label(id, label).await?;
+        self.catalog_changed(id);
+        Ok(())
     }
 
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()> {
@@ -295,7 +318,9 @@ impl GroupCoreService for GroupCore {
     }
 
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>> {
-        self.repo.delete(id).await
+        let result = self.repo.delete(id).await?;
+        self.catalog_changed(id);
+        Ok(result)
     }
 
     async fn list(&self) -> Vec<Group> {
@@ -372,7 +397,9 @@ impl GroupCoreService for GroupCore {
     async fn update_visibility(&self, id: &str, visibility: &str) -> ServiceResult<()> {
         let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
         if visibility == "public" { self.require_public_scope(id).await?; }
-        self.repo.update_visibility(id, visibility).await
+        self.repo.update_visibility(id, visibility).await?;
+        self.catalog_changed(id);
+        Ok(())
     }
 
     async fn count_filtered(

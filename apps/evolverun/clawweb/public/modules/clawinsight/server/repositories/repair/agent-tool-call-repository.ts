@@ -94,10 +94,11 @@ export class AgentToolCallRepository {
           throw new AgentToolCallWorkloadConflictError(normalized.taskId, "authorization_scope");
         }
         if (input.toolCallLedgerGuard != null) {
-          input.toolCallLedgerGuard(
+          const prior = input.toolCallLedgerGuard(
             await this.toolCallLedger(tx, normalized.taskId, normalized.stepId),
             { runtimeTargetVersion: workload.runtimeTargetVersion, taskConfig: JSON.parse(task.config_json), taskStatus: task.status },
           );
+          if (prior) return { call: prior, created: false };
         }
         if (normalized.isWrite) {
           const active = (await tx.query<{ call_id: string }>(

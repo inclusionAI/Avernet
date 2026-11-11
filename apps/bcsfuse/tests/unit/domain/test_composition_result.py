@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.composition_result import (
+from app.domain.models.composition_result import (
     CompositionResult,
     CompositionExplanation,
     CompositionWarning,
     CompositionError,
 )
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================

@@ -57,6 +57,7 @@ export const routes = [
       { path: '/bot-workshop/scheduled-tasks/detail', component: '@/pages/BotWorkshop/ScheduledTasks' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },
       { path: '/bot-workshop/health-check', component: '@/pages/BotWorkshop/HealthCheck' },
+      { path: '/bot-workshop/evaluation/:botId/versions/:botVersion', component: '@/pages/BotWorkshop/Evaluation' },
       // split-admin-space-ticket-pages：管理后台单页拆分，空间管理/通知中心为独立路由，均不占导航位
       //（入口 = 空间切换弹层设置 icon / 通知弹层「查看全部」）。
       { path: '/space-admin', component: '@/pages/SpaceAdmin' },

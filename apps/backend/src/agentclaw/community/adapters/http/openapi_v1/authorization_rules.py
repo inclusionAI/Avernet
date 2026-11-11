@@ -5,6 +5,7 @@ from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
+from .authorization_rules_service_eval import SERVICE_EVAL_AUTHORIZATION
 from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
@@ -32,6 +33,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "service environment teardown intentionally has no Bot collaborator-level requirement"
     ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
+    **SERVICE_EVAL_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),

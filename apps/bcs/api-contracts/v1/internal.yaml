@@ -25,6 +25,13 @@ paths:
     $ref: ./internal/agent-self.yaml#/AgentSelfPath
   /api/v1/collaboration/bots/me:
     $ref: ./internal/bot-self.yaml#/BotSelfPath
+  # Read-only consumer: a candidate search may be issued by an authenticated
+  # Human browser through the BCS-only [api.auth] OAuth session chain. This
+  # route is read-only, has no public /openapi/v1 alias and no anonymous
+  # access, and BCS still requires a usable Human identity plus perspective
+  # authorization. One semantic recall returns at most 20 provider items; the
+  # response is that recall's authorized subset in provider order and is not
+  # topped up to fill a page.
   /api/v1/collaboration/bots/{bot_id}/candidates/search:
     $ref: ./openapi/bots.yaml#/BotCandidateSearchPath
   /api/v1/collaboration/templates:

@@ -25,13 +25,13 @@ class TestTaskUnderstandingInputBasics:
 
     def test_input_importable(self):
         """测试 Input 可导入"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         assert TaskUnderstandingInput is not None
 
     def test_create_input_with_minimal_fields(self):
         """测试最小字段创建输入"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(
             raw_request="帮我做一个系统方案",
@@ -43,7 +43,7 @@ class TestTaskUnderstandingInputBasics:
 
     def test_create_input_with_all_fields(self):
         """测试所有字段创建输入"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(
             raw_request="帮我组一个团队完成调研任务",
@@ -65,7 +65,7 @@ class TestTaskUnderstandingInputValidation:
 
     def test_empty_raw_request_raises_error(self):
         """测试空请求抛出错误"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -73,7 +73,7 @@ class TestTaskUnderstandingInputValidation:
 
     def test_whitespace_only_request_raises_error(self):
         """测试只有空白字符抛出错误"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -81,7 +81,7 @@ class TestTaskUnderstandingInputValidation:
 
     def test_request_too_long_raises_error(self):
         """测试过长请求抛出错误"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
         from pydantic import ValidationError
 
         long_request = "a" * 10001  # 超过默认 10000 字符限制
@@ -91,7 +91,7 @@ class TestTaskUnderstandingInputValidation:
 
     def test_request_at_max_length_succeeds(self):
         """测试最大长度请求成功"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         max_request = "a" * 10000  # 正好10000 字符
 
@@ -104,7 +104,7 @@ class TestTaskUnderstandingInputOptionalFields:
 
     def test_context_is_optional(self):
         """测试context 可选"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(raw_request="Test task")
 
@@ -112,7 +112,7 @@ class TestTaskUnderstandingInputOptionalFields:
 
     def test_known_constraints_defaults_to_empty_list(self):
         """测试 known_constraints 默认空列表"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(raw_request="Test task")
 
@@ -120,7 +120,7 @@ class TestTaskUnderstandingInputOptionalFields:
 
     def test_worker_hints_defaults_to_empty_list(self):
         """测试 worker_hints 默认空列表"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(raw_request="Test task")
 
@@ -128,7 +128,7 @@ class TestTaskUnderstandingInputOptionalFields:
 
     def test_metadata_defaults_to_empty_dict(self):
         """测试 metadata 默认空字典"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(raw_request="Test task")
 
@@ -140,7 +140,7 @@ class TestTaskUnderstandingInputWorkerHints:
 
     def test_worker_hints_accepts_valid_worker_ids(self):
         """测试 worker_hints 接受有效 worker ID"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(
             raw_request="Test task",
@@ -151,7 +151,7 @@ class TestTaskUnderstandingInputWorkerHints:
 
     def test_worker_hints_empty_list_is_valid(self):
         """测试空 worker_hints 列表有效"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(
             raw_request="Test task",
@@ -166,7 +166,7 @@ class TestTaskUnderstandingInputConstraints:
 
     def test_constraints_are_preserved(self):
         """测试约束被保留"""
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(
             raw_request="Test task",

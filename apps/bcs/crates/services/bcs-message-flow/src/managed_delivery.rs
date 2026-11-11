@@ -27,6 +27,29 @@ static QUEUE_TTL_FALLBACK_WARNED: std::sync::atomic::AtomicBool = std::sync::ato
 
 pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
 
+/// Scheduler row isolation: a never-sent Queued row whose processing keeps
+/// failing deterministically is settled by `PreparationFailed` carrying this
+/// marker. The settle skips task-intent parsing and notice construction, the
+/// very steps that may be the deterministic fault.
+pub(crate) const SCHEDULER_QUARANTINED: &str = "scheduler_quarantined";
+
+/// Session deletion cancels the Session's lane rows before the Session row is
+/// removed. Their task notices would be enqueued into a Session that is about
+/// to disappear, so the cancel carries this marker and builds no notice.
+pub(crate) const SESSION_DELETING: &str = "session_deleting";
+
+fn is_session_deleting(command: &DeliveryTransitionCommand) -> bool {
+    command.event == Event::CancelRequested
+        && command.transport_context_json.as_ref()
+            .and_then(|v| v.get(SESSION_DELETING)).and_then(|v| v.as_bool()) == Some(true)
+}
+
+pub(crate) fn is_quarantine(command: &DeliveryTransitionCommand) -> bool {
+    command.event == Event::PreparationFailed
+        && command.transport_context_json.as_ref()
+            .and_then(|v| v.get(SCHEDULER_QUARANTINED)).and_then(|v| v.as_bool()) == Some(true)
+}
+
 // Once persistence starts, cancellation of the caller must not release the Bot
 // guard while an async DB driver is still committing. Return guards on success
 // so the caller also retains its existing notification ordering.
@@ -37,7 +60,12 @@ async fn persist_with_guards<T: Send + 'static>(
     let (result, guards) = tokio::spawn(async move {
         let result = work.await;
         (result, guards)
-    }.in_current_span()).await.map_err(|err| MessageDeliveryRepoError::Storage(format!("delivery persistence task: {err}")))?;
+    }.in_current_span()).await.map_err(|err| if err.is_panic() {
+        // A panic repeats on every attempt; never classify it as retryable.
+        MessageDeliveryRepoError::Invalid("delivery persistence task panicked".into())
+    } else {
+        MessageDeliveryRepoError::Storage(format!("delivery persistence task: {err}"))
+    })?;
     Ok((result?, guards))
 }
 
@@ -139,14 +167,16 @@ impl ManagedMessageDelivery {
     ) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {
         // Only discover immutable ownership before locking. State is reloaded
         // and validated below after all source/reply-target locks are held.
+        let quarantine = is_quarantine(&command);
+        let suppress_notice = quarantine || is_session_deleting(&command);
         let initial = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         let owner = initial.target_bot_id.clone();
         let mut bots = vec![owner.clone()];
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
-        if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
+        if command.reply.is_none() && !suppress_notice && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
             | Event::DefinitelyNotSent { .. } | Event::TransportUnknown | Event::Recover) {
-            if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
+            if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Invalid(format!("task intent: {e}")))? {
                 if task.leg == crate::queued_task::TaskLeg::Dispatch { bots.push(task.manager); }
             }
         }
@@ -310,7 +340,7 @@ impl ManagedMessageDelivery {
         // Protected result park carried to the post-commit publish below:
         // (parked identity, result message id, Manager target).
         let mut pending_result_park: Option<(crate::queued_task_terminal::ResultLegIdentity, String, String)> = None;
-        if command.reply.is_none() && outcome.changed {
+        if command.reply.is_none() && outcome.changed && !suppress_notice {
             // Protected result routing (caller-enabled Manager): the §15.4
             // gate refuses ordinary content dispatch, so the failure notice
             // must carry its own protected material and park the session
@@ -345,7 +375,7 @@ impl ManagedMessageDelivery {
                             crate::queued_task_terminal::release_result_leg_identity(&flow, Some(&parked)).await;
                         }
                     }
-                    return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(error.to_string())));
+                    return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Invalid(format!("task notice: {error}"))));
                 },
             };
             if let (Some(policy), Some(reply)) = (&policy, command.reply.as_mut()) {
@@ -397,6 +427,9 @@ impl ManagedMessageDelivery {
         }
         if event == Event::Failed {
             primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
+        }
+        if quarantine {
+            primary.last_error_code = Some(SCHEDULER_QUARANTINED.into());
         }
         if let Some(reply) = &command.reply {
             let marker = if reply.message_id.starts_with("task-unknown:") { Some("task_uncertainty_notified") }
@@ -711,7 +744,17 @@ impl ManagedMessageDelivery {
             let cleanup = self.output_cleanup.get().cloned();
             let terminal = primary.clone();
             persist_with_guards(_guards, async move {
-                let result = repo.commit_transition(updates, command.reply).await?;
+                let result = match repo.commit_transition(updates.clone(), command.reply).await {
+                    // The Session was deleted while this row was pending. Its
+                    // reply/notice has no audience any more, but the row must
+                    // still converge or every later scan selects it again.
+                    Err(error) if error.is_session_missing() => {
+                        tracing::warn!(delivery_id = %terminal.delivery_id, session_id = %terminal.session_id,
+                            status = ?terminal.state.status, "session deleted; committing delivery transition without its reply");
+                        repo.commit_transition(updates, None).await?
+                    }
+                    other => other?,
+                };
                 // Persistence has committed and its transaction is closed. Do
                 // local cleanup inside the cancellation-retained task, so an
                 // aborted caller or a lagged notification receiver cannot leak.

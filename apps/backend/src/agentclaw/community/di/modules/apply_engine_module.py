@@ -46,7 +46,11 @@ from __future__ import annotations
 
 from typing import Callable
 
+import subprocess
+
 from injector import Injector, Module, inject, multiprovider, provider, singleton
+
+from agentclaw.community.log import get_logger
 
 from agentclaw.community.core.apply_engine.activation_delegates import (
     DeviceActivation,
@@ -72,6 +76,22 @@ from agentclaw.community.core.apply_engine.identity_files import (
 )
 from agentclaw.community.core.apply_engine.redeliver import TeclawRedeliver
 from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
+from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+    BotFileSyncRegistry,
+    DelegatingBotFileSyncPort,
+)
+from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
+    NasBotFileSyncPort,
+)
+from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+    BotConfigKindRegistry,
+)
+from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
+    RenderScreenSyncHandler,
+)
+from agentclaw.community.core.bot_management.render_screen_service_protocol import (
+    RenderScreenServiceProtocol,
+)
 from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.apply_engine.resource_files import (
@@ -108,6 +128,10 @@ from agentclaw.community.core.skill_center.services.local_skill_security_upload_
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -123,6 +147,8 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.di.local_skill_security_config import (
     LocalSkillSecurityObservationConfig,
 )
+
+logger = get_logger()
 
 
 class ApplyEngineModule(Module):
@@ -193,6 +219,13 @@ class ApplyEngineModule(Module):
                 resource_rows=lambda bot_id: resource_services.create(bot_id=bot_id),
                 cli_tool_service=cli_tool_service_factory("arca"),
                 shared_skills=injector.get(SharedSkillPort),
+                # The delegating port resolves the destination's engine and
+                # dispatches; ARCA (openclaw) reaches the NAS-rsync strategy,
+                # every other engine the noop refusal.
+                file_sync=injector.get(BotFileSyncPort),
+                # The kind registry is engine-agnostic — every engine uses the
+                # same kind set, one unconditional registration on both bundles.
+                bot_config=injector.get(BotConfigKindRegistry),
             )
 
         return device_ports
@@ -254,6 +287,12 @@ class ApplyEngineModule(Module):
                 # family whatever the switch says.
                 cli_tool_service=cli_tool_service_factory("teclaw"),
                 shared_skills=injector.get(SharedSkillPort),
+                # The delegating port resolves teclaw to the noop refusal — the
+                # capabilities table already refuses BOT_FILE_SYNC on teclaw at
+                # PUT; this is the same verdict the apply path honours.
+                file_sync=injector.get(BotFileSyncPort),
+                # Engine-agnostic kind registry — the same one device binds.
+                bot_config=injector.get(BotConfigKindRegistry),
             )
 
         return platform_ports
@@ -401,6 +440,121 @@ class ApplyEngineModule(Module):
         if not isinstance(queries, SharedSkillPort):
             raise TypeError(f"{type(queries).__name__} does not implement SharedSkillPort")
         return queries
+
+    # ── bot file sync: the per-engine dispatch + the NAS-rsync strategy ─────
+
+    @singleton
+    @provider
+    def bot_file_sync_runner(self) -> Callable[..., "subprocess.CompletedProcess"]:
+        """A subprocess wrapper for the NAS-rsync strategy — logging + error
+        translation, the shape publish's ``_run_local_command`` has.
+
+        Not a ``BotBuildService`` method (that lives in ``core.service_bot``,
+        which ``apply_engine`` does not depend on — importing it here would be
+        an undeclared cross-module edge the boundary test catches). A thin
+        ``@provider`` rather than a Protocol keeps the port bundle passing a
+        concrete callable: the backend runs no static type checker, and a
+        Protocol over a one-method shape buys nothing binding does not already.
+        """
+
+        def run_command(
+            *,
+            cmd: list[str],
+            command_name: str,
+            error_message: str,
+            timeout_seconds: float | None = None,
+        ) -> "subprocess.CompletedProcess":
+            logger.info("bot_file_sync.run command=%s argv=%s", command_name, " ".join(cmd))
+            run_kwargs: dict = {
+                "capture_output": True,
+                "text": True,
+                "encoding": "utf-8",
+                "errors": "replace",
+            }
+            if timeout_seconds is not None:
+                run_kwargs["timeout"] = timeout_seconds
+            try:
+                result = subprocess.run(cmd, **run_kwargs)
+            except FileNotFoundError:
+                logger.error("bot_file_sync.run %s command not found", command_name)
+                raise RuntimeError(f"{command_name} command not found")
+            except subprocess.TimeoutExpired as exc:
+                logger.error("bot_file_sync.run %s timed out", command_name)
+                raise RuntimeError(
+                    f"{error_message}: command timed out"
+                ) from exc
+            if result.returncode != 0:
+                logger.error(
+                    "bot_file_sync.run %s failed returncode=%s stderr=%s",
+                    command_name, result.returncode, result.stderr,
+                )
+                raise RuntimeError(f"{error_message}: {result.stderr}")
+            return result
+
+        return run_command
+
+    @singleton
+    @provider
+    @inject
+    def bot_file_sync_registry(
+        self,
+        bot_repo: BotRepository,
+        sandbox_registry: EngineSandboxRegistry,
+        path_factory: WorkspacePathFactory,
+        run_command: Callable[..., "subprocess.CompletedProcess"],
+    ) -> BotFileSyncRegistry:
+        """One strategy per engine that has a real implementation.
+
+        v1 registers the NAS-rsync strategy under ``openclaw`` only —
+        ``copy.py``'s ``_COPYABLE_ENGINES`` and the capabilities table gate the
+        surface to openclaw, and the strategy is family-generic so widening to
+        a sibling later is one more row here. Engines absent (teclaw, the
+        fastdisk family) resolve to the noop refusal the materialiser already
+        translates to a FAILED entry.
+        """
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        nas = NasBotFileSyncPort(
+            bot_repo=bot_repo,
+            sandbox_registry=sandbox_registry,
+            path_factory=path_factory,
+            run_command=run_command,
+            env=get_current_env(),
+        )
+        return BotFileSyncRegistry({"openclaw": nas})
+
+    @singleton
+    @provider
+    def bot_file_sync_port(
+        self, registry: BotFileSyncRegistry
+    ) -> BotFileSyncPort:
+        """The one port the materialiser calls: resolves by dst engine, delegates.
+
+        Bound on both the ARCA and teclaw port bundles; a teclaw dst resolves
+        to the noop refusal (the capabilities table already refuses
+        BOT_FILE_SYNC on teclaw at PUT, this is the belt-and-braces second
+        refusal the apply path also honours)."""
+        return DelegatingBotFileSyncPort(registry)
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_kind_registry(
+        self,
+        render_screen_service: RenderScreenServiceProtocol,
+    ) -> BotConfigKindRegistry:
+        """One handler per bot_config kind that has a real implementation.
+
+        v1 registers the ``render_screen`` handler only — the schema kind table
+        matches it, so a manifest naming any other kind is refused at PUT and
+        never reaches apply. Bot config sync is engine-agnostic, so the handler
+        is bound once and the same registry answers on both the ARCA and
+        teclaw port bundles. A future ``task_nav`` kind is one more row here
+        plus a handler module — the kind set is the registry's, not the
+        construct's."""
+        return BotConfigKindRegistry({
+            "render_screen": RenderScreenSyncHandler(render_screen_service),
+        })
 
     # ── who hears how an apply ended ───────────────────────────────────────
 

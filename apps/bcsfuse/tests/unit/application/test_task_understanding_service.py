@@ -31,14 +31,14 @@ class TestTaskUnderstandingServiceBasics:
 
     def test_service_importable(self):
         """测试 Service 可导入"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
+        from app.application.services.task_understanding_service import TaskUnderstandingService
 
         assert TaskUnderstandingService is not None
 
     def test_service_initializes_with_understander(self):
         """测试 Service 需要 understander 依赖"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -51,9 +51,9 @@ class TestTaskUnderstandingServiceProcessing:
 
     def test_process_simple_request(self):
         """测试处理简单请求"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -70,9 +70,9 @@ class TestTaskUnderstandingServiceProcessing:
 
     def test_process_request_with_context(self):
         """测试处理带上下文的请求"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -89,9 +89,9 @@ class TestTaskUnderstandingServiceProcessing:
 
     def test_process_request_with_constraints(self):
         """测试处理带约束的请求"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -113,9 +113,9 @@ class TestTaskUnderstandingServiceWarnings:
 
     def test_warnings_from_understander_preserved(self):
         """测试 understander 返回的 warnings 被保留"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -136,15 +136,15 @@ class TestTaskUnderstandingServiceErrors:
 
     def test_errors_from_understander_preserved(self):
         """测试 understander 返回的 errors 被保留"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_understanding_result import TaskUnderstandingResult
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_result import TaskUnderstandingResult
 
         # 创建一个返回 errors 的 mock understander
         class ErrorReturningUnderstander:
             def understand(self, input_data):
                 result = TaskUnderstandingResult()
-                from src.domain.models.task_understanding_result import UnderstandingError
+                from app.domain.models.task_understanding_result import UnderstandingError
                 result.errors.append(UnderstandingError(
                     field="test",
                     message="Test error from understander",
@@ -165,9 +165,9 @@ class TestTaskUnderstandingServiceExceptionHandling:
 
     def test_understander_exception_returns_error(self):
         """测试 understander 抛异常时返回 error"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_understanding_result import TaskUnderstandingResult
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_result import TaskUnderstandingResult
 
         # 创建一个会抛异常的 mock understander
         class BrokenUnderstander:
@@ -189,9 +189,9 @@ class TestTaskUnderstandingServiceContextUsage:
 
     def test_context_reduces_unknowns(self):
         """测试上下文减少 unknowns"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -215,9 +215,9 @@ class TestTaskUnderstandingServiceContextUsage:
 
     def test_worker_hints_preserved(self):
         """测试 worker hints 被保留"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)

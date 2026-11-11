@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Optional post-commit catalog change notifications for Group creation, provisioning, metadata, visibility and deletion.
+
 - Group session service implementation for BCS.
 - Group lifecycle, membership, and session coordination rules.
 - Application-facing orchestration for group creation, updates, and state changes.

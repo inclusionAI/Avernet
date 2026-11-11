@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.application.services.workspace_assembly_service import WorkspaceAssemblyService
-from src.domain.services.workspace_assembler import WorkspaceAssembler
-from src.domain.models.workspace_assembly_input import WorkspaceAssemblyInput, AssemblyHints
-from src.domain.models.workspace_assembly_result import WorkspaceAssemblyResult
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
-from src.domain.models.candidate_bundle import CandidateBundle
-from src.domain.models.worker import (
+from app.application.services.workspace_assembly_service import WorkspaceAssemblyService
+from app.domain.services.workspace_assembler import WorkspaceAssembler
+from app.domain.models.workspace_assembly_input import WorkspaceAssemblyInput, AssemblyHints
+from app.domain.models.workspace_assembly_result import WorkspaceAssemblyResult
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.candidate_bundle import CandidateBundle
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel,
     Availability, TrustLevel,
@@ -46,7 +46,7 @@ class MockWorkspaceAssembler:
             return self._result
 
         # Default successful result
-        from src.domain.models.workspace import Workspace, WorkspaceStatus
+        from app.domain.models.workspace import Workspace, WorkspaceStatus
 
         workspace = Workspace(
             id="wsp_mock_001",
@@ -277,7 +277,7 @@ class TestWorkspaceAssemblyServiceIntegration:
         sample_candidate_bundle: CandidateBundle,
     ):
         """测试服务与真实 BaselineWorkspaceAssembler 集成"""
-        from src.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
+        from app.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
 
         assembler = BaselineWorkspaceAssembler()
         service = WorkspaceAssemblyService(assembler=assembler)
@@ -302,7 +302,7 @@ class TestWorkspaceAssemblyServiceIntegration:
         sample_plan_draft: PlanDraft,
     ):
         """测试服务处理最小输入"""
-        from src.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
+        from app.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
 
         assembler = BaselineWorkspaceAssembler()
         service = WorkspaceAssemblyService(assembler=assembler)

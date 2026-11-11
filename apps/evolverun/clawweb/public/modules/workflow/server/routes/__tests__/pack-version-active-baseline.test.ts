@@ -78,11 +78,27 @@ it('requires edit, a unique active row, and never allows PUT without a draft', a
   await f.db.exec('UPDATE workflow_deploy_history SET is_active = 1'); await f.history.insert({ workflowId: 'flow', packId: 'pack', deployNumber: 2, version: 2, action: 'deploy', tagName: 'deploy/flow/#2', specJson: JSON.stringify(spec), isActive: true });
   expect((await fetch(`${f.base}?version=current`)).status).toBe(404);
 }, 30000);
-it('rejects mismatched Pack, DB content and active tag without exposing files', async () => {
+it('rejects mismatched Pack but warns on active DB content mismatch', async () => {
   const f = await fixture(); await f.db.exec("UPDATE workflow_deploy_history SET pack_id = 'other'"); let r = await fetch(`${f.base}?version=current`); expect(r.status).toBe(503); expect(await r.text()).not.toContain('asset.txt');
-  await f.db.exec("UPDATE workflow_deploy_history SET pack_id = 'pack', spec_json = ?", [JSON.stringify({ ...spec, title: 'different' })]); r = await fetch(`${f.base}?version=current`); expect(r.status).toBe(503);
+  await f.db.exec("UPDATE workflow_deploy_history SET pack_id = 'pack', spec_json = ?", [JSON.stringify({ ...spec, title: 'different' })]); r = await fetch(`${f.base}?version=current`);
+  expect(r.status).toBe(200); expect(await r.json()).toMatchObject({ baseCommit: f.sha, activeHistoryMismatch: true });
   await f.db.exec('UPDATE workflow_deploy_history SET spec_json = ?', [JSON.stringify(spec)]); runGit(f.seed, ['commit', '--allow-empty', '-m', 'unrelated']); runGit(f.seed, ['push', f.bare, 'HEAD:refs/heads/wf/flow']);
-  r = await fetch(`${f.base}?version=current`); expect(r.status).toBe(200); expect(await r.json()).toMatchObject({ baseCommit: f.sha });
+  r = await fetch(`${f.base}?version=current`);
+  expect(r.status).toBe(200); expect(await r.json()).not.toHaveProperty('activeHistoryMismatch');
+}, 30000);
+it('warns on a legacy active-history omission of the authored workflow version', async () => {
+  const f = await fixture();
+  const authored = { ...spec, version: '0' as const };
+  writeFileSync(path.join(f.seed, 'packs/pack/workflows/flow.yaml'), stringify(authored));
+  runGit(f.seed, ['add', '.']); runGit(f.seed, ['commit', '-m', 'legacy version omission']);
+  const legacySha = runGit(f.seed, ['rev-parse', 'HEAD']);
+  runGit(f.seed, ['tag', '-fa', 'deploy/flow/#1', '-m', 'release']);
+  runGit(f.seed, ['push', '--force', f.bare, `${legacySha}:refs/heads/wf/flow`, 'refs/tags/deploy/flow/#1']);
+  const response = await fetch(`${f.base}?version=current`);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ baseCommit: legacySha, baseRef: 'refs/tags/deploy/flow/#1', activeHistoryMismatch: true });
+  const row = (await f.db.query<{ spec_json: string }>('SELECT spec_json FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', ['flow']))[0];
+  expect(JSON.parse(row.spec_json)).not.toHaveProperty('version');
 }, 30000);
 it('fails closed when the active baseline changes while Git is read', async () => {
   const f = await fixture(); const query = f.db.query.bind(f.db); let activeReads = 0;

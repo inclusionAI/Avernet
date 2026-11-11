@@ -11,7 +11,7 @@ use bcs_db_api::{
     DbRow, DbValue as Value, db_get_column, db_get_column_opt,
 };
 use bcs_service_api::{
-    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    ActorKind, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch, ServiceError, ServiceResult,
 };
@@ -19,6 +19,7 @@ use bcs_service_api::port::repo::bot_control_plane::{
     BotCallerConfiguration, CallerConfigurationSync, CallerIdentitySnapshot,
 };
 
+use super::candidate_friend_set::friend_uuids_cte;
 use super::PersistentBotRepo;
 use super::caller_config::caller_cache_key;
 use crate::{BotInfo, bot_info_json_set, serialized_string_value};
@@ -38,8 +39,8 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
         .as_deref()
     {
-        Some("human") => bcs_service_api::ActorKind::Human,
-        _ => bcs_service_api::ActorKind::Bot,
+        Some("human") => ActorKind::Human,
+        _ => ActorKind::Bot,
     };
     let status = match db_get_column_opt::<String>(row, "status")
         .map_err(|error| ServiceError::InternalError(error.to_string()))?
@@ -185,31 +186,21 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let name_filter = name.unwrap_or_default().to_lowercase();
-        let visibility_filter = match query.visibility {
-            BotCandidateVisibility::Discovery => "b.visibility IN ('public', 'protected')",
-            BotCandidateVisibility::Collaboration => {
+        let visibility_filter = match (query.viewer_kind, query.visibility) {
+            (ActorKind::Human, BotCandidateVisibility::Discovery) => {
+                "b.user_visibility IN ('public', 'protected')"
+            }
+            (ActorKind::Human, BotCandidateVisibility::Collaboration) => {
+                "b.user_visibility = 'public' OR f.bot_uuid IS NOT NULL"
+            }
+            (_, BotCandidateVisibility::Discovery) => {
+                "b.visibility IN ('public', 'protected')"
+            }
+            (_, BotCandidateVisibility::Collaboration) => {
                 "b.visibility = 'public' OR f.bot_uuid IS NOT NULL"
             }
         };
-        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
-        friend_ids.sort_unstable();
-        let friend_rows = if friend_ids.is_empty() {
-            "SELECT NULL AS bot_uuid WHERE 1 = 0".to_string()
-        } else {
-            friend_ids
-                .iter()
-                .enumerate()
-                .map(|(index, _)| {
-                    if index == 0 {
-                        "SELECT ? AS bot_uuid"
-                    } else {
-                        "SELECT ?"
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" UNION ALL ")
-        };
-        let common = format!("WITH friend_uuids AS ({friend_rows}) ");
+        let (common, friend_param) = friend_uuids_cte(self.flavor, &query.friend_ids)?;
         let page_sql = format!(
             "{common}\
              SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
@@ -230,10 +221,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             self.flavor.unix_ts("b.gmt_create"),
             self.flavor.unix_ts("b.gmt_modified"),
         );
-        let mut base_params = friend_ids
-            .iter()
-            .map(|friend_id| Value::from(friend_id.as_str()))
-            .collect::<Vec<_>>();
+        let mut base_params = vec![friend_param];
         base_params.extend([
             Value::from(query.env.as_str()),
             Value::from(query.acting_bot_id.as_str()),
@@ -336,36 +324,14 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         {
             return Ok((Vec::new(), 0));
         }
-        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
-        friend_ids.sort_unstable();
-        friend_ids.dedup();
-        let friend_rows = if friend_ids.is_empty() {
-            "SELECT NULL AS bot_uuid WHERE 1 = 0".to_string()
-        } else {
-            friend_ids
-                .iter()
-                .enumerate()
-                .map(|(index, _)| {
-                    if index == 0 {
-                        "SELECT ? AS bot_uuid"
-                    } else {
-                        "SELECT ?"
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" UNION ALL ")
-        };
-        let common = format!("WITH friend_uuids AS ({friend_rows}) ");
+        let (common, friend_param) = friend_uuids_cte(self.flavor, &query.friend_ids)?;
         let mut predicates = vec![
             "b.env = ?".to_string(),
             "COALESCE(b.is_deleted, 0) = 0".to_string(),
             "COALESCE(b.actor_kind, 'bot') = 'bot'".to_string(),
             "b.bot_uuid != ?".to_string(),
         ];
-        let mut params = friend_ids
-            .iter()
-            .map(|friend_id| Value::from(friend_id.as_str()))
-            .collect::<Vec<_>>();
+        let mut params = vec![friend_param];
         params.push(Value::from(query.env.as_str()));
         params.push(Value::from(query.acting_bot_id.as_str()));
         if let Some(values) = bot_uuid_filter.as_ref() {
@@ -376,13 +342,18 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             params.extend(values.iter().map(|value| Value::from(value.as_str())));
         }
         if let Some(search_text) = search_text.as_ref() {
-            let (card_sql, card_params) = crate::a2a_search::card_text_match(self.flavor, "b.agent_card", search_text);
-            predicates.push(format!("(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR \
-                (b.agent_card IS NULL AND INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0) OR \
-                (b.agent_card IS NOT NULL AND ({card_sql})) OR INSTR(LOWER(b.bot_uuid), ?) > 0)"));
-            params.extend(vec![Value::from(search_text.as_str()); 2]);
-            params.extend(card_params);
-            params.push(Value::from(search_text.as_str()));
+            if query.name_only {
+                predicates.push("INSTR(LOWER(COALESCE(b.name, '')), ?) > 0".to_string());
+                params.push(Value::from(search_text.as_str()));
+            } else {
+                let (card_sql, card_params) = crate::a2a_search::card_text_match(self.flavor, "b.agent_card", search_text);
+                predicates.push(format!("(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR \
+                    (b.agent_card IS NULL AND INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0) OR \
+                    (b.agent_card IS NOT NULL AND ({card_sql})) OR INSTR(LOWER(b.bot_uuid), ?) > 0)"));
+                params.extend(vec![Value::from(search_text.as_str()); 2]);
+                params.extend(card_params);
+                params.push(Value::from(search_text.as_str()));
+            }
         }
         if let Some(values) = visibility_filter.as_ref() {
             predicates.push(format!(
@@ -391,11 +362,22 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             ));
             params.extend(values.iter().map(|value| Value::from(value.as_str())));
         } else {
-            match query.visibility {
-                BotCandidateVisibility::Discovery => {
+            match (
+                query.viewer_kind.unwrap_or(ActorKind::Bot),
+                query.visibility,
+            ) {
+                (ActorKind::Human, BotCandidateVisibility::Discovery) => {
+                    predicates.push("b.user_visibility IN ('public', 'protected')".to_string());
+                }
+                (ActorKind::Human, BotCandidateVisibility::Collaboration) => {
+                    predicates.push(
+                        "(b.user_visibility = 'public' OR f.bot_uuid IS NOT NULL)".to_string(),
+                    );
+                }
+                (_, BotCandidateVisibility::Discovery) => {
                     predicates.push("b.visibility IN ('public', 'protected')".to_string());
                 }
-                BotCandidateVisibility::Collaboration => {
+                (_, BotCandidateVisibility::Collaboration) => {
                     predicates.push("(b.visibility = 'public' OR f.bot_uuid IS NOT NULL)".to_string());
                 }
             }
@@ -507,8 +489,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         if let Some(kind) = query.kind {
             sql.push_str(" AND COALESCE(actor_kind, 'bot') = ?");
             params.push(Value::from(match kind {
-                bcs_service_api::ActorKind::Bot => "bot",
-                bcs_service_api::ActorKind::Human => "human",
+                ActorKind::Bot => "bot",
+                ActorKind::Human => "human",
             }));
         }
         if let Some(name) = query

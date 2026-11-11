@@ -2,19 +2,33 @@
 import { WorkOrderTabs } from '@/components/Admin/WorkOrderTabs';
 import type { WorkOrder } from '@/domain/admin/models';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mockNavigate = jest.fn();
 const mockMarkOneRead = jest.fn().mockResolvedValue(true);
 const mockRefreshUnread = jest.fn().mockResolvedValue(undefined);
 let mockWorkOrder: WorkOrder;
+let mockEmpty = false;
+let mockCategory = 'APPROVAL';
+let mockError: { message: string } | null = null;
+const mockSetView = jest.fn();
+const mockSetCategory = jest.fn();
+const mockSetPageNo = jest.fn();
+const mockFetchList = jest.fn().mockResolvedValue(undefined);
+const mockMarkAllRead = jest.fn().mockResolvedValue(undefined);
+beforeEach(() => {
+  mockEmpty = false;
+  mockCategory = 'APPROVAL';
+  mockError = null;
+  jest.clearAllMocks();
+});
 
 jest.mock('@umijs/max', () => ({ useNavigate: () => mockNavigate }));
 
 jest.mock('@/hooks/useNotifications', () => ({
   useNotifications: () => ({
     unreadCount: 1,
-    markAllRead: jest.fn(),
+    markAllRead: mockMarkAllRead,
     markOneRead: mockMarkOneRead,
     refreshUnread: mockRefreshUnread,
   }),
@@ -23,18 +37,18 @@ jest.mock('@/hooks/useNotifications', () => ({
 jest.mock('@/hooks/useWorkOrders', () => ({
   useWorkOrders: () => ({
     view: 'pending_mine',
-    category: 'ALL',
+    category: mockCategory,
     pageNo: 1,
     pageSize: 10,
-    items: [mockWorkOrder],
+    items: mockEmpty ? [] : [mockWorkOrder],
     total: 1,
     loading: false,
-    error: null as string | null,
-    setView: jest.fn(),
-    setCategory: jest.fn(),
-    setPageNo: jest.fn(),
+    error: mockError,
+    setView: mockSetView,
+    setCategory: mockSetCategory,
+    setPageNo: mockSetPageNo,
     setPageSize: jest.fn(),
-    fetchList: jest.fn(),
+    fetchList: mockFetchList,
     approve: jest.fn(),
     reject: jest.fn(),
     getDetail: jest.fn(),
@@ -91,8 +105,48 @@ describe('WorkOrderTabs', () => {
     fireEvent.click(screen.getByRole('button', { name: '张三回复了你的帖子' }));
     await screen.findByRole('button', { name: '张三回复了你的帖子' });
     expect(mockMarkOneRead).toHaveBeenCalledWith(9002);
-    expect(mockNavigate).toHaveBeenCalledWith(
-      '/lab/community?topicId=topic-1&postId=post-1',
-    );
+    expect(mockNavigate).toHaveBeenCalledWith('/lab/community?topicId=topic-1&postId=post-1');
+  });
+});
+
+describe('通知中心设计交互', () => {
+  it('纵向视图切换并重置页码', () => {
+    render(<WorkOrderTabs />);
+    expect(screen.getByRole('navigation', { name: '通知视图' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '全部' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '待我处理' })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(screen.getByRole('button', { name: /^已处理$/ }));
+    expect(mockSetView).toHaveBeenCalledWith('processed');
+    expect(mockSetPageNo).toHaveBeenCalledWith(1);
+  });
+
+  it('分类切换并重置页码', () => {
+    render(<WorkOrderTabs />);
+    fireEvent.click(screen.getByRole('tab', { name: '通知类' }));
+    expect(mockSetCategory).toHaveBeenCalledWith('NOTIFICATION');
+    expect(mockSetPageNo).toHaveBeenCalledWith(1);
+  });
+
+  it('全部已读完成后刷新当前列表', async () => {
+    render(<WorkOrderTabs />);
+    fireEvent.click(screen.getByRole('button', { name: '标记为全部已读' }));
+    await waitFor(() => expect(mockFetchList).toHaveBeenCalledTimes(1));
+    expect(mockMarkAllRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('空态保留插图，不再提供返回全部的筛选入口', () => {
+    mockEmpty = true;
+    mockCategory = 'APPROVAL';
+    render(<WorkOrderTabs />);
+    expect(screen.getByText('暂无通知')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '清除筛选' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '全部' })).not.toBeInTheDocument();
+  });
+
+  it('请求失败仍提供重试入口', () => {
+    mockError = { message: '网络连接失败' };
+    render(<WorkOrderTabs />);
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(mockFetchList).toHaveBeenCalledTimes(1);
   });
 });

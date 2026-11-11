@@ -15,7 +15,7 @@ from tests.community.core.bot_management.aicoding.test_restart_fastdisk import c
 @pytest.mark.parametrize('detected', [detection(), detection('skip_no_fastdisk'), ConnectionError('private probe')])
 @pytest.mark.parametrize('result', [partial_response(), partial_response(completeness='degraded'),
                                     committed(completeness='degraded')])
-def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(blocking, detected, result, caplog, monkeypatch):
+def test_partial_receipts_are_only_read_for_confirmed_fastdisk(blocking, detected, result, caplog, monkeypatch):
     monkeypatch.setenv('SERVER_ENV', 'pre')
     execute = executor([response('running'), result, result], detected=detected)
     with patch.object(backup.time, 'sleep'):
@@ -24,10 +24,16 @@ def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(bloc
             owner_id='o', blocking_enabled=lambda: blocking,
         )
         check()
-    assert execute.call_count == 4
+    if isinstance(detected, Exception) or json.loads(detected.stdout)['status'] != 'run':
+        assert execute.call_count == 1  # No helper or partial receipt without live mounts.
+        assert 'event=aicoding_restart_backup' not in caplog.text
+        assert 'status=partial_success' not in caplog.text
+        assert check.required is False
+        return
+    assert execute.call_count == 3
     assert execute.call_args.args == (backup.command('status', OPERATION),)
     partial_logs = [r for r in caplog.records if 'status=partial_success' in r.getMessage()]
-    assert len(partial_logs) == 2
+    assert len(partial_logs) == 1
     for record in partial_logs:
         text = record.getMessage()
         assert record.levelno == logging.WARNING
@@ -38,7 +44,7 @@ def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(bloc
         assert f'operation_id={OPERATION}' in text
         assert 'generation_id=g' in text
     assert 'phase=prepared status=partial_success' in caplog.text
-    assert 'phase=verify status=partial_success' in caplog.text
+    assert 'phase=verify status=' not in caplog.text
     assert 'phase=prepare status=failed' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
@@ -49,39 +55,36 @@ def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(bloc
     ('error_code', None), ('error_code', 'archive_failed'), ('failed_phase', None),
     ('failed_phase', 'publish'), ('completeness', 'failed'), ('completeness', 'success'),
 ])
-@pytest.mark.parametrize('phase', ['prepare', 'verify'])
-def test_invalid_partial_receipt_is_still_failure_under_enabled_guard(field, value, phase, caplog):
+@pytest.mark.parametrize('delivery', ['start', 'poll'])
+def test_invalid_partial_receipt_is_still_failure_under_enabled_guard(field, value, delivery, caplog):
     payload = json.loads(partial_response().stdout)
     if value is None:
         payload['backup'].pop(field, None)
     else:
         payload['backup'][field] = value
     invalid = SimpleNamespace(exit_code=0, stdout=json.dumps(payload))
-    results = [invalid] if phase == 'prepare' else [partial_response(), invalid]
+    results = [invalid] if delivery == 'start' else [response('running'), invalid]
     execute = executor(results)
-    with pytest.raises(backup.RestartBackupBlocked) as caught:
+    with patch.object(backup.time, 'sleep'), pytest.raises(backup.RestartBackupBlocked) as caught:
         backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b',
                                target_id='ARCA-SANDBOX-p@8', blocking_enabled=lambda: True)()
     assert caught.value.reason == 'invalid_receipt'
-    assert f'phase={phase}' in caplog.text
+    assert 'phase=prepare status=failed' in caplog.text
     assert 'AICODING_RESTART_FAILED' in caplog.text
 
 
 @pytest.mark.parametrize('change, reason', [
-    ({'boot_id': 'replacement'}, 'receipt_stale'),
-    ({'boot_id': None}, 'receipt_stale'),
+    ({'boot_id': 'replacement'}, 'instance_changed'),
+    ({'boot_id': None}, 'instance_changed'),
     ({'operation_id': 'b' * 32}, 'operation_mismatch'),
     ({'status': 'failed'}, 'backup_failed'),
-    ({'status': 'running'}, 'receipt_stale'),
-    ({'backup': json.loads(partial_response(generation_id='new').stdout)['backup']}, 'generation_changed'),
 ])
-def test_partial_receipt_still_fences_operation_boot_status_and_generation(change, reason):
+def test_partial_result_still_fences_operation_and_boot_while_waiting(change, reason):
     payload = json.loads(partial_response().stdout) | change
-    execute = executor([partial_response(), SimpleNamespace(exit_code=0, stdout=json.dumps(payload))])
-    check = backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b',
-                                   target_id='ARCA-SANDBOX-p@8', blocking_enabled=lambda: True)
-    with pytest.raises(backup.RestartBackupBlocked) as caught:
-        check()
+    execute = executor([response('running'), SimpleNamespace(exit_code=0, stdout=json.dumps(payload))])
+    with patch.object(backup.time, 'sleep'), pytest.raises(backup.RestartBackupBlocked) as caught:
+        backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b',
+                               target_id='ARCA-SANDBOX-p@8', blocking_enabled=lambda: True)
     assert caught.value.reason == reason
 
 
@@ -103,7 +106,8 @@ def test_full_success_keeps_info_logs_and_is_not_a_partial_warning(caplog):
     backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b',
                            target_id='ARCA-SANDBOX-p@8', blocking_enabled=lambda: True)()
     assert 'phase=prepared status=committed' in caplog.text
-    assert 'phase=verify status=allowed' in caplog.text
+    assert execute.call_count == 2
+    assert 'phase=verify status=' not in caplog.text
     assert 'partial_success' not in caplog.text
     assert 'data_loss_risk=true' not in caplog.text
     assert all(r.levelno == logging.INFO for r in caplog.records)

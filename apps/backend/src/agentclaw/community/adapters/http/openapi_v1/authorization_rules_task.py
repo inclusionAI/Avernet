@@ -37,6 +37,23 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/config/match"): NoCheck(
         "a config match probe, not a bot; read-only, returns only matched: bool"
     ),
+    # ── Context collab public surface (create / append event / status; spec §6.1
+    # ── openapi twin). A collab context is not a bot, so the bot-level `Check`
+    # does not apply; the operator is the L2 accountability subject the gateway
+    # already authenticated (delivery binds it and refuses a forged actor_ref),
+    # and P1 attaches no space-level Check.
+    ("POST", "/openapi/v1/collaboration/task/context_collab"): NoCheck(
+        "a collab context, not a bot; the submitter is the gateway-authenticated L2 principal, no space-level Check in P1"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
+    ): NoCheck(
+        "a collab event, not a bot; the actor resolves to the gateway-authenticated principal and delivery refuses a forged actor_ref"
+    ),
+    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): NoCheck(
+        "a collab context read, not a bot; visibility filtering happens in the service projection"
+    ),
 }
 
 #: BBS, Browse-Loop, feedback, and trajectory rows.

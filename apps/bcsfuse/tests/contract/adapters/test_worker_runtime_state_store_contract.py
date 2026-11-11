@@ -7,7 +7,7 @@ Contract Tests for WorkerRuntimeStateStoreAdapter
 import pytest
 
 from tests.contract.adapters.helpers import WorkerRuntimeStateStoreContractTests
-from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
 
 
 # ============================================================================
@@ -51,7 +51,7 @@ class TestInMemoryWorkerRuntimeStateStore:
 @pytest.fixture
 def sqlite_runtime_state_store():
     """创建 SQLite WorkerRuntimeStateStore 实例"""
-    from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+    from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
     return SQLiteWorkerRuntimeStateStore(":memory:")
 
 

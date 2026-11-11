@@ -32,7 +32,8 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentDetailItem, AgentEvent, AgentMessageDetail,
     AgentAttemptDetail, AgentResultDetail, GlobalRunLimitExceeded,
-    GuardEventDetailItem, GuardEventSummary, QueueDepthExceeded, RoundDetailItem,
+    GuardEventDetailItem, GuardEventSummary, IdentitySourceInvalid,
+    IdentitySourceRequired, QueueDepthExceeded, RoundDetailItem,
     RoundEvent, RunDetail, RunEvents, SubmitRunRequest, TenantRunLimitExceeded,
 )
 from agentclaw.community.api.agentswarm_service import (
@@ -608,6 +609,27 @@ class TestErrorMapping:
         resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 400
         assert "llm config missing" in resp.json()["error"]
+
+    def test_a_missing_identity_source_maps_to_400(self, client, stub):
+        """Absent is a caller error, not a transient condition: 400, and the
+        body names the field the caller must supply."""
+        stub.submit_error = IdentitySourceRequired()
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 400
+        assert "identity_bot_id" in resp.json()["error"]
+
+    def test_an_invalid_identity_source_maps_to_422(self, client, stub):
+        """Well-formed request naming a source it may not use: 422, matching
+        what create-with-manifest answers for the same condition."""
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source",
+            "is not a Bot owned by the caller holding an issued passport",
+        )
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        assert "20261110_source" in resp.json()["error"]
 
 
 class TestAuthWiring:

@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 // 会话行契约测试（restore-design-chat-page-b2-b3 Batch 1，dmore「会话目录二级*」帧 1:1）：
-// 平齐化（无 rail/前置图标/条数列）、点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
+// 平齐化二级行、固定 14px 状态槽、无条数列；点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
 // 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话;收藏只走行内星标）。
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
@@ -23,24 +23,30 @@ const createActions = () => ({
 });
 
 describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () => {
-  it.each([false, true])('无树形 rail/前置消息图标、无条数列，文字 13px 平齐排版（selected=%s）', (selected) => {
-    const { container } = render(<ConversationSessionRow session={session} selected={selected} onSelect={jest.fn()} />);
-    const row = container.firstElementChild as HTMLElement;
-    // 平齐化裁决（B1 tasks 6.1 + 本批 spec）：不出现树形竖线/折线指示元素。
-    expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
-    expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
-    // 稿二级行:无前置消息图标、右余部无「N 条」列。
-    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
-    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 稿二级行:无前置消息图标、右余部无「N 条」列。
-    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
-    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
-    const title = screen.getByText('对话会话');
-    expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-    expect(title).toHaveClass('font-normal');
-    expect(title).toHaveClass(selected ? 'text-foreground' : 'text-content-strong');
-  });
+  it.each([false, true])(
+    '无树形 rail、有固定 13px 会话占位、无条数列，文字 13px 平齐排版（selected=%s）',
+    (selected) => {
+      const { container } = render(
+        <ConversationSessionRow session={session} selected={selected} onSelect={jest.fn()} />,
+      );
+      const row = container.firstElementChild as HTMLElement;
+      // 平齐化裁决（B1 tasks 6.1 + 本批 spec）：不出现树形竖线/折线指示元素。
+      expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
+      expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
+      // 2026-11-06 状态桥视觉：所有 Bot 共用一个固定 14px 左侧槽位，
+      // 默认占位是弱化的 13px 对话图标，不改变标题起点或引入折线 rail。
+      const placeholder = container.querySelector('svg.lucide-message-square');
+      expect(placeholder).toBeInTheDocument();
+      expect(placeholder).toHaveClass('size-[13px]', 'text-content-icon');
+      // 稿二级行右余部无「N 条」列。
+      expect(screen.queryByText('21 条')).not.toBeInTheDocument();
+      // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
+      const title = screen.getByText('对话会话');
+      expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
+      expect(title).toHaveClass('font-normal');
+      expect(title).toHaveClass(selected ? 'text-foreground' : 'text-content-strong');
+    },
+  );
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
     const { container, rerender } = render(

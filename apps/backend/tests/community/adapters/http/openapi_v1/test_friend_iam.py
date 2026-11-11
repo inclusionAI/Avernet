@@ -60,7 +60,12 @@ def request(context, **overrides):
 
 @pytest.mark.parametrize("stage", ["online", "draft"])
 def test_friend_iam_uses_effective_online_stage_and_original_owned_session(friend_iam, stage):
-    response = request(friend_iam, stage=stage, entity_id="unrelated-entity")
+    response = request(
+        friend_iam,
+        stage=stage,
+        entity_id="unrelated-entity",
+        session_key="untrusted-session",
+    )
     assert response.status_code == 200, response.json()
     args = friend_iam.service.get_iam_token.await_args.kwargs
     assert args["stage"] is CallerIdentityStage.ONLINE
@@ -68,6 +73,32 @@ def test_friend_iam_uses_effective_online_stage_and_original_owned_session(frien
     assert args["entity_id"] == "entity-owner"
     assert args["session_key"] == "owned-session"
     assert friend_iam.expert.calls[-1][0] == "get_owned_chat_session"
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"session_key": "draft-session"}, "draft-session"),
+        ({"sessionKey": "online-session"}, "online-session"),
+        ({"session_id": "original-openapi-session"}, "original-openapi-session"),
+        (
+            {
+                "session_key": "canonical-session",
+                "sessionKey": "legacy-session",
+                "session_id": "original-openapi-session",
+            },
+            "canonical-session",
+        ),
+    ],
+)
+def test_regular_iam_forwards_compatible_session_query_names(friend_iam, params, expected):
+    response = friend_iam.client.post(
+        "/openapi/v1/bots/b1/iam-token",
+        params={"stage": "draft", **params},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert friend_iam.service.get_iam_token.await_args.kwargs["session_key"] == expected
 
 
 @pytest.mark.parametrize("failure", ["not_friend", "other_user", "other_session", "stage_not_live", "no_session"])

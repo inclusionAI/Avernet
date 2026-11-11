@@ -133,438 +133,11 @@ curl http://localhost:8765/ready
 
 ## External Product APIs (/api/v1)
 
-These endpoints are intended for 3rd-party callers such as BCS. They use the `/api/v1` prefix.
-
-### POST /api/v1/workers/{worker_id}/sync
-
-**Purpose:** Create or update a Worker and its Profile. Existing runtime state is preserved when omitted.
-
-**Authentication:** Required
-
-> **Backward Compatibility:** `POST /v1/workers/{worker_id}/sync` is also available (deprecated) for existing BCS callers. Prefer `/api/v1/workers/{worker_id}/sync` going forward.
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `worker_id` | string | Yes | Unique worker identifier |
-
-**Request Body:**
-
-```json
-{
-  "name": "My Bot",
-  "availability": "protected",
-  "capabilities": [{"name": "nlp", "level": "expert"}],
-  "profile": {
-    "profile_id": "default",
-    "soul_md": "Expert in NLP and search",
-    "contents": {"identity": "Assistant"},
-    "skill_sets": [{"name": "search"}]
-  }
-}
-```
-
-`name` and `profile` are required. For an existing Worker/Profile, omitted
-mutable fields retain their stored values. Explicit empty scalar/list values
-replace them; nonempty `contents`/`metadata` objects merge by key, while `{}`
-clears the map. Omitted or null `runtime_state` preserves an existing state;
-new Workers default online. See [External Product API](api-external.md) for
-the full field and retry contract. Concurrent syncs on one Worker or Profile
-retry version conflicts; exhausted conflicts return `SYNC_WORKER_ERROR` or
-`PROFILE_SYNC_FAILED` rather than acknowledge a lost update.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "worker_id": "my-bot-001",
-  "created": false,
-  "runtime_state": "online",
-  "profile_id": "default",
-  "profile_activated": true
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Worker synced successfully
-- `400 Bad Request`: Invalid request body
-- `401 Unauthorized`: Missing or invalid token
-- `422 Unprocessable Entity`: Validation error
-- `500 Internal Server Error`: Profile sync failed (`PROFILE_SYNC_FAILED`); retry is safe
-- `503 Service Unavailable`: Required provider unavailable
-
-**Example:**
-
-```bash
-curl -X POST http://localhost:8765/api/v1/workers/my-bot-001/sync \
-  -H "Authorization: Bearer <BCSFUSE_AUTH_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "My Bot",
-    "availability": "protected",
-    "profile": {
-      "profile_id": "default",
-      "soul_md": "Expert in NLP and search"
-    }
-  }'
-```
-
----
-
-### PUT /api/v1/workers/{worker_id}/online
-
-**Purpose:** Set worker online
-
-**Authentication:** Required
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `worker_id` | string | Yes | Worker identifier |
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "worker_id": "my-bot-001",
-  "runtime_state": "online",
-  "updated_at": "2026-07-06T10:00:00Z"
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Worker set online successfully
-- `401 Unauthorized`: Missing or invalid token
-- `404 Not Found`: Worker not found
-
-**Example:**
-
-```bash
-curl -X PUT http://localhost:8765/api/v1/workers/my-bot-001/online \
-  -H "Authorization: Bearer dev-opencore-token"
-```
-
----
-
-### PUT /api/v1/workers/{worker_id}/offline
-
-**Purpose:** Set worker offline
-
-**Authentication:** Required
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `worker_id` | string | Yes | Worker identifier |
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "worker_id": "my-bot-001",
-  "runtime_state": "offline",
-  "updated_at": "2026-07-06T10:00:00Z"
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Worker set offline successfully
-- `401 Unauthorized`: Missing or invalid token
-- `404 Not Found`: Worker not found
-
-**Example:**
-
-```bash
-curl -X PUT http://localhost:8765/api/v1/workers/my-bot-001/offline \
-  -H "Authorization: Bearer dev-opencore-token"
-```
-
----
-
-### POST /api/v1/search
-
-**Purpose:** Semantic search for workers based on query
-
-**Authentication:** Required
-
-**Request Body:**
-
-```json
-{
-  "query": "string (required)",
-  "top_k": "int (default: 10, max: 50)",
-  "mode": "string (default: auto)",
-  "min_score": "float (default: 0.0)",
-  "filters": {
-    "runtime_state": "online|offline",
-    "visibility": "public|private",
-    "test_id": "string"
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "query": "Python expert",
-  "results": [
-    {
-      "worker_id": "bot-001",
-      "name": "Python Bot",
-      "role": "Python Expert",
-      "score": 0.95,
-      "runtime_state": "online",
-      "visibility": "public",
-      "profile_summary": "Expert in Python and ML"
-    }
-  ],
-  "total": 1,
-  "search_mode": "semantic"
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Search successful
-- `400 Bad Request`: Invalid query
-- `401 Unauthorized`: Missing or invalid token
-- `422 Unprocessable Entity`: Validation error
-
-**Example:**
-
-```bash
-curl -X POST http://localhost:8765/api/v1/search \
-  -H "Authorization: Bearer dev-opencore-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Python expert with machine learning experience",
-    "top_k": 5,
-    "filters": {
-      "runtime_state": "online"
-    }
-  }'
-```
-
----
-
-### POST /api/v1/recommend
-
-**Purpose:** Recommend experts for a specific task/question
-
-**Authentication:** Required
-
-**Request Body:**
-
-```json
-{
-  "question": "string (required)",
-  "context": {
-    "domain": "string",
-    "urgency": "low|medium|high",
-    "preferred_experts": ["worker_id"]
-  },
-  "top_k": "int (default: 3, max: 10)",
-  "recommend_to_fuse": "boolean (default: false)"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "question": "How do I optimize a slow SQL query?",
-  "recommendations": [
-    {
-      "worker_id": "dba-expert",
-      "name": "Database Expert",
-      "role": "DBA",
-      "score": 0.98,
-      "runtime_state": "online",
-      "relevance_reason": "Specialized in database optimization",
-      "profile_summary": "Expert in SQL optimization and indexing"
-    }
-  ],
-  "total": 1
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Recommendation successful
-- `400 Bad Request`: Invalid question
-- `401 Unauthorized`: Missing or invalid token
-- `422 Unprocessable Entity`: Validation error
-
-**Example:**
-
-```bash
-curl -X POST http://localhost:8765/api/v1/recommend \
-  -H "Authorization: Bearer dev-opencore-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "How do I optimize a slow SQL query?",
-    "context": {
-      "domain": "database",
-      "urgency": "high"
-    },
-    "top_k": 3,
-    "recommend_to_fuse": true
-  }'
-```
-
----
-
-### POST /api/v1/groups/{group_id}/fuse
-
-**Purpose:** Multi-expert group consultation (G2 conflict resolution, G5 risk assessment)
-
-**Authentication:** Required
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `group_id` | string | Yes | Unique group identifier |
-
-**Request Body:**
-
-```json
-{
-  "question": "string (required)",
-  "participants": [
-    {
-      "worker_id": "string",
-      "profile_key": "worker_id:profile_id"
-    }
-  ],
-  "context": {
-    "domain": "string",
-    "urgency": "low|medium|high"
-  },
-  "fusion_mode": "g2|g5 (default: g2)"
-}
-```
-
-**Response (G2):**
-
-```json
-{
-  "success": true,
-  "group_id": "grp-001",
-  "fusion_id": "fus-abc123",
-  "question": "Database optimization strategies",
-  "fusion_mode": "g2",
-  "perspectives": [
-    {
-      "participant_id": "dba-expert:default",
-      "perspective": "From a DBA perspective...",
-      "confidence": 0.9,
-      "status": "completed"
-    }
-  ],
-  "conclusion": {
-    "overall_severity": "medium",
-    "go_no_go": "proceed_with_caution",
-    "resolution_strategy": "Implement suggested optimizations",
-    "reasoning": "Based on expert analysis...",
-    "priority_actions": ["Action 1", "Action 2"],
-    "risks": ["Risk 1", "Risk 2"]
-  },
-  "duration_ms": 5432
-}
-```
-
-**Response (G5):**
-
-```json
-{
-  "success": true,
-  "group_id": "grp-001",
-  "fusion_id": "fus-xyz789",
-  "question": "Production deployment risk assessment",
-  "fusion_mode": "g5",
-  "perspectives": [
-    {
-      "participant_id": "security-expert:default",
-      "perspective": "From a security perspective...",
-      "confidence": 0.95,
-      "status": "completed"
-    }
-  ],
-  "risk_assessment": {
-    "overall_risk": "medium",
-    "go_live_conditions": ["Condition 1", "Condition 2"],
-    "critical_issues": ["Issue 1", "Issue 2"],
-    "recommendations": ["Recommendation 1", "Recommendation 2"]
-  },
-  "duration_ms": 6543
-}
-```
-
-**Status Codes:**
-
-- `200 OK`: Fusion successful
-- `400 Bad Request`: Invalid request
-- `401 Unauthorized`: Missing or invalid token
-- `404 Not Found`: Participant not found or offline
-- `422 Unprocessable Entity`: Validation error
-- `500 Internal Server Error`: LLM or embedding service error
-
-**Example:**
-
-```bash
-# G2: Conflict Resolution
-curl -X POST http://localhost:8765/api/v1/groups/grp-001/fuse \
-  -H "Authorization: Bearer dev-opencore-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What are the trade-offs between MySQL vs PostgreSQL?",
-    "participants": [
-      {
-        "worker_id": "dba-expert",
-        "profile_key": "dba-expert:default"
-      },
-      {
-        "worker_id": "backend-arch",
-        "profile_key": "backend-arch:default"
-      }
-    ],
-    "fusion_mode": "g2"
-  }'
-
-# G5: Risk Assessment
-curl -X POST http://localhost:8765/api/v1/groups/grp-002/fuse \
-  -H "Authorization: Bearer dev-opencore-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Production deployment risk assessment for new feature",
-    "participants": [
-      {
-        "worker_id": "security-expert",
-        "profile_key": "security-expert:default"
-      },
-      {
-        "worker_id": "ops-expert",
-        "profile_key": "ops-expert:default"
-      }
-    ],
-    "fusion_mode": "g5"
-  }'
-```
-
----
+The authoritative request fields, examples, errors and retry semantics for the
+seven product endpoints are maintained in [External Product API](api-external.md).
+This document covers health, management and privileged admin operations. TC's
+existing product endpoints remain unchanged; the new shared Card API is opt-in
+and is not mounted by TC at present.
 
 ## Management Platform APIs (/v1)
 
@@ -678,7 +251,14 @@ curl -X GET http://localhost:8765/v1/workers/my-bot-001 \
 
 ### POST /v1/workers/batch
 
-**Purpose:** Batch query multiple workers
+**Purpose:** Look up known Worker IDs and supply their metadata and tags. This
+endpoint does not perform semantic search or reranking.
+
+The response includes both `data` (summaries keyed by Worker ID, consumed by
+BCN) and `workers` (the existing full Worker list). `profile_tags` currently
+contains `trust_level`. Unknown IDs are listed in `not_found_ids`; an all-missing
+lookup still succeeds with an empty map and list. Duplicate IDs appear only once
+in `data`, while `workers` and `total` retain the existing per-request-ID behavior.
 
 **Authentication:** Required
 
@@ -697,19 +277,25 @@ curl -X GET http://localhost:8765/v1/workers/my-bot-001 \
   "success": true,
   "data": {
     "bot-001": {
-      "worker_id": "bot-001",
       "name": "Bot 1",
-      "runtime_state": "online"
+      "runtime_state": "online",
+      "availability": "protected",
+      "profile_tags": {"trust_level": "trusted"}
     },
     "bot-002": {
-      "worker_id": "bot-002",
       "name": "Bot 2",
-      "runtime_state": "offline"
+      "runtime_state": "offline",
+      "availability": "private",
+      "profile_tags": {"trust_level": "guarded"}
     }
   },
-  "not_found_ids": ["bot-003"]
+  "not_found_ids": ["bot-003"],
+  "total": 2
 }
 ```
+
+The example omits the unchanged `workers` field for brevity; the actual response
+also includes the full Worker objects in that list.
 
 **Status Codes:**
 

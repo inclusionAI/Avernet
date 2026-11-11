@@ -77,6 +77,12 @@ from agentclaw.community.api.bot_config_manifest_service import (
 from agentclaw.community.api.apply_run_service import (
     ApplyInProgressError,
 )
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
+)
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
     CliToolNotFoundError,
@@ -334,6 +340,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -566,6 +574,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
+    ServicePublicationGateBlockedError: (
+        403,
+        "评测未通过，无法推进发布",
+    ),
+    ServicePublicationGatePendingError: (
+        409,
+        "评测认证处理中，请稍后再试",
+    ),
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -841,6 +857,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
     TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
+    # BBS context collaboration protocol (spec 2026-11-09 §6). Leaf rows for
+    # every error the service/repository raises at the three delivery routes.
+    # The ENVELOPE_ERRORS table has no rows for the ``ValidationError`` /
+    # ``NotFound`` / ``Conflict`` bases these subclass, and the app-level
+    # ``_DOMAIN_ERROR_STATUS_MAP`` matches on exact type — a subclass would
+    # otherwise fall through to the 500 catch-all. Fixed messages per the
+    # table rule: no caller data, no internal ids.
+    ContextCollabNotFoundError: (404, "Not found"),
+    ContextCollabVersionConflict: (409, "Context version conflict"),
+    ContextCollabValidationError: (422, "Invalid context collab request"),
+    ContextCollabParentEventError: (422, "Parent event not found"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
@@ -876,6 +903,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetAccessDeniedError: 403201,
     McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
+    ServicePublicationGateBlockedError: 403210,
+    ServicePublicationGatePendingError: 409210,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {

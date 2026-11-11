@@ -12,4 +12,12 @@ There is no saved/ lookup, comparison, fallback, synchronization or migration.
 Changes to any unrelated branch do not invalidate the read. The selected refs
 and active DB identity are rechecked before return.
 
+For `current`, publication identity must still match the unique active row: the
+Pack ID, active tag, immutable commit candidate and canonical Pack tree path are
+hard checks. If the active history content differs from the active Git workflow,
+the read returns `activeHistoryMismatch: true` instead of failing. The editor
+uses that flag to show the existing warning/difference/choose flow and to pick a
+display baseline. The database row is never rewritten, so a historical mismatch
+in `#N` cannot block deploying a valid `#N+1`.
+
 See [the save and deployment contract](workflow-wf-save-tag-deploy.md).

@@ -26,6 +26,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
 from gateway.community.adapters.web._cors import CORS_RESPONSE_HEADERS
+from gateway.community.adapters.web._envelope import error_response, request_id
 from gateway.community.adapters.web._log_redaction import redact_credentials
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
@@ -40,31 +41,15 @@ from gateway.community.spi.authn import (
 )
 from gateway.community.spi.forwarder import ForwardRequest
 from gateway.community.spi.principal_signer import PrincipalSigner
-from gateway.community.tracer import get_tracer_plugin
 
 logger = get_logger("forward")
 
 _ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 
-def _request_id() -> str:
-    try:
-        return str(get_tracer_plugin().get_trace_id())
-    except Exception:
-        return ""
-
-
-def _error(status: int, subcode: int, message: str) -> JSONResponse:
+def _error(request: Request, status: int, subcode: int, message: str) -> JSONResponse:
     """A gateway-generated error in the standard envelope shape."""
-    return JSONResponse(
-        status_code=status,
-        content={
-            "code": status * 1000 + subcode,
-            "message": message,
-            "data": None,
-            "request_id": _request_id(),
-        },
-    )
+    return error_response(request, status, message, subcode=subcode)
 
 
 def _bundle(connection: HTTPConnection) -> CredentialBundle:
@@ -230,7 +215,7 @@ async def forward_request(request: Request) -> Response:
     domain = request.app.state.domain_map.http_domain_for(path)
     if domain is None:
         logger.info("no route for %s %s", request.method, path)
-        return _error(404, 1, "no route for path")
+        return _error(request, 404, 1, "no route for path")
     server = domain.server
     upstream_path = domain.upstream_path(path)
 
@@ -240,7 +225,7 @@ async def forward_request(request: Request) -> Response:
         )
     except AuthError as exc:
         logger.warning("auth failed for %s %s: %s", request.method, path, exc)
-        return _error(401, 1, str(exc))
+        return _error(request, 401, 1, str(exc))
 
     try:
         forward = await _attach_identities(
@@ -261,7 +246,7 @@ async def forward_request(request: Request) -> Response:
         )
     except Exception:
         logger.exception("principal signing failed")
-        return _error(500, 1, "principal signing failed")
+        return _error(request, 500, 1, "principal signing failed")
 
     forward = replace(forward, body=await _request_body(request))
     try:
@@ -275,7 +260,7 @@ async def forward_request(request: Request) -> Response:
         logger.warning(
             "upstream unavailable for %s %s", request.method, path, exc_info=True
         )
-        return _error(502, 1, "upstream unavailable")
+        return _error(request, 502, 1, "upstream unavailable")
 
     async def stream() -> AsyncIterator[bytes]:
         try:
@@ -309,7 +294,7 @@ async def forward_request(request: Request) -> Response:
         caller,
         domain.name,
         server.name,
-        _request_id() or _ABSENT,
+        request_id(request),
     )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
     #

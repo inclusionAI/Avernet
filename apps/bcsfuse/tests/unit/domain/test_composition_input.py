@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.composition_input import CompositionInput, CompositionConstraints
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
-from src.domain.models.worker import (
+from app.domain.models.composition_input import CompositionInput, CompositionConstraints
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel, SkillRef, ResourceRef,
     SkillSource, TrustLevel, ResourceKind, ResourceAccess, Availability,

@@ -35,7 +35,7 @@ from agentclaw.community.core.apply_engine.skill_validation import PackageRefusa
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage, RepoSkillPath
 from agentclaw.community.core.content_store import decode_tree_bytes
-from agentclaw.community.core.content_store.errors import ContentStoreError
+from agentclaw.community.core.content_store.errors import ContentStoreError, ContentStoreFault
 from agentclaw.community.core.apply_engine.outcomes import (
     EntryOutcome,
     EntryResult,
@@ -186,7 +186,7 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
                 continue
             try:
                 tree = await asyncio.to_thread(self._content.read, entry.source.tree.digest)
-            except ContentStoreError as exc:
+            except (ContentStoreError, ContentStoreFault) as exc:
                 failures.append(ResolveFailure(name, f"the skill package's bytes are not in the store: {exc}"))
                 continue
             files = decode_tree_bytes(tree)

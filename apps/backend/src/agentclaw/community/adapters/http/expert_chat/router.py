@@ -192,7 +192,8 @@ async def get_chat_session(
         return ApiResponse(success=False, message=str(e), error_code=403)
 
     except ConnectionError as e:
-        logger.error(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
+        log_failure = logger.warning if e.caller_device_unavailable else logger.error
+        log_failure(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
         error_code = int(e.error_code) if e.error_code else 5001
         return ApiResponse(success=False, message=str(e), error_code=error_code)
 
@@ -567,7 +568,12 @@ async def get_caller_connection_for_other(
         )
     except Exception as error:
         duration_ms = (time.perf_counter() - started_at) * 1000
-        logger.error(
+        log_failure = (
+            logger.warning
+            if isinstance(error, ConnectionError) and error.caller_device_unavailable
+            else logger.error
+        )
+        log_failure(
             "event=expert_chat.caller_connection.failed direction=inbound "
             "operation=caller_connection method=POST "
             "route=/api/v1/expert-chats/caller-connection operator_id=%s "

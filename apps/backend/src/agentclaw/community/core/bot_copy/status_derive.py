@@ -87,20 +87,28 @@ def compute_copy_status(
     if on is None:
         # pre done, on_container not yet started: provisioning gap. Device already
         # ACTIVE means on_container apply is imminent — BOT_STARTED; else still
-        # provisioning — FILE_SYNCED. (A FAILED bot is caught by the early gate
-        # above and never reaches here.)
-        return BotCopyStatus.BOT_STARTED if dst_bot_status == _ACTIVE else BotCopyStatus.FILE_SYNCED
+        # provisioning, pre done but device not up — CREATED. File sync runs in
+        # the on_container phase (after the device is up), so a pre-only state is
+        # never FILE_SYNCED: that value names an on_container signal, and the pre
+        # terminal here carries no such signal. (A FAILED bot is caught by the
+        # early gate above and never reaches here.)
+        return BotCopyStatus.BOT_STARTED if dst_bot_status == _ACTIVE else BotCopyStatus.CREATED
 
     if on.status == ApplyStatus.RUNNING.value:
         # on_container apply running: device is up (on only runs post-ACTIVE).
         return BotCopyStatus.BOT_STARTED
 
-    if on.status == ApplyStatus.SUCCEEDED.value:
-        # Both applies terminal + device up → converged. Device not yet ACTIVE
-        # means the report outran the device-alive callback — still BOT_STARTED.
+    if on.status in (ApplyStatus.SUCCEEDED.value, ApplyStatus.PARTIAL.value):
+        # on_container is terminal: SUCCEEDED fully converged; PARTIAL means some
+        # entries did not land but the phase finished (a retry must converge the
+        # remainder via detail-page manifest apply, not the copy retry endpoint).
+        # Either way, with the dst device ACTIVE the copy itself is converged —
+        # the bot is up and usable; the partial remainder is a separate concern.
+        # Device not yet ACTIVE means the report outran the device-alive callback
+        # — still BOT_STARTED.
         return BotCopyStatus.CONVERGED if dst_bot_status == _ACTIVE else BotCopyStatus.BOT_STARTED
 
-    # on_container PARTIAL or otherwise non-terminal: not converged.
+    # on_container otherwise non-terminal: not converged.
     return BotCopyStatus.BOT_STARTED
 
 

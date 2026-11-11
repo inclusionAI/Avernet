@@ -35,6 +35,7 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
       const verifyRefs = await packVersionPhase('git_fetch', () => fetchPackVersionRefs(dir, gitConfig, input.workflowId, input.active?.tag, !!input.active && input.version === 'draft', input.active?.action === 'rollback'));
       try {
         const snapshot = await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: input.includeVersionFiles !== false, activeTag: input.active?.tag, allowMalformedDraftWorkflow: input.version === 'draft' }));
+        let activeHistoryMismatch = false;
         if (input.active) {
           if (!verifyRefs.activeCommit) throw new Error('Active deployment unavailable');
           const metadata = await readPreparedPackMetadata(dir, input.workflowId, verifyRefs.activeCommit);
@@ -42,15 +43,19 @@ export async function readPackVersionFromRemote(input: Context & { packId: strin
           const dbDocument = activeHistoryDocument(input.workflowId, input.active.specJson, gitDocument.digest);
           // The inventory reader omits the trailing slash used by prepared metadata.
           // Compare the actual canonical tree paths, not just matching manifest IDs.
+          // Content (digest) differences are actionable editor warnings, not publication
+          // identity corruption; #N+1 deployment must not be blocked by stale #N metadata.
+          activeHistoryMismatch = gitDocument.digest
+            !== projectWorkflowSnapshotJson(input.workflowId, JSON.stringify(dbDocument)).digest;
           if (snapshot.packId !== input.packId || metadata.packId !== input.packId
-            || (input.includeVersionFiles !== false && !samePackDirectory(snapshot.packPath, metadata.packPath))
-            || gitDocument.digest !== projectWorkflowSnapshotJson(input.workflowId, JSON.stringify(dbDocument)).digest) throw new Error('Active deployment snapshot mismatch');
+            || (input.includeVersionFiles !== false && !samePackDirectory(snapshot.packPath, metadata.packPath))) throw new Error('Active deployment snapshot mismatch');
 
         }
         if (observedActive) {
           const after = await readBoundActive(input.db, input.workflowId);
           if (!after || after.activeHash !== observedActive.activeHash) throw Object.assign(new Error('Active baseline changed'), { code: 'PACK_REFS_CHANGED' });
         }
+        if (input.version === 'current' && activeHistoryMismatch) return { ...snapshot, activeHistoryMismatch: true as const };
         return snapshot;
       } finally {
         await packVersionPhase('git_verify', verifyRefs);

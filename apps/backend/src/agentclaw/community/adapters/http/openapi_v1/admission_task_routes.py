@@ -152,6 +152,17 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # bot — any authenticated principal may read. The authorization row beside
     # it is NoCheck for the same reason.
     ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
+    # Context collab public surface — the operator of all three operations is
+    # the L2 accountability subject the delivery binds `ActorContext.actor` (a
+    # `human` PrincipalRef) to, and an application calling alone names no end
+    # user to bind. REFUSED at the gate keeps that contract mechanical instead
+    # of a PrincipalRef empty-id validation later.
+    ("POST", "/openapi/v1/collaboration/task/context_collab"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
+    ): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): AdmissionMode.REFUSED,
 }
 
 

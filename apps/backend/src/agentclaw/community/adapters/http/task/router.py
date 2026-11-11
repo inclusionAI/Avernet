@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
+    TaskStopRequestDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
     graph_to_dto, op_result_to_dto,
@@ -415,6 +416,34 @@ async def report_callback(
         return envelope(report_result_to_dto(result).model_dump(), request)
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
+
+@router.post(
+    "/{task_id}/stop",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def stop_task(
+    task_id: str,
+    request: Request,
+    body: TaskStopRequestDTO = Body(default=None),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """Manual stop one task graph into CANCELLED."""
+    result = await service.stop_task(
+        task_id,
+        reason=body.reason if body is not None else "manual_stop",
+        operator=body.operator if body is not None else "manual_stop",
+    )
+    return envelope(
+        {
+            "task_id": result.task_id,
+            "status": result.status.value,
+            "stopped_nodes": result.stopped_nodes,
+            "reason": result.reason,
+            "operator": result.operator,
+        },
+        request,
+    )
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
 @envelope_errors

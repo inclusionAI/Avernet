@@ -12,8 +12,18 @@ export function fixture() {
     if (/CREATE TABLE IF NOT EXISTS flow_runs|CREATE.*INDEX.*ON flow_runs/.test(sql)) raw.exec(sql);
   }
   for (const sql of migrations.find(m => m.version === 5)!.sql) raw.exec(sql);
+  for (const sql of migrations.find(m => m.version === 73)!.sql) raw.exec(sql);
   raw.exec('ALTER TABLE workflow_specs ADD COLUMN version INTEGER');
   raw.prepare('INSERT INTO workflow_specs (workflow_id, spec_json, version) VALUES (?, ?, ?)').run('child-wf', '{}', 1);
+  raw.exec(`CREATE TABLE flow_run_links (
+    child_flow_id TEXT PRIMARY KEY,
+    parent_flow_id TEXT NOT NULL,
+    parent_node_id TEXT NOT NULL,
+    parent_attempt INTEGER,
+    child_workflow_id TEXT NOT NULL,
+    gmt_create INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX idx_flow_run_links_parent ON flow_run_links(parent_flow_id);`);
   for (const name of ['state_json', 'credentials_json', 'origin_session_key', 'origin_bot_id', 'user_id', 'current_phase']) {
     raw.exec(`ALTER TABLE flow_runs ADD COLUMN ${name} TEXT`);
   }
