@@ -5,7 +5,7 @@
   "type": "module",
   "description": "本地 JSON 转 A2A 1.0 工具",
   "engines": { "node": ">=22" },
-  "bin": { "a2a-json": "./cli.mjs" },
+  "bin": { "a2a": "./cli.mjs" },
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"

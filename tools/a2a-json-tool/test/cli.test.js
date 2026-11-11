@@ -20,7 +20,8 @@ for (const args of [['--help'], ['-h'], ['message', '--help'], ['card', '-h']]) 
     const [code, signal] = await once(child, 'close');
     assert.equal(signal, null, '帮助不应等待读取标准输入');
     assert.equal(code, 0, stderr);
-    assert.match(stdout, /a2a-json/);
+    assert.match(stdout, /^用法：a2a card\|message /);
+    assert.doesNotMatch(stdout, /a2a-json/);
     assert.match(stdout, /card/);
     assert.match(stdout, /message/);
     assert.equal(stderr, '');

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { convertInput } from './web/convert-input.js';
 
-const usage = '用法：a2a-json card|message [文件|-]';
+const usage = '用法：a2a card|message [文件|-]';
 const help = `${usage}
 
 模式：
@@ -14,9 +14,9 @@ const help = `${usage}
 转换结果写入 stdout，说明和错误写入 stderr；失败时非零退出。
 
 示例：
-  a2a-json message input.json > request.json
-  a2a-json card agent.json > agent-card.json
-  echo '{"question":"你好"}' | a2a-json message
+  a2a message input.json > request.json
+  a2a card agent.json > agent-card.json
+  echo '{"question":"你好"}' | a2a message
 
 选项：
   -h, --help  显示帮助
@@ -32,7 +32,7 @@ try {
     process.stdout.write(help);
   } else {
     if (!['card', 'message'].includes(mode) || extra.length) {
-      throw new Error(`${usage}；运行 a2a-json --help 查看说明。`);
+      throw new Error(`${usage}；运行 a2a --help 查看说明。`);
     }
     const { output, notes } = convertInput(readFileSync(filename === '-' ? 0 : filename, 'utf8'), mode);
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);

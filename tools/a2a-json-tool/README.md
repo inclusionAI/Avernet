@@ -105,16 +105,16 @@ CLI 可独立运行，无需启动网页。需要 Node.js 22 或更高版本，�
 
 ```bash
 npm link
-a2a-json --help
+a2a --help
 ```
 
 随后可在任意目录执行，输入文件路径相对于当前工作目录：
 
 ```bash
-a2a-json message business.json > request.json
-a2a-json card agent.json > agent-card.json
-echo '{"question":"你好"}' | a2a-json message
-echo 'message=Message(role=USER,parts=[TextPart(content=你好)])' | a2a-json message -
+a2a message business.json > request.json
+a2a card agent.json > agent-card.json
+echo '{"question":"你好"}' | a2a message
+echo 'message=Message(role=USER,parts=[TextPart(content=你好)])' | a2a message -
 ```
 
 不注册命令时，也可在工具目录直接运行：
@@ -126,9 +126,9 @@ node cli.mjs message business.json > request.json
 echo '{"question":"你好"}' | node cli.mjs message
 ```
 
-省略文件参数或传入 `-` 时读取标准输入，文件也可以是 `.txt`/`.log` 中的 JSON 片段或对象打印文本。转换时标准输出只有结果 JSON，补全说明和错误写入标准错误；失败时非零退出。`--help`/`-h` 将帮助写入标准输出并成功退出，也支持 `a2a-json message --help` 和 `a2a-json card --help`。
+省略文件参数或传入 `-` 时读取标准输入，文件也可以是 `.txt`/`.log` 中的 JSON 片段或对象打印文本。转换时标准输出只有结果 JSON，补全说明和错误写入标准错误；失败时非零退出。`--help`/`-h` 将帮助写入标准输出并成功退出，也支持 `a2a message --help` 和 `a2a card --help`。
 
-`npm link` 将命令链接到当前检出目录，更新代码后可直接使用新版本。若不再需要该命令，运行 `npm unlink --global json-to-a2a-local`；删除或移动检出目录后需要重新注册。
+`npm link` 将命令链接到当前检出目录，更新代码后可直接使用新版本。本次命令改名为 `a2a` 后，已安装旧命令的用户需要在工具目录重新执行 `npm link`；旧安装残留的 `a2a-json` 链接不会自动删除。若不再需要该命令，运行 `npm unlink --global json-to-a2a-local`；删除或移动检出目录后需要重新注册。
 
 ## JavaScript 复用
 
