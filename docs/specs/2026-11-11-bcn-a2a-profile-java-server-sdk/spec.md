@@ -43,7 +43,7 @@ BCS 已作为公司级 A2A 注册中心和 A2A Client：Agent 注册 AgentCard�
 | D3 | 多实例只提供跨实例存储的 SPI 和参考实现 | 任务始终在接收它的实例上执行；其他实例只通过共享存储协作，见第 6 节 |
 | D4 | 接受 D3 带来的三项降级 | 跨实例订阅为轮询合成；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复 |
 | D5 | 以进程内 SDK（API + SPI）作为本期唯一的交付形态 | 业务引入 starter、实现 SPI、自己运维存储；标准靠窄 SPI、TCK 准入和版本治理保证 |
-| D7 | TaskStore 的参考实现以分布式缓存为默认，JDBC 为备选 | 业务只需要一个不淘汰数据的缓存实例；主备切换可能丢失个别 Task 的最近写入 |
+| D7 | TaskStore 的参考实现只提供分布式缓存 | 业务只需要一个不淘汰数据的缓存实例；主备切换可能丢失个别 Task 的最近写入 |
 | D6 | Profile 不包含提交去重扩展 | 初始提交结果未知时调用方不重发、报告结果未知；存储只需要一张表和三个原语 |
 
 ## 4. Profile
@@ -145,8 +145,7 @@ Data-only 扩展，`required:false`。`params` 包含：
 | --- | --- | --- |
 | `bcn-a2a-spec` | 扩展 URI 常量、扩展数据模型、Card 的 Profile 校验 | a2a-java 模型 |
 | `bcn-a2a-server-core` | 请求处理、Task 生命周期、行为约束、SPI 定义、内存存储 | `bcn-a2a-spec` |
-| `bcn-a2a-server-store-redis` | 存储 SPI 的分布式缓存参考实现，默认推荐 | `bcn-a2a-server-core` |
-| `bcn-a2a-server-store-jdbc` | 存储 SPI 的 JDBC 备选实现 | `bcn-a2a-server-core` |
+| `bcn-a2a-server-store-redis` | 存储 SPI 的分布式缓存参考实现（Redis 协议） | `bcn-a2a-server-core` |
 | `bcn-a2a-server-sofaboot-starter` | 自动装配、GRPC（Triple）端点、HTTP+JSON 和 JSONRPC 端点、Card 发布 | `bcn-a2a-server-core`、SOFABoot |
 | `bcn-a2a-tck` | 一致性测试套件 | `bcn-a2a-spec` |
 
@@ -184,7 +183,7 @@ SDK 负责：创建并持久化 Task、首帧返回 Task、把 `append` 转成�
 | SPI | 职责 | 默认实现 |
 | --- | --- | --- |
 | `AgentResolver` | 一个进程多个 Agent 时，按接口路由或 `tenant` 选择 `BcnAgent` | 单 Agent |
-| `TaskStore` | 跨实例存储，见第 6.2 节 | 内存；分布式缓存参考实现；JDBC 备选 |
+| `TaskStore` | 跨实例存储，见第 6.2 节 | 内存；分布式缓存参考实现 |
 | `CallerContextProvider` | 从 RPC 上下文取得调用方应用名 | SOFARPC 实现在 starter 中 |
 | `ToolEventEmitter` | 发出工具观察记录 | 由 SDK 提供，Agent 调用 |
 | `ApprovalHandler` | 发起 exec 审批、接收决定、恢复执行 | 无；不实现则不声明该扩展 |
@@ -261,12 +260,11 @@ public interface TaskStore {
 
 ### 6.5 参考实现
 
-默认推荐分布式缓存实现（Redis 协议）：要求实例不淘汰数据、读写走主节点、支持原子比较并写入；文本只写增量，过期时间自动清理。选型理由和记录丢失时的行为见评审稿 9.8。以下是 JDBC 备选实现，适用于需要强持久性的应用。
+只提供分布式缓存实现（Redis 协议）。公司内的应用都已接入分布式缓存，不再提供数据库实现；有特殊需要的应用可以自行实现 TaskStore 并通过合同测试。
 
-- 面向 MySQL 和 OceanBase。一张 Task 表，主键 `(agent_key, task_id)`，`version` 列用于 CAS。
-- 所有访问按主键，不做范围扫描。
-- 提供建表语句，不自动建表。
-- 过期清理由宿主负责；参考实现提供按时间分批删除的语句。
+- 要求缓存实例不淘汰数据、读写走主节点、支持原子比较并写入。
+- 文本只写增量；过期时间自动清理，默认保留 24 小时。
+- 选型理由、数据布局和记录丢失时的行为见评审稿 9.8。
 
 ## 7. TCK
 
@@ -282,7 +280,7 @@ public interface TaskStore {
 | 阶段 | 交付 | 验收 |
 | --- | --- | --- |
 | P1 | Profile 文本；`bcn-a2a-spec`；`server-core` 的 L0/L1；内存存储；starter 的 GRPC 端点 | 单实例下 BCS 到示例 Agent 的流式、非流式、取消闭环；TCK 的 L0/L1 通过 |
-| P2 | `TaskStore` 多实例语义；分布式缓存参考实现；JDBC 备选实现 | 两实例下第 6.3 节全部行为通过 TCK |
+| P2 | `TaskStore` 多实例语义；分布式缓存参考实现 | 两实例下第 6.3 节全部行为通过 TCK |
 | P3 | 调用上下文扩展；BCS 下行侧生成 `userId` | L2 用例通过；未协商时拒绝 |
 | P4 | 工具观察、exec 审批的 SPI | L3 用例通过；审批续交在两实例下验证 |
 
