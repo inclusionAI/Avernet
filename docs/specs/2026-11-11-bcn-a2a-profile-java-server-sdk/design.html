@@ -821,7 +821,14 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>BCS 到 Agent</td><td>E2</td><td>群标识和协作模式；本 Agent 在群中的角色；本条消息的发言人；是否被点名（必须回应，还是可以不回应）；成员列表及其简介</td></tr>
 <tr><td>Agent 到 BCS</td><td>E3</td><td>要点名的成员；选择不回应；任务交接或完成的信号</td></tr>
 </table></div>
-<p>它必须可降级：未协商时退回文本入群。它与一致性等级（6.3）和 Card 的暴露模式（4.1）无关：BCS 自己调用 Agent 时始终使用保存的原始 Card，所以以原生地址暴露的 Agent 同样可以入群。范围和时间见 <span class="tag q">Q22</span>。</p>
+<p>它必须可降级：未协商时退回文本入群。它与一致性等级（6.3）和 Card 的暴露模式（4.1）无关：BCS 自己调用 Agent 时始终使用保存的原始 Card，所以以原生地址暴露的 Agent 同样可以入群。</p>
+<div class="box d"><p><b>当前倾向</b>（待评审确认，<span class="tag q">Q22</span>）</p>
+<ul>
+<li><b>首版维持文本入群。</b>这是现状，任何等级的 Agent 都能参与，不需要 Agent 做任何改动，Profile 也不增加条款。</li>
+<li><b>增加“不入群”设置。</b>由 Provider 在注册或管理时设置，适用于只做点对点调用的 Agent。这是 BCS 的管理属性，不写进 Card。</li>
+<li><b>平台协作扩展单独立项设计，不在本期范围。</b>它涉及 BCS 现有的群聊模式和协调逻辑，需要和这部分的负责人一起定字段。设计时必须保持可降级：未协商时退回文本入群。</li>
+<li><b>群内两个 Bot 之间的结构化数据交换暂不支持。</b>群里只广播文本和降级文本。确有需要的两个 Agent 可以直连（4.1），在直连路径上使用业务扩展。</li>
+</ul></div>
 
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
