@@ -1,0 +1,34 @@
+name: JSON → A2A 1.0
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - 'tools/a2a-json-tool/**'
+      - '.github/workflows/a2a-json-tool.yml'
+  push:
+    branches:
+      - dev
+    paths:
+      - 'tools/a2a-json-tool/**'
+      - '.github/workflows/a2a-json-tool.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 工具测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tools/a2a-json-tool
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
