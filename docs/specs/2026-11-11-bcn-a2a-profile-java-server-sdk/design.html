@@ -221,33 +221,102 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-16</span></td><td>Card 中声明的每个扩展必须真实可用。声明了但未实现视为不合规。</td></tr>
 <tr><td><span class="tag p">P-17</span></td><td><code>skills[].id</code> 在 Card 内唯一。Card 中不得包含凭据。</td></tr>
 </table></div>
-<h4>L2 Agent 的 Card 示例</h4>
+<h4>完整示例：L3 Agent 的 Card</h4>
+<p>L3 是最高等级。这个示例用到了 Profile 定义的全部能力：三种绑定、流式、多模态、全部平台扩展和一个业务 UI 扩展。</p>
 <pre><code>{
   "name": "订单助手",
-  "description": "查询订单状态并回答订单相关问题",
-  "version": "1.3.0",
+  "description": "查询订单状态、核对发票并回答订单相关问题",
+  "version": "2.1.0",
+  "provider": {"organization": "订单平台", "url": "https://order.example.internal"},
+  "documentationUrl": "https://docs.example.internal/order-agent",
+  "iconUrl": "https://static.example.internal/order-agent.png",
+
   "supportedInterfaces": [
     {"url": "https://order-agent.example.internal", "protocolBinding": "GRPC",
      "protocolVersion": "1.0", "tenant": "order-agent"},
     {"url": "https://order-agent.example.internal/a2a/order-agent", "protocolBinding": "HTTP+JSON",
+     "protocolVersion": "1.0"},
+    {"url": "https://order-agent.example.internal/a2a/order-agent/jsonrpc", "protocolBinding": "JSONRPC",
      "protocolVersion": "1.0"}
   ],
+
   "capabilities": {
     "streaming": true,
+    "pushNotifications": false,
     "extensions": [
       {"uri": "&lt;profile 声明扩展 URI&gt;", "required": false,
-       "params": {"profileVersion": "1", "level": "L2"}},
-      {"uri": "&lt;调用上下文扩展 URI&gt;", "required": true}
+       "params": {"profileVersion": "1", "level": "L3", "sdk": "bcn-a2a-java/1.0.0"}},
+
+      {"uri": "&lt;调用上下文扩展 URI&gt;", "required": true,
+       "description": "需要业务用户和调用来源"},
+
+      {"uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md",
+       "required": false, "description": "工具观察"},
+
+      {"uri": "https://github.com/a2aproject/experimental-ext-structured-input/tree/main/v1",
+       "required": false,
+       "params": {"jsonschema_draft": "2020-12",
+                  "bcs_exec_profile": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/structured-input-exec/v1.md"}},
+
+      {"uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/message-dedup/v1.md",
+       "required": false, "description": "提交去重"},
+
+      {"uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md",
+       "required": false, "params": {"party": "first_party"}},
+
+      {"uri": "&lt;订单 UI 扩展 URI&gt;", "required": false,
+       "description": "订单卡片，业务 UI 扩展",
+       "params": {"points": ["E2", "E3", "E5"],
+                  "mediaTypes": ["application/vnd.example.order-card+json"]}}
+    ]
+  },
+
+  "defaultInputModes": ["text/plain", "image/png", "image/jpeg"],
+  "defaultOutputModes": ["text/plain"],
+
+  "skills": [
+    {"id": "query_order", "name": "查询订单", "description": "根据订单号查询订单状态和物流",
+     "tags": ["orders"], "examples": ["查询订单 ORD-001"]},
+    {"id": "check_invoice", "name": "核对发票", "description": "识别发票图片并与订单核对，可导出核对结果",
+     "tags": ["orders", "invoice"],
+     "inputModes": ["text/plain", "image/png", "image/jpeg"],
+     "outputModes": ["text/plain", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]}
+  ],
+
+  "securityRequirements": []
+}</code></pre>
+<div class="tw"><table>
+<tr><th>字段</th><th>对应的条款或章节</th></tr>
+<tr><td><code>supportedInterfaces</code> 三项</td><td>三种绑定都开启，按偏好排序（P-02、P-12）</td></tr>
+<tr><td><code>streaming: true</code></td><td>L1 以上必须（6.3）</td></tr>
+<tr><td><code>pushNotifications: false</code></td><td>推送本期只定义语义，SDK 不声明（6.12）。声明为 true 就必须实现四个配置方法</td></tr>
+<tr><td>profile 声明，<code>level: "L3"</code></td><td>P-15、7.1</td></tr>
+<tr><td>调用上下文，<code>required: true</code></td><td>L2 能力。未协商或缺少用户时拒绝（P-102）</td></tr>
+<tr><td>工具观察、exec 审批、提交去重</td><td>L3 的三项，可分别声明（6.3、7.3）</td></tr>
+<tr><td>来源分类</td><td>可选的 Card 描述数据，扩展点 E1</td></tr>
+<tr><td>订单 UI 扩展</td><td>业务扩展，必须 <code>required: false</code>（P-124）；使用的扩展点与登记描述一致（7.6）</td></tr>
+<tr><td><code>defaultInputModes</code>、技能级 <code>inputModes</code> 和 <code>outputModes</code></td><td>多模态声明（P-160）。文本始终在列表中（P-13）</td></tr>
+<tr><td><code>securityRequirements: []</code></td><td>不鉴权（P-11、<span class="tag d">D1</span>）</td></tr>
+</table></div>
+<h4>对照：最小的 L0 Card</h4>
+<pre><code>{
+  "name": "汇率查询",
+  "description": "查询当日汇率",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {"url": "https://fx-agent.example.internal/a2a/fx", "protocolBinding": "HTTP+JSON", "protocolVersion": "1.0"}
+  ],
+  "capabilities": {
+    "extensions": [
+      {"uri": "&lt;profile 声明扩展 URI&gt;", "required": false, "params": {"profileVersion": "1", "level": "L0"}}
     ]
   },
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["text/plain"],
-  "skills": [
-    {"id": "query_order", "name": "查询订单", "description": "根据订单号查询订单状态", "tags": ["orders"]}
-  ],
+  "skills": [{"id": "fx_rate", "name": "汇率查询", "description": "查询指定货币对的当日汇率", "tags": ["fx"]}],
   "securityRequirements": []
 }</code></pre>
-<p class="cap">扩展 URI 用占位符表示，命名空间见 <span class="tag q">Q2</span>。</p>
+<p class="cap">新增扩展的 URI 用占位符表示，命名空间见 <span class="tag q">Q2</span>。已有扩展使用现行 URI。用 SDK 时 Card 由 SDK 生成，业务不需要手写。</p>
 
 <h3 id="s6-5"><span class="n">6.5</span>方法</h3>
 <p>下表给出 GRPC 和 HTTP+JSON 绑定的对应关系。JSONRPC 绑定把五个方法统一 POST 到接口地址，以相同的方法名作为 <code>method</code>，流式响应为 SSE。</p>
