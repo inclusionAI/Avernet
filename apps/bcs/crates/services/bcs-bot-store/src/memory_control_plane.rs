@@ -476,6 +476,11 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         }
         if let Some(value) = patch.friend_ext.as_ref() {
             friend_ext = value.clone();
+        } else if crate::control_plane_visibility::clears_agent_scope(&patch) {
+            friend_ext.insert(
+                crate::control_plane_visibility::AGENT_SCOPE_KEY.to_string(),
+                serde_json::Value::Array(Vec::new()),
+            );
         }
         if let Some(value) = patch.friend_check_in_strategy {
             friend_check_in_strategy = value;

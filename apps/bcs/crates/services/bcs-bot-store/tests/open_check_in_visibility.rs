@@ -298,3 +298,48 @@ async fn clearing_scope_observes_concurrently_enabled_approval() {
     assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Approval);
     assert!(record.friend_ext.is_empty());
 }
+
+#[tokio::test]
+async fn public_only_patch_clears_live_scope_without_replaying_stale_siblings() {
+    let record = execute_patch_after_concurrent_write(
+        "UPDATE bcs_bots SET friend_ext = '{\"view_scope_agent_friend_deps\":[\"new-department\"],\"unknown\":{\"keep\":\"latest\"},\"public_agent_approval\":{\"puid\":\"pending-new\"},\"view_scope_user_friend_deps\":[\"U2\"]}' WHERE bot_uuid = 'race'",
+        "public", serde_json::json!({"view_scope_agent_friend_deps": ["old-department"], "unknown": "stale"}),
+        FriendCheckInStrategy::Open,
+        BotControlPlanePatch { visibility: Some("public".into()), ..Default::default() },
+    ).await;
+    assert_eq!(record.friend_ext, serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({
+        "view_scope_agent_friend_deps": [],
+        "unknown": {"keep": "latest"},
+        "public_agent_approval": {"puid": "pending-new"},
+        "view_scope_user_friend_deps": ["U2"]
+    })).unwrap());
+}
+
+#[tokio::test]
+async fn failed_public_only_write_preserves_both_scope_and_visibility() {
+    let (db, repo) = fixture::sqlite_repo().await;
+    let env = bcs_config::resolve_env_str();
+    repo.register_with_owner_and_token("fail-clear".into(), BotCapabilities {
+        name: Some("Fail Clear".into()), ..Default::default()
+    }, "owner", "fail-clear-token").await.unwrap();
+    let scope = serde_json::json!({"view_scope_agent_friend_deps": ["D1"], "unknown": {"keep": true}});
+    repo.patch_control_plane("fail-clear", &env, BotControlPlanePatch {
+        visibility: Some("protected".into()),
+        friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
+        friend_ext: Some(serde_json::from_value(scope.clone()).unwrap()),
+        ..Default::default()
+    }).await.unwrap().unwrap();
+    db.execute(DbStatement::new(
+        "CREATE TRIGGER reject_public BEFORE UPDATE ON bcs_bots \
+         WHEN NEW.visibility = 'public' \
+         BEGIN SELECT RAISE(ABORT, 'injected visibility failure'); END"
+    )).await.unwrap();
+    assert!(repo.patch_control_plane("fail-clear", &env, BotControlPlanePatch {
+        visibility: Some("public".into()), ..Default::default()
+    }).await.is_err());
+    let record = repo.get_control_plane("fail-clear", &env).await.unwrap().unwrap();
+    assert_eq!(record.visibility, "protected");
+    assert_eq!(record.friend_ext, serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(scope).unwrap());
+    assert_eq!(record.friend_check_in_strategy, FriendCheckInStrategy::Open);
+    assert_eq!(repo.try_get("fail-clear").await.unwrap().unwrap().capabilities.visibility, "protected");
+}

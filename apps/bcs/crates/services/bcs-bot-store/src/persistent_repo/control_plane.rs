@@ -654,6 +654,13 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         if let Some(friend_ext) = patch.friend_ext.as_ref() {
             assignments.push("friend_ext = json_extract(?, '$')".to_string());
             params.push(Value::from(serde_json::to_string(friend_ext)?));
+        } else if crate::control_plane_visibility::clears_agent_scope(&patch) {
+            // Clear only active agent scope on the live JSON object. Do not
+            // replay a pre-read object over concurrent sibling/approval changes.
+            assignments.push(format!(
+                "friend_ext = JSON_SET(COALESCE(friend_ext, '{{}}'), '$.{}', JSON_ARRAY())",
+                crate::control_plane_visibility::AGENT_SCOPE_KEY,
+            ));
         }
         if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
             assignments.push("friend_check_in_strategy = ?".to_string());

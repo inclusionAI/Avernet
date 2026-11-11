@@ -72,13 +72,3 @@ remain import-compatible through the original service module.
   logs live in BCS (`Worker synced to bcsfuse` / `Worker sync failed, retrying`).
   Successful publication is not proof of downstream synchronization; use these
   logs and the BCSFuse worker record when verifying a rollout.
-
-### Effective Bot visibility after approval
-
-Approval callbacks still validate the approved target/PUID and publish its active
-organization scope only after AGREE. The final persisted Bot-facing visibility is
-normalized by BCS from the live strategy and the effective top-level scope in the
-same attribute write: private stays private; visible intent is public only for
-OPEN plus an empty active scope, otherwise protected. Callback public/protected
-values are not a bypass of that storage rule. Pending `public_agent_approval`
-metadata is not active scope, and user-facing `user_visibility` remains separate.

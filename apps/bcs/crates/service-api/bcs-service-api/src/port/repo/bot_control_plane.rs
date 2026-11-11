@@ -133,7 +133,10 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
     /// intent, not an override. Supplied fields win over stored fields; omitted
     /// fields are read inside the write boundary. Pending approval sub-blocks do
     /// not determine active scope. Other attribute-only patches leave visibility
-    /// unchanged. Normalization never edits friend_ext itself.
+    /// unchanged. For legacy all-visible intent, explicit visibility=public
+    /// without friend_ext clears only the active top-level agent scope in the
+    /// same write, preserving sibling fields. Explicit friend_ext takes precedence;
+    /// strategy-only and private patches never implicitly clear scope.
     async fn patch_control_plane(
         &self,
         bot_id: &str,

@@ -151,6 +151,7 @@ pub async fn verify(repo: &(impl BotRepoPort + BotControlPlaneRepoPort)) {
             }
         }
     }
+    verify_public_only_request_means_all_visible(repo).await;
     verify_single_field_transitions(repo).await;
     verify_pending_approval_is_not_effective_scope(repo).await;
     // Legacy registry writes can leave a noncanonical row. A profile/user-only
@@ -249,12 +250,12 @@ async fn verify_single_field_transitions(repo: &(impl BotRepoPort + BotControlPl
             all.clone(),
         ),
         (
-            "public-with-scope",
+            "protected-retains-scope",
             "protected",
             Open,
             scoped.clone(),
             BotControlPlanePatch {
-                visibility: Some("public".into()),
+                visibility: Some("protected".into()),
                 ..Default::default()
             },
             "protected",
@@ -386,4 +387,58 @@ async fn verify_pending_approval_is_not_effective_scope(
         )
         .await;
     }
+}
+
+/// Old external clients express all-visible with visibility alone. BCS owns
+/// clearing just the active agent scope; unrelated data and draft approval stay.
+async fn verify_public_only_request_means_all_visible(
+    repo: &(impl BotRepoPort + BotControlPlaneRepoPort),
+) {
+    use FriendCheckInStrategy::{Approval, DeptFree, Open};
+    let env = bcs_config::resolve_env_str();
+    let scoped = json!({
+        "view_scope_agent_friend_deps": ["D1"],
+        "view_scope_user_friend_deps": ["U1"],
+        "no_check_scope_friend_deps": ["N1"],
+        "public_agent_approval": {"status": "PROCESSING", "puid": "draft-1", "view_friend_deps": ["D2"]},
+        "unknown": {"view_scope_agent_friend_deps": ["nested-keep"]}
+    });
+    let mut cleared = scoped.clone();
+    cleared["view_scope_agent_friend_deps"] = json!([]);
+    for (index, strategy, expected) in [(0, Open, "public"), (1, Approval, "protected"), (2, DeptFree, "protected")] {
+        let id = format!("public-only-{index}");
+        seed(repo, &id, "protected", strategy, scoped.clone()).await;
+        for _ in 0..2 {
+            let record = repo.patch_control_plane(&id, &env, BotControlPlanePatch {
+                visibility: Some("public".into()), ..Default::default()
+            }).await.unwrap().unwrap();
+            assert_state(repo, record, expected, strategy, cleared.clone()).await;
+        }
+    }
+    seed(repo, "public-plus-open", "protected", Approval, scoped.clone()).await;
+    let record = repo.patch_control_plane("public-plus-open", &env, BotControlPlanePatch {
+        visibility: Some("public".into()), friend_check_in_strategy: Some(Open), ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_state(repo, record, "public", Open, cleared).await;
+
+    // Opening strategy alone is not a request to remove a restriction.
+    seed(repo, "open-with-retained-scope", "protected", Approval, scoped.clone()).await;
+    let record = repo.patch_control_plane("open-with-retained-scope", &env, BotControlPlanePatch {
+        friend_check_in_strategy: Some(Open), ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_state(repo, record, "protected", Open, scoped.clone()).await;
+
+    // Explicit friend_ext has whole-object replacement semantics and wins over
+    // the compatibility interpretation, even with explicit visibility=public.
+    seed(repo, "public-with-explicit-scope", "private", Open, json!({})).await;
+    let record = repo.patch_control_plane("public-with-explicit-scope", &env, BotControlPlanePatch {
+        visibility: Some("public".into()), friend_ext: Some(ext(scoped.clone())), ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_state(repo, record, "protected", Open, scoped.clone()).await;
+
+    seed(repo, "private-retains-scope", "protected", Open, scoped.clone()).await;
+    let record = repo.patch_control_plane("private-retains-scope", &env, BotControlPlanePatch {
+        visibility: Some("private".into()), ..Default::default()
+    }).await.unwrap().unwrap();
+    assert_state(repo, record, "private", Open, scoped).await;
 }

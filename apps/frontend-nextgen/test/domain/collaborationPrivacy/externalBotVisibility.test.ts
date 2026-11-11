@@ -15,7 +15,7 @@ describe('external bot visibility domain', () => {
   });
 
   test('public 即使保留旧行的部门范围也展示为全部可见', () => {
-    // 兼容历史 public 数据；新写入切回全部可见会显式清空顶层范围。
+    // 外部 Bot 切回 public 只提交 visibility；后端可能保留陈旧的 view_scope_agent_friend_deps，展示必须忽略。
     expect(
       normalizeExternalViewScopeConfig('public', { view_scope_agent_friend_deps: ['蚂蚁集团-CRO线-大安全技术部'] }),
     ).toEqual({ scope: 'all', organizationPaths: [] });
@@ -44,9 +44,6 @@ describe('external bot visibility domain', () => {
   });
 
   test('protected 且无部门范围时展示为全部可见', () => {
-    expect(normalizeExternalViewScopeConfig('protected', { view_scope_agent_friend_deps: [] })).toEqual({
-      scope: 'all', organizationPaths: [],
-    });
     expect(normalizeExternalViewScopeConfig('protected', {})).toEqual({ scope: 'all', organizationPaths: [] });
     expect(normalizeExternalViewScopeConfig('protected', undefined)).toEqual({ scope: 'all', organizationPaths: [] });
   });
@@ -79,24 +76,6 @@ describe('external bot visibility domain', () => {
     });
     // 不修改调用方持有的原对象。
     expect(currentFriendExt.view_scope_agent_friend_deps).toEqual(['旧范围']);
-  });
-
-  test('清空范围只替换顶层键，不清空嵌套同名键、审批字段或修改原对象', () => {
-    const current = {
-      view_scope_agent_friend_deps: ['旧范围'],
-      no_check_scope_friend_deps: ['D9'],
-      public_agent_approval: { status: 'PENDING', puid: 'PU-9' },
-      unknown: { view_scope_agent_friend_deps: ['嵌套范围'], enabled: true },
-    };
-    const patched = buildExternalViewScopeFriendExt(current, []);
-    expect(patched).toEqual({
-      view_scope_agent_friend_deps: [],
-      no_check_scope_friend_deps: ['D9'],
-      public_agent_approval: { status: 'PENDING', puid: 'PU-9' },
-      unknown: { view_scope_agent_friend_deps: ['嵌套范围'], enabled: true },
-    });
-    expect(current.view_scope_agent_friend_deps).toEqual(['旧范围']);
-    expect(patched.unknown).not.toBe(current.unknown);
   });
 
   test('friend_ext 缺失或非对象时从空对象开始合并', () => {

@@ -335,89 +335,39 @@ describe('collaborationPrivacyRuntimeAdapter 外部 Bot 不读取画像公开配
 });
 
 describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
-  it.each([
-    ['OPEN', 'public'],
-    ['APPROVAL', 'protected'],
-    ['DEPT_FREE', 'protected'],
-  ] as const)('全部可见先 GET 最新范围并同次 PATCH 清空，保留 %s 策略并接受 BCS 返回 %s', async (strategy, visibility) => {
+  it('全部可见/不可见直改 PATCH 且不触发 publish 审批链路', async () => {
     const { adapter, listMyBots, getCollaborationBot, patchCollaborationBot, publishBotPublic } = createExternalAdapter();
-    listMyBots.mockResolvedValue(mockMineWithExternalBot({
-      dto: createExternalBotDto({
-        visibility: 'protected',
-        friend_ext: { view_scope_agent_friend_deps: ['加载时范围'], stale_only: true },
-      }),
-    }));
-    const latestFriendExt = {
-      view_scope_agent_friend_deps: ['最新范围'],
-      view_scope_user_friend_deps: ['U1'],
-      no_check_scope_friend_deps: [{ deptNo: 'D9', deptName: '免审批部门' }],
-      public_agent_approval: { status: 'PENDING', puid: 'PU-9', approval_url: 'https://example.com/x' },
-      custom_flags: { nested: { keep: true, view_scope_agent_friend_deps: ['嵌套范围不清空'] } },
-    };
-    getCollaborationBot.mockResolvedValue({
-      code: 20000,
-      data: createExternalBotDto({ visibility: 'protected', friend_ext: latestFriendExt, friend_check_in_strategy: strategy }),
-    });
+    listMyBots.mockResolvedValue(
+      mockMineWithExternalBot({ dto: createExternalBotDto({ visibility: 'protected' }) }),
+    );
     patchCollaborationBot.mockResolvedValue({
       code: 20000,
-      data: createExternalBotDto({
-        visibility,
-        friend_ext: { ...latestFriendExt, view_scope_agent_friend_deps: [] },
-        friend_check_in_strategy: strategy,
-      }),
+      message: 'OK',
+      data: createExternalBotDto({ visibility: 'public' }),
     });
     await adapter.loadOverview('900004', undefined, externalScope);
-    const signal = new AbortController().signal;
 
     const published = await adapter.submitPublication({
       botId: 'external-1',
       audience: 'bot',
       isExternalBot: true,
       config: { scope: 'all', organizationPaths: [] },
-      // 切换范围后即使编辑器仍携带旧选择，全部可见也必须显式清空。
-      deptEntries: [{ deptNo: 'OLD', deptName: '旧选择' }],
-    }, signal);
-
-    expect(getCollaborationBot).toHaveBeenCalledTimes(1);
-    expect(getCollaborationBot).toHaveBeenCalledWith('external-1', signal);
-    expect(getCollaborationBot.mock.invocationCallOrder[0]).toBeLessThan(patchCollaborationBot.mock.invocationCallOrder[0]);
-    expect(patchCollaborationBot).toHaveBeenCalledTimes(1);
-    expect(patchCollaborationBot).toHaveBeenCalledWith('external-1', {
-      visibility: 'public', // 仅非 private 意图；客户端不根据好友审批策略归一化。
-      friend_ext: {
-        view_scope_agent_friend_deps: [],
-        view_scope_user_friend_deps: ['U1'],
-        no_check_scope_friend_deps: [{ deptNo: 'D9', deptName: '免审批部门' }],
-        public_agent_approval: { status: 'PENDING', puid: 'PU-9', approval_url: 'https://example.com/x' },
-        custom_flags: { nested: { keep: true, view_scope_agent_friend_deps: ['嵌套范围不清空'] } },
-      },
-    }, signal);
-    expect(latestFriendExt.view_scope_agent_friend_deps).toEqual(['最新范围']);
-    expect(publishBotPublic).not.toHaveBeenCalled();
-    expect(published).toEqual({ status: 'completed', config: { scope: 'all', organizationPaths: [] } });
-  });
-
-  it.each(['private', 'protected', 'public'] as const)('从 %s 改为不可见只 PATCH private，不读取或清空范围/审批', async (visibility) => {
-    const { adapter, listMyBots, getCollaborationBot, patchCollaborationBot, publishBotPublic } = createExternalAdapter();
-    const friendExt = { view_scope_agent_friend_deps: ['旧范围'], no_check_scope_friend_deps: ['D9'] };
-    listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto: createExternalBotDto({ visibility, friend_ext: friendExt }) }));
-    getCollaborationBot.mockRejectedValue(new Error('private 不依赖详情接口'));
-    patchCollaborationBot.mockResolvedValue({
-      code: 20000,
-      data: createExternalBotDto({ visibility: 'private', friend_ext: friendExt }),
     });
-    await adapter.loadOverview('900004', undefined, externalScope);
 
-    await expect(adapter.submitPublication({
+    expect(patchCollaborationBot).toHaveBeenCalledTimes(1);
+    expect(patchCollaborationBot).toHaveBeenCalledWith('external-1', { visibility: 'public' }, undefined);
+    expect(publishBotPublic).not.toHaveBeenCalled();
+    expect(getCollaborationBot).not.toHaveBeenCalled();
+    expect(published).toEqual({ status: 'completed', config: { scope: 'all', organizationPaths: [] } });
+
+    // 不可见 → visibility = private（与既有 none→private 合同一致）
+    await adapter.submitPublication({
       botId: 'external-1',
       audience: 'bot',
       isExternalBot: true,
       config: { scope: 'none', organizationPaths: [] },
-    })).resolves.toEqual({ status: 'completed', config: { scope: 'none', organizationPaths: [] } });
-
-    expect(patchCollaborationBot).toHaveBeenCalledTimes(1);
-    expect(patchCollaborationBot).toHaveBeenCalledWith('external-1', { visibility: 'private' }, undefined);
-    expect(getCollaborationBot).not.toHaveBeenCalled();
+    });
+    expect(patchCollaborationBot).toHaveBeenLastCalledWith('external-1', { visibility: 'private' }, undefined);
     expect(publishBotPublic).not.toHaveBeenCalled();
   });
 
@@ -512,7 +462,7 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
     expect(patchCollaborationBot).not.toHaveBeenCalled();
   });
 
-  it.each(['all', 'restricted'] as const)('%s：GET friend_ext 失败不 PATCH，PATCH 失败不产出成功结果', async (scope) => {
+  it('GET friend_ext 失败或 PATCH 失败都不产出成功结果', async () => {
     const { adapter, listMyBots, getCollaborationBot, patchCollaborationBot } = createExternalAdapter();
     listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto: createExternalBotDto({ visibility: 'public' }) }));
     await adapter.loadOverview('900004', undefined, externalScope);
@@ -523,7 +473,7 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
         botId: 'external-1',
         audience: 'bot',
         isExternalBot: true,
-        config: { scope, organizationPaths: scope === 'restricted' ? [['蚂蚁集团-CRO线-大安全技术部']] : [] },
+        config: { scope: 'restricted', organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']] },
         deptEntries: [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
       }),
     ).rejects.toThrow('Bot 详情接口返回异常');
@@ -540,30 +490,11 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
         botId: 'external-1',
         audience: 'bot',
         isExternalBot: true,
-        config: { scope, organizationPaths: scope === 'restricted' ? [['蚂蚁集团-CRO线-大安全技术部']] : [] },
+        config: { scope: 'restricted', organizationPaths: [['蚂蚁集团-CRO线-大安全技术部']] },
         deptEntries: [{ deptNo: 'A4195', deptName: '蚂蚁集团-CRO线-大安全技术部' }],
       }),
     ).rejects.toThrow('Bot 更新接口返回异常');
     expect(patchCollaborationBot).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    { code: 50000, data: createExternalBotDto() },
-    { code: 20000, data: { bot_id: 'external-1' } },
-    { code: 20000, data: createExternalBotDto({ bot_id: 'another-bot' }) },
-  ])('全部可见的 GET 业务码、DTO 或 Bot ID 无效时不 PATCH（%j）', async (response) => {
-    const { adapter, listMyBots, getCollaborationBot, patchCollaborationBot } = createExternalAdapter();
-    listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto: createExternalBotDto() }));
-    await adapter.loadOverview('900004', undefined, externalScope);
-    getCollaborationBot.mockResolvedValue(response);
-
-    await expect(adapter.submitPublication({
-      botId: 'external-1',
-      audience: 'bot',
-      isExternalBot: true,
-      config: { scope: 'all', organizationPaths: [] },
-    })).rejects.toThrow('Bot 详情接口返回了');
-    expect(patchCollaborationBot).not.toHaveBeenCalled();
   });
 
   it('外部命令仅支持对 Bot 受众，用户受众直接拒绝以免误改 Bot 可见性字段', async () => {
@@ -583,8 +514,7 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
     expect(patchCollaborationBot).not.toHaveBeenCalled();
   });
 
-  it.each(['all', 'restricted'] as const)('外部 %s 直改成功后刷新快照：随后的好友审批保留新范围与未知键', async (scope) => {
-    const savedNames = scope === 'all' ? [] : ['蚂蚁集团-研究院'];
+  it('外部限定组织直改成功后刷新快照：随后的好友审批整体替换保留新名称与未知键', async () => {
     const { adapter, listMyBots, getCollaborationBot, patchCollaborationBot } = createExternalAdapter();
     const initialFriendExt = { custom_flags: { nested: { keep: true } }, view_scope_agent_friend_deps: ['旧范围'] };
     listMyBots.mockResolvedValue(
@@ -603,17 +533,17 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
         message: 'OK',
         data: createExternalBotDto({
           visibility: 'protected',
-          friend_ext: { custom_flags: { nested: { keep: true } }, view_scope_agent_friend_deps: savedNames },
+          friend_ext: { custom_flags: { nested: { keep: true } }, view_scope_agent_friend_deps: ['蚂蚁集团-研究院'] },
         }),
       })
       .mockResolvedValueOnce({
         code: 20000,
         message: 'OK',
         data: createExternalBotDto({
-          visibility: scope === 'all' ? 'public' : 'protected',
+          visibility: 'protected',
           friend_ext: {
             custom_flags: { nested: { keep: true } },
-            view_scope_agent_friend_deps: savedNames,
+            view_scope_agent_friend_deps: ['蚂蚁集团-研究院'],
             no_check_scope_friend_deps: [],
           },
           friend_check_in_strategy: 'OPEN',
@@ -625,7 +555,7 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
       botId: 'external-1',
       audience: 'bot',
       isExternalBot: true,
-      config: { scope, organizationPaths: scope === 'all' ? [] : [['蚂蚁集团-研究院']] },
+      config: { scope: 'restricted', organizationPaths: [['蚂蚁集团-研究院']] },
       deptEntries: [{ deptNo: 'A5000', deptName: '蚂蚁集团-研究院' }],
     });
     await adapter.updateFriendApproval({
@@ -634,13 +564,13 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
     });
 
     // 第二次 PATCH（好友审批整体替换 friend_ext）必须基于直改后的最新快照：
-    // 保留刚保存的范围（含全部可见的空范围），同时不丢未知嵌套键。
+    // 保留刚保存的可见性范围名称，同时不丢未知嵌套键。
     const friendApprovalPatch = patchCollaborationBot.mock.calls.at(-1);
     expect(friendApprovalPatch?.[0]).toBe('external-1');
     expect(friendApprovalPatch?.[1]).toEqual({
       friend_ext: {
         custom_flags: { nested: { keep: true } },
-        view_scope_agent_friend_deps: savedNames,
+        view_scope_agent_friend_deps: ['蚂蚁集团-研究院'],
         no_check_scope_friend_deps: [],
       },
       friend_check_in_strategy: 'OPEN',
@@ -700,25 +630,6 @@ describe('collaborationPrivacyRuntimeAdapter.externalBotPublication', () => {
 });
 
 describe('collaborationPrivacyRuntimeAdapter 外部 Bot 加载展示', () => {
-  it('protected + 空范围 + APPROVAL 展示为全部可见且仍需好友审批，不生成发布审批态', async () => {
-    const { adapter, listMyBots, listOrgDepts } = createExternalAdapter();
-    listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto: createExternalBotDto({
-      visibility: 'protected',
-      friend_check_in_strategy: 'APPROVAL',
-      friend_ext: {
-        view_scope_agent_friend_deps: [],
-        public_agent_approval: { status: 'PENDING', puid: 'PU-1', visibility: 'public' },
-      },
-    }) }));
-
-    const overview = await adapter.loadOverview('900004', undefined, externalScope);
-
-    expect(overview.bots[0].publication.bot).toEqual({ scope: 'all', organizationPaths: [] });
-    expect(overview.bots[0].friendApproval.mode).toBe('all');
-    expect(overview.bots[0].pendingPublications).toEqual({});
-    expect(listOrgDepts).not.toHaveBeenCalled();
-  });
-
   it('public 即使响应保留陈旧部门范围也展示全部可见，审批类字段不生成 pending/链接', async () => {
     const { adapter, listMyBots, listOrgDepts } = createExternalAdapter();
     const staleDto = createExternalBotDto({

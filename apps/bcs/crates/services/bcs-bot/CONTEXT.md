@@ -227,5 +227,7 @@ repository's atomic write boundary. Private stays private; otherwise only
 Open strategy plus an empty active organization scope becomes public. All
 other visible configurations are protected, including when restrictions are
 introduced on a formerly public Bot. Explicit public/protected are visible
-intent, not overrides. Core must not synthesize unconditional visibility from
-a pre-read. Catalog notification follows successful writes as before.
+intent, not overrides. The repository also supports legacy public-only requests
+as all-visible intent by atomically clearing active agent scope while preserving
+other extension fields; supplied friend_ext still wins. Core must not synthesize
+unconditional visibility from a pre-read. Catalog notification follows successful writes as before.

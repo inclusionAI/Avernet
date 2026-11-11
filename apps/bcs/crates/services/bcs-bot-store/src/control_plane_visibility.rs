@@ -7,12 +7,18 @@ use bcs_db_api::{DbSqlFlavor, DbValue};
 use bcs_service_api::{BotControlPlanePatch, FriendCheckInStrategy};
 use serde_json::{Map, Value};
 
-const AGENT_SCOPE_KEY: &str = "view_scope_agent_friend_deps";
+pub(crate) const AGENT_SCOPE_KEY: &str = "view_scope_agent_friend_deps";
 
 pub(crate) fn should_normalize(patch: &BotControlPlanePatch) -> bool {
     patch.visibility.is_some()
         || patch.friend_check_in_strategy.is_some()
         || patch.friend_ext.is_some()
+}
+
+/// Legacy external clients send only visibility=public for all-visible intent.
+/// An explicitly supplied friend_ext is authoritative and never implicitly cleared.
+pub(crate) fn clears_agent_scope(patch: &BotControlPlanePatch) -> bool {
+    patch.visibility.as_deref() == Some("public") && patch.friend_ext.is_none()
 }
 
 fn scope_is_empty(friend_ext: &Map<String, Value>) -> bool {
@@ -65,6 +71,7 @@ pub(crate) fn sql_assignment(
             "1 = 0"
         }
         .into(),
+        None if clears_agent_scope(patch) => "1 = 1".into(),
         None => {
             let path = format!("'$.{AGENT_SCOPE_KEY}'");
             match flavor {

@@ -3,12 +3,10 @@
  *
  * TC Bot 走 publishBotPublic 审批链路的行为保持不变；外部 Bot 合同只允许
  * PATCH /openapi/v1/collaboration/bots/{botId}（复用 apiAdapter 的业务码 + DTO 运行时校验）：
- * - 不可见只提交 {visibility:'private'}，不读取或清空范围；
- * - 全部可见/限定组织先 GET 同一 Bot 取最新 friend_ext，保留未知兄弟字段，
- *   只替换顶层 view_scope_agent_friend_deps，并与 visibility 意图同次 PATCH；
- *   全部可见用空数组，限定组织用完整名称字符串（BCS 按名称精确/前缀匹配），绝不用部门编码；
- * - public/protected 仅表达非 private 意图，最终权限由 BCS 原子归一化，前端不复制策略判断；
- * - 不走发布审批：不提取审批链接，成功即 completed；既有好友审批策略与字段保持不变。
+ * - 全部可见 body 固定为 {visibility:'public'}，不可见 {visibility:'private'}；
+ * - 限定组织先 GET 同一 Bot 取最新 friend_ext，整体合并后只替换 view_scope_agent_friend_deps，
+ *   值为组织完整名称字符串（BCS 按名称精确/前缀匹配），绝不用部门编码；
+ * - 无审批语义：不提取审批链接，成功即已完成（completed）。
  */
 import {
   applyExternalViewScopeToBot,
@@ -30,7 +28,7 @@ function readCommandDepartmentNames(command: PublicationCommand): string[] {
 
 /**
  * 外部 Bot 通用配置弹窗加载归一：对 Bot 可见性按外部合同重建
- * （兼容历史 public 陈旧范围；protected 空范围仍为全部可见；清空发布审批态，不影响好友审批）。
+ * （public 忽略陈旧部门范围；protected 名称字符串原样回显；清空审批态）。
  */
 export function applyExternalBotDtoToDomain(bot: CollaborationBot, dto: CollaborationBotDto): CollaborationBot {
   return applyExternalViewScopeToBot(bot, { visibility: dto.visibility, friend_ext: dto.friend_ext });
@@ -64,19 +62,18 @@ export async function submitExternalPublication(
     throw new Error('外部 Bot 仅支持配置对 Bot 可见性');
   }
   let patchedBot: CollaborationBotDto;
-  if (command.config.scope === 'none') {
-    // private 不清空范围，也不因详情读取失败阻止收紧权限。
-    patchedBot = await apiAdapter.patchManagedBot(command.botId, { visibility: 'private' }, signal);
-  } else {
-    const names = command.config.scope === 'restricted' ? readCommandDepartmentNames(command) : [];
-    if (command.config.scope === 'restricted' && names.length === 0) {
+  if (command.config.scope === 'restricted') {
+    const names = readCommandDepartmentNames(command);
+    if (names.length === 0) {
       throw new Error('组织范围缺少部门名称，无法保存 Bot 可见性');
     }
-    // friend_ext 是顶层整体替换语义；全部可见也须取最新值后显式清空旧范围，保留审批及未知键。
+    // friend_ext 是顶层整体替换语义，必须先取最新值再合并，保留全部未知键。
     const current = await apiAdapter.getManagedBot(command.botId, signal);
     const friendExt = buildExternalViewScopeFriendExt(current.friend_ext, names);
-    const visibility = command.config.scope === 'restricted' ? 'protected' : 'public';
-    patchedBot = await apiAdapter.patchManagedBot(command.botId, { visibility, friend_ext: friendExt }, signal);
+    patchedBot = await apiAdapter.patchManagedBot(command.botId, { visibility: 'protected', friend_ext: friendExt }, signal);
+  } else {
+    const visibility = command.config.scope === 'none' ? 'private' : 'public';
+    patchedBot = await apiAdapter.patchManagedBot(command.botId, { visibility }, signal);
   }
   return { result: { status: 'completed', config: structuredClone(command.config) }, patchedBot };
 }

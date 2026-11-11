@@ -521,10 +521,15 @@ BotPath:
       All other visible configurations become protected, including non-empty or
       malformed scopes and APPROVAL/DEPT_FREE strategies. Explicit public and
       protected values express visible intent and do not override this rule.
-      Supplied fields replace their stored values before normalization; omitted
+      For legacy all-visible requests, explicit visibility=public with friend_ext
+      omitted clears only the active top-level agent scope in the same write,
+      preserving all other extension fields. Explicit friend_ext takes precedence;
+      changing only strategy or setting private never implicitly clears scope.
+      Other supplied fields replace stored values before normalization; omitted
       fields use the live row, not a prior snapshot. Approval draft sub-blocks
       do not count as an effective scope. Other attribute-only patches do not
-      normalize visibility. The derivation itself does not modify friend_ext.
+      normalize visibility. Apart from the legacy all-visible scope clearing,
+      derivation does not modify friend_ext.
     x-avernet-security:
       user: required
       app: required
@@ -534,6 +539,7 @@ BotPath:
       descriptor_kind: bot_only
       descriptor_arrays: replace
       visibility_normalization: private_else_public_iff_open_and_unscoped_else_protected
+      public_without_friend_ext: clear_active_agent_scope
     parameters:
       - $ref: ../shared.yaml#/BotIdPath
     requestBody:

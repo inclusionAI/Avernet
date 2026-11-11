@@ -402,9 +402,16 @@ values cannot authorize public. This supports both editing directions and
 downgrades when approval or a department restriction is introduced. Explicit
 public/protected express visible intent rather than bypassing this rule.
 
-Supplied fields replace stored values; omitted fields use the live row. Pending
-approval sub-blocks are not active scope. Replacing friend_ext preserves its
-existing whole-object semantics; normalization itself never changes its data.
+Supplied fields replace stored values; omitted fields use the live row. Legacy
+all-visible requests (explicit `visibility=public` with `friend_ext` omitted)
+clear only the active top-level agent scope in the same write before deriving
+visibility. SQL JSON_SET operates on the live object; Memory edits it under the
+record-write guard. Approval, user-scope, exemption and unknown sibling fields
+are preserved, including concurrent changes. Explicit `friend_ext` instead has
+its existing whole-object replacement semantics and wins over this compatibility
+rule. Strategy-only, private and protected requests do not implicitly clear scope.
+Pending approval sub-blocks are not active scope. No frontend or Backend change
+is required to send the legacy all-visible request or display normalized results.
 Name/status/user-visibility-only patches do not normalize Bot visibility, and
 there is no bulk backfill. Existing public Group membership is not rewritten
 by a Bot patch; public participant admission guards still apply separately.
