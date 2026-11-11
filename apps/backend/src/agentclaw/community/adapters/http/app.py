@@ -144,6 +144,7 @@ from agentclaw.community.adapters.http.service_bot.router_eval import router as 
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
+from agentclaw.community.adapters.http.task.context_collab import router as context_collab_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
@@ -319,6 +320,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError, CallerMcpSyncError, CallerBcsSyncError,
 )
 from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
+from agentclaw.community.adapters.http.context_collab_status import CONTEXT_COLLAB_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpEndpointUnavailableError,
     McpPermissionDeniedError,
@@ -343,11 +345,9 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
     CallerIdentityIrreversibleError: 409,
-    CallerIdentityNotFoundError: 404,
-    CallerIdentityReadOnlyError: 409,
+    CallerIdentityNotFoundError: 404, CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,
-    CallerMcpNotFoundError: 404,
-    CallerMcpSyncError: 500, CallerBcsSyncError: 500,
+    CallerMcpNotFoundError: 404, CallerMcpSyncError: 500, CallerBcsSyncError: 500,
     CallerCliNotFoundError: 404,
     CallerCliSyncError: 500,
     CallerCallTypeInvalidError: 500,
@@ -371,7 +371,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
-    **ACLI_CLI_ERROR_STATUS,
+    **ACLI_CLI_ERROR_STATUS, **CONTEXT_COLLAB_ERROR_STATUS,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
@@ -895,6 +895,7 @@ app.include_router(bot_message_feedback_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
+app.include_router(context_collab_router)  # /api/v1/collaboration/task/context_collab — BBS context collab (spec §6.1)
 app.include_router(work_orders_http_router)
 app.include_router(agentswarm_router_module.router)
 agentswarm_router_module.register_exception_handlers(app)
@@ -957,8 +958,6 @@ app.include_router(economy_governance_router)
 app.include_router(economy_governance_admin_router)
 app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
-app.include_router(task_internal_router)
-app.include_router(task_callback_router)
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated in
 # local boots via the test column's app-services module) are NOT mounted here:
 # they are the one route registration that needs a resolved binding, so

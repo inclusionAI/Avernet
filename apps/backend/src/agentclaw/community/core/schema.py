@@ -85,6 +85,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification[_group]
     import agentclaw.community.core.agentswarm.repository.registry  # noqa: F401  ac_agent_swarm_* (run/agent/message/result_shard/round/guard_event/job/audit)
+    import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401  ac_context_collab_*
 
 
 def _metadatas() -> list[MetaData]:

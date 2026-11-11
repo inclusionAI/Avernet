@@ -184,6 +184,7 @@ from .collaboration_bots import public_router as collaboration_public_router
 from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
+from .task.context_collab import router as task_context_collab_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
 from .bots.acli_clis import operations_router as acli_cli_operations_router
@@ -715,6 +716,18 @@ def build_public_router() -> APIRouter:
     # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
     public.include_router(
         task_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Context collab public surface (create / append event / status) — the
+    # spec §6.1 openapi twin of the internal ``/api/v1/collaboration/task``
+    # copy. Not bot-scoped, no grant gate; the operator is the L2
+    # accountability subject the gateway authenticated, which delivery binds
+    # to the verified principal (REFUSED admission — an app-only caller names
+    # no end user to bind). Base error table like the task group: no route
+    # here is scoped by the caller's user_id.
+    public.include_router(
+        task_context_collab_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
