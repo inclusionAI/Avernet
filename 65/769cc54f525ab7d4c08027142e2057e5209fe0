@@ -16,6 +16,7 @@ apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.t
   s_46bcfe8c4c3bdf::t_ddf2071aa85d63 35
 apps/frontend-nextgen/scripts/public-tests.list
   s_46bcfe8c4c3bdf::t_40de85cf426ffa 123-133
+  s_143559103dbd9f::t_d634fe8fc7448e 120
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -23,6 +24,14 @@ apps/frontend-nextgen/scripts/public-tests.list
   "base_commit_sha": "65769cc54f525ab7d4c08027142e2057e5209fe0",
   "prompts": {},
   "sessions": {
+    "s_143559103dbd9f": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "927b25a9-8907-44d6-b18f-64fc77722c39",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
     "s_46bcfe8c4c3bdf": {
       "agent_id": {
         "tool": "antcc",
