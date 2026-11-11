@@ -4,6 +4,8 @@
 
 本文定义两件事：公司内 Agent 统一遵循的 **BCN A2A Profile**（A2A 1.0 的子集、行为约束和扩展目录），以及帮助 SOFABoot（JDK 17）平台按该 Profile 提供 A2A Server 的 **Java Server SDK**。
 
+本文是摘要。逐条的规范条款、SPI、多实例流程和待确认问题见同目录的评审稿 [design.html](design.html)；两者不一致时以评审稿为准。
+
 本文是目标合同，不代表已实现。BCS 现有下行行为以 [A2A 接口参考](../../bcn-a2a-api-reference.zh-CN.md) 为准；两者不一致之处在第 9 节列出。
 
 ## 1. 背景与目标

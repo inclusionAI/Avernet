@@ -1,0 +1,1000 @@
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>BCN A2A Profile 设计稿</title>
+<style>
+/* Layout: sticky section index on the left, one reading column on the right; stacks to one column on phones. */
+:root{
+  --bg:#f7f8fb; --surface:#ffffff; --sunk:#eef1f6; --line:#d9dee8; --fg:#1b2333; --muted:#5b667a;
+  --accent:#2563eb; --accent-soft:#e3ecfd; --ok:#17794a; --ok-soft:#dff3e8; --warn:#9a5b00; --warn-soft:#fbefd5; --bad:#b3261e; --bad-soft:#fbe4e2;
+  --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11151d; --surface:#181d28; --sunk:#202736; --line:#2f3849; --fg:#e4e8f0; --muted:#98a3b8;
+  --accent:#7aa5ff; --accent-soft:#1d2c4d; --ok:#6fd19c; --ok-soft:#173326; --warn:#e9b860; --warn-soft:#3a2d12; --bad:#ff8f86; --bad-soft:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11151d; --surface:#181d28; --sunk:#202736; --line:#2f3849; --fg:#e4e8f0; --muted:#98a3b8;
+  --accent:#7aa5ff; --accent-soft:#1d2c4d; --ok:#6fd19c; --ok-soft:#173326; --warn:#e9b860; --warn-soft:#3a2d12; --bad:#ff8f86; --bad-soft:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.75 var(--sans)}
+.page{display:grid;grid-template-columns:250px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;padding-block:32px 80px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);align-self:start;max-height:calc(100vh - 32px);overflow:auto;font-size:13px;line-height:1.5}
+nav.toc b{display:block;color:var(--muted);font-weight:600;letter-spacing:.08em;margin-bottom:8px}
+nav.toc a{display:block;padding:3px 0 3px 10px;color:var(--muted);text-decoration:none;border-left:2px solid var(--line)}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-left-color:var(--accent);outline:none}
+nav.toc a.sub{padding-left:22px;font-size:12px}
+main{min-width:0;max-width:900px}
+header.doc h1{font-size:30px;line-height:1.3;margin:0 0 8px;text-wrap:balance}
+header.doc p.lead{color:var(--muted);margin:0 0 16px;max-width:68ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--muted);padding:12px 0;border-block:1px solid var(--line)}
+.meta span b{color:var(--fg);font-weight:600}
+h2{font-size:22px;margin:56px 0 12px;padding-top:8px;line-height:1.35;text-wrap:balance}
+h2 .n,h3 .n{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+h3{font-size:17px;margin:32px 0 8px}
+h4{font-size:15px;margin:22px 0 6px}
+p{margin:8px 0;max-width:72ch}
+ul,ol{margin:8px 0;padding-left:22px;max-width:72ch}
+li{margin:3px 0}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunk);padding:1px 5px;border-radius:4px;word-break:break-word}
+pre{font:12.5px/1.6 var(--mono);background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:12px 0}
+pre code{background:none;padding:0;font-size:inherit;word-break:normal}
+.tw{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.6}
+th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line)}
+th{background:var(--sunk);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.nw{white-space:nowrap}
+.tag{display:inline-block;font:600 11.5px/1.5 var(--mono);padding:1px 7px;border-radius:999px;white-space:nowrap;vertical-align:1px}
+.tag.d{background:var(--accent-soft);color:var(--accent)}
+.tag.q{background:var(--warn-soft);color:var(--warn)}
+.tag.p{background:var(--sunk);color:var(--muted)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tag.bad{background:var(--bad-soft);color:var(--bad)}
+.box{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:12px 16px;margin:14px 0}
+.box.q{border-color:var(--warn);background:var(--warn-soft)}
+.box.d{border-color:var(--accent);background:var(--accent-soft)}
+.box>p:first-child{margin-top:0}.box>p:last-child,.box>ul:last-child{margin-bottom:0}
+ol.seq{list-style:none;padding:0;counter-reset:s;max-width:none}
+ol.seq li{counter-increment:s;display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px dashed var(--line)}
+ol.seq li::before{content:counter(s);font:600 12px/22px var(--mono);color:var(--accent);text-align:right}
+.who{display:inline-block;font-size:12px;font-weight:600;padding:0 7px;border-radius:4px;background:var(--sunk);border:1px solid var(--line);margin-right:4px;white-space:nowrap}
+.fig{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:12px}
+.fig svg{display:block;min-width:720px;width:100%;height:auto;font-family:var(--sans)}
+.fig figcaption,.cap{font-size:12.5px;color:var(--muted);margin-top:8px}
+svg .b{fill:var(--sunk);stroke:var(--line)} svg .a{fill:var(--accent-soft);stroke:var(--accent)} svg .s{fill:var(--ok-soft);stroke:var(--ok)}
+svg .w{fill:var(--warn-soft);stroke:var(--warn)} svg .x{fill:var(--bad-soft);stroke:var(--bad)}
+svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:11.5px} svg .ln{stroke:var(--muted);stroke-width:1.4;fill:none} svg .ah{fill:var(--muted)}
+@media (max-width:900px){.page{grid-template-columns:minmax(0,1fr);gap:16px}nav.toc{position:static;max-height:none;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--surface)}header.doc h1{font-size:24px}}
+</style>
+
+<div class="page">
+<nav class="toc" aria-label="目录">
+<b>目录</b>
+<a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
+<a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a>
+<a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a>
+<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a>
+<a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 JDBC 参考实现</a>
+<a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
+</nav>
+
+<main>
+<header class="doc">
+<h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
+<p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
+<div class="meta"><span><b>状态</b> 评审草案 v0.1</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="box">
+<p><b>评审方式。</b>文中三类编号可以直接引用：</p>
+<ul>
+<li><span class="tag d">D1</span> 已确认的决策，评审时只确认后果是否可接受。</li>
+<li><span class="tag p">P-01</span> Profile 的规范性条款，逐条评审。"必须"表示不满足即不合规。</li>
+<li><span class="tag q">Q1</span> 待确认问题，需要评审给出结论；汇总在<a href="#s16">第 16 节</a>。</li>
+</ul>
+</div>
+</header>
+
+<h2 id="s1"><span class="n">1</span>背景与问题</h2>
+<p>BCS 现在是公司级的 A2A 注册中心：Agent 把 AgentCard 注册到 BCS，BCS 作为 A2A Client 按 Card 调用 Agent。注册和 Client 侧能力已经具备，问题出在 Agent 一侧。</p>
+<ul>
+<li><b>大量 Agent 没有标准 A2A 接口。</b>它们以各自的 RPC 接口或 HTTP 接口提供服务，要接入就得各自写适配。</li>
+<li><b>适配结果不一致。</b>A2A 标准留了很多自由度（是否返回 Task、文本是追加还是替换、何时算结束、断流后怎么恢复）。BCS 对这些有明确的行为前提，目前只写在接入文档里，没有可检验的标准。</li>
+<li><b>BCS 的扩展没有统一实现。</b>工具观察、exec 审批、提交去重等扩展，目前只有 Harness adapter 一份实现，且不在本仓库。</li>
+<li><b>多实例没有答案。</b>现有文档明确说明内存 TaskStore 不支持多实例，而公司的 SOFABoot 应用默认多实例部署。</li>
+</ul>
+<p>现有约定散落在接入指南、接口参考和各扩展文档中。本设计把它们收敛成一份标准，并提供参考实现。</p>
+
+<h2 id="s2"><span class="n">2</span>目标与范围</h2>
+<h3>目标</h3>
+<ol>
+<li>发布 <b>BCN A2A Profile</b>：一份可检验的标准，说明接入 BCN 的 Agent 必须实现什么、行为必须是什么。</li>
+<li>提供 <b>Java Server SDK</b>：平台实现少量 SPI，即得到合规的 A2A Server。目标是纯文本 Agent 半天内接完。</li>
+<li>提供 <b>TCK</b>：一致性测试套件，Profile 的解释以它为准。</li>
+</ol>
+<h3>本期范围之外</h3>
+<div class="tw"><table>
+<tr><th>不做</th><th>原因</th></tr>
+<tr><td>BCS 对外作为 A2A Server</td><td>后续单独讨论</td></tr>
+<tr><td>Java Client SDK</td><td>后续单独讨论</td></tr>
+<tr><td>应用层鉴权（Bearer、OAuth、mTLS、签名断言）</td><td>见决策 <span class="tag d">D1</span></td></tr>
+<tr><td>跨实例事件转发、执行迁移、宕机后自动重跑</td><td>见决策 <span class="tag d">D3</span></td></tr>
+<tr><td>A2A 0.3 兼容、Push Notification、ListTasks、GetExtendedAgentCard</td><td>BCS 下行不使用</td></tr>
+<tr><td>文件、多模态、通用结构化输出、通用 ask_user</td><td>BCS 当前只处理文本和已登记的扩展</td></tr>
+<tr><td>非 Java 技术栈的 SDK</td><td>可按 Profile 自行实现，用 TCK 验证</td></tr>
+</table></div>
+
+<h2 id="s3"><span class="n">3</span>术语</h2>
+<div class="tw"><table>
+<tr><th>术语</th><th>含义</th></tr>
+<tr><td class="nw">Profile</td><td>A2A 1.0 的一个子集，加上更严格的行为约束和一组登记的扩展。不是新协议。</td></tr>
+<tr><td class="nw">Agent / Bot</td><td>Agent 是提供 A2A 服务的一方；注册到 BCS 后在 BCN 中称为 Bot。</td></tr>
+<tr><td class="nw">Provider</td><td>BCS 中的服务提供方账号，一个 Provider 下可注册多个 Agent。</td></tr>
+<tr><td class="nw">Task</td><td>A2A 中一次执行的载体，有 <code>id</code>、<code>contextId</code>、状态和 Artifact。由 Agent 分配 ID。</td></tr>
+<tr><td class="nw">Context</td><td>多轮会话的关联标识 <code>contextId</code>，首轮由 Agent 建立，后续由 BCS 带回。</td></tr>
+<tr><td class="nw">Run</td><td>BCS 内部一次调用的标识 <code>run_id</code>。BCS 保存 Run 与远端 Task 的关联，Agent 不感知。</td></tr>
+<tr><td class="nw">执行实例</td><td>接收某个 Task 初始请求并执行它的应用实例。</td></tr>
+<tr><td class="nw">agentKey</td><td>SDK 内部用于隔离的键，由 Agent 标识和 <code>tenant</code> 组成。</td></tr>
+<tr><td class="nw">TCK</td><td>Technology Compatibility Kit，一致性测试套件。</td></tr>
+</table></div>
+
+<h2 id="s4"><span class="n">4</span>总体架构</h2>
+<figure class="fig">
+<svg viewBox="0 0 880 400" role="img" aria-label="总体架构：调用方经 BCS 和 MOSN 调用多实例 SOFABoot 应用中的 Agent，实例之间通过共享存储协作">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="b" x="10" y="150" width="120" height="60" rx="8"/><text x="70" y="176" text-anchor="middle">工作台</text><text class="m" x="70" y="195" text-anchor="middle">或业务系统</text>
+<rect class="a" x="180" y="120" width="170" height="120" rx="8"/><text x="265" y="148" text-anchor="middle" font-weight="600">BCS</text><text class="m" x="265" y="172" text-anchor="middle">注册中心（AgentCard）</text><text class="m" x="265" y="192" text-anchor="middle">A2A Client（下行）</text><text class="m" x="265" y="212" text-anchor="middle">Run 与 Task 关联</text>
+<rect class="b" x="400" y="150" width="80" height="60" rx="8"/><text x="440" y="176" text-anchor="middle">MOSN</text><text class="m" x="440" y="195" text-anchor="middle">寻址、负载</text>
+<rect class="b" x="530" y="20" width="340" height="150" rx="8"/><text x="545" y="42" font-weight="600">SOFABoot 应用 · 实例 A</text>
+<rect class="s" x="545" y="54" width="310" height="30" rx="6"/><text x="700" y="74" text-anchor="middle">sofaboot-starter：GRPC（Triple）端点</text>
+<rect class="s" x="545" y="90" width="310" height="30" rx="6"/><text x="700" y="110" text-anchor="middle">server-core：Task 生命周期、Profile 约束</text>
+<rect class="w" x="545" y="126" width="310" height="30" rx="6"/><text x="700" y="146" text-anchor="middle">BcnAgent（平台实现的 SPI）</text>
+<rect class="b" x="610" y="190" width="260" height="80" rx="8"/><text x="625" y="212" font-weight="600">SOFABoot 应用 · 实例 B</text><text class="m" x="625" y="234">同样的三层。处理跨实例的查询、</text><text class="m" x="625" y="252">订阅、取消时只读写共享存储</text>
+<rect class="a" x="590" y="320" width="220" height="60" rx="8"/><text x="700" y="346" text-anchor="middle" font-weight="600">共享存储</text><text class="m" x="700" y="365" text-anchor="middle">TaskStore SPI · JDBC 参考实现</text>
+<path class="ln" marker-end="url(#ar)" d="M130 180H178"/><path class="ln" marker-end="url(#ar)" d="M350 180H398"/>
+<path class="ln" marker-end="url(#ar)" d="M480 170C505 150 505 100 528 95"/><path class="ln" marker-end="url(#ar)" d="M480 190C520 205 560 225 608 230"/>
+<path class="ln" marker-end="url(#ar)" d="M570 170V350H588"/><path class="ln" marker-end="url(#ar)" d="M760 270V318"/>
+<text class="m" x="150" y="170" text-anchor="middle">BCN API</text><text class="m" x="375" y="170" text-anchor="middle">A2A</text><text class="m" x="562" y="300" text-anchor="end">快照 + 租约</text><text class="m" x="768" y="300">读 / 取消标记</text>
+<rect class="b" x="180" y="290" width="170" height="60" rx="8"/><text x="265" y="316" text-anchor="middle">TCK</text><text class="m" x="265" y="335" text-anchor="middle">扮演 Client 验证 Agent</text>
+</svg>
+<figcaption>绿色为 SDK 提供，黄色为平台实现，蓝色为已有或共享的基础设施。实例之间不直接通信。</figcaption>
+</figure>
+<p>调用方向只有一个：BCS 调 Agent。Agent 不需要回调 BCS，也不需要知道 BCS 的 Run、Session。</p>
+
+<h2 id="s5"><span class="n">5</span>已确认的决策</h2>
+<div class="tw"><table>
+<tr><th>编号</th><th>决策</th><th>直接后果</th><th>被否决的方案</th></tr>
+<tr><td><span class="tag d">D1</span></td><td>内部调用全部走 RPC，协议不定义额外鉴权</td><td>信任边界是内部 RPC 网络。Card 固定 <code>securityRequirements: []</code>。调用上下文的可信度等同于 RPC 调用方。</td><td>Bearer 下行凭据；签名的用户断言。成本高，与公司 RPC 互信惯例不一致。</td></tr>
+<tr><td><span class="tag d">D2</span></td><td>多实例是一等约束</td><td>SDK 的默认行为必须在多实例下正确；单实例只是特例。</td><td>要求粘性路由。MOSN 负载均衡下不现实。</td></tr>
+<tr><td><span class="tag d">D3</span></td><td>多实例只提供跨实例存储的 SPI 和参考实现</td><td>Task 始终在接收它的实例上执行。其他实例只读写共享存储。</td><td>基于消息队列的事件复制（a2a-java 的 replicated queue manager）。引入额外中间件依赖。</td></tr>
+<tr><td><span class="tag d">D4</span></td><td>接受 D3 带来的三项降级</td><td>跨实例订阅为轮询合成，粒度约 1 秒；跨实例取消有秒级延迟；审批续交要求引擎状态可从存储恢复。</td><td>—</td></tr>
+</table></div>
+
+<h2 id="s6"><span class="n">6</span>Profile 规范</h2>
+<h3 id="s6-1"><span class="n">6.1</span>定位</h3>
+<p>合规 Agent 是一个标准的 A2A 1.0 Server，任何标准 A2A Client 都能调用它。Profile 只做三件事：选定子集，收紧行为，登记扩展。BCS 继续兼容不使用 SDK 但符合 Profile 的 Server。</p>
+
+<h3 id="s6-2"><span class="n">6.2</span>基线</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-01</span></td><td>接口的 <code>protocolVersion</code> 必须为 <code>"1.0"</code>。对象和绑定细节遵循 A2A 1.0.1 规范。不兼容 0.3 的方法名和字段（<code>message/stream</code>、<code>kind</code>、<code>final</code>）。</td></tr>
+<tr><td><span class="tag p">P-02</span></td><td>必须提供 <code>GRPC</code> 绑定，服务为 <code>lf.a2a.v1.A2AService</code>，通过 SOFARPC Triple 暴露，经 MOSN 寻址。普通 Bolt/Hessian 接口不能替代。</td></tr>
+<tr><td><span class="tag p">P-03</span></td><td>可以额外提供 <code>HTTP+JSON</code> 和 <code>JSONRPC</code> 绑定。三种绑定的对象语义和行为必须一致。</td></tr>
+<tr><td><span class="tag p">P-04</span></td><td>必须实现的方法由一致性等级决定（6.3）。Profile 之外的标准方法可以实现，BCS 不调用。</td></tr>
+<tr><td><span class="tag p">P-05</span></td><td>输入输出必须支持 <code>text/plain</code>。请求只包含文本 Part；响应的用户可见内容必须以文本 Artifact 提供。</td></tr>
+<tr><td><span class="tag p">P-06</span></td><td>JSON 使用 A2A 1.0 的 lowerCamelCase（ProtoJSON）。枚举使用全名，例如 <code>ROLE_USER</code>、<code>TASK_STATE_WORKING</code>。</td></tr>
+</table></div>
+
+<h3 id="s6-3"><span class="n">6.3</span>一致性等级</h3>
+<p>等级逐级包含。分级的目的是让存量 Agent 渐进接入：先以 L0 接入，再按需要升级。</p>
+<div class="tw"><table>
+<tr><th>能力</th><th>L0</th><th>L1</th><th>L2</th><th>L3</th></tr>
+<tr><td>SendMessage（含 <code>returnImmediately</code>）</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>GetTask</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>CancelTask</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>SendStreamingMessage</td><td>—</td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>SubscribeToTask</td><td>—</td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>Card 声明 <code>streaming: true</code></td><td>否</td><td>是</td><td>是</td><td>是</td></tr>
+<tr><td>调用上下文扩展</td><td>—</td><td>—</td><td>必须</td><td>必须</td></tr>
+<tr><td>工具观察扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
+<tr><td>exec 审批扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
+<tr><td>提交去重扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
+<tr><td>多实例正确性（第 9 节）</td><td colspan="4">所有等级都必须满足，除非 Agent 明确以单实例部署</td></tr>
+</table></div>
+<p>L3 的三项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商工具观察和 exec 审批，因此这两项要求 L1 以上。</p>
+
+<h3 id="s6-4"><span class="n">6.4</span>AgentCard</h3>
+<p>字段要求沿用 Provider AgentCard 管理接口 v0.1，以下是 Profile 追加或收紧的部分。</p>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-10</span></td><td><code>name</code>、<code>description</code>、<code>version</code>、<code>supportedInterfaces</code>、<code>capabilities</code>、<code>defaultInputModes</code>、<code>defaultOutputModes</code>、<code>skills</code> 必须显式提供。</td></tr>
+<tr><td><span class="tag p">P-11</span></td><td><code>securityRequirements</code> 必须为 <code>[]</code>，不得包含 <code>securitySchemes</code>。</td></tr>
+<tr><td><span class="tag p">P-12</span></td><td><code>supportedInterfaces</code> 必须包含至少一个 <code>GRPC</code> 接口，且排在首选位置。</td></tr>
+<tr><td><span class="tag p">P-13</span></td><td><code>defaultInputModes</code> 和 <code>defaultOutputModes</code> 必须包含 <code>text/plain</code>。</td></tr>
+<tr><td><span class="tag p">P-14</span></td><td>一个进程承载多个 Agent 时，每个 Agent 必须有可区分的接口地址或 <code>tenant</code>。</td></tr>
+<tr><td><span class="tag p">P-15</span></td><td>必须通过 profile 声明扩展（7.1）声明 Profile 版本和等级。</td></tr>
+<tr><td><span class="tag p">P-16</span></td><td>Card 中声明的每个扩展必须真实可用。声明了但未实现视为不合规。</td></tr>
+<tr><td><span class="tag p">P-17</span></td><td><code>skills[].id</code> 在 Card 内唯一。Card 中不得包含凭据。</td></tr>
+</table></div>
+<h4>L2 Agent 的 Card 示例</h4>
+<pre><code>{
+  "name": "订单助手",
+  "description": "查询订单状态并回答订单相关问题",
+  "version": "1.3.0",
+  "supportedInterfaces": [
+    {"url": "https://order-agent.example.internal", "protocolBinding": "GRPC",
+     "protocolVersion": "1.0", "tenant": "order-agent"}
+  ],
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {"uri": "&lt;profile 声明扩展 URI&gt;", "required": false,
+       "params": {"profileVersion": "1", "level": "L2"}},
+      {"uri": "&lt;调用上下文扩展 URI&gt;", "required": true}
+    ]
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {"id": "query_order", "name": "查询订单", "description": "根据订单号查询订单状态", "tags": ["orders"]}
+  ],
+  "securityRequirements": []
+}</code></pre>
+<p class="cap">扩展 URI 用占位符表示，命名空间见 <span class="tag q">Q2</span>。</p>
+
+<h3 id="s6-5"><span class="n">6.5</span>方法</h3>
+<p>下表给出 GRPC 方法和可选 HTTP+JSON 绑定的对应关系。JSONRPC 绑定使用相同的方法名作为 <code>method</code>。</p>
+<div class="tw"><table>
+<tr><th>方法</th><th>GRPC</th><th>HTTP+JSON</th><th>成功响应</th></tr>
+<tr><td>SendMessage</td><td>unary</td><td><code>POST /message:send</code></td><td><code>task</code> 或 <code>message</code>，二选一</td></tr>
+<tr><td>SendStreamingMessage</td><td>server streaming</td><td><code>POST /message:stream</code>（SSE）</td><td>StreamResponse 序列</td></tr>
+<tr><td>GetTask</td><td>unary</td><td><code>GET /tasks/{id}</code></td><td>Task</td></tr>
+<tr><td>SubscribeToTask</td><td>server streaming</td><td><code>POST /tasks/{id}:subscribe</code>（SSE）</td><td>StreamResponse 序列</td></tr>
+<tr><td>CancelTask</td><td>unary</td><td><code>POST /tasks/{id}:cancel</code></td><td>Task</td></tr>
+</table></div>
+
+<h4>SendMessage 与 SendStreamingMessage</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-20</span></td><td>不带 <code>taskId</code> 的消息开启新 Task。Agent 必须分配 <code>id</code>；请求未带 <code>contextId</code> 时必须分配 <code>contextId</code>，带了则必须沿用。</td></tr>
+<tr><td><span class="tag p">P-21</span></td><td>新 Task 必须先持久化，再对外返回或开始执行。</td></tr>
+<tr><td><span class="tag p">P-22</span></td><td>流式响应的第一个事件必须是 <code>task</code>，包含 <code>id</code>、<code>contextId</code> 和状态。之后所有事件的 <code>taskId</code>、<code>contextId</code> 必须与它一致。</td></tr>
+<tr><td><span class="tag p">P-23</span></td><td><code>SendMessage</code> 且 <code>returnImmediately: true</code> 时，必须在持久化后立即返回非终态或终态的 Task，不等待执行结束。</td></tr>
+<tr><td><span class="tag p">P-24</span></td><td><code>SendMessage</code> 且未设置 <code>returnImmediately</code> 时，等待到终态或中断态再返回。</td></tr>
+<tr><td><span class="tag p">P-25</span></td><td>L0 Agent 可以直接返回 <code>message</code>。此时没有 Task，不可查询、不可取消。L1 以上必须返回 Task。</td></tr>
+<tr><td><span class="tag p">P-26</span></td><td>带 <code>taskId</code> 的消息是对已有 Task 的续交，只在 Task 处于 <code>INPUT_REQUIRED</code> 且消息符合对应扩展时接受。<code>contextId</code> 必须与该 Task 一致。其他情况必须拒绝，不得开启新 Task。</td></tr>
+<tr><td><span class="tag p">P-27</span></td><td><code>messageId</code> 相同不等于幂等。只有协商了提交去重扩展，Agent 才承诺同一 <code>messageId</code> 只执行一次。</td></tr>
+<tr><td><span class="tag p">P-28</span></td><td>客户端断开流不得取消 Task。Task 继续执行并写入存储。</td></tr>
+</table></div>
+
+<h4>GetTask</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-30</span></td><td>返回当前状态和全部 Artifact 的累计全文，不是最后一段增量。</td></tr>
+<tr><td><span class="tag p">P-31</span></td><td>非终态 Task 的快照滞后不得超过 2 秒（写入间隔上限 1 秒，见 9.4）。终态快照必须是最终全文。</td></tr>
+<tr><td><span class="tag p">P-32</span></td><td>不存在或不属于当前 Agent/tenant 的 Task 返回 <code>TASK_NOT_FOUND</code>，两种情况不得区分。</td></tr>
+<tr><td><span class="tag p">P-33</span></td><td>不要求返回 <code>history</code>；<code>historyLength</code> 可以忽略。BCS 不把 history 当作事件回放。</td></tr>
+</table></div>
+
+<h4>SubscribeToTask</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-40</span></td><td>第一个事件必须是当前 <code>task</code> 快照，之后是增量事件，直到终态或中断态后关闭流。</td></tr>
+<tr><td><span class="tag p">P-41</span></td><td>对终态 Task 订阅必须返回协议错误（<code>UNSUPPORTED_OPERATION</code>），客户端改用 GetTask。</td></tr>
+<tr><td><span class="tag p">P-42</span></td><td>订阅不得触发重新执行。同一 Task 可以有多个并发订阅者。</td></tr>
+<tr><td><span class="tag p">P-43</span></td><td>首个快照之后的文本事件只包含快照之后的新增后缀，不得重复快照中已有的文本。</td></tr>
+<tr><td><span class="tag p">P-44</span></td><td>订阅流不保证补齐订阅前的工具观察记录。</td></tr>
+</table></div>
+
+<h4>CancelTask</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-50</span></td><td>只有 Task 确实进入 <code>CANCELED</code> 才能返回该状态。不得在执行仍在进行时返回 <code>CANCELED</code>。</td></tr>
+<tr><td><span class="tag p">P-51</span></td><td>已处于终态的 Task 返回 <code>TASK_NOT_CANCELABLE</code>。</td></tr>
+<tr><td><span class="tag p">P-52</span></td><td>在限定时间内未能确认取消时，返回当前的非终态 Task。BCS 会把这种响应视为取消未确认，并通过 GetTask 继续核对。</td></tr>
+<tr><td><span class="tag p">P-53</span></td><td>取消是请求停止执行，不是事务回滚。已完成的工具副作用不撤销。</td></tr>
+<tr><td><span class="tag p">P-54</span></td><td>对同一 Task 重复取消必须安全。</td></tr>
+</table></div>
+
+<h3 id="s6-6"><span class="n">6.6</span>Task 状态机</h3>
+<figure class="fig">
+<svg viewBox="0 0 640 250" role="img" aria-label="Task 状态机">
+<rect class="b" x="20" y="95" width="120" height="44" rx="22"/><text x="80" y="122" text-anchor="middle">SUBMITTED</text>
+<rect class="a" x="220" y="95" width="120" height="44" rx="22"/><text x="280" y="122" text-anchor="middle">WORKING</text>
+<rect class="w" x="220" y="195" width="150" height="44" rx="22"/><text x="295" y="222" text-anchor="middle">INPUT_REQUIRED</text>
+<rect class="s" x="470" y="20" width="130" height="44" rx="22"/><text x="535" y="47" text-anchor="middle">COMPLETED</text>
+<rect class="x" x="470" y="95" width="130" height="44" rx="22"/><text x="535" y="122" text-anchor="middle">FAILED</text>
+<rect class="x" x="470" y="170" width="130" height="44" rx="22"/><text x="535" y="197" text-anchor="middle">CANCELED</text>
+<rect class="x" x="15" y="195" width="130" height="44" rx="22"/><text x="80" y="222" text-anchor="middle">REJECTED</text>
+<path class="ln" marker-end="url(#ar)" d="M140 117H218"/><path class="ln" marker-end="url(#ar)" d="M340 105C400 80 420 50 468 44"/><path class="ln" marker-end="url(#ar)" d="M340 117H468"/><path class="ln" marker-end="url(#ar)" d="M340 129C400 150 420 185 468 190"/>
+<path class="ln" marker-end="url(#ar)" d="M262 139V193"/><path class="ln" marker-end="url(#ar)" d="M310 195V141"/>
+<path class="ln" marker-end="url(#ar)" d="M370 217C430 217 440 205 468 200"/>
+<path class="ln" marker-end="url(#ar)" d="M80 139V193"/>
+<text class="m" x="180" y="109" text-anchor="middle">开始执行</text><text class="m" x="205" y="170">请求审批</text><text class="m" x="318" y="170">续交</text><text class="m" x="88" y="170">拒绝执行</text><text class="m" x="415" y="235">取消或过期</text>
+</svg>
+<figcaption>红色和绿色为终态。SUBMITTED 也可以直接进入 FAILED 或 CANCELED（图中省略）。</figcaption>
+</figure>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-60</span></td><td>终态为 <code>COMPLETED</code>、<code>FAILED</code>、<code>CANCELED</code>、<code>REJECTED</code>。进入终态后状态和 Artifact 不得再变化。</td></tr>
+<tr><td><span class="tag p">P-61</span></td><td>每个 Task 必须在有限时间内到达终态。Agent 必须配置最长执行时间，超时后置为 <code>FAILED</code>。</td></tr>
+<tr><td><span class="tag p">P-62</span></td><td><code>INPUT_REQUIRED</code> 只用于已协商的 exec 审批扩展。未协商该扩展时不得进入此状态。</td></tr>
+<tr><td><span class="tag p">P-63</span></td><td>不得使用 <code>AUTH_REQUIRED</code>。不得发出 <code>UNSPECIFIED</code>。</td></tr>
+<tr><td><span class="tag p">P-64</span></td><td>流式响应中，终态必须通过 <code>statusUpdate</code> 显式发出。关闭流和 <code>lastChunk: true</code> 都不表示 Task 结束。</td></tr>
+<tr><td><span class="tag p">P-65</span></td><td>工具失败不等于 Task 失败。只有 Agent 无法给出结果时才置为 <code>FAILED</code>。</td></tr>
+</table></div>
+
+<h3 id="s6-7"><span class="n">6.7</span>文本流</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-70</span></td><td>同一 <code>artifactId</code> 的第一个事件使用 <code>append: false</code> 建立基线，之后使用 <code>append: true</code> 追加后缀。</td></tr>
+<tr><td><span class="tag p">P-71</span></td><td>不得改写已输出的文本。允许最后发送一个 <code>append: false, lastChunk: true</code> 的完整块，但已输出文本必须是它的前缀。</td></tr>
+<tr><td><span class="tag p">P-72</span></td><td><code>artifactId</code> 在 Task 内唯一且稳定。Artifact 结束后不得继续追加。</td></tr>
+<tr><td><span class="tag p">P-73</span></td><td>引擎本身产生修订式输出（后一帧替换前一帧）时，Agent 必须在输出层转换：缓冲到稳定后再输出，或只输出最终文本。</td></tr>
+<tr><td><span class="tag p">P-74</span></td><td>单个 Task 的累计文本不得超过上限（默认值见 <span class="tag q">Q7</span>）。超过时 Task 置为 <code>FAILED</code>，不得截断后报告成功。</td></tr>
+</table></div>
+<h4>一次完整的流式响应</h4>
+<pre><code>{"task":{"id":"t-001","contextId":"c-001","status":{"state":"TASK_STATE_WORKING"}}}
+{"artifactUpdate":{"taskId":"t-001","contextId":"c-001",
+   "artifact":{"artifactId":"answer","parts":[{"text":"订单 ORD-001"}]},"append":false,"lastChunk":false}}
+{"artifactUpdate":{"taskId":"t-001","contextId":"c-001",
+   "artifact":{"artifactId":"answer","parts":[{"text":" 已发货。"}]},"append":true,"lastChunk":true}}
+{"statusUpdate":{"taskId":"t-001","contextId":"c-001","status":{"state":"TASK_STATE_COMPLETED"}}}</code></pre>
+<p>此后 GetTask 必须返回文本为"订单 ORD-001 已发货。"的 Artifact。</p>
+
+<h3 id="s6-8"><span class="n">6.8</span>错误模型</h3>
+<p>错误使用所选绑定的标准格式。下表用 A2A 的错误原因名表示，JSONRPC 的数字错误码按 A2A 1.0.1 规范。</p>
+<div class="tw"><table>
+<tr><th>情况</th><th>错误原因</th><th>GRPC 状态</th><th>HTTP 状态</th></tr>
+<tr><td>Task 不存在或不可见</td><td><code>TASK_NOT_FOUND</code></td><td>NOT_FOUND</td><td>404</td></tr>
+<tr><td>Task 已终结，无法取消</td><td><code>TASK_NOT_CANCELABLE</code></td><td>FAILED_PRECONDITION</td><td>409</td></tr>
+<tr><td>对终态 Task 订阅；未实现的方法</td><td><code>UNSUPPORTED_OPERATION</code></td><td>UNIMPLEMENTED 或 FAILED_PRECONDITION</td><td>400</td></tr>
+<tr><td>必需扩展未协商</td><td><code>EXTENSION_SUPPORT_REQUIRED</code></td><td>FAILED_PRECONDITION</td><td>400</td></tr>
+<tr><td>协议版本不支持</td><td><code>VERSION_NOT_SUPPORTED</code></td><td>UNIMPLEMENTED</td><td>400</td></tr>
+<tr><td>请求不合法（缺字段、非文本 Part、续交不匹配）</td><td>参数错误</td><td>INVALID_ARGUMENT</td><td>400 或 422</td></tr>
+<tr><td>存储不可用等内部错误</td><td>内部错误</td><td>UNAVAILABLE 或 INTERNAL</td><td>503 或 500</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-80</span></td><td>GRPC 错误必须附带含 <code>reason</code> 的 ErrorInfo。BCS 依赖 <code>reason</code> 区分错误，不解析文本。</td></tr>
+<tr><td><span class="tag p">P-81</span></td><td>初始提交被明确拒绝（参数错误、扩展未协商）时必须返回错误，不得创建 Task 后立即置为失败。</td></tr>
+<tr><td><span class="tag p">P-82</span></td><td>执行期间的业务失败通过 Task 状态 <code>FAILED</code> 和状态消息表达，不通过协议错误。</td></tr>
+<tr><td><span class="tag p">P-83</span></td><td>错误信息不得包含凭据、内部地址、堆栈或其他 Agent 的数据。</td></tr>
+<tr><td><span class="tag p">P-84</span></td><td>存储写入失败必须作为错误返回，不得在写入失败后对外报告成功。</td></tr>
+</table></div>
+
+<h3 id="s6-9"><span class="n">6.9</span>标识与限制</h3>
+<div class="tw"><table>
+<tr><th>项</th><th>约束</th></tr>
+<tr><td><code>taskId</code>、<code>contextId</code></td><td>由 Agent 生成，不透明字符串，不超过 64 个 ASCII 字符，不含 <code>/</code>。不得包含可推断的业务信息。</td></tr>
+<tr><td><code>messageId</code></td><td>由发送方生成，非空，不超过 256 个字符。BCS 使用 Run 标识作为初始消息的 <code>messageId</code>。</td></tr>
+<tr><td><code>artifactId</code></td><td>Task 内唯一，不超过 64 个字符。</td></tr>
+<tr><td>请求体</td><td>不超过 1 MiB。</td></tr>
+<tr><td>单 Task 累计文本</td><td>有上限，默认值待定（<span class="tag q">Q7</span>）。</td></tr>
+<tr><td>Task 记录保留期</td><td>终态后至少保留 24 小时，供断流恢复和核对。默认值待定（<span class="tag q">Q7</span>）。</td></tr>
+</table></div>
+
+<h3 id="s6-10"><span class="n">6.10</span>版本与扩展协商</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-90</span></td><td>请求通过 <code>a2a-version</code> 元数据（HTTP 为 <code>A2A-Version</code> 头）声明版本。不支持的版本返回 <code>VERSION_NOT_SUPPORTED</code>。</td></tr>
+<tr><td><span class="tag p">P-91</span></td><td>扩展通过 <code>a2a-extensions</code> 元数据（HTTP 为 <code>A2A-Extensions</code> 头）按请求协商。只有请求中列出的扩展才算启用。</td></tr>
+<tr><td><span class="tag p">P-92</span></td><td>Agent 不得发出未协商扩展的数据。未协商工具观察时，仍必须提供正常的文本 Artifact。</td></tr>
+<tr><td><span class="tag p">P-93</span></td><td>Card 以 <code>required: true</code> 声明的扩展未被协商时，返回 <code>EXTENSION_SUPPORT_REQUIRED</code>。</td></tr>
+<tr><td><span class="tag p">P-94</span></td><td>同一 Task 的协商结果以初始提交为准，续交和订阅不改变它。</td></tr>
+<tr><td><span class="tag p">P-95</span></td><td>扩展的不兼容变更使用新的 URI。Profile 自身的不兼容变更提升 <code>profileVersion</code>。</td></tr>
+</table></div>
+
+<h2 id="s7"><span class="n">7</span>扩展目录</h2>
+<div class="tw"><table>
+<tr><th>扩展</th><th>类型</th><th>等级</th><th>状态</th><th>SDK 支持方式</th></tr>
+<tr><td>profile 声明</td><td>Card 数据</td><td>全部</td><td><span class="tag q">新增</span></td><td>starter 自动写入 Card</td></tr>
+<tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>解析后通过 <code>CallerContext</code> 提供</td></tr>
+<tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ToolEventEmitter</code></td></tr>
+<tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ApprovalHandler</code></td></tr>
+<tr><td>提交去重 <code>message-dedup/v1</code></td><td>行为承诺</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>TaskStore.reserveSubmission</code></td></tr>
+<tr><td>来源分类 <code>source-agent/v2</code></td><td>Card 数据</td><td>可选</td><td><span class="tag ok">已有</span></td><td>配置项写入 Card</td></tr>
+</table></div>
+
+<h3 id="s7-1"><span class="n">7.1</span>profile 声明扩展</h3>
+<p>Data-only 扩展，<code>required: false</code>。同一 Card 最多一条。</p>
+<div class="tw"><table>
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td><code>params.profileVersion</code></td><td>string，必填</td><td>本设计对应 <code>"1"</code></td></tr>
+<tr><td><code>params.level</code></td><td>string，必填</td><td><code>"L0"</code>、<code>"L1"</code>、<code>"L2"</code>、<code>"L3"</code></td></tr>
+<tr><td><code>params.sdk</code></td><td>string，可选</td><td>实现和版本，例如 <code>"bcn-a2a-java/1.0.0"</code>，仅用于排查</td></tr>
+</table></div>
+<p>这是自声明，不授予任何权限。BCS 注册时校验声明的等级与 Card 其他字段是否自洽（例如 L1 必须声明 <code>streaming: true</code>），不探测实际行为。实际行为由 TCK 验证。</p>
+
+<h3 id="s7-2"><span class="n">7.2</span>调用上下文扩展</h3>
+<p>解决现有待办 A2A-003。BCS 调用 Agent 时，把业务用户等上下文放在 <code>SendMessageRequest.metadata</code> 中，键为扩展 URI。</p>
+<pre><code>{
+  "message": {"messageId": "run-8f2c", "role": "ROLE_USER", "parts": [{"text": "查询我的订单"}]},
+  "metadata": {
+    "&lt;调用上下文扩展 URI&gt;": {"version": "1", "userId": "2088xxxx"}
+  }
+}</code></pre>
+<div class="tw"><table>
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td><code>version</code></td><td>string，必填</td><td><code>"1"</code></td></tr>
+<tr><td><code>userId</code></td><td>string，必填</td><td>发起调用的业务用户标识，1 到 128 个字符</td></tr>
+<tr><td>其他字段</td><td>—</td><td>首版不定义，见 <span class="tag q">Q3</span>。未知字段必须忽略，不得据此授权。</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-100</span></td><td>BCS 从已认证的调用上下文生成字段。用户消息、模型输出和外部传入的 metadata 不得成为字段来源。</td></tr>
+<tr><td><span class="tag p">P-101</span></td><td>Agent 不验签。字段的可信度等同于"本次 RPC 的调用方是可信的内部应用"（<span class="tag d">D1</span>）。</td></tr>
+<tr><td><span class="tag p">P-102</span></td><td>Card 以 <code>required: true</code> 声明本扩展时，未协商或缺少 <code>userId</code> 的请求必须拒绝，不得回退为默认用户或共享用户。</td></tr>
+<tr><td><span class="tag p">P-103</span></td><td>Agent 必须把 <code>userId</code> 与 Task 一起保存。同一 Task 的续交消息如果带有不同的 <code>userId</code>，必须拒绝。</td></tr>
+<tr><td><span class="tag p">P-104</span></td><td>GetTask、SubscribeToTask、CancelTask 不携带上下文，按 Task 关联处理。</td></tr>
+<tr><td><span class="tag p">P-105</span></td><td><code>userId</code> 不得写入 Artifact、状态消息或工具观察记录。</td></tr>
+</table></div>
+<div class="box q"><p><b>需要评审确认的后果。</b>任何能发起 RPC 的内部应用都可以构造 <code>userId</code> 调用 Agent。处理敏感数据的 Agent 应结合 RPC 调用方应用名做限制。SDK 会把调用方应用名提供给 Agent（8.5），但 Profile 不强制 Agent 校验。是否要求 L2 Agent 默认只接受来自 BCS 的调用，见 <span class="tag q">Q8</span>。</p></div>
+
+<h3 id="s7-3"><span class="n">7.3</span>已有扩展的要点</h3>
+<p>这三项的线上格式不变，以各自的规范文档为准。这里只列出与 SDK 设计有关的要点。</p>
+<div class="tw"><table>
+<tr><th>扩展</th><th>要点</th></tr>
+<tr><td>工具观察</td><td>记录放在 <code>statusUpdate.status.message</code> 的 DataPart 中，分 <code>start</code> 和 <code>result</code> 两个阶段，以 <code>toolCallId</code> 关联。发出记录时保持真实的 Task 状态。它只用于展示，不表示审批。</td></tr>
+<tr><td>exec 审批</td><td>Task 进入 <code>INPUT_REQUIRED</code>，状态消息带 JSON Schema，每个工具接受 <code>allow_once</code> 或 <code>deny</code>。BCS 通过带 <code>taskId</code> 的 SendMessage 续交。已接受的决定必须先持久化到 <code>Task.metadata</code>，再恢复执行。一批最多 64 个工具。</td></tr>
+<tr><td>提交去重</td><td>协商后，同一 Agent 下相同 <code>messageId</code> 且请求内容相同的初始提交只执行一次，跨实例、跨重启有效。内容不同则拒绝。它提供的是"至多执行一次"，不是"恰好一次"。</td></tr>
+</table></div>
+
+<h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
+<h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
+<ul>
+<li><b>Profile 约束是默认行为。</b>平台代码不需要知道"先返回 Task""只追加文本""显式终态"，SDK 保证。</li>
+<li><b>平台差异全部走 SPI。</b>SDK 内不判断部署环境；存储、调用方身份、注册都通过配置选择实现。</li>
+<li><b>分两层 SPI。</b>简易层一个接口覆盖 L0 到 L2；完整层按能力拆分，只有需要的平台才实现。</li>
+<li><b>失败要可见。</b>存储写入失败、超限、超时都转成明确的 Task 失败或协议错误，不吞掉。</li>
+</ul>
+
+<h3 id="s8-2"><span class="n">8.2</span>与官方 a2a-java 的关系</h3>
+<p>官方 Java SDK（<code>org.a2aproject.sdk</code>，要求 Java 17 以上）提供协议模型、GRPC 生成代码、服务端请求处理和可替换的 TaskStore、QueueManager。它的参考服务端基于 Quarkus，构建中管理了 CDI 和 Jakarta 依赖。它的 extras 中有基于 JPA 的 TaskStore 和基于消息队列复制的 QueueManager。现有 Harness adapter 使用它的 <code>1.4.0.Final</code>。</p>
+<div class="tw"><table>
+<tr><th></th><th>方案 A：复用模型和请求处理</th><th>方案 B：只复用模型</th></tr>
+<tr><td>复用范围</td><td>spec、spec-grpc、server-common 的请求处理和事件队列</td><td>只用 spec 和 spec-grpc；请求处理自己实现</td></tr>
+<tr><td>优点</td><td>代码量小；跟随官方修复；Harness adapter 已验证可行</td><td>无 CDI 依赖；多实例语义（租约、取消标记、轮询订阅）可以直接按第 9 节实现</td></tr>
+<tr><td>缺点</td><td>官方的事件队列以单实例内存或消息队列复制为前提，与 <span class="tag d">D3</span> 不一致，需要在其上绕行；CDI 与 Spring 的装配需要桥接</td><td>五个方法的处理逻辑自己维护；需要自己跟进协议变更</td></tr>
+<tr><td>升级风险</td><td>官方内部接口变化会影响 SDK</td><td>只受模型变化影响</td></tr>
+</table></div>
+<div class="box d"><p><b>建议采用方案 B。</b>Profile 只有五个方法，处理逻辑有限，而多实例语义是本 SDK 的核心，放在自己的代码里更可控。协议模型和 GRPC 定义继续使用官方库，保证线上格式与标准一致。这一点需要评审确认，见 <span class="tag q">Q5</span>。无论选哪个方案，对平台暴露的 SPI 不变。</p></div>
+
+<h3 id="s8-3"><span class="n">8.3</span>模块</h3>
+<div class="tw"><table>
+<tr><th>模块</th><th>内容</th><th>依赖</th></tr>
+<tr><td><code>bcn-a2a-spec</code></td><td>扩展 URI 常量、扩展数据模型及编解码、Card 的 Profile 校验器</td><td>a2a-java spec</td></tr>
+<tr><td><code>bcn-a2a-server-core</code></td><td>五个方法的处理、Task 生命周期、文本流约束、SPI 定义、内存 TaskStore</td><td><code>bcn-a2a-spec</code></td></tr>
+<tr><td><code>bcn-a2a-server-store-jdbc</code></td><td>TaskStore 的 JDBC 参考实现和建表语句</td><td><code>server-core</code>、JDBC</td></tr>
+<tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、GRPC（Triple）端点、可选 HTTP 端点、调用方身份提取、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
+<tr><td><code>bcn-a2a-server-test</code></td><td>单元测试辅助：内存运行器、断言工具</td><td><code>server-core</code></td></tr>
+<tr><td><code>bcn-a2a-tck</code></td><td>一致性测试套件（第 10 节）</td><td><code>bcn-a2a-spec</code></td></tr>
+</table></div>
+<p><code>server-core</code> 不依赖 Spring 或 SOFABoot，可以在其他容器中使用。平台通常只引入 starter 和一个存储实现。</p>
+
+<h3 id="s8-4"><span class="n">8.4</span>简易层 SPI</h3>
+<p>覆盖 L0 到 L2。平台实现一个接口，SDK 负责其余全部。以下签名用于说明职责，最终 API 在实现阶段确定。</p>
+<pre><code>public interface BcnAgent {
+
+    /** Agent 的静态描述。SDK 据此生成 AgentCard。 */
+    AgentDescriptor descriptor();
+
+    /** 执行一次请求。在 SDK 管理的线程上调用，可以阻塞。 */
+    void execute(AgentRequest request, AgentResponseSink sink) throws Exception;
+
+    /** 收到取消请求时调用。应尽快让 execute 返回。默认通过线程中断实现。 */
+    default void cancel(String taskId) {}
+}
+
+public interface AgentRequest {
+    String taskId();
+    String contextId();          // 多轮会话标识；会话记忆由 Agent 自己管理
+    String text();               // 本轮输入文本
+    CallerContext caller();
+    boolean cancelled();         // 协作式取消检查
+}
+
+public interface CallerContext {
+    Optional&lt;String&gt; userId();        // 来自调用上下文扩展；未协商时为空
+    Optional&lt;String&gt; callerApp();     // RPC 调用方应用名
+    Optional&lt;String&gt; tenant();
+}
+
+public interface AgentResponseSink {
+    void append(String text);    // 追加文本；线程安全
+    void complete();             // 成功结束
+    void fail(String reason);    // 失败结束；reason 会展示给用户
+}</code></pre>
+<h4>平台侧的完整代码</h4>
+<pre><code>@Component
+public class OrderAgent implements BcnAgent {
+
+    @Override
+    public AgentDescriptor descriptor() {
+        return AgentDescriptor.builder()
+                .name("订单助手").description("查询订单状态").version("1.3.0")
+                .skill("query_order", "查询订单", "根据订单号查询订单状态", "orders")
+                .requireUserId(true)
+                .build();
+    }
+
+    @Override
+    public void execute(AgentRequest request, AgentResponseSink sink) {
+        String userId = request.caller().userId().orElseThrow();
+        orderEngine.stream(userId, request.contextId(), request.text(), sink::append);
+        sink.complete();
+    }
+}</code></pre>
+<h4>简易层的行为约定</h4>
+<div class="tw"><table>
+<tr><th>平台做的事</th><th>SDK 的处理</th></tr>
+<tr><td><code>execute</code> 正常返回但没有调用 <code>complete</code> 或 <code>fail</code></td><td>视为 <code>complete</code></td></tr>
+<tr><td><code>execute</code> 抛出异常</td><td>Task 置为 <code>FAILED</code>，对外给出通用失败信息，异常详情只记日志</td></tr>
+<tr><td>结束后继续调用 <code>append</code></td><td>忽略并记录告警</td></tr>
+<tr><td>同步型 Agent 一次性 <code>append</code> 全文</td><td>允许。流式客户端收到一个文本块和一个终态。</td></tr>
+<tr><td>执行超过最长执行时间</td><td>调用 <code>cancel</code> 并中断线程，Task 置为 <code>FAILED</code></td></tr>
+<tr><td>累计文本超过上限</td><td>Task 置为 <code>FAILED</code>，后续 <code>append</code> 忽略</td></tr>
+</table></div>
+<p>简易层不支持工具观察和审批。<code>AgentDescriptor</code> 决定 Card 中的等级：声明 <code>streaming(false)</code> 为 L0，默认为 L1，<code>requireUserId(true)</code> 为 L2。</p>
+
+<h3 id="s8-5"><span class="n">8.5</span>完整层 SPI</h3>
+<div class="tw"><table>
+<tr><th>SPI</th><th>职责</th><th>默认实现</th><th>何时需要自己实现</th></tr>
+<tr><td><code>AgentResolver</code></td><td>按接口路由或 <code>tenant</code> 选择 <code>BcnAgent</code></td><td>容器内所有 <code>BcnAgent</code>，按 <code>tenant</code> 匹配</td><td>Agent 是动态配置的（例如平台上由用户创建）</td></tr>
+<tr><td><code>TaskStore</code></td><td>跨实例存储（9.2）</td><td>内存</td><td>多实例部署时选择 JDBC 实现或自行实现</td></tr>
+<tr><td><code>CallerContextProvider</code></td><td>从 RPC 上下文提取调用方应用名</td><td>starter 提供 SOFARPC 实现</td><td>非 SOFARPC 环境</td></tr>
+<tr><td><code>CallerPolicy</code></td><td>决定是否接受某个调用方</td><td>全部接受</td><td>需要调用方白名单</td></tr>
+<tr><td><code>ToolEventEmitter</code></td><td>发出工具观察记录</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
+<tr><td><code>ApprovalHandler</code></td><td>exec 审批的发起、接受和恢复</td><td>无</td><td>声明 exec 审批扩展时必须实现</td></tr>
+<tr><td><code>AgentRegistrar</code></td><td>启动时向 BCS 注册或更新 Card</td><td>关闭</td><td>通常使用 SDK 提供的实现并配置开启</td></tr>
+<tr><td><code>TaskIdGenerator</code></td><td>生成 <code>taskId</code>、<code>contextId</code></td><td>随机 UUID</td><td>需要自定义格式</td></tr>
+</table></div>
+
+<h4>动态 Agent：AgentResolver</h4>
+<pre><code>public interface AgentResolver {
+    /** 找不到时返回空；SDK 对外返回未找到，不暴露其他 Agent 的存在。 */
+    Optional&lt;BcnAgent&gt; resolve(String tenant);
+
+    /** 列出当前可提供的 Agent，用于 Card 发布和自动注册。 */
+    Collection&lt;AgentDescriptor&gt; list();
+}</code></pre>
+
+<h4>L3：扩展执行接口</h4>
+<p>需要工具观察或审批的 Agent 实现 <code>BcnAgent</code> 的扩展接口，得到功能更全的上下文。</p>
+<pre><code>public interface AdvancedBcnAgent extends BcnAgent {
+    void execute(AgentRequest request, AgentExecution execution) throws Exception;
+
+    /** 审批完成后恢复执行。可能在另一个实例上调用。 */
+    void resume(AgentRequest original, ApprovalResult result, AgentExecution execution) throws Exception;
+}
+
+public interface AgentExecution extends AgentResponseSink {
+    ToolEventEmitter tools();
+    /** 暂停并请求审批。返回后 execute 应立即返回；SDK 把 Task 置为 INPUT_REQUIRED。 */
+    void requestApproval(ApprovalRequest request);
+    boolean negotiated(String extensionUri);
+}
+
+public interface ToolEventEmitter {
+    void start(String toolCallId, String name, Map&lt;String, Object&gt; args);
+    void result(String toolCallId, String name, boolean isError, String text);
+}
+
+public record ApprovalRequest(String requestId, long expiresAtMs, List&lt;ToolCall&gt; tools) {}
+public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decisions) {}   // ALLOW_ONCE / DENY</code></pre>
+<div class="tw"><table>
+<tr><th>SDK 负责</th><th>Agent 负责</th></tr>
+<tr><td>把工具记录编码成 <code>tools/v1</code> 格式；未协商时静默丢弃</td><td>提供稳定的 <code>toolCallId</code></td></tr>
+<tr><td>生成审批 Schema、参数快照和摘要；校验回复；持久化已接受的决定；处理分批回复和过期</td><td>在 <code>requestApproval</code> 前保存好可恢复的引擎状态</td></tr>
+<tr><td>全部工具都有决定后，通过 CAS 接管执行权并调用 <code>resume</code></td><td><code>resume</code> 必须能在任意实例上从存储恢复；做不到则在 <code>AgentDescriptor</code> 中声明，SDK 会在跨实例续交时返回错误</td></tr>
+</table></div>
+
+<h3 id="s8-6"><span class="n">8.6</span>请求处理</h3>
+<h4>初始提交（SendStreamingMessage）</h4>
+<ol class="seq">
+<li><div><span class="who">starter</span>收到 GRPC 请求，提取 <code>a2a-version</code>、<code>a2a-extensions</code>、<code>tenant</code> 和 RPC 调用方应用名。</div></li>
+<li><div><span class="who">core</span>校验版本和请求结构；通过 <code>AgentResolver</code> 找到 Agent；执行 <code>CallerPolicy</code>。失败直接返回协议错误，不创建 Task。</div></li>
+<li><div><span class="who">core</span>计算协商结果：请求列出的扩展与 Card 声明的交集。必需扩展缺失则返回 <code>EXTENSION_SUPPORT_REQUIRED</code>。</div></li>
+<li><div><span class="who">core</span>解析调用上下文扩展，得到 <code>userId</code>。</div></li>
+<li><div><span class="who">core</span>如果协商了提交去重：调用 <code>reserveSubmission</code>。已存在且内容相同，转为订阅已有 Task；内容不同，返回参数错误。</div></li>
+<li><div><span class="who">core</span>生成 <code>taskId</code>、<code>contextId</code>，以 <code>SUBMITTED</code> 状态写入 TaskStore，本实例成为执行实例并写入租约。写入失败返回内部错误。</div></li>
+<li><div><span class="who">core</span>向流写出 <code>task</code> 事件，然后把执行提交到执行线程池。线程池已满则 Task 置为 <code>REJECTED</code>。</div></li>
+<li><div><span class="who">core</span>执行线程把状态改为 <code>WORKING</code>，调用 <code>BcnAgent.execute</code>。</div></li>
+<li><div><span class="who">Agent</span>调用 <code>sink.append</code>。core 更新内存中的累计文本，向本实例的订阅者推送 <code>artifactUpdate</code>，并按节流写入 TaskStore。</div></li>
+<li><div><span class="who">core</span>执行结束：写入终态和最终全文，成功后向订阅者推送终态 <code>statusUpdate</code> 并关闭流。</div></li>
+</ol>
+<p><code>SendMessage</code> 走同一流程。<code>returnImmediately: true</code> 时在第 7 步返回 Task；否则等到第 10 步返回。</p>
+
+<h3 id="s8-7"><span class="n">8.7</span>线程与背压</h3>
+<div class="tw"><table>
+<tr><th>项</th><th>设计</th></tr>
+<tr><td>执行线程池</td><td>SDK 管理的有界线程池，每个 Task 占用一个线程直到 <code>execute</code> 返回。池大小即并发 Task 上限。JDK 21 以上可以配置为虚拟线程。</td></tr>
+<tr><td>RPC 线程</td><td>只做校验、建 Task、写首帧，不执行 Agent 逻辑。</td></tr>
+<tr><td>订阅者缓冲</td><td>每个订阅者一个有界缓冲。客户端读得慢导致缓冲溢出时，SDK 关闭该订阅，不阻塞 Agent 执行。客户端按 GetTask 加 SubscribeToTask 恢复，文本不丢。</td></tr>
+<tr><td>存储写入</td><td>节流写入在独立的调度线程上执行，不阻塞 <code>append</code>。终态写入是同步的：写入成功后才对外发终态。</td></tr>
+<tr><td>优雅停机</td><td>收到停机信号后停止接收新 Task，等待在途 Task 完成（可配置上限）。超时后把剩余 Task 置为 <code>FAILED</code> 并写入存储，不等租约过期。</td></tr>
+</table></div>
+<div class="box q"><p><b>发布的影响。</b>滚动发布会终止实例。执行时间长于停机等待时间的 Task 会失败。这是 <span class="tag d">D3</span>"不做执行迁移"的直接后果，需要评审确认可以接受，或确定停机等待时间的默认值（<span class="tag q">Q9</span>）。</p></div>
+
+<h3 id="s8-8"><span class="n">8.8</span>配置项</h3>
+<div class="tw"><table>
+<tr><th>配置键</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>bcn.a2a.server.enabled</code></td><td><code>true</code></td><td>总开关</td></tr>
+<tr><td><code>bcn.a2a.server.interface-url</code></td><td>无，必填</td><td>写入 Card 的 GRPC 接口地址，即 MOSN 路由匹配的接口标识</td></tr>
+<tr><td><code>bcn.a2a.server.http.enabled</code></td><td><code>false</code></td><td>是否开启 HTTP+JSON 和 JSONRPC 端点</td></tr>
+<tr><td><code>bcn.a2a.server.http.base-path</code></td><td><code>/a2a</code></td><td>HTTP 端点前缀；每个 Agent 位于 <code>{base-path}/{tenant}</code></td></tr>
+<tr><td><code>bcn.a2a.server.store</code></td><td><code>memory</code></td><td><code>memory</code> 或 <code>jdbc</code>，或自定义实现的 Bean 名</td></tr>
+<tr><td><code>bcn.a2a.server.single-instance</code></td><td><code>false</code></td><td>为 <code>false</code> 且存储为 <code>memory</code> 时启动告警；生产环境启动失败</td></tr>
+<tr><td><code>bcn.a2a.server.execution.max-concurrent</code></td><td>64</td><td>并发 Task 上限</td></tr>
+<tr><td><code>bcn.a2a.server.execution.timeout</code></td><td>10 分钟</td><td>单个 Task 最长执行时间，不含审批等待</td></tr>
+<tr><td><code>bcn.a2a.server.task.flush-interval</code></td><td>1 秒</td><td>文本写入存储的最大间隔</td></tr>
+<tr><td><code>bcn.a2a.server.task.lease-duration</code></td><td>15 秒</td><td>租约时长</td></tr>
+<tr><td><code>bcn.a2a.server.task.max-text-bytes</code></td><td>待定</td><td>单 Task 累计文本上限</td></tr>
+<tr><td><code>bcn.a2a.server.task.retention</code></td><td>待定</td><td>终态后保留时间</td></tr>
+<tr><td><code>bcn.a2a.server.cancel.wait</code></td><td>8 秒</td><td>跨实例取消时等待终态的上限，必须小于 BCS 的取消超时</td></tr>
+<tr><td><code>bcn.a2a.server.shutdown.drain</code></td><td>30 秒</td><td>停机时等待在途 Task 的上限</td></tr>
+<tr><td><code>bcn.a2a.server.register.enabled</code></td><td><code>false</code></td><td>是否在启动时向 BCS 注册</td></tr>
+<tr><td><code>bcn.a2a.server.register.bcs-url</code></td><td>无</td><td>BCS 管理接口地址</td></tr>
+</table></div>
+
+<h3 id="s8-9"><span class="n">8.9</span>Card 生成、发布与注册</h3>
+<ul>
+<li><b>生成。</b>starter 根据 <code>AgentDescriptor</code>、配置的接口地址和已装配的能力生成 Card。扩展声明由 SDK 写入：只有对应 SPI 已装配，才声明该扩展。</li>
+<li><b>校验。</b>启动时用 <code>bcn-a2a-spec</code> 的校验器检查 Card。不合规则启动失败，并给出具体条款编号。</li>
+<li><b>发布。</b>开启 HTTP 时，在 <code>{base-path}/{tenant}/agent-card.json</code> 提供 Card。未开启 HTTP 时，通过内联 Card 注册。</li>
+<li><b>注册。</b><code>AgentRegistrar</code> 默认关闭。开启后在启动完成时调用 BCS 的 Provider 管理接口：以 <code>provider_bot_ref</code> 查询，不存在则注册，存在且 Card 有变化则更新。管理凭据从平台的密钥配置读取，不写在应用配置中。注册失败不阻止应用启动，但会告警并重试。</li>
+</ul>
+<div class="box q"><p>多实例同时启动会并发注册。BCS 对重复的 <code>provider_bot_ref</code> 返回冲突，SDK 收到冲突后改为查询再更新。更新是完整替换且以最后写入为准，各实例的 Card 相同，因此结果一致。动态 Agent（<code>AgentResolver.list()</code> 的结果会变化）的注册时机见 <span class="tag q">Q10</span>。</p></div>
+
+<h3 id="s8-10"><span class="n">8.10</span>可观测性</h3>
+<div class="tw"><table>
+<tr><th>类别</th><th>内容</th></tr>
+<tr><td>日志</td><td>每个 Task 的创建、状态变化、终态各一条，包含 <code>taskId</code>、<code>contextId</code>、<code>tenant</code>、调用方应用名、耗时。不记录消息文本、<code>userId</code> 原值和工具参数。</td></tr>
+<tr><td>指标</td><td>各方法的请求数、错误数和耗时；在途 Task 数；Task 终态分布；存储读写耗时和失败数；CAS 冲突数；租约过期回收数；订阅者缓冲溢出数。</td></tr>
+<tr><td>链路</td><td>沿用 SOFATracer 上下文。Agent 的执行在一个 span 内，<code>taskId</code> 作为标签。</td></tr>
+<tr><td>排查标识</td><td>BCS 侧排查使用 <code>run_id</code>，Agent 侧使用 <code>taskId</code>。BCS 把 <code>run_id</code> 作为初始消息的 <code>messageId</code>，SDK 在日志中同时记录两者。</td></tr>
+</table></div>
+
+<h2 id="s9"><span class="n">9</span>多实例设计</h2>
+<h3 id="s9-1"><span class="n">9.1</span>模型</h3>
+<ul>
+<li>接收初始请求的实例是该 Task 的<b>执行实例</b>。执行权不迁移。唯一的例外是审批续交：Task 在 <code>INPUT_REQUIRED</code> 时没有执行实例，接到续交的实例接管。</li>
+<li>执行实例是 Task 内容（状态、文本、metadata）的<b>唯一写入者</b>。</li>
+<li>其他实例只做三件事：读快照、写取消标记、回收租约过期的 Task。</li>
+<li>实例之间不直接通信。所有协作通过 TaskStore 的 CAS 完成。</li>
+</ul>
+
+<h3 id="s9-2"><span class="n">9.2</span>TaskStore SPI</h3>
+<pre><code>public interface TaskStore {
+
+    /** 按主键读取。 */
+    Optional&lt;TaskRecord&gt; get(String agentKey, String taskId);
+
+    /** 不存在才写入。已存在返回 false。 */
+    boolean create(TaskRecord record);
+
+    /** 当存储中的 version 等于 expectedVersion 时写入 next（next.version = expectedVersion + 1）。 */
+    boolean compareAndSet(TaskRecord next, long expectedVersion);
+
+    /** 提交去重占位。首次返回 RESERVED；已存在返回已有的 taskId 和摘要。 */
+    Reservation reserveSubmission(String agentKey, String messageId, String requestDigest, String taskId);
+}</code></pre>
+<div class="tw"><table>
+<tr><th>实现约束</th><th>说明</th></tr>
+<tr><td>原子性</td><td><code>create</code> 和 <code>compareAndSet</code> 必须是原子的。</td></tr>
+<tr><td>读己之写</td><td>成功写入后，任何实例的读取都必须能看到。不得使用可能读到旧值的从库或缓存。</td></tr>
+<tr><td>失败语义</td><td>存储不可用时抛出异常；不得返回 <code>false</code> 或空来表示故障。</td></tr>
+<tr><td>不要求的能力</td><td>发布订阅、分布式锁、范围查询、事务跨多条记录。</td></tr>
+<tr><td>一致性测试</td><td>SDK 提供 TaskStore 的合同测试，自定义实现必须通过。</td></tr>
+</table></div>
+
+<h3 id="s9-3"><span class="n">9.3</span>TaskRecord</h3>
+<div class="tw"><table>
+<tr><th>字段</th><th>类型</th><th>写入者</th><th>说明</th></tr>
+<tr><td><code>agentKey</code></td><td>string</td><td>创建时</td><td>Agent 标识加 <code>tenant</code>，隔离边界</td></tr>
+<tr><td><code>taskId</code>、<code>contextId</code></td><td>string</td><td>创建时</td><td>不可变</td></tr>
+<tr><td><code>version</code></td><td>long</td><td>每次写入</td><td>从 1 开始递增</td></tr>
+<tr><td><code>state</code></td><td>enum</td><td>执行实例；回收者</td><td>Task 状态</td></tr>
+<tr><td><code>task</code></td><td>序列化的 Task</td><td>执行实例</td><td>状态消息、累计 Artifact、Task metadata（含审批回执）</td></tr>
+<tr><td><code>negotiatedExtensions</code></td><td>string 列表</td><td>创建时</td><td>初始提交的协商结果</td></tr>
+<tr><td><code>caller</code></td><td>对象</td><td>创建时</td><td><code>userId</code>、调用方应用名</td></tr>
+<tr><td><code>request</code></td><td>对象</td><td>创建时</td><td>原始请求文本，供审批恢复时重建 <code>AgentRequest</code></td></tr>
+<tr><td><code>ownerInstance</code></td><td>string，可空</td><td>执行实例</td><td>执行实例标识；<code>INPUT_REQUIRED</code> 和终态时为空</td></tr>
+<tr><td><code>leaseExpiresAtMs</code></td><td>long</td><td>执行实例</td><td>租约到期时间</td></tr>
+<tr><td><code>cancelRequested</code></td><td>boolean</td><td>任意实例</td><td>取消标记，只能从 false 变为 true</td></tr>
+<tr><td><code>deadlineMs</code></td><td>long</td><td>创建时；审批时</td><td>执行或审批等待的截止时间</td></tr>
+<tr><td><code>createdAtMs</code>、<code>updatedAtMs</code></td><td>long</td><td>每次写入</td><td>用于清理和排查</td></tr>
+</table></div>
+
+<h3 id="s9-4"><span class="n">9.4</span>写入节奏与租约</h3>
+<div class="tw"><table>
+<tr><th>事件</th><th>写入</th></tr>
+<tr><td>Task 创建</td><td>立即，<code>create</code></td></tr>
+<tr><td>状态变化（WORKING、INPUT_REQUIRED、终态）</td><td>立即，CAS</td></tr>
+<tr><td>文本追加</td><td>合并后节流，最长 1 秒一次，CAS</td></tr>
+<tr><td>工具观察记录</td><td>随下一次节流写入；只保留最近一条状态消息</td></tr>
+<tr><td>无输出的执行期</td><td>每 5 秒一次续租，CAS</td></tr>
+</table></div>
+<ul>
+<li>每次写入都把 <code>leaseExpiresAtMs</code> 更新为当前时间加租约时长（默认 15 秒）。</li>
+<li>租约判定加入 5 秒的时钟偏差容忍：当前时间超过 <code>leaseExpiresAtMs</code> 加 5 秒才视为过期。</li>
+<li><code>INPUT_REQUIRED</code> 的 Task 没有执行实例，不受租约约束，由 <code>deadlineMs</code> 约束。任何实例读到已过截止时间的 <code>INPUT_REQUIRED</code> Task，都通过 CAS 把它置为 <code>FAILED</code>。</li>
+</ul>
+
+<h3 id="s9-5"><span class="n">9.5</span>跨实例流程</h3>
+<div class="tw"><table>
+<tr><th>操作</th><th>落在执行实例</th><th>落在其他实例</th></tr>
+<tr><td>GetTask</td><td>读存储（保证与其他实例一致）</td><td>读存储</td></tr>
+<tr><td>SubscribeToTask</td><td>快照后直接推送事件</td><td>轮询存储，合成事件</td></tr>
+<tr><td>CancelTask</td><td>直接取消，等待终态</td><td>写取消标记，有限等待</td></tr>
+<tr><td>审批续交</td><td colspan="2">Task 无执行实例；接到请求的实例通过 CAS 接管</td></tr>
+</table></div>
+
+<h4>跨实例 SubscribeToTask</h4>
+<ol class="seq">
+<li><div><span class="who">实例 B</span>读取 TaskRecord。不存在返回 <code>TASK_NOT_FOUND</code>；终态返回 <code>UNSUPPORTED_OPERATION</code>。</div></li>
+<li><div><span class="who">实例 B</span><code>ownerInstance</code> 是自己：挂到本地事件源，结束。否则继续。</div></li>
+<li><div><span class="who">实例 B</span>向流写出当前 <code>task</code> 快照，记下每个 Artifact 已发送的文本长度和记录的 <code>version</code>。</div></li>
+<li><div><span class="who">实例 B</span>每秒读取一次记录。<code>version</code> 未变则跳过。</div></li>
+<li><div><span class="who">实例 B</span><code>version</code> 变化：每个 Artifact 的新增后缀作为 <code>artifactUpdate(append: true)</code> 发出；新的 Artifact 以 <code>append: false</code> 发出；状态或状态消息变化作为 <code>statusUpdate</code> 发出。</div></li>
+<li><div><span class="who">实例 B</span>读到终态或 <code>INPUT_REQUIRED</code>：发出对应 <code>statusUpdate</code>，关闭流。</div></li>
+<li><div><span class="who">实例 B</span>读到租约过期：按"宕机回收"处理后发出 <code>FAILED</code>，关闭流。</div></li>
+</ol>
+<p>由于文本只追加（P-70、P-71），快照差异必然是后缀，合成结果与直接推送在文本上等价。差别在于粒度（约 1 秒一批）和工具观察记录可能缺失（两次轮询之间被覆盖的状态消息不可见）。</p>
+
+<h4>跨实例 CancelTask</h4>
+<ol class="seq">
+<li><div><span class="who">实例 B</span>读取 TaskRecord。终态返回 <code>TASK_NOT_CANCELABLE</code>。</div></li>
+<li><div><span class="who">实例 B</span>通过 CAS 把 <code>cancelRequested</code> 置为 true。CAS 冲突则重读后重试，最多 3 次。</div></li>
+<li><div><span class="who">实例 A</span>下一次节流写入或续租时 CAS 失败（<code>version</code> 已变），重读记录，看到 <code>cancelRequested</code>。</div></li>
+<li><div><span class="who">实例 A</span>调用 <code>BcnAgent.cancel</code> 并中断执行线程；通过 CAS 写入 <code>CANCELED</code> 和已输出的文本。</div></li>
+<li><div><span class="who">实例 B</span>每 500 毫秒读取一次，直到读到终态或超过 <code>cancel.wait</code>（默认 8 秒）。</div></li>
+<li><div><span class="who">实例 B</span>读到 <code>CANCELED</code>：返回该 Task。读到其他终态（完成与取消竞争）：返回该终态 Task。超时：返回当前非终态 Task。</div></li>
+</ol>
+<p>执行实例最迟在下一次续租（5 秒）时发现取消标记。实际延迟通常在 1 秒内，因为执行中的 Task 在持续写入。已核对 BCS 的处理：响应状态不是 <code>CANCELED</code> 时，BCS 不把该 Run 记为已取消，后续通过 GetTask 核对。BCS 清理路径的取消超时为 15 秒，因此 <code>cancel.wait</code> 默认取 8 秒。</p>
+
+<h4>审批续交</h4>
+<ol class="seq">
+<li><div><span class="who">实例 A</span>Agent 调用 <code>requestApproval</code>。core 写入 <code>INPUT_REQUIRED</code>、审批 Schema、<code>deadlineMs</code>，清空 <code>ownerInstance</code>。<code>execute</code> 返回，线程释放。</div></li>
+<li><div><span class="who">BCS</span>用户决定后，发送带 <code>taskId</code> 的 SendMessage，可能到达任意实例。</div></li>
+<li><div><span class="who">实例 B</span>读取记录，校验 <code>contextId</code>、审批批次、工具标识、过期时间和 <code>userId</code> 一致性。不合法则返回带校验错误的 <code>INPUT_REQUIRED</code>，不改变已接受的决定。</div></li>
+<li><div><span class="who">实例 B</span>通过 CAS 把决定写入 <code>Task.metadata</code>。仍有工具未决定：保持 <code>INPUT_REQUIRED</code>，返回更新后的 Task。</div></li>
+<li><div><span class="who">实例 B</span>全部已决定：同一次 CAS 把状态改为 <code>WORKING</code>，<code>ownerInstance</code> 设为自己并写入租约。CAS 成功即接管成功。</div></li>
+<li><div><span class="who">实例 B</span>返回 Task，然后在执行线程上调用 <code>resume</code>。</div></li>
+</ol>
+<p>两个实例同时收到同一批决定时，只有一个 CAS 成功，另一个重读后发现状态已是 <code>WORKING</code> 且决定相同，按重复提交处理，返回当前 Task，不调用 <code>resume</code>。这保证工具只恢复一次。</p>
+
+<h4>宕机回收</h4>
+<ol class="seq">
+<li><div><span class="who">实例 A</span>进程终止。Task 停在 <code>WORKING</code>，租约不再续期。</div></li>
+<li><div><span class="who">实例 B</span>处理该 Task 的 GetTask、订阅或取消时，读到租约已过期（含 5 秒容忍）。</div></li>
+<li><div><span class="who">实例 B</span>通过 CAS 把状态置为 <code>FAILED</code>，状态消息说明执行中断，保留已写入的文本。</div></li>
+<li><div><span class="who">实例 B</span>按终态继续处理原请求。</div></li>
+</ol>
+<p>回收是惰性的：只有当有人读这个 Task 时才发生。BCS 在跟踪期间会持续查询或订阅，所以在途 Task 会被及时回收。没有人再读的 Task 由保留期清理处理。不设后台扫描，避免对存储做范围查询。</p>
+
+<h3 id="s9-6"><span class="n">9.6</span>竞争分析</h3>
+<div class="tw"><table>
+<tr><th>场景</th><th>处理</th><th>结果</th></tr>
+<tr><td>执行实例写入时，另一实例写了取消标记</td><td>执行实例 CAS 失败，重读，合并取消标记后执行取消</td><td>取消生效，文本不丢</td></tr>
+<tr><td>完成与取消同时发生</td><td>先成功的 CAS 生效。完成先写入：取消方读到终态，返回 <code>TASK_NOT_CANCELABLE</code> 或该终态。取消标记先写入：执行实例写终态时 CAS 失败，重读后发现执行已实际完成，仍写入 <code>COMPLETED</code></td><td>不会把已完成的执行报告为已取消</td></tr>
+<tr><td>执行实例只是变慢，被其他实例判为租约过期并置为 FAILED</td><td>执行实例下一次 CAS 失败，重读到终态，立即停止执行并关闭本地订阅流</td><td>Task 为 FAILED；执行被终止。靠 5 秒容忍和 15 秒租约降低发生概率</td></tr>
+<tr><td>两个实例同时回收同一个过期 Task</td><td>只有一个 CAS 成功，另一个重读到终态</td><td>一致</td></tr>
+<tr><td>提交去重：同一 <code>messageId</code> 同时到达两个实例</td><td><code>reserveSubmission</code> 只有一个成功，另一个得到已有 <code>taskId</code>，转为订阅</td><td>只执行一次</td></tr>
+<tr><td>提交去重：占位成功后、<code>create</code> 之前实例宕机</td><td>重试方得到已有 <code>taskId</code>，但记录不存在；SDK 以该 <code>taskId</code> 创建一条 FAILED 记录并返回</td><td>不执行，对外可见失败。这是"至多一次"的取舍</td></tr>
+<tr><td>订阅者在快照和第一次轮询之间错过更新</td><td>轮询基于已发送长度计算后缀，不依赖事件</td><td>不丢文本</td></tr>
+<tr><td>存储短暂不可用</td><td>执行实例的节流写入重试到租约剩余时间的一半；仍失败则终止执行。终态写入失败时不对外发终态</td><td>Task 最终由租约过期回收为 FAILED</td></tr>
+</table></div>
+
+<h3 id="s9-7"><span class="n">9.7</span>成本估算</h3>
+<p>以一次持续 30 秒、输出 4 KB 文本的流式 Task 为例。</p>
+<div class="tw"><table>
+<tr><th>阶段</th><th>写入次数</th><th>读取次数</th><th>单次数据量</th></tr>
+<tr><td>创建（含去重占位）</td><td>1 到 2</td><td>0</td><td>约 1 KB</td></tr>
+<tr><td>执行中</td><td>最多 30（每秒一次）</td><td>0，除非 CAS 冲突</td><td>累计全文，最终约 5 KB</td></tr>
+<tr><td>终态</td><td>1</td><td>0</td><td>约 5 KB</td></tr>
+<tr><td>BCS 终态后的 GetTask 核对</td><td>0</td><td>1</td><td>约 5 KB</td></tr>
+<tr><td>跨实例订阅（如发生）</td><td>0</td><td>每秒 1 次</td><td>约 5 KB</td></tr>
+</table></div>
+<ul>
+<li>稳态下每个在途 Task 对存储的压力是每秒 1 次按主键的更新。1000 个并发 Task 约为每秒 1000 次更新。</li>
+<li>每次更新写入累计全文，因此写入总字节数随输出长度平方增长。文本上限（P-74）约束了最坏情况。如果压测显示这是瓶颈，可以在参考实现中把文本拆到追加写的分片表，SPI 不变。</li>
+<li>不逐 token 写入。所有访问都按主键，没有扫描。</li>
+<li>没有事务跨越 Agent 执行或网络调用。</li>
+</ul>
+
+<h3 id="s9-8"><span class="n">9.8</span>JDBC 参考实现</h3>
+<p>面向 MySQL 和 OceanBase。提供建表语句，不自动建表。</p>
+<pre><code>CREATE TABLE bcn_a2a_task (
+  id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  gmt_create           DATETIME(3)  NOT NULL,
+  gmt_modified         DATETIME(3)  NOT NULL,
+  agent_key            VARCHAR(128) NOT NULL,
+  task_id              VARCHAR(64)  NOT NULL,
+  context_id           VARCHAR(64)  NOT NULL,
+  version              BIGINT       NOT NULL,
+  state                VARCHAR(32)  NOT NULL,
+  owner_instance       VARCHAR(128) NULL,
+  lease_expires_at_ms  BIGINT       NOT NULL DEFAULT 0,
+  cancel_requested     TINYINT      NOT NULL DEFAULT 0,
+  deadline_ms          BIGINT       NOT NULL,
+  expire_at_ms         BIGINT       NOT NULL,          -- 清理用：终态时间 + 保留期
+  record_json          MEDIUMTEXT   NOT NULL,          -- Task、协商结果、caller、request
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_task (agent_key, task_id),
+  KEY idx_expire (expire_at_ms)
+);
+
+CREATE TABLE bcn_a2a_submission (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  gmt_create      DATETIME(3)  NOT NULL,
+  gmt_modified    DATETIME(3)  NOT NULL,
+  agent_key       VARCHAR(128) NOT NULL,
+  message_id      VARCHAR(256) NOT NULL,
+  request_digest  CHAR(64)     NOT NULL,
+  task_id         VARCHAR(64)  NOT NULL,
+  expire_at_ms    BIGINT       NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_submission (agent_key, message_id),
+  KEY idx_expire (expire_at_ms)
+);</code></pre>
+<div class="tw"><table>
+<tr><th>操作</th><th>SQL</th></tr>
+<tr><td><code>get</code></td><td>按 <code>uk_task</code> 的一次 SELECT</td></tr>
+<tr><td><code>create</code></td><td>一次 INSERT；唯一键冲突返回 false</td></tr>
+<tr><td><code>compareAndSet</code></td><td>一次 <code>UPDATE ... WHERE agent_key=? AND task_id=? AND version=?</code>；影响行数为 0 返回 false</td></tr>
+<tr><td><code>reserveSubmission</code></td><td>一次 INSERT；冲突时一次 SELECT</td></tr>
+<tr><td>清理</td><td>宿主的定时任务按 <code>idx_expire</code> 分批删除，每批有上限。SDK 提供语句，不内置调度。</td></tr>
+</table></div>
+<p>标识列使用区分大小写的排序规则。读取必须走主库。连接池由宿主提供。</p>
+
+<h3 id="s9-9"><span class="n">9.9</span>明确不保证的事项</h3>
+<ul>
+<li>执行实例宕机或被发布终止后，Task 不会在其他实例上继续，结果是 <code>FAILED</code>。</li>
+<li>跨实例订阅不保证工具观察记录完整。</li>
+<li>跨实例取消不保证在一次调用内确认。</li>
+<li>Agent 自身的会话记忆（基于 <code>contextId</code>）是否跨实例可用，由 Agent 负责，SDK 不管理。</li>
+</ul>
+
+<h2 id="s10"><span class="n">10</span>一致性测试 TCK</h2>
+<p>Profile 的每个条款对应至少一个用例。条款与用例冲突时，先修正其中之一，不允许长期不一致。</p>
+<h3>结构</h3>
+<div class="tw"><table>
+<tr><th>组成</th><th>内容</th></tr>
+<tr><td>用例定义</td><td>语言无关的描述文件：请求序列、对响应的断言、对应的条款编号、适用等级。放在本仓库，随 Profile 版本管理。</td></tr>
+<tr><td>Server 方向执行器</td><td>扮演 A2A Client 调用被测 Agent。Java 实现，提供命令行和 JUnit 两种入口。平台用它自测，SDK 用它回归。</td></tr>
+<tr><td>Client 方向桩</td><td>可按用例编排响应的桩 Server。用于验证 BCS 下行 adapter，逐步与现有 Rust 合同测试对齐。</td></tr>
+<tr><td>被测 Agent 约定</td><td>为了让用例可重复，被测 Agent 需要提供一个测试用的 tenant，对约定的输入文本产生约定的行为（见下）。SDK 内置这个测试 Agent。</td></tr>
+</table></div>
+<h3>测试 Agent 的约定输入</h3>
+<div class="tw"><table>
+<tr><th>输入文本</th><th>行为</th></tr>
+<tr><td><code>tck:echo &lt;text&gt;</code></td><td>分三块输出 text，然后完成</td></tr>
+<tr><td><code>tck:slow &lt;seconds&gt;</code></td><td>每秒输出一块，持续指定秒数</td></tr>
+<tr><td><code>tck:fail</code></td><td>输出一块后失败</td></tr>
+<tr><td><code>tck:whoami</code></td><td>输出收到的 <code>userId</code> 是否存在（不输出原值）</td></tr>
+<tr><td><code>tck:tool</code></td><td>发出一组工具观察记录后完成</td></tr>
+<tr><td><code>tck:approve</code></td><td>请求一次 exec 审批，按决定完成</td></tr>
+</table></div>
+<h3>用例分组</h3>
+<div class="tw"><table>
+<tr><th>分组</th><th>覆盖内容</th><th>等级</th></tr>
+<tr><td>Card</td><td>P-10 到 P-17；等级声明与能力自洽</td><td>全部</td></tr>
+<tr><td>非流式</td><td>立即返回、阻塞返回、GetTask 完整快照、未知 Task</td><td>L0</td></tr>
+<tr><td>取消</td><td>运行中取消、终态取消、重复取消、完成与取消竞争</td><td>L0</td></tr>
+<tr><td>流式</td><td>首帧为 Task、追加规则、显式终态、流后 GetTask 一致</td><td>L1</td></tr>
+<tr><td>断流恢复</td><td>断开后 Task 继续、订阅首帧为快照、不重复文本、终态订阅报错</td><td>L1</td></tr>
+<tr><td>协商与错误</td><td>版本不支持、必需扩展缺失、未协商扩展不出数据、错误原因</td><td>全部</td></tr>
+<tr><td>调用上下文</td><td>有 <code>userId</code>、缺失拒绝、续交不一致拒绝</td><td>L2</td></tr>
+<tr><td>扩展</td><td>工具记录格式；审批允许、拒绝、分批、过期、重复；去重同内容与不同内容</td><td>L3</td></tr>
+<tr><td>多实例</td><td>两个实例共用存储：9.5 表中每一格；终止执行实例后的回收；并发续交只恢复一次</td><td>全部</td></tr>
+<tr><td>隔离</td><td>不同 tenant 的 Task 互不可见</td><td>全部</td></tr>
+</table></div>
+<p>多实例用例需要直接指定目标实例，因此通过各实例的直连地址执行，不经过负载均衡。</p>
+
+<h2 id="s11"><span class="n">11</span>存量 Agent 迁移</h2>
+<div class="tw"><table>
+<tr><th>现有形态</th><th>接入方式</th><th>得到的等级</th><th>工作量</th></tr>
+<tr><td>同步接口：请求进，完整文本出</td><td>实现 <code>BcnAgent</code>，在 <code>execute</code> 中调用原接口，一次 <code>append</code> 后 <code>complete</code></td><td>L0 或 L1</td><td>小</td></tr>
+<tr><td>流式接口：回调或迭代器逐段输出</td><td>实现 <code>BcnAgent</code>，把回调接到 <code>sink.append</code></td><td>L1</td><td>小</td></tr>
+<tr><td>需要用户身份</td><td>在上面的基础上声明 <code>requireUserId</code>，从 <code>caller().userId()</code> 取值</td><td>L2</td><td>小</td></tr>
+<tr><td>有工具调用过程要展示</td><td>实现 <code>AdvancedBcnAgent</code>，在工具前后调用 <code>tools()</code></td><td>L3</td><td>中</td></tr>
+<tr><td>有执行前审批</td><td>实现 <code>AdvancedBcnAgent</code> 的 <code>resume</code>；引擎状态需要可持久化</td><td>L3</td><td>大，取决于引擎</td></tr>
+<tr><td>平台上有大量动态创建的 Agent</td><td>实现 <code>AgentResolver</code>，一个进程承载全部 Agent，以 <code>tenant</code> 区分</td><td>按 Agent</td><td>中</td></tr>
+<tr><td>非 Java 技术栈</td><td>按 Profile 自行实现，通过 TCK</td><td>按实现</td><td>—</td></tr>
+</table></div>
+<p>建议各平台先以 L1 接入并通过 TCK，再根据业务需要升级。</p>
+<h3>接入步骤</h3>
+<ol>
+<li>引入 starter 和存储实现；多实例部署创建 9.8 的两张表。</li>
+<li>实现 <code>BcnAgent</code>（或 <code>AgentResolver</code>）。</li>
+<li>配置接口地址，由平台确认 MOSN 路由。</li>
+<li>本地运行 TCK 的对应等级。</li>
+<li>向 BCS 申请 Provider，注册 Agent（手动或开启自动注册）。</li>
+<li>通过 BCN 工作台发起一次对话，核对流式输出、取消和断流恢复。</li>
+</ol>
+
+<h2 id="s12"><span class="n">12</span>BCS 侧需要的改动</h2>
+<p>Profile 大部分条款是对 BCS 现有下行行为的整理，BCS 侧改动有限。</p>
+<div class="tw"><table>
+<tr><th>改动</th><th>原因</th><th>阶段</th></tr>
+<tr><td>下行调用生成调用上下文 metadata 并协商该扩展</td><td>7.2，即待办 A2A-003</td><td>P3</td></tr>
+<tr><td>注册时识别 profile 声明扩展，校验等级自洽</td><td>7.1</td><td>P1</td></tr>
+<tr><td>接入文档更新：无凭据调用从"本期限制"改为 Profile 要求；GRPC 为必选</td><td><span class="tag d">D1</span>、P-02</td><td>P1</td></tr>
+<tr><td>下行合同测试与 TCK 的 Client 方向用例对齐</td><td>第 10 节</td><td>P2 起逐步</td></tr>
+<tr><td>确认取消超时与 SDK 的 <code>cancel.wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
+</table></div>
+<p>以下不在本设计范围内，但会影响整体可用性：BCS 的运行跟踪目前按单实例部署使用；兼容入口保留的 Bearer 下行链路不属于 Profile，继续按原约定工作。</p>
+
+<h2 id="s13"><span class="n">13</span>安全与信任</h2>
+<div class="tw"><table>
+<tr><th>主题</th><th>设计</th></tr>
+<tr><td>信任边界</td><td>内部 RPC 网络。Agent 的 A2A 端点不得暴露到公网。开启 HTTP 端点时同样只能在内网可达。</td></tr>
+<tr><td>调用方身份</td><td>SDK 从 RPC 上下文取调用方应用名，提供给 Agent 和 <code>CallerPolicy</code>。Profile 不强制校验。</td></tr>
+<tr><td>用户身份</td><td><code>userId</code> 由 BCS 从已认证上下文生成，不验签。能发起 RPC 的内部应用可以构造它。</td></tr>
+<tr><td>隔离</td><td>所有存储访问都带 <code>agentKey</code>。跨 Agent、跨 tenant 的 Task 访问返回未找到。</td></tr>
+<tr><td>标识不可猜测</td><td><code>taskId</code> 默认随机生成。它不是凭据，但不应可枚举。</td></tr>
+<tr><td>数据最小化</td><td>存储中保存请求文本和输出文本，有保留期。日志不记录文本和 <code>userId</code> 原值。</td></tr>
+<tr><td>Card 自声明</td><td>Card 中的等级、来源分类、提供方信息都不授予权限。归属以 BCS 的 Provider 注册关系为准。</td></tr>
+<tr><td>管理凭据</td><td>自动注册使用的 Provider 管理凭据只用于调用 BCS 管理接口，不进入 Card，不出现在日志。</td></tr>
+</table></div>
+
+<h2 id="s14"><span class="n">14</span>风险</h2>
+<div class="tw"><table>
+<tr><th>风险</th><th>影响</th><th>应对</th></tr>
+<tr><td>发布和宕机导致在途 Task 失败</td><td>长任务在发布窗口失败</td><td>停机等待；文档明确说明；后续可评估执行迁移</td></tr>
+<tr><td>存储成为每个 Task 的必经路径</td><td>存储抖动直接影响 Agent 可用性</td><td>写入重试有上限；失败可见；压测确定容量</td></tr>
+<tr><td>累计全文重复写入的成本</td><td>长输出时写入量大</td><td>文本上限；必要时在参考实现中改为分片追加</td></tr>
+<tr><td>修订式输出的引擎无法满足"只追加"</td><td>这类 Agent 只能输出最终文本，失去流式体验</td><td>P-73 给出转换方式；BCS 支持文本替换是后续课题</td></tr>
+<tr><td>审批要求引擎状态可恢复</td><td>部分引擎无法达到 L3 审批</td><td>允许声明为不可跨实例恢复，此时跨实例续交返回错误</td></tr>
+<tr><td><code>userId</code> 可被内部应用构造</td><td>越权访问个人数据</td><td><code>CallerPolicy</code> 白名单；见 <span class="tag q">Q8</span></td></tr>
+<tr><td>官方 a2a-java 模型随协议演进变化</td><td>SDK 需要跟进</td><td>只依赖模型和 GRPC 定义；锁定版本；TCK 回归</td></tr>
+<tr><td>exec 审批依赖的上游扩展仍是实验性的</td><td>上游变更导致不兼容</td><td>已固定到具体提交；变更时发布新的 profile 版本</td></tr>
+<tr><td>SOFARPC Triple 的服务端流与标准 GRPC 的兼容性</td><td>流式方法行为差异</td><td>Harness adapter 已在该链路验证；P1 用 TCK 再次确认</td></tr>
+</table></div>
+
+<h2 id="s15"><span class="n">15</span>分期与验收</h2>
+<div class="tw"><table>
+<tr><th>阶段</th><th>交付</th><th>验收</th></tr>
+<tr><td class="nw">P0 评审</td><td>本设计评审通过；待确认问题有结论</td><td>第 16 节全部关闭或明确延后</td></tr>
+<tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的 L0、L1；内存存储；starter 的 GRPC 端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>示例 Agent 单实例通过 TCK L1；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
+<tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；JDBC 参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
+<tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
+<tr><td class="nw">P4 扩展</td><td><code>AdvancedBcnAgent</code>；工具观察；exec 审批；提交去重；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
+<tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
+</table></div>
+
+<h2 id="s16"><span class="n">16</span>待确认问题</h2>
+<div class="tw"><table>
+<tr><th>编号</th><th>问题</th><th>当前倾向</th><th>影响范围</th></tr>
+<tr><td><span class="tag q">Q1</span></td><td>代码放在哪里</td><td>Profile 规范和 TCK 用例放开源仓库 <code>docs/specs/a2a/</code>；SDK 开源核心放开源仓库或独立仓库；MOSN、注册中心、密钥相关实现放内部仓库</td><td>工程组织</td></tr>
+<tr><td><span class="tag q">Q2</span></td><td>扩展 URI 的命名空间、版本和废弃策略。现有扩展使用仓库 <code>dev</code> 分支的文档地址作为标识</td><td>新扩展使用稳定的命名空间；已有扩展 URI 不变，避免破坏已接入方</td><td>7.1、7.2</td></tr>
+<tr><td><span class="tag q">Q3</span></td><td>调用上下文除 <code>userId</code> 外还需要哪些字段（租户、工号、渠道、语言等）</td><td>首版只有 <code>userId</code></td><td>7.2</td></tr>
+<tr><td><span class="tag q">Q4</span></td><td>现有 Harness adapter 的去向</td><td>扩展编解码和审批逻辑迁入 SDK；Harness 改为基于 SDK 的一个 <code>AdvancedBcnAgent</code> 实现</td><td>P4</td></tr>
+<tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>方案 B</td><td>8.2，决定 P1 工作量</td></tr>
+<tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的主要形态及数量分布</td><td>需要各平台提供</td><td>简易层是否需要更多便捷形式</td></tr>
+<tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>文本 1 MiB；保留 7 天</td><td>P-74、9.8</td></tr>
+<tr><td><span class="tag q">Q8</span></td><td>L2 Agent 是否默认只接受来自 BCS 的调用</td><td>SDK 提供白名单能力，默认不开启；由平台按数据敏感度决定</td><td>7.2、第 13 节</td></tr>
+<tr><td><span class="tag q">Q9</span></td><td>停机等待时间的默认值，以及是否需要与发布系统联动</td><td>30 秒</td><td>8.7</td></tr>
+<tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.9</td></tr>
+<tr><td><span class="tag q">Q11</span></td><td>参考存储是否需要除 JDBC 外的实现（例如 Tair）</td><td>首期只提供 JDBC；其他实现通过 TaskStore 合同测试后可自行使用</td><td>9.8</td></tr>
+<tr><td><span class="tag q">Q12</span></td><td>GRPC 之外，HTTP+JSON 端点是否需要在生产环境开放</td><td>默认关闭，仅用于调试</td><td>P-03</td></tr>
+</table></div>
+
+<h2 id="s17"><span class="n">17</span>参考</h2>
+<ul>
+<li>A2A 1.0.1 协议规范：<code>https://a2a-protocol.org/v1.0.1/specification/</code></li>
+<li>官方 Java SDK：<code>https://github.com/a2aproject/a2a-java</code></li>
+<li>仓库内现有文档：
+<ul>
+<li><code>docs/bcn-a2a-integration-guide.zh-CN.md</code>：接入指南</li>
+<li><code>docs/bcn-a2a-api-reference.zh-CN.md</code>：接口参考，BCS 下行行为的现行描述</li>
+<li><code>docs/bcn-provider-agent-card-api-v0.1.zh-CN.md</code>：Provider AgentCard 管理接口</li>
+<li><code>docs/specs/a2a/extensions/</code>：工具观察、提交去重、来源分类扩展</li>
+<li><code>docs/specs/a2a/structured-input-exec/v1.md</code>：exec 审批 profile</li>
+<li><code>docs/specs/a2a/todo.zh-CN.md</code>：A2A 适配待办（A2A-003 调用上下文）</li>
+<li><code>docs/specs/2026-10-28-bcs-a2a-grpc/plan.md</code>：Harness 联调与 GRPC、MOSN 链路</li>
+</ul></li>
+<li>BCS 下行 adapter：<code>apps/bcs/crates/external-clients/bcs-a2a-http/</code></li>
+</ul>
+</main></div>
