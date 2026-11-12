@@ -807,3 +807,14 @@ Singlebox 因此列为**未验收（NOT passed）**：属本机环境冲突（�
 - 补测未发现生产缺陷；期间观察到的既有行为（自删除未知 Session 由 store 决定
   返回 404、scope 仅允许 Human 改自己、`Internal` launch 错误带
   `Internal error: ` 前缀）已在用例注释中记录，未改生产逻辑。
+- 质量复审补强（同日）：`96d6c2ea8f` 把 create 的 role/kind 翻译、SessionApplication
+  facade 命中、通知触发与 collect identity 的断言从“仅状态码”补强到可识别回归，
+  移除 1 个与既有用例重复的冗余断言；`participants.rs` 因 1000 行上限拆出
+  `participants_edges.rs`；`c2944b72a5` 修整两处文件结尾。最终新增用例 **125 个**
+  （套件 185、bcs-http 合计 791），全部通过。补充观察：`GET /groups/{id}/sessions`
+  在当前实现对未认证调用返回会话列表（既有契约测试亦锁定该行为），已在用例注释
+  标记为待 owner 审议，本工单不改动该行为。
+- 最终门禁复跑（HEAD=`96d6c2ea8f`，`ci_test.sh --coverage` + `cov_gate.py`，base
+  `$SOURCE_BASE`）：changed-line **1358/1409 = 96.38%（PASS）**；overall line
+  **87.49%（PASS）**；unit **8360/8362 = 99.98%**，仍是同一组 2 个既有失败、新增
+  用例全部通过——**unit 100% 门禁仍红**（owner 决策待定），Singlebox 仍未验收。
