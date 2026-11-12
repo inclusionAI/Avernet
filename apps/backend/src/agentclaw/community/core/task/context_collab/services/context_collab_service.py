@@ -264,15 +264,25 @@ class ContextCollabService(ContextCollabServiceProtocol):
                     event_kind=CREATION_EVENT_KIND,
                     primitive_type=CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    # 创建资源绑定事实随初始事件持久(事件承载,spec
-                    # 2026-11-12-context-collab-l4-resource-binding);恒带
-                    # key,空引用也写空列表——新行与存量行(payload 无 key)
-                    # 判别有据。
+                    # 创建事实全量入初始事件 payload(事件承载,spec
+                    # 2026-11-12-context-collab-l4-creation-event-facts):
+                    # 事件流 append-only,今天不写则存量行永远缺失(不可
+                    # 回填性);space/principal_ref 由聚合持久(scope/
+                    # initiator_ref),不重复记录。恒带全部 key,None 也写
+                    # null——与存量行判别有据。
                     payload={
                         "objective": objective,
                         "resource_refs": [
                             ref.to_dict() for ref in spec.resource_refs
                         ],
+                        "method_kind": spec.method_kind,
+                        "executor_ref": (
+                            spec.executor_ref.to_dict()
+                            if spec.executor_ref
+                            else None
+                        ),
+                        "product_kind": spec.product_kind,
+                        "workflow_kind": spec.workflow_kind,
                     },
                 ),
             )

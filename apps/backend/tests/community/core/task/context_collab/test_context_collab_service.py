@@ -189,9 +189,10 @@ class TestCreateContext:
         assert request.initial_event.event_kind == "task.created"
         assert request.initial_event.primitive_type == "Task"
         assert request.initial_event.actor_ref == actor.actor
-        # 创建资源绑定事实随初始事件持久(事件承载,spec
-        # 2026-11-12-context-collab-l4-resource-binding):payload 携带命令的
-        # resource_refs 序列化;本用例 fixture 带一条 forum_topic 引用。
+        # 创建事实全量入初始事件 payload(事件承载,spec
+        # 2026-11-12-context-collab-l4-creation-event-facts):objective/
+        # resource_refs 第一天就有;本轮补 method_kind/executor_ref/
+        # product_kind/workflow_kind;space/principal_ref 由聚合持久不重复。
         assert request.initial_event.payload == {
             "objective": OBJECTIVE,
             "resource_refs": [
@@ -201,6 +202,13 @@ class TestCreateContext:
                     "revision": "3",
                 }
             ],
+            "method_kind": "Single",
+            "executor_ref": {
+                "agent_type": "bot",
+                "agent_id": "bot_coding_001",
+            },
+            "product_kind": "team_todo",
+            "workflow_kind": "team_todo_execution",
         }
 
     def test_create_without_resource_refs_still_carries_empty_key(self):
