@@ -61,3 +61,29 @@ No production URL was invoked. Deployment and live container creation/restart ar
 
 ## PR CI inventory correction
 - Actual remote Backend found the pinned public route-count contract: new Caller read adds one explicit-user operation (298 to 299) and one Bot-path operation (226 to 227). Updated only those exact pins with a route-specific note; complete explicit-user-id suite passed 23 tests. No runtime changes or relaxed checks.
+
+
+## CI follow-up: live Singlebox observation story
+
+The first head's remote Singlebox artifact reported Expert Chat Core 565/936
+(60.36%), below the unchanged 61.18% module threshold. Existing acceptance
+stories never called the added read-only methods, increasing their real Core
+denominator without exercising them.
+
+Added one real-HTTP story in the existing registered Expert Chat acceptance suite:
+`test_caller_instance_status.py`. It seeds a source Bot without any container,
+uses a real gateway-signed public principal, and verifies absent allocation,
+pending ledger without UUID, and registered UUID missing from BaaS (real 404 to
+RELEASED). Each step asserts the exact two booleans and compares the full Caller
+ledger snapshot, including timestamps, to prove no creation or mutation. It does
+not call caller-connection or provision an engine. The manifest now explicitly
+includes the new GET in its Router API denominator; no threshold or exclusion
+changes were made.
+
+Validation: manifest checker PASS; acceptance story collects as one live test;
+changed-file flake8 and diff checks PASS; manifest/report checker plus current
+HTTP regression **36 passed**. Live Singlebox execution remains the remote CI's
+responsibility for this follow-up: no existing local shared services were
+started or stopped. Healthy-device and upstream-error behavior remain covered by
+the focused runtime/MockTransport tests, while this live story preserves real
+provider behavior rather than replacing it.
