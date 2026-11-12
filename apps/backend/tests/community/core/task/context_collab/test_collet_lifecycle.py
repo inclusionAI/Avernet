@@ -102,7 +102,15 @@ def _status_record(collab_context_id: str = COLLET_ID) -> ContextStatusRecord:
 
 
 class _FakeCollabRepository:
+
     """最小 collet 仓储 fake:按 ID 返回受控 ``ContextStatusRecord``。"""
+
+    def list_collets_by_product(self, product_kind: str):
+        raise NotImplementedError("fake does not implement product listing")
+
+    def count_message_events(self, collab_context_ids):
+        raise NotImplementedError("fake does not implement message counting")
+
 
     def __init__(self, records: dict[str, ContextStatusRecord]) -> None:
         self._records = dict(records)

@@ -177,11 +177,19 @@ def _fixture_events() -> list[EventRecord]:
 
 
 class _FakeStatusRepository:
+
     """手写 in-memory dict 仓储 fake,只实现 ``get_current_status`` 的
     真实语义:collet 行 + events 按接纳顺序(自增 id)全量返回,
     不存在返回 ``None``;trunk 过滤在服务投影层完成。
     ``get_calls`` 记录读取入参,用于断言服务只读不写。
     """
+
+    def list_collets_by_product(self, product_kind: str):
+        raise NotImplementedError("fake does not implement product listing")
+
+    def count_message_events(self, collab_context_ids):
+        raise NotImplementedError("fake does not implement message counting")
+
 
     def __init__(
         self,

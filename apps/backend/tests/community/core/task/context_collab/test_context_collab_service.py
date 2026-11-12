@@ -94,6 +94,7 @@ def make_actor(principal_id: str = "u_1001") -> ActorContext:
 
 
 class _FakeContextCollabRepository:
+
     """手写 in-memory 仓储 fake,只实现 create_context 的 P1 语义。
 
     创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
@@ -101,6 +102,13 @@ class _FakeContextCollabRepository:
     初始 task.created 事件(parent=None)。
     真实仓储见 persistence/repository.py。
     """
+
+    def list_collets_by_product(self, product_kind: str):
+        raise NotImplementedError("fake does not implement product listing")
+
+    def count_message_events(self, collab_context_ids):
+        raise NotImplementedError("fake does not implement message counting")
+
 
     def __init__(self) -> None:
         self.create_calls: list[CreateContextRecordRequest] = []

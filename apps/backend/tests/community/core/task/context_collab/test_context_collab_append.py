@@ -116,6 +116,7 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 
 
 class _FakeContextCollabRepository:
+
     """手写 in-memory 仓储 fake,承载三个用例的仓储真实语义。
 
     创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
@@ -124,6 +125,13 @@ class _FakeContextCollabRepository:
     返回原事件 + 当前行 collet)→ ``ensure_expected_version`` →
     parent 存在性检查 → ``snapshot_updater`` 求值 → CAS 推进版本。
     """
+
+    def list_collets_by_product(self, product_kind: str):
+        raise NotImplementedError("fake does not implement product listing")
+
+    def count_message_events(self, collab_context_ids):
+        raise NotImplementedError("fake does not implement message counting")
+
 
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
