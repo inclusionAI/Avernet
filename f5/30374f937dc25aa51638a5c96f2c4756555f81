@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository_protocol.py
+  h_9d7cfd405752f5 48-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f530374f937dc25aa51638a5c96f2c4756555f81",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

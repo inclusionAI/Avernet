@@ -1,0 +1,16 @@
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 30-50,116
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 416,453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1838d35048c4c6f80dbf85da572ac4742e7cf0e8",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

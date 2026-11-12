@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_ef052cb65039f6::t_e7c7ef23401002 302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d590be0da69e5f08d2041e703b9758d856dd08b1",
+  "prompts": {},
+  "sessions": {
+    "s_ef052cb65039f6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17b72-ba1c-7333-9f5a-ff685f952df1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

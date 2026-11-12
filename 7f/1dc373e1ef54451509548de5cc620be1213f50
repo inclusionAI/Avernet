@@ -1,0 +1,267 @@
+apps/backend/specs/2026-11-10-openapi-iam-session-key/spec.md
+  s_7517e37f6fcee5::t_53a5bfafa3a4a0 1-21
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_7517e37f6fcee5::t_0d7692d5d5bf69 255,428
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_7517e37f6fcee5::t_8fe77bd602e65d 35-40
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_7517e37f6fcee5::t_3757d13b8e68c6 8,35
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_service_eval.py
+  s_7517e37f6fcee5::t_d018d3ead6dccf 1-27
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/__init__.py
+  s_7517e37f6fcee5::t_ba146d7314a934 1
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/router.py
+  s_7517e37f6fcee5::t_f25a8fcd8b3e52 1-185
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/schemas.py
+  s_7517e37f6fcee5::t_a020b443f10182 1-44
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_7517e37f6fcee5::t_07f2165e4807e8 91-101,138-144
+apps/backend/src/agentclaw/community/adapters/http/service_bot/eval_files.py
+  s_7517e37f6fcee5::t_8597c7813755cd 1-72
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_eval.py
+  s_7517e37f6fcee5::t_845b4c4f7af3e9 9,146
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_file_sync.py
+  s_7517e37f6fcee5::t_e469b13fb880a3 36-37,58-59,115-122
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/nas_bot_file_sync.py
+  s_7517e37f6fcee5::t_bd7ce81b8fe8e2 106-119,191-193
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/README.md
+  s_7517e37f6fcee5::t_a8ec7e3978c77e 10,35,192-267
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/contracts.py
+  s_7517e37f6fcee5::t_0a7066156f602a 32-36
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/preflight.py
+  s_7517e37f6fcee5::t_a1f2f77a36f7df 1-95
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/service.py
+  s_7517e37f6fcee5::t_d1c069543dfd45 26,73,81,113-120,124-129,135,244-271,281-285,385
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_7517e37f6fcee5::t_52e4665a39cf5a 42-48
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py
+  s_7517e37f6fcee5::t_d6edf99351120f 126-137
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_d23d2dd74fff18::t_bc012961096831 90-91,95
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_control.py
+  s_d23d2dd74fff18::t_5fede5e878414e 1-150
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py
+  s_7517e37f6fcee5::t_58b2f797123f16 871-873
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_support.py
+  s_7517e37f6fcee5::t_ab9eb77c45a6fa 831-889
+apps/backend/src/agentclaw/community/plugin_api/passport.py
+  s_7517e37f6fcee5::t_2700de3f550b90 391-398
+apps/backend/tests/community/acceptance/bot_ownership_sync/live_case.py
+  s_7517e37f6fcee5::t_91ad6b23346083 89,95-114
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py
+  s_7517e37f6fcee5::t_554f8dca1e8bda 115-124
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_7517e37f6fcee5::t_9f2183f0196902 646,860-862
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_7517e37f6fcee5::t_f7d873e29112cb 63-68,78-103
+apps/backend/tests/community/adapters/http/task/test_relay_report_trajectory_e2e.py
+  s_7517e37f6fcee5::t_254fd976e9473b 23,71,594-606
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_7517e37f6fcee5::t_73ff4e1bc56488 82-84
+apps/backend/tests/community/contracts/test_passport.py
+  s_7517e37f6fcee5::t_b155fee5c81324 163,169,174,187
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_file_sync.py
+  s_7517e37f6fcee5::t_19f06cfdd872d6 150-176
+apps/backend/tests/community/core/apply_engine/materialisers/test_nas_bot_file_sync.py
+  s_7517e37f6fcee5::t_0d296a97c4bb9a 226-255
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  s_7517e37f6fcee5::t_454a6cd258df19 30-33,130-138,174,192-193,464-603,847-848,854,866,883-886,888-895,906-907,909
+apps/backend/tests/community/core/bot_management/test_owner_handoff_preflight.py
+  s_7517e37f6fcee5::t_c3a34c2e0f930c 1-198
+apps/backend/tests/community/di/test_owner_handoff_preflight_wiring.py
+  s_7517e37f6fcee5::t_af55c038d8963f 1-15
+apps/backend/tests/community/endpoints/test_owner_handoff_router.py
+  s_7517e37f6fcee5::t_6dee32ed0a0bc8 21-23,37,61-65,68,78-81
+apps/backend/tests/community/endpoints/test_service_bot_eval_openapi.py
+  s_7517e37f6fcee5::t_7bb4208ee4a020 1-255
+apps/backend/tests/community/endpoints/test_task_endpoints.py
+  s_7517e37f6fcee5::t_2581cf103107ae 288-327
+apps/backend/tests/community/plugins/local/test_ownership_acceptance_preflight.py
+  s_7517e37f6fcee5::t_576310b3c46c9e 1-46
+apps/backend/tests/community/repository/task/test_intake_atomic_creation.py
+  s_7517e37f6fcee5::t_aba9fde40c84ed 6,81-96,100,424,467,511,555,606
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_7517e37f6fcee5::t_7265bc2bd6e4d8 113-117,125-126,130-131
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/ExpertCreationResult.tsx
+  s_7517e37f6fcee5::t_c24f2bea045d15 50
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  s_7517e37f6fcee5::t_28f4604b05d047 2,4-7,16-19,24-42,49-52,58-61,67-87,89-92
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_7517e37f6fcee5::t_1ea55d98167451 15,97-106,279-283,296
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_7517e37f6fcee5::t_e57653dd0055d1 217
+apps/frontend-nextgen/src/components/CollaborationSquare/SquareNavigation/index.tsx
+  s_7517e37f6fcee5::t_54ada033b50c5e 8
+apps/frontend-nextgen/src/components/Workspace/BotDisplayAvatar.tsx
+  s_7517e37f6fcee5::t_b60792b1f26f0a 3,14
+apps/frontend-nextgen/src/domain/botAvatar.ts
+  s_7517e37f6fcee5::t_32e3275583566b 18-22
+apps/frontend-nextgen/src/domain/workspaceRoute.ts
+  s_7517e37f6fcee5::t_81ce0d458b015d 58-70
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_7517e37f6fcee5::t_003f38d0d99ab6 36,166,168-169,173,177,181
+apps/frontend-nextgen/src/hooks/useReleaseNotes.ts
+  s_7517e37f6fcee5::t_2ff9fb79e80c85 6-7,9,15-16,19,21,23,28-31,34,37-40,43,46-48
+apps/frontend-nextgen/src/hooks/useSkillSetActivation.ts
+  s_7517e37f6fcee5::t_7a299dc48a047e 16,38,57
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/index.tsx
+  s_7517e37f6fcee5::t_c21462d8640446 183
+apps/frontend-nextgen/src/pages/Workspace/Collaboration/Focused.tsx
+  s_7517e37f6fcee5::t_19bf19db717d76 13,16-22,28,31,37,48,86,88,90
+apps/frontend-nextgen/src/pages/Workspace/Collaboration/index.tsx
+  s_7517e37f6fcee5::t_cbdaa64f9e05c6 5,32,35
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_7517e37f6fcee5::t_020ccc60db7c74 12,176,289
+apps/frontend-nextgen/src/pages/Workspace/components/CollaborationIdentityHeader.tsx
+  s_7517e37f6fcee5::t_3e8f1a161092cd 2,8-10,18,20-27
+apps/frontend-nextgen/src/pages/Workspace/components/GroupWorkspaceConversation.tsx
+  s_7517e37f6fcee5::t_bdd430134447bb 1-29
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/BindingSlot.tsx
+  s_7517e37f6fcee5::t_07cae76dcb685f 56-57
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationFlowAside.tsx
+  s_7517e37f6fcee5::t_d97ad2cda4d79d 47,62
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationGroupLaunchDialog.tsx
+  s_7517e37f6fcee5::t_9cacc000ed5173 1,64,70,89,95
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationTemplatePicker.tsx
+  s_7517e37f6fcee5::t_d1f1ea991bacd0 52,54
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupFooter.tsx
+  s_7517e37f6fcee5::t_3131219d0a22d2 23,29,32
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupHeader.tsx
+  s_7517e37f6fcee5::t_d629d2c24734dd 6-7
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupModal.tsx
+  s_7517e37f6fcee5::t_d2c37a8d7f4d01 72,271,281
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/DraftGroupForm.tsx
+  s_7517e37f6fcee5::t_881f296b9342a9 134,144
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupConfigFields.tsx
+  s_7517e37f6fcee5::t_f120fe89640ed2 86,94,98-99,116,121,134,152,169,179,191-194,201,228,231
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupLeaderSelect.tsx
+  s_7517e37f6fcee5::t_7fb9e8a93b2d2f 37,46,48,54,56,60,102
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupParticipantPicker.tsx
+  s_7517e37f6fcee5::t_8e0f67721b4b42 21,72,100,158,175,181-182
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/ParticipantBindingPanel.tsx
+  s_7517e37f6fcee5::t_3957d823936f4f 44,82
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/ParticipantRow.tsx
+  s_7517e37f6fcee5::t_3e381f2392e526 1,31,49,52
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/SelectedParticipantChip.tsx
+  s_7517e37f6fcee5::t_e5f85ab77db439 1-2,30
+apps/frontend-nextgen/src/pages/Workspace/hooks/useAllAvailableBots.ts
+  s_7517e37f6fcee5::t_3d98764027c115 1,3,6-8,12-26,28-33,39,43
+apps/frontend-nextgen/src/pages/Workspace/hooks/useFocusedCollaborationNavigation.ts
+  s_7517e37f6fcee5::t_07b5f00d5b571c 2,26-35
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.ts
+  s_7517e37f6fcee5::t_f2f4eb50eaa115 44,55,165,171-172,176,178-179,190,219-221
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.types.ts
+  s_7517e37f6fcee5::t_1f9d93b91d3dcf 13-15
+apps/frontend-nextgen/src/pages/Workspace/hooks/usePickerLists.ts
+  s_7517e37f6fcee5::t_4611fa96d54c4f 31,66
+apps/frontend-nextgen/src/pages/Workspace/hooks/useRecommendCandidates.ts
+  s_7517e37f6fcee5::t_b5170138a2c91a 35,44,85
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSelectedGroupDetail.ts
+  s_7517e37f6fcee5::t_961a2f6decfdc2 2,4,6-13,21-29,32-34,37-64
+apps/frontend-nextgen/src/pages/Workspace/hooks/useWorkspacePage.ts
+  s_7517e37f6fcee5::t_5caa2451e640a7 2,68
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_7517e37f6fcee5::t_3d9629869e4992 256,261,266,270,280,283,287-291,298-299,304-305
+apps/frontend-nextgen/src/services/backendApi/bots/serviceBotEvalController.ts
+  s_7517e37f6fcee5::t_a2e43e895de0cd 2-9,75-91,93-94,98,102-106,108-112,114-122,124-128,141-145
+apps/frontend-nextgen/src/services/backendApi/collaboration/publicBotController.ts
+  s_7517e37f6fcee5::t_bedc39749c7a75 19-21
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_7517e37f6fcee5::t_4fe0fc86f992f0 12-18,38,48-56
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_7517e37f6fcee5::t_682f23f94b3894 260-261,264,267-270,281-283,286,290,301,308
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  s_7517e37f6fcee5::t_44044806751d16 191
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_7517e37f6fcee5::t_187092e4052a47 243,247-258
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  s_7517e37f6fcee5::t_f93611f64ddb24 16,84-110,337,343,366,368-371
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  s_7517e37f6fcee5::t_c4d2a1e3dc861e 87
+apps/frontend-nextgen/src/stores/releaseNotesStore.ts
+  s_7517e37f6fcee5::t_0fd650dbf1d3ed 1-74
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_7517e37f6fcee5::t_4dda4e9ea45132 3,5-39,41-82,95,97,104-120,122,134
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.header.test.tsx
+  s_7517e37f6fcee5::t_95ab86e3c29eb4 13
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_7517e37f6fcee5::t_2392fbd952d85b 16
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.userMessage.test.tsx
+  s_7517e37f6fcee5::t_e2b5b922b4da90 13
+apps/frontend-nextgen/test/components/CollaborationPrivacy/ExternalBotGeneralConfigDialog.test.tsx
+  s_7517e37f6fcee5::t_9db0d7c4131d23 67-69
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  s_7517e37f6fcee5::t_ef2ed20a385996 13,32
+apps/frontend-nextgen/test/components/Workspace/BotDisplayAvatar.test.tsx
+  s_7517e37f6fcee5::t_bc4bb5dd638c85 34-38
+apps/frontend-nextgen/test/domain/workspaceRoute.test.ts
+  s_7517e37f6fcee5::t_fa17c66bc84d3d 1,54-76
+apps/frontend-nextgen/test/hooks/useReleaseNotes.test.ts
+  s_7517e37f6fcee5::t_7536caa835e34b 30,32,39,47,55,61-63,66,68-70,75,80,82-86,89-90,93-94,99-162,174-175,178,184,188,193-195
+apps/frontend-nextgen/test/pages/Workspace/FocusedCollaboration.test.tsx
+  s_7517e37f6fcee5::t_5de5d74c273890 78-91,100-109
+apps/frontend-nextgen/test/pages/Workspace/components/CollaborationIdentityHeader.test.tsx
+  s_7517e37f6fcee5::t_6ee51c177373d6 95,98-104,106-108
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.profileDiscovery.test.tsx
+  s_7517e37f6fcee5::t_74fdb6f1cd71f1 1-60
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.test.tsx
+  s_7517e37f6fcee5::t_e6feee239e3dc4 2,129-223,284,288,424,500,503
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/GroupParticipantPicker.test.tsx
+  s_7517e37f6fcee5::t_5cbc5f9e0b321e 2,9,162,208,215,282-323
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/ParticipantBindingPanel.test.tsx
+  s_7517e37f6fcee5::t_333072bcc2f09b 26-27
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupCollaborationPicker.test.ts
+  s_7517e37f6fcee5::t_b62b89a8a90228 106,115,232,267-281
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupCreateDialog.test.tsx
+  s_7517e37f6fcee5::t_8c0402c784cc36 52-55
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupWorkspace.test.ts
+  s_7517e37f6fcee5::t_263af7d23b95a7 27,219,239,277,282-283,286,288-291
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.test.ts
+  s_7517e37f6fcee5::t_b0f4f4cc1e7474 4,6-10,13-14,17-22,25-26,30-36,39-42,46-52,54-125,127-138
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.warmMount.test.ts
+  s_7517e37f6fcee5::t_49216380375ea7 55,59,73,78
+apps/frontend-nextgen/test/services/backendApi/bots/botEditorController.test.ts
+  s_7517e37f6fcee5::t_618327b275f6bc 266,268,275-282
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  s_7517e37f6fcee5::t_ecc47353e66862 26-28,30-48
+apps/frontend-nextgen/test/services/backendApi/bots/serviceBotEvalController.test.ts
+  s_7517e37f6fcee5::t_8342c07b6b2521 1-36
+apps/frontend-nextgen/test/services/botWorkshop/botAvatarGenerator.test.ts
+  s_7517e37f6fcee5::t_063eabaf4e7370 12-18
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_7517e37f6fcee5::t_6fa492ff98e388 301,429,431-432
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  s_7517e37f6fcee5::t_b9d17529ed2d15 217-218,220-246,252-255
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_7517e37f6fcee5::t_961ed1fb447556 76-78,86-88,160,188-191,222-226,312-317,538-540,566-571
+apps/frontend-nextgen/test/services/workspace/collaborationCandidateService.test.ts
+  s_7517e37f6fcee5::t_118746f5f9143e 42-67,347-366,370,395-398,405,414-436,449,465
+apps/frontend-nextgen/test/shell/HelpMenu.test.tsx
+  s_7517e37f6fcee5::t_11ea333b3d4be3 4,18-19,25,54,70-76
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_7517e37f6fcee5::t_3722a8e2dbfeab 28-46,138-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f1dc373e1ef54451509548de5cc620be1213f50",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    },
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

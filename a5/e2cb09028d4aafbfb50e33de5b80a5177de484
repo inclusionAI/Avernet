@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  h_43af82e14600e4 11
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  h_43af82e14600e4 23
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  h_43af82e14600e4 11
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceWriteGuardPop.test.tsx
+  h_43af82e14600e4 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a5e2cb09028d4aafbfb50e33de5b80a5177de484",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

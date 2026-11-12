@@ -1,0 +1,21 @@
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_2b26d456bc46f8::t_ffe2d22ce63f7e 50-52
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_2b26d456bc46f8::t_fe86973b2187a9 35-39,41-43,48-50,54-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bacd6dda8084a9a4455039701f3de3e3c9bd8c9c",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
