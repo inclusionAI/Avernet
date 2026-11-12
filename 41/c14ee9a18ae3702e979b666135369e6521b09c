@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal.test.tsx
+  s_2cb160c1e91f68::t_b374747002f3fc 97-105,118-119,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "41c14ee9a18ae3702e979b666135369e6521b09c",
+  "prompts": {},
+  "sessions": {
+    "s_2cb160c1e91f68": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f3ec-75c3-af57-d49ef5d0077e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

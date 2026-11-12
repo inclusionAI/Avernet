@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  h_b601d8706f5d44 45-50,54-55
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  h_b601d8706f5d44 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "711a728ef07276f923f5087577423a5197ac6175",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

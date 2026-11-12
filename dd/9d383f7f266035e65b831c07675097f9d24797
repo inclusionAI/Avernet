@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/task/task_runner/client/bcs_http_adapter.py
+  s_4efef845bd857d::t_79775f5c723e37 26-30,101-103,136-138,171-178
+apps/backend/tests/community/core/task/task_runner/integration/test_bcs_http_adapter.py
+  s_4efef845bd857d::t_79775f5c723e37 9,204,206,224-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd9d383f7f266035e65b831c07675097f9d24797",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
