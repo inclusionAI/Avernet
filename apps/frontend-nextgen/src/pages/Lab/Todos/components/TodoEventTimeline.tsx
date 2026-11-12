@@ -1,5 +1,5 @@
 import { Button, Empty, Spin } from '@/components/ui';
-import type { TodoArtifact, TodoEvent } from '@/domain/todos/models';
+import type { TodoEvent, TodoEventArtifact } from '@/domain/todos/models';
 import { cn } from '@/utils/cn';
 import { ArrowRight, Bot, FileText, Link2, UserRound } from 'lucide-react';
 
@@ -28,12 +28,12 @@ function actorLabel(event: TodoEvent, botName?: string): string {
   return event.actorId || event.actorType || '系统';
 }
 
-function isExternalLink(artifact: TodoArtifact): boolean {
+function isExternalLink(artifact: TodoEventArtifact): boolean {
   const fileLike = /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.name) || /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.url);
   return !fileLike;
 }
 
-function EventArtifact({ artifact }: { artifact: TodoArtifact }) {
+function EventArtifact({ artifact }: { artifact: TodoEventArtifact }) {
   const externalLink = isExternalLink(artifact);
   const Icon = externalLink ? Link2 : FileText;
   return (

@@ -2,6 +2,7 @@ import type {
   CreateTodoInput,
   CreateTodoInteractionInput,
   TodoAcceptanceInput,
+  TodoArtifact,
   TodoEvent,
   TodoListQuery,
   TodoRecord,
@@ -13,15 +14,18 @@ import {
   createTodo,
   createTodoInteraction,
   getTodo,
+  listTodoArtifacts,
   listTodoEvents,
   listTodoInteractions,
   listTodos,
+  downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
   runTodo,
   submitTodoAcceptance,
+  type TodoArtifactDto,
   type TodoDto,
   type TodoEventDto,
 } from './todoController';
-import { mapTodoDto, mapTodoEventDto } from './todoMapper';
+import { mapTodoArtifactDto, mapTodoDto, mapTodoEventDto } from './todoMapper';
 
 export interface TodoPage {
   items: TodoRecord[];
@@ -54,6 +58,10 @@ function readPage(data: BackendApiPage<TodoDto> | TodoDto[], query: TodoListQuer
 
 function readList(data: TodoEventDto[]): TodoEvent[] {
   return data.map(mapTodoEventDto);
+}
+
+function readArtifacts(data: TodoArtifactDto[]): TodoArtifact[] {
+  return data.map(mapTodoArtifactDto).filter((item): item is TodoArtifact => item !== null);
 }
 
 export async function loadTodos(query: TodoListQuery): Promise<TodoPage> {
@@ -102,3 +110,17 @@ export async function startTodoRun(todoId: string): Promise<TodoRecord> {
 }
 
 export type { TodoStatus };
+
+export async function loadTodoArtifacts(todoId: string): Promise<TodoArtifact[]> {
+  const response = await listTodoArtifacts(todoId);
+  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/artifacts`);
+  return readArtifacts(data);
+}
+
+export function downloadTodoArtifactContent(
+  todoId: string,
+  artifactId: string,
+  disposition: 'inline' | 'attachment' = 'attachment',
+): Promise<Blob> {
+  return downloadTodoArtifactContentRequest(todoId, artifactId, disposition);
+}

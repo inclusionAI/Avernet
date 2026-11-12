@@ -3,11 +3,55 @@ export type TodoStatus = 'pending' | 'in_progress' | 'pending_acceptance' | 'com
 
 export type AcceptanceVerdict = 'approved' | 'rejected';
 
-export interface TodoArtifact {
+export interface TodoEventArtifact {
   artifactId?: string;
   name: string;
   url: string;
 }
+
+interface TodoArtifactBase {
+  artifactId: string;
+  todoId: string;
+  executionId: string;
+  artifactName: string;
+  createdAt: string;
+}
+
+export type TodoArtifact =
+  | (TodoArtifactBase & {
+      kind: 'text';
+      content: {
+        text: string;
+        isFinalArtifact: boolean;
+      };
+    })
+  | (TodoArtifactBase & {
+      kind: 'file';
+      content: {
+        fileName: string;
+        fileType: string;
+        size: number;
+        isFinalArtifact: boolean;
+      };
+    })
+  | (TodoArtifactBase & {
+      kind: 'url_link';
+      content: {
+        url: string;
+        type?: string;
+        isFinalArtifact: boolean;
+      };
+    })
+  | (TodoArtifactBase & {
+      kind: 'code';
+      content: {
+        codeBaseName: string;
+        codeBaseAddress: string;
+        prLink?: string;
+        prDesc?: string;
+        isFinalArtifact: boolean;
+      };
+    });
 
 export interface TodoRecord {
   todoId: string;
@@ -35,7 +79,7 @@ export interface TodoEvent {
   contextVersion?: number;
   status?: string;
   createdAt: string;
-  artifacts: TodoArtifact[];
+  artifacts: TodoEventArtifact[];
 }
 
 export interface TodoListQuery {

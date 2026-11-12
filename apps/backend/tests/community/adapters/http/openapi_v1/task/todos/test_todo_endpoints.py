@@ -10,9 +10,11 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     create_todo,
     create_todo_interaction,
     get_todo,
+    list_todo_artifacts,
     list_todo_events,
     list_todo_interactions,
     list_todos,
+    read_todo_artifact_content,
     run_todo,
     submit_todo_acceptance,
 )
@@ -21,9 +23,14 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
 )
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoArtifactDownload,
+    TodoArtifactKind,
+    TodoArtifactRecord,
+)
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
-    TodoArtifactRecord,
+    TodoArtifactRecord as TodoEventArtifactRecord,
     TodoEventRecord,
     TodoPage,
     TodoRecord,
@@ -39,8 +46,8 @@ def _request(method: str, path: str) -> Request:
     return request
 
 
-def _artifact() -> TodoArtifactRecord:
-    return TodoArtifactRecord(
+def _artifact() -> TodoEventArtifactRecord:
+    return TodoEventArtifactRecord(
         artifact_id="artifact_1",
         name="report.docx",
         url="/files/report.docx",
@@ -347,5 +354,104 @@ async def test_acceptance_returns_updated_todo_and_passes_verdict():
             "actor_id": "human_1",
             "verdict": AcceptanceVerdict.APPROVED,
             "message": "Looks good",
+        }
+    ]
+
+
+def _persisted_file_artifact() -> TodoArtifactRecord:
+    return TodoArtifactRecord(
+        artifact_id="todoartifact_1",
+        todo_id="todo_1",
+        collab_context_id="context_todo_1",
+        execution_id="todoexec_1",
+        artifact_name="Release report",
+        artifact_kind=TodoArtifactKind.FILE,
+        content={
+            "kind": "file",
+            "storage_id": "task-artifacts/todos/todo_1/report.pdf",
+            "file_name": "release report.pdf",
+            "file_type": "application/pdf",
+            "size": 4,
+            "is_final_artifact": True,
+        },
+        content_hash="hash",
+        creator="bot_1",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+class _ArtifactService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def list_artifacts(self, **kwargs):
+        self.calls.append({"op": "list_artifacts", **kwargs})
+        return (_persisted_file_artifact(),)
+
+    def read_file(self, **kwargs):
+        self.calls.append({"op": "read_file", **kwargs})
+        return TodoArtifactDownload(
+            record=_persisted_file_artifact(),
+            payload=b"%PDF",
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_artifacts_returns_public_content_without_storage_id():
+    service = _ArtifactService()
+
+    payload = await list_todo_artifacts(
+        todo_id="todo_1",
+        request=_request("GET", "/openapi/v1/todos/todo_1/artifacts"),
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    assert payload.code == 200000
+    assert payload.request_id == "trace-todo"
+    assert payload.data[0].kind is TodoArtifactKind.FILE
+    assert payload.data[0].content == {
+        "kind": "file",
+        "file_name": "release report.pdf",
+        "file_type": "application/pdf",
+        "size": 4,
+        "is_final_artifact": True,
+    }
+    assert service.calls == [
+        {
+            "op": "list_artifacts",
+            "todo_id": "todo_1",
+            "actor_id": "human_1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_artifact_content_sets_preview_headers_and_passes_actor():
+    service = _ArtifactService()
+
+    response = await read_todo_artifact_content(
+        todo_id="todo_1",
+        artifact_id="todoartifact_1",
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        disposition="inline",
+        service=service,
+    )
+
+    assert response.body == b"%PDF"
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-length"] == "4"
+    assert response.headers["content-disposition"] == (
+        "inline; filename*=UTF-8''release%20report.pdf"
+    )
+    assert service.calls == [
+        {
+            "op": "read_file",
+            "todo_id": "todo_1",
+            "artifact_id": "todoartifact_1",
+            "actor_id": "human_1",
         }
     ]

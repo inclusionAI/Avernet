@@ -1,5 +1,5 @@
-import type { TodoEvent, TodoRecord, TodoStatus } from '@/domain/todos/models';
-import type { TodoDto, TodoEventDto } from './todoController';
+import type { TodoArtifact, TodoEvent, TodoRecord, TodoStatus } from '@/domain/todos/models';
+import type { TodoArtifactDto, TodoDto, TodoEventDto } from './todoController';
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
@@ -71,4 +71,65 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
     createdAt: stringValue(dto.created_at),
     artifacts,
   };
+}
+
+export function mapTodoArtifactDto(dto: TodoArtifactDto): TodoArtifact | null {
+  const artifactId = stringValue(dto.artifact_id);
+  const todoId = stringValue(dto.todo_id);
+  const executionId = stringValue(dto.execution_id);
+  const artifactName = stringValue(dto.artifact_name, '未命名产物');
+  const createdAt = stringValue(dto.created_at);
+  const kind = stringValue(dto.kind).toLowerCase();
+  const content = recordValue(dto.content);
+  const isFinalArtifact = Boolean(content.is_final_artifact);
+  const base = { artifactId, todoId, executionId, artifactName, createdAt };
+
+  if (!artifactId || !todoId || !executionId) return null;
+  if (kind === 'text') {
+    return {
+      ...base,
+      kind,
+      content: { text: stringValue(content.text), isFinalArtifact },
+    };
+  }
+  if (kind === 'file') {
+    return {
+      ...base,
+      kind,
+      content: {
+        fileName: stringValue(content.file_name, artifactName),
+        fileType: stringValue(content.file_type, 'application/octet-stream'),
+        size: numberValue(content.size),
+        isFinalArtifact,
+      },
+    };
+  }
+  if (kind === 'url_link') {
+    const type = stringValue(content.type);
+    return {
+      ...base,
+      kind,
+      content: {
+        url: stringValue(content.url),
+        type: type || undefined,
+        isFinalArtifact,
+      },
+    };
+  }
+  if (kind === 'code') {
+    const prLink = stringValue(content.pr_link);
+    const prDesc = stringValue(content.pr_desc);
+    return {
+      ...base,
+      kind,
+      content: {
+        codeBaseName: stringValue(content.code_base_name, artifactName),
+        codeBaseAddress: stringValue(content.code_base_address),
+        prLink: prLink || undefined,
+        prDesc: prDesc || undefined,
+        isFinalArtifact,
+      },
+    };
+  }
+  return null;
 }

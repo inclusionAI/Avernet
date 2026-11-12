@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoRecord } from '@/domain/todos/models';
 import TodoDetailPage from '@/pages/Lab/Todos/TodoDetailPage';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -28,6 +28,8 @@ jest.mock('@/services/todos/todoService', () => ({
   loadTodoInteractions: jest.fn(),
   addTodoInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
+  loadTodoArtifacts: jest.fn(),
+  downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
 }));
 
@@ -49,6 +51,56 @@ const todo: TodoRecord = {
   createdAt: '2026-11-08T01:12:00Z',
   updatedAt: '2026-11-08T06:48:00Z',
 };
+
+const artifacts: TodoArtifact[] = [
+  {
+    artifactId: 'artifact-text',
+    todoId: 'todo-1',
+    executionId: 'execution-1',
+    artifactName: '执行摘要',
+    kind: 'text',
+    content: { text: '已完成三款产品的定价对比。', isFinalArtifact: false },
+    createdAt: '2026-11-08T06:00:00Z',
+  },
+  {
+    artifactId: 'artifact-file',
+    todoId: 'todo-1',
+    executionId: 'execution-1',
+    artifactName: '定价与功能矩阵',
+    kind: 'file',
+    content: {
+      fileName: '定价与功能矩阵.xlsx',
+      fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      size: 2048,
+      isFinalArtifact: true,
+    },
+    createdAt: '2026-11-08T06:10:00Z',
+  },
+  {
+    artifactId: 'artifact-link',
+    todoId: 'todo-1',
+    executionId: 'execution-1',
+    artifactName: '产品官网',
+    kind: 'url_link',
+    content: { url: 'https://example.test/product', type: '官网', isFinalArtifact: false },
+    createdAt: '2026-11-08T06:20:00Z',
+  },
+  {
+    artifactId: 'artifact-code',
+    todoId: 'todo-1',
+    executionId: 'execution-1',
+    artifactName: '分析脚本',
+    kind: 'code',
+    content: {
+      codeBaseName: 'pricing-analysis',
+      codeBaseAddress: 'https://example.test/repo',
+      prLink: 'https://example.test/repo/pull/1',
+      prDesc: '新增定价采集和对比脚本',
+      isFinalArtifact: true,
+    },
+    createdAt: '2026-11-08T06:30:00Z',
+  },
+];
 
 function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent {
   return {
@@ -74,13 +126,16 @@ function resetStore() {
     selectedTodo: null,
     interactions: [],
     events: [],
+    artifacts: [],
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
+    artifactsLoading: false,
     mutationLoading: false,
     listError: null,
     detailError: null,
     eventsError: null,
+    artifactsError: null,
   });
 }
 
@@ -96,9 +151,11 @@ beforeEach(() => {
     event(2, {
       content: '整理三款产品的定价与功能矩阵',
       status: 'pending_acceptance',
-      artifacts: [{ artifactId: 'artifact-1', name: '定价与功能矩阵.xlsx', url: 'https://example.test/matrix' }],
+      artifacts: [{ artifactId: 'event-artifact-1', name: '事件产物', url: 'https://example.test/event-artifact' }],
     }),
   ]);
+  mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
+  mockedService.downloadTodoArtifactContent.mockResolvedValue(new Blob(['file']));
   mockedService.addTodoInteraction.mockResolvedValue(event(5, { content: '补充价格来源' }));
   mockedService.acceptTodo.mockResolvedValue({ ...todo, status: 'completed' });
 });
@@ -112,12 +169,9 @@ describe('TodoDetailPage', () => {
     expect(screen.getByRole('group', { name: '待办详情视图' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '事件' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '互动' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '产物 1' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '产物 4' })).toBeInTheDocument();
     expect(await screen.findByText('开始采集竞品资料')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /定价与功能矩阵\.xlsx/ })).toHaveAttribute(
-      'href',
-      'https://example.test/matrix',
-    );
+    expect(mockedService.loadTodoArtifacts).toHaveBeenCalledWith('todo-1');
   });
 
   it('切换互动视图并提交互动', async () => {
@@ -158,13 +212,42 @@ describe('TodoDetailPage', () => {
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
 
-  it('产物视图汇总事件中的产物', async () => {
+  it('产物视图使用独立产物接口展示四类产物，并支持文件下载', async () => {
+    const createObjectURL = jest.fn(() => 'blob:todo-artifact');
+    const revokeObjectURL = jest.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
     render(<TodoDetailPage />);
     await screen.findByText('开始采集竞品资料');
 
-    fireEvent.click(screen.getByRole('tab', { name: '产物 1' }));
+    fireEvent.click(screen.getByRole('tab', { name: '产物 4' }));
     const artifactView = screen.getByRole('region', { name: '待办产物' });
-    expect(within(artifactView).getByRole('link', { name: /定价与功能矩阵\.xlsx/ })).toBeInTheDocument();
+    expect(within(artifactView).getByText('已完成三款产品的定价对比。')).toBeInTheDocument();
+    expect(within(artifactView).getByRole('link', { name: /https:\/\/example\.test\/product/ })).toHaveAttribute(
+      'href',
+      'https://example.test/product',
+    );
+    expect(within(artifactView).getByRole('link', { name: /pricing-analysis/ })).toHaveAttribute(
+      'href',
+      'https://example.test/repo',
+    );
+    expect(within(artifactView).queryByText('事件产物')).not.toBeInTheDocument();
+
+    fireEvent.click(within(artifactView).getByRole('button', { name: '下载' }));
+    await waitFor(() =>
+      expect(mockedService.downloadTodoArtifactContent).toHaveBeenCalledWith(
+        'todo-1',
+        'artifact-file',
+        'attachment',
+      ),
+    );
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(clickSpy).toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:todo-artifact');
+    expect(within(artifactView).queryByText('产物文件读取失败')).not.toBeInTheDocument();
+    clickSpy.mockRestore();
   });
 
   it('返回列表', async () => {

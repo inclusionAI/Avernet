@@ -1,12 +1,11 @@
 import { Badge, Button, Card, Empty, Spin } from '@/components/ui';
-import type { TodoArtifact } from '@/domain/todos/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
 import { history, useParams } from '@umijs/max';
 import { ArrowLeft, Bot, CalendarClock, ChevronDown, ChevronRight, FileText, History } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TodoAcceptanceActions } from './components/TodoAcceptanceActions';
 import { TodoArtifactList } from './components/TodoArtifactList';
 import { TodoEventTimeline } from './components/TodoEventTimeline';
@@ -18,18 +17,6 @@ function formatDateTime(value?: string): string {
   if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
-}
-
-function uniqueArtifacts(events: ReturnType<typeof useTodoDetail>['events']): TodoArtifact[] {
-  const seen = new Set<string>();
-  return events.flatMap((event) =>
-    event.artifacts.filter((artifact) => {
-      const key = artifact.artifactId || `${artifact.url}\u0000${artifact.name}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  );
 }
 
 function DetailItem({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
@@ -76,7 +63,6 @@ export default function TodoDetailPage() {
   const [view, setView] = useState<DetailView>('events');
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const detail = useTodoDetail(todoId || null);
-  const artifacts = useMemo(() => uniqueArtifacts(detail.events), [detail.events]);
   const todo = detail.selectedTodo;
 
   return (
@@ -175,7 +161,7 @@ export default function TodoDetailPage() {
                   互动
                 </DetailTab>
                 <DetailTab active={view === 'artifacts'} onClick={() => setView('artifacts')}>
-                  产物 {artifacts.length}
+                  产物 {detail.artifacts.length}
                 </DetailTab>
               </div>
 
@@ -212,7 +198,15 @@ export default function TodoDetailPage() {
                   />
                 ) : null}
 
-                {view === 'artifacts' ? <TodoArtifactList artifacts={artifacts} /> : null}
+                {view === 'artifacts' ? (
+                  <TodoArtifactList
+                    artifacts={detail.artifacts}
+                    loading={detail.artifactsLoading}
+                    error={detail.artifactsError}
+                    onRetry={detail.refreshArtifacts}
+                    onReadFile={detail.readArtifactContent}
+                  />
+                ) : null}
               </div>
             </Card>
 

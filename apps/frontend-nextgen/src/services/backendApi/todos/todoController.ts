@@ -40,6 +40,16 @@ export interface TodoEventDto extends BackendUnknownRecord {
   artifacts?: Array<BackendUnknownRecord>;
 }
 
+export interface TodoArtifactDto extends BackendUnknownRecord {
+  artifact_id?: string;
+  todo_id?: string;
+  execution_id?: string;
+  artifact_name?: string;
+  kind?: string;
+  content?: BackendUnknownRecord;
+  created_at?: string;
+}
+
 export interface TodoPageDto {
   items?: TodoDto[];
   total?: number;
@@ -55,6 +65,9 @@ export const TODO_ENDPOINTS = {
   interactions: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/interactions`,
   events: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/events`,
   run: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/run`,
+  artifacts: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/artifacts`,
+  artifactContent: (todoId: string, artifactId: string) =>
+    `${TODO_API_BASE}/${encodeURIComponent(todoId)}/artifacts/${encodeURIComponent(artifactId)}/content`,
 };
 
 export function listTodos(query: TodoListQuery) {
@@ -140,5 +153,27 @@ export function runTodo(todoId: string) {
     method: 'POST',
     params: userScopedParams(),
     operation: 'run-todo',
+  });
+}
+
+export function listTodoArtifacts(todoId: string) {
+  return backendRequest<BackendApiEnvelope<TodoArtifactDto[]>>(TODO_ENDPOINTS.artifacts(todoId), {
+    method: 'GET',
+    params: userScopedParams(),
+    operation: 'list-todo-artifacts',
+    retryOnTransient: true,
+  });
+}
+
+export function downloadTodoArtifactContent(
+  todoId: string,
+  artifactId: string,
+  disposition: 'inline' | 'attachment' = 'attachment',
+): Promise<Blob> {
+  return backendRequest<Blob>(TODO_ENDPOINTS.artifactContent(todoId, artifactId), {
+    method: 'GET',
+    params: userScopedParams({ disposition }),
+    responseType: 'blob',
+    operation: 'download-todo-artifact-content',
   });
 }

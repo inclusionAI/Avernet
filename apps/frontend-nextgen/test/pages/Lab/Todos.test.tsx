@@ -64,6 +64,8 @@ jest.mock('@/services/todos/todoService', () => ({
   loadTodoInteractions: jest.fn(),
   addTodoInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
+  loadTodoArtifacts: jest.fn(),
+  downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
 }));
 
@@ -114,13 +116,16 @@ function resetTodoStore() {
     selectedTodo: null,
     interactions: [],
     events: [],
+    artifacts: [],
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
+    artifactsLoading: false,
     mutationLoading: false,
     listError: null,
     detailError: null,
     eventsError: null,
+    artifactsError: null,
   });
 }
 

@@ -4,7 +4,9 @@ import { canInteractWithTodo } from '@/domain/todos/status';
 import {
   acceptTodo,
   addTodoInteraction,
+  downloadTodoArtifactContent,
   loadTodo,
+  loadTodoArtifacts,
   loadTodoEvents,
   loadTodoInteractions,
 } from '@/services/todos/todoService';
@@ -22,22 +24,29 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   const selectedTodo = useTodoStore((state) => state.selectedTodo);
   const interactions = useTodoStore((state) => state.interactions);
   const events = useTodoStore((state) => state.events);
+  const artifacts = useTodoStore((state) => state.artifacts);
   const loading = useTodoStore((state) => state.detailLoading);
   const eventsLoading = useTodoStore((state) => state.eventsLoading);
+  const artifactsLoading = useTodoStore((state) => state.artifactsLoading);
   const mutationLoading = useTodoStore((state) => state.mutationLoading);
   const error = useTodoStore((state) => state.detailError);
   const eventsError = useTodoStore((state) => state.eventsError);
+  const artifactsError = useTodoStore((state) => state.artifactsError);
   const setSelectedTodo = useTodoStore((state) => state.setSelectedTodo);
   const setInteractions = useTodoStore((state) => state.setInteractions);
   const setEvents = useTodoStore((state) => state.setEvents);
+  const setArtifacts = useTodoStore((state) => state.setArtifacts);
   const setLoading = useTodoStore((state) => state.setDetailLoading);
   const setEventsLoading = useTodoStore((state) => state.setEventsLoading);
+  const setArtifactsLoading = useTodoStore((state) => state.setArtifactsLoading);
   const setMutationLoading = useTodoStore((state) => state.setMutationLoading);
   const setError = useTodoStore((state) => state.setDetailError);
   const setEventsError = useTodoStore((state) => state.setEventsError);
+  const setArtifactsError = useTodoStore((state) => state.setArtifactsError);
   const resetDetail = useTodoStore((state) => state.resetDetail);
   const requestRef = useRef(0);
   const eventRequestRef = useRef(0);
+  const artifactRequestRef = useRef(0);
 
   const refreshEvents = useCallback(async () => {
     if (!todoId) return;
@@ -56,10 +65,28 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     }
   }, [setEvents, setEventsError, setEventsLoading, todoId]);
 
+  const refreshArtifacts = useCallback(async () => {
+    if (!todoId) return;
+    const requestId = ++artifactRequestRef.current;
+    setArtifactsLoading(true);
+    setArtifactsError(null);
+    try {
+      const todoArtifacts = await loadTodoArtifacts(todoId);
+      if (requestId === artifactRequestRef.current) setArtifacts(todoArtifacts);
+    } catch (cause) {
+      if (requestId !== artifactRequestRef.current) return;
+      setArtifacts([]);
+      setArtifactsError(cause instanceof Error ? cause.message : '产物加载失败');
+    } finally {
+      if (requestId === artifactRequestRef.current) setArtifactsLoading(false);
+    }
+  }, [setArtifacts, setArtifactsError, setArtifactsLoading, todoId]);
+
   const refresh = useCallback(async () => {
     if (!todoId) {
       requestRef.current += 1;
       eventRequestRef.current += 1;
+      artifactRequestRef.current += 1;
       resetDetail();
       return;
     }
@@ -67,6 +94,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     setLoading(true);
     setError(null);
     void refreshEvents();
+    void refreshArtifacts();
     try {
       const [todo, todoInteractions] = await Promise.all([
         loadTodo(todoId),
@@ -82,13 +110,14 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, [refreshEvents, resetDetail, setError, setInteractions, setLoading, setSelectedTodo, todoId]);
+  }, [refreshArtifacts, refreshEvents, resetDetail, setError, setInteractions, setLoading, setSelectedTodo, todoId]);
 
   useEffect(() => {
     void refresh();
     return () => {
       requestRef.current += 1;
       eventRequestRef.current += 1;
+      artifactRequestRef.current += 1;
     };
   }, [refresh]);
 
@@ -154,17 +183,30 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     [onListRefresh, refresh, selectedTodo, setMutationLoading, todoId],
   );
 
+  const readArtifactContent = useCallback(
+    async (artifactId: string, disposition: 'inline' | 'attachment') => {
+      if (!todoId) throw new Error('待办不存在');
+      return downloadTodoArtifactContent(todoId, artifactId, disposition);
+    },
+    [todoId],
+  );
+
   return {
     selectedTodo,
     interactions,
     events,
+    artifacts,
     loading,
     eventsLoading,
+    artifactsLoading,
     mutationLoading,
     error,
     eventsError,
+    artifactsError,
     refresh,
     refreshEvents,
+    refreshArtifacts,
+    readArtifactContent,
     interact,
     accept,
   };
