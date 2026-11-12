@@ -363,6 +363,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,

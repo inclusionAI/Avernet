@@ -154,6 +154,7 @@ pub struct HttpProviderTransport {
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
     chat_run_timeout_ms: u64,
+    preproduction_caller_token_diagnostics: bool,
     event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
     interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
@@ -163,6 +164,7 @@ mod transport;
 mod multiplex;
 mod wire;
 mod network;
+mod caller_token_diagnostics;
 mod stream;
 use wire::*;
 use network::*;

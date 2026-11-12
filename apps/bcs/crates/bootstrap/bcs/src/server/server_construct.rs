@@ -258,6 +258,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard)
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
