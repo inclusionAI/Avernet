@@ -41,6 +41,9 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
@@ -53,6 +56,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
     ColletLifecycleStore,
@@ -417,3 +426,20 @@ def test_task_module_binds_collet_lifecycle_store_and_service_singletons():
         assert inj.get(binding) is inj.get(binding)
     # 服务持有同一 store singleton。
     assert service._store is store  # noqa: SLF001
+
+
+def test_task_module_binds_bbs_public_discussion_service_singleton():
+    """BBS 公开讨论产品层接线(spec §3.4):协议解析为产品服务 singleton,
+    复用既有 ContextCollabAuthorizerProtocol / MethodStoreProtocol /
+    ContextCollabRepositoryProtocol 绑定,collab_repo 由 persistence
+    模块绑(测试经 stub 供可解析)。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    service = inj.get(BbsPublicDiscussionServiceProtocol)
+    assert isinstance(service, BbsPublicDiscussionService)
+    # singleton:两次解析取同对象。
+    assert inj.get(BbsPublicDiscussionServiceProtocol) is service
+    # 复用既有 singleton 依赖。
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
+    assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001

@@ -111,6 +111,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
     SwarmMethodOpsServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
     ColletLifecycleStore,
     InMemoryColletLifecycleStore,
@@ -356,6 +362,13 @@ class TaskModule(Module):
         )
         binder.bind(
             ColletLifecycleService, to=ColletLifecycleService, scope=singleton
+        )
+        # BBS 公开讨论产品层(2026-11-12 bbs-public-discussion-product spec
+        # §3.4):模块级交付面(P1 无 HTTP),自持编排组合协议层;仓储/
+        # 作者器/MethodStore 均复用上面既有绑定,无新基建。
+        binder.bind(
+            BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService,
+            scope=singleton,
         )
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
         # 授权器与四个服务协议全部显式 singleton 绑定——python-injector
