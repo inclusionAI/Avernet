@@ -1,0 +1,37 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 101,103
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/closed-loop.test.ts
+  s_41d2ae492c3a5b::t_42db6f4f7cb4e5 629,631,633-635
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 140,153
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 131,133,278,310
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/bootstrap-evidence.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 37-39,51
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 61
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_41d2ae492c3a5b::t_c36b1c5c148ed3 296-297,824-827
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  s_41d2ae492c3a5b::t_908e9a09c84f07 116-118,120-124,143,148-153
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/bootstrap-evidence.test.ts
+  s_41d2ae492c3a5b::t_908e9a09c84f07 86-102
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_41d2ae492c3a5b::t_9f12acfe597491 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "30fca75945a9e3e26794d08f47a5db5c2a57e43f",
+  "prompts": {},
+  "sessions": {
+    "s_41d2ae492c3a5b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9f5-9952-7503-85ab-66a3e3271d26",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
