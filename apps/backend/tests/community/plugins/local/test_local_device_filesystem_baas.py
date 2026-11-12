@@ -509,3 +509,115 @@ async def test_delete_file_baas_returns_false_on_oserror(fs_baas, tmp_path):
     d.mkdir()
     assert await fs_baas.delete_file(str(d)) is False
     assert d.exists()
+
+
+# ── bounded retry on transient BaaS statuses (502/503/504) ────────────
+
+
+class _SeqAsyncMock(MagicMock):
+    """Awaitable MagicMock returning sequential values, one per call."""
+
+    def __init__(self, values=(), *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._values = list(values)
+        self._idx = 0
+
+    def __call__(self, *args, **kwargs):
+        super().__call__(*args, **kwargs)
+        if self._idx < len(self._values):
+            self._value = self._values[self._idx]
+            self._idx += 1
+        return self
+
+    def __await__(self):
+        async def _coro():
+            return self._value
+        return _coro().__await__()
+
+
+def _patch_async_client_seq(responses):
+    """Patch httpx.AsyncClient to return sequential canned responses on .post()."""
+    client = MagicMock()
+    client.__aenter__ = MagicMock(return_value=_AsyncMock(client))
+    client.__aexit__ = MagicMock(return_value=_AsyncMock(False))
+    client.post = _SeqAsyncMock(responses)
+    return client
+
+
+async def _noop_sleep(*args, **kwargs):
+    """Suppress real asyncio.sleep delays in retry tests."""
+
+
+@pytest.mark.asyncio
+async def test_read_file_baas_502_retries_then_200(fs_baas):
+    """502 → 1 retry → 200: content is returned after the retry succeeds."""
+    responses = [
+        _mock_httpx_response(status_code=502, json_body={"error": "bad gateway"}),
+        _mock_httpx_response(status_code=200, content=b"recovered"),
+    ]
+    client = _patch_async_client_seq(responses)
+
+    with patch("httpx.AsyncClient", return_value=client), \
+         patch("asyncio.sleep", _noop_sleep):
+        result = await fs_baas.read_file("/tmp/x")
+
+    assert result == b"recovered"
+    assert client.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_read_file_baas_503_retries_then_200(fs_baas):
+    """503 → retry → 200 covers the 503 member of the retryable set."""
+    responses = [
+        _mock_httpx_response(status_code=503, json_body={"error": "unavailable"}),
+        _mock_httpx_response(status_code=200, content=b"data"),
+    ]
+    client = _patch_async_client_seq(responses)
+
+    with patch("httpx.AsyncClient", return_value=client), \
+         patch("asyncio.sleep", _noop_sleep):
+        result = await fs_baas.read_file("/tmp/x")
+
+    assert result == b"data"
+    assert client.post.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_read_file_baas_all_retries_exhausted_raises(fs_baas):
+    """Persistent 502 across all attempts (1 initial + 3 retries = 4 calls)
+    → the last response is returned so raise_for_status() raises fail-closed."""
+    bad = _mock_httpx_response(status_code=502, json_body={"error": "bad gateway"})
+    client = _patch_async_client_seq([bad] * 4)
+
+    with patch("httpx.AsyncClient", return_value=client), \
+         patch("asyncio.sleep", _noop_sleep):
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs_baas.read_file("/tmp/x")
+
+    assert client.post.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_baas_502_no_retry(fs_baas):
+    """Mutating ops (delete_tree → rmtree) receive no retry on 502 — fail-closed."""
+    response = _mock_httpx_response(status_code=502, json_body={"error": "bad gateway"})
+    client = _patch_async_client(response)
+
+    with patch("httpx.AsyncClient", return_value=client):
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs_baas.delete_tree("/tmp/d")
+
+    assert client.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_write_file_baas_502_no_retry(fs_baas):
+    """Mutating ops (write_file) receive no retry on 502 — fail-closed."""
+    response = _mock_httpx_response(status_code=502, json_body={"error": "bad gateway"})
+    client = _patch_async_client(response)
+
+    with patch("httpx.AsyncClient", return_value=client):
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs_baas.write_file("/tmp/x", b"data")
+
+    assert client.post.call_count == 1
