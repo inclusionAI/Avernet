@@ -2,7 +2,6 @@
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
-from .authorization_rules_caller_identity import CALLER_IDENTITY_AUTHORIZATION
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -12,6 +11,7 @@ from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
 )
+from .caller_identity.authorization_rules import CALLER_IDENTITY_AUTHORIZATION
 from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS
 from .dws_hosting.admission import PATH as DWS_PATH
 from .models_authorization import (

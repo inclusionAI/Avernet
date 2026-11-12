@@ -6,7 +6,7 @@ these rows are merged into the central fail-closed authorization inventory.
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
-from .models_authorization import EDIT_LOCK, Authorization, Check
+from ..models_authorization import EDIT_LOCK, Authorization, Check
 
 CALLER_IDENTITY_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
