@@ -39,7 +39,7 @@ test('the caveats live in the limits list rather than bloating the template', ()
   expect(joined).toContain('script');
   expect(joined).toMatch(/MEMORY\.md/);
   // The clearing semantics are the one thing a reader must not guess.
-  expect(joined).toContain('An empty list');
+  expect(joined).toContain('声明为空列表');
 });
 
 test('the limits list covers the refusals the gateway returns', () => {
