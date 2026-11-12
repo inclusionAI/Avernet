@@ -27,8 +27,8 @@ import {
 } from '@/services/tasks/taskConversationNavigation';
 import { persistPanelWidthPercent, TASK_PANEL_INITIAL_WIDTH } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import type { PanelHandle, PanelTab } from '@tc-chat/core';
+import { taskNavigationAwareHandle, onTaskPanelTabClosed } from '@/services/tasks/panel/taskPanelHandleAdapter';
+import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { PanelRegistryContext } from '@tc-chat/ui/es/ChatLayout/context';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
@@ -63,60 +63,6 @@ const ChatLayoutPanelWithInjectedProps = ChatLayout.Panel as unknown as React.Co
   ChatLayoutPanelProps & ChatLayoutPanelInjectedProps & React.RefAttributes<PanelHandle>
 >;
 
-function taskPanelTaskId(tab: PanelTab): string | null {
-  if (tab.type !== 'taskPanel.TaskLoopView' || !tab.id.startsWith('task-')) return null;
-  const taskId = tab.id.slice('task-'.length);
-  return taskId || null;
-}
-
-function shouldKeepTaskPanelActiveTask(tab: PanelTab): boolean {
-  const store = useTaskConversationNavigationStore.getState();
-  if (!store.navigation || !shouldPreserveTaskPanelDuringNavigation()) return false;
-  const taskId = taskPanelTaskId(tab);
-  if (taskId === null) return false;
-
-  // 显式切换任务先登记 intent；对应 tab 的这一次 openTab 是用户来源，必须放行。
-  // 其余 openTab 均视为会话历史恢复，不得抢占或重渲染当前选中的 TaskPanel。
-  if (useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(taskId)) return false;
-  return true;
-}
-
-function taskNavigationAwareHandle(handle: PanelHandle): PanelHandle {
-  return {
-    // 返回根会话时，历史面板消息可能随 hydration 重新 openTab 旧任务 tab。任务节点
-    // handoff 本身已经复用持久 Panel；除用户在切换条显式选择的任务外，会话历史
-    // 驱动的 openTab 不能抢占当前选中的 TaskPanel 任务。
-    openTab: (tab) => {
-      if (shouldKeepTaskPanelActiveTask(tab)) return;
-      handle.openTab(tab);
-    },
-    closeTab: (id) => {
-      const store = useTaskConversationNavigationStore.getState();
-      if (store.navigation?.tab?.id === id) store.completeNavigation(store.navigation.id);
-      handle.closeTab(id);
-    },
-    updateTab: (id, update) => handle.updateTab(id, update),
-    focusTab: (id) => handle.focusTab(id),
-    openPanel: () => handle.openPanel(),
-    closePanel: () => {
-      const store = useTaskConversationNavigationStore.getState();
-      if (store.navigation) store.completeNavigation(store.navigation.id);
-      handle.closePanel();
-    },
-    closePanelForce: () => {
-      if (shouldPreserveTaskPanelDuringNavigation()) return;
-      // 普通会话切换会清空全部 tabs，同步丢弃旧任务宿主与焦点任务状态。
-      // 否则 activeTaskId 会残留到下一个 session，把 by_session 自动恢复挡在
-      // “已展示任务不抢焦点”分支，表现为刷新后能打开、切换后打不开。
-      useTaskConversationNavigationStore.getState().resetAll();
-      useTaskSidePanelStore.getState().clearActiveTask();
-      handle.closePanelForce();
-    },
-    flushContext: () => handle.flushContext(),
-    flushInteractions: () => handle.flushInteractions(),
-  };
-}
-
 function assignPanelRef(ref: React.ForwardedRef<PanelHandle>, handle: PanelHandle | null): void {
   if (typeof ref === 'function') ref(handle);
   else if (ref) ref.current = handle;
@@ -149,6 +95,10 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
     },
     [rootIsOpenChange, onOpenStateChange],
   );
+  const handleTabClose = useCallback<NonNullable<ChatLayoutPanelProps['onTabClose']>>((id) => {
+    onTaskPanelTabClosed(id);
+    injected.onTabClose?.(id);
+  }, [injected.onTabClose]);
   // containerWidth 尚未由 SDK ResizeObserver 测得时，SDK 会忽略 active tab 的
   // defaultWidth，直接使用 panelWidth 回退。这里必须同步使用 TaskPanel 的 420px
   // 初始宽，否则面板会先以通用 380px 打开，直到主会话变化触发重新测量才变宽。
@@ -163,10 +113,12 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
         .filter(Boolean)
         .join(' '),
       onIsOpenChange: handleIsOpenChange,
+      onTabClose: handleTabClose,
     }),
     [
       fallbackPanelWidth,
       handleIsOpenChange,
+      handleTabClose,
       injected.autoCloseWhenEmpty,
       injected.bridge,
       injected.className,

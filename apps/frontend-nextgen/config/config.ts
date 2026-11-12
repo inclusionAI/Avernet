@@ -33,6 +33,7 @@ export default defineConfig({
   favicons: ['/favicon.png'],
   title: 'Avernet',
   define: {
+    TASK_PANEL_ASSET_BASE_URL: process.env.TASK_PANEL_ASSET_BASE_URL || '',
     QWENWORK_PROVIDER_SLUG: process.env.QWENWORK_PROVIDER_SLUG || '',
     BCS_ENDPOINT_PRE: bcsEndpointPre,
     BCS_ENDPOINT_PROD: bcsEndpointProd,

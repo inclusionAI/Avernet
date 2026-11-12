@@ -35,6 +35,8 @@ export default defineConfig({
   mfsu: false,
   https: devHttpsEnabled ? { hosts: [devHttpsHost], http2: false } : undefined,
   proxy: {
+    // Local task-panel source testing; the asset process is started independently.
+    '/task-panel': proxy('http://127.0.0.1:43820'),
     '/auth': proxy(auth),
     '/openapi/v1/auth': proxy(auth),
     '/openapi/v1/bots/work-order-notifications': proxy(admin),
@@ -61,6 +63,7 @@ export default defineConfig({
     },
   },
   define: {
+    TASK_PANEL_ASSET_BASE_URL: process.env.TASK_PANEL_ASSET_BASE_URL || '/task-panel/0.1.1',
     TEAMCLAW_LOGIN_STRATEGY: loginStrategy,
     TEAMCLAW_TASK_API_BASE: taskApiBase,
     TEAMCLAW_DEV_ENV:
