@@ -13,7 +13,6 @@ provides:
 consumes:
   - CallerTokenProviderProtocol
   - CallerRuntimeUpdaterProtocol
-  - ExpertChatRepository (active owned-session lookup for shared Teclaw refresh)
 internal_dependencies:
   - agentclaw.community.core
   - agentclaw.community.plugin_api
@@ -35,8 +34,9 @@ Explicit OpenAPI friend IAM preparation carries a server-verified
 the effective chat stage, and loads the actual entity address from the exact
 Bot/owner pair. For Caller-mode services, installation is restricted to that
 subject's existing Caller instance, including when the subject is also the Bot
-owner. Online Teclaw shared-runtime refresh is the narrow exception described
-below: it still installs only for the authenticated subject's owned session.
+owner. Teclaw shared-runtime refresh is the narrow exception described
+below: it uses the supplied nonblank session key without checking the Backend
+owned-session ledger.
 Owner inspection of another Human's conversation does not authorize
 credential installation there. The optional internal friend argument is not an
 authorization flag clients can supply directly to the application service.
@@ -57,34 +57,37 @@ existing authorized binding resolution and Bot permissions; there is no runtime
 session lookup or session ownership filtering in that legacy method. All existing eligible targets keep the
 existing per-target update success aggregation.
 
-### Shared online Teclaw refresh
+### Shared Teclaw refresh
 
 The server-resolved `CallerIamTokenContext.shared_teclaw_runtime` capability is
-true only for active Caller-mode Teclaw services. Online IAM refresh uses the
-existing runtime resolver's AUTO policy to select the published shared binding,
-matching chat runtime selection without querying or creating an independent
-Caller instance. Draft/verify, other engines and temporary test exchange retain
-their existing Owner/lock and target-selection policies.
+true only for active Caller-mode Teclaw services. IAM refresh across draft,
+verify and online uses the existing runtime resolver's AUTO policy to select the
+requested stage's shared binding, matching chat runtime selection without querying
+or creating an independent Caller instance. The refresh branch imposes no online
+stage or SERVICE_ONLINE source restriction. Other engines and temporary test
+exchange retain their existing Owner/lock and target-selection policies.
 
-Before signing and again immediately before installation,
+Before signing,
 `validate_owned_shared_session` confirms an ACTIVE Teclaw binding, a nonblank
-session key and the exact authenticated user/Bot/Owner/session tuple in the
-Backend-owned session index. The existing repository also filters ACTIVE rows
-and the current environment. Missing keys are invalid requests; unknown,
-deleted or differently scoped sessions are forbidden. This read-only guard
-requires no runtime session lookup and does not create ownership records.
-The application resolves AUTO again after signing and rejects a changed binding
-or source instead of installing into a replacement publication. Required signing,
-target and installation errors remain errors; shared refresh is not a fallback
-that turns those failures into success.
+session key. Missing keys are invalid requests. This shared refresh branch does
+not query the Backend-owned session index: absent, deleted or differently scoped
+ledger rows do not reject refresh. It does not establish ownership of the supplied
+session key; existing Caller authentication and target authorization remain in
+force. The method retains its existing name for internal call-site compatibility.
+No runtime session lookup or ownership record creation is performed.
+After signing, the application installs into the initially selected binding;
+it does not resolve the target or validate session context a second time. Shared
+refresh does not enforce a signing-time publication fence. Required signing,
+initial-target and installation errors remain errors.
 
 The `caller_shared_target_selected`, `caller_shared_target_rejected`,
-`caller_shared_target_fenced`, `caller_shared_target_refresh_succeeded`, and
+`caller_shared_target_refresh_succeeded`, and
 `caller_shared_session_validated/rejected` events identify the selected Bot,
 Owner, Caller, stage, binding/source and business session key where applicable.
 They never include token values or raw upstream error bodies. Public and
-enterprise composition inject the existing ExpertChat repository read port;
-no HTTP route, persistence schema or provider protocol is added.
+enterprise composition use the existing binding and runtime-resolution ports;
+the validator no longer consumes the ExpertChat repository. No HTTP route,
+persistence schema or provider protocol is added.
 
 The BaaS Caller overlay uses `mode=append` and, only for TeClaw, `session_key`.
 The HTTP client encodes the query once. It retains `set`, `x-caller-token`, the
