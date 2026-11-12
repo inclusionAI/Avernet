@@ -5,7 +5,7 @@ use axum::{Json, Router, body::Bytes, extract::State, http::{Method, StatusCode,
 use bcs::{BcsConfig, BcsServer};
 use bcs_fuse_client::BcsFuseApiVersion;
 use bcs_service_api::application::ActorSearchCommand;
-use bcs_service_api::{BotCapabilities, Group, GroupMutableFieldsPatch, PatchBotInternalAttributes, Skill, UserVisibility};
+use bcs_service_api::{BotCapabilities, Group, GroupMutableFieldsPatch, GroupStrategy, PatchBotInternalAttributes, Skill, UserVisibility};
 use serde_json::{Value, json};
 
 #[derive(Clone, Default)]
@@ -132,6 +132,7 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
 
     let groups = &state.services.group;
     let mut group = Group::new("card-group", "card-agent", vec![]);
+    group.group_strategy = GroupStrategy::ManagerWorker;
     group.label = Some("Billing group".into());
     groups.upsert(group).await.unwrap();
     wait_call(&catalog_state, 0, Method::DELETE, "card-group").await;
@@ -146,6 +147,22 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
     assert_eq!(card["labels"], json!({"visibility":["public"]}));
     assert_eq!(card["card"]["groupId"], "card-group");
     assert_eq!(card["card"]["description"], "Invoice collaboration");
+    let mut template = groups.read_card_snapshot("card-group").await.unwrap().unwrap().card_template.unwrap();
+    template["groupId"] = json!("card-group");
+    assert_eq!(card["card"], template);
+    assert_eq!(card["card"]["skills"][0]["id"], "group.execute");
+    assert_eq!(card["card"]["skills"][0]["description"], "Invoice collaboration");
+    let from = count(&catalog_state);
+    groups.patch_mutable_fields("card-group", GroupMutableFieldsPatch { context: Some(String::new()), ..Default::default() }).await.unwrap();
+    let card = wait_call(&catalog_state, from, Method::PUT, "card-group").await;
+    assert_eq!(card["card"]["description"], "");
+    assert_eq!(card["card"]["skills"][0]["description"], "");
+    let mut chat = Group::new("chat-without-card", "card-agent", vec![]);
+    chat.visibility = "public".into();
+    let from = count(&catalog_state);
+    groups.upsert(chat).await.unwrap();
+    wait_call(&catalog_state, from, Method::DELETE, "chat-without-card").await;
+    assert!(!catalog_state.calls.lock().unwrap().iter().any(|(m, path, _)| *m == Method::PUT && path.ends_with("chat-without-card")));
     let from = count(&catalog_state);
     groups.update_visibility("card-group", "private").await.unwrap();
     wait_call(&catalog_state, from, Method::DELETE, "card-group").await;

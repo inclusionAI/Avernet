@@ -49,15 +49,43 @@ local context fusion service, since their API has no legacy Group-fusion route.
   user visibility values are synchronized. Human actors and deleted Agents are
   removed. BCS still enforces collaboration permission checks on search results,
   including allowing a private Agent that is already a friend.
-- Group: BCS group ID, label and context, with `resource_type=group`.
-  Only normal Groups with `record_status=active` and `visibility=public` are
-  published. DM and private Groups are removed. Publishing does not change
+- Group: the stored Group Card template, with `groupId` added to the Card and
+  `resource_type=group` / visibility labels supplied by the catalog adapter.
+  Names, descriptions, skills, supported interfaces and extensions come from
+  the Group store's template projection, not a second Fuse-specific builder.
+  Only normal Manager–Worker and State Machine Groups with a template,
+  `record_status=active` and `visibility=public` are published. Chat, DM,
+  private Groups and Groups without templates are removed. Publishing does not change
   Group visibility or member visibility. Conversation completion does not
   remove a still-public Group resource.
 - Agent/Group updates explicitly send empty descriptions and arrays when
   cleared, because Fuse recursively merges objects and preserves omitted
   fields. Runtime credentials, local context files and chat history are not
   part of the discovery projection.
+
+### Group template ownership
+
+`bcs-group-store` owns `bcs_group_agent_cards.card_template`. Creation/upsert,
+renaming and patches containing `label` or `context` maintain it in the same
+transaction as the Group. This includes eventful mutations. Both the Card
+description and the `group.execute` skill description use the Group's
+`context` (the collaboration goal/background), or `""` when absent/cleared.
+Names use `label`, falling back to the Group ID when absent/empty. Changes to
+these display fields preserve other template interfaces and extensions.
+
+`GroupRepoPort::read_card_snapshot` and `GroupCoreService::read_card_snapshot`
+return one current Group/template snapshot. SQL uses one environment-scoped
+LEFT JOIN with at most one row and bypasses the ordinary Group cache; Memory
+holds the Group and template read locks together. Read/decode failures are
+errors, not absent Groups. An absent template remains explicit and is never
+generated as a side effect of reading or publication.
+
+For templates stored before the context-description rule, the read projection
+refreshes name/description from the same Group snapshot while preserving the
+stored template's remaining fields. It does not write back; the next upsert,
+name patch or context patch persists the new display values. There is no
+database migration or deployment-wide backfill. Existing remote Chat Cards
+are removed on their next change notification; no startup sweep is added.
 
 ### Labels contract
 
@@ -151,10 +179,11 @@ of replaying a stale PUT. Read failures are retried rather than treated as delet
 
 Each drain takes at most 100 identities and permits one HTTP request in flight.
 Each Agent attempt reads one control-plane row by bot ID and environment
-(`LIMIT 1`), including both visibility fields. Each Group attempt uses its
-existing current-state lookup (cache hit or DB read). There are no page/count
+(`LIMIT 1`), including both visibility fields. Each Group attempt uses one
+indexed Group/template snapshot query (`LIMIT 1`), with no participant or
+definition reads. There are no page/count
 queries or lease checks, and no database lock spans an HTTP request. A failing
-Agent change therefore costs at most 10 single-row reads and 10 HTTP attempts;
+Agent or Group change therefore costs at most 10 single-row reads and 10 HTTP attempts;
 newly committed changes may legitimately start another budget.
 
 Pending identities are held in process memory. Failed or interrupted changes
