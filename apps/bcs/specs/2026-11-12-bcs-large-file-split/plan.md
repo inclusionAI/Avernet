@@ -769,3 +769,41 @@ Singlebox 因此列为**未验收（NOT passed）**：属本机环境冲突（�
 - 未执行 push、未创建 PR（由 controller 在用户确认后处理）；未绕过 hooks，未设置任何
   门禁旁路环境变量。pushed 之前的最终裁决需要：处理 2 个既有失败与 changed-line 门槛，
   并在干净环境补 Singlebox 证据。
+
+### 变更行覆盖率补测（2026-11-12 跟进）
+
+上一节的 changed-line 66.08%（931/1409）是本工单唯一由“补测试即可解决”的门禁缺口，
+故追加一次纯测试补测（生产代码零改动，未改阈值、未加豁免、未使用 `#[ignore]`）：
+
+- 测试提交：`b8767fd8e3`（`test(bcs): cover session handler error and edge paths`）。
+  在既有 `suite_sessions` target 中新增 `session_handler_edges` 主题模块（6 个文件：
+  入口 fixture + `participants` / `lifecycle` / `creation` / `history_chat` +
+  SessionService 替身），共 **126 个 HTTP 层用例**（套件由 60 增至 186），全部通过；未新增 test binary。
+  用例覆盖成员增删改的鉴权阶梯与 store 错误传播、Session patch/complete/delete
+  的缺失与失败分支、create 的 8 种 `SessionLaunchError` 映射、history/chat 的
+  错误翻译与调用方可见性、collection/list 的边界。
+- 补测后门禁（`ci_test.sh --coverage` + `cov_gate.py`，base `$SOURCE_BASE`）：
+  - changed-line：**1358/1409 = 96.38%（>85%，PASS）**。逐文件
+    （covered/instrumentable，前值见本记录 66.08% 一节）：
+    participants 458/467（253 未覆盖→9）、lifecycle 159/162（61→3）、
+    creation 120/120（45→0）、history 221/244（63→23）、chat 130/144（32→14）、
+    queries 187/189（17→2）、collections 83/83（7→0）。
+  - overall line：**87.48%（>87%，PASS）**，较此前 87.26% 略升。
+  - unit pass-rate：**8361/8363 = 99.98%**，2 个失败仍是同一组基线既有用例
+    （`bcs-bot-store::conformance_bot_control_plane_repo cases_2::persistent_capability_save_preserves_patched_internal_attributes`
+    与 `cases_3::memory_control_plane_list_by_task_modes_filters_visibility_status_user_visibility`），
+    新增 126 个用例全部通过；因此 **unit 100% 门禁仍为红**，owner 决策仍待定，
+    本次补测不声称整体绿灯。
+  - Singlebox：未在本机复验，状态与上一节一致（仍为未验收）。
+- 剩余未覆盖区间（51 行，均有据可查，非漏测）：`history.rs` 263-275、295-302、
+  305 的 Public / Integration / Admin 调用方分支在该路由的 `resolve_session_caller`
+  之后不可达（防御性代码）；`history.rs` 120、161 与 `chat.rs` 131-141、143-144
+  需要完整的状态机 `CollaborationRuntimeService` 替身（HTTP 路径传入
+  `caller_ingress=None`，Noop runtime 恒返回 `NotStateMachine`）；`lifecycle.rs`
+  217/225 与 `participants.rs` 258/268/279/287 需要“第 N 次才失败”的脚本化
+  authority hook；`lifecycle.rs` 260 是 session 文件清理失败的仅日志分支，需要
+  12 方法的失败 `SessionFileService` 替身；`chat.rs` 233 与若干闭合花括号行为
+  LLVM region 归因，行为本身已被用例覆盖。
+- 补测未发现生产缺陷；期间观察到的既有行为（自删除未知 Session 由 store 决定
+  返回 404、scope 仅允许 Human 改自己、`Internal` launch 错误带
+  `Internal error: ` 前缀）已在用例注释中记录，未改生产逻辑。
