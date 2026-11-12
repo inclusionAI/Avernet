@@ -7,7 +7,7 @@ from agentclaw.community.core.task.task_panel.manifest import (
     TaskPanelManifestService,
 )
 
-from agentclaw.community.core.task.task_panel.manifest_contract import PANEL_CONFIG_KEY, PanelManifestConfig
+from agentclaw.community.core.task.task_panel.manifest_contract import PanelManifestConfig
 
 
 def configured(version="0.1.1"):
@@ -54,9 +54,3 @@ def test_invalid_or_floating_asset_urls_are_rejected(url):
     value["bundles"][0]["url"] = url
     with pytest.raises(ValueError):
         PanelManifestConfig.from_value(value)
-
-
-def test_sensitive_config_key_aliases_cannot_bypass_the_write_guard():
-    for category, key in [("task", "panel"), ("TASK ", "PANEL "), ("ｔａｓｋ", "ｐａｎｅｌ"), ("tásk", "panél")]:
-        assert PANEL_CONFIG_KEY.matches(category, key)
-    assert not PANEL_CONFIG_KEY.matches("task", "relay_execution_enabled")

@@ -1,9 +1,8 @@
-"""Single task manifest read/write interface and generic write-bypass protection."""
+"""Task-owned manifest read/write interface backed by existing config storage."""
 from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, InstanceProvider
@@ -11,9 +10,7 @@ from injector import Injector, InstanceProvider
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.task import manifest_routes
-from agentclaw.community.adapters.http.system_config import router as config_routes
-from agentclaw.community.api.system_config_service import ProtectedConfigKey, SystemConfigServiceProtocol
-from agentclaw.community.core.errors import Forbidden
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -37,21 +34,15 @@ def setup(monkeypatch):
     auth.is_operator_allowed.return_value = True
     app = FastAPI()
     app.include_router(manifest_routes.router, prefix="/api/v1/collaboration/tasks")
-    app.include_router(config_routes.router)
     user = AuthenticatedUser(id="viewer", staffId="viewer", operatorName="viewer")
     app.dependency_overrides[get_current_user] = lambda: user
 
-    @app.exception_handler(Forbidden)
-    async def forbidden(request, exc):
-        return JSONResponse(status_code=403, content={"detail": exc.detail})
-
-    # Exercise the real composition registrations, not a manually supplied key list.
+    # Exercise the real task manifest service binding.
     injector = Injector([SystemConfigModule, TaskModule])
     injector.binder.bind(AuthPlugin, to=InstanceProvider(auth))
     injector.binder.bind(SystemConfigServiceProtocol, to=InstanceProvider(store))
     attach_injector(app, injector)
     monkeypatch.setattr(manifest_routes, "get_current_env", lambda: "pre")
-    monkeypatch.setattr(config_routes.env_utils, "get_current_env", lambda: "pre")
     return TestClient(app), store, auth
 
 
@@ -84,14 +75,12 @@ def test_manifest_requires_authentication(setup, method):
     store.create_category.assert_not_called()
 
 
-def test_manifest_write_requires_operator(setup):
+def test_manifest_write_requires_login_but_not_operator_permission(setup):
     client, store, auth = setup
     auth.is_operator_allowed.return_value = False
-    assert client.post(PATH, json=config()).status_code == 403
-    auth.is_operator_allowed.assert_called_once_with("viewer")
-    store.set_config.assert_not_called()
-    store.create_category.assert_not_called()
-    assert client.get(PATH).status_code == 200
+    assert client.post(PATH, json=config()).status_code == 200
+    auth.is_operator_allowed.assert_not_called()
+    store.set_config.assert_called_once()
 
 
 def test_writer_creates_category_and_saves_using_server_environment(setup):
@@ -150,44 +139,3 @@ def test_unsaved_configuration_is_not_reported_as_success(setup, operation):
     assert client.post(PATH, json=config()).status_code == 503
     if operation == "create_category":
         store.set_config.assert_not_called()
-
-
-@pytest.mark.parametrize("category,key", [("task", "panel"), ("TASK ", "PANEL "), ("ｔａｓｋ", "ｐａｎｅｌ"), ("tásk", "panél")])
-@pytest.mark.parametrize("allowed", [False, True])
-def test_generic_set_and_delete_cannot_bypass_domain_interface(setup, category, key, allowed):
-    client, store, auth = setup
-    auth.is_operator_allowed.return_value = allowed
-    body = {"category": category, "config_key": key, "config_value": config()}
-    for path in ["/api/v1/config/set", "/api/v1/config/delete"]:
-        assert client.post(path, json=body).status_code == 403
-    store.set_config.assert_not_called()
-    store.delete_config_by_key.assert_not_called()
-
-
-def test_category_delete_cannot_remove_protected_configuration(setup):
-    client, store, _ = setup
-    store.get_category_by_id.return_value = {"category": "TASK "}
-    assert client.post("/api/v1/config/categories/delete", json={"category_id": 1}).status_code == 403
-    store.delete_category.assert_not_called()
-
-
-def test_unrelated_keys_and_categories_keep_existing_behavior(setup):
-    client, store, auth = setup
-    auth.is_operator_allowed.return_value = False
-    assert client.post("/api/v1/config/set", json={"category": "task", "config_key": "other", "config_value": True}).status_code == 200
-    auth.is_operator_allowed.return_value = True
-    assert client.post("/api/v1/config/delete", json={"category": "task", "config_key": "other"}).status_code == 200
-    store.get_category_by_id.return_value = {"category": "other"}
-    assert client.post("/api/v1/config/categories/delete", json={"category_id": 2}).status_code == 200
-    store.delete_category.assert_called_once_with(category_id=2)
-
-
-def test_generic_protection_has_no_task_dependency():
-    from pathlib import Path
-    source = Path(config_routes.__file__).parent
-    for name in ["router.py", "write_access.py"]:
-        text = (source / name).read_text()
-        assert "task_manifest" not in text
-        assert "task_panel" not in text
-    injector = Injector([SystemConfigModule])
-    assert injector.get(list[ProtectedConfigKey]) == []

@@ -23,7 +23,7 @@ from injector import Binder, Module, singleton
 from injector import inject, provider
 
 from agentclaw.community.api.device_config_service import DeviceConfigServiceProtocol
-from agentclaw.community.api.system_config_service import ProtectedConfigKey, SystemConfigServiceProtocol
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 from agentclaw.community.core.system_config import (
     ClusterConfigService,
@@ -42,7 +42,6 @@ class SystemConfigModule(Module):
     """Production bindings for system_config."""
 
     def configure(self, binder: Binder) -> None:
-        binder.multibind(list[ProtectedConfigKey], to=[])
         binder.bind(DwsRolloutIdentity, to=DwsRolloutIdentity, scope=singleton)
         # All three services have ``@inject`` ctors taking already-bound
         # deps (``ConfigRepositoryProtocol`` is supplied below; the two

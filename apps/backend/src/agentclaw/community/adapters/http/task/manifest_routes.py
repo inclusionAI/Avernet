@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope
@@ -53,7 +53,7 @@ async def set_task_manifest(
     value: dict[str, object],
     request: Request,
     response: Response,
-    user: AuthenticatedUser = Depends(require_operator),
+    user: AuthenticatedUser = Depends(get_current_user),
     service: TaskPanelManifestServiceProtocol = Injected(TaskPanelManifestServiceProtocol),
 ):
     response.headers["Cache-Control"] = "no-store"

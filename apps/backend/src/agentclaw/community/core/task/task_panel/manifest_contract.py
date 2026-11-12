@@ -6,11 +6,8 @@ import re
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.system_config.system_config_service_protocol import ProtectedConfigKey
-
 CATEGORY = "task"
 KEY = "panel"
-PANEL_CONFIG_KEY = ProtectedConfigKey(CATEGORY, KEY)
 
 
 @dataclass(frozen=True)
@@ -78,7 +75,8 @@ class TaskPanelManifestServiceProtocol(Protocol):
     def set_manifest(self, *, value: dict[str, object], env: str, operator: str) -> TaskPanelManifest:
         """Create or fully replace the current environment's validated manifest.
 
-        The caller authorizes the operator. Invalid input raises ValueError;
+        The caller supplies the authenticated actor for audit fields.
+        Invalid input raises ValueError;
         storage failure raises InternalError, never a successful response.
         """
         ...

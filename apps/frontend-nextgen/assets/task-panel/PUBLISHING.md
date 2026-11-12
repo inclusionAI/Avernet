@@ -125,10 +125,10 @@ branch and publish only when separately authorized.
 
 After confirming both published files are reachable, deploy the task manifest
 authenticated read endpoint `GET /api/v1/collaboration/tasks/manifest` and configure
-the pre environment. There is no OpenAPI mirror. Operators save the complete
+the pre environment. There is no OpenAPI mirror. Signed-in users save the complete
 configuration through `POST /api/v1/collaboration/tasks/manifest`. The task module
 creates the category if absent and replaces the value if present. The server
-selects its own environment; generic config APIs cannot modify this protected key.
+selects its own environment. Existing generic config APIs retain their behavior.
 
 Example (replace 0.1.1 with an actually published and verified release):
 
@@ -143,7 +143,7 @@ Example (replace 0.1.1 with an actually published and verified release):
 }
 ```
 
-Only an operator can update this key. Invalid values, category creation failures
+The task interface requires login, not operator permission. Invalid values, category creation failures
 and save failures return an error, never success. Both hosts read
 `data.bundles` from the manifest and derive `task-panel.css` beside the JS URL.
 There is no host asset URL injection or application package-version pin. Updates

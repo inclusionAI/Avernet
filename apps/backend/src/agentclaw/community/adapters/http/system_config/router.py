@@ -30,9 +30,6 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
 from agentclaw.community.api.device_config_service import DeviceConfigServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
-from agentclaw.community.adapters.http.system_config.write_access import (
-    protect_category_delete, protect_config_delete, protect_config_set,
-)
 from agentclaw.community.di import Injected
 from agentclaw.community.utils import env_utils
 from agentclaw.community.log import get_logger
@@ -106,7 +103,7 @@ async def create_category(
     )
 
 
-@router.post("/categories/delete", response_model=ApiResponse[dict], dependencies=[Depends(protect_category_delete)])
+@router.post("/categories/delete", response_model=ApiResponse[dict])
 async def delete_category(
     req: DeleteCategoryRequest,
     user: AuthenticatedUser = Depends(require_operator),
@@ -158,7 +155,7 @@ async def get_config(
     )
 
 
-@router.post("/set", response_model=ApiResponse[dict], dependencies=[Depends(protect_config_set)])
+@router.post("/set", response_model=ApiResponse[dict])
 async def set_config(
     req: SetConfigRequest,
     user: AuthenticatedUser = Depends(get_current_user),
@@ -194,7 +191,7 @@ async def set_config(
     )
 
 
-@router.post("/delete", response_model=ApiResponse[dict], dependencies=[Depends(protect_config_delete)])
+@router.post("/delete", response_model=ApiResponse[dict])
 async def delete_config(
     req: DeleteConfigRequest,
     user: AuthenticatedUser = Depends(require_operator),

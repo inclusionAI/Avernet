@@ -39,7 +39,7 @@ def read_missing():
     input=CaseInput(headers=HEADERS, json_body=VALUE),
     expect=ExpectSuccess(json_contains={"code": 200000}), extra_assertions=(assert_saved,))
 def save_valid():
-    """Operator creates the category and persists the validated configuration."""
+    """A signed-in user creates the category and persists the validated configuration."""
 
 
 @endpoint_test(method="POST", path=PATH, scenario="invalid",

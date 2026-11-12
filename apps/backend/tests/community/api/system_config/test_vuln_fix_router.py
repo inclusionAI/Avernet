@@ -25,12 +25,11 @@ def _bind_services(mock_config_service, mock_device_config_service):
     (what the router resolves) and the concrete class (so any other
     consumer in the test injector graph still works).
     """
-    from agentclaw.community.api.system_config_service import ProtectedConfigKey, SystemConfigServiceProtocol
+    from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
     from agentclaw.community.api.device_config_service import DeviceConfigServiceProtocol
 
     class _M(Module):
         def configure(self, binder):
-            binder.multibind(list[ProtectedConfigKey], to=[])
             binder.bind(SystemConfigService, to=mock_config_service)
             binder.bind(DeviceConfigService, to=mock_device_config_service)
             binder.bind(SystemConfigServiceProtocol, to=mock_config_service)
