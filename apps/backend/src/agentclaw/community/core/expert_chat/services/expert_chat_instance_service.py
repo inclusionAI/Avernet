@@ -31,6 +31,7 @@ from agentclaw.community.core.bot_management.engines.registry import prepare_ins
 
 import asyncio
 import traceback
+from time import monotonic
 from typing import Any, Dict, Optional
 
 from injector import inject
@@ -181,6 +182,58 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Observe an allocated Caller without entering its lifecycle flow."""
+        bot = await asyncio.to_thread(self._find_chat_bot, bot_id, owner_id)
+        if bot is None:
+            raise self._caller_permission_error("bot_not_found")
+        instance = await asyncio.to_thread(
+            self._instance_repo.get_instance, user_id, bot_id, str(bot["owner_id"]),
+        )
+        ext = instance.get("ext") if instance else None
+        bot_uuid = ext.get("bot_uuid") if isinstance(ext, dict) else None
+        if not isinstance(bot_uuid, str) or not bot_uuid.strip():
+            return {"exists": False, "alive": False}
+        engine_type = bot.get("active_engine") or "openclaw"
+        started = monotonic()
+        context = {
+            "system": "baas", "direction": "outbound", "operation": "caller_instance_status",
+            "method": "GET", "route": "/api/v1/bots/{bot_uuid}",
+            "bot_id": bot_id, "owner_id": str(bot["owner_id"]), "user_id": user_id,
+            "bot_uuid": bot_uuid, "engine_type": engine_type, "health_check": True,
+            "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        }
+        logger.info("event=caller_instance_status.provider.request context=%s", context)
+        try:
+            observation = await asyncio.to_thread(
+                self._baas.get_bot, bot_uuid, health_check=True, engine_type=engine_type,
+                log_response=False,
+            )
+            devices = observation.get("devices") or []
+            health = [
+                {"status": device.get("status"), "health": device.get("health")}
+                for device in devices
+            ]
+            alive = observation.get("status") != "RELEASED" and any(
+                device["status"] == "ACTIVE" and device["health"] == "true"
+                for device in health
+            )
+        except Exception as error:
+            logger.warning(
+                "event=caller_instance_status.provider.failed context=%s error_type=%s duration_ms=%s",
+                context, type(error).__name__, round((monotonic() - started) * 1000, 2),
+            )
+            raise
+        logger.info(
+            "event=caller_instance_status.provider.success context=%s status=%s devices=%s "
+            "exists=true alive=%s duration_ms=%s",
+            context, observation.get("status"), health, alive,
+            round((monotonic() - started) * 1000, 2),
+        )
+        return {"exists": True, "alive": alive}
+
     async def get_application_caller_connection(
         self,
         *,

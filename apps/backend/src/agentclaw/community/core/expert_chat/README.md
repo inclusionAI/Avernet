@@ -81,3 +81,25 @@ collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
 existing access policies.
+
+
+### Read-only independent Caller status
+
+`GET /openapi/v1/bots/{bot_id}/caller-instance/status` requires `user_id`
+(the authenticated user, or the application-granted acting user) and accepts
+`entity_id` addressing, with `owner_id` as its deprecated alias. Existing
+owner/public/collaborator chat access applies; application-only credentials
+also require an addressed-Bot grant. The standard public envelope's `data`
+contains exactly two required booleans: `exists` and `alive`.
+
+`exists` means a nonempty Caller UUID is registered in the scoped instance
+ledger; a recycled or released Caller remains registered. `alive` requires a
+fresh provider observation of an ACTIVE device with `health="true"`; a released
+Bot or an empty device list is not alive. No row/UUID returns both false without
+a provider call. Upstream failure is an error, not a false health observation.
+The query resolves the actual owner, reads only the acting user's independent
+Caller and never substitutes the source Bot's shared runtime. It never creates,
+revives, upgrades, polls publishing, exchanges identity or updates ledger/binding
+rows. Provider health observation may refresh the provider's own health cache.
+Provider payload logging is disabled for this query because details can carry
+credentials; diagnostic events project only status and health fields.

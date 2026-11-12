@@ -15,6 +15,10 @@ internal router does.
 from __future__ import annotations
 
 from typing import Any
+from time import monotonic
+
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -121,6 +125,15 @@ from .router_listings import list_bots as list_bots, query_bot_metadata as query
 from .router_runtime import router as runtime_router
 from .router_runtime import _audit_actor as _audit_actor
 
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.core.expert_chat.errors import (
+    BotNotFoundError as ChatBotNotFoundError, ChatPermissionError,
+)
+from agentclaw.community.core.service_bot.errors import ServiceContainerUpstreamError
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+from agentclaw.community.adapters.http.openapi_v1.errors import BotAccessRefusedError
+from .schemas_caller_instance import CallerInstanceStatus
+
 logger = get_logger()
 
 
@@ -145,6 +158,53 @@ BOT_QUOTA_CONFLICT_RESPONSES = {
 }
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
+
+
+@router.get(
+    "/{bot_id}/caller-instance/status",
+    response_model=Envelope[CallerInstanceStatus],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def get_caller_instance_status(
+    bot_id: BotIdPath, request: Request, user_id: UserIdDep, owner_id: OwnerIdDep,
+    service: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+) -> Envelope[CallerInstanceStatus]:
+    """Read Caller allocation and current health without creating or restarting it.
+
+    Released registered Callers still exist. Only the authenticated user's
+    independent Caller is observed; shared Bot runtimes are never substituted.
+    """
+    started = monotonic()
+    context = {
+        "system": "backend", "direction": "inbound", "operation": "caller_instance_status",
+        "method": "GET", "route": "/openapi/v1/bots/{bot_id}/caller-instance/status",
+        "bot_id": bot_id, "owner_id": owner_id, "user_id": user_id,
+        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        "request_id": request.headers.get("x-request-id"),
+        "trace_id": getattr(request.state, "trace_id", None),
+    }
+    logger.info("event=caller_instance_status.request context=%s", context)
+    try:
+        result = await service.get_caller_instance_status(
+            user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+        )
+    except Exception as error:
+        logger.warning(
+            "event=caller_instance_status.failed context=%s error_type=%s duration_ms=%s",
+            context, type(error).__name__, round((monotonic() - started) * 1000, 2),
+        )
+        if isinstance(error, (ChatBotNotFoundError, ChatPermissionError)):
+            raise BotAccessRefusedError("Bot access unavailable") from None
+        if isinstance(error, BaasServiceError):
+            raise ServiceContainerUpstreamError("Caller health query failed") from None
+        raise
+    logger.info(
+        "event=caller_instance_status.success context=%s status=200 response=%s duration_ms=%s",
+        context, result, round((monotonic() - started) * 1000, 2),
+    )
+    return envelope(CallerInstanceStatus(**result), request)
 
 
 def _auth_status_error(status: str, request: Request) -> JSONResponse:

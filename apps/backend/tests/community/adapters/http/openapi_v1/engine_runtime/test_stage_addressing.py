@@ -112,6 +112,8 @@ _REQUIRED_OWNER_OPERATIONS = {
 }
 
 _OWNER_ADDRESSED_ELSEWHERE = {
+    # Caller status names the source owner and has no stage-selection input.
+    ("get", "/openapi/v1/bots/{bot_id}/caller-instance/status"),
     # Service-Bot evaluation addresses a bot by (owner, bot_id), but takes no
     # runtime stage: its records and tasks are bot/version scoped, not runtime
     # scoped. All six routes intentionally use the same owner-addressing seam
