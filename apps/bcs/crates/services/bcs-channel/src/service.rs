@@ -129,13 +129,14 @@ impl ChannelService for BcsChannelService {
         }
 
         let result = async {
-            let actor_id = self.ensure_im_human_actor(&msg).await.map_err(|error| {
+            let human = self.ensure_im_human_actor(&msg).await.map_err(|error| {
                 inbound_failure(
                     ChannelInboundFailureKind::ActorResolutionFailed,
                     true,
                     error,
                 )
             })?;
+            let actor_id = human.actor_id.clone();
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %account_ref,
@@ -289,10 +290,7 @@ impl ChannelService for BcsChannelService {
             let dispatch_session_id = session_id.clone();
             let dispatch_actor_id = actor_id.clone();
             let dispatch_msg_id = msg.msg_id.clone();
-            let caller = CallerContext::Human(HumanActor {
-                actor_id: actor_id.clone(),
-                staff_no: msg.im_user_id.trim().to_string(),
-            });
+            let caller = CallerContext::Human(human);
             let channel_sender_identity = channel_sender_identity(&binding, &msg, &caller);
             let outcome = self
                 .message_flow

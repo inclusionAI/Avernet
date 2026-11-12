@@ -159,7 +159,7 @@ impl BcsChannelService {
     async fn ensure_im_human_actor(
         &self,
         msg: &InboundMessage,
-    ) -> Result<String, ChannelUseCaseError> {
+    ) -> Result<HumanActor, ChannelUseCaseError> {
         let im_user_id = normalize_required(&msg.im_user_id, "im_user_id")?;
         let user_id = self.provider_for(&msg.channel_type)?
             .resolve_inbound_user_id(im_user_id).map_err(provider_error)?;
@@ -185,7 +185,7 @@ impl BcsChannelService {
             })
             .await?;
 
-        Ok(actor_id)
+        Ok(HumanActor { actor_id, staff_no: staff_no.to_string() })
     }
 
     async fn resolve_inbound_context(
