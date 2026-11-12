@@ -41,10 +41,12 @@ export class BackendRequestError extends Error {
   toastKey?: string;
   /** 协议层默认提示是否已投递;Hook 守卫 helper(safeReportError)据此跳过自有 toast 防重复。 */
   alreadyHandled?: boolean;
+  /** 认证或邀请码门禁正在处理，此请求的错误提示必须静默。 */
+  silent?: boolean;
 
   constructor(
     message: string,
-    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean },
+    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean; silent?: boolean },
   ) {
     super(message);
     this.name = 'BackendRequestError';
@@ -53,6 +55,7 @@ export class BackendRequestError extends Error {
     this.apiPath = options.apiPath;
     this.toastKey = options.toastKey;
     this.alreadyHandled = options.alreadyHandled;
+    this.silent = options.silent;
   }
 }
 
@@ -241,6 +244,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
         apiPath,
         toastKey,
         alreadyHandled: true,
+        silent: true,
       });
     }
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
@@ -255,6 +259,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
       apiPath,
       toastKey,
       alreadyHandled: true,
+      silent: authDisposition === 'silent',
     });
   }
 
@@ -289,6 +294,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
       data: inspectData,
       apiPath,
       alreadyHandled: true,
+      silent: true,
     });
   }
 

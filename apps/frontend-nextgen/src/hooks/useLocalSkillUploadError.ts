@@ -8,6 +8,7 @@ export function useLocalSkillUploadError() {
   const handleError = (error: unknown) => {
     if (error instanceof DOMException && error.name === 'AbortError') return;
     if (error instanceof BackendRequestError) {
+      if (error.silent) return;
       if (isLocalSkillPackageError(error.data) || error.status === 413) {
         if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
         setMessage(localSkillUploadErrorMessage(error.data, error.status));

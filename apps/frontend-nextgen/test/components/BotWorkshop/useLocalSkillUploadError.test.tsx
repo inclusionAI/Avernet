@@ -7,6 +7,11 @@ import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 
 describe('local Skill upload error handling', () => {
   beforeEach(() => useErrorNotifyStore.getState().reset());
+  it('preserves authentication silence', () => {
+    const { result } = renderHook(() => useLocalSkillUploadError());
+    act(() => result.current.handleError(new BackendRequestError('internal', { status: 500, apiPath: '/skills', silent: true })));
+    expect(result.current.message).toBe('');
+  });
   it.each([
     [404, '当前 Bot 不存在或无访问权限'],
     [409, '当前无法上传 Skill'],
