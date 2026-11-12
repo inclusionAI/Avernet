@@ -75,7 +75,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a>
-<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 两种接入模式</a><a class="sub" href="#s8-3">8.3 与 a2a-java 的关系</a><a class="sub" href="#s8-5">8.5 引擎模式 SPI</a><a class="sub" href="#s8-6">8.6 请求处理与校验</a><a class="sub" href="#s8-7">8.7 编解码工具库</a><a class="sub" href="#s8-8">8.8 引擎模式示例</a><a class="sub" href="#s8-9">8.9 托管模式</a><a class="sub" href="#s8-11">8.11 配置项</a><a class="sub" href="#s8-15">8.15 推送实现</a>
+<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 三种接入模式</a><a class="sub" href="#s8-3">8.3 与 a2a-java 的关系</a><a class="sub" href="#s8-5">8.5 引擎模式 SPI</a><a class="sub" href="#s8-6">8.6 请求处理与校验</a><a class="sub" href="#s8-7">8.7 编解码工具库</a><a class="sub" href="#s8-8">8.8 引擎模式示例</a><a class="sub" href="#s8-9">8.9 消息模式</a><a class="sub" href="#s8-10">8.10 托管模式</a><a class="sub" href="#s8-12">8.12 配置项</a><a class="sub" href="#s8-16">8.16 推送实现</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 对引擎的要求</a><a class="sub" href="#s9-3">9.3 跨实例流程</a><a class="sub" href="#s9-4">9.4 停机与恢复</a><a class="sub" href="#s9-5">9.5 托管模式</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.23</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.24</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -136,7 +136,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td class="nw">Context</td><td>多轮会话的关联标识 <code>contextId</code>，首轮由 Agent 建立，后续由 BCS 带回。</td></tr>
 <tr><td class="nw">Run</td><td>BCS 内部一次调用的标识 <code>run_id</code>。BCS 保存 Run 与远端 Task 的关联，Agent 不感知。</td></tr>
 <tr><td class="nw">引擎</td><td>Agent 背后实际执行任务的系统，有自己的运行记录和会话存储。</td></tr>
-<tr><td class="nw">引擎模式、托管模式</td><td>SDK 的两种接入模式。引擎模式下任务状态以引擎为准；托管模式下由 SDK 代管，供没有运行记录的简单 Agent 使用（8.2）。</td></tr>
+<tr><td class="nw">消息模式、引擎模式、托管模式</td><td>SDK 的三种接入模式。消息模式只返回一条消息，没有 Task；引擎模式下任务状态以引擎为准；托管模式下由 SDK 代管，供没有运行记录的 Agent 使用（8.2）。</td></tr>
 <tr><td class="nw">执行实例</td><td>托管模式中接收某个 Task 初始请求并执行它的应用实例。</td></tr>
 <tr><td class="nw">agentKey</td><td>SDK 内部用于隔离的键，由 Agent 标识和 <code>tenant</code> 组成。</td></tr>
 <tr><td class="nw">TCK</td><td>Technology Compatibility Kit，一致性测试套件。</td></tr>
@@ -211,11 +211,13 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D2</span></td><td>多实例是一等约束</td><td>SDK 的默认行为必须在多实例下正确；单实例只是特例。</td><td>要求粘性路由。MOSN 负载均衡下不现实。</td></tr>
 <tr><td><span class="tag d">D3</span></td><td>任务状态以引擎的运行记录为唯一来源，SDK 不另存一份（托管模式除外）</td><td>SDK 是无状态协议层，任意实例把请求转给引擎；对引擎提出 9.2 的要求；业务不需要为 SDK 准备存储。</td><td>SDK 自有共享存储并承担任务生命周期（v0.22 之前的方案）。两份状态需要对齐，业务要准备缓存实例，SDK 复杂；而且引擎做不到的恢复，SDK 存储也补不上。</td></tr>
 <tr><td><span class="tag d">D4</span></td><td>停机重启后的恢复由引擎保证</td><td>SDK 不做执行接管和检查点对齐；引擎需满足 R-03、R-04（9.2），9.4 给出实现建议。</td><td>SDK 侧的检查点对齐和跨实例执行接管。</td></tr>
-<tr><td><span class="tag d">D5</span></td><td>以进程内 SDK（API + SPI）作为本期唯一的交付形态</td><td>公司 90% 以上技术栈是 Java。业务引入 starter、实现 SPI。标准靠协议层校验、TCK 准入和版本治理保证（8.14）。</td><td>BCN 托管的协议适配层。多一跳，所有流式流量经过一个中心服务；本期不做，但核心保持可托管。</td></tr>
+<tr><td><span class="tag d">D5</span></td><td>以进程内 SDK（API + SPI）作为本期唯一的交付形态</td><td>公司 90% 以上技术栈是 Java。业务引入 starter、实现 SPI。标准靠协议层校验、TCK 准入和版本治理保证（8.15）。</td><td>BCN 托管的协议适配层。多一跳，所有流式流量经过一个中心服务；本期不做，但核心保持可托管。</td></tr>
 <tr><td><span class="tag d">D6</span></td><td>Profile 不包含提交去重扩展</td><td>标准里没有提交幂等。初始提交结果未知时调用方不重发、报告结果未知。没有历史依赖，不需要兼容。</td><td>保留原 BCS 的提交去重扩展。它要求永久保留占位记录、跨语言一致的请求摘要，并带来“占位成功但未执行”的失败窗口，复杂度与收益不相称。以后确有需要可以作为新扩展加回，不影响现有 Agent。</td></tr>
 <tr><td><span class="tag d">D7</span></td><td>托管模式的存储只提供分布式缓存实现</td><td>托管模式的 Task 记录是短生命周期、高频写入、到期清理的数据，适合缓存。只需要一个不淘汰数据的缓存实例。代价是主备切换时可能丢失个别 Task 的最近写入，按 9.5 的规则处理。</td><td>数据库实现，无论作为默认还是备选。每秒整行更新占用业务库资源，接入要建表和配置清理；公司内的应用都已接入分布式缓存，备选没有使用者，只增加维护成本。</td></tr>
 <tr><td><span class="tag d">D8</span></td><td>引擎模式的 SPI 是 A2A 五个方法的子集接口，参数和返回值使用 a2a-java 的模型类型</td><td>平台方直接按 A2A 规范理解 SPI，不需要第二套词汇。标准约束由 SDK 在协议层校验和过滤（8.6），扩展编码由工具库提供（8.7）。</td><td>自定义的执行接口作为唯一 SPI：与 A2A 方法一一对应却换了名字，增加理解成本。直接使用 a2a-java 的 <code>RequestHandler</code>：范围大于标准，演进受官方影响。</td></tr>
-<tr><td><span class="tag d">D9</span></td><td>提供可选的托管模式，给没有运行记录的简单 Agent</td><td>平台只写输入到输出的逻辑，SDK 代管 Task；不支持 exec 审批，不承诺停机恢复（8.9、9.5）。</td><td>只提供引擎模式：简单 Agent 要自己实现运行记录，门槛过高。</td></tr>
+<tr><td><span class="tag d">D9</span></td><td>提供可选的托管模式，给没有运行记录的简单 Agent</td><td>平台只写输入到输出的逻辑，SDK 代管 Task；不支持 exec 审批，不承诺停机恢复（8.10、9.5）。</td><td>只提供引擎模式：简单 Agent 要自己实现运行记录，门槛过高。</td></tr>
+<tr><td><span class="tag d">D10</span></td><td>支持只返回消息的消息模式（L0），不支持“有 Task 但不保存”的无状态流式</td><td>最轻的 Agent 只需实现一个方法，完全符合 A2A 标准，BCS 已支持，多实例天然满足。代价是回答一次性到达、断线后结果丢失、不能取消。需要逐段输出又不想自己存状态的 Agent 使用托管模式。</td><td>无状态流式：能逐段输出，但换一台机器就查不到 Task，违背“任意实例可查询”；断线、取消都要在标准里开例外，BCS 也要改。</td></tr>
+<tr><td><span class="tag d">D11</span></td><td>调用上下文从等级中拆出，作为任何等级都可以声明的独立能力</td><td>等级只描述交互形态（消息、非流式任务、流式任务、工具与审批）。L0 的 Agent 也可以拿到用户身份。</td><td>保留原来“L2 = 调用上下文”的逐级包含：只返回消息的 Agent 需要用户身份时无法达到相应等级。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -234,23 +236,23 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 
 <h3 id="s6-3"><span class="n">6.3</span>一致性等级</h3>
-<p>等级逐级包含。分级的目的是让存量 Agent 渐进接入：先以 L0 接入，再按需要升级。</p>
+<p>分级的目的是让存量 Agent 按需要选择、渐进接入。L0 是独立的消息模式，没有 Task；L1 到 L3 是任务模式，逐级包含。</p>
 <div class="tw"><table>
-<tr><th>能力</th><th>L0</th><th>L1</th><th>L2</th><th>L3</th></tr>
-<tr><td>SendMessage（含 <code>returnImmediately</code>）</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
-<tr><td>GetTask</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
-<tr><td>CancelTask</td><td>必须</td><td>必须</td><td>必须</td><td>必须</td></tr>
-<tr><td>SendStreamingMessage</td><td>—</td><td>必须</td><td>必须</td><td>必须</td></tr>
-<tr><td>SubscribeToTask</td><td>—</td><td>必须</td><td>必须</td><td>必须</td></tr>
-<tr><td>Card 声明 <code>streaming: true</code></td><td>否</td><td>是</td><td>是</td><td>是</td></tr>
-<tr><td>调用上下文扩展</td><td>—</td><td>—</td><td>必须</td><td>必须</td></tr>
+<tr><th>能力</th><th>L0 消息模式</th><th>L1 任务·非流式</th><th>L2 任务·流式</th><th>L3 工具与审批</th></tr>
+<tr><td>新请求的返回</td><td>一条消息</td><td>Task</td><td>Task</td><td>Task</td></tr>
+<tr><td>SendMessage</td><td>必须</td><td>必须，含 <code>returnImmediately</code></td><td>必须</td><td>必须</td></tr>
+<tr><td>SendStreamingMessage</td><td>可选，流中只有一条消息</td><td>—</td><td>必须</td><td>必须</td></tr>
+<tr><td>GetTask、CancelTask</td><td>返回 <code>TASK_NOT_FOUND</code></td><td>必须</td><td>必须</td><td>必须</td></tr>
+<tr><td>SubscribeToTask</td><td>返回 <code>TASK_NOT_FOUND</code></td><td>—</td><td>必须</td><td>必须</td></tr>
+<tr><td>Card 声明 <code>streaming: true</code></td><td>可选</td><td>否</td><td>是</td><td>是</td></tr>
 <tr><td>工具观察扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
 <tr><td>exec 审批扩展</td><td>—</td><td>—</td><td>—</td><td>可选声明</td></tr>
-<tr><td>推送通知（6.12）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
+<tr><td>调用上下文扩展（7.2）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>文本以外的模态（6.13）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
-<tr><td>多实例正确性（第 9 节）</td><td colspan="4">所有等级都必须满足，除非 Agent 明确以单实例部署</td></tr>
+<tr><td>推送通知（6.12）</td><td>不适用，没有 Task</td><td colspan="3">可选能力，不影响等级</td></tr>
+<tr><td>多实例正确性（第 9 节）</td><td>天然满足</td><td colspan="3">必须满足，除非 Agent 明确以单实例部署</td></tr>
 </table></div>
-<p>L3 的两项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商这两项，因此它们要求 L1 以上。</p>
+<p>L3 的两项扩展相互独立，至少声明一项即为 L3。BCS 对非流式 Agent 不协商这两项，因此它们要求 L2 以上。选择建议：简单问答、能接受回答一次性到达的，用 L0；需要长任务查询和取消的，用 L1；需要逐段输出的，用 L2。</p>
 
 <h3 id="s6-4"><span class="n">6.4</span>AgentCard</h3>
 <p>字段要求沿用 Provider AgentCard 管理接口 v0.1，以下是 Profile 追加或收紧的部分。</p>
@@ -329,17 +331,17 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>字段</th><th>对应的条款或章节</th></tr>
 <tr><td><code>supportedInterfaces</code> 三项</td><td>三种绑定都开启，按偏好排序（P-02、P-12）</td></tr>
-<tr><td><code>streaming: true</code></td><td>L1 以上必须（6.3）</td></tr>
+<tr><td><code>streaming: true</code></td><td>L2 以上必须（6.3）</td></tr>
 <tr><td><code>pushNotifications: false</code></td><td>推送本期只定义语义，SDK 不声明（6.12）。声明为 true 就必须实现四个配置方法</td></tr>
 <tr><td>profile 声明，<code>level: "L3"</code></td><td>P-15、7.1</td></tr>
-<tr><td>调用上下文，<code>required: true</code></td><td>L2 能力。未协商或缺少用户时拒绝（P-102）</td></tr>
+<tr><td>调用上下文，<code>required: true</code></td><td>可选能力，与等级无关（6.3）。未协商或缺少用户时拒绝（P-102）</td></tr>
 <tr><td>工具观察、exec 审批</td><td>L3 的两项，可分别声明（6.3、7.3）</td></tr>
 <tr><td>来源分类</td><td>可选的 Card 描述数据，扩展点 E1</td></tr>
 <tr><td>订单 UI 扩展</td><td>业务扩展，必须 <code>required: false</code>（P-124）；<code>params</code> 中列出使用的扩展点和媒体类型，供调用方了解</td></tr>
 <tr><td><code>defaultInputModes</code>、技能级 <code>inputModes</code> 和 <code>outputModes</code></td><td>多模态声明（P-160）。文本始终在列表中（P-13）</td></tr>
 <tr><td><code>securityRequirements: []</code></td><td>不鉴权（P-11、<span class="tag d">D1</span>）</td></tr>
 </table></div>
-<h4>对照：最小的 L0 Card</h4>
+<h4>对照：最小的 L0 Card（消息模式）</h4>
 <pre><code>{
   "name": "汇率查询",
   "description": "查询当日汇率",
@@ -378,11 +380,21 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-22</span></td><td>流式响应的第一个事件必须是 <code>task</code>，包含 <code>id</code>、<code>contextId</code> 和状态。之后所有事件的 <code>taskId</code>、<code>contextId</code> 必须与它一致。</td></tr>
 <tr><td><span class="tag p">P-23</span></td><td><code>SendMessage</code> 且 <code>returnImmediately: true</code> 时，必须在持久化后立即返回非终态或终态的 Task，不等待执行结束。</td></tr>
 <tr><td><span class="tag p">P-24</span></td><td><code>SendMessage</code> 且未设置 <code>returnImmediately</code> 时，等待到终态或中断态再返回。</td></tr>
-<tr><td><span class="tag p">P-25</span></td><td>L0 Agent 可以直接返回 <code>message</code>。此时没有 Task，不可查询、不可取消。L1 以上必须返回 Task。</td></tr>
+<tr><td><span class="tag p">P-25</span></td><td>L1 以上的 Agent 对新请求必须返回 Task，不得返回消息。只返回消息的是 L0，见 P-35 到 P-38。</td></tr>
 <tr><td><span class="tag p">P-26</span></td><td>带 <code>taskId</code> 的消息是对已有 Task 的续交，只在 Task 处于 <code>INPUT_REQUIRED</code> 且消息符合对应扩展时接受。<code>contextId</code> 必须与该 Task 一致。其他情况必须拒绝，不得开启新 Task。</td></tr>
 <tr><td><span class="tag p">P-27</span></td><td><code>messageId</code> 不是幂等键。Profile 不定义提交幂等（<span class="tag d">D6</span>）：每次不带 <code>taskId</code> 的提交都开启新 Task，Agent 不得因 <code>messageId</code> 相同而合并或拒绝请求。</td></tr>
 <tr><td><span class="tag p">P-28</span></td><td>客户端断开流不得取消 Task。Task 继续执行并写入存储。</td></tr>
 </table></div>
+
+<h4>L0 消息模式</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-35</span></td><td>L0 的 Agent 对所有发送只返回一条完整的消息（<code>ROLE_AGENT</code>），不创建 Task。非流式时响应为 <code>message</code>；流式时流中只有这一条消息，随后立即关闭（A2A 规范 3.1.2）。</td></tr>
+<tr><td><span class="tag p">P-36</span></td><td>L0 的 Agent 收到 GetTask、SubscribeToTask、CancelTask，或带 <code>taskId</code> 的消息时，返回 <code>TASK_NOT_FOUND</code>。</td></tr>
+<tr><td><span class="tag p">P-37</span></td><td>消息中可以有文本 Part 和文件 Part（6.13）。不得使用依赖 Task 的能力：工具观察、exec 审批、结果字段（E3）、过程事件（E4）、内容块（E5）、推送。可以使用描述（E1）和请求参数（E2），包括调用上下文。</td></tr>
+<tr><td><span class="tag p">P-38</span></td><td>请求带 <code>contextId</code> 时回复沿用；没带时 Agent 生成一个并放进回复，供多轮会话使用。</td></tr>
+</table></div>
+<p>调用方收到消息即视为本轮完成。消息模式没有断线恢复：回复到达前断开，结果丢失，调用方报告结果未知（P-112）。</p>
 
 <h4>GetTask</h4>
 <div class="tw"><table>
@@ -522,7 +534,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <p>A2A 标准有三种跟踪 Task 的方式：流式、轮询、推送通知。BCS 目前只用前两种。推送通知是调用方在提交时给出一个地址，Agent 在 Task 状态变化时主动通知。它适合三类场景：</p>
 <ul>
 <li>执行时间很长的 Task（几分钟到几小时），调用方不应一直持有连接或每秒轮询。</li>
-<li>非流式 Agent（L0），目前只能靠 1 秒一次的轮询跟踪。</li>
+<li>非流式 Agent（L1），目前只能靠 1 秒一次的轮询跟踪。</li>
 <li>等待人工审批的 Task，等待期间没有输出。</li>
 </ul>
 <p>Profile 现在就定义它的语义，否则各业务会按各自的理解实现。实现放在后续阶段。</p>
@@ -538,7 +550,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-157</span></td><td>调用方在配置的 <code>authentication</code> 中给出 <code>scheme: "Bearer"</code> 和一个每个 Task 随机生成的 <code>credentials</code>。Agent 必须在推送请求的 <code>Authorization</code> 头中原样带回（标准要求）。接收方校验它与 Task 的对应关系。它用于关联和防止误投，不改变“调用 Agent 不鉴权”的决定（<span class="tag d">D1</span>）。配置中的 <code>token</code> 字段在 1.0 中没有对应的请求头定义，Profile 不使用。凭据不得写入日志，Get 和 List 返回时必须隐去。</td></tr>
 </table></div>
 <h4>谁负责投递</h4>
-<p>引擎模式下由引擎在关键状态变化时投递，至少一次由引擎保证；托管模式下由 SDK 投递（8.15）。无论哪种模式，推送都可能丢失或重复，这正是 P-154、P-155 要求接收方去重并保留查询兜底的原因。</p>
+<p>引擎模式下由引擎在关键状态变化时投递，至少一次由引擎保证；托管模式下由 SDK 投递（8.16）。无论哪种模式，推送都可能丢失或重复，这正是 P-154、P-155 要求接收方去重并保留查询兜底的原因。</p>
 
 <h3 id="s6-13"><span class="n">6.13</span>多模态输入输出（可选能力）</h3>
 <p>A2A 标准本身已经定义了多模态：Part 可以是文本、文件字节（<code>raw</code>）、文件地址（<code>url</code>）或结构化数据（<code>data</code>），并带 <code>mediaType</code> 和 <code>filename</code>；Card 和每个技能可以声明支持的输入输出类型；调用方用 <code>acceptedOutputModes</code> 声明能接收的类型。这些不需要扩展。</p>
@@ -584,7 +596,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>扩展</th><th>类型</th><th>等级</th><th>状态</th><th>SDK 支持方式</th></tr>
 <tr><td>profile 声明</td><td>Card 数据</td><td>全部</td><td><span class="tag q">新增</span></td><td>starter 自动写入 Card</td></tr>
-<tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>SDK 解析，通过 <code>BcnCall.caller()</code> 提供</td></tr>
+<tr><td>调用上下文</td><td>请求 metadata</td><td>可选</td><td><span class="tag q">新增</span></td><td>SDK 解析，通过 <code>BcnCall.caller()</code> 提供</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td>工具库 <code>ToolEvents</code>；托管模式 <code>sink.tools()</code></td></tr>
 <tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td>工具库 <code>Approvals</code>；仅引擎模式</td></tr>
 <tr><td>协作（群协作感知）</td><td>请求 metadata 加 Task 字段</td><td>可选</td><td><span class="tag q">待设计</span></td><td>后续阶段，见 7.8</td></tr>
@@ -599,7 +611,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><code>params.level</code></td><td>string，必填</td><td><code>"L0"</code>、<code>"L1"</code>、<code>"L2"</code>、<code>"L3"</code></td></tr>
 <tr><td><code>params.sdk</code></td><td>string，可选</td><td>实现和版本，例如 <code>"bcn-a2a-java/1.0.0"</code>，仅用于排查</td></tr>
 </table></div>
-<p>这是自声明，不授予任何权限。BCS 注册时校验声明的等级与 Card 其他字段是否自洽（例如 L1 必须声明 <code>streaming: true</code>），不探测实际行为。实际行为由 TCK 验证。</p>
+<p>这是自声明，不授予任何权限。BCS 注册时校验声明的等级与 Card 其他字段是否自洽（例如 L2 必须声明 <code>streaming: true</code>，L0 不得声明工具观察和审批），不探测实际行为。实际行为由 TCK 验证。</p>
 
 <h3 id="s7-2"><span class="n">7.2</span>调用上下文扩展</h3>
 <p>解决现有待办 A2A-003。BCS 调用 Agent 时，把业务用户等上下文放在 <code>SendMessageRequest.metadata</code> 中，键为扩展 URI。</p>
@@ -792,7 +804,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>级别</th><th>定义方</th><th>可否 <code>required: true</code></th><th>BCS 的处理</th><th>SDK 支持</th></tr>
 <tr><td>平台扩展</td><td>BCN</td><td>可以</td><td>理解并处理</td><td>Server 和 Client 两侧内置</td></tr>
-<tr><td>业务扩展</td><td>业务方。不需要登记</td><td>不可以</td><td>不解释内容，透明透传（7.6）</td><td>引擎模式用工具库（8.7）；托管模式用扩展通道（8.9）</td></tr>
+<tr><td>业务扩展</td><td>业务方。不需要登记</td><td>不可以</td><td>不解释内容，透明透传（7.6）</td><td>引擎模式用工具库（8.7）；托管模式用扩展通道（8.10）</td></tr>
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
@@ -838,26 +850,27 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
 <ul>
-<li><b>任务状态以引擎为唯一来源。</b>SDK 不另存一份任务状态，查询、订阅、取消都交给引擎回答（<span class="tag d">D3</span>）。只有托管模式由 SDK 代管（8.9）。</li>
+<li><b>任务状态以引擎为唯一来源。</b>SDK 不另存一份任务状态，查询、订阅、取消都交给引擎回答（<span class="tag d">D3</span>）。只有托管模式由 SDK 代管（8.10）。</li>
 <li><b>SPI 就是 A2A 的五个方法。</b>方法名、参数和返回值类型与标准一致，平台方读 A2A 规范就能理解 SPI（<span class="tag d">D8</span>）。</li>
 <li><b>标准约束靠校验和工具库保证。</b>SDK 在协议层校验和过滤引擎的输出（8.6）；扩展的编码规则由工具库提供（8.7），平台不必自己实现。</li>
 <li><b>平台差异全部走 SPI 和配置。</b>SDK 内不判断部署环境。</li>
 <li><b>失败要可见。</b>校验不通过、超限、引擎报错都转成明确的协议错误或 Task 失败，不吞掉。</li>
 </ul>
 
-<h3 id="s8-2"><span class="n">8.2</span>两种接入模式</h3>
+<h3 id="s8-2"><span class="n">8.2</span>三种接入模式</h3>
 <div class="tw"><table>
-<tr><th></th><th>引擎模式（默认）</th><th>托管模式（可选，<span class="tag d">D9</span>）</th></tr>
-<tr><td>适用</td><td>引擎有自己的运行记录：能按标识查询状态和已输出内容、取消、在任意实例上订阅后续事件</td><td>没有运行记录的简单 Agent，例如把一个无状态服务包装成问答</td></tr>
-<tr><td>平台实现</td><td><code>A2aAgentHandler</code>：A2A 的五个方法（8.5）</td><td><code>ManagedAgent</code>：执行和取消（8.9）</td></tr>
-<tr><td>任务状态</td><td>引擎的运行记录</td><td>SDK 代管，存在分布式缓存中</td></tr>
-<tr><td>多实例</td><td>任意实例把请求转给引擎（9.1）</td><td>执行实例写入，其他实例读取（9.5）</td></tr>
-<tr><td>停机重启</td><td>由引擎恢复（<span class="tag d">D4</span>）</td><td>在途 Task 失败</td></tr>
-<tr><td>exec 审批</td><td>支持</td><td>不支持，因为审批需要可恢复的引擎状态</td></tr>
-<tr><td>能达到的等级</td><td>L0 到 L3</td><td>L0 到 L2，以及 L3 中的工具观察</td></tr>
-<tr><td>业务要准备的</td><td>无额外存储</td><td>一个不淘汰数据的缓存实例（多实例部署时）</td></tr>
+<tr><th></th><th>消息模式（<span class="tag d">D10</span>）</th><th>引擎模式（默认）</th><th>托管模式（可选，<span class="tag d">D9</span>）</th></tr>
+<tr><td>适用</td><td>简单问答，不需要逐段输出、查询和取消</td><td>引擎有自己的运行记录：能按标识查询状态和已输出内容、取消、在任意实例上订阅后续事件</td><td>没有运行记录、但需要任务语义的 Agent</td></tr>
+<tr><td>平台实现</td><td><code>MessageAgent</code>：一个方法（8.9）</td><td><code>A2aAgentHandler</code>：A2A 的五个方法（8.5）</td><td><code>ManagedAgent</code>：执行和取消（8.10）</td></tr>
+<tr><td>任务状态</td><td>没有 Task</td><td>引擎的运行记录</td><td>SDK 代管，存在分布式缓存中</td></tr>
+<tr><td>多实例</td><td>天然满足</td><td>任意实例把请求转给引擎（9.1）</td><td>执行实例写入，其他实例读取（9.5）</td></tr>
+<tr><td>停机重启</td><td>在途请求失败</td><td>由引擎恢复（<span class="tag d">D4</span>）</td><td>在途 Task 失败</td></tr>
+<tr><td>逐段输出</td><td>不支持</td><td>支持</td><td>支持</td></tr>
+<tr><td>exec 审批</td><td>不支持</td><td>支持</td><td>不支持，因为审批需要可恢复的引擎状态</td></tr>
+<tr><td>能达到的等级</td><td>L0</td><td>L1 到 L3</td><td>L1、L2，以及 L3 中的工具观察</td></tr>
+<tr><td>业务要准备的</td><td>无</td><td>无额外存储</td><td>一个不淘汰数据的缓存实例（多实例部署时）</td></tr>
 </table></div>
-<p>两种模式共用同一条请求处理流水线和同一套校验：SDK 把 <code>ManagedAgent</code> 包装成一个 <code>A2aAgentHandler</code>，所以托管模式只是引擎模式的一个内置实现。</p>
+<p>三种模式共用同一条请求处理流水线和同一套校验：SDK 把 <code>MessageAgent</code> 和 <code>ManagedAgent</code> 分别包装成一个 <code>A2aAgentHandler</code>，所以消息模式和托管模式都是引擎模式的内置实现。</p>
 
 <h3 id="s8-3"><span class="n">8.3</span>与官方 a2a-java 的关系</h3>
 <p>SDK 复用官方的协议模型（<code>a2a-java-sdk-spec</code>）和 GRPC 定义（<code>a2a-java-sdk-spec-grpc</code>），SPI 的参数和返回值直接使用这些类型，保证线上格式与标准一致。请求处理流水线、标准校验和托管模式的多实例逻辑由 SDK 自己实现，不复用官方的 <code>DefaultRequestHandler</code>、<code>TaskStore</code> 和 <code>QueueManager</code>。</p>
@@ -896,14 +909,14 @@ public interface TaskStore {
 <tr><th>模块</th><th>内容</th><th>依赖</th></tr>
 <tr><td><code>bcn-a2a-spec</code></td><td>扩展 URI 常量、扩展数据模型、Card 校验器</td><td>a2a-java spec</td></tr>
 <tr><td><code>bcn-a2a-codec</code></td><td>扩展编解码工具库：审批、工具观察、内容块、多模态（8.7）</td><td><code>bcn-a2a-spec</code></td></tr>
-<tr><td><code>bcn-a2a-server-core</code></td><td>请求处理流水线、协商、授权、调用上下文、标准校验（8.6）；引擎模式 SPI。不依赖 Spring</td><td><code>bcn-a2a-codec</code></td></tr>
-<tr><td><code>bcn-a2a-server-managed</code></td><td>托管模式：<code>ManagedAgent</code>、执行线程池、TaskStore SPI 和内存实现（8.9）</td><td><code>server-core</code></td></tr>
+<tr><td><code>bcn-a2a-server-core</code></td><td>请求处理流水线、协商、授权、调用上下文、标准校验（8.6）；引擎模式 SPI 和消息模式（8.9）。不依赖 Spring</td><td><code>bcn-a2a-codec</code></td></tr>
+<tr><td><code>bcn-a2a-server-managed</code></td><td>托管模式：<code>ManagedAgent</code>、执行线程池、TaskStore SPI 和内存实现（8.10）</td><td><code>server-core</code></td></tr>
 <tr><td><code>bcn-a2a-server-managed-redis</code></td><td>托管模式的分布式缓存存储（9.5）</td><td><code>server-managed</code>、Redis 客户端</td></tr>
 <tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、三种绑定的端点、调用方身份提取、Card 发布、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
 <tr><td><code>bcn-a2a-server-test</code></td><td>单元测试辅助：内存运行器、断言工具</td><td><code>server-core</code></td></tr>
 <tr><td><code>bcn-a2a-tck</code></td><td>一致性测试套件（第 10 节）</td><td><code>bcn-a2a-spec</code></td></tr>
 </table></div>
-<p>引擎模式只需要 starter 和 codec；托管模式再加两个 managed 模块。</p>
+<p>消息模式只需要 starter；引擎模式再加 codec；托管模式再加两个 managed 模块。</p>
 
 <h3 id="s8-5"><span class="n">8.5</span>引擎模式 SPI</h3>
 <pre><code>public interface A2aAgentHandler {
@@ -941,7 +954,7 @@ public interface CallerContext {
 </table></div>
 <h4>SDK 保留数据</h4>
 <p>同一 Task 的协商结果以初始提交为准（P-94），续交的用户必须与初始一致（P-103）。后续请求落到其他实例时，SDK 需要知道这些信息。SDK 不另存，而是借用标准字段：创建 Task 时，SDK 通过 <code>taskAttributes</code> 交给引擎一小段数据（协商结果、调用上下文摘要），引擎把它原样写入 <code>Task.metadata</code> 的 Profile 保留键并随 Task 持久化（R-05）。之后任意实例都从 Task 中读回。SDK 在把 Task 返回给调用方之前去掉这个键。</p>
-<h4>两种模式共用的辅助 SPI</h4>
+<h4>各模式共用的辅助 SPI</h4>
 <div class="tw"><table>
 <tr><th>SPI</th><th>职责</th><th>默认实现</th><th>何时需要自己实现</th></tr>
 <tr><td><code>AgentResolver</code></td><td>按接口路由或 <code>tenant</code> 选择 <code>A2aAgentHandler</code></td><td>容器内所有 handler，按 <code>tenant</code> 匹配</td><td>Agent 是动态配置的</td></tr>
@@ -949,7 +962,7 @@ public interface CallerContext {
 <tr><td><code>AgentAuthorizer</code></td><td>根据 <code>CallerContext</code> 和目标 Agent 决定是否接受调用。拒绝时返回权限错误，不创建 Task</td><td>全部接受</td><td>需要按来源、用户或场景限制</td></tr>
 <tr><td><code>AgentRegistrar</code></td><td>启动时向 BCS 注册或更新 Card</td><td>关闭</td><td>通常使用 SDK 提供的实现并配置开启</td></tr>
 <tr><td><code>ExtensionDescriptors</code></td><td>提供本应用所用扩展的描述（7.6，可选），用于测试模式下的 Schema 校验</td><td>读取应用内的描述文件</td><td>通常不需要</td></tr>
-<tr><td><code>PushSender</code></td><td>投递一条推送（8.15）。本期只定义接口</td><td>未启用</td><td>后续阶段</td></tr>
+<tr><td><code>PushSender</code></td><td>投递一条推送（8.16）。本期只定义接口</td><td>未启用</td><td>后续阶段</td></tr>
 </table></div>
 <pre><code>public interface AgentResolver {
     /** 找不到时返回空；SDK 对外返回未找到，不暴露其他 Agent 的存在。 */
@@ -1117,7 +1130,40 @@ public class OrderAuthorizer implements AgentAuthorizer {
     }
 }</code></pre>
 
-<h3 id="s8-9"><span class="n">8.9</span>托管模式</h3>
+<h3 id="s8-9"><span class="n">8.9</span>消息模式</h3>
+<p>最轻的接入方式，对应 L0（6.3、<span class="tag d">D10</span>）。Agent 对每次发送只返回一条完整的消息，没有 Task，也没有任何状态。SDK 把 <code>MessageAgent</code> 包装成一个 <code>A2aAgentHandler</code>：用它同时响应 SendMessage 和 SendStreamingMessage（流中只有这一条消息），对 GetTask、SubscribeToTask、CancelTask 和带 <code>taskId</code> 的消息返回 <code>TASK_NOT_FOUND</code>（P-35 到 P-38）。</p>
+<pre><code>public interface MessageAgent {
+    AgentDescriptor descriptor();
+    /** 返回一条完整的回复。在 SDK 管理的线程上调用，可以阻塞。 */
+    Message reply(BcnCall&lt;SendMessageRequest&gt; call) throws Exception;
+}</code></pre><pre><code>@Component
+public class FaqAgent implements MessageAgent {
+    @Override
+    public AgentDescriptor descriptor() {
+        return AgentDescriptor.builder()
+                .name("报销问答").description("回答差旅报销政策相关问题").version("1.0.0")
+                .skill("expense_faq", "报销政策", "回答报销标准、流程和材料要求", "finance")
+                .messageOnly()                       // L0；可再声明 .streaming(true)，流中只有一条消息
+                .build();
+    }
+
+    @Override
+    public Message reply(BcnCall&lt;SendMessageRequest&gt; call) {
+        String answer = faqService.answer(Texts.of(call.request().message()));
+        return Messages.agentText(answer);           // SDK 补齐 messageId、role、contextId
+    }
+}</code></pre>
+<div class="tw"><table>
+<tr><th>项</th><th>行为</th></tr>
+<tr><td>多轮会话</td><td>SDK 沿用请求中的 <code>contextId</code>，没有时生成一个并放进回复（P-38）。会话记忆由 Agent 按 <code>contextId</code> 自己保存</td></tr>
+<tr><td>可用的能力</td><td>文本和文件 Part（6.13）、调用上下文、Card 描述（E1）和请求参数（E2）</td></tr>
+<tr><td>不可用的能力</td><td>逐段输出、断线后取回结果、取消、工具观察、exec 审批、结果字段（E3）、过程事件（E4）、内容块（E5）、推送。<code>AgentDescriptor</code> 声明了其中任何一项时启动失败</td></tr>
+<tr><td>断线</td><td>结果丢失。调用方报告结果未知，不自动重发（P-112）</td></tr>
+<tr><td>超时</td><td>SDK 对 <code>reply</code> 施加最长执行时间，超时返回内部错误</td></tr>
+<tr><td>多实例</td><td>天然满足，因为没有后续请求</td></tr>
+</table></div>
+
+<h3 id="s8-10"><span class="n">8.10</span>托管模式</h3>
 <p>给没有运行记录的简单 Agent 用（<span class="tag d">D9</span>）。平台只写"输入到输出"的逻辑，Task 的创建、状态、存储、查询、订阅、取消都由 SDK 代管。SDK 把 <code>ManagedAgent</code> 包装成一个 <code>A2aAgentHandler</code>，所以请求处理和校验与引擎模式相同。</p>
 <pre><code>public interface ManagedAgent {
     AgentDescriptor descriptor();
@@ -1181,7 +1227,7 @@ public class FxRateAgent implements ManagedAgent {
 </table></div>
 <p>托管模式的限制：只支持同步执行；不支持 exec 审批；停机或宕机时在途 Task 失败；多实例部署需要一个不淘汰数据的缓存实例（9.5）。</p>
 
-<h3 id="s8-10"><span class="n">8.10</span>线程、背压与停机</h3>
+<h3 id="s8-11"><span class="n">8.11</span>线程、背压与停机</h3>
 <div class="tw"><table>
 <tr><th>项</th><th>引擎模式</th><th>托管模式</th></tr>
 <tr><td>执行</td><td>在引擎中。SDK 不持有执行线程</td><td>SDK 管理的有界线程池，每个 Task 占一个线程直到 <code>execute</code> 返回</td></tr>
@@ -1190,7 +1236,7 @@ public class FxRateAgent implements ManagedAgent {
 <tr><td>优雅停机</td><td>停止接收新请求，从注册中心下线，关闭已打开的流。运行在引擎中继续，调用方重连到其他实例后由引擎回答</td><td>停止接收新请求，等待在途 Task 结束（上限可配），超时的置为 <code>FAILED</code></td></tr>
 </table></div>
 
-<h3 id="s8-11"><span class="n">8.11</span>配置项</h3>
+<h3 id="s8-12"><span class="n">8.12</span>配置项</h3>
 <div class="tw"><table>
 <tr><th>配置键</th><th>默认值</th><th>说明</th></tr>
 <tr><td><code>bcn.a2a.server.enabled</code></td><td><code>true</code></td><td>总开关</td></tr>
@@ -1213,7 +1259,7 @@ public class FxRateAgent implements ManagedAgent {
 <tr><td><code>bcn.a2a.server.managed.max-text-bytes</code></td><td>1 MiB</td><td>单 Task 累计文本上限</td></tr>
 </table></div>
 
-<h3 id="s8-12"><span class="n">8.12</span>Card 生成、发布与注册</h3>
+<h3 id="s8-13"><span class="n">8.13</span>Card 生成、发布与注册</h3>
 <ul>
 <li><b>生成。</b>starter 根据 <code>AgentDescriptor</code> 和配置的接口地址生成 Card。扩展声明来自 <code>AgentDescriptor</code> 中显式声明的能力。托管模式不允许声明 exec 审批。</li>
 <li><b>校验。</b>启动时用 <code>bcn-a2a-spec</code> 的校验器检查 Card。不合规则启动失败，并给出具体条款编号。</li>
@@ -1222,7 +1268,7 @@ public class FxRateAgent implements ManagedAgent {
 </ul>
 <div class="box q"><p>多实例同时启动会并发注册。BCS 对重复的 <code>provider_bot_ref</code> 返回冲突，SDK 收到冲突后改为查询再更新。更新是完整替换且以最后写入为准，各实例的 Card 相同，因此结果一致。动态 Agent 的注册时机见 <span class="tag q">Q10</span>。</p></div>
 
-<h3 id="s8-13"><span class="n">8.13</span>可观测性</h3>
+<h3 id="s8-14"><span class="n">8.14</span>可观测性</h3>
 <div class="tw"><table>
 <tr><th>类别</th><th>内容</th></tr>
 <tr><td>日志</td><td>每个请求一条，包含方法、<code>taskId</code>、<code>contextId</code>、<code>tenant</code>、调用方应用名、耗时、结果。不记录消息文本、<code>userId</code> 原值和工具参数。</td></tr>
@@ -1231,7 +1277,7 @@ public class FxRateAgent implements ManagedAgent {
 <tr><td>排查标识</td><td>BCS 侧排查使用 <code>run_id</code>，Agent 侧使用 <code>taskId</code>。BCS 把 <code>run_id</code> 作为初始消息的 <code>messageId</code>，SDK 在日志中同时记录两者。</td></tr>
 </table></div>
 
-<h3 id="s8-14"><span class="n">8.14</span>交付形态与标准的保证</h3>
+<h3 id="s8-15"><span class="n">8.15</span>交付形态与标准的保证</h3>
 <p>协议实现放在哪里运行，有两种形态。</p>
 <div class="tw"><table>
 <tr><th></th><th>进程内 SDK（本期）</th><th>BCN 托管适配层（不做）</th></tr>
@@ -1249,7 +1295,7 @@ public class FxRateAgent implements ManagedAgent {
 <tr><td>版本治理</td><td>Card 的 profile 声明扩展带 <code>sdk</code> 字段，BCS 可以统计全量版本分布。Profile 规定最低 SDK 版本，低于它的 Agent 在注册或更新时得到告警或被拒绝。见 <span class="tag q">Q14</span>。</td><td>版本碎片化；协议修复无法触达</td></tr>
 </table></div>
 
-<h3 id="s8-15"><span class="n">8.15</span>推送通知的实现方案（后续阶段）</h3>
+<h3 id="s8-16"><span class="n">8.16</span>推送通知的实现方案（后续阶段）</h3>
 <div class="box"><p><b>本期不实现，也不改动任何接口。</b>本期只定义推送的语义（6.12），<code>PushSender</code> 只定义不启用。本节说明以后如何扩展。</p></div>
 <div class="tw"><table>
 <tr><th></th><th>引擎模式</th><th>托管模式</th></tr>
@@ -1271,7 +1317,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 
 <h2 id="s9"><span class="n">9</span>多实例设计</h2>
 <h3 id="s9-1"><span class="n">9.1</span>模型</h3>
-<p>引擎模式下 SDK 是无状态的协议层。任何实例收到任何请求，都在协议层处理完后转给引擎；实例之间不通信，也不共享 SDK 层的状态。多实例下的正确性由引擎满足 9.2 的要求来保证，SDK 不做补救（<span class="tag d">D3</span>、<span class="tag d">D4</span>）。托管模式由 SDK 代管任务状态，见 9.5。</p>
+<p>消息模式没有 Task，也就没有跨实例的问题。引擎模式下 SDK 是无状态的协议层。任何实例收到任何请求，都在协议层处理完后转给引擎；实例之间不通信，也不共享 SDK 层的状态。多实例下的正确性由引擎满足 9.2 的要求来保证，SDK 不做补救（<span class="tag d">D3</span>、<span class="tag d">D4</span>）。托管模式由 SDK 代管任务状态，见 9.5。</p>
 
 <h3 id="s9-2"><span class="n">9.2</span>对引擎的要求</h3>
 <p>以下要求适用于引擎模式。它们由 TCK 的引擎要求分组验证：至少两个实例，请求分别发到不同实例，以及终止并重启实例（第 10 节）。</p>
@@ -1347,7 +1393,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td><code>ownerInstance</code>、<code>leaseExpiresAtMs</code></td><td>执行实例和租约</td></tr>
 <tr><td><code>cancelRequested</code></td><td>取消标记，只能从 false 变为 true</td></tr>
 <tr><td><code>deadlineMs</code>、<code>createdAtMs</code>、<code>updatedAtMs</code></td><td>截止时间和审计</td></tr>
-<tr><td><code>pushConfig</code></td><td>推送配置（8.15）。本期预留，始终为空</td></tr>
+<tr><td><code>pushConfig</code></td><td>推送配置（8.16）。本期预留，始终为空</td></tr>
 </table></div>
 <h4>写入节奏与跨实例行为</h4>
 <div class="tw"><table>
@@ -1412,15 +1458,16 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <div class="tw"><table>
 <tr><th>分组</th><th>覆盖内容</th><th>等级</th></tr>
 <tr><td>Card</td><td>P-10 到 P-17；等级声明与能力自洽</td><td>全部</td></tr>
-<tr><td>非流式</td><td>立即返回、阻塞返回、GetTask 完整快照、未知 Task</td><td>L0</td></tr>
-<tr><td>取消</td><td>运行中取消、终态取消、重复取消、完成与取消竞争</td><td>L0</td></tr>
-<tr><td>流式</td><td>首帧为 Task、追加规则、显式终态、流后 GetTask 一致</td><td>L1</td></tr>
-<tr><td>断流恢复</td><td>断开后 Task 继续、订阅首帧为快照、不重复文本、终态订阅报错</td><td>L1</td></tr>
+<tr><td>消息模式</td><td>非流式和流式都只返回一条消息，流随后关闭；查询、订阅、取消和续交返回 <code>TASK_NOT_FOUND</code>；多轮的 <code>contextId</code></td><td>L0</td></tr>
+<tr><td>非流式</td><td>立即返回、阻塞返回、GetTask 完整快照、未知 Task</td><td>L1</td></tr>
+<tr><td>取消</td><td>运行中取消、终态取消、重复取消、完成与取消竞争</td><td>L1</td></tr>
+<tr><td>流式</td><td>首帧为 Task、追加规则、显式终态、流后 GetTask 一致</td><td>L2</td></tr>
+<tr><td>断流恢复</td><td>断开后 Task 继续、订阅首帧为快照、不重复文本、终态订阅报错</td><td>L2</td></tr>
 <tr><td>协商与错误</td><td>版本不支持、必需扩展缺失、未协商扩展不出数据、错误原因</td><td>全部</td></tr>
-<tr><td>调用上下文</td><td>有 <code>userId</code>、缺失拒绝、续交不一致拒绝</td><td>L2</td></tr>
+<tr><td>调用上下文</td><td>有 <code>userId</code>、缺失拒绝、续交不一致拒绝</td><td>声明了调用上下文的 Agent</td></tr>
 <tr><td>扩展</td><td>工具记录格式；审批允许、拒绝、分批、过期、重复</td><td>L3</td></tr>
 <tr><td>引擎要求</td><td>引擎模式。至少两个实例：请求分别发到不同实例，验证 R-01 到 R-09；终止并重启实例后运行恢复或置为失败，且已输出内容不变；同一批审批回复同时发到两个实例只生效一次</td><td>全部</td></tr>
-<tr><td>托管模式</td><td>两个实例共用缓存：9.5 中每种跨实例行为；终止执行实例后的回收；TaskStore 合同测试</td><td>L0 到 L2</td></tr>
+<tr><td>托管模式</td><td>两个实例共用缓存：9.5 中每种跨实例行为；终止执行实例后的回收；TaskStore 合同测试</td><td>L1、L2</td></tr>
 <tr><td>隔离</td><td>不同 tenant 的 Task 互不可见</td><td>全部</td></tr>
 </table></div>
 <p>多实例用例需要直接指定目标实例，因此通过各实例的直连地址执行，不经过负载均衡。</p>
@@ -1428,20 +1475,21 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <h2 id="s11"><span class="n">11</span>存量 Agent 迁移</h2>
 <div class="tw"><table>
 <tr><th>现有形态</th><th>接入方式</th><th>得到的等级</th><th>工作量</th></tr>
-<tr><td>引擎有运行记录，满足 9.2 的要求</td><td>引擎模式：实现 <code>A2aAgentHandler</code>，把五个方法对应到引擎的运行接口，用工具库编码扩展</td><td>L0 到 L3</td><td>中，主要是运行记录到 Task 的映射</td></tr>
+<tr><td>简单问答，回答一次性给出即可</td><td>消息模式：实现 <code>MessageAgent</code></td><td>L0</td><td>很小</td></tr>
+<tr><td>引擎有运行记录，满足 9.2 的要求</td><td>引擎模式：实现 <code>A2aAgentHandler</code>，把五个方法对应到引擎的运行接口，用工具库编码扩展</td><td>L1 到 L3</td><td>中，主要是运行记录到 Task 的映射</td></tr>
 <tr><td>引擎有运行记录，但部分要求不满足</td><td>先补齐引擎能力；在此之前单实例部署，或改用托管模式</td><td>按满足情况</td><td>取决于引擎</td></tr>
-<tr><td>无运行记录的同步接口：请求进，完整文本出</td><td>托管模式：实现 <code>ManagedAgent</code>，一次 <code>append</code> 后 <code>complete</code></td><td>L0 或 L1</td><td>小</td></tr>
-<tr><td>无运行记录的流式接口</td><td>托管模式：把回调接到 <code>sink.append</code></td><td>L1；需要用户身份时 L2</td><td>小</td></tr>
+<tr><td>无运行记录的同步接口：请求进，完整文本出</td><td>托管模式：实现 <code>ManagedAgent</code>，一次 <code>append</code> 后 <code>complete</code></td><td>L1 或 L2</td><td>小</td></tr>
+<tr><td>无运行记录的流式接口</td><td>托管模式：把回调接到 <code>sink.append</code></td><td>L2</td><td>小</td></tr>
 <tr><td>已有标准 A2A Server</td><td>不使用 SDK，按 Profile 调整并通过 TCK；或把现有实现包装为 <code>A2aAgentHandler</code> 以获得协议层校验</td><td>按实现</td><td>小到中</td></tr>
 <tr><td>平台上有大量动态创建的 Agent</td><td>实现 <code>AgentResolver</code>，一个进程承载全部 Agent，以 <code>tenant</code> 区分</td><td>按 Agent</td><td>中</td></tr>
 <tr><td>非 Java 技术栈</td><td>按 Profile 自行实现，通过 TCK</td><td>按实现</td><td>—</td></tr>
 </table></div>
-<p>建议各平台先以 L1 接入并通过 TCK，再根据业务需要升级。</p>
+<p>建议各平台按需要选择最低的等级接入并通过 TCK：简单问答用 L0，需要逐段输出用 L2，再按业务需要升级。需要用户身份时，在任何等级上声明调用上下文扩展。</p>
 <h3>接入步骤</h3>
 <ol>
-<li>确认引擎是否满足 9.2 的要求，选择引擎模式或托管模式。</li>
+<li>按 8.2 选择接入模式：消息模式、引擎模式（需满足 9.2 的要求）或托管模式。</li>
 <li>引入 starter 和 codec；托管模式再引入 managed 模块，多实例部署准备一个不淘汰数据的缓存实例（9.5）。</li>
-<li>实现 <code>A2aAgentHandler</code> 或 <code>ManagedAgent</code>（动态 Agent 再实现 <code>AgentResolver</code>）。</li>
+<li>实现 <code>MessageAgent</code>、<code>A2aAgentHandler</code> 或 <code>ManagedAgent</code>（动态 Agent 再实现 <code>AgentResolver</code>）。</li>
 <li>配置绑定和接口地址，由平台确认 MOSN 路由。</li>
 <li>本地运行 TCK 的对应等级；引擎模式运行引擎要求分组。</li>
 <li>向 BCS 申请 Provider，注册 Agent（手动或开启自动注册）。</li>
@@ -1458,7 +1506,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td>下行合同测试与 TCK 的 Client 方向用例对齐</td><td>第 10 节</td><td>P2 起逐步</td></tr>
 <tr><td>确认取消超时与托管模式的 <code>cancel-wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
 <tr><td>推送接收端点；对声明了推送能力的 Agent，长任务和非流式任务改用推送加低频查询</td><td>6.12，取决于 <span class="tag q">Q19</span></td><td>P6</td></tr>
-<tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.14，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
+<tr><td>保存每个 Agent 的 TCK 通过记录和 SDK 版本；提供版本分布查询</td><td>8.15，取决于 <span class="tag q">Q13</span>、<span class="tag q">Q14</span></td><td>P5</td></tr>
 <tr><td>业务扩展的透明透传：转发协商集合；按扩展点上限检查；只沿调用路径；日志不记内容。下行 adapter 的文本投影需要跳过并保留非文本的块和字段</td><td>7.6。会话历史是否保存取决于 <span class="tag q">Q15</span></td><td>P4 之后</td></tr>
 <tr><td>工作台前端：按内容块序列渲染；实现平台 UI 扩展；对不认识的块显示降级文本</td><td>7.5，取决于 <span class="tag q">Q17</span></td><td>P4 之后</td></tr>
 <tr><td>多模态：工作台上传文件并以地址下发；中转输出的文件块；按已支持的类型填写 <code>acceptedOutputModes</code>；注册时不再只看 <code>text/plain</code></td><td>6.13，取决于 <span class="tag q">Q20</span></td><td>P4 之后</td></tr>
@@ -1499,11 +1547,11 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <div class="tw"><table>
 <tr><th>阶段</th><th>交付</th><th>验收</th></tr>
 <tr><td class="nw">P0 评审</td><td>本设计评审通过；待确认问题有结论</td><td>第 16 节全部关闭或明确延后</td></tr>
-<tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的请求处理和校验；引擎模式 SPI；starter 的三种绑定端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>一个引擎模式的示例 Agent 单实例通过 TCK L1；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
+<tr><td class="nw">P1 基础</td><td>Profile 规范文本；<code>bcn-a2a-spec</code>；<code>server-core</code> 的请求处理和校验；引擎模式 SPI 和消息模式；starter 的三种绑定端点；TCK 的 Card、非流式、流式、取消、断流恢复分组</td><td>一个消息模式和一个引擎模式的示例 Agent 分别通过 TCK L0 和 L2；BCS 到示例 Agent 的对话、取消、断流恢复闭环</td></tr>
 <tr><td class="nw">P2 多实例</td><td>TCK 引擎要求分组；托管模式及其分布式缓存存储；TCK 托管模式分组</td><td>示例引擎在两实例下通过引擎要求分组，包括终止并重启实例；托管模式两实例通过对应分组；压测得到 SDK 校验的开销和托管模式的存储容量数据</td></tr>
-<tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
+<tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK 调用上下文分组通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
 <tr><td class="nw">P4 扩展</td><td><code>bcn-a2a-codec</code>：审批、工具观察、内容块、多模态；托管模式的扩展通道和文件块；自动注册</td><td>TCK L3 通过；两实例下同一批审批回复只生效一次；工作台完成一次允许和一次拒绝</td></tr>
-<tr><td class="nw">P6 推送</td><td>按 8.15：引擎模式的四个配置方法和 <code>PushSender</code> 实现；托管模式的发件箱和到期队列；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
+<tr><td class="nw">P6 推送</td><td>按 8.16：引擎模式的四个配置方法和 <code>PushSender</code> 实现；托管模式的发件箱和到期队列；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
 <tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
 </table></div>
 
@@ -1516,14 +1564,14 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td><span class="tag q">Q4</span></td><td>现有 Harness adapter 的去向</td><td>扩展编解码迁入 <code>bcn-a2a-codec</code>；Harness 改为引擎模式的一个 <code>A2aAgentHandler</code> 实现，前提是 Harness 的运行记录满足 9.2</td><td>P4</td></tr>
 <tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>已结论：SDK 只复用协议模型，SPI 使用其类型；请求处理自己实现（8.3）</td><td>8.3</td></tr>
 <tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的接口形态分布（同步、流式、是否带工具和审批）。技术栈已确认 90% 以上为 Java</td><td>需要各平台提供</td><td>引擎模式和托管模式的接入比例；L3 的优先级</td></tr>
-<tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>引擎模式由引擎决定，保留期不短于 24 小时（R-07）；托管模式默认文本 1 MiB、保留 24 小时</td><td>P-74、9.2、8.11</td></tr>
+<tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>引擎模式由引擎决定，保留期不短于 24 小时（R-07）；托管模式默认文本 1 MiB、保留 24 小时</td><td>P-74、9.2、8.12</td></tr>
 <tr><td><span class="tag q">Q8</span></td><td>来源信息未签名，能直连 Agent 的内部应用可以伪造。是否接受；不接受时选网络层限制还是启用 <code>proof</code></td><td>首版接受，与 <span class="tag d">D1</span> 一致；敏感 Agent 用网络层限制；<code>proof</code> 留作后续版本</td><td>7.2、第 13 节</td></tr>
-<tr><td><span class="tag q">Q9</span></td><td>托管模式的停机等待时间默认值，以及是否需要与发布系统联动。引擎模式停机时只关闭流，不需要等待</td><td>30 秒</td><td>8.10</td></tr>
-<tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.12</td></tr>
+<tr><td><span class="tag q">Q9</span></td><td>托管模式的停机等待时间默认值，以及是否需要与发布系统联动。引擎模式停机时只关闭流，不需要等待</td><td>30 秒</td><td>8.11</td></tr>
+<tr><td><span class="tag q">Q10</span></td><td>动态 Agent 的注册由谁触发：SDK 定时对账，还是平台在创建 Agent 时主动调用</td><td>平台主动调用 SDK 提供的注册接口；SDK 不做定时对账</td><td>8.13</td></tr>
 <tr><td><span class="tag q">Q11</span></td><td>托管模式只提供分布式缓存实现（<span class="tag d">D7</span>）。遗留：公司内部缓存产品的实现由谁提供；它是否满足不淘汰、主节点读写、原子比较并写入三项要求</td><td>开源仓库提供 Redis 协议的实现；内部缓存产品的实现放内部仓库，通过 TaskStore 合同测试</td><td>9.5</td></tr>
 <tr><td><span class="tag q">Q12</span></td><td>已结论：三种绑定都保留并可用于生产，都不鉴权。遗留问题：SDK 是否默认同时开启三种，还是由业务显式选择</td><td>由业务在 <code>bindings</code> 中显式选择，不设默认</td><td>P-03</td></tr>
-<tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.14、第 12 节</td></tr>
-<tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.14</td></tr>
+<tr><td><span class="tag q">Q13</span></td><td>TCK 通过是否作为注册的硬性准入条件，以及通过记录如何提交和核验</td><td>分两步：先记录并展示，不拦截；接入平台稳定后改为新注册必须通过对应等级</td><td>8.15、第 12 节</td></tr>
+<tr><td><span class="tag q">Q14</span></td><td>最低 SDK 版本策略：低于最低版本时告警还是拒绝，宽限期多长</td><td>先告警；安全或协议正确性修复给出明确的截止日期后拒绝</td><td>8.15</td></tr>
 <tr><td><span class="tag q">Q15</span></td><td>BCS 的会话历史是否保存业务扩展的 E3 和 E5 数据。不保存则超过 Agent 的 Task 保留期后只剩降级文本；保存则 BCS 要存储它不理解的业务数据</td><td>首版不保存，只保存文本和降级文本。有明确的历史回看需求后再评估</td><td>7.6</td></tr>
 <tr><td><span class="tag q">Q16</span></td><td>是否建立可选的扩展目录，供各团队查找和复用扩展。它不是使用扩展的前提</td><td>首版不建。扩展的规范文档由业务方自己发布；业务扩展数量多起来之后再建目录</td><td>7.6、7.7</td></tr>
 <tr><td><span class="tag q">Q17</span></td><td>平台 UI 扩展的组件集：自行设计，还是采用已有的开放规范（例如面向 Agent 生成界面的 A2UI，需要先评估其成熟度和与内容块模型的匹配）</td><td>先确定内容块模型（7.5），组件集单独立项；在此之前工作台只渲染文本和降级文本</td><td>7.5</td></tr>
@@ -1532,7 +1580,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
 <tr><td><span class="tag q">Q21</span></td><td><b>待讨论项。</b>调用路径由 BCS 返回的 Card 决定：原生地址模式（直连）或 BCN 地址模式（经 BCS），按 Agent 类型和使用模式确定。需要讨论：各类 Agent 的默认模式；每个 Agent 固定一种还是因调用方而异；派生 Card 的改写规则；必须经 BCS 的 Agent 如何强制；直连调用是否向 BCS 上报摘要</td><td>采用该方案。按 Profile 接入的 Agent 默认原生地址；未按 Profile 接入的 Bot 只用 BCN 地址；每个 Agent 先固定一种；上报摘要为可选。具体设计放在 client SDK 和 BCS A2A 服务阶段</td><td>4.1</td></tr>
 <tr><td><span class="tag q">Q22</span></td><td>群协作：是否需要平台协作扩展让 Agent 感知群，还是维持现在的文本入群；群内两个 Bot 之间是否需要交换结构化数据（目前只广播文本）；Provider 是否可以将 Agent 设为不入群</td><td>首版维持文本入群，增加“不入群”设置；平台协作扩展单独立项设计；群内结构化交换暂不支持</td><td>7.8</td></tr>
-<tr><td><span class="tag q">Q23</span></td><td>异步引擎：提交作业后立即返回、结果稍后到达的引擎</td><td>已结论：引擎模式下运行由引擎管理，异步引擎自然支持；托管模式只支持同步执行，异步引擎应使用引擎模式</td><td>8.2、8.9</td></tr>
+<tr><td><span class="tag q">Q23</span></td><td>异步引擎：提交作业后立即返回、结果稍后到达的引擎</td><td>已结论：引擎模式下运行由引擎管理，异步引擎自然支持；托管模式只支持同步执行，异步引擎应使用引擎模式</td><td>8.2、8.10</td></tr>
 <tr><td><span class="tag q">Q24</span></td><td>检查点恢复</td><td>已结论：由引擎保证（<span class="tag d">D4</span>）；Profile 只要求恢复后不改写已输出内容（R-03），9.4 给出引擎侧的实现建议</td><td>9.2、9.4</td></tr>
 <tr><td><span class="tag q">Q25</span></td><td>SDK 校验发现无法安全修正的违规时，生产环境是拒绝还是只记录</td><td>测试和 TCK 中拒绝；生产环境默认拒绝，接入灰度期可以配置为只记录，并按条款编号统计</td><td>8.6</td></tr>
 <tr><td><span class="tag q">Q26</span></td><td>现有各引擎对 9.2 要求的满足情况，尤其是 R-02（订阅首帧快照与后续事件衔接）、R-05（原样持久化 <code>Task.metadata</code>）、R-06（审批决定的原子记录）</td><td>各引擎负责人逐条确认；不满足的引擎先单实例部署或使用托管模式</td><td>9.2</td></tr>
