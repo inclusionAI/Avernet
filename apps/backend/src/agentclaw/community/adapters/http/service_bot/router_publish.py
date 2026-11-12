@@ -246,7 +246,7 @@ async def process_publish(
         )
 
     except PublishNotFoundError as e:
-        logger.error(f"[process_publish] Order not found: {e}")
+        logger.warning(f"[process_publish] Order not found: publish_id={publish_id}, user_id={user_id}, error={e}")
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except PublishStatusInvalidError as e:
