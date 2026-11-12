@@ -8,7 +8,12 @@ MethodStore、L5 顶层投影)。``service_api``/通用服务等其余模块对�
 import ast
 from pathlib import Path
 
-_PRODUCTS_SRC = Path("src/agentclaw/community/core/task/context_collab/products")
+# 以测试文件自身锚定(src 树),与 cwd 无关;不存在即响亮失败,杜绝"空转过绿"。
+_PRODUCTS_SRC = (
+    Path(__file__).resolve().parents[6]
+    / "src/agentclaw/community/core/task/context_collab/products"
+)
+assert _PRODUCTS_SRC.is_dir(), f"products src tree missing: {_PRODUCTS_SRC}"
 
 _CC = "agentclaw.community.core.task.context_collab"
 # 层模块 + errors + 三处基建端口(spec §3.1 逐字)。
@@ -38,27 +43,51 @@ def _imported_modules(tree: ast.Module) -> list[str]:
 
 
 def _violating_modules(modules: list[str]) -> list[str]:
-    """返回违规 agentclaw 模块(其余第三方/标准库不裁)。"""
+    """违规 agentclaw 模块清单。
+
+    裁定面(spec §3.1"全部 import"):任何 ``agentclaw.*`` import 都必须
+    落在白名单内——context_collab 之外的模块(如 core.task.forum)一律
+    违规;标准库/第三方不在此列(无 agentclaw 前缀)。静态 AST 扫描
+    不覆盖 importlib/__import__ 动态导入(documented limitation)。
+    """
+    _layer_dirs = {
+        "l2_agent_network", "l3_spaces_resources", "l4_context_primitives",
+        "l5_methods", "l6_products", "g1_secure_govern",
+        "g2_keep_reliable_live", "g3_observe_evaluate_evolve",
+        "g4_contracts_consistency",
+    }
     out = []
     for module in modules:
-        if not module.startswith("agentclaw.community.core.task.context_collab."):
+        if not module.startswith("agentclaw."):
+            continue  # 标准库/第三方不裁。
+        if not module.startswith(_CC + "."):
+            out.append(module)  # agentclaw 但在 context_collab 之外 → 违规。
             continue
         rest = module[len(_CC) + 1 :]
-        # products/ 内部引用(含 products 自身)允许。
+        # products/ 子树内部互引(含 products 自身)允许。
         if rest == "products" or rest.startswith("products."):
             continue
         if rest in _ALLOWED_CONTEXT_COLLAB_PARTS:
             continue
-        # 允许白名单子模块的成员引用(如 l4_context_primitives.collet)。
-        head = rest.split(".")[0]
-        if head in {"l2_agent_network", "l3_spaces_resources",
-                    "l4_context_primitives", "l5_methods", "l6_products",
-                    "g1_secure_govern", "g2_keep_reliable_live",
-                    "g3_observe_evaluate_evolve", "g4_contracts_consistency"}:
+        # 层模块的成员引用(如 l4_context_primitives.collet)允许。
+        if rest.split(".")[0] in _layer_dirs:
             continue
         out.append(module)
     return out
 
+
+
+def test_probe_blocks_agentclaw_outside_context_collab():
+    """执法盲区自证:context_collab 之外的 agentclaw 模块(如 forum)必须违规。"""
+    bad = _imported_modules(
+        ast.parse(
+            "from agentclaw.community.core.task.forum.services.forum_service import ForumService\n"
+        )
+    )
+    assert _violating_modules(bad), (
+        "checker under-enforces: agentclaw imports outside context_collab "
+        "must be violations"
+    )
 
 def test_products_import_whitelist():
     """products/ 下每个文件的所有 agentclaw import 必须落在白名单内。"""
