@@ -51,7 +51,7 @@ No human review/comment at creation-time readback.
 - Other module jobs were successful through unchanged-scope skips, not full module test execution. Singlebox was still running at this observation; an older-head result cannot substitute for the next pushed head.
 
 ## Final delivery head and request template
-- Current PR head: `0396a07c20371998ca9937e58f632fe1c9aad49a`; base: GitHub `inclusionAI/Avernet:dev`. The latest head contains the exact inventory pin correction; previous-head results are historical evidence only.
+- Current PR head: `8fc3c3634488c2e29225ba6b52b57fe90ce9700b`; base: GitHub `inclusionAI/Avernet:dev`. The latest head contains the exact inventory pin correction; previous-head results are historical evidence only.
 - The remote correction follows 23 explicit-user contract tests and 98 router inventory/namespace/parity tests, all passed.
 - Final checks: Backend run `43148622567` / job `130952282155`; Singlebox run `43148622546` / job `130952395672`. Both were running at this observation.
 - Request template below assumes the normal authenticated public gateway client/required authentication headers; it embeds no credentials and has not been executed against production:
@@ -81,3 +81,16 @@ This report's final CI observations are maintained locally without further repor
 - Add the new GET to the existing ExpertChat router denominator. Coverage thresholds and source denominators remain intact.
 - Local validation: manifest validation, story collection, static/diff hygiene and 36 affected tests passed. Full local live Singlebox was not run: this checkout lacks Python environments, BCS instrumented binary and frontend dependencies, and --module still requires setup/start all. It would need a fresh full-stack setup; no existing process was stopped or modified.
 - The next head's actual Singlebox result, not an estimated coverage gain, determines PASS. Prior Backend single-job retry and its outcome are historical after the next push.
+
+## Current acceptance-fix head
+- Latest pushed head: `8fc3c3634488c2e29225ba6b52b57fe90ce9700b`; current base remains GitHub dev. Prior head/run observations above are historical and do not establish this head's gate.
+- Backend https://github.com/inclusionAI/Avernet/actions/runs/43153450906/job/130967814338: PENDING, real test/coverage step started 2026-11-12 12:14:32 Asia/Shanghai.
+- Singlebox https://github.com/inclusionAI/Avernet/actions/runs/43153450587/job/130967813274: PENDING, real coverage step started 2026-11-12 12:15:43 Asia/Shanghai.
+- PR title and design guard: SUCCESS. Unchanged module tests are scope skips, not claimed executed suites.
+- No new code changes or additional retries were made after this head.
+
+## Complete OpenAPI contract audit
+- Head 8fc3c36344 Backend exposed a second strict contract inventory: `engine_runtime/test_stage_addressing.py` requires an explicit set of owner-addressed non-stage operations. Added only the new Caller GET to that set; retained all equality assertions.
+- Full OpenAPI adapter suite then found one additional schema-description gap before the next push: `CallerInstanceStatus` lacked model-level documentation. Added a class docstring; field descriptions and runtime behavior remain unchanged.
+- Targeted two failing suites: 28 passed. Complete OpenAPI adapter suite after both corrections: **2505 passed, 2 skipped**, zero failed, 83.21s; JUnit `/tmp/caller-status-full-openapi-final-junit.xml`. This includes all stage, address, admission, authorization, count, schema and routing inventories, not only selected inventory files.
+- Same-head Singlebox 43153450587/job130967813274: **SUCCESS**, actual new acceptance story executed; exact artifact metrics are being extracted. The next pushed head still requires its own checks.

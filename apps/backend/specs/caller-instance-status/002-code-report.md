@@ -87,3 +87,6 @@ responsibility for this follow-up: no existing local shared services were
 started or stopped. Healthy-device and upstream-error behavior remain covered by
 the focused runtime/MockTransport tests, while this live story preserves real
 provider behavior rather than replacing it.
+
+## Complete public-contract audit
+- Registered the new GET in the existing owner-addressed/non-stage exact inventory and added CallerInstanceStatus model documentation. Targeted suites28 passed; full OpenAPI adapter suite2505 passed,2 skipped,zero failed (83.21s). No production control flow changed. Prior acceptance-fix head Singlebox job130967813274 actually succeeded; final pushed head remains independently checked.
