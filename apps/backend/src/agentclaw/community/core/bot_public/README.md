@@ -68,7 +68,9 @@ existing friend access. Legacy HTTP parameters named `owner_id` remain accepted
 as compatibility locators: friend flows resolve them against either the stable
 entity or current Owner, then persist new rows with the resolved entity. Reads
 also accept historical rows containing either locator, while ambiguity fails
-closed. The strict repository `get_by_id_and_owner` contract is unchanged.
+closed. Friend approval and BCS friend-auth synchronization use the same
+compatibility locator, then send the resolved current Owner as the AgentPass
+operator. The strict repository `get_by_id_and_owner` contract is unchanged.
 
 ### BCSFuse publication synchronization
 

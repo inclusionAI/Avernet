@@ -1265,9 +1265,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_creates_relationship_for_restricted_bot(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = {"auth_id": 42}
         svc = _make_service(
@@ -1291,9 +1291,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_already_exists_is_idempotent_success(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = {
             "auth_id": None,
@@ -1308,11 +1308,43 @@ class TestCreateAuthRelationshipForApproval:
 
         plugin.create_relationship.assert_called_once()
 
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_transferred_bot_uses_current_owner_for_relationship(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            {
+                **_make_bot(
+                    owner_id="current-owner",
+                    ext={"friend_approval": "1"},
+                ),
+                "entity_id": "owner1",
+            }
+        ]
+        plugin = MagicMock()
+        plugin.create_relationship.return_value = {"auth_id": 42}
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        svc._create_auth_relationship_for_approval(self._friend_record(), 1)
+
+        bot_repo.list_matches_by_legacy_locator.assert_called_once_with(
+            "bot1", "owner1"
+        )
+        assert (
+            plugin.create_relationship.call_args.kwargs["operator_work_no"]
+            == "current-owner"
+        )
+
     def test_open_bot_skips_explicit_relationship(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "0"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "0"})
+        ]
         plugin = MagicMock()
         svc = _make_service(
             bot_repository=bot_repo,
@@ -1337,7 +1369,7 @@ class TestCreateAuthRelationshipForApproval:
 
     def test_missing_bot_fails_closed(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = None
+        bot_repo.list_matches_by_legacy_locator.return_value = []
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(BotNotFoundError, match="bot1"):
@@ -1347,7 +1379,9 @@ class TestCreateAuthRelationshipForApproval:
 
     def test_invalid_bot_ext_propagates_json_error(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(ext="invalid-json")
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext="invalid-json")
+        ]
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(ValueError):
@@ -1361,9 +1395,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_missing_agent_code_fails_closed(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(BotPublicServiceError, match="agent_code"):
@@ -1377,9 +1411,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_none_result_fails_closed(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = None
         svc = _make_service(
@@ -1398,9 +1432,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_plugin_exception_propagates(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.side_effect = RuntimeError(
             "auth unavailable",
