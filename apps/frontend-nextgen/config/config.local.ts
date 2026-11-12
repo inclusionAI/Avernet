@@ -46,6 +46,8 @@ export default defineConfig({
   mfsu: false,
   https: devHttpsEnabled ? { hosts: [devHttpsHost], http2: false } : undefined,
   proxy: {
+    // Local task-panel source testing; the asset process is started independently.
+    '/task-panel': proxy('http://127.0.0.1:43820'),
     '/auth': proxy(auth),
     '/openapi/v1/auth': proxy(auth),
     // BCS-only 开发 profile：好友发现整棵 collaboration 子树优先于其余通用键

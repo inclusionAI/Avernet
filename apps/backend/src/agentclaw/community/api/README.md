@@ -320,6 +320,7 @@ internal_dependencies:
   - agentclaw.community.core.task.task_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.task.task_loop_callback_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.task.task_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.task_panel.manifest_contract  # Task panel discovery contract
   - agentclaw.community.core.user_list.user_list_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.work_orders.work_order_service_protocol  # Protocol defined in its owning core module, re-exported here
 ```

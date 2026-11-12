@@ -6,7 +6,7 @@ it('BCS 状态机副屏由 manifest/CDN 远程加载，不在 Open Core 注册�
   expect(existsSync(localPanelPath)).toBe(false);
 
   const sourceFiles = [
-    'src/assets/TaskPanel/index.ts',
+    'src/services/tasks/panel/registerTaskPanel.ts',
     'src/services/workspace/groupTaskAdapter.ts',
     'src/services/bcs/libraryCdnInjector.ts',
     'src/services/bcs/UmdPanel.tsx',
