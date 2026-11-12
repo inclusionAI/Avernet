@@ -586,3 +586,19 @@ def test_local_manifest_failure_keeps_actionable_detail(
         )
     assert caught.value.reason == "invalid_metadata"
     assert caught.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("limit", "value", "files", "reason"),
+    [
+        ("MAX_FILE_BYTES", 2, [("file", b"abc")], "file_too_large"),
+        ("MAX_FILES", 1, [("one", b"a"), ("two", b"b")], "too_many_files"),
+        ("MAX_EXPANDED_BYTES", 3, [("one", b"aa"), ("two", b"bb")], "expanded_too_large"),
+        ("MAX_COMPRESSED_BYTES", 1, [("file", b"abc")], "compressed_too_large"),
+    ],
+)
+def test_directory_packing_reports_the_specific_limit(monkeypatch, limit, value, files, reason):
+    monkeypatch.setattr(package_module, limit, value)
+    with pytest.raises(SkillPackageTooLargeError) as error:
+        SkillPackageValidator(SkillParser()).pack_directory(files)
+    assert error.value.reason == reason
