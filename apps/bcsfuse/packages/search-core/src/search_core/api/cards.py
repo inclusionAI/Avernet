@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from search_core.catalog.cards import CardSnapshot
 
 PreparedT = TypeVar("PreparedT")
+
+
+class UnsetMapping(Enum):
+    VALUE = "unset"
+
+
+UNSET_MAPPING = UnsetMapping.VALUE
 
 
 class CatalogConflict(ValueError):
@@ -29,6 +37,7 @@ class CardRecord(Generic[PreparedT]):
     profile: dict[str, Any] | None = None
     config: dict[str, Any] | None = None
     preparation_key: str = ""
+    mapping_warnings: tuple[dict, ...] = ()
 
 
 class CardManagement(Protocol):
@@ -44,3 +53,18 @@ class CardManagement(Protocol):
     ) -> CardRecord: ...
     def remove(self, agent_id: str) -> None: ...
     def status(self, agent_id: str) -> dict: ...
+
+
+class MappedCardManagement(CardManagement, Protocol):
+    """Opt-in host capability for validating and saving Card projection rules."""
+
+    def upsert(
+        self,
+        agent_id: str,
+        fields: dict[str, Any],
+        resource_type: str | None,
+        search_config: dict[str, Any],
+        *,
+        labels: dict[str, list[str]] | None = None,
+        document_mapping: dict | None | UnsetMapping = UNSET_MAPPING,
+    ) -> CardRecord: ...

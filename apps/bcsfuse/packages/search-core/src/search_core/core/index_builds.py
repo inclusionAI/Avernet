@@ -37,7 +37,9 @@ class IndexBuildService:
         self.lease_seconds = lease_seconds
         self.conversion_version = conversion_version
 
-    def create(self, build_id, model, dimension, *, filter_fields=None):
+    def create(
+        self, build_id, model, dimension, *, filter_fields=None, document_mapping=None
+    ):
         # Retrying an existing version must not pick up changed deployment defaults.
         if filter_fields is None:
             previous = self.builds.get(build_id)
@@ -51,6 +53,7 @@ class IndexBuildService:
                 embedding_dimension=dimension,
                 conversion_version=self.conversion_version,
                 filter_fields=tuple(filter_fields),
+                document_mapping=document_mapping,
             )
         )
 

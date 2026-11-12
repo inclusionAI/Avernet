@@ -246,3 +246,59 @@ def test_catalog_http_versions_distinguish_card_and_doc():
             "saved_revision": 2,
         }
     ).model_dump() == {"published": True, "index_key": "default", "card_version": 2}
+
+
+@pytest.mark.parametrize("creating", [False, True])
+def test_mapping_and_card_roll_back_together_on_config_failure(tmp_path, creating):
+    repo = sqlite_card_repository(str(tmp_path / "atomic.db"))
+    if not creating:
+        repo.upsert("one", {"name": "old"}, None, {})
+    before = repo.read_card("one")
+    with repo.connect() as conn:
+        conn.execute("""CREATE TRIGGER fail_config BEFORE UPDATE OF config
+                        ON bcsfuse_agent_cards BEGIN
+                        SELECT RAISE(ABORT, 'injected config failure'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match="injected config failure"):
+        repo.upsert(
+            "one",
+            {"name": "new"},
+            None,
+            {},
+            document_mapping={"search_text_template": "{name}"},
+        )
+    assert repo.read_card("one") == before
+
+
+def test_mapping_retry_remerges_latest_card_and_preserves_other_config(
+    tmp_path, monkeypatch
+):
+    repo = sqlite_card_repository(str(tmp_path / "race.db"))
+    repo.upsert("one", {"name": "old"}, None, {})
+    original = repo.save
+    seen = []
+    raced = False
+
+    def competing_save(card, revision, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            repo.upsert("one", {"description": "concurrent"}, None, {})
+            current = repo.read_card("one")
+            assert repo.save_config("one", current.revision, {"existing": True})
+        return original(card, revision, **kwargs)
+
+    monkeypatch.setattr(repo, "save", competing_save)
+    mapping = {"search_text_template": "{name} {description}"}
+
+    def validate(card, config):
+        seen.append((dict(card.source_card), dict(config)))
+        return ()
+
+    result = repo.upsert(
+        "one", {}, None, {}, document_mapping=mapping, validate_mapping=validate
+    )
+    assert result.card.source_card == {"name": "old", "description": "concurrent"}
+    assert result.config == {"existing": True, "document_mapping": mapping}
+    assert seen[-1] == (result.card.source_card, result.config)
+    assert len(seen) == 2
+    assert repo.read_card("one") == result
