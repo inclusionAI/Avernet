@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from search_core.api.cards import UNSET_MAPPING, UnsetMapping
+
 if TYPE_CHECKING:
     from search_core.config.index_builds import IndexBuildConfig
 
@@ -20,6 +22,7 @@ class IndexBuildRecord:
     completed_count: int
     total_count: int
     error_code: str
+    mapping_warnings: tuple[dict, ...] = ()
 
 
 class IndexBuildManagement(Protocol):
@@ -37,3 +40,18 @@ class IndexBuildManagement(Protocol):
         ...
 
     def status(self, build_id: str) -> IndexBuildRecord: ...
+
+
+class MappedIndexBuildManagement(IndexBuildManagement, Protocol):
+    """Opt-in creation with immutable mapping rules and optional sample validation."""
+
+    def create(
+        self,
+        build_id: str,
+        model: str,
+        dimension: int,
+        *,
+        filter_fields: tuple[str, ...] | None = None,
+        document_mapping: dict | None | UnsetMapping = UNSET_MAPPING,
+        validation_card_ids: tuple[str, ...] = (),
+    ) -> IndexBuildRecord: ...

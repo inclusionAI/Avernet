@@ -89,7 +89,7 @@ class SqlIndexBuildRepository:
                         (
                             self.environment,
                             config.build_id,
-                            config.model_dump_json(),
+                            config.model_dump_json(exclude_none=True),
                             "pending" if enqueue else "configured",
                         ),
                     )
