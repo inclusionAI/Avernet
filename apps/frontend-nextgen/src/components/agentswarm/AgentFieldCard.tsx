@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AgentDraft } from '@/domain/agentswarm/draft';
-import { MANIFEST_LIMITS, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { MANIFEST_DOCS_URL, MANIFEST_LIMITS, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import { useState } from 'react';
 import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
@@ -115,6 +115,17 @@ function ManifestField({
                 <li key={limit}>{limit}</li>
               ))}
             </ul>
+            <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+              完整语法：
+              <a
+                href={MANIFEST_DOCS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-primary hover:underline"
+              >
+                manifest-schema.zh-CN.md
+              </a>
+            </p>
           </details>
         </>
       )}
