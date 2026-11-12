@@ -29,6 +29,8 @@ coverage_modules=()
 reporter_command=()
 phase_timing_file=""
 bcs_companion_pid=""
+backend_report_pid=""
+baas_report_pid=""
 source "$repo_root/apps/bcs/scripts/e2e-test/mock_services.sh"
 
 record_phase_timing() {
@@ -47,6 +49,20 @@ timed_phase() {
   end_epoch="$(date +%s)"
   record_phase_timing "$phase" "$start_epoch" "$end_epoch" "$status"
   echo "[phase] $phase: exit=$status elapsed=$((end_epoch - start_epoch))s"
+  return "$status"
+}
+
+timed_python_coverage_report() {
+  local component="$1"; shift
+  local start_epoch end_epoch status=0
+  local timing_file="$report_dir/python-${component}-timing.tsv"
+  start_epoch="$(date +%s)"
+  printf '' > "$timing_file"
+  combine_python_coverage "$component" "$@" || status=$?
+  end_epoch="$(date +%s)"
+  printf 'python_%s_report\t%s\t%s\t%s\t%s\n' \
+    "$component" "$start_epoch" "$end_epoch" "$((end_epoch - start_epoch))" "$status" \
+    >> "$timing_file"
   return "$status"
 }
 
@@ -82,6 +98,17 @@ stop_bcs_companions() {
     kill -TERM "$bcs_companion_pid" 2>/dev/null || true
     wait "$bcs_companion_pid" 2>/dev/null || true
     bcs_companion_pid=""
+  fi
+}
+
+reap_python_coverage_reports() {
+  if [[ -n "$backend_report_pid" ]]; then
+    wait "$backend_report_pid" 2>/dev/null || true
+    backend_report_pid=""
+  fi
+  if [[ -n "$baas_report_pid" ]]; then
+    wait "$baas_report_pid" 2>/dev/null || true
+    baas_report_pid=""
   fi
 }
 
@@ -269,6 +296,7 @@ run_real_singlebox() {
   echo "acceptance_targets: ${acceptance_targets[*]}"
   echo "model_config_mode: $model_config_mode"
   cleanup_real_singlebox() {
+    reap_python_coverage_reports
     stop_bcs_companions
     flush_coverage_processes || true
     env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
@@ -334,9 +362,50 @@ run_real_singlebox() {
   timed_phase "bcs_shared_stories" run_bcs_e2e --shared-tests-only || bcs_e2e_status=$?
   local companion_status=0 aggregate_status=0
   timed_phase "bcs_companion_join" wait_bcs_companions || companion_status=$?
-  # Both producer branches have exited. Only now stop the shared service,
-  # flush/merge profiles, and execute the unchanged coverage/endpoint gates.
+
+  # BaaS uses `coverage run --parallel-mode --save-signal=USR1` without
+  # SIGTERM handling, so a direct stop can exit without writing any coverage.
+  # Save Backend/BaaS data while their writers are still live; the combines
+  # below delete these raw inputs.
+  flush_coverage_processes || true
+  # Backend and BaaS must have exited before `coverage combine` runs: combine
+  # deletes the raw inputs, while both services write their final
+  # shutdown/lifespan coverage only during stop. Stop Backend first so its
+  # shutdown hooks can still call BaaS/BCS; the final cleanup's `stop all` is
+  # idempotent, and BCS stays up for its own aggregate below. This phase is
+  # fail-closed: partial data must never be combined.
+  timed_phase "python_services_stop" env \
+    OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    bash "$repo_root/singlebox/singlebox.sh" --standalone stop backend baas
+
+  local backend_report_log="$coverage_root/backend-report.log"
+  local baas_report_log="$coverage_root/baas-report.log"
+  local report_phase_start report_phase_end
+  report_phase_start="$(date +%s)"
+
+  timed_python_coverage_report "backend" "$repo_root/apps/backend" "$coverage_root/raw/backend" \
+    > "$backend_report_log" 2>&1 &
+  backend_report_pid=$!
+  timed_python_coverage_report "baas" "$repo_root/apps/baas" "$coverage_root/raw/baas" \
+    > "$baas_report_log" 2>&1 &
+  baas_report_pid=$!
+
   timed_phase "bcs_coverage_report" run_bcs_e2e --aggregate-only || aggregate_status=$?
+
+  wait "$backend_report_pid" || backend_coverage_status=$?
+  backend_report_pid=""
+  wait "$baas_report_pid" || baas_coverage_status=$?
+  baas_report_pid=""
+  cat "$backend_report_log" "$baas_report_log"
+  # Per-component rows are each branch's own report duration; the parent
+  # python_coverage_reports row below is the overlap-to-join window.
+  cat "$report_dir/python-backend-timing.tsv" \
+      "$report_dir/python-baas-timing.tsv" >> "$phase_timing_file"
+  report_phase_end="$(date +%s)"
+  record_phase_timing "python_coverage_reports" "$report_phase_start" "$report_phase_end" "$((backend_coverage_status || baas_coverage_status))"
+
   if [[ "$bcs_e2e_status" -eq 0 ]]; then
     bcs_e2e_status="$companion_status"
   fi
@@ -344,30 +413,13 @@ run_real_singlebox() {
     bcs_e2e_status="$aggregate_status"
   fi
   coverage_flush_and_cleanup() {
-    flush_coverage_processes
+    # cleanup_real_singlebox already flushes live coverage writers before
+    # stopping the stack. Flushing again here, after combine deleted the raw
+    # inputs, would let a late signal recreate empty raw coverage files.
     cleanup_real_singlebox
   }
   timed_phase "coverage_flush_and_cleanup" coverage_flush_and_cleanup || true
   trap - EXIT TERM INT
-  # Backend and BaaS coverage are independent (separate project dirs, data
-  # files, and report paths), so render them concurrently. Each writes to its
-  # own log that is replayed afterwards so the output stays readable.
-  local backend_report_log="$coverage_root/backend-report.log"
-  local baas_report_log="$coverage_root/baas-report.log"
-  local backend_report_pid baas_report_pid
-  local report_phase_start report_phase_end
-  report_phase_start="$(date +%s)"
-  combine_python_coverage "backend" "$repo_root/apps/backend" "$coverage_root/raw/backend" \
-    > "$backend_report_log" 2>&1 &
-  backend_report_pid=$!
-  combine_python_coverage "baas" "$repo_root/apps/baas" "$coverage_root/raw/baas" \
-    > "$baas_report_log" 2>&1 &
-  baas_report_pid=$!
-  wait "$backend_report_pid" || backend_coverage_status=$?
-  wait "$baas_report_pid" || baas_coverage_status=$?
-  cat "$backend_report_log" "$baas_report_log"
-  report_phase_end="$(date +%s)"
-  record_phase_timing "python_coverage_reports" "$report_phase_start" "$report_phase_end" "$((backend_coverage_status || baas_coverage_status))"
   local artifact_phase_start artifact_phase_end
   artifact_phase_start="$(date +%s)"
   write_summary_artifacts "$acceptance_status" "$bcs_e2e_status" || summary_status=$?

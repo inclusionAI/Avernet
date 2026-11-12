@@ -210,24 +210,6 @@ jobs:
           npm install -g openclaw@2026.6.1
           openclaw --version || true
 
-      - name: Cache Cargo registry and git
-        if: steps.changes.outputs.skip != 'true'
-        uses: actions/cache@v4
-        with:
-          # Registry/git fetch only. NOT apps/bcs/target: the instrumented
-          # build under target/cov-e2e/llvm-cov-target is force-rebuilt every
-          # run (BCS_COVERAGE_FORCE_REBUILD=1) so coverage always reflects
-          # the pushed source; caching those artifacts would risk stale
-          # coverage across commits.
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-singlebox-${{ hashFiles('apps/bcs/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-singlebox-
-            ${{ runner.os }}-cargo-e2e-
-            ${{ runner.os }}-cargo-
-
       - name: Cache instrumented BCS target
         if: steps.changes.outputs.skip != 'true'
         uses: Swatinem/rust-cache@v2
@@ -278,7 +260,8 @@ jobs:
             singlebox/ci/tests/test_singlebox_e2e_phases.py \
             singlebox/ci/tests/test_singlebox_parallel_pipeline.py \
             singlebox/ci/tests/test_singlebox_acceptance_orchestration.py \
-            singlebox/ci/tests/test_merge_junit_reports.py
+            singlebox/ci/tests/test_merge_junit_reports.py \
+            singlebox/ci/tests/test_bcs_panel_asset.py
 
       - name: Wait for Qdrant
         if: steps.changes.outputs.skip != 'true'
@@ -333,4 +316,5 @@ jobs:
             apps/bcs/target/cov-e2e/endpoint_coverage.txt
             apps/bcs/target/cov-e2e/cli_command_coverage.txt
             singlebox/.dependencies/coverage/singlebox/reports/phase-timings.tsv
+            !**/node_modules/**
           if-no-files-found: ignore
