@@ -2,7 +2,7 @@
 
 | Deployment | Default | Durable records | Index ownership |
 | --- | --- | --- | --- |
-| Direct `dev`, `dev_smoke`, `test`, and Singlebox | Server | SQLite | One application instance owns a collection pair |
+| Direct `dev`, `dev_smoke`, `test`, and Singlebox | Server | SQLite | One collection pair per SQLite path and index configuration |
 | Public `runtime` | Server | MySQL | One application instance owns a collection pair |
 | Public Docker / Compose | Server | SQLite in the smoke example; MySQL for runtime | Compose starts a separate Qdrant container |
 
