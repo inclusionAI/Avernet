@@ -33,7 +33,7 @@ const TODO_GROUPS: TodoGroup[] = [
     key: 'pending',
     label: '待处理',
     statuses: ['pending', 'pending_acceptance'],
-    labelClassName: 'text-destructive',
+    labelClassName: 'font-semibold text-destructive',
     attentionDotClassName: 'bg-destructive',
   },
   {
@@ -68,33 +68,33 @@ function TodoCard({ todo, onSelect }: { todo: TodoRecord; onSelect: (todoId: str
     <Card
       role="article"
       aria-label={todo.title}
-      className="overflow-hidden rounded-2xl border-border bg-card shadow-sm transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md"
+      className="overflow-hidden rounded-xl border-border bg-card shadow-sm transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md"
     >
       <Button
         variant="ghost"
-        className="h-auto min-h-[218px] w-full flex-col items-stretch gap-0 rounded-2xl border-0 px-7 py-6 text-left font-normal hover:bg-muted/20"
+        className="h-auto w-full flex-col items-stretch gap-0 rounded-xl border-0 p-4 text-left font-normal normal-case hover:bg-muted/20"
         onClick={() => onSelect(todo.todoId)}
       >
-        <span className="flex w-full items-start gap-3.5">
-          <span className={cn('mt-2 size-3 shrink-0 rounded-full', TODO_DOT_CLASS[todo.status])} aria-hidden />
-          <span className="min-w-0 text-lg font-semibold leading-7 text-foreground">{todo.title}</span>
+        <span className="flex w-full items-start gap-2">
+          <span className={cn('mt-1 size-2 shrink-0 rounded-full', TODO_DOT_CLASS[todo.status])} aria-hidden />
+          <span className="min-w-0 truncate text-sm font-medium leading-5 text-foreground">{todo.title}</span>
         </span>
 
-        <span className="mt-5 line-clamp-2 min-h-[52px] w-full whitespace-normal text-base leading-[26px] text-muted-foreground">
+        <span className="mt-2 line-clamp-2 w-full whitespace-normal text-xs leading-[18px] text-muted-foreground">
           {todo.description || '暂无描述'}
         </span>
 
-        <span className="mt-5 flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-divider pt-4 text-sm text-muted-foreground">
-          <span className="flex min-w-0 items-center gap-2.5">
-            <Bot className="size-[18px] shrink-0 text-foreground" aria-hidden />
+        <span className="mt-2.5 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-divider pt-2.5 text-xs text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-2">
+            <Bot className="size-3 shrink-0 text-foreground" aria-hidden />
             <span className="truncate">{todo.botName || todo.botId || '—'}</span>
           </span>
-          <span className="flex shrink-0 items-center gap-3">
+          <span className="flex shrink-0 items-center gap-2.5">
             <span className="flex items-center gap-2">
-              <CalendarDays className="size-4" aria-hidden />
+              <CalendarDays className="size-3" aria-hidden />
               {formatDate(todo.updatedAt)}
             </span>
-            <Badge className={cn('shrink-0 border-0 px-2.5 py-1.5 text-sm', TODO_STATUS_CLASS[todo.status])}>
+            <Badge className={cn('shrink-0 border-0 px-2 py-0.5 text-xs', TODO_STATUS_CLASS[todo.status])}>
               {TODO_STATUS_LABEL[todo.status]}
             </Badge>
           </span>
@@ -141,7 +141,7 @@ export function TodoBoard({
   }
 
   return (
-    <section role="region" aria-label="待办分组" className="space-y-6">
+    <section role="region" aria-label="待办分组" className="space-y-3">
       {TODO_GROUPS.map((group) => {
         const items = todos.filter((todo) => group.statuses.includes(todo.status));
         const isExpanded = expanded[group.key];
@@ -149,19 +149,19 @@ export function TodoBoard({
           <section key={group.key} aria-labelledby={`todo-group-${group.key}`} className="space-y-4">
             <Button
               variant="ghost"
-              className="h-auto w-fit justify-start gap-2.5 rounded-md border-0 px-0 py-1 hover:bg-transparent"
+              className="h-auto w-fit justify-start gap-2 rounded-md border-0 px-0 py-1 text-sm hover:bg-transparent"
               aria-expanded={isExpanded}
               onClick={() => setExpanded((current) => ({ ...current, [group.key]: !current[group.key] }))}
             >
               {isExpanded ? (
-                <ChevronDown className="size-5 text-muted-foreground" aria-hidden />
+                <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
               ) : (
-                <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+                <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
               )}
-              <span id={`todo-group-${group.key}`} className={cn('text-xl font-semibold', group.labelClassName)}>
+              <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
                 {group.label}
               </span>
-              <span className="text-base tabular-nums text-muted-foreground">({items.length})</span>
+              <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
               {group.attentionDotClassName && items.length > 0 ? (
                 <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
               ) : null}
@@ -169,7 +169,7 @@ export function TodoBoard({
 
             {isExpanded ? (
               items.length > 0 ? (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="grid gap-[10px] [grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))]">
                   {items.map((todo) => (
                     <TodoCard key={todo.todoId} todo={todo} onSelect={onSelect} />
                   ))}

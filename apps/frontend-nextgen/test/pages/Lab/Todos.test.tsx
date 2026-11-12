@@ -270,13 +270,24 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
 
-  it('按状态分组展示小卡片，不显示表格查看操作', async () => {
+  it('按紧凑卡片和状态分组展示，不显示表格查看操作', async () => {
     render(<LabTodosPage />);
 
     const acceptanceCard = await screen.findByRole('article', { name: '编写实施方案' });
     expect(within(acceptanceCard).getByText('写作助手')).toBeInTheDocument();
     expect(within(acceptanceCard).getByText('待验收')).toBeInTheDocument();
     const board = screen.getByRole('region', { name: '待办分组' });
+    const cardButton = within(acceptanceCard).getByRole('button', { name: /编写实施方案/ });
+    const cardGrid = acceptanceCard.parentElement as HTMLElement;
+    expect(acceptanceCard).toHaveClass('rounded-xl', 'shadow-sm');
+    expect(cardButton).toHaveClass('h-auto', 'rounded-xl', 'p-4');
+    expect(cardButton.className).not.toContain('min-h-[218px]');
+    expect(cardGrid).toHaveClass(
+      'gap-[10px]',
+      '[grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))]',
+    );
+    expect(within(acceptanceCard).getByText('编写实施方案', { selector: 'span' })).toHaveClass('truncate', 'text-sm', 'font-medium');
+    expect(within(acceptanceCard).getByText('整理需求并输出实施方案')).toHaveClass('line-clamp-2', 'text-xs', 'leading-[18px]');
     expect(within(board).getByRole('button', { name: /^待处理 \(1\)$/ })).toHaveTextContent('1');
     expect(within(board).getByRole('button', { name: /^进行中 \(1\)$/ })).toHaveTextContent('1');
     expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
