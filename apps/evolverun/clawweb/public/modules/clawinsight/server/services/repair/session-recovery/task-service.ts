@@ -582,8 +582,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return;
     }
     const id = `${key}-${attempts.length}`;
+    // A disabled attempt never reached DingTalk. A missing or uncertain receipt may have.
     const notDispatched = new Set(task.timeline.filter(event => event.kind === "notification"
-      && event.payload.channel === "owner_card" && event.payload.dispatched === false).map(event => event.event_id));
+      && event.payload.channel === "owner_card" && (event.payload.state === "disabled" || event.payload.dispatched === false)).map(event => event.event_id));
     const updateOnly = task.timeline.some(event => event.kind === "notification" && event.payload.channel === "owner_card"
       && event.payload.operation === "create" && event.payload.state === "sending" && !notDispatched.has(`${event.event_id}-result`));
     const payload = { channel: "owner_card", owner_request_id: request.requestId, notification_key: key, kind: "owner_request", phase: task.phase, operation: updateOnly ? "update" : "create" };

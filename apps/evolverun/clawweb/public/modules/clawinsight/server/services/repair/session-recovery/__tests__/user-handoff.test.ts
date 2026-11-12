@@ -471,6 +471,39 @@ function useNativeOwnerCards() {
   return sender;
 }
 
+it("creates a permission card after a legacy configuration request was never dispatched", async () => {
+  const sender = useNativeOwnerCards();
+  const task = await create();
+  const legacyRequestId = "legacy-configuration";
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    status: "waiting_owner", ownerCardSyncPending: true,
+    ownerRequest: { requestId: legacyRequestId, revision: 1, reason: "configuration", status: "pending",
+      summary: "缺少分发目标", instructions: "请补齐分发目标", evidence_ids: [], resumePhase: "assess", createdAtMs: now } }));
+
+  await service.maintenance();
+  await vi.waitFor(async () => {
+    const saved = await current(task.taskId);
+    expect(saved.ownerCardSyncPending).toBe(false);
+    expect(saved.timeline.some(event => event.payload.owner_request_id === legacyRequestId
+      && event.payload.operation === "create" && event.payload.state === "disabled")).toBe(true);
+  });
+
+  await service.confirmOwner(task.taskId, legacyRequestId, actor);
+  await vi.waitFor(async () => expect((await current(task.taskId)).ownerCardSyncPending).toBe(false));
+  const fresh = await inspect(await current(task.taskId), "after-legacy-feedback");
+  await agent.report(await current(task.taskId), { phase: "assess", kind: "owner_handoff",
+    summary: "读取原资料仍缺权限", evidence_ids: [fresh.evidenceId],
+    owner_request: { reason: "permission", instructions: "请申请原资料读取权限" } });
+  await vi.waitFor(async () => {
+    const saved = await current(task.taskId);
+    expect(saved.ownerCardSyncPending).toBe(false);
+    expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      cardParamMap: expect.objectContaining({ request_id: saved.ownerRequest!.requestId, title: "请处理权限申请" }),
+    }));
+  });
+  expect(sender.updateCard).not.toHaveBeenCalled();
+});
+
 it("retains the full handoff report and material requirements without sending a DingTalk DM", async () => {
   const sender = useNativeOwnerCards();
   let task = await create(); const read = await inspect(task, "materials-brief"); task = await current(task.taskId);
