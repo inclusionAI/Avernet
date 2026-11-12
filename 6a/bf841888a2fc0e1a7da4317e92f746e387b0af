@@ -1,0 +1,19 @@
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/spec.md
+  s_a5f125bde83e04::t_6c154d390f7a2d 297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6abf841888a2fc0e1a7da4317e92f746e387b0af",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/task/context_collab/test_method_profiles.py
+  s_a5f125bde83e04::t_4ff36e886fac97 35-40,42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "87a1388342703db25c7dacc2a2ffe72b2c838255",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

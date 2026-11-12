@@ -1,0 +1,37 @@
+apps/backend/specs/2026-11-12-context-collab-l6-product-forms/spec.md
+  s_7b8f9bb75d926b::t_b69693028396d1 1-168
+apps/backend/specs/README.md
+  s_7b8f9bb75d926b::t_99be94412ab60e 143
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_7b8f9bb75d926b::t_ad4902e21ab85f 143-144,148-150
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_7b8f9bb75d926b::t_bc7887f483a7e3 57-73,79-80,94-98,101-103
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  s_7b8f9bb75d926b::t_0c32d0129f0bef 1,472-525,528,533
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profiles.py
+  s_7b8f9bb75d926b::t_26eed30f32d11f 1,16,18-19,27-28
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_7b8f9bb75d926b::t_73791052cd9461 493
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  s_7b8f9bb75d926b::t_762f3d88044e2d 1-316
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  s_7b8f9bb75d926b::t_cef90999e40b12 5,163-164,173-174
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  s_7b8f9bb75d926b::t_b8fca09a349124 3,19,46-49,91-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b52a54ec2ffa952e93ed2d7bf75ebc02f0dde019",
+  "prompts": {},
+  "sessions": {
+    "s_7b8f9bb75d926b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_7b8f9bb75d926b",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
