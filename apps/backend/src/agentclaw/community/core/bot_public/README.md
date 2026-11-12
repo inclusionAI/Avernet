@@ -60,6 +60,16 @@ Display projections include only the saved avatar URL, not raw extension data.
 friend/catalog responsibilities composed by `BotPublicService`; shared errors
 remain import-compatible through the original service module.
 
+### Friend Bot addressing
+
+Friend rows address a Bot with `target_bot_id` plus `target_entity_id`. Owner
+handoff changes the responsible person but preserves that entity identifier and
+existing friend access. Legacy HTTP parameters named `owner_id` remain accepted
+as compatibility locators: friend flows resolve them against either the stable
+entity or current Owner, then persist new rows with the resolved entity. Reads
+also accept historical rows containing either locator, while ambiguity fails
+closed. The strict repository `get_by_id_and_owner` contract is unchanged.
+
 ### BCSFuse publication synchronization
 
 - Legacy `POST /api/bots/{bot_id}/public` syncs user publication through

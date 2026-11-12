@@ -81,15 +81,21 @@ async def list_render_screens(
     # COSEC: the only operation in this group that resolves the Bot itself, and
     # the only one whose row is ``NoCheck`` — share and group viewers hold no
     # Editor relation, so the seam deliberately adjudicates nothing here. That
-    # makes this call the sole proof the addressed Bot exists under the named
-    # owner; without it the read answers for any ``bot_id`` a caller can name.
+    # makes this call the sole proof the addressed Bot exists under the supplied
+    # stable or legacy locator; without it the read answers for any ``bot_id`` a
+    # caller can name.
     # ``actor_id`` is likewise load-bearing for its dependency rather than its
     # value: ``UserIdDep`` is what keeps this route authenticated-only.
     # The three mutations do not repeat it. They declare ``Check(MEMBER)``, so
     # ``bot_access._level`` has already resolved ``(bot_id, owner_id)`` and
     # refused on absence before the handler is entered.
-    resolve_readable_bot(bot_service, bot_id=bot_id, owner_id=owner_id)
-    records = service.list_render_screens(bot_id=bot_id, owner_id=owner_id, current_user_id=actor_id)
+    bot = resolve_readable_bot(bot_service, bot_id=bot_id, owner_id=owner_id)
+    resource_owner_id = str(bot.get("entity_id") or owner_id)
+    records = service.list_render_screens(
+        bot_id=bot_id,
+        owner_id=resource_owner_id,
+        current_user_id=actor_id,
+    )
     items = [_screen(record) for record in records]
     return envelope(RenderScreenList(total=len(items), items=items), request)
 

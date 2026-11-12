@@ -63,6 +63,7 @@ def _bot(**overrides):
         "id": 10,
         "bot_id": "bot-1",
         "owner_id": "owner-1",
+        "entity_id": "entity-1",
         "space_id": "22",
         "bot_type": "service",
         **overrides,
@@ -88,9 +89,9 @@ def _record(**overrides) -> RenderScreenRecord:
 
 
 @pytest.mark.asyncio
-async def test_list_is_readable_without_editor_permission():
+async def test_list_is_readable_by_stable_entity_after_owner_transfer():
     bots = Mock()
-    bots.get_bot.return_value = _bot()
+    bots.get_bot_by_address.return_value = _bot(owner_id="current-owner")
     service = Mock()
     service.list_render_screens.return_value = [_record()]
 
@@ -98,7 +99,7 @@ async def test_list_is_readable_without_editor_permission():
         bot_id="bot-1",
         request=_request(),
         actor_id="viewer-1",
-        owner_id="owner-1",
+        owner_id="entity-1",
         bot_service=bots,
         service=service,
     )
@@ -113,9 +114,9 @@ async def test_list_is_readable_without_editor_permission():
         "created_at": "2026-08-19T10:00:00",
         "updated_at": "2026-08-19T10:00:00",
     }
-    bots.get_bot.assert_called_once_with("bot-1", "owner-1")
+    bots.get_bot_by_address.assert_called_once_with("bot-1", "entity-1")
     service.list_render_screens.assert_called_once_with(
-        bot_id="bot-1", owner_id="owner-1", current_user_id="viewer-1"
+        bot_id="bot-1", owner_id="entity-1", current_user_id="viewer-1"
     )
 
 
@@ -203,9 +204,9 @@ async def test_the_read_refuses_a_bot_that_is_not_the_owners():
     for absent in (BotNotFoundError("no such bot"), None):
         bots = Mock()
         if isinstance(absent, Exception):
-            bots.get_bot.side_effect = absent
+            bots.get_bot_by_address.side_effect = absent
         else:
-            bots.get_bot.return_value = absent
+            bots.get_bot_by_address.return_value = absent
         service = Mock()
 
         response = await list_render_screens(
