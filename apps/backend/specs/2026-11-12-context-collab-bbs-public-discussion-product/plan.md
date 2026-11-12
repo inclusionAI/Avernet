@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 context_collab 层之上实现 BBS 公开讨论产品四用例（发帖/回帖/列表/详情）：products/ 只组合协议层模块与三处基建端口（乙案），`service_api.py` 对产品永久不依赖，架构测试执法；不动 forum、DDL、既有 wire。
+**Goal:** 在 context_collab 层之上实现 BBS 公开讨论产品四用例（发帖/回帖/列表/详情），P1 交付面=模块级 service 接口（产品协议 + DI singleton，无 HTTP）：products/ 只组合协议层模块与三处基建端口（乙案），`service_api.py` 对产品永久不依赖，架构测试执法；不动 forum、DDL、既有 wire。
 
-**Architecture:** 平台归位二连（ActorContext 迁 G1、creation_payload 纯函数迁 L4）→ 仓储列表读方法（persistence 内部）→ 产品自持编排（L4 对象 + G1/G4 + 仓储端口 + L5 顶层投影）+ 架构测试 → 读投影 + DI → HTTP 内部+OpenAPI 双侧镜像 → 收尾。
+**Architecture:** 平台归位二连（ActorContext 迁 G1、creation_payload 纯函数迁 L4）→ 仓储两读方法（域类型直出，零发明 record）→ 产品自持编排（L4 对象 + G1/G4 + 仓储端口 + L5 顶层投影）+ 架构测试 → 读投影 + api 协议再导出 → 收尾。
 
 **Tech Stack:** Python 3.12、FastAPI、SQLAlchemy（SQLite 测试）、python-injector DI、pytest。
 
@@ -15,7 +15,7 @@
 - 分支 `dev_bbs_help_1019_3` 直接叠加 HEAD。
 - **乙案依赖禁令**：`src/…/context_collab/products/**/*.py` 的 import 白名单 = 层模块（`l2_agent_network`/`l3_spaces_resources`/`l4_context_primitives`/`l5_methods`/`l6_products`/`g1_secure_govern`/`g2_keep_reliable_live`/`g3_observe_evaluate_evolve`/`g4_contracts_consistency`）+ `errors` + `persistence.repository` + `persistence.method_store` + `services.method_lifecycle_service`；`service_api.py`、`services/context_collab_service.py`、`method_service_api.py` 等其余模块**永久禁止**。
 - 不动 `core/task/forum`；不动 `ac_context_collab_collet`/`ac_context_collab_event` 表结构；不改三个既有 wire 路由。
-- 测试命令：`cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/ -v`（CI 门禁与全量套件不跑——用户指示）。
+- 测试命令：`cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py -v`（CI 门禁与全量套件不跑——用户指示；P1 无 HTTP 改动，不跑 endpoints）。
 - 提交 `<type>(backend): <outcome>`，尾行 `Co-Authored-By: Claude <noreply@anthropic.com>`；任一文件 ≤1000 行；不格式化未改动行；不新增依赖。
 - 异常只用既有 `ContextCollabNotFoundError` / `ContextCollabValidationError` / `ContextCollabVersionConflict`；HTTP 沿 `ENVELOPE_ERRORS`。
 - 词汇常量从源头 import（`MethodKind.OPEN_GROUP.value`、`ProductProfile/WorkflowKind.BBS_PUBLIC_DISCUSSION.value`、`VISIBILITY_PUBLIC`）；`"user_interaction.posted"`/`"Message"` 与 G4 `validate_event_body` 合同一致（payload `{"content": 非空str}`）。
@@ -60,10 +60,10 @@ def creation_payload(spec: ContextSpec, objective: str) -> dict
 ```
 - Consumes: `ContextSpec`、`ResourceRef.to_dict()`。
 
-- [ ] **Step 1:** 先跑 `tests/community/core/task/context_collab/ tests/community/endpoints/test_context_collab_endpoints.py -v` 记基线全绿。
+- [ ] **Step 1:** 先跑 `tests/community/core/task/context_collab/ -v` 记基线全绿。
 - [ ] **Step 2:** `creation_facts.py` 实现 + `context_collab_service.py` 改用（服务 pin `test_creates_collet_with_initial_event` 已钉 six-key 全量断言，跑它必须仍绿——这是行为不变的证据）。
 - [ ] **Step 3:** `ActorContext` 定义迁 `g1_secure_govern/actor_context.py`,`service_api` 改再导出;`g1`/`method_authorization`/`authorization` 两处 import 换新家。
-- [ ] **Step 4:** 全回归 `tests/community/core/task/context_collab/ tests/community/endpoints/test_context_collab_endpoints.py tests/community/endpoints/test_context_collab_methods_endpoints.py -v` 零回归。
+- [ ] **Step 4:** 全回归 `tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ -v` 零回归。
 - [ ] **Step 5: Commit** `refactor(backend): move ActorContext home to G1 and extract creation payload helper`
 
 ### Task 2: 仓储列表读路径（persistence 内部）
@@ -76,22 +76,22 @@ def creation_payload(spec: ContextSpec, objective: str) -> dict
 - Produces（T4 消费）：
 
 ```python
-@dataclass
-class ContextSummaryRecord:
-    collet: Collet
-    context_spec: ContextSpec
-    created_at: datetime      # gmt_create
-    message_count: int       # primitive_type="Message" 计数,含首帖正文
+def list_collets_by_product(
+    self, product_kind: str
+) -> list[tuple[Collet, ContextSpec, datetime]]
+# 元组三元素:六字段聚合根、创建参数(过滤源+过渡期 title 伴随)、gmt_create;
+# Python 侧过滤(§6-E);gmt_create 倒序;解码失败外部行跳过+logger.warning。
 
-def list_collab_contexts_by_product(self, product_kind: str) -> list[ContextSummaryRecord]: ...
-# collet 行全读 + 单条 GROUP BY 计数(2 次往返);Python 侧过滤;gmt_create 倒序;
-# 解码失败行跳过+logger.warning(含 collab_context_id)
+def count_message_events(
+    self, collab_context_ids: Sequence[str]
+) -> dict[str, int]
+# 单条 GROUP BY(primitive_type="Message"),键=collab_context_id;禁 N+1。
 ```
-- Consumes: `_collet_from_row`、两 ORM 模型。
+- Consumes: `_collet_from_row`、两 ORM 模型。**零发明 record**——v1 的 `ContextSummaryRecord` 作废（spec §4）。
 
-- [ ] **Step 1: 失败测试**：真 SQLite（沿 `test_repository_create_get.py` 夹具模式）`test_lists_only_matching_product_kind`、`test_message_count_counts_all_message_events`（正文+2 回帖+1 条 Task 事件 → 3）、`test_list_orders_by_gmt_create_desc`、`test_list_skips_undecodable_rows`（裸 SQL NULL actor_ref 行+好行 → 只回好行）。
+- [ ] **Step 1: 失败测试**：真 SQLite（沿 `test_repository_create_get.py` 夹具模式）`test_lists_only_matching_product_kind`（bbs_public_discussion 与 team_todo 各一行只回前者）、`test_list_orders_by_gmt_create_desc`（等宽时钟或秒级插入两行断言倒序）、`test_list_skips_undecodable_rows`（裸 SQL NULL actor_ref 行+好行 → 只回好行）、`test_count_message_events_groups_in_one_query`（两 Collet 计数互不串、Task 事件不计、未知 id 不在结果键里）。
 - [ ] **Step 2: 跑失败** → **Step 3: 实现** → **Step 4: 跑绿** + `tests/community/repository/task/context_collab/ -v` 零回归。
-- [ ] **Step 5: Commit** `feat(backend): add collab context list read path by product profile`
+- [ ] **Step 5: Commit** `feat(backend): add collab context read methods speaking domain types`
 
 ### Task 3: products 写用例 + 架构测试
 
@@ -186,32 +186,21 @@ class DiscussionDetailView:
 - [ ] **Step 2: 失败确认** → **Step 3: 实现 views.py + service 读方法** → **Step 4: 全绿** + products+DI 全回归。
 - [ ] **Step 5: Commit** `feat(backend): add BBS public discussion read use cases`
 
-### Task 5: HTTP 路由（内部 + OpenAPI 镜像）
+### Task 5: api 协议再导出 + 收尾回归
 
 **Files:**
-- Create: `src/agentclaw/community/adapters/http/task/schemas_bbs_discussions.py`、`src/agentclaw/community/adapters/http/task/bbs_discussions.py`、`src/agentclaw/community/adapters/http/openapi_v1/task/bbs_discussions.py`
-- Modify: `src/agentclaw/community/adapters/http/app.py`（import + include，紧邻 context_collab 段）、`src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py`（4 行 NoCheck 沿既例）
-- Test: `tests/community/endpoints/test_bbs_public_discussion_endpoints.py`（新，沿 `test_context_collab_endpoints.py` 配方：fresh FastAPI + 认证 override + injector 绑真服务/真仓储 + 内存 SQLite）
+- Create: `src/agentclaw/community/api/task/bbs_public_discussion_service.py`（协议再导出，沿 `api/task/context_collab_service.py` 先例一行件）
+- Test: 全目录回归
 
-**Interfaces:**
-- 路由四条 + OpenAPI 镜像（spec §5 路由表逐字）；`_actor_context(user)` 同款内部；响应 DTO 字段名=视图字段名（snake_case 与三既有 schema 文件风格对齐时由实现者定夺）。
-- Consumes: T3 `BbsPublicDiscussionServiceProtocol` × `Injected(…)`。delivery 可 import `service_api.ActorContext`（再导出）——依赖禁令只管 products/。
-
-- [ ] **Step 1: 失败测试**——双客户端（内部+OpenAPI）：发帖→回帖→列表→详情全链，断言路由前缀逐字、列表 message_count 倒序、详情 body/replies、404（乱 id）、回帖 422（骨架 parent）；OpenAPI 同链 smoke。
-- [ ] **Step 2: 失败确认** → **Step 3: 实现三文件 + 两处接线** → **Step 4: 全绿** + `tests/community/endpoints/ -v` 零回归。
-- [ ] **Step 5: Commit** `feat(backend): expose BBS public discussion product routes`
-
-### Task 6: 收尾——回归 + 文档
-
-- [ ] **Step 1:** 全目录回归 `tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/ -v` 整段全绿（≥800 基线 + 本计划增量）。
-- [ ] **Step 2:** spec README 索引核对（已在 2026-11-12 登记，无需动）；plan/spec v2 修订内容随本提交入档。
-- [ ] **Step 3: Commit** `docs(backend): finalize BBS public discussion product docs`
+- [ ] **Step 1:** 再导出文件（`from …products.service_api import BbsPublicDiscussionServiceProtocol`，注释注明 P1 模块级交付面、HTTP 后置 spec §5）。
+- [ ] **Step 2:** 全目录回归 `DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py -v` 整段全绿（≥819 基线 + 本计划增量）。
+- [ ] **Step 3: Commit** `feat(backend): expose BBS public discussion service at module level`
 
 ---
 
 ## Self-Review 结论
 
-- Spec 覆盖：§2 域映射→T3/T4；§2a 操作族映射为 spec 层治理（无独立实现动作,T3 编排逐用例对应四族）；§3.1 依赖矩阵→T3 架构测试；§3.2 归位二连→T1；§3.3 四用例→T3/T4；§3.4 DI→T3；§4 列表读路径→T2；§5 路由→T5；§6 A–J 全数落在接口块与嵌注（A/F→T4、B→T5、C/D/E→spec 文本裁决、G→T1 消最大面+T3 编辑距离、H→T3 白名单、I→T1、J→T3 恒等）；§7 测试表 1:1 分解到各 Task Step 1。
-- 类型一致：`ActorContext`/`creation_payload`（T1 产,T3 消）、`ContextSummaryRecord`（T2 产,T4 消）、产品协议/视图（T3/T4 产,T5 消）签名逐字。
+- Spec 覆盖：§2 域映射→T3/T4；§2a 操作族映射为 spec 层治理（无独立实现动作,T3 编排逐用例对应四族）；§3.1 依赖矩阵→T3 架构测试；§3.2 归位二连→T1；§3.3 四用例→T3/T4；§3.4 DI→T3；§4 两读方法→T2；§5 模块级交付面→T5（api 协议再导出）,HTTP 后置为非目标；§6 A–J 全数落在接口块与嵌注（A/F→T4、B=HTTP 后置、C/D/E→文本裁决、G→T1 消最大面+T3 编辑距离、H→T3 白名单、I→T1、J→T3 恒等）；§7 测试表 1:1 分解到各 Task Step 1。
+- 类型一致：`ActorContext`/`creation_payload`（T1 产,T3 消）、`list_collets_by_product`/`count_message_events`（T2 产,T4 消）、产品协议/视图（T3/T4 产,T5 消）签名逐字；v1 的 `ContextSummaryRecord` 作废（零发明 record,spec §4）。
 - Review Focus 7 项全有归属测试（骨架 parent/外 product→T3；泄漏/孤儿/NO-title 回退→T4；坏行→T2；CAS→T3；依赖违约→T3）。
 - 比例：6 任务、4 个新源文件 + 3 个端到端测试文件 + 2 架构小步，接口与断言为主、零方法体转写。

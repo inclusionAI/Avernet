@@ -18,9 +18,11 @@
 
 在 context_collab 层之上**重实现** BBS"公开讨论"产品能力（发帖、回帖、列表、详情），作为 ACCS 层蛋糕足以组合出产品的第一个实体证明。**不动** `core/task/forum` 现有业务、不动两张协议权威表结构、不动既有三个北向 wire 路由。
 
-**范围内**：乙案依赖矩阵（§3）与架构测试；平台归位二连（`ActorContext` 迁 G1、`creation_payload` 纯函数迁 L4）；产品四用例自持编排；仓储列表读方法；HTTP 内部+OpenAPI 镜像路由。
+**范围内**：乙案依赖矩阵（§3）与架构测试；平台归位二连（`ActorContext` 迁 G1、`creation_payload` 纯函数迁 L4）；产品四用例自持编排；仓储两个域类型读方法（§4）；模块级 service 接口（产品协议 + DI singleton）。
 
-**非目标（P2 留档）**：结帖接口（`Context.complete`）；阅读面细化（楼层号、树形、分页）；通知；产品编排与通用服务的重复装配合并（§6-G）；`service_api` 自身退役讨论（wire 合同，P3+）。
+**非目标（后置留档）**：
+- **HTTP/`OpenAPI` 对外交付整体后置**（作者裁决 2026-11-13：P1 只提供模块级 service 接口，对外 wire 以后再议）；
+- 结帖接口（`Context.complete`）；阅读面细化（楼层号、树形、分页）；通知；产品编排与通用服务的重复装配合并（§6-G）；`service_api` 自身退役讨论（wire 合同，P3+）。
 
 ## 2. 域映射（权威裁决）
 
@@ -107,7 +109,7 @@ G1 intent 载体：产品内部私有 dataclass `_PublicMessageIntent(event_kind
 
 **列表 `list_discussions()`**
 
-仓储列表读方法（§4）返材料 → 组装 `DiscussionSummaryView{collet_id, title, initiator_id, message_count, created_at}`。`message_count`=Message 事件总数含首帖正文（一次 GROUP BY；前端要纯回帖数减一即可）。
+`repo.list_collets_by_product(...)` + `repo.count_message_events(...)`（§4 两方法）→ 组装 `DiscussionSummaryView{collet_id, title, initiator_id, message_count, created_at}`（标题过渡期伴随读自第二个元素，P3 随过滤源升级）。`message_count`=Message 事件总数含首帖正文。
 
 **详情 `get_discussion(collet_id)`**
 
@@ -119,40 +121,34 @@ G1 intent 载体：产品内部私有 dataclass `_PublicMessageIntent(event_kind
 
 `binder.bind(BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService, scope=singleton)`；服务构造 `@inject(collab_repo, authorizer: ContextCollabAuthorizerProtocol, method_store: MethodStoreProtocol)`——三依赖均在 DI 既有绑定/storage 之内，无新基建。
 
-## 4. 仓储列表读路径（persistence 内部，不上产品合同）
+## 4. 仓储读路径（persistence 内部，只说领域类型）
+
+不发明中间 record（v1 的 `ContextSummaryRecord` 作废——bespoke 载体病）：仓储端口新增两方法，返回值全部是领域类型/内建类型：
 
 ```python
-@dataclass
-class ContextSummaryRecord:            # persistence 内部 record，不进产品接口块
-    collet: Collet
-    context_spec: ContextSpec           # 过滤源 + 过渡期 title 伴随材料
-    created_at: datetime                # gmt_create 列
-    message_count: int                  # GROUP BY primitive_type="Message"
+def list_collets_by_product(
+    self, product_kind: str
+) -> list[tuple[Collet, ContextSpec, datetime]]
+# 元组三元素：六字段聚合根、创建参数（过滤源+过渡期 title 伴随）、gmt_create。
+# product_kind 过滤在 Python 侧（§6-E）；按 gmt_create 倒序；解码失败的
+# 外部部分行跳过并 logger.warning（全页不炸）；单点读维持方案 i 严格失败。
 
-def list_collab_contexts_by_product(self, product_kind: str) -> list[ContextSummaryRecord]
+def count_message_events(
+    self, collab_context_ids: Sequence[str]
+) -> dict[str, int]
+# 单条 GROUP BY（primitive_type="Message"），键=collab_context_id；禁 N+1。
 ```
 
-实现约束：collet 行全读 + 单条 GROUP BY 计数（2 次往返，禁 N+1）；product_kind 过滤在 Python 侧（§6-E）；按 `gmt_create` 倒序；`_collet_from_row` 解码失败的外部部分行跳过并 `logger.warning`（全页不炸；单点 `get_current_status` 维持方案 i 严格失败）。
+## 5. 模块级交付面（HTTP 后置）
 
-## 5. HTTP delivery（北向新路由，两侧）
-
-对齐既有 `context_collab.py` 三路由风格与绑定惯例，本节钉路由骨架：
-
-| 操作 | 路由 |
-| --- | --- |
-| 发帖 | `POST /api/v1/collaboration/task/context_collab/bbs/discussions` body `{title, body, space, resource_refs?}` |
-| 回帖 | `POST …/discussions/{collab_context_id}/replies` body `{content, parent_event_id?}` |
-| 列表 | `GET …/discussions` |
-| 详情 | `GET …/discussions/{collab_context_id}` |
-
-`/openapi/v1/collaboration/task/context_collab/bbs/discussions` 四者镜像（§6-B 裁决），body/响应合同相同。delivery 层可 import `service_api.py`（含 `ActorContext` 再导出）——**依赖禁令只约束 products/**。错误映射沿 `ENVELOPE_ERRORS`（404/409/422）零新增。
+P1 交付面 = **产品协议（`products/service_api.py` 的 `BbsPublicDiscussionServiceProtocol`）+ DI singleton**（§3.4），内部模块经 injector 消费；另照 `api/task/context_collab_service.py` 先例补一行协议再导出（`api/task/bbs_public_discussion_service.py`）。HTTP/`OpenAPI` 万向对外交付（含内部路由、镜像、NoCheck 行、endpoints 测试）整体后置，届时的路由骨架 v1 稿留档于 git 历史（`468eec4ea` 版 spec §5）。
 
 ## 6. 裁决表（作者确认；v2 增 G/H/I/J）
 
 | # | 事项 | 裁决 |
 | - | --- | --- |
 | A | 列表计数 | `message_count`（Message 事件总数，含首帖正文） |
-| B | OpenAPI 镜像路由 | 一并补，两侧对称 |
+| B | HTTP 对外交付 | **后置**（2026-11-13 作者裁决：P1 只提供模块级 service 接口；HTTP/镜像路由 P2 再议，原"补镜像"裁决存档） |
 | C | 结帖门 | P2 落结帖时补"终态拒回帖" |
 | D | 发帖两步窗口态 | 调用方报错+重试建新帖；详情容忍 `body=None`（合法领域态） |
 | E | 列表过滤 | Python 侧（表小、方言差异大）；上量后改 JSON path |
@@ -171,8 +167,7 @@ def list_collab_contexts_by_product(self, product_kind: str) -> list[ContextSumm
 | `tests/…/context_collab/products/test_products_layering.py`（新） | **架构测试**：products 全量 import 扫描，白名单外红（含"service_api 出局"钉死） |
 | `tests/…/products/test_bbs_public_discussion_write.py`（新） | 发帖两步串联（payload 全量材料）、回帖 G1 窄规则陌生 actor 放行、**task.created 骨架不可当 parent**、外 profile 404、not-found、CAS 409 |
 | `tests/…/products/test_bbs_public_discussion_read.py`（新） | 列表倒序+message_count、详情 title=初始事件 objective + **NULL-payload 回退**、public-only 投影、孤儿帖 body=None、外 profile 404 |
-| `tests/community/repository/task/context_collab/`（追加） | 真 SQLite：列表按 profile 过滤/计数/倒序/坏行跳过 |
+| `tests/community/repository/task/context_collab/`（追加） | 真 SQLite：两读方法按 profile 过滤/计数/倒序/坏行跳过 |
 | DI 测试（追加） | 产品协议 singleton 解析、作者器/仓储/store 共享注入 |
-| `tests/community/endpoints/test_bbs_public_discussion_endpoints.py`（新） | 内部+OpenAPI 双客户端四路由 e2e |
 
-按需只跑 `context_collab` 目录 + products + repository + DI + endpoints；CI 门禁延后统一处理。
+按需只跑 `context_collab` 目录 + products + repository + DI；CI 门禁延后统一处理。endpoints 面无改动（P1 不上 wire）。
