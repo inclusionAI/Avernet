@@ -103,7 +103,7 @@ export function BotManagementRuntimeItems({
               发起评测
             </Button>
           ) : null}
-          {isServiceBot && onOpenEvalHistory ? (
+          {isServiceBot && !isAgentCodingBot && onOpenEvalHistory ? (
             <Button
               variant="ghost"
               size="sm"

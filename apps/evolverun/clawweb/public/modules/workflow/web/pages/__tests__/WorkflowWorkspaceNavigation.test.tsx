@@ -20,6 +20,7 @@ vi.mock('../../api/hooks', () => ({
     refetch: vi.fn(),
   }),
   useCreateWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useEvolveDiagnoses: queryHooks.diagnoses,
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
   useEvolveLessons: queryHooks.lessons,
