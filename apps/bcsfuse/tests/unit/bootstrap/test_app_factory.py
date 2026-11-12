@@ -1,11 +1,10 @@
 """TC lifecycle owns storage after host initialization and closes its index."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.bootstrap.app_factory import create_bcsfuse_app
 from app.bootstrap.application_context import ApplicationContext
 from app.bootstrap.opensource import build_opensource_provider_registry
+from fastapi.testclient import TestClient
 
 
 class StartupSpy:
@@ -44,6 +43,44 @@ def test_factory_is_lazy_and_uses_supplied_context():
         "provider_mode": "test",
         "process_health": "alive",
     }
+
+
+@pytest.mark.parametrize("source", ["environment", "host"])
+def test_tc_cors_accepts_configured_origin_for_legacy_config(source, monkeypatch):
+    origin = "https://teamclaw.example.test"
+    context, _ = build_context()
+    if source == "environment":
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", r"https://teamclaw\.example\.test")
+    else:
+        monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+        get = context.config.get
+
+        def host_get(key, default=None):
+            return [origin] if key == "tc.cors_allowed_origins" else get(key, default)
+
+        monkeypatch.setattr(context.config, "get", host_get)
+
+    client = TestClient(create_bcsfuse_app(context))
+    path = "/v1/workers/test-bot/config"
+    preflight = {
+        "Origin": origin,
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "content-type",
+    }
+    allowed = client.options(path, headers=preflight)
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == origin
+    assert allowed.headers["access-control-allow-credentials"] == "true"
+
+    rejected = client.options(path, headers={**preflight, "Origin": origin + ".evil"})
+    assert rejected.status_code == 400
+    assert "access-control-allow-origin" not in rejected.headers
+    assert (
+        client.get("/health", headers={"Origin": origin}).headers[
+            "access-control-allow-origin"
+        ]
+        == origin
+    )
 
 
 @pytest.mark.parametrize("missing", ["config", "secret_provider", "startup_provider"])
