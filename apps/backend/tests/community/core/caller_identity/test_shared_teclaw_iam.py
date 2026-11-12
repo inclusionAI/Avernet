@@ -112,7 +112,7 @@ def shared_world(tmp_path, monkeypatch):
     def boundaries(binder):
         for interface, value in {
             di.BotRepository: bots, di.DeviceBindingRepository: bindings,
-            di.ExpertChatRepository: repo, di.RuntimeBindingResolutionService: runtime,
+            di.RuntimeBindingResolutionService: runtime,
             di.AuthPlugin: auth, di.CallerTokenProvider: signing, di.BaasService: baas,
             di.BotCollabLockRepositoryProtocol: locks,
             di.CollaboratorRepositoryProtocol: MagicMock(), di.BotMCPProvider: MagicMock(),
@@ -164,6 +164,8 @@ async def test_real_shared_refresh_uses_owned_online_session_and_append(shared_w
     assert json.loads(puts[0].content)["header_operation_rules"][0]["value"] == "private-caller-token"
     shared_world.instances.get_instance.assert_not_called()
     shared_world.locks.get_by_key.assert_not_called()
+    assert "caller_shared_session_validated" in caplog.text
+    assert "ownership_check=not_required" in caplog.text
     assert "caller_shared_target_selected" in caplog.text
     assert "caller_shared_target_fenced" in caplog.text
     assert "caller_shared_target_refresh_succeeded" in caplog.text
@@ -183,7 +185,7 @@ async def test_shared_missing_session_rejected_before_signing(shared_world, sess
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["user", "bot", "owner", "environment", "deleted", "absent"])
-async def test_real_sqlite_shared_session_scope_cannot_be_crossed(shared_world, scope):
+async def test_shared_refresh_does_not_require_matching_owned_session(shared_world, scope):
     shared_world.repo.delete_owned_session("caller-1", "bot-1", "owner-1", "owned-session")
     if scope == "user":
         shared_world.repo.add_owned_session("another-user", "bot-1", "owner-1", "owned-session")
@@ -196,14 +198,16 @@ async def test_real_sqlite_shared_session_scope_cannot_be_crossed(shared_world, 
         shared_world.repo.add_owned_session("caller-1", "bot-1", "owner-1", "owned-session")
         shared_world.env["value"] = "test"
     response = await _http_iam(shared_world)
-    assert response.status_code == 403
-    shared_world.signing.exchange.assert_not_called()
-    assert shared_world.requests == []
+    assert response.status_code == 200
+    shared_world.signing.exchange.assert_called_once()
+    puts = [request for request in shared_world.requests if request.method == "PUT"]
+    assert len(puts) == 1
+    assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["publication", "provider", "engine", "session", "inactive"])
-async def test_shared_target_or_session_change_during_signing_prevents_append(shared_world, change):
+async def test_shared_target_changes_still_reject_but_ledger_deletion_allows_append(shared_world, change):
     original = shared_world.signing.exchange.return_value
 
     def exchange(**kwargs):
@@ -221,8 +225,14 @@ async def test_shared_target_or_session_change_during_signing_prevents_append(sh
 
     shared_world.signing.exchange.side_effect = exchange
     response = await _http_iam(shared_world)
-    assert response.status_code == (403 if change == "session" else 502)
-    assert shared_world.requests == []
+    if change == "session":
+        assert response.status_code == 200
+        puts = [request for request in shared_world.requests if request.method == "PUT"]
+        assert len(puts) == 1
+        assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
+    else:
+        assert response.status_code == 502
+        assert shared_world.requests == []
 
 
 @pytest.mark.asyncio
