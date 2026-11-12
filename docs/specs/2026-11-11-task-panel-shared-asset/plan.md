@@ -51,7 +51,7 @@ apps/frontend-nextgen/src/assets/TaskPanel/                    # 已删除，不
 
 ## 3. Data model 与现有消息合同
 
-数据库和后端模型无变更。继续读取现有 dashboard/list/by_session 和既有产物、历史消息接口。不新增服务端资源 manifest 或静态资源 HTTP 路由。
+数据库和任务执行模型无变更。继续读取现有 dashboard/list/by_session 和既有产物、历史消息接口。新增唯一已认证的 `GET /api/v1/collaboration/tasks/manifest`，不增加 OpenAPI 镜像或后端静态资产路由。manifest 读取既有 system-config 的 `task / panel` 配置，写入复用管理员 config API，不扩展 bool-only task settings。
 
 ```tsx
 // 现有声明形状保持不变：services/tasks/taskPanelMessage.ts:19-32
@@ -251,16 +251,17 @@ build: {
 
 新增依赖限现有组件真实所需的公开库及构建测试工具。实现时记录包体 gzip，重依赖懒加载，避免 SDK/antd 随资产引入。不能为方便打包而删除原有预览、安全清洗或 Markdown 行为。
 
-```text
-# 两宿主部署配置语义（不是新增后端 API）
-assetVersion = "0.1.0"
-hostApiVersion = 1
-assetBaseUrl = "<deployment-owned immutable HTTPS directory>/task-panel/0.1.0"
-assetUrl = assetBaseUrl + "/index.umd.js"
-# CSS 由同版本资产显式加载，或构建时仅注入资产作用域；不假设宿主扫描外部 Tailwind 源码。
-```
+正式构建的两宿主只读 `GET /api/v1/collaboration/tasks/manifest` 的 `data.bundles`，选择
+`name=taskPanel` 的完整 JS URL，并从同目录加载 `task-panel.css`。配置在 system-config
+按服务端环境隔离；只允许管理员写入固定 HTTPS URL。宿主不保存包版本 pin、不注入
+资源地址变量。加载按页面去重，校验 hostApiVersion 和必要导出，错误可重试但不静默
+回退或在活跃页面替换已求值的全局资产。配置更新在下次整页刷新生效。
 
-- C2（用户批准的最终交付方式）：独立构建并部署同一固定版本 UMD/CSS，两个产品从部署配置 `TASK_PANEL_ASSET_BASE_URL` 运行时加载。禁止向宿主 source/public 复制产物、生成 helpers 或 prepare hook；不依赖 BCS 业务 manifest，不新增 Python 运行时依赖或后端 HTTP 路由。
+本地开发直接加载 `/task-panel/index.umd.js` 与同目录 CSS，不请求 manifest。
+独立资产 server 将固定本地别名指向当前 dist，两个宿主仅代理 `/task-panel` 到 loopback；
+其余业务 API 仍走选定的预发后端。先验证未发布
+资产，再合并、发布组件并进行真实预发 manifest/CDN 验证；不隐含生产发布。
+
 - 公共类型仅经 `src/public-api.ts` 的 type-only 包入口提供，运行时擦除；本地类型检查可以指向拥有方源码入口，生产构建不需要 backend 资产输入。普通 RichContent、文件预览和一般状态工具由宿主独立拥有，不依赖任务资产。
 - taskPanel 稳定注册不得依赖“先进过群聊”，不得被 Bot 渲染库配置覆盖或随 CDN map clear 消失。
 - loader 必须真正注入 host：不能直接打开 SDK CDN 分支而绕过任务 wrapper。taskPanel 的消费解析在专属入口完成，不在通用 UmdPanel 增加大量任务分支。

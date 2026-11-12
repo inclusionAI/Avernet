@@ -86,7 +86,6 @@ export default defineConfig({
     // 仅 bcs-only 开发 profile 覆盖：编译关闭可选 Backend 增强（布尔 false，与部署
     // runtime-config.js 同语义）；full 缺省不覆盖，有效值仍由 config/config.ts 定义。
     ...(bcsOnlyProfile ? { TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: false } : {}),
-    TASK_PANEL_ASSET_BASE_URL: process.env.TASK_PANEL_ASSET_BASE_URL || '/task-panel/0.1.1',
     TEAMCLAW_LOGIN_STRATEGY: loginStrategy,
     TEAMCLAW_TASK_API_BASE: taskApiBase,
     TEAMCLAW_DEV_ENV:

@@ -5,35 +5,16 @@
     "noUnusedLocals": true,
     "strict": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@@/*": [
-        "./src/.umi/*"
-      ],
-      "@tc-chat/core": [
-        "./node_modules/@tc-chat/core"
-      ],
-      "@avernet/a2a-chat-client": [
-        "../../packages/a2a-chat-client/src/index.ts"
-      ],
-      "@avernet/a2a-chat-client/testing": [
-        "../../packages/a2a-chat-client/src/testing.ts"
-      ],
-      "@task-panel-test/*": [
-        "./assets/task-panel/src/*"
-      ],
-      "@avernet-assets/task-panel": [
-        "./assets/task-panel/src/public-api.ts"
-      ]
+      "@/*": ["./src/*"],
+      "@@/*": ["./src/.umi/*"],
+      "@tc-chat/core": ["./node_modules/@tc-chat/core"],
+      "@avernet/a2a-chat-client": ["../../packages/a2a-chat-client/src/index.ts"],
+      "@avernet/a2a-chat-client/testing": ["../../packages/a2a-chat-client/src/testing.ts"],
+      "@task-panel-test/*": ["./assets/task-panel/src/*"],
+      "@avernet-assets/task-panel": ["./assets/task-panel/src/public-api.ts"]
     }
   },
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/.umi/*",
-    ".tmp"
-  ],
+  "exclude": ["node_modules", "dist", "src/.umi/*", ".tmp"],
   "include": [
     "mock/**/*",
     "src/**/*",
