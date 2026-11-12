@@ -1,6 +1,6 @@
 const messages: Record<string, string> = {
-  missing_skill_file: '未找到 SKILL.md，请确认选择的是单个 Skill 目录。',
-  multiple_skill_files: '所选目录包含多个 SKILL.md，一次只能上传一个 Skill，请选择其中一个 Skill 的目录。',
+  missing_skill_file: '未找到 SKILL.md，请确认上传的 Skill 包含该文件。',
+  multiple_skill_files: '上传内容包含多个 SKILL.md，一次只能上传一个 Skill，请仅选择一个 Skill 后重试。',
   invalid_wrapper: '文件不在同一个 Skill 目录中，请重新选择目录。',
   wrapper_name_mismatch: 'Skill 目录名需要与 SKILL.md 中的 name 一致。',
   unsafe_file_path: '文件路径不合法，请检查目录后重试。',
