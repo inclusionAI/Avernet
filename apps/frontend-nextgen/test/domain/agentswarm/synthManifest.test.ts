@@ -13,6 +13,25 @@ test('the synthesized document is valid YAML the form accepts', () => {
   expect(validateManifest(synthesizeManifest('任意指令')).issues).toEqual([]);
 });
 
+test('every manifest category is present, empty where the agent declares nothing', () => {
+  const doc = synthesizeManifest('任意指令');
+  for (const category of ['identity', 'mcp', 'resources', 'skills', 'cli_tools']) {
+    expect(doc).toContain(`  ${category}:`);
+  }
+  // An empty category is an empty list, not an omission: a preview missing the
+  // keys reads as an incomplete format rather than a complete one with nothing filled in.
+  expect(doc).toContain('  mcp: []');
+  expect(doc).toContain('  resources: []');
+  expect(doc).toContain('  skills: []');
+  expect(doc).toContain('  cli_tools: []');
+});
+
+test('the categories appear in the order the grammar documents them', () => {
+  const doc = synthesizeManifest('x');
+  const order = ['identity', 'mcp', 'resources', 'skills', 'cli_tools'].map((c) => doc.indexOf(`  ${c}:`));
+  expect(order).toEqual([...order].sort((a, b) => a - b));
+});
+
 test('name and role never enter the synthesized persona', () => {
   // The backend only reads `instructions`; name/role only label the agent.
   const doc = synthesizeManifest('只包含指令内容');
