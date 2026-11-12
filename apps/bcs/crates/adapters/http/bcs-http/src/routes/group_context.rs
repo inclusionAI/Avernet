@@ -6,6 +6,7 @@
 //! resolves the effective actor from trusted headers/server-side token lookup.
 //! The actor is never trusted from the JSON body or URL query.
 
+
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Json, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
@@ -43,6 +44,8 @@ impl GroupContextQuery {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct AddRequest {
+    #[serde(default)]
+    preset: bool,
     name: String,
     scope_level: ScopeLevel,
     content: String,
@@ -110,6 +113,7 @@ pub(crate) async fn add(
         .services
         .group_context
         .add(AddGroupContext {
+            preset: body.preset,
             actor_id,
             request_context: query.request_context(),
             name: body.name,
@@ -122,6 +126,88 @@ pub(crate) async fn add(
         })
         .await?;
     Ok(json_ok(result))
+}
+
+pub(crate) async fn list_preset(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    use super::group_messages::{application_caller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    let presets = state.services.group_context.list_presets(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
+    Ok(json_ok(serde_json::json!({ "presets": presets })))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AddPresetRequest { name: String, #[serde(default)] description: String }
+
+pub(crate) async fn add_preset(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<AddPresetRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(AddPresetRequest { name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.add_preset(&group_id, &actor, name, description).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdatePresetRequest { name: String, new_name: Option<String>, description: Option<String> }
+
+pub(crate) async fn update_preset(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<UpdatePresetRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(UpdatePresetRequest { name, new_name, description }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.update_preset(&group_id, &actor, name, new_name, description).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeletePresetRequest { name: String }
+
+pub(crate) async fn delete_preset(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    body: Result<Json<DeletePresetRequest>, JsonRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    let (actor, group_id) = preset_write_context(&state, &headers, &uri, query).await?;
+    let Json(DeletePresetRequest { name }) = body.map_err(GroupContextHttpError::from_json_rejection)?;
+    state.services.group_context.delete_preset(&group_id, &actor, name).await?;
+    Ok(json_ok(GroupContextAck::ok()))
+}
+
+async fn preset_write_context(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+) -> Result<(String, String), GroupContextHttpError> {
+    use super::group_messages::{GroupChatCaller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(state, headers, uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
+    let GroupChatCaller::Human(human) = caller else {
+        return Err(ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller").into());
+    };
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    Ok((human.actor_id, group_id))
 }
 
 pub(crate) async fn update(
@@ -287,6 +373,23 @@ pub(crate) struct GroupContextHttpError {
 }
 
 impl GroupContextHttpError {
+    fn from_caller_status(status: StatusCode) -> Self {
+        let (group_status, message) = match status {
+            status if status.is_server_error() => (GroupContextStatus::InternalError, "Internal server error"),
+            StatusCode::UNAUTHORIZED => (GroupContextStatus::InvalidParam, "Authentication is required"),
+            StatusCode::FORBIDDEN => (GroupContextStatus::PermissionDenied, "Permission denied"),
+            _ => (GroupContextStatus::InvalidParam, "Invalid authentication request"),
+        };
+        Self {
+            status,
+            body: GroupContextErrorBody {
+                status: group_status,
+                error_msg: message.into(),
+            },
+        }
+    }
+
+
     fn from_query_rejection(error: QueryRejection) -> Self {
         Self::from_application(ApplicationError::invalid(
             "invalid_param",
@@ -382,6 +485,25 @@ fn _assert_response_shapes(
 mod group_context_error_tests {
     use super::*;
     use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn caller_errors_preserve_status_and_group_context_envelope() {
+        for (status, group_status) in [
+            (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+            (StatusCode::SERVICE_UNAVAILABLE, "internal_error"),
+            (StatusCode::UNAUTHORIZED, "invalid_param"),
+            (StatusCode::FORBIDDEN, "permission_denied"),
+        ] {
+            let response = GroupContextHttpError::from_caller_status(status).into_response();
+            assert_eq!(response.status(), status);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["status"], group_status);
+            if status.is_server_error() {
+                assert_eq!(body["error_msg"], "Internal server error");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn application_errors_map_to_http_status_and_response_body() {

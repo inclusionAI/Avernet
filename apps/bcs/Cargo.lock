@@ -711,6 +711,7 @@ dependencies = [
  "chrono",
  "serde_json",
  "tokio",
+ "tracing",
  "ulid",
 ]
 

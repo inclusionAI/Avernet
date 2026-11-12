@@ -17,6 +17,7 @@ bcs-group-context-store = { workspace = true }
 bcs-service-api = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]

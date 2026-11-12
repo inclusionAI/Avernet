@@ -57,15 +57,16 @@ fn mysql_v20_prefix_upgrade_reports_the_complete_pending_tail() -> Result<()> {
     let prefix = records.iter().filter(|record| record.version <= 20).cloned().collect();
     let before = build_mysql_migration_report("bcs".into(), plans.clone(), prefix, true)?;
     assert_eq!(before.current_version, Some(20));
-    assert_eq!(before.target_version, Some(45));
+    assert_eq!(before.target_version, Some(46));
     assert_eq!(before.pending_versions.iter().map(|plan| plan.version).collect::<Vec<_>>(),
-        (21..=45).collect::<Vec<_>>());
+        (21..=46).collect::<Vec<_>>());
 
     let after = build_mysql_migration_report("bcs".into(), plans, records, true)?;
     let report = format_mysql_apply_report(&after, &before.pending_versions);
-    assert!(report.contains("applied_versions=25\npending_versions=0"), "{report}");
+    assert!(report.contains("applied_versions=26\npending_versions=0"), "{report}");
     assert!(report.contains("- 044 actor_identity_no_pad checksum="), "{report}");
     assert!(report.contains("- 045 delivery_session_lookup checksum="), "{report}");
+    assert!(report.contains("- 046 group_context_preset checksum="), "{report}");
     let repeated = format_mysql_apply_report(&after, &[]);
     assert!(repeated.contains("applied_versions=0\npending_versions=0"), "{repeated}");
     Ok(())
@@ -182,9 +183,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=45\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=46\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=45).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=46).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
