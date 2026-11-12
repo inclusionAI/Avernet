@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.20</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.21</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -1010,9 +1010,11 @@ Optional&lt;ApprovalResult&gt; approval();   // 审批续交时为已解析、�
 
 public interface AgentExecution extends AgentResponseSink {
     ToolEventEmitter tools();
-    /** 暂停并请求审批。返回后 execute 应立即返回；SDK 把 Task 置为 INPUT_REQUIRED。 */
+    /** 本次调用能否请求审批，即调用方是否协商了 exec 审批扩展。 */
+    boolean approvalAvailable();
+    /** 暂停并请求审批。返回后 execute 应立即返回；SDK 把 Task 置为 INPUT_REQUIRED。
+        approvalAvailable() 为 false 时调用会抛出异常（P-62）。 */
     void requestApproval(ApprovalRequest request);
-    boolean negotiated(String extensionUri);
 }
 
 public interface ToolEventEmitter {
@@ -1026,6 +1028,7 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <tr><th>SDK 负责</th><th>Agent 负责</th></tr>
 <tr><td>把工具记录编码成 <code>tools/v1</code> 格式；未协商时静默丢弃</td><td>提供稳定的 <code>toolCallId</code></td></tr>
 <tr><td>生成审批 Schema、参数快照和摘要；校验回复；持久化已接受的决定；处理分批回复和过期</td><td>在 <code>requestApproval</code> 前保存好可恢复的引擎状态</td></tr>
+<tr><td>按协商结果给出 <code>approvalAvailable()</code></td><td>审批不可用时决定怎么办：不执行该工具并用文本说明，或改走不需要审批的路径。SDK 不能替业务决定，因为跳过审批直接执行有副作用的工具是不安全的</td></tr>
 <tr><td>全部工具都有决定后，通过 CAS 接管执行权，带着 <code>request.approval()</code> 调用 <code>execute</code></td><td>续交分支必须能在任意实例上从存储恢复；做不到则在 <code>AgentDescriptor</code> 中声明，SDK 会在跨实例续交时返回错误</td></tr>
 </table></div>
 
@@ -1165,6 +1168,10 @@ public class OrderAgent implements AdvancedBcnAgent {
             if (step instanceof TextStep text) {
                 exec.append(text.delta());                // 流式文本
 
+            } else if (step instanceof ToolStep tool &amp;&amp; tool.needsApproval() &amp;&amp; !exec.approvalAvailable()) {
+                // 调用方不支持审批：不执行该工具，告诉引擎被拒绝，由引擎用文本说明
+                run.feedDenied(tool);
+
             } else if (step instanceof ToolStep tool &amp;&amp; tool.needsApproval()) {
                 // 先保存可恢复的状态，再请求审批，然后立即返回
                 checkpoints.save(request.taskId(), new Checkpoint(run.snapshot(), tool));
@@ -1203,6 +1210,7 @@ public class OrderAgent implements AdvancedBcnAgent {
 <tr><td><code>descriptor()</code></td><td>决定 Card 的内容和等级。声明了什么扩展，SDK 就在 Card 里写什么（8.9）</td></tr>
 <tr><td><code>exec.append</code></td><td>文本块，只追加（6.7）</td></tr>
 <tr><td><code>exec.tools().start / result</code></td><td>工具观察，扩展点 E4。未协商时 SDK 丢弃，代码不用判断</td></tr>
+<tr><td><code>exec.approvalAvailable()</code></td><td>调用方没有协商审批扩展时，不能进入等待审批的状态（P-62）。示例选择不执行该工具，由引擎在文本里说明原因</td></tr>
 <tr><td><code>checkpoints.save</code> 然后 <code>requestApproval</code> 然后 <code>return</code></td><td>审批的固定写法：先保存可恢复状态，再请求，立即返回。Task 进入 <code>INPUT_REQUIRED</code>，不占线程</td></tr>
 <tr><td><code>request.approval()</code></td><td>审批续交也进入 <code>execute</code>，以此区分。全部工具有决定后才调用一次，可能在另一个实例上（9.5）。SDK 保证并发续交只调用一次</td></tr>
 <tr><td><code>ui.putBlock</code></td><td>结构化块，扩展点 E5。未协商时 SDK 改为输出降级文本（7.5）</td></tr>
