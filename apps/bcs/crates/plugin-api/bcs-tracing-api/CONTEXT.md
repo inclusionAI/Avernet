@@ -1,6 +1,6 @@
 # Network tracing plugin contract
 
-Contract revision: 2026-11-05 (explicit propagation field removal).
+Contract revision: 2026-11-12 (explicit gRPC invocation metadata).
 
 ## Provides
 
@@ -17,6 +17,21 @@ SDK, HTTP/gRPC framework, exporter, configuration loader or business services.
 `Context` is an opaque shared value owned by the installed implementation.
 
 ## Metadata and parent selection
+
+`Kind::GrpcClient { server_streaming }` identifies gRPC independently of mesh
+routing. `Outcome::Rpc` carries its original gRPC status code (0 is success).
+The flag describes the invocation, not completion of a stream: adapters finish
+at initial response readiness; messages and final trailers remain out of scope.
+For failures without a received status, providers map Timeout, TransportError
+and Cancelled to protocol-appropriate codes. Existing `RpcClient` semantics are
+unchanged for non-gRPC transports.
+
+This new enum variant requires exhaustive provider/fixture matches to migrate.
+The bundled A2A client sets it for all five operations, with server streaming
+only for SendStreamingMessage and SubscribeToTask. Concrete exporters decide
+log encodings; no vendor protocol names belong in the transport contract.
+RequestInfo literals and propagation fields are unchanged. No business API,
+configuration, database or deployment schema changes are required.
 
 `RequestInfo.route` is the matched HTTP server route template, including mount
 prefixes (for example `/api/v1/bots/{id}/chat`). It is `None` on HTTP/RPC clients.
