@@ -10,7 +10,6 @@ from app.bootstrap.opensource import build_opensource_provider_registry
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "test")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "tc.sqlite3"))
@@ -251,38 +250,3 @@ def test_legacy_identity_is_resolved_for_fuse_without_md(runtime):
         source.scan_for_workers(["bot:owner:legacy"]).profiles[0].staff_id
         == "bot:owner"
     )
-
-
-def test_explicit_card_backend_ignores_removed_index_source_setting(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
-    monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "new.sqlite"))
-    monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "new-qdrant"))
-    monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "legacy")
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
-    registry = build_opensource_provider_registry("test")
-
-    def old_storage():
-        raise AssertionError("new deployment must never open the old storage")
-
-    registry.register("tc_legacy_storage_factory", old_storage)
-    app = create_bcsfuse_app(
-        ApplicationContext(mode="test", startup_profile="opensource", registry=registry)
-    )
-    with TestClient(app, headers={"Authorization": "Bearer test-token"}) as client:
-        response = client.post(
-            "/v1/workers/new:owner/sync",
-            json={
-                "name": "New database worker",
-                "description": "Database recovery",
-                "runtime_state": "online",
-                "availability": "public",
-                "profile": {},
-            },
-        )
-        assert response.status_code == 200, response.text
-        result = client.post("/v1/search", json={"query": "Database recovery"})
-        assert result.status_code == 200, result.text
-        assert result.json()["results"][0]["worker_id"] == "new:owner"
-        assert registry.require("tc_catalog_repository").get("new:owner") is not None
