@@ -75,7 +75,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a>
-<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a>
+<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a><a class="sub" href="#s8-12">8.12 推送实现</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 存储选型</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.18</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.19</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -986,7 +986,7 @@ public class OrderAgent implements BcnAgent {
 <tr><td><code>TaskIdGenerator</code></td><td>生成 <code>taskId</code>、<code>contextId</code></td><td>随机 UUID</td><td>需要自定义格式</td></tr>
 <tr><td><code>ExtensionChannel</code></td><td>业务扩展在五个扩展点上的读写通道（7.4）。简易层和完整层都可以使用</td><td>SDK 提供，Agent 调用</td><td>不需要实现</td></tr>
 <tr><td><code>ExtensionDescriptors</code></td><td>提供本应用所用扩展的描述（7.6，可选），用于检查扩展点是否用对，以及测试模式下的 Schema 校验</td><td>读取应用内的描述文件；没有描述时不检查</td><td>通常不需要</td></tr>
-<tr><td><code>PushSender</code></td><td>向推送地址发送状态提示，含地址白名单检查和有限重试（6.12）。本期只定义接口</td><td>未启用；Card 不声明推送能力</td><td>后续阶段由 SDK 提供 HTTP 实现</td></tr>
+<tr><td><code>PushSender</code></td><td>向推送地址发送一条状态提示（8.12）。白名单、重试和发件箱由 core 负责。本期只定义接口</td><td>未启用；Card 不声明推送能力</td><td>后续阶段由 SDK 提供 HTTP 实现</td></tr>
 </table></div>
 
 <h4>动态 Agent：AgentResolver</h4>
@@ -1370,6 +1370,49 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td>版本治理</td><td>Card 的 profile 声明扩展带 <code>sdk</code> 字段，BCS 可以统计全量版本分布。Profile 规定最低 SDK 版本，低于它的 Agent 在注册或更新时得到告警或被拒绝。见 <span class="tag q">Q14</span>。</td><td>版本碎片化；协议修复无法触达</td></tr>
 </table></div>
 
+<h3 id="s8-12"><span class="n">8.12</span>推送通知的实现方案（后续阶段）</h3>
+<p>本期只定义推送的语义（6.12）。本节是 SDK 以后实现推送的方案，目的是确认现在预留的字段和接口足够，避免以后改动 SPI。</p>
+<h4>难点</h4>
+<p>推送要求"至少尝试投递一次"，而多实例设计里实例之间不通信、回收是惰性的（9.5）。如果状态写入成功后、推送发出前实例宕机，或执行实例宕机后没有人再查询这个 Task，推送就会丢失。推送存在的意义正是让调用方不必一直查询，所以不能依赖查询来触发。</p>
+<h4>方案：发件箱加到期队列</h4>
+<ol class="seq">
+<li><div><span class="who">core</span>写入状态变化（终态或 <code>INPUT_REQUIRED</code>）时，在同一次比较并写入中，往 Task 记录的发件箱里为每个推送配置追加一条待投递记录，并把这个 Task 放进到期队列，到期时间为当前时间。状态和待投递记录要么一起写入，要么都不写入。</div></li>
+<li><div><span class="who">core</span>写入成功后，本实例立即异步投递，不阻塞执行线程。</div></li>
+<li><div><span class="who">PushSender</span>按 6.12 发送：负载为只含 <code>statusUpdate</code> 的 StreamResponse，<code>Authorization</code> 头带调用方给的关联凭据，单次超时 10 秒。</div></li>
+<li><div><span class="who">core</span>收到 2xx 后，通过比较并写入删除这条待投递记录。失败则记录尝试次数，按退避（例如 5 秒、30 秒、2 分钟、10 分钟）把到期时间推后。达到上限后放弃，计数并记日志。</div></li>
+<li><div><span class="who">任一实例</span>后台每隔几秒从到期队列取出少量已到期的 Task，重新投递其中未完成的记录。到期队列同时登记租约到期时间，所以执行实例宕机后，任一实例都能主动回收该 Task 为 <code>FAILED</code>，并按同样流程推送。</div></li>
+</ol>
+<p>结果是投递"至少一次"：宕机、重启、推送失败都会由其他实例接着重试；重复投递由接收方按 Task 标识加状态去重（P-154）。</p>
+<h4>需要对现有设计做的补充</h4>
+<div class="tw"><table>
+<tr><th>位置</th><th>补充</th><th>影响</th></tr>
+<tr><td>Task 记录（9.3）</td><td><code>pushConfig</code> 之外增加发件箱 <code>pushOutbox</code>：每条记录包含配置标识、要通知的状态、尝试次数、下次时间</td><td>只增加字段，随 Task 一起写入和过期</td></tr>
+<tr><td>TaskStore（9.2）</td><td>增加两个原语：<code>schedule(taskKey, dueAtMs)</code> 和 <code>pollDue(nowMs, limit)</code>。缓存实现用有序集合，按到期时间取最小的若干项</td><td>新增原语。只有启用推送时需要；未启用推送的 Agent 不受影响</td></tr>
+<tr><td>回收（9.5）</td><td>启用推送后，回收由到期队列主动触发，不再只依赖查询</td><td>顺带解决了 9.5 中"宕机后没人查询就不会回收"的缺口</td></tr>
+<tr><td>请求处理（8.6）</td><td>初始提交时校验 <code>taskPushNotificationConfig</code> 的地址白名单，写入 Task 记录；未启用推送时返回 <code>PushNotificationNotSupportedError</code>（P-150）</td><td>—</td></tr>
+<tr><td>四个配置方法</td><td>在 Task 记录上增删改查推送配置，用比较并写入；最多 4 个；<code>Get</code> 和 <code>List</code> 返回时隐去凭据</td><td>—</td></tr>
+<tr><td>Card</td><td>只有配置开启推送、且所用 TaskStore 支持到期队列时，SDK 才写入 <code>pushNotifications: true</code></td><td>启动时校验，不满足则启动失败</td></tr>
+</table></div>
+<h4>接口</h4>
+<pre><code>public interface PushSender {
+    /** 投递一条推送。返回是否成功（2xx）；超时和网络错误视为失败，由 core 负责重试。 */
+    boolean send(URI url, String authorization, byte[] streamResponseJson, Duration timeout);
+}
+
+// TaskStore 增加（仅启用推送时需要）
+void schedule(String agentKey, String taskId, long dueAtMs);
+List&lt;TaskKey&gt; pollDue(long nowMs, int limit);</code></pre>
+<p>SDK 提供基于 JDK HttpClient 的默认 <code>PushSender</code>。平台需要走公司内部的 HTTP 出口或加链路信息时，可以替换它。业务的 Agent 代码不需要任何改动：推送完全由 SDK 根据状态变化触发。</p>
+<h4>配置</h4>
+<pre><code>bcn.a2a.server.push.enabled=true
+bcn.a2a.server.push.allowed-hosts=bcs.example.internal,order-console.example.internal
+bcn.a2a.server.push.max-configs-per-task=4
+bcn.a2a.server.push.timeout=10s
+bcn.a2a.server.push.retry-backoff=5s,30s,2m,10m
+bcn.a2a.server.push.sweep-interval=5s</code></pre>
+<h4>成本</h4>
+<p>每个启用推送的 Task 在每次关键状态变化时多一次删除待投递记录的写入，以及到期队列的一次登记和一次移除。后台扫描每个实例每隔几秒一次有上限的读取，只取已到期的项，不扫描全部 Task。未启用推送时这些都不发生。</p>
+
 <h2 id="s9"><span class="n">9</span>多实例设计</h2>
 <h3 id="s9-1"><span class="n">9.1</span>模型</h3>
 <ul>
@@ -1415,7 +1458,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td><code>ownerInstance</code></td><td>string，可空</td><td>执行实例</td><td>执行实例标识；<code>INPUT_REQUIRED</code> 和终态时为空</td></tr>
 <tr><td><code>leaseExpiresAtMs</code></td><td>long</td><td>执行实例</td><td>租约到期时间</td></tr>
 <tr><td><code>cancelRequested</code></td><td>boolean</td><td>任意实例</td><td>取消标记，只能从 false 变为 true</td></tr>
-<tr><td><code>pushConfig</code></td><td>对象，可空</td><td>创建时</td><td>推送配置列表（地址、关联凭据），最多 4 个（6.12）。本期预留，始终为空</td></tr>
+<tr><td><code>pushConfig</code></td><td>对象，可空</td><td>创建时</td><td>推送配置列表（地址、关联凭据），最多 4 个（6.12）；以后增加发件箱 <code>pushOutbox</code>（8.12）。本期预留，始终为空</td></tr>
 <tr><td><code>deadlineMs</code></td><td>long</td><td>创建时；审批时</td><td>执行或审批等待的截止时间</td></tr>
 <tr><td><code>createdAtMs</code>、<code>updatedAtMs</code></td><td>long</td><td>每次写入</td><td>用于清理和排查</td></tr>
 </table></div>
@@ -1485,7 +1528,7 @@ void without_ui_extension_falls_back_to_text() {
 <li><div><span class="who">实例 B</span>通过 CAS 把状态置为 <code>FAILED</code>，状态消息说明执行中断，保留已写入的文本。</div></li>
 <li><div><span class="who">实例 B</span>按终态继续处理原请求。</div></li>
 </ol>
-<p>回收是惰性的：只有当有人读这个 Task 时才发生。BCS 在跟踪期间会持续查询或订阅，所以在途 Task 会被及时回收。没有人再读的 Task 由保留期清理处理。不设后台扫描，避免对存储做范围查询。</p>
+<p>回收是惰性的：只有当有人读这个 Task 时才发生。BCS 在跟踪期间会持续查询或订阅，所以在途 Task 会被及时回收。没有人再读的 Task 由保留期清理处理。以后启用推送时，到期队列会让回收变为主动（8.12）。本期不设后台扫描，避免对存储做范围查询。</p>
 
 <h3 id="s9-6"><span class="n">9.6</span>竞争分析</h3>
 <div class="tw"><table>
@@ -1680,7 +1723,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td class="nw">P2 多实例</td><td>TaskStore 多实例语义；分布式缓存参考实现；优雅停机；TCK 多实例分组</td><td>两实例通过 TCK 多实例分组；终止执行实例后 Task 在租约过期后变为 FAILED；压测得到单实例并发和存储容量数据</td></tr>
 <tr><td class="nw">P3 上下文</td><td>调用上下文扩展规范；SDK 解析；BCS 下行生成</td><td>TCK L2 通过；BCS 发起的调用中 Agent 得到正确的 <code>userId</code>；缺失时拒绝</td></tr>
 <tr><td class="nw">P4 扩展</td><td>扩展通道（E2 到 E5）和内容块；多模态的附件与文件块（6.13）；<code>AdvancedBcnAgent</code>；工具观察；exec 审批；自动注册</td><td>TCK L3 通过；两实例下并发续交只恢复一次；工作台完成一次允许和一次拒绝</td></tr>
-<tr><td class="nw">P6 推送</td><td><code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
+<tr><td class="nw">P6 推送</td><td>按 8.12：发件箱和到期队列；<code>PushSender</code> 的 HTTP 实现；四个推送配置方法；BCS 推送接收端点；TCK 推送分组。目前没有明确的长任务场景，不排期，有需求时启动</td><td>长任务在 BCS 不持有连接的情况下完成；推送丢失时查询兜底生效；非白名单地址被拒绝</td></tr>
 <tr><td class="nw">P5 推广</td><td>接入文档；示例工程；至少两个平台接入</td><td>接入平台通过 TCK 并在生产环境完成对话闭环</td></tr>
 </table></div>
 
