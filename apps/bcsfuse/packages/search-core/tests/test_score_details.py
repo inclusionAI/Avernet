@@ -59,7 +59,7 @@ def test_rerank_failure_reports_only_real_stage_results():
             raise TimeoutError()
 
     result = retrieve(reranker=Broken(), allow_partial=True)
-    assert result.reasons == ("reranker_unavailable",)
+    assert result.reasons == ("reranker_unavailable", "reranker_timeout")
     assert [i.item_id for i in result.items] == ["a", "b"]
     for item in result.items:
         assert item.score_source == "rrf"
