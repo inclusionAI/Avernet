@@ -97,12 +97,14 @@ export function createMonitoringRecoveryTrigger(input: {
           event.businessDiagnosis?.trim() ? `业务诊断：${event.businessDiagnosis}` : "",
           event.systemDiagnosis?.trim() ? `系统诊断：${event.systemDiagnosis}` : "",
         ].filter(Boolean).join("\n");
+        const faultAtMs = event.engine === "OC" && event.occurredAt ? Date.parse(event.occurredAt) : NaN;
         request = parseRequest({
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
           target: recoveryTarget,
           session_key: event.sessionKey,
           ...(event.sessionId ? { session_id: event.sessionId } : {}),
           ...(isRecoveryTraceId(event.traceId) ? { trace_id: event.traceId } : {}),
+          ...(Number.isSafeInteger(faultAtMs) && faultAtMs > 0 ? { fault_at_ms: faultAtMs } : {}),
           delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
           diagnosis,
         });
