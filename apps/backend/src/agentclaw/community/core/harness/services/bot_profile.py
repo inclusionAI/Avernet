@@ -4,6 +4,7 @@ Wraps IdentityService for file I/O and adds backup/diff capabilities.
 Also aggregates activated skills / MCPs from SkillSetService.
 """
 from __future__ import annotations
+import httpx
 
 import hashlib
 import json
@@ -136,11 +137,27 @@ class BotProfile:
 
         Writes always target the current working draft, regardless of publish_id.
         publish_id is accepted for API consistency but is currently unused.
+
+        Raises RuntimeError with a descriptive message when the underlying
+        device write fails (e.g. Arca proxy 500), so callers can surface a
+        meaningful error instead of a bare HTTP 500.
         """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
         raw = document.serialize()
-        await self._identity.write_identity_file(
-            entity_type, entity_id, bot_id, file_type, raw, entity_id,
-        )
+        try:
+            await self._identity.write_identity_file(
+                entity_type, entity_id, bot_id, file_type, raw, entity_id,
+            )
+        except Exception as exc:
+            _logger.error(
+                "[BotProfile] write_file failed entity_type=%s entity_id=%s bot_id=%s "
+                "file_type=%s error=%s",
+                entity_type, entity_id, bot_id, file_type, exc,
+            )
+            raise RuntimeError(
+                f"Device write failed for {file_type} on bot {bot_id}: {exc}"
+            ) from exc
         return BotFileRef(
             entity_type=entity_type,
             entity_id=entity_id,
