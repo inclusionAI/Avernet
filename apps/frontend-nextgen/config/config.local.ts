@@ -46,6 +46,8 @@ export default defineConfig({
   mfsu: false,
   https: devHttpsEnabled ? { hosts: [devHttpsHost], http2: false } : undefined,
   proxy: {
+    // Local task-panel source testing; the asset process is started independently.
+    '/task-panel': proxy('http://127.0.0.1:43820'),
     '/auth': proxy(auth),
     '/openapi/v1/auth': proxy(auth),
     // BCS-only 开发 profile：好友发现整棵 collaboration 子树优先于其余通用键
@@ -84,6 +86,7 @@ export default defineConfig({
     // 仅 bcs-only 开发 profile 覆盖：编译关闭可选 Backend 增强（布尔 false，与部署
     // runtime-config.js 同语义）；full 缺省不覆盖，有效值仍由 config/config.ts 定义。
     ...(bcsOnlyProfile ? { TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED: false } : {}),
+    TASK_PANEL_ASSET_BASE_URL: process.env.TASK_PANEL_ASSET_BASE_URL || '/task-panel/0.1.1',
     TEAMCLAW_LOGIN_STRATEGY: loginStrategy,
     TEAMCLAW_TASK_API_BASE: taskApiBase,
     TEAMCLAW_DEV_ENV:

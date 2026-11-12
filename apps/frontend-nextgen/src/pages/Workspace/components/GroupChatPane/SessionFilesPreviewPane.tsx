@@ -1,4 +1,4 @@
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { SafeHtml } from '@/components/Common/RichContent';
 import { Badge, Button } from '@/components/ui';
 import type { SessionFilePreviewState } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { formatFileSize } from '@/services/workspace/sessionFileUtils';

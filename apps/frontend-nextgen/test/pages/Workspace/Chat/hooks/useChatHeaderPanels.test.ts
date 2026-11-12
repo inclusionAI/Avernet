@@ -20,6 +20,12 @@ import { useTaskConversationNavigationStore } from '@/stores/taskConversationNav
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
+jest.mock('@/services/tasks/panel/taskPanelRuntime', () => {
+  const { createTestTaskPanelRuntime } = require('../../../../helpers/taskPanelRuntime');
+  return createTestTaskPanelRuntime({ bySession: (...args: any[]) => mockGetTaskBySession(...args), list: (...args: any[]) => mockListMyTasks(...args) });
+});
+jest.mock('@/services/tasks/panel/taskPanelHistoryAdapter', () => ({ createBotTaskHistoryReader: () => ({ readPage: async () => ({ messages: [], nextCursor: null }) }) }));
+
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
   return {
     sessionId: 'sess-1',
@@ -67,6 +73,7 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
       section: 'managed' as const,
       userId: overrides.userId ?? null,
       botId: 'bot-1',
+      bot: { botId: 'bot-1' } as any,
       toggleFavorite: jest.fn().mockResolvedValue(true),
       favoritePending: jest.fn().mockReturnValue(false),
       openFileDrawer: jest.fn(),

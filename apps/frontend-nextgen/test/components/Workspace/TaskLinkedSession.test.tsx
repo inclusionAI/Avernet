@@ -10,6 +10,10 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+jest.mock('@/components/Workspace/TaskPanelAssetBoundary', () => ({
+  TaskPanelAssetBoundary: require('../../helpers/taskPanelHost').TaskPanelTestAssetBoundary,
+}));
+
 jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));

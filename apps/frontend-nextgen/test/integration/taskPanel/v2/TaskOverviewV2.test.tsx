@@ -1,0 +1,308 @@
+/** @jest-environment jsdom */
+// TaskOverviewV2(L1):节点视图/下钻入口隐藏/产物区(PRD #1/2/3/4/9)。DAG 视图入口当前隐藏。
+import {
+  artifactDescriptorCode,
+  artifactDescriptorText,
+  artifactDescriptorUrlLink,
+} from '@task-panel-test/panel/testdata/artifactFixtures';
+import type { TaskNodeView, TaskView } from '@task-panel-test/panel/types';
+import type { ResolvedSessionTarget } from '@task-panel-test/panel/sessionResolution';
+import { TaskOverviewV2, type TaskOverviewV2Props } from '@task-panel-test/panel/v2/TaskOverviewV2';
+import type { TaskPanelNav } from '@task-panel-test/panel/v2/taskPanelNav';
+import { fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it } from '@jest/globals';
+import { TaskPanelTestHost } from '../../../helpers/taskPanelHost';
+
+const render = (ui: Parameters<typeof baseRender>[0], options?: Parameters<typeof baseRender>[1]) => baseRender(ui, { wrapper: TaskPanelTestHost, ...options });
+
+
+
+const nodeArtifacts = (n: Partial<TaskNodeView>): TaskNodeView =>
+  ({
+    id: 'n-x',
+    name: '节点',
+    sequence: 1,
+    status: 'running',
+    hasSubTask: false,
+    artifacts: [],
+    stepTraces: [],
+    ...n,
+  }) as TaskNodeView;
+
+const task = {
+  id: 't1',
+  name: '竞品分析',
+  description: '任务背景描述',
+  goal: '输出决策建议',
+  objective: '输出决策建议',
+  acceptances: ['三家竞品'],
+  status: 'EXECUTING',
+  taskType: 'dynamic',
+  taskTypeLabel: '动态',
+  sourceLabel: 'Bot',
+  ownerBotName: '规划师Bot',
+  ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
+  createdAt: '2026-10-20 10:00',
+  finishedAt: null,
+  loopRound: 1,
+  needsAttention: true,
+  progress: { total: 2, pending: 0, planning: 0, running: 1, done: 1, failed: 0, hung: 0, skipped: 0, percent: 50 },
+  artifacts: [
+    {
+      id: 'root-legacy-1',
+      name: '任务根产物',
+      type: 'document',
+      url: null,
+      summary: '根级 legacy 产物',
+      updatedAt: '2026-10-01 09:00',
+    },
+  ],
+  mainSessionId: 'agent:main:session:s-main',
+  derivedSessionIds: [],
+  nodes: [
+    nodeArtifacts({
+      id: 'n-solo',
+      name: '需求澄清与规划',
+      sequence: 1,
+      status: 'done',
+      present: 'merged',
+      executor: '规划师Bot',
+      runMode: 'single_bot',
+    }),
+    nodeArtifacts({
+      id: 'n-group',
+      name: '并行调研执行',
+      sequence: 2,
+      status: 'running',
+      present: 'running',
+      executor: '竞品研究员Group',
+      runMode: 'coop_group',
+      drillable: true,
+      needsHitl: true,
+      attemptCount: 2,
+      sessionId: 'bcs_grp_902:round:2',
+      groupId: 'g-902',
+      startedAtMs: 1700000000000,
+      endAtMs: 1700000005000,
+      artifacts: [
+        {
+          id: 'art-url',
+          name: '需求说明书',
+          type: 'link',
+          kind: 'url_link',
+          url: 'https://yuque.example/doc1',
+          linkRef: { url: 'https://yuque.example/doc1', type: 'dima需求' },
+          owner: 'group-902',
+          isFinalArtifact: true,
+          updatedAt: '2026-10-20T08:53:20.000Z',
+        },
+        {
+          id: 'art-code',
+          name: '重构 PR',
+          type: 'other',
+          kind: 'code',
+          url: 'https://git.example/pr/1024',
+          summary: '产物读侧接入',
+          codeRef: {
+            codeBaseName: 'avernet',
+            codeBaseAddress: 'https://git.example/avernet',
+            pullRequestUrl: 'https://git.example/pr/1024',
+            description: '产物读侧接入',
+          },
+          owner: 'bot-coder',
+          updatedAt: '2026-10-20T08:56:40.000Z',
+        },
+        { id: 'art-text', name: '阶段结论', type: 'document', kind: 'text', summary: '一段纯文本结论', owner: 'bot-planner', updatedAt: '2026-10-20T08:58:20.000Z' },
+      ],
+    }),
+  ],
+  dagNodes: [
+    { id: 'n-solo', label: '需求澄清与规划', status: 'done', x: 0, y: 0, isCurrent: false, present: 'merged', short: '需求澄清与规划' },
+    { id: 'n-group', label: '并行调研执行', status: 'running', x: 0, y: 100, isCurrent: false, present: 'running', drillable: true, short: '并行调研执…' },
+  ],
+  dagEdges: [
+    { from: 'n-solo', to: 'n-group', semantics: 'rework', reason: 'Owner Bot 裁决 revise: 返工' },
+  ],
+} as unknown as TaskView;
+
+// fixture Descriptor 断言备份(kind 徽章依赖)
+void artifactDescriptorUrlLink;
+void artifactDescriptorCode;
+void artifactDescriptorText;
+
+const makeNav = (): TaskPanelNav & {
+  calls: { root: string[]; select: Array<[string, ResolvedSessionTarget | null]>; drill: string[] };
+} => {
+  const calls = {
+    root: [] as string[],
+    select: [] as Array<[string, ResolvedSessionTarget | null]>,
+    drill: [] as string[],
+  };
+  return {
+    selectedNodeId: null,
+    drillStack: [],
+    calls,
+    selectRootNode: (id: string) => calls.root.push(id),
+    selectNode: (id: string, target: ResolvedSessionTarget | null) => calls.select.push([id, target]),
+    drillInto: (id: string) => calls.drill.push(id),
+    backToOverview: () => {},
+  } as unknown as TaskPanelNav & { calls: typeof calls };
+};
+
+const props = (overrides?: Partial<TaskOverviewV2Props>): TaskOverviewV2Props => ({
+  task,
+  nav: makeNav(),
+  apiBaseUrl: '',
+  ...overrides,
+});
+
+describe('TaskOverviewV2(L1)', () => {
+  it('节点视图默认:卡片渲染执行体 pill/返工徽章/HITL 徽章/完成划线', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.getByText('第2棒 并行调研执行')).toBeTruthy();
+    expect(screen.getByText('竞品研究员Group')).toBeTruthy();
+    expect(screen.getByText('点击查看会话')).toBeTruthy();
+    // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
+    expect(screen.getByText('第 1 次返工')).toBeTruthy();
+    // attemptCount 1(仅首发,无返工)不显示返工徽章
+    expect(screen.queryByText('第 0 次返工')).toBeNull();
+    expect(screen.getByText('人工处理')).toBeTruthy();
+    // demo 语义:完成态(present done/merged)节点标题划线
+    const doneTitle = screen.getByText('第1棒 需求澄清与规划');
+    expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
+  });
+
+  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
+    const nav = makeNav();
+    render(<TaskOverviewV2 {...props({ nav })} />);
+
+    fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
+    expect(nav.calls.root).toEqual(['n-solo']);
+    expect(nav.calls.select).toHaveLength(0);
+    expect(nav.calls.drill).toHaveLength(0);
+
+    fireEvent.click(screen.getByText('第2棒 并行调研执行'));
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-group');
+    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    expect(nav.calls.drill).toHaveLength(0);
+  });
+
+  it('节点视图下钻入口隐藏,协作群节点也不渲染下钻按钮', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    expect(screen.queryByTitle('下钻节点副屏')).toBeNull();
+    expect(screen.queryByLabelText('下钻 并行调研执行')).toBeNull();
+  });
+
+  it('DAG 视图入口隐藏,总览始终展示节点视图', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'DAG视图' })).toBeNull();
+    expect(screen.queryByTitle('切换到 DAG 视图')).toBeNull();
+    expect(screen.queryByTitle('当前为 DAG 视图')).toBeNull();
+  });
+
+  it('产物区:任务级聚合(根 legacy + 节点产物)去重计数,kind 徽章与链接', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    // 1 root legacy + 3 node artifacts
+    expect(screen.getByTitle('产物计数').textContent).toBe('4 项');
+    expect(screen.getByText('需求说明书')).toBeTruthy();
+    expect(screen.getByText('任务根产物')).toBeTruthy();
+    // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
+    // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
+    const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
+    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
+    const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
+    expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
+    expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
+    const finalArtifact = within(finalArtifactRow);
+    const stageLabelElement = finalArtifact.getByTestId('artifact-stage');
+    expect(finalArtifact.getByText('链接').compareDocumentPosition(stageLabelElement)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // kind 徽章
+    expect(screen.getByText('链接')).toBeTruthy();
+    expect(screen.getByText('代码')).toBeTruthy();
+    expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
+    // url_link/code 卡仅保留外链入口，不提供站内预览按钮。
+    expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
+      'https://yuque.example/doc1',
+    );
+    expect(screen.getByRole('link', { name: '跳转产物 重构 PR' }).getAttribute('href')).toBe(
+      'https://git.example/pr/1024',
+    );
+    expect(screen.queryByRole('button', { name: '预览产物 需求说明书' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '预览产物 重构 PR' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下载产物 需求说明书' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下载产物 重构 PR' })).toBeNull();
+  });
+
+  it('链接与代码产物仅直接跳转,不打开站内详情抽屉', () => {
+    render(<TaskOverviewV2 {...props()} />);
+
+    expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
+      'https://yuque.example/doc1',
+    );
+    expect(screen.getByRole('link', { name: '跳转产物 重构 PR' }).getAttribute('href')).toBe(
+      'https://git.example/pr/1024',
+    );
+    expect(screen.queryByTestId('task-artifact-link-details')).toBeNull();
+    expect(screen.queryByTestId('task-artifact-code-details')).toBeNull();
+  });
+
+  it('纯文本产物保留预览入口，但不提供下载入口', async () => {
+    render(<TaskOverviewV2 {...props()} />);
+
+    expect(screen.getByRole('button', { name: '预览产物 阶段结论' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '下载产物 阶段结论' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 阶段结论' }));
+    expect((await screen.findByTestId('task-artifact-plain-text')).textContent).toContain('一段纯文本结论');
+    expect(screen.queryByRole('button', { name: '下载文件' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+  });
+
+  it('session_file 产物可在 TaskPanel 内预览，并可关闭抽屉', async () => {
+    const sessionArtifact = {
+      id: 'session-pdf',
+      name: '附件.pdf',
+      type: 'document' as const,
+      kind: 'file' as const,
+      owner: 'bot-1',
+      updatedAt: '2026-10-20T11:00:00.000Z',
+      fileRef: {
+        storageType: 'session_file' as const,
+        storageId: 'sess-9',
+        fileId: 'f-1',
+        fileType: 'application/pdf',
+      },
+    };
+    render(<TaskOverviewV2 {...props({ task: { ...task, artifacts: [...task.artifacts, sessionArtifact] } })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '预览产物 附件.pdf' }));
+
+    expect(await screen.findByTestId('task-artifact-preview-drawer')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTitle('附件.pdf 预览').getAttribute('src')).toBe(
+        '/api/v1/collaboration/sessions/sess-9/files/f-1/content?show=true',
+      ),
+    );
+    expect(screen.getByRole('button', { name: '下载产物 附件.pdf' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭产物预览' }));
+    expect(screen.queryByTestId('task-artifact-preview-drawer')).toBeNull();
+  });
+
+  it('PRD 两区结构:只有步骤与产物,无「任务产出」「任务信息」区', () => {
+    render(<TaskOverviewV2 {...props()} />);
+    expect(screen.getByText('步骤')).toBeTruthy();
+    expect(screen.getByText('产物')).toBeTruthy();
+    expect(screen.queryByText('任务产出')).toBeNull();
+    expect(screen.queryByText('任务信息')).toBeNull();
+    expect(screen.queryByText('任务背景描述')).toBeNull();
+  });
+});
