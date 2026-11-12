@@ -350,6 +350,29 @@ it("NAS reads bind delivery to the current retry's actual user record, never an 
   const found = await agent.sessionRead(task, { clientRequestId: "nas-current-found", purpose: "读取实际新消息", nas_evidence: evidence });
   expect(found.result).toMatchObject({ delivery_confirmed: true, delivery: { message_id: "actual" } });
 });
+it("redacts OC NAS URL arguments and drops supplied comparison claims", async () => {
+  const task = await create("automatic");
+  const original = "fixture".repeat(8), copied = original.slice(0, 6) + original.slice(7);
+  const url = (value: string) => {
+    const url = new URL("https://example.invalid/file");
+    url.searchParams.set("token", value);
+    return url.href;
+  };
+  const receipt = await agent.sessionRead(task, { clientRequestId: "nas-url-argument", purpose: "比较原链接和工具入参",
+    nas_evidence: {
+      source: `${directory}/prod/prod_staff_owner_openclaw_default/.openclaw/agents/main/sessions/original.jsonl`,
+      session_id: "original", delivery_key: request.delivery_key,
+      url_argument_comparisons: [{ status: "match", source_line: 20 }],
+      messages: [
+        { line_no: 5, record: { message: { role: "user", content: url(original) } } },
+        { line_no: 6, record: { message: { role: "assistant", content: [{ type: "toolCall", arguments: { url: url(copied) } }] } } },
+      ],
+    } });
+  expect(receipt).toMatchObject({ status: "succeeded" });
+  expect(receipt.result).not.toHaveProperty("url_argument_comparisons");
+  expect(JSON.stringify(receipt)).not.toContain(original);
+  expect(JSON.stringify(receipt)).not.toContain(copied);
+});
 it.each(["apply", "blocked"])("%s failure callbacks retain saved evidence without a prior effect judgment", async kind => {
   let task = await create("automatic"); const read = await inspect(task, "failure-source");
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要环境修复", evidence_ids: [read.evidenceId] });
