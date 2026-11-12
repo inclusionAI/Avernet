@@ -1,5 +1,5 @@
 import { load as parseYaml } from 'js-yaml';
-import { MANIFEST_DOCS_URL, MANIFEST_LIMITS, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { MANIFEST_DOCS_URL, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
 import { validateManifest } from '@/domain/agentswarm/manifest';
 
 test('the shipped template parses and passes the form validator', () => {
@@ -23,6 +23,23 @@ test('the two most-used categories are shown as commented examples', () => {
   }
 });
 
+test('the template interpolates its values rather than shipping placeholders', () => {
+  expect(MANIFEST_TEMPLATE).not.toContain('${');
+  expect(MANIFEST_TEMPLATE.split('\n')[0]).toContain('https://github.com');
+});
+
+test('uncommenting the two examples yields valid YAML', () => {
+  // Uncommenting is the one edit a user is meant to make, so the commented
+  // shape must be valid the moment it loses its `#`. Prose comments stay
+  // commented, which is why this drops only lines that look like configuration.
+  const uncommented = MANIFEST_TEMPLATE.split('\n')
+    .map((line) => (/^(\s*)# (.+:|- .+)/.test(line) ? line.replace(/^(\s*)# /, '$1') : line))
+    .join('\n');
+  const parsed = parseYaml(uncommented) as Record<string, any>;
+  expect(parsed.manifest.mcp[0].server_code).toBe('github');
+  expect(parsed.manifest.skills[0].source.protocol).toBe('oss');
+});
+
 test('the template points at the full grammar', () => {
   expect(MANIFEST_DOCS_URL).toMatch(/^https:\/\/github\.com\/inclusionAI\/Avernet\//);
   expect(MANIFEST_TEMPLATE).toContain(MANIFEST_DOCS_URL);
@@ -31,21 +48,4 @@ test('the template points at the full grammar', () => {
 test('the template stays short enough to read in a 440px panel', () => {
   // A template carrying every shape buries the fields the user came to edit.
   expect(MANIFEST_TEMPLATE.split('\n').length).toBeLessThan(40);
-});
-
-test('the caveats live in the limits list rather than bloating the template', () => {
-  const joined = MANIFEST_LIMITS.join('\n');
-  expect(joined).toContain('engine_config');
-  expect(joined).toContain('script');
-  expect(joined).toMatch(/MEMORY\.md/);
-  // The clearing semantics are the one thing a reader must not guess.
-  expect(joined).toContain('声明为空列表');
-});
-
-test('the limits list covers the refusals the gateway returns', () => {
-  const joined = MANIFEST_LIMITS.join('\n');
-  expect(joined).toContain('engine_config');
-  expect(joined).toContain('MEMORY.md');
-  expect(joined).toContain('server_code');
-  expect(joined).toContain('digest');
 });

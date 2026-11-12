@@ -45,15 +45,3 @@ manifest:
   #     digest: "sha256:<content digest>"
   #     unpack: zip
 `;
-
-/** Field-level limits the gateway enforces, so a user is not surprised at submit. */
-export const MANIFEST_LIMITS: readonly string[] = [
-  'identity 的 type 必须属于当前引擎的身份文件白名单',
-  'MEMORY.md 会被拒绝：它是引擎运行期记忆，不可由清单声明',
-  'mcp 的 server_code 必须是 MCP Center 已登记且租户可用的服务',
-  'skills 与 cli_tools 走 oss 来源时必须提供 digest',
-  'resources 的 path 相对 bot workspace，目录须以 / 结尾',
-  'engine_config 当前不可用，写入会被拒绝',
-  'script 在 teclaw 引擎上不支持',
-  '声明为空列表（如 skills: []）会清空该类目；不写这个键则不碰',
-];
