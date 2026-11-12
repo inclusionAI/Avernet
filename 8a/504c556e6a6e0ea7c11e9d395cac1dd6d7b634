@@ -1,0 +1,24 @@
+apps/backend/tests/community/acceptance/expert_chat/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_77cac29d8b12c9 1-40,44-46,48-70,72-82,84-86,88,90
+  s_7bf7edeb41f354::t_6bb3bbeb6eecda 83
+  s_7bf7edeb41f354::t_3eef5682fa9f3a 47,71
+  s_7bf7edeb41f354::t_b49360b56e7759 41-43,87,89
+apps/backend/specs/caller-cron-sessions/001-spec-output.md
+  s_7bf7edeb41f354::t_66643c1a0b4513 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a504c556e6a6e0ea7c11e9d395cac1dd6d7b634",
+  "prompts": {},
+  "sessions": {
+    "s_7bf7edeb41f354": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda2-fe95-7ee3-8d2f-a9fa07b666f5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
