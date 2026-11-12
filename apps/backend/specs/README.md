@@ -141,6 +141,8 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-09-catalog-search-budget](2026-11-09-catalog-search-budget/)
 - [2026-11-10-openapi-iam-session-key](2026-11-10-openapi-iam-session-key/)
 - [2026-11-12-context-collab-l6-product-forms](2026-11-12-context-collab-l6-product-forms/)
+- [2026-11-12-context-collab-bbs-public-discussion-product](2026-11-12-context-collab-bbs-public-discussion-product/)
+- [2026-11-12-context-collab-l4-resource-binding](2026-11-12-context-collab-l4-resource-binding/)
 - [2026-11-12-context-collab-l4-collet-accs-alignment](2026-11-12-context-collab-l4-collet-accs-alignment/)
 - [2026-11-12-context-collab-l5-method-objects](2026-11-12-context-collab-l5-method-objects/)
 - [admin-caller-to-owner](admin-caller-to-owner/)
