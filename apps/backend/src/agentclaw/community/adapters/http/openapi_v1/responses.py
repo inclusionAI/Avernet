@@ -184,7 +184,9 @@ from agentclaw.community.core.bot_inventory.errors import (
 )
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
     DeviceNotBoundError,
+    DeviceOfflineError,
     UnknownProviderError,
 )
 from agentclaw.community.core.cron.errors import (
@@ -596,9 +598,16 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # The binding row names a device provider the resolver does not know: bad
     # data on our side, never something the caller can correct.
     UnknownProviderError: (500, "Device binding is misconfigured"),
-    # The connection-info build called the underlying device service and it
-    # failed — an upstream dependency problem, hence 502 like the other
-    # downstream-service mappings.
+    # The provider confirms the current device is offline — an expected
+    # lifecycle state, not an upstream failure. 503 tells callers the
+    # resource is temporarily unavailable, distinct from a gateway error.
+    DeviceOfflineError: (503, "Bot device is offline"),
+    # A transient provider connection failure where the device state is
+    # unknown. Still 502 (upstream dependency), but with a distinct message
+    # so callers can tell it apart from a permanent configuration error.
+    DeviceConnectionUnavailableError: (502, "Device connection temporarily unavailable"),
+    # Catch-all for other ConnInfoBuildError subclasses — upstream dependency
+    # problem, hence 502 like the other downstream-service mappings.
     ConnInfoBuildError: (502, "Device service error"),
     # The passport service answered with nothing at all — upstream problem, not
     # a caller mistake, and not an unhandled crash.

@@ -8,6 +8,7 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.factories.bot_collaborator import make_bot
@@ -30,8 +31,9 @@ class _Resolver:
 
 
 class _Asset:
-    def __init__(self, *, missing: bool = False) -> None:
+    def __init__(self, *, missing: bool = False, offline: bool = False) -> None:
         self._missing = missing
+        self._offline = offline
         self.parameters = {"enabled": False}
 
     def get_skill(self, **_kwargs):
@@ -49,6 +51,8 @@ class _Asset:
 
     async def get_content(self, **_kwargs) -> str:
         self.get_skill()
+        if self._offline:
+            raise DeviceOfflineError("No active device for binding=1390508")
         return "---\nname: asset\n---\n# Asset"
 
     async def get_parameters(self, **_kwargs):
@@ -81,7 +85,7 @@ def _principal() -> str:
 _HEADERS = {PRINCIPAL_HEADER: _principal()}
 
 
-def _seed_asset(world, *, missing: bool = False) -> None:
+def _seed_asset(world, *, missing: bool = False, offline: bool = False) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     # The seven ``{skill_id}`` operations declare ``Check(MEMBER)``, so
     # ``bot_access`` resolves ``(bot_id, owner_id)`` against the real
@@ -89,7 +93,7 @@ def _seed_asset(world, *, missing: bool = False) -> None:
     # double and can answer without a Bot row; the gate cannot, and refuses.
     make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
     world.injector.binder.bind(
-        SkillQueryServiceProtocol, to=_Asset(missing=missing), scope=None
+        SkillQueryServiceProtocol, to=_Asset(missing=missing, offline=offline), scope=None
     )
 
 
@@ -123,6 +127,22 @@ def content_happy():
 )
 def content_error():
     """Content shares item-not-found behavior."""
+
+
+def _seed_offline(world) -> None:
+    _seed_asset(world, offline=True)
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/content",
+    scenario="device_offline_returns_503",
+    input=CaseInput(path_params={"bot_id": _BOT_ID, "skill_id": "1"}, query_params={"user_id": _OWNER}, headers=_HEADERS),
+    seed=_seed_offline,
+    expect=ExpectError(status=503),
+)
+def content_device_offline():
+    """Content returns 503 when the Bot device is offline."""
 
 
 @endpoint_test(
