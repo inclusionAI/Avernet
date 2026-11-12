@@ -26,6 +26,13 @@ mod tests {
     }
 
     #[test]
+    fn detects_broken_pipe_lowercase() {
+        assert!(is_transport_close_error(
+            &"IO error: broken pipe (os error 32)"
+        ));
+    }
+
+    #[test]
     fn detects_connection_reset_without_handshake() {
         assert!(is_transport_close_error(
             &"WebSocket protocol error: Connection reset without closing handshake"
@@ -40,6 +47,34 @@ mod tests {
     }
 
     #[test]
+    fn detects_generic_connection_reset() {
+        assert!(is_transport_close_error(
+            &"connection reset"
+        ));
+    }
+
+    #[test]
+    fn detects_os_error_32() {
+        assert!(is_transport_close_error(
+            &"os error 32"
+        ));
+    }
+
+    #[test]
+    fn detects_os_error_54_macos() {
+        assert!(is_transport_close_error(
+            &"os error 54"
+        ));
+    }
+
+    #[test]
+    fn detects_os_error_104_linux() {
+        assert!(is_transport_close_error(
+            &"os error 104"
+        ));
+    }
+
+    #[test]
     fn does_not_match_parse_error() {
         assert!(!is_transport_close_error(
             &"expected value at line 1 column 1"
@@ -49,5 +84,12 @@ mod tests {
     #[test]
     fn does_not_match_empty() {
         assert!(!is_transport_close_error(&""));
+    }
+
+    #[test]
+    fn does_not_match_unrelated_error() {
+        assert!(!is_transport_close_error(
+            &"invalid utf-8 sequence"
+        ));
     }
 }
