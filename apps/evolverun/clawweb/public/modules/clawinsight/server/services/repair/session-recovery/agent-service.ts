@@ -378,6 +378,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const call = sent ? await this.deps.audit.findToolCall(String(sent.payload.tool_call_id)) : null;
       const receipt = call?.taskId === task.taskId && call.toolName === "retry_message" ? call.result as Record<string, unknown> : undefined;
       const startedAt = receipt?.dry_run !== true && typeof receipt?.started_at_ms === "number" ? receipt.started_at_ms : undefined;
+      const sentMessage = task.request.target.engine === "TE" && typeof receipt?.message === "string" ? receipt.message : undefined;
       const diagnosisTraceId = task.simulation ? undefined : task.request.trace_id;
       const notBeforeMs = startedAt ?? (diagnosisTraceId ? task.timeline.find(event => event.kind === "created")?.at_ms : undefined);
       const result = await this.deps.trajectory!.read({ target: task.runtimeTarget?.target ?? this.logicalTarget(task),
@@ -386,7 +387,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined,
         ...(task.simulation ? { until: { atMs: task.simulation.cutoffAtMs, traceId: task.simulation.cutoffNode.traceId,
           observationId: task.simulation.cutoffNode.observationId, sessionId: this.originalSessionId(task) } } : {}),
-        ...(!task.simulation && startedAt !== undefined ? { messageMarker: `[会话自愈：${deliveryKey}]\n` } : {}),
+        ...(!task.simulation && startedAt !== undefined ? {
+          messageMarker: `[会话自愈：${deliveryKey}]\n`, ...(sentMessage !== undefined ? { sentMessage } : {}),
+        } : {}),
         ...(!task.simulation && notBeforeMs !== undefined ? { notBeforeMs } : {}) });
       if (Buffer.byteLength(JSON.stringify(result), "utf8") > 128 * 1024) {
         throw new SessionRecoveryError(422, "recovery_trajectory_page_too_large", "轨迹页过大，请缩小读取范围；正文使用 field 和 content_offset 分段读取");
