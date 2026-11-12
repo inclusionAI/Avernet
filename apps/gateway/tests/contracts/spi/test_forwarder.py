@@ -518,7 +518,10 @@ class _AlwaysFailingTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.attempts += 1
-        raise self._error("always failing", request=request)
+        try:
+            raise self._error("always failing", request=request)
+        except TypeError:
+            raise self._error("always failing") from None
 
 
 async def test_retry_succeeds_after_transient_error_on_get() -> None:
