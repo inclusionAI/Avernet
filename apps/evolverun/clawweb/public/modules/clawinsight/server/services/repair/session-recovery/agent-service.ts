@@ -1,3 +1,4 @@
+import { effectResumeDispatchExpired } from "./effect-resume.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { logRepairEvent, repairLogError } from "../common/logging.js";
 import { simulationReadTools, type RecoverySimulationAssessment } from "./simulation.js";
@@ -127,7 +128,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     const beforeDispatch = await this.required(task.taskId);
     if (beforeDispatch.status === "canceled") {
-      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id); return;
+      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id);
+      if (task.effectResumeSlot) await this.deps.repo.recordCancellationAttempt(contract.stepId, { status: "remote_stopped" });
+      return;
+    }
+    if (effectResumeDispatchExpired(beforeDispatch, this.now())) {
+      await this.release(beforeDispatch);
+      await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", retryable: false, errorCode: "EFFECT_RESUME_DISPATCH_EXPIRED" });
+      return;
     }
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
@@ -182,6 +190,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
+  }
+  async effectResumeJobEnded(jobId: string): Promise<boolean> {
+    const remote = await this.deps.ais.getJobStatusDetail(jobId);
+    return remote.status !== "running" && remote.rawStatus !== "notfound";
   }
   async listExecutions(taskId: string): Promise<RecoveryExecutionView[]> {
     const steps = await this.deps.repo.listSteps(taskId);
@@ -283,7 +295,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, sessionReadCoverage, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
       && typeof (event.payload.result as Record<string, unknown> | undefined)?.initial_message === "boolean");

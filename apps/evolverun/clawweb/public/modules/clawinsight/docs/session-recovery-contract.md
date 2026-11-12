@@ -35,6 +35,22 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+### Automatic effect resumption
+
+The existing recovery maintenance scan can resume an effect wait one hour after it was
+saved, up to three times and within 24 hours of the first wait. It resumes the same
+task and observation phase. Execution failures still use the existing retry policy.
+If the limit is reached with no confirmed effect, the task completes with effect
+`unknown` and reports through the existing result queue.
+
+Enable this per control plane with `ce_app_config.session_recovery_effect_resume_pre`
+or `session_recovery_effect_resume_prod`. The enabled record holds a JSON integer
+`concurrency` (1–10). Start with 2 in pre. An absent or disabled record leaves
+automatic resumption off. The same scan finishes its existing work before processing
+a bounded number of due waits. Reserved, queued and running automatic executions
+count against the environment's shared limit until their AIS steps settle.
+
+
 ## Handbook and Agent assessment
 
 Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `common/mcp/handbook.md`, `common/file-download/handbook.md` and scoped `custom/<team_key>/` content. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
