@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.26</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.27</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -219,6 +219,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D10</span></td><td>支持只返回消息的消息模式（L0），不支持“有 Task 但不保存”的无状态流式</td><td>最轻的 Agent 只需实现一个方法，完全符合 A2A 标准，BCS 已支持，多实例天然满足。代价是回答一次性到达、断线后结果丢失、不能取消。需要逐段输出又不想自己存状态的 Agent 使用托管模式。</td><td>无状态流式：能逐段输出，但换一台机器就查不到 Task，违背“任意实例可查询”；断线、取消都要在标准里开例外，BCS 也要改。</td></tr>
 <tr><td><span class="tag d">D11</span></td><td>调用上下文从等级中拆出，作为任何等级都可以声明的独立能力</td><td>等级只描述交互形态（消息、非流式任务、流式任务、审批）。L0 的 Agent 也可以拿到用户身份。</td><td>保留原来“L2 = 调用上下文”的逐级包含：只返回消息的 Agent 需要用户身份时无法达到相应等级。</td></tr>
 <tr><td><span class="tag d">D12</span></td><td>工具观察是尽力投递的过程信息：有 Task 时放在状态消息中（与 v1 相同），没有 Task 时放在回复消息中（v2 新增）；从等级中拆出，作为可选能力</td><td>符合 A2A 对状态消息和产出物的划分。丢失的记录不补发；需要保存的一方自己保存，BCS 本来就持久化收到的工具调用。L3 只剩 exec 审批（7.9）。</td><td>放在产出物中：产出物是任务结果，工具调用是过程，语义不对。要求 Agent 把工具记录保存进 Task 历史：增加引擎负担，而 A2A 本来就把过程信息视为可以丢失。移出 A2A、走单独的观测服务：直连的调用方都要另接观测服务，与统一协议的目标相反。</td></tr>
+<tr><td><span class="tag d">D13</span></td><td>扩展标识用 URI，扩展数据的键用短键：BCN 平台扩展统一使用 <code>bcn.</code> 前缀</td><td>A2A 规范要求扩展以 URI 标识，但 metadata 的键可以是任意字符串，由扩展自己规定。URI 只出现在 Card 和协商头中；每次请求和日志里只有 <code>bcn.caller</code>、<code>bcn.tool</code>、<code>bcn.sdk</code> 这样的短键（P-128）。</td><td>数据键也用完整 URI：符合官方示例的写法，但又长又难读，对内部系统负担大，且版本信息与 URI 重复。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -616,12 +617,11 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <p>这是自声明，不授予任何权限。BCS 注册时校验声明的等级与 Card 其他字段是否自洽（例如 L2 必须声明 <code>streaming: true</code>，L0 不得声明审批），不探测实际行为。实际行为由 TCK 验证。</p>
 
 <h3 id="s7-2"><span class="n">7.2</span>调用上下文扩展</h3>
-<p>解决现有待办 A2A-003。BCS 调用 Agent 时，把业务用户等上下文放在 <code>SendMessageRequest.metadata</code> 中，键为扩展 URI。</p>
+<p>解决现有待办 A2A-003。调用方把业务用户等上下文放在 <code>SendMessageRequest.metadata</code> 的固定键 <code>bcn.caller</code> 下（P-128）。扩展本身仍以 URI 标识，用于 Card 声明和协商；版本由 URI 表达，数据里不再重复。</p>
 <pre><code>{
   "message": {"messageId": "run-8f2c", "role": "ROLE_USER", "parts": [{"text": "查询我的订单"}]},
   "metadata": {
-    "&lt;调用上下文扩展 URI&gt;": {
-      "version": "1",
+    "bcn.caller": {
       "userId": "2088xxxx",
       "source": {"platform": "bcn", "app": "order-console", "scene": "api"}
     }
@@ -629,7 +629,6 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 }</code></pre>
 <div class="tw"><table>
 <tr><th>字段</th><th>类型</th><th>说明</th></tr>
-<tr><td><code>version</code></td><td>string，必填</td><td><code>"1"</code></td></tr>
 <tr><td><code>userId</code></td><td>string，有用户时必填</td><td>发起调用的业务用户标识，1 到 128 个字符。Bot 之间协作等没有用户的调用可以省略</td></tr>
 <tr><td><code>source</code></td><td>object，必填</td><td>调用来源，供 Agent 自行授权</td></tr>
 <tr><td><code>source.platform</code></td><td>string，必填</td><td>本次调用的路径。经 BCS 时填 <code>"bcn"</code>，Agent 之间直连时填 <code>"direct"</code>。被调方可以据此区分并采用不同的授权规则</td></tr>
@@ -668,9 +667,9 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>扩展点</th><th>用途</th><th>载体</th><th>方向</th><th>生命周期</th><th>大小上限</th></tr>
 <tr><td class="nw"><b>E1</b> 描述</td><td>Agent 的静态业务属性：分类、标签、所属业务域</td><td>Card 的 <code>capabilities.extensions[].params</code></td><td>Agent 到注册中心</td><td>随 Card</td><td>16 KB</td></tr>
-<tr><td class="nw"><b>E2</b> 请求参数</td><td>调用时的业务输入：调用上下文、场景码、UI 操作的回传</td><td><code>SendMessageRequest.metadata[URI]</code>；结构化输入用带 URI 标记的 DataPart</td><td>Client 到 Agent</td><td>随请求；SDK 存入 Task 记录</td><td>16 KB</td></tr>
+<tr><td class="nw"><b>E2</b> 请求参数</td><td>调用时的业务输入：调用上下文、场景码、UI 操作的回传</td><td><code>SendMessageRequest.metadata[键]</code>；结构化输入用带键标记的 DataPart</td><td>Client 到 Agent</td><td>随请求；SDK 存入 Task 记录</td><td>16 KB</td></tr>
 <tr><td class="nw"><b>E3</b> 结果字段</td><td>挂在 Task 或 Artifact 上的自定义字段：用量统计、引用来源、业务状态码、追踪标识</td><td><code>Task.metadata[URI]</code>、<code>Artifact.metadata[URI]</code></td><td>Agent 到 Client</td><td><b>持久</b>：随 Task 保存，GetTask 返回，跨实例可见</td><td>每个 URI 16 KB</td></tr>
-<tr><td class="nw"><b>E4</b> 过程事件</td><td>执行过程中的瞬时信息：进度、阶段、思考过程、工具调用</td><td><code>statusUpdate.status.message</code> 中带 URI 标记的 DataPart</td><td>Agent 到 Client</td><td><b>瞬时</b>：只在流上；断流后不保证补齐</td><td>单条 64 KB</td></tr>
+<tr><td class="nw"><b>E4</b> 过程事件</td><td>执行过程中的瞬时信息：进度、阶段、思考过程、工具调用</td><td><code>statusUpdate.status.message</code> 中带键标记的 DataPart</td><td>Agent 到 Client</td><td><b>瞬时</b>：只在流上；断流后不保证补齐</td><td>单条 64 KB</td></tr>
 <tr><td class="nw"><b>E5</b> 内容块</td><td>给用户看的结构化内容：卡片、表格、图表、表单等 UI 渲染数据</td><td>独立的 Artifact，内容为 DataPart 加 <code>mediaType</code>，<code>artifact.extensions</code> 列出 URI</td><td>Agent 到 Client</td><td><b>持久</b>：同 E3</td><td>单块 256 KB</td></tr>
 </table></div>
 <p class="cap">大小上限是初值，见 <span class="tag q">Q18</span>。</p>
@@ -693,9 +692,10 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">P-128</span></td><td>扩展的<b>标识</b>必须是 URI，用于 Card 声明和 <code>A2A-Extensions</code> 协商（A2A 规范要求）。扩展数据在 metadata 中的<b>键</b>由扩展规范规定：BCN 平台扩展使用 <code>bcn.</code> 前缀的短键，这个前缀保留给 BCN；业务扩展使用自己的扩展 URI 为键，或使用以自己域名、应用名开头的前缀（例如 <code>order.</code>），不得使用 <code>bcn.</code>。引用的上游扩展（例如 exec 审批依赖的 Structured Input）沿用上游规定的键。</td></tr>
 <tr><td><span class="tag p">P-130</span></td><td>业务扩展只能使用这五个扩展点。一个扩展可以使用多个扩展点。</td></tr>
-<tr><td><span class="tag p">P-131</span></td><td>所有扩展数据都以扩展 URI 为键或标记。不同 URI 的数据互不影响；任何一方不得读取或修改其他 URI 的数据。</td></tr>
-<tr><td><span class="tag p">P-132</span></td><td>E3 的更新是整体替换该 URI 下的值。Agent 是唯一写入者。Task 进入终态后不得再修改。</td></tr>
+<tr><td><span class="tag p">P-131</span></td><td>所有扩展数据都以该扩展规定的键为键或标记（P-128）。不同扩展的数据互不影响；任何一方不得读取或修改其他扩展的数据。</td></tr>
+<tr><td><span class="tag p">P-132</span></td><td>E3 的更新是整体替换该键下的值。Agent 是唯一写入者。Task 进入终态后不得再修改。</td></tr>
 <tr><td><span class="tag p">P-133</span></td><td>E4 发出时必须保持真实的 Task 状态，不得为了发事件而改变状态。Client 不得依赖 E4 的完整性。</td></tr>
 <tr><td><span class="tag p">P-134</span></td><td>超过大小上限的数据必须被拒绝发出，并以错误通知 Agent 代码。不得静默截断。</td></tr>
 <tr><td><span class="tag p">P-135</span></td><td>扩展数据只在该扩展已协商时发出（P-91）。E1 不需要协商。</td></tr>
@@ -857,7 +857,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <li>v2 相对 v1 只增加一种载体：没有 Task 的 L0 回复也能带工具记录。</li>
 </ul>
 <h4>格式与载体</h4>
-<p>记录格式沿用 v1：一条工具记录是一个 DataPart，字段为 <code>toolCallId</code>、<code>name</code>、<code>phase</code>（<code>start</code> 或 <code>result</code>）、<code>args</code>、<code>isError</code>、<code>result.content</code>，另加可选的 <code>truncated</code>。Part 的 <code>metadata</code> 在扩展 URI 下写入 <code>{"version":"2"}</code>。</p>
+<p>记录格式沿用 v1：一条工具记录是一个 DataPart，字段为 <code>toolCallId</code>、<code>name</code>、<code>phase</code>（<code>start</code> 或 <code>result</code>）、<code>args</code>、<code>isError</code>、<code>result.content</code>，另加可选的 <code>truncated</code>。Part 的 <code>metadata</code> 中写入 <code>"bcn.tool": true</code> 作为标记。</p>
 <div class="tw"><table>
 <tr><th></th><th>没有 Task（L0）</th><th>有 Task（L1 到 L3）</th></tr>
 <tr><td>载体</td><td>那条唯一回复消息的 <code>parts</code>，与文本 Part 按发生顺序交错</td><td><code>statusUpdate.status.message</code>，每条状态消息一条记录，与 v1 相同</td></tr>
@@ -867,7 +867,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
-<tr><td><span class="tag p">P-180</span></td><td>两种载体使用同一种记录格式。调用方按扩展 URI 识别工具记录。</td></tr>
+<tr><td><span class="tag p">P-180</span></td><td>两种载体使用同一种记录格式。调用方按 <code>bcn.tool</code> 标记识别工具记录。</td></tr>
 <tr><td><span class="tag p">P-181</span></td><td>L0 的回复中，每次工具调用对应一个 <code>result</code> 阶段的记录，按实际发生顺序与文本 Part 交错排列。</td></tr>
 <tr><td><span class="tag p">P-182</span></td><td>有 Task 时，工具记录放在状态更新的消息中，发出时保持真实的 Task 状态，不得为了发记录而改变状态（P-133）。不得放在产出物中。</td></tr>
 <tr><td><span class="tag p">P-183</span></td><td>工具记录不保证可靠投递。Agent 不需要把它保存进 Task 历史；调用方不得依赖查询或订阅补齐丢失的记录。</td></tr>
@@ -879,14 +879,14 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
   {"text": "我先查一下订单。"},
   {"data": {"toolCallId": "t1", "name": "query_order", "phase": "result", "args": {"orderId": "ORD-001"},
             "isError": false, "result": {"content": [{"type": "text", "text": "已发货"}]}},
-   "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}},
+   "metadata": {"bcn.tool": true}},
   {"text": "订单 ORD-001 已发货。"}]}}
 
 // 有 Task：与 v1 相同，放在状态消息中
 {"statusUpdate": {"taskId": "t-001", "contextId": "c-001", "status": {"state": "TASK_STATE_WORKING",
   "message": {"messageId": "tool-t1-start", "role": "ROLE_AGENT", "taskId": "t-001", "contextId": "c-001",
     "parts": [{"data": {"toolCallId": "t1", "name": "query_order", "phase": "start", "args": {"orderId": "ORD-001"}},
-               "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}}]}}}}</code></pre>
+               "metadata": {"bcn.tool": true}}]}}}}</code></pre>
 <h4>与 v1 的关系</h4>
 <p>有 Task 时 v2 与 v1 完全相同。v2 使用新的 URI，因为只认识 v1 的调用方遇到 L0 回复中的工具记录会出错：BCS 现在处理独立回复消息时只接受文本 Part。过渡期 BCS 同时支持 v1 和 v2；Agent 可以同时声明两者，调用方两者都声明时使用 v2。exec 审批不受影响，仍然在 <code>INPUT_REQUIRED</code> 的状态消息中。</p>
 
@@ -996,7 +996,7 @@ public interface CallerContext {
 <tr><td>CancelTask</td><td>解析、授权</td><td>如实取消（P-50 到 P-54）</td><td>校验返回状态</td></tr>
 </table></div>
 <h4>SDK 保留数据</h4>
-<p>同一 Task 的协商结果以初始提交为准（P-94），续交的用户必须与初始一致（P-103）。后续请求落到其他实例时，SDK 需要知道这些信息。SDK 不另存，而是借用标准字段：创建 Task 时，SDK 通过 <code>taskAttributes</code> 交给引擎一小段数据（协商结果、调用上下文摘要），引擎把它原样写入 <code>Task.metadata</code> 的 Profile 保留键并随 Task 持久化（R-05）。之后任意实例都从 Task 中读回。SDK 在把 Task 返回给调用方之前去掉这个键。</p>
+<p>同一 Task 的协商结果以初始提交为准（P-94），续交的用户必须与初始一致（P-103）。后续请求落到其他实例时，SDK 需要知道这些信息。SDK 不另存，而是借用标准字段：创建 Task 时，SDK 通过 <code>taskAttributes</code> 交给引擎一小段数据（协商结果、调用上下文摘要），引擎把它原样写入 <code>Task.metadata</code> 的保留键 <code>bcn.sdk</code> 并随 Task 持久化（R-05）。之后任意实例都从 Task 中读回。SDK 在把 Task 返回给调用方之前去掉这个键。</p>
 <h4>各模式共用的辅助 SPI</h4>
 <div class="tw"><table>
 <tr><th>SPI</th><th>职责</th><th>默认实现</th><th>何时需要自己实现</th></tr>
@@ -1038,7 +1038,7 @@ public interface AgentAuthorizer {
 <tr><td>结构化块带降级文本（P-142）</td><td>检查块内是否有文本 Part</td><td>拒绝</td></tr>
 <tr><td>输出类型（P-162）</td><td>检查 Part 的 <code>mediaType</code> 是否在 <code>acceptedOutputModes</code> 中</td><td>拒绝</td></tr>
 <tr><td>大小和数量上限（P-74、P-134、P-147）</td><td>累计检查</td><td>拒绝</td></tr>
-<tr><td>SDK 保留数据</td><td>检查 <code>Task.metadata</code> 的保留键</td><td>过滤</td></tr>
+<tr><td>SDK 保留数据</td><td>检查 <code>Task.metadata</code> 的 <code>bcn.sdk</code> 键</td><td>过滤</td></tr>
 </table></div>
 <p>"过滤"用于去掉数据不影响结果正确性的情况。"拒绝"表示 SDK 无法安全修正：流式响应以协议错误结束，调用方按断流处理（先查询再订阅）；单次响应返回内部错误。两者都记录违反的条款编号。生产环境是否先只记录不拒绝，见 <span class="tag q">Q25</span>。</p>
 <p>校验只覆盖单个请求内能看到的内容。跨请求、跨实例的一致性，例如 A 实例流上输出过的文本在 B 实例的查询快照里是否保留了相同前缀，SDK 看不到，由 TCK 的引擎要求分组验证（第 10 节）。</p>
