@@ -264,7 +264,16 @@ class ContextCollabService(ContextCollabServiceProtocol):
                     event_kind=CREATION_EVENT_KIND,
                     primitive_type=CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    payload={"objective": objective},
+                    # 创建资源绑定事实随初始事件持久(事件承载,spec
+                    # 2026-11-12-context-collab-l4-resource-binding);恒带
+                    # key,空引用也写空列表——新行与存量行(payload 无 key)
+                    # 判别有据。
+                    payload={
+                        "objective": objective,
+                        "resource_refs": [
+                            ref.to_dict() for ref in spec.resource_refs
+                        ],
+                    },
                 ),
             )
         )

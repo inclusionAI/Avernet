@@ -189,7 +189,35 @@ class TestCreateContext:
         assert request.initial_event.event_kind == "task.created"
         assert request.initial_event.primitive_type == "Task"
         assert request.initial_event.actor_ref == actor.actor
-        assert request.initial_event.payload == {"objective": OBJECTIVE}
+        # 创建资源绑定事实随初始事件持久(事件承载,spec
+        # 2026-11-12-context-collab-l4-resource-binding):payload 携带命令的
+        # resource_refs 序列化;本用例 fixture 带一条 forum_topic 引用。
+        assert request.initial_event.payload == {
+            "objective": OBJECTIVE,
+            "resource_refs": [
+                {
+                    "resource_type": "forum_topic",
+                    "resource_id": "topic_001",
+                    "revision": "3",
+                }
+            ],
+        }
+
+    def test_create_without_resource_refs_still_carries_empty_key(self):
+        """空引用恒带空列表 key(spec resource-binding §2):新行与存量行
+        (payload 无 key)判别有据。"""
+        repo = _FakeContextCollabRepository()
+        service = ContextCollabService(
+            method_store=InMemoryMethodStore(),
+            repository=repo,
+        )
+
+        service.create_context(
+            make_create_command(resource_refs=[]), make_actor()
+        )
+
+        request = repo.create_calls[0]
+        assert request.initial_event.payload["resource_refs"] == []
 
     def test_single_without_executor_rejected(self):
         service = ContextCollabService(
