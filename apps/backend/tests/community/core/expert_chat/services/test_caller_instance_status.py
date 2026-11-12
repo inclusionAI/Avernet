@@ -13,7 +13,7 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 
 
 # Synthetic marker used to assert that response details stay out of logs.
-REDACTION_SENTINEL = "sentinel-credential"
+MARKER = "sentinel-credential"
 
 
 def assert_read_only(svc):
@@ -54,14 +54,14 @@ async def test_absent_status(instance):
 async def test_live_observation(status, devices, alive, caplog):
     svc, repo, baas, *_ = _make_service()
     repo.get_instance.return_value = {"status": "success", "ext": {"bot_uuid": BOT_UUID}}
-    baas.get_bot.return_value = {"status": status, "devices": devices, "token": REDACTION_SENTINEL}
+    baas.get_bot.return_value = {"status": status, "devices": devices, "token": MARKER}
     with caplog.at_level("INFO"):
         result = await svc.get_caller_instance_status(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
     assert result == {"exists": True, "alive": alive}
     baas.get_bot.assert_called_once_with(BOT_UUID, health_check=True, engine_type="openclaw", log_response=False)
     repo.get_instance.assert_called_once_with(USER_ID, BOT_ID, OWNER_ID)
     assert "provider.request" in caplog.text and "provider.success" in caplog.text
-    assert REDACTION_SENTINEL not in caplog.text
+    assert MARKER not in caplog.text
     assert_read_only(svc)
 
 
@@ -69,11 +69,11 @@ async def test_live_observation(status, devices, alive, caplog):
 async def test_provider_error_is_not_false_success(caplog):
     svc, repo, baas, *_ = _make_service()
     repo.get_instance.return_value = {"ext": {"bot_uuid": BOT_UUID}}
-    baas.get_bot.side_effect = BaasServiceError(REDACTION_SENTINEL)
+    baas.get_bot.side_effect = BaasServiceError(MARKER)
     with caplog.at_level("INFO"), pytest.raises(BaasServiceError):
         await svc.get_caller_instance_status(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
     assert "provider.failed" in caplog.text and "error_type=BaasServiceError" in caplog.text
-    assert REDACTION_SENTINEL not in caplog.text
+    assert MARKER not in caplog.text
     assert "provider.success" not in caplog.text
     assert_read_only(svc)
 
@@ -143,18 +143,18 @@ async def test_real_baas_read_does_not_log_provider_credentials(mode, caplog):
         assert request.url.params["health_check"] == "true"
         assert request.url.params["engine_type"] == "openclaw"
         if mode == "transport":
-            raise httpx.ConnectError(REDACTION_SENTINEL, request=request)
+            raise httpx.ConnectError(MARKER, request=request)
         if mode == "http_error":
-            return httpx.Response(503, text=REDACTION_SENTINEL)
+            return httpx.Response(503, text=MARKER)
         if mode == "released":
-            return httpx.Response(404, text=REDACTION_SENTINEL)
+            return httpx.Response(404, text=MARKER)
         if mode == "invalid_json":
-            return httpx.Response(200, text=REDACTION_SENTINEL)
+            return httpx.Response(200, text=MARKER)
         return httpx.Response(200, json={
             "code": 1 if mode == "api_error" else 0,
-            "message": REDACTION_SENTINEL,
-            "data": {"status": "ACTIVE", "token": REDACTION_SENTINEL, "devices": [
-                {"status": "ACTIVE", "health": "true", "secret": REDACTION_SENTINEL},
+            "message": MARKER,
+            "data": {"status": "ACTIVE", "token": MARKER, "devices": [
+                {"status": "ACTIVE", "health": "true", "secret": MARKER},
             ]},
         })
 
@@ -170,5 +170,5 @@ async def test_real_baas_read_does_not_log_provider_credentials(mode, caplog):
             else:
                 with pytest.raises(BaasServiceError, match="(failed|error)"):
                     await svc.get_caller_instance_status(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
-    assert REDACTION_SENTINEL not in caplog.text
+    assert MARKER not in caplog.text
     assert "BaaS raw response" not in caplog.text
