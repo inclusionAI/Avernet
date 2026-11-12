@@ -1,0 +1,16 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_incident_core_contract.py
+  h_12dd6d063428b2 16,271,277-278,316-317,321-323,327-328,335
+apps/bcs/scripts/e2e-runner/tests/test_workspace_incident_core.py
+  h_12dd6d063428b2 32,490-519
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d543d2368553bf7f8898135f0cde665fc148d4a0",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
