@@ -13,7 +13,7 @@
  */
 import { load as parseYaml } from 'js-yaml';
 
-export { MANIFEST_TEMPLATE, MANIFEST_LIMITS, MANIFEST_DOCS_URL } from './manifestTemplate';
+export { MANIFEST_TEMPLATE, MANIFEST_DOCS_URL } from './manifestTemplate';
 
 /** The five content categories a five-category manifest carries. */
 export const MANIFEST_CATEGORIES = ['identity', 'mcp', 'resources', 'skills', 'cli_tools'] as const;
