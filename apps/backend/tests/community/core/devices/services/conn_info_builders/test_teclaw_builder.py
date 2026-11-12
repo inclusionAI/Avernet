@@ -27,11 +27,11 @@ def fake_baas_service():
     ws_info.engine_port = 20003
     ws_info.tenant = "team_claw"
     ws_info.headers = {}
-    # teclaw shares the BaaS invoke-http transport; its target is never an
-    # ``ARCA_`` sandbox id, so the conn-info builder takes the invoke-http branch
-    # (no sandbox_client needed). A bare MagicMock target would falsely satisfy
-    # ``startswith("ARCA_")``, so pin a realistic non-ARCA value.
-    ws_info.target = "BOT-teclaw-device-id"
+    # teclaw target always starts with TECLAW_; conn_info branch uses proxy URL
+    # ``ARCA_`` sandbox id
+    # (no sandbox_client needed)
+    # pin a realistic TECLAW_ target to match production format.
+    ws_info.target = "TECLAW_b_01M6FZ9Q767PPNW7YDR7HYASCQ@4:20003"
     svc.get_ws_info.return_value = ws_info
     return svc
 

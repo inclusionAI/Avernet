@@ -600,3 +600,51 @@ def test_build_baas_conn_info_for_http_empty_string_device_uuid_omitted():
         device_uuid="",
     )
     assert "device_uuid" not in info
+
+
+def test_build_baas_conn_info_for_http_teclaw_target_uses_proxy_url():
+    """TeClaw target (starts with TECLAW_) 不走 invoke-http，走 proxy URL。
+
+    secbaas facade 不支持 TECLAW 平台的 invoke_http_in_device，
+    data_init 创建 session 时会收到 PLATFORM_ERROR 500。
+    证据：trace 21d59aa817936849913116766ed117
+    """
+    from agentclaw.community.core.service_bot.services.baas_service import BotWsConnectionInfoResponse
+    from agentclaw.community.core.devices.services.baas_conn_info import (
+        build_baas_conn_info_for_http,
+    )
+
+    ws_info = BotWsConnectionInfoResponse(
+        ws_url="wss://agentclawproxy-prod.alipay.com/proxypass/TECLAW_b_01M6FZ9Q767PPNW7YDR7HYASCQ@4:20003/api/openclaw/ws",
+        token="tok-xyz",
+        target="TECLAW_b_01M6FZ9Q767PPNW7YDR7HYASCQ@4:20003",
+        expires_at="2026-01-01T00:00:00Z",
+        paas_device_id="container_abc--machine_M1--user_U7@tpl_42",
+        baas_base_url="https://secbaas-prod.alipay.com",
+        engine_port=20003,
+        tenant="team_claw",
+        bot_uuid="BOT-2d9aa5b946df48428a0090da966a4c17",
+    )
+
+    http_info = build_baas_conn_info_for_http(
+        bind_id=42,
+        ws_info=ws_info,
+        engine_type="teclaw",
+        bot_type="personal",
+        device_provider="teclaw",
+        user_id="365511",
+    )
+
+    # TeClaw target 不应走 invoke-http
+    assert "invoke-http" not in http_info["url"], (
+        f"TeClaw target must not use invoke-http URL, got: {http_info['url']}"
+    )
+    # 应走 proxy URL（从 ws_url 转换）
+    expected_url = "https://agentclawproxy-prod.alipay.com/proxypass/TECLAW_b_01M6FZ9Q767PPNW7YDR7HYASCQ@4:20003"
+    assert http_info["url"] == expected_url, (
+        f"Expected proxy URL {expected_url}, got {http_info['url']}"
+    )
+    # sandbox_id 应为 target（对齐 ARCA 分支语义）
+    assert http_info["sandbox_id"] == ws_info.target
+    # bind_id 仍然存在（TeClaw filesystem 需要）
+    assert http_info["bind_id"] == 42
