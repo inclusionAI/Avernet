@@ -84,7 +84,7 @@ const EvaluationPage: React.FC = () => {
 
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
-      <div className="w-full max-w-7xl p-5 sm:p-6">
+      <div className="w-full p-5 sm:p-6">
         <Button variant="link" onClick={() => history.push('/bot-workshop')}>
           ← 返回 Bot 管理
         </Button>

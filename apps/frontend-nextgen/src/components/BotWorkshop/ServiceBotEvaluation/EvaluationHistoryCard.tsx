@@ -24,15 +24,15 @@ export const EvaluationHistoryCard = ({ records }: EvaluationHistoryCardProps) =
         {records.map((item, index) => (
           <div
             key={item.id ?? String(index)}
-            className="flex flex-wrap items-center justify-between gap-3 border-border px-4 py-3 text-xs odd:bg-background even:bg-muted/20"
+            className="flex flex-col gap-3 border-border px-4 py-3 text-xs odd:bg-background even:bg-muted/20 sm:flex-row sm:items-center sm:justify-between"
           >
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="m-0 font-medium text-foreground">{item.mode ?? '统一评测'}</p>
-              <p className="m-0 mt-1 text-muted-foreground">
+              <p className="m-0 mt-1 break-words text-muted-foreground">
                 {item.evaluated_at ?? '时间未知'} · {item.summary ?? '暂无摘要'}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <Badge tone={evaluationStatusTone(item.status)}>{evaluationStatusLabel(item.status)}</Badge>
               {item.report_url ? (
                 <a
