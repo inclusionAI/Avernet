@@ -49,6 +49,7 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert workflow.count("apps/bcs") >= 1
     assert "bash singlebox/ci/singlebox_coverage.sh" in workflow
     assert "python3 singlebox/ci/verify_singlebox_coverage_artifacts.py" in workflow
+    assert "singlebox/ci/tests/test_singlebox_coverage_workflow.py" in workflow
     assert 'SINGLEBOX_COVERAGE_BCS_LINE_MIN: "54"' in workflow
     assert 'SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "48"' in workflow
     assert "--bcs-router-min 100" in workflow
@@ -88,3 +89,30 @@ def test_workflow_excludes_provider_credentials_from_artifacts():
     upload = workflow.split("- name: Upload singlebox artifacts", 1)[1]
     assert "!singlebox/.dependencies/coverage/**/collaboration-repair-provider.json" in upload
     assert "!singlebox/.dependencies/coverage/**/.repair-provider-*" in upload
+
+
+def test_native_bm25_has_a_ready_qdrant_server():
+    import yaml
+
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = document["jobs"]["singlebox-coverage"]
+    qdrant = job.get("services", {}).get("qdrant", {})
+    assert qdrant.get("image") == "qdrant/qdrant:v1.20.0"
+    assert set(qdrant.get("ports", [])) == {"6333:6333", "6334:6334"}
+    env = job.get("env", {})
+    assert env.get("QDRANT_MODE") == "server"
+    assert env.get("QDRANT_URL") == "http://127.0.0.1:6333"
+    assert env.get("QDRANT_GRPC_PORT") == "6334"
+    steps = WORKFLOW.read_text(encoding="utf-8")
+    assert "curl --retry 20 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:6333/readyz" in steps
+    template = (REPO_ROOT / "apps/bcsfuse/.env.example").read_text(encoding="utf-8")
+    assert 'export QDRANT_MODE="server"' in template
+    assert 'export QDRANT_URL="http://127.0.0.1:6333"' in template
+    assert 'export QDRANT_GRPC_PORT="6334"' in template
+
+
+def test_bcsfuse_changes_trigger_singlebox_coverage():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    detection = workflow.split("- name: Detect singlebox-relevant changes vs base", 1)[1]
+    detection = detection.split("- name: Mark singlebox coverage as passed", 1)[0]
+    assert "            apps/bcsfuse \\\n" in detection

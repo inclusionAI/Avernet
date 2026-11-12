@@ -90,6 +90,12 @@ and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
 then run `verify_singlebox_coverage_artifacts.py` against the generated report
 directory so local pushes and GitHub PRs enforce the same artifact baseline.
 
+The GitHub workflow starts `qdrant/qdrant:v1.20.0` on ports 6333/6334 and exports
+`QDRANT_MODE=server`, `QDRANT_URL` and `QDRANT_GRPC_PORT`; native multilingual
+BM25 does not support Qdrant Python Local. Before running the same entrypoint
+locally, provide an equivalent Server and those connection settings. The workflow
+also treats `apps/bcsfuse` changes as Singlebox-relevant.
+
 The BCS unit-test CI gate requires a 100% pass rate and overall line coverage
 strictly above 87%. Changed-line coverage must be strictly above 85% when
 there are more than 50 instrumentable changed lines; changes with 1–50 such
