@@ -7,6 +7,32 @@ apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
   s_ce84d91f3d35be::t_e1873fd8258fc1 7,78-83
 apps/bcsfuse/docs/deploy/tc-card-migration.md
   s_ce84d91f3d35be::t_de525157cc42ea 8-10
+singlebox/ci/tests/test_pre_push_dispatch.py
+  s_ce84d91f3d35be::t_939596e25b0cef 28,30,56,67,76,96,103-122
+apps/bcsfuse/README.md
+  s_ce84d91f3d35be::t_939596e25b0cef 54-55,63,68,73,97-99,184,250,252-255,257,259-260,435-436,482-486,490
+devops/hook/pre_push.sh
+  s_ce84d91f3d35be::t_939596e25b0cef 203-204
+apps/bcsfuse/docs/qdrant-modes.md
+  s_ce84d91f3d35be::t_939596e25b0cef 5,16-17,20-22,25-28,42-43,50
+apps/bcsfuse/tests/contract/test_qdrant_deployment_modes.py
+  s_ce84d91f3d35be::t_939596e25b0cef 1,4,7,34-38
+.github/workflows/singlebox-coverage.yml
+  s_ce84d91f3d35be::t_939596e25b0cef 115-118
+docs/agents/validation.md
+  s_ce84d91f3d35be::t_939596e25b0cef 72
+apps/bcsfuse/main.py
+  s_ce84d91f3d35be::t_939596e25b0cef 17-19
+docs/quick-start.md
+  s_ce84d91f3d35be::t_939596e25b0cef 36-38
+singlebox/modules/bcsfuse.sh
+  s_ce84d91f3d35be::t_939596e25b0cef 298,313-314,319,338
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_ce84d91f3d35be::t_939596e25b0cef 1,60-93
+apps/bcsfuse/src/app/tc/providers.py
+  s_ce84d91f3d35be::t_939596e25b0cef 88-95
+docs/quick-start.zh-CN.md
+  s_ce84d91f3d35be::t_939596e25b0cef 24-25
 ---
 {
   "schema_version": "authorship/3.0.0",
