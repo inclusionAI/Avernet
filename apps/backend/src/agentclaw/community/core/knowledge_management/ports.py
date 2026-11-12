@@ -49,7 +49,11 @@ class KnowledgeCatalog(Protocol):
         ...
 
     def set_grant(self, **kwargs) -> dict:
-        """Write a Bot grant through the canonical knowledge service."""
+        """Write a grant with a display-only bot_name from scoped Bot metadata.
+
+        actor_id is the authenticated operator; owner_id remains the target
+        identity. Missing Bot metadata on revoke sends an empty name.
+        """
         ...
 
 

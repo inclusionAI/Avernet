@@ -25,7 +25,7 @@ import React, { useEffect, useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
-  const evalMenuBots = useServiceBotEvalMenuVisibility(workshop.items);
+  const evalMenuBots = useServiceBotEvalMenuVisibility(workshop.items, workshop.currentUserId);
   // 对话菜单落地参数(2026-11-05):?create=cloud 默认唤起云端创建;?keyword=Bot 名称按名称
   // 过滤定位该 Bot(Bot 行「跳转至 Bot 管理」前置入口传入)。挂载一次性消费并清参,避免刷新/回退重复触发。
   useEffect(() => {

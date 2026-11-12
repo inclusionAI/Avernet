@@ -349,3 +349,41 @@ describe('ensurePersonalSpaceOnAppEntry', () => {
     expect(mockedEnsure(svc)).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ensurePersonalSpaceOnAppEntry：BCS-only 可选 Backend 开关（bcs-standalone-friend-discovery）', () => {
+  // node 测试无 window：运行时/编译常量均缺省，能力开关经隔离注册表内的
+  // extendCapabilities 覆写（与闸口读取的 getPublicBotBackendEnabled 同一决策）。
+  function freshModuleWithCapability(enabled: boolean) {
+    jest.resetModules();
+    let mod!: typeof import('@/hooks/useSpaceContext');
+    let svc!: typeof import('@/services/admin').adminService;
+    jest.isolateModules(() => {
+      const capabilities = require('@/capabilities') as typeof import('@/capabilities');
+      capabilities.extendCapabilities({ getPublicBotBackendEnabled: () => enabled });
+      mod = require('@/hooks/useSpaceContext') as typeof import('@/hooks/useSpaceContext');
+      svc = (require('@/services/admin') as typeof import('@/services/admin')).adminService;
+    });
+    return { mod, svc };
+  }
+
+  it('Backend disabled：在单飞 Promise、ensureUserId 与任何 Admin 请求之前直接返回', async () => {
+    const { mod, svc } = freshModuleWithCapability(false);
+    const ensure = svc.ensurePersonalSpace as unknown as jest.MockedFunction<typeof svc.ensurePersonalSpace>;
+    ensure.mockResolvedValue({ data: true });
+
+    await expect(mod.ensurePersonalSpaceOnAppEntry()).resolves.toBeUndefined();
+    // 重复调用同样零请求：不创建单飞、不补拉身份。
+    await expect(mod.ensurePersonalSpaceOnAppEntry()).resolves.toBeUndefined();
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('Backend enabled：能力开启后保留原全栈行为（进入项目即单飞初始化一次）', async () => {
+    const { mod, svc } = freshModuleWithCapability(true);
+    const ensure = svc.ensurePersonalSpace as unknown as jest.MockedFunction<typeof svc.ensurePersonalSpace>;
+    ensure.mockResolvedValue({ data: true });
+
+    await mod.ensurePersonalSpaceOnAppEntry();
+    await mod.ensurePersonalSpaceOnAppEntry();
+    expect(ensure).toHaveBeenCalledTimes(1);
+  });
+});

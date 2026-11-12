@@ -262,8 +262,11 @@ export interface ProductBrand {
    * 页头品牌视觉组件（接收 className 控制尺寸）。
    * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
    * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
+   * markOnly：仅渲染图形 mark、不渲染字标——收起态 rail（w-14 容器宽度低于
+   * compact 锁版预算）等图标位使用；带字标锁版的形态必须消费该语义，
+   * 否则字标被容器挤压 truncate 成省略号残迹。
    */
-  Logo: ComponentType<{ className?: string; compact?: boolean }>;
+  Logo: ComponentType<{ className?: string; compact?: boolean; markOnly?: boolean }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
@@ -738,6 +741,16 @@ export interface AppCapabilities {
    * 同步签名，组件不得按部署环境自行判断（collab-permission-entry-migration §10）。
    */
   getGeneralConfigPublishApprovalEnabled: () => CapabilityResult<boolean>;
+  /**
+   * 可选 Backend 增强（BCS 独立好友发现）是否启用：身份 engine/botType 补充、公开 Bot 的
+   * metadata 服务发布过滤与 Human 建聊跳转共用本开关；壳层
+   * `getShellVisibility().value.notificationBell` 从同一决策派生（关闭时铃铛不挂载，
+   * 未读轮询随挂载自然停止）。默认全栈未显式关闭时为 true；
+   * 运行时 `window.AVERNET_RUNTIME_CONFIG.PUBLIC_BOT_BACKEND_ENABLED === false`
+   * （由部署 profile 写入，布尔值）或编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false
+   * 时为 false，运行时显式设置优先。同步签名，不发请求。
+   */
+  getPublicBotBackendEnabled: () => boolean;
   /**
    * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`

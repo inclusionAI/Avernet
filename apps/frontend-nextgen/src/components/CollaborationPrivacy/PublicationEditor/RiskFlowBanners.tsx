@@ -9,15 +9,23 @@ const stepTone = 'flex items-center gap-1 rounded-full px-2.5 py-1 text-xs';
 const stepActive = `${stepTone} bg-primary/10 font-medium text-primary`;
 const stepPending = `${stepTone} bg-muted/70 text-muted-foreground`;
 
-/** 在途终态卡:进行中提示 + 两步进度 + 工单入口,及「审批前可见性不变」的锁定说明。 */
+/**
+ * 在途终态卡:进行中提示 + 两步进度 + 工单入口,及「审批前可见性不变」的锁定说明。
+ * 检测超时（5 分钟）后端仅暂停自动轮询、状态停留「检测中」无终态,故在途卡同样
+ * 提供「刷新状态」入口（§2.2 手动刷新）：立即查询原安全单同步最新结论,不重新建单。
+ */
 export function RiskInFlightBanner({
   kind,
   record,
   currentScopeNote,
+  onRefreshState,
+  refreshing = false,
 }: {
   kind: 'checking' | 'advancing' | 'approving';
   record: BotPublicRiskCheckRecord | null;
   currentScopeNote: string;
+  onRefreshState?: () => void;
+  refreshing?: boolean;
 }) {
   return (
     <>
@@ -52,6 +60,21 @@ export function RiskInFlightBanner({
             </a>
           ) : record ? (
             <span className="text-muted-foreground">检测工单号：{record.risk_check_id}</span>
+          ) : null}
+          {onRefreshState ? (
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-muted-foreground">若长时间停留在检测中，可手动刷新同步最新结论。</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 text-primary"
+                loading={refreshing}
+                leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
+                onClick={onRefreshState}
+              >
+                刷新状态
+              </Button>
+            </div>
           ) : null}
         </div>
       </div>

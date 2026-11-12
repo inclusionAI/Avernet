@@ -79,4 +79,16 @@ describe('PublicBotCatalogPanel 纯内容网格', () => {
     expect(grid).toHaveClass('grid', 'gap-4', 'md:grid-cols-2', 'xl:grid-cols-3');
     expect(container.contains(cards[0])).toBe(true);
   });
+
+  it('智能 name_fallback 时在结果上方展示「名称匹配」提示；semantic 命中不展示', () => {
+    const { rerender } = render(
+      <PublicBotCatalogPanel vm={buildVm({ mode: 'smart', searchResultMode: 'name_fallback' })} scrollRootRef={{ current: null }} />,
+    );
+    expect(screen.getByText('未命中语义匹配，已按名称匹配展示结果')).toBeInTheDocument();
+
+    rerender(
+      <PublicBotCatalogPanel vm={buildVm({ mode: 'smart', searchResultMode: 'semantic' })} scrollRootRef={{ current: null }} />,
+    );
+    expect(screen.queryByText('未命中语义匹配，已按名称匹配展示结果')).not.toBeInTheDocument();
+  });
 });

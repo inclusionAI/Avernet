@@ -334,3 +334,48 @@ describe('defaultCapabilities.navigateToConversation', () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 });
+
+// ── BCS 独立好友发现：可选 Backend 增强开关（bcs-standalone-friend-discovery Task 2）──
+// 显式覆盖运行时 false、true 以及无覆盖时的默认行为；运行时显式设置优先于编译常量。
+describe('getPublicBotBackendEnabled / getShellVisibility 可选 Backend 决策', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
+    Reflect.deleteProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED');
+  });
+
+  test('无运行时/编译覆盖时默认开启（全栈），铃铛展示', () => {
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(true);
+    expect(defaultCapabilities.getShellVisibility()).toEqual({
+      status: 'available',
+      value: { spaceSwitcher: false, notificationBell: true },
+    });
+  });
+
+  test('运行时 PUBLIC_BOT_BACKEND_ENABLED=false → 关闭，通知铃铛随之隐藏', () => {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: false },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(false);
+    expect(defaultCapabilities.getShellVisibility()).toEqual({
+      status: 'available',
+      value: { spaceSwitcher: false, notificationBell: false },
+    });
+  });
+
+  test('运行时 PUBLIC_BOT_BACKEND_ENABLED=true 覆盖编译 false（部署显式运行时设置优先）', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED', { value: false, configurable: true });
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: true },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(true);
+    expect(defaultCapabilities.getShellVisibility().value.notificationBell).toBe(true);
+  });
+
+  test('编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false（本地 BCS-only profile）→ 关闭', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED', { value: false, configurable: true });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(false);
+    expect(defaultCapabilities.getShellVisibility().value.notificationBell).toBe(false);
+  });
+});

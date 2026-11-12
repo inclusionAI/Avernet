@@ -95,12 +95,13 @@ export function describeSessionFileCreator(
 }
 
 /**
- * 创建时间 ISO 串 → UTC `YYYY-MM-DD HH:mm:ss`。
+ * 创建时间 ISO 串 → 查看端本地时区 `YYYY-MM-DD HH:mm:ss`。
  *
- * 用 UTC 分量（getUTC*）而非本地时区：后端 `created_at` 是 ISO 8601 UTC 锚
- * （2026-11-09 契约，可能带微秒精度，秒级截断展示），引擎实例可能跑在与查看端
- * 不同的时区，UTC 是唯一跨实例一致的展示锚，且与后端原值逐字对应——与老前端
- * formatSessionUploadTime 同语义（含东八区查看端不得偏移成 +8 小时的行为）。
+ * 后端 `created_at` 是 ISO 8601 UTC 锚（2026-11-09 契约，可能带微秒精度，秒级截断展示）。
+ * 曾用 UTC 分量（getUTC*）逐字展示，2026-11-12 用户反馈「展示的时间需要加上 8 小时」——
+ * 时间应显示为查看端本地时间（北京时间即 UTC+8，如 11:16:19Z 显示成 19:16:19），
+ * 与后端原值逐字一致反而让用户误判时点，故改用本地分量（getFullYear 等）——与老前端
+ * formatSessionUploadTime 同语义（东八区查看端显示 +8 小时后的本地时间）。
  *
  * null / undefined / 空串 / 非法日期 → null：legacy 文件缺 created_at 时调用方
  * 整段不渲染（不显示 `--`/`—` 占位、不回退其它时间字段）。
@@ -110,9 +111,9 @@ export function formatSessionUploadTime(iso: string | null | undefined): string 
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(
-    d.getUTCHours(),
-  )}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** 取扩展名（小写，支持 .tar.gz 多段后缀）。 */

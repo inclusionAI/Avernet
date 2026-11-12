@@ -182,7 +182,15 @@ class RunRepository(RunRepositoryProtocol):
         return result.rowcount == 1
 
     def list_page(self, tenant: dm.TenantId, status: dm.RunStatus | None = None,
-                  page: int = 1, page_size: int = 20) -> dm.RunPage:
+                  page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> dm.RunPage:
+        """One tenant's runs, optionally narrowed to one owner.
+
+        ``owner_id`` is what keeps the end-user list to the caller's own runs: a
+        tenant is a group, not a person. Runs written before the column existed
+        carry an empty owner and stay visible under a tenant-wide read rather
+        than vanishing from every listing.
+        """
         offset = max(0, (page - 1)) * page_size
         with self._db.orm_session() as session:
             conditions = [
@@ -191,6 +199,8 @@ class RunRepository(RunRepositoryProtocol):
             ]
             if status is not None:
                 conditions.append(om.AcAgentSwarmRunModel.status == status.value)
+            if owner_id is not None:
+                conditions.append(om.AcAgentSwarmRunModel.owner_id == owner_id)
             total = session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmRunModel).where(*conditions)
             ).scalar_one()

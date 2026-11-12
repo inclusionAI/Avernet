@@ -185,6 +185,49 @@ def _seed_collaborator_row(
     )
 
 
+def _promote_to_running_service(
+    client: httpx.Client,
+    *,
+    bot_id: str,
+    owner_id: str,
+) -> None:
+    """Promote the seeded Bot and give it one visible online publication."""
+    _execute_local_sql(
+        client,
+        [
+            {
+                "sql": (
+                    "UPDATE ac_bots SET bot_type = 'service', "
+                    "gmt_modified = CURRENT_TIMESTAMP "
+                    "WHERE bot_id = :bot_id AND owner_id = :owner_id"
+                ),
+                "params": {"bot_id": bot_id, "owner_id": owner_id},
+            },
+            {
+                "sql": (
+                    "INSERT INTO ac_bot_publish ("
+                    "source_bot_pk, source_bot_id, publish_bot_id, name, description, "
+                    "owner_id, owner_name, status, version, last_pub_id, env, ext, "
+                    "permission_owner, gmt_create, gmt_modified"
+                    ") VALUES ("
+                    "(SELECT id FROM ac_bots WHERE bot_id = :bot_id "
+                    "AND owner_id = :owner_id), :bot_id, :publish_bot_id, "
+                    ":name, :description, :owner_id, :owner_id, 'success', 1, 0, "
+                    "'dev', '{}', 'owner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                    ")"
+                ),
+                "params": {
+                    "bot_id": bot_id,
+                    "publish_bot_id": f"{bot_id}_pub_1",
+                    "name": f"Running service {bot_id}",
+                    "description": "singlebox collaborator inventory acceptance",
+                    "owner_id": owner_id,
+                },
+            },
+        ],
+    )
+
+
 def test_edit_domain_refuses_space_member_and_admits_explicit_editor(live_backend):
     """One story: the same MEMBER, refused while Space-synthesized, admitted with a row."""
     pytest.importorskip("httpx")
@@ -270,3 +313,65 @@ def test_edit_domain_refuses_space_member_and_admits_explicit_editor(live_backen
             # all the grant has to prove — the same request that the bar
             # masked as 404 while the standing was synthesized now reaches
             # the route's second, request-visible gate.
+
+
+def test_running_service_explicit_collaborator_can_view_config(live_backend):
+    """Only an explicitly granted collaborator may open service configuration."""
+    pytest.importorskip("httpx")
+    owner_id = _fresh_id("service_owner")
+    space_code = _fresh_id("service_space")
+    bot_id = _fresh_id("service_bot")
+    member_id = f"member_of_{space_code}"
+
+    with httpx.Client(
+        base_url=live_backend,
+        headers={"x-user-id": member_id},
+        timeout=60.0,
+    ) as member_client:
+        with httpx.Client(
+            base_url=live_backend, headers={"x-user-id": owner_id}, timeout=60.0
+        ) as owner_client:
+            space_id = _seed_team_space_bot(
+                owner_client,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                space_code=space_code,
+            )
+            _promote_to_running_service(
+                owner_client,
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+
+            space_inventory = member_client.get(
+                "/openapi/v1/bots/all",
+                params={"user_id": member_id, "owner_id": member_id},
+                headers=_principal_headers(member_id) | {"X-Space-Id": str(space_id)},
+            )
+            assert space_inventory.status_code == 200, space_inventory.text
+            space_card = {
+                item["bot_id"]: item
+                for item in space_inventory.json()["data"]["items"]
+            }[bot_id]
+            assert space_card["display_state"] == "service_online"
+            assert "view_config" not in space_card["actions"]
+
+            _seed_collaborator_row(
+                owner_client,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                member_id=member_id,
+            )
+            explicit_inventory = member_client.get(
+                "/openapi/v1/bots/all",
+                params={"user_id": member_id, "owner_id": member_id},
+                headers=_principal_headers(member_id) | {"X-Space-Id": str(space_id)},
+            )
+            assert explicit_inventory.status_code == 200, explicit_inventory.text
+            explicit_card = {
+                item["bot_id"]: item
+                for item in explicit_inventory.json()["data"]["items"]
+            }[bot_id]
+            assert explicit_card["display_state"] == "service_online"
+            assert "view_config" in explicit_card["actions"]
+            assert "edit" not in explicit_card["actions"]

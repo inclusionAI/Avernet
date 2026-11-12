@@ -107,7 +107,7 @@ not silently bypass another user's lock by querying a new Owner-qualified key.
 `ScheduledCallerRefreshProtocol` v1 is an additive Service API invoked after a
 service Bot's Owner Passport runtime update succeeds and
 `bot_service.SCHEDULED_CALLER_REFRESH_ENABLED` is enabled. This code-level rollout
-gate ships `False` until the scheduled credential provider is deployed; disabled callbacks
+gate ships `True`; explicitly disabled callbacks
 keep the original Owner result without invoking Caller refresh. It does not gate
 interactive ASC provisioning. The composition root binds
 a no-op in public profiles and an enterprise service when ASC is supported.
