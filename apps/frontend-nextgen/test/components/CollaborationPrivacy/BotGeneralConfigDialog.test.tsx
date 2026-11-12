@@ -3,6 +3,10 @@ import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGen
 import type { CollaborationBot, CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
 import * as identityModule from '@/hooks/useHumanIdentity';
 import {
+  getCurrentBotPublicRiskCheck,
+  refreshBotPublicRiskCheck,
+} from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
+import {
   botCollaborationRepairService,
   type CollaborationRepairReport,
 } from '@/services/botWorkshop/botCollaborationRepairService';
@@ -21,6 +25,13 @@ jest.mock('sonner', () => ({ toast: { success: jest.fn(), warning: jest.fn(), er
 // 网络边界 mock，Hook 与共享 Store 使用真实实现（AC-34 竞态集成用例）。
 jest.mock('@/services/botWorkshop/botCollaborationRepairService', () => ({
   botCollaborationRepairService: { repair: jest.fn(), pending: jest.fn() },
+}));
+// 风险动线网络边界与修复层同法：Hook/Store 走真实现，Controller 一律 mock。
+jest.mock('@/services/backendApi/collaboration/collaborationBotPublicRiskController', () => ({
+  createBotPublicRiskCheck: jest.fn(),
+  getCurrentBotPublicRiskCheck: jest.fn(),
+  getBotPublicRiskCheck: jest.fn(),
+  refreshBotPublicRiskCheck: jest.fn(),
 }));
 
 const mockCapabilities = jest.fn();
@@ -572,5 +583,97 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
         await Promise.resolve();
       });
     });
+  });
+
+  it('审批中行级提供「刷新状态」入口，点击后经 refresh 端点重读最新记录（bot-public-risk-check）', async () => {
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+    // approving 起钩子不再自动轮询（审批终态由后端工单回调推进），current 仅弹窗打开恢复时查一次。
+    const approvingRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'APPROVING',
+      security_status: 'PASS',
+      detail_url: null,
+      auto_poll_paused: false,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: 'WO-1',
+    };
+    const mockRiskCurrent = jest.mocked(getCurrentBotPublicRiskCheck);
+    const mockRiskRefresh = jest.mocked(refreshBotPublicRiskCheck);
+    mockRiskCurrent.mockResolvedValue({ code: 200000, message: 'OK', data: approvingRecord });
+    mockRiskRefresh.mockResolvedValue({ code: 200000, message: 'OK', data: { outcome: 'NOT_QUERIED', record: approvingRecord } });
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    const refreshButton = await screen.findByRole('button', { name: '刷新状态' });
+    expect(screen.getByRole('button', { name: '审批中' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '查看审批进度' })).toBeInTheDocument();
+    expect(mockRiskCurrent).toHaveBeenCalledWith('bot-1:900004', '900004', { public_scope: 'user' });
+
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(mockRiskRefresh).toHaveBeenCalledWith('bot-1:900004', '900004', 'rk-1'));
+  });
+
+  it('审批期行带 pending 投影时「刷新状态」仍可见，双刷后行回正常态（bot-public-risk-check）', async () => {
+    // 复刻线上场景：APPROVING 时后端把同一申请写进 BCS friend_ext（status=PROCESSING），
+    // 前端即出现 pendingPublications 投影；行级刷新入口不得因此隐藏。
+    const approvingRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'APPROVING',
+      security_status: 'PASS',
+      detail_url: 'https://example.test/risk/rk-1',
+      auto_poll_paused: false,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'public', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: 'WO-1',
+    };
+    const publishedRecord = { ...approvingRecord, phase: 'PUBLISHED' };
+    const pendingBot = makeBot('bot-1:900004');
+    pendingBot.pendingPublications = {
+      user: {
+        id: 'WO-1',
+        audience: 'user',
+        target: { scope: 'all', organizationPaths: [] },
+        submittedAt: '',
+        approvalUrl: 'https://approval.example.test/ticket/WO-1',
+      },
+    };
+    const loadSpy = jest.spyOn(collaborationPrivacyService, 'loadOverview');
+    let overview = overviewWithBot(pendingBot);
+    loadSpy.mockImplementation(async () => {
+      const snapshot = overview;
+      // 刷新后的静默重载：审批回调已完成，friend_ext pending 已清（后续读取返回正常态）。
+      overview = overviewWithBot(makeBot('bot-1:900004'));
+      return snapshot;
+    });
+    const mockRiskCurrent = jest.mocked(getCurrentBotPublicRiskCheck);
+    const mockRiskRefresh = jest.mocked(refreshBotPublicRiskCheck);
+    mockRiskCurrent.mockResolvedValue({ code: 200000, message: 'OK', data: approvingRecord });
+    // refresh 端点对非 CHECKING phase 无副作用地透传最新记录；审批完成后后端已翻成 PUBLISHED。
+    mockRiskRefresh.mockResolvedValue({ code: 200000, message: 'OK', data: { outcome: 'NOT_QUERIED', record: publishedRecord } });
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    const refreshButton = await screen.findByRole('button', { name: '刷新状态' });
+    expect(screen.getByText('待审批')).toBeInTheDocument();
+
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(mockRiskRefresh).toHaveBeenCalledWith('bot-1:900004', '900004', 'rk-1'));
+    // 双刷第二条：refresh 后静默重载总览，行级「待审批」随 friend_ext 终态同步清除。
+    await waitFor(() => {
+      const editButtons = screen.getAllByRole('button', { name: '修改可见性' });
+      expect(editButtons.length).toBeGreaterThan(0);
+      editButtons.forEach((button) => expect(button).toBeEnabled());
+    });
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '刷新状态' })).not.toBeInTheDocument();
   });
 });
