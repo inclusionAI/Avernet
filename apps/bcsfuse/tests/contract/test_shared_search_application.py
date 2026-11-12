@@ -69,7 +69,6 @@ def test_optional_common_routes_preserve_tc_identity_and_v1_surface(monkeypatch)
 
 
 def test_tc_factory_mounts_new_search_on_the_card_backend(monkeypatch):
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "false")
     context, _ = build_context()

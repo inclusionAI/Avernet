@@ -14,7 +14,6 @@ from app.infra.trace_context import get_trace_id
 
 @pytest.fixture(autouse=True)
 def logging_state(monkeypatch):
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     from app.infra.config.feature_flags import FeatureFlags
 
     for key in ("LOG_LEVEL", "SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"):
