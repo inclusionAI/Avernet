@@ -105,12 +105,23 @@ class CronRuntimeOperationsMixin:
             f"device not ACTIVE (status={device_status})",
             error_code=409,
         )
-        logger.error(
-            "[_ensure_runtime_device_active] Device status check failed for "
-            "bot %s: %s",
-            bot_id,
-            error,
-        )
+        if device_status == DeviceBindingStatus.PENDING:
+            # A fresh or restarted binding can still be waiting for its first
+            # heartbeat. Treat this as an expected retry state, not an
+            # operational failure, while retaining the 409 guard.
+            logger.warning(
+                "[_ensure_runtime_device_active] Runtime device is not "
+                "reachable yet for bot %s: %s",
+                bot_id,
+                error,
+            )
+        else:
+            logger.error(
+                "[_ensure_runtime_device_active] Device status check failed for "
+                "bot %s: %s",
+                bot_id,
+                error,
+            )
         raise error
 
     def _get_active_runtime_device(
