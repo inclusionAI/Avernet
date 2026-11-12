@@ -279,7 +279,7 @@ class A2aStory(Story):
             if expected >= 400:
                 assert "error_code" in value["data"]
                 # Existing rejection cases compare machine codes on both protocols.
-                return {"error": {"code": value["data"]["error_code"]}}
+                return {"error": {"code": value["data"]["error_code"], "request_id": value["request_id"]}}
             return value["data"]
         return value
 

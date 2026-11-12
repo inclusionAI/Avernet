@@ -88,19 +88,20 @@ pub(crate) fn failure(error: ServiceError) -> ApplicationError {
         }
         ServiceError::Unauthorized(_) => ApplicationError::Unauthenticated,
         ServiceError::Forbidden(_) | ServiceError::BotHidden(_) | ServiceError::NotFriends(_) => {
-            ApplicationError::forbidden("A2A access denied")
+            ApplicationError::forbidden_code("PERMISSION_DENIED", "A2A access denied")
         }
         ServiceError::BotNotFound(_)
         | ServiceError::BotNotRegistered(_)
         | ServiceError::ProviderNotFound(_)
         | ServiceError::BotNotConnected(_) => {
-            ApplicationError::not_found("a2a_not_found", "Agent not found")
+            ApplicationError::not_found("BOT_NOT_FOUND", "Agent not found")
         }
-        ServiceError::Conflict(_) => {
-            ApplicationError::conflict("a2a_conflict", "A2A state changed")
-        }
+        ServiceError::Conflict(_) => ApplicationError::conflict(
+            "PROVIDER_BOT_REF_CONFLICT",
+            "A2A registration already exists",
+        ),
         ServiceError::InvalidOperation { .. } => {
-            ApplicationError::invalid("invalid_request", "Invalid A2A request")
+            ApplicationError::invalid("INVALID_REQUEST", "Invalid A2A request")
         }
         _ => ApplicationError::internal("A2A operation failed"),
     }
@@ -243,6 +244,33 @@ mod tests {
         ];
         for error in errors {
             assert!(!format!("{:?}", failure(error)).contains("private-"));
+        }
+    }
+
+    #[test]
+    fn legacy_management_failures_retain_the_public_machine_codes() {
+        for (error, expected) in [
+            (
+                ServiceError::Conflict("duplicate binding".into()),
+                "PROVIDER_BOT_REF_CONFLICT",
+            ),
+            (
+                ServiceError::Forbidden("private provider".into()),
+                "PERMISSION_DENIED",
+            ),
+            (
+                ServiceError::BotNotFound("private bot".into()),
+                "BOT_NOT_FOUND",
+            ),
+            (
+                ServiceError::InvalidOperation {
+                    message: "private input".into(),
+                    request_id: None,
+                },
+                "INVALID_REQUEST",
+            ),
+        ] {
+            assert_eq!(failure(error).code(), expected);
         }
     }
 
