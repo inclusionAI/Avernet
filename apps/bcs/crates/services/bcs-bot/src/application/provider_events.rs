@@ -762,6 +762,7 @@ fn map_service_error(error: ServiceError) -> ProviderBotEventError {
         ServiceError::InvalidOperation { message, .. } => {
             ProviderBotEventError::InvalidRequest(message)
         }
+        ServiceError::Conflict(message) => ProviderBotEventError::TransportConflict(message),
         ServiceError::BotNotFound(bot_id) | ServiceError::BotNotRegistered(bot_id) => {
             ProviderBotEventError::BotNotFound(bot_id)
         }

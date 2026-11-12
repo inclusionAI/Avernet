@@ -80,7 +80,7 @@ impl CoordinationIntentPort for CoordinationCacheStore {
             return Ok(());
         }
         if self.task_delivery(id).await?.as_deref() == Some(delivery) { return Ok(()); }
-        Err(error("task_delivery_conflict"))
+        Err(ServiceError::Conflict("task_delivery_conflict".to_string()))
     }
 
     async fn resolve_and_claim(&self, id: &str, tool: &str,
@@ -116,7 +116,7 @@ impl CoordinationIntentPort for CoordinationCacheStore {
             return Ok(CoordinationClaim::Acquired(CoordinationLease { arguments: p.arguments, claim_token: token }));
         }
         let claim = self.read(id, "claim", deadline_ms).await?.ok_or_else(|| error("claim_unavailable"))?;
-        if claim["context"] != json!(context) { return Err(error("intent_context_conflict")); }
+        if claim["context"] != json!(context) { return Err(ServiceError::Conflict("intent_context_conflict".to_string())); }
         let result = self.read(id, "result", deadline_ms).await?.map(serde_json::from_value)
             .transpose().map_err(|_| error("invalid_coordination_receipt"))?;
         Ok(CoordinationClaim::Duplicate(result))
@@ -127,7 +127,7 @@ impl CoordinationIntentPort for CoordinationCacheStore {
         let deadline = now_ms() + 10000;
         let claim = self.read(id, "claim", deadline).await?.ok_or_else(|| error("claim_unavailable"))?;
         if claim["context"] != json!(context) || claim["claim_token"] != token {
-            return Err(error("claim_conflict"));
+            return Err(ServiceError::Conflict("claim_conflict".to_string()));
         }
         let value = json!(result);
         for attempt in 0..3 {
@@ -135,7 +135,7 @@ impl CoordinationIntentPort for CoordinationCacheStore {
                 Ok(true) => return Ok(()),
                 Ok(false) => {
                     if self.read(id, "result", deadline).await?.as_ref() == Some(&value) { return Ok(()); }
-                    return Err(error("result_conflict"));
+                    return Err(ServiceError::Conflict("result_conflict".to_string()));
                 }
                 Err(e) if attempt == 2 => return Err(e),
                 Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
