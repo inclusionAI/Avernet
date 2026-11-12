@@ -7,7 +7,14 @@ import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AgentDraft } from '@/domain/agentswarm/draft';
 import { MANIFEST_LIMITS, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { VerticalResizeHandle } from './VerticalResizeHandle';
+import { useState } from 'react';
 import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
+
+/** The manifest editor opens at a readable height and can be dragged taller. */
+const EDITOR_DEFAULT_HEIGHT = 260;
+const EDITOR_MIN_HEIGHT = 160;
+const EDITOR_MAX_HEIGHT = 640;
 
 export interface AgentFieldCardProps {
   agent: AgentDraft;
@@ -44,6 +51,7 @@ function ManifestField({
   error?: string;
   onChange: (patch: Partial<AgentDraft>) => void;
 }) {
+  const [editorHeight, setEditorHeight] = useState(EDITOR_DEFAULT_HEIGHT);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
@@ -78,7 +86,15 @@ function ManifestField({
           <YamlCodeEditor
             value={agent.config_manifest ?? ''}
             onChange={(manifest) => onChange({ config_manifest: manifest })}
-            height={200}
+            height={editorHeight}
+          />
+          {/* 清单可能很长，固定 200px 读不下；高度给用户自己调。 */}
+          <VerticalResizeHandle
+            height={editorHeight}
+            onHeightChange={setEditorHeight}
+            min={EDITOR_MIN_HEIGHT}
+            max={EDITOR_MAX_HEIGHT}
+            label="调整配置清单编辑器高度"
           />
           <div className="flex items-center justify-between">
             <p className="text-xs leading-5 text-muted-foreground">已填写 YAML 时原样提交，「指令」不再参与人设。</p>
