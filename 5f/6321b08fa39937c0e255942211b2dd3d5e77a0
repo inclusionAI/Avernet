@@ -1,0 +1,19 @@
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  s_b407ecbadd402c::t_3ba67dd26066a8 30-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f6321b08fa39937c0e255942211b2dd3d5e77a0",
+  "prompts": {},
+  "sessions": {
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/input_builder.py
+  h_9d7cfd405752f5 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c61887b5363c4817ed56e88de87020464cac8216",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

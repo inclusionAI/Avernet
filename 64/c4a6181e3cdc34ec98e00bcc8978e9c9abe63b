@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/analysis-workflow-snapshot.ts
+  h_43af82e14600e4 26-27
+apps/evolverun/clawweb/public/modules/workflow/docs/subworkflow-observability.md
+  h_43af82e14600e4 35-43
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-related-run-registration.test.ts
+  h_43af82e14600e4 95-107
+apps/evolverun/clawweb/public/modules/workflow/server/services/parent-related-run-registration.ts
+  h_43af82e14600e4 72,74-79,180,190-216
+apps/evolverun/clawweb/public/shared/server/__tests__/workflow-snapshot.test.ts
+  h_43af82e14600e4 6,48-54
+apps/evolverun/clawweb/public/shared/server/services/workflow-snapshot.ts
+  h_43af82e14600e4 57-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "64c4a6181e3cdc34ec98e00bcc8978e9c9abe63b",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
