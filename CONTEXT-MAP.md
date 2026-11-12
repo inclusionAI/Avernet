@@ -28,6 +28,10 @@ Read only the sources relevant to the boundary being changed.
 Add a module-level `CONTEXT.md` only when that module has stable vocabulary
 that is not already defined here. Add it to this map in the same change.
 
+## 开发工具
+
+- [JSON → A2A 1.0](tools/a2a-json-tool/README.md)：本地转换、字段映射与网页测试。
+
 ## Knowledge framework
 
 Use this shared layout to navigate and contribute knowledge. Backend is the

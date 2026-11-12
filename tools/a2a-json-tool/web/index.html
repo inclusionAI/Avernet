@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="csp-nonce" content="__CSP_NONCE__">
+  <meta name="description" content="在本地将 JSON 转换为 A2A 1.0 AgentCard 或 SendMessage 请求。">
+  <title>JSON → A2A 1.0 · 本地转换工具</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%232845d2'/%3E%3Cpath d='M12 24h24m-9-9 9 9-9 9' stroke='white' stroke-width='4' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="A2A JSON Lab 首页"><span class="brand-icon" aria-hidden="true">↗</span>A2A <span class="brand-secondary">JSON LAB</span></a>
+    <div class="local-badge"><span class="status-dot" aria-hidden="true"></span>本地运行<span class="local-detail"> · 无需 API Key</span></div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><div class="eyebrow">协议转换工作台 <span> / </span> A2A 1.0</div><h1>JSON <span class="title-arrow">→</span> A2A<span class="version">1.0</span></h1><p>粘贴 JSON、字段片段或对象打印文本，生成 A2A 数据。</p></div>
+      <a class="docs-link" href="https://a2a-protocol.org/v1.0.0/specification/" target="_blank" rel="noopener noreferrer">查看协议规范 <span aria-hidden="true">↗</span></a>
+    </section>
+
+    <section class="workbench" aria-label="JSON 转换工作台">
+      <div class="mode-row">
+        <div class="mode-tabs" role="tablist" aria-label="转换类型">
+          <button id="message-tab" class="mode-tab active" type="button" role="tab" aria-selected="true" aria-controls="converter-panel" data-mode="message"><span aria-hidden="true">↗</span> 消息请求</button>
+          <button id="card-tab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="converter-panel" tabindex="-1" data-mode="card"><span aria-hidden="true">▣</span> AgentCard</button>
+        </div>
+        <span class="binding-badge" id="binding-badge">AGENT DISCOVERY</span>
+      </div>
+      <div id="converter-panel" role="tabpanel" aria-labelledby="message-tab">
+        <div class="mode-description"><strong id="mode-title">描述你的 Agent</strong><span id="mode-description">将名称、技能和接口地址整理成 A2A 1.0 AgentCard。</span></div>
+
+        <section class="demo-section" aria-labelledby="demo-title">
+          <div class="demo-heading"><h2 id="demo-title">待转换 Demo</h2><span>选一个示例开始测试</span></div>
+          <div id="demo-list" class="demo-list"></div>
+          <p id="demo-help" class="demo-help">点击示例替换当前输入，再点击“转换并检查”。</p>
+        </section>
+
+        <details id="message-options" class="message-options" hidden>
+          <summary>消息标识 <span>可选 · 留空自动生成请求与消息 ID</span></summary>
+          <div class="option-grid">
+            <label>Request ID<input name="requestId" placeholder="自动生成 UUID" autocomplete="off"></label>
+            <label>Message ID<input name="messageId" placeholder="自动生成 UUID" autocomplete="off"></label>
+            <label>Context ID<input name="contextId" placeholder="继续已有会话时填写" autocomplete="off"></label>
+            <label>Task ID<input name="taskId" placeholder="关联已有任务时填写" autocomplete="off"></label>
+          </div>
+        </details>
+
+        <div class="editors">
+          <section class="editor-panel input-panel" aria-label="输入 JSON">
+            <div class="editor-heading"><div><span class="step">01</span><span class="editor-label">输入 JSON</span></div><span class="file-label" id="input-file-label">agent-config.json</span></div>
+            <div class="editor-tools"><button type="button" id="import-button">导入文件</button><button type="button" id="format-button">格式化</button><span class="tool-spacer"></span><button type="button" id="clear-button" class="subtle">清空</button><input type="file" id="file-input" accept=".json,.txt,.log,application/json,text/plain" hidden></div>
+            <div class="fold-tools" aria-label="输入 JSON 折叠控制"><span>折叠层级</span><button type="button" data-editor="input" data-fold="1" aria-label="输入 JSON：折叠第 1 层">1</button><button type="button" data-editor="input" data-fold="2" aria-label="输入 JSON：折叠第 2 层">2</button><button type="button" data-editor="input" data-fold="3" aria-label="输入 JSON：折叠第 3 层">3</button><button type="button" data-editor="input" data-fold="0">全部展开</button><span class="bracket-hint">光标靠近括号可查看配对</span></div>
+            <div id="json-input" class="json-editor" aria-describedby="input-help"></div>
+            <div class="editor-footer"><span id="input-help">示例接口仅为占位，请替换为真实地址。</span><span id="input-count"></span></div>
+          </section>
+
+          <section class="editor-panel output-panel" aria-label="转换结果">
+            <div class="editor-heading"><div><span class="step">02</span><span class="editor-label">转换结果</span></div><span class="file-label" id="output-file-label">agent-card.json</span></div>
+            <div class="editor-tools"><span id="output-state" class="output-state">等待转换</span><span class="tool-spacer"></span><button type="button" id="copy-button" disabled>复制</button><button type="button" id="download-button" disabled>下载 JSON</button></div>
+            <div class="fold-tools" aria-label="转换结果折叠控制"><span>折叠层级</span><button type="button" data-editor="output" data-fold="1" aria-label="转换结果：折叠第 1 层">1</button><button type="button" data-editor="output" data-fold="2" aria-label="转换结果：折叠第 2 层">2</button><button type="button" data-editor="output" data-fold="3" aria-label="转换结果：折叠第 3 层">3</button><button type="button" data-editor="output" data-fold="0">全部展开</button><span class="bracket-hint">光标靠近括号可查看配对</span></div>
+            <div id="json-output" class="json-editor output-editor" aria-describedby="output-help field-link"></div>
+            <div class="editor-footer"><span id="output-help">双击输入中的字段名或值，联动定位对应字段。</span><span id="output-count"></span></div>
+          </section>
+        </div>
+
+        <div id="field-link" class="field-link" role="status" aria-live="polite" hidden></div>
+        <details id="parsed-preview" class="parsed-preview" hidden><summary id="parsed-summary">查看解析后的 JSON</summary><textarea id="normalized-input" class="code-editor" readonly spellcheck="false" aria-label="解析后的 JSON"></textarea></details>
+        <div id="feedback" class="feedback" role="status" aria-live="polite" tabindex="-1" hidden></div>
+        <details id="notes" class="notes" hidden>
+          <summary id="notes-title">转换说明</summary>
+          <div class="notes-table-wrap" role="region" aria-label="转换说明表格，可横向滚动" tabindex="0">
+            <table class="notes-table" aria-labelledby="notes-title">
+              <thead><tr><th scope="col">原始字段</th><th scope="col">A2A 字段</th><th scope="col">处理说明</th></tr></thead>
+              <tbody id="notes-rows"></tbody>
+            </table>
+          </div>
+        </details>
+
+        <div class="action-row"><div class="privacy-note"><span aria-hidden="true">◈</span><span>数据仅在浏览器中处理，刷新后不保留。</span></div><div class="convert-action"><span class="keyboard-hint"><kbd>⌘ / Ctrl</kbd> + <kbd>Enter</kbd></span><button type="button" id="convert-button" class="primary-button">转换并检查 <span aria-hidden="true">→</span></button></div></div>
+      </div>
+    </section>
+
+    <section class="guidance" aria-label="输入说明">
+      <div class="guidance-symbol" aria-hidden="true">i</div><div><h2 id="guide-title">从一份简单配置开始</h2><p id="guide-text">至少提供 name、description、version、url 和完整 skills。url 会转换为 supportedInterfaces，协议版本固定为 1.0。</p><p class="scope-note">本工具生成 JSON 并检查核心字段；不连接 Agent，也不代表完整协议认证。复杂可选字段的检查范围会在转换说明中列出。</p></div>
+    </section>
+  </main>
+  <footer><span>JSON IN. A2A OUT.</span><span>依据 A2A v1.0.0 <span class="footer-dot">·</span> <a href="https://github.com/a2aproject/A2A/blob/v1.0.0/specification/a2a.proto" target="_blank" rel="noopener noreferrer">官方字段定义 ↗</a></span></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
