@@ -28,7 +28,7 @@ const messages: Record<string, string> = {
   compressed_too_large: '压缩后的 Skill 包超过 10 MiB，请减少文件后重试。',
 };
 
-export function localSkillUploadErrorMessage(payload: unknown): string {
+export function localSkillUploadErrorMessage(payload: unknown, status?: number): string {
   if (payload && typeof payload === 'object' && 'data' in payload) {
     const data = payload.data;
     if (data && typeof data === 'object' && 'reason' in data && typeof data.reason === 'string') {
@@ -37,7 +37,9 @@ export function localSkillUploadErrorMessage(payload: unknown): string {
         : 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
     }
   }
-  return 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
+  return status === 413
+    ? '上传包超过服务允许的大小，请减少文件或缩小后重试。'
+    : 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
 }
 
 export function isLocalSkillPackageError(payload: unknown): boolean {

@@ -8,9 +8,9 @@ export function useLocalSkillUploadError() {
   const handleError = (error: unknown) => {
     if (error instanceof DOMException && error.name === 'AbortError') return;
     if (error instanceof BackendRequestError) {
-      if (isLocalSkillPackageError(error.data)) {
+      if (isLocalSkillPackageError(error.data) || error.status === 413) {
         if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
-        setMessage(localSkillUploadErrorMessage(error.data));
+        setMessage(localSkillUploadErrorMessage(error.data, error.status));
       }
     } else if (!(error instanceof Error && error.name === 'AceLoginRedirectError')) {
       setMessage('Skill 上传失败，请检查网络或目录权限后重试。');

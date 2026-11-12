@@ -16,6 +16,7 @@ describe('local Skill upload errors', () => {
   it('uses a safe fallback for older or unknown responses', () => {
     const fallback = 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
     expect(localSkillUploadErrorMessage({ data: null, message: 'internal details' })).toBe(fallback);
+    expect(localSkillUploadErrorMessage('<html>413</html>', 413)).toContain('超过服务允许的大小');
     expect(localSkillUploadErrorMessage({ data: { reason: 'unknown' } })).toBe(fallback);
     expect(localSkillUploadErrorMessage({ data: { reason: 'constructor' } })).toBe(fallback);
     expect(localSkillUploadErrorMessage({ data: { reason: '__proto__' } })).toBe(fallback);
