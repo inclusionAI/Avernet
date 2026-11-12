@@ -891,6 +891,7 @@ public interface TaskStore {
 <tr><td>存储接口</td><td><code>save</code>、<code>get</code>、<code>delete</code>、<code>list</code>，没有版本号和比较并写入</td><td><code>get</code>、<code>create</code>、<code>compareAndSet</code>，记录带版本、租约、取消标记</td><td>9.5 的跨实例协作全部依赖比较并写入，a2a-java 的存储接口提供不了</td></tr>
 <tr><td>多实例</td><td><code>extras/queue-manager-replicated</code>：通过消息中间件在实例间复制事件队列</td><td>只通过共享存储协作</td><td><span class="tag d">D3</span> 已否决事件复制</td></tr>
 </table></div>
+<div class="box d"><p><b>续交保留单独的 <code>resume</code>，不合并进 <code>execute</code>。</b>审批回复的校验规则很细：批次标识、工具标识、参数摘要、过期时间、分批回复、已接受的决定不得改写。交给每个业务在 <code>execute</code> 里自己解析容易出错，这与收窄输出接口是同一个理由。SDK 校验通过、持久化决定、全部工具都有决定并拿到执行权后，才调用一次 <code>resume</code>，传入已解析的 <code>ApprovalResult</code>。代价是接口形态与 a2a-java 不完全一致，熟悉官方 SDK 的开发者需要知道续交走另一个入口。</p></div>
 <p>后两行是 8.2 建议方案 B（只复用协议模型，请求处理自己实现）的直接依据：复用 <code>DefaultRequestHandler</code> 就要继承它的存储和队列模型，而这两者和本设计的多实例方案不兼容。</p>
 
 <h3 id="s8-3"><span class="n">8.3</span>模块</h3>
