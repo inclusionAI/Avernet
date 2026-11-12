@@ -219,7 +219,17 @@ export function getBotCollaborationMode(
   if (bot.serviceMode === 'non-service' && !bot.runtime.isAgentCodingBot) return undefined;
   if (bot.spaceKind !== 'team') return undefined;
   if (isOwner) return 'authorize';
-  return bot.actions.includes('edit') ? undefined : 'request';
+
+  // VIEW_CONFIG grants read-only configuration access, but the inventory
+  // backend emits it only for an explicit service-Bot collaborator. Treat it
+  // as collaboration standing (not edit capability). Approved collaborators
+  // may also be identified by lifecycle/management actions such as EDIT,
+  // RESTART_PUBLISH or OFFLINE. Ordinary Space members are reduced to VIEW/CHAT.
+  // Do not infer standing from disabledActions: denied operations are returned
+  // there for ordinary members as well.
+  const nonStandingActions = new Set(['view', 'chat']);
+  const hasCollaborationStanding = bot.actions.some((action) => !nonStandingActions.has(action));
+  return hasCollaborationStanding ? undefined : 'request';
 }
 
 /**

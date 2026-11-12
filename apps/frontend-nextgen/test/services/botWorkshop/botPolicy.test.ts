@@ -289,6 +289,32 @@ describe('Bot 授权入口门禁', () => {
     expect(getBotCollaborationMode(serviceBot, true)).toBe('authorize');
     expect(getBotCollaborationMode(serviceBot, false)).toBe('request');
   });
+
+  test('服务 Bot 的 view_config 表明当前用户已有显式协作关系', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-readonly-collaborator-bot',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view', 'view_config', 'chat'],
+    }).item;
+
+    expect(getBotCollaborationMode(bot, false)).toBeUndefined();
+  });
+
+  test('服务 Bot 无 edit 时由其他生命周期操作识别已获操作权限', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-operator-bot',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view', 'chat', 'restart_publish', 'offline'],
+    }).item;
+
+    expect(getBotCollaborationMode(bot, false)).toBeUndefined();
+  });
 });
 
 describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/AC-03）', () => {
