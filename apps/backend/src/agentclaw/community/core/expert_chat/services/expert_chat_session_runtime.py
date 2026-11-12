@@ -59,6 +59,7 @@ class ExpertChatSessionRuntimeMixin:
         actor_user_id: str | None = None,
     ) -> tuple[Optional[Dict[str, Any]], bool]:
         """Resolve the subject's instance using the authorized reader identity."""
+        bot.pop("_caller_instance_binding_id", None)
         bot_id = bot["bot_id"]
         connection_user_id = self._session_read_actor(bot, user_id, actor_user_id, bcn_friend_authorized)
         bot_call_type = McpCallType.parse(bot.get("call_type") or None)
@@ -82,6 +83,7 @@ class ExpertChatSessionRuntimeMixin:
                 return result.get("connection"), True
             instance = result.get("instance", {})
             bot["binding_id"] = (instance.get("ext") or {}).get("binding_id")
+            bot["_caller_instance_binding_id"] = bot["binding_id"]
         elif bot.get("bot_type", "personal") == "service":
             bot["binding_id"] = online_binding
         return self._get_connection(
