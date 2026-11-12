@@ -70,7 +70,8 @@ class StubAgentSwarmService:
         return self.run
 
     def list_runs(self, tenant: str, status: dm.RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> dm.RunPage:
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> dm.RunPage:
         raise NotImplementedError
 
     def run_events(self, run_id: str, tenant: str, after_agent_id: int = 0,
