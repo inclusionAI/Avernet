@@ -1709,6 +1709,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td><span class="tag q">Q20</span></td><td>多模态的文件从哪里来：是否指定公司统一的文件服务；地址能否在内网内无凭据读取，还是必须带临时签名；内联上限 256 KB 是否合适；BCS 何时支持哪些类型</td><td>由 BCN 指定一个默认的内部文件服务，业务也可以用自己的，只要满足 P-164；BCS 先支持图片输入和文件输出</td><td>6.13</td></tr>
 <tr><td><span class="tag q">Q21</span></td><td><b>待讨论项。</b>调用路径由 BCS 返回的 Card 决定：原生地址模式（直连）或 BCN 地址模式（经 BCS），按 Agent 类型和使用模式确定。需要讨论：各类 Agent 的默认模式；每个 Agent 固定一种还是因调用方而异；派生 Card 的改写规则；必须经 BCS 的 Agent 如何强制；直连调用是否向 BCS 上报摘要</td><td>采用该方案。按 Profile 接入的 Agent 默认原生地址；未按 Profile 接入的 Bot 只用 BCN 地址；每个 Agent 先固定一种；上报摘要为可选。具体设计放在 client SDK 和 BCS A2A 服务阶段</td><td>4.1</td></tr>
 <tr><td><span class="tag q">Q22</span></td><td>群协作：是否需要平台协作扩展让 Agent 感知群，还是维持现在的文本入群；群内两个 Bot 之间是否需要交换结构化数据（目前只广播文本）；Provider 是否可以将 Agent 设为不入群</td><td>首版维持文本入群，增加“不入群”设置；平台协作扩展单独立项设计；群内结构化交换暂不支持</td><td>7.8</td></tr>
+<tr><td><span class="tag q">Q23</span></td><td>异步引擎：提交作业后立即返回、结果稍后经回调或消息到达的引擎。现在 <code>execute</code> 返回而未完成会被视为完成；回调可能落到另一个实例，而那里没有该 Task 的输出接口</td><td>首版只支持同步执行，异步引擎在 <code>execute</code> 中阻塞等待结果。如果存量异步引擎较多，参照审批续交设计“转入后台”：引擎显式声明后 <code>execute</code> 可以返回，任意实例凭任务标识通过比较并写入接管执行权继续写结果。这会改动单一写入者和租约规则，需单独设计</td><td>8.4、8.7、9.1</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
