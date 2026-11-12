@@ -167,7 +167,6 @@ async def test_real_shared_refresh_uses_owned_online_session_and_append(shared_w
     assert "caller_shared_session_validated" in caplog.text
     assert "ownership_check=not_required" in caplog.text
     assert "caller_shared_target_selected" in caplog.text
-    assert "caller_shared_target_fenced" in caplog.text
     assert "caller_shared_target_refresh_succeeded" in caplog.text
     assert "owned-session" in caplog.text
     assert "private-caller-token" not in caplog.text
@@ -206,33 +205,26 @@ async def test_shared_refresh_does_not_require_matching_owned_session(shared_wor
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["publication", "provider", "engine", "session", "inactive"])
-async def test_shared_target_changes_still_reject_but_ledger_deletion_allows_append(shared_world, change):
+@pytest.mark.parametrize("change", ["publication", "session"])
+async def test_shared_refresh_uses_initial_target_without_signing_time_rechecks(shared_world, change):
     original = shared_world.signing.exchange.return_value
 
     def exchange(**kwargs):
         if change == "publication":
-            shared_world.publications.list_by_source_bot.return_value[0].ext["binding"]["online"] = 82
-        elif change == "provider":
-            shared_world.binding.device_provider = "arca"
-        elif change == "engine":
-            shared_world.bot["active_engine"] = "openclaw"
-        elif change == "inactive":
-            shared_world.binding.status = "RELEASED"
+            shared_world.publications.list_by_source_bot.side_effect = RuntimeBindingResolutionError(
+                "publication became unavailable after signing",
+            )
         else:
             shared_world.repo.delete_owned_session("caller-1", "bot-1", "owner-1", "owned-session")
         return original
 
     shared_world.signing.exchange.side_effect = exchange
     response = await _http_iam(shared_world)
-    if change == "session":
-        assert response.status_code == 200
-        puts = [request for request in shared_world.requests if request.method == "PUT"]
-        assert len(puts) == 1
-        assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
-    else:
-        assert response.status_code == 502
-        assert shared_world.requests == []
+    assert response.status_code == 200
+    puts = [request for request in shared_world.requests if request.method == "PUT"]
+    assert len(puts) == 1
+    assert puts[0].url.path == "/api/v1/paas/devices/shared-runtime@template/outbound-rule"
+    assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
 
 
 @pytest.mark.asyncio
@@ -322,7 +314,6 @@ async def test_shared_refresh_uses_requested_stage_without_independent_instance(
     assert f"'stage': '{stage.value}'" in caplog.text
     assert f"'binding_id': {binding_id}" in caplog.text
     assert f"'source': '{source}'" in caplog.text
-    assert "caller_shared_target_fenced" in caplog.text
 
 
 @pytest.mark.asyncio

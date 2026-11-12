@@ -257,17 +257,6 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             iam_token=iam_token, caller_user_id=caller_user_id,
             bot_id=bot_id, owner_user_id=owner_id, token_provider=self._token_provider,
         )
-        try:
-            current = await asyncio.to_thread(self._runtime_bindings.resolve, request)
-        except RuntimeBindingResolutionError:
-            logger.warning("caller_shared_target_rejected fields=%s reason=target_unavailable_after_exchange", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from None
-        # COSEC: never install a credential into a publication selected after signing.
-        if current != target:
-            logger.warning("caller_shared_target_rejected fields=%s reason=target_changed", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-        await asyncio.to_thread(self._session_validator.validate_owned_shared_session, **validation)
-        logger.info("caller_shared_target_fenced fields=%s", fields)
         await self._exchange_target(
             iam_token=iam_token, caller_user_id=caller_user_id, bot_id=bot_id,
             owner_id=owner_id, stage=stage, publish_id=publish_id, entity_id=entity_id,

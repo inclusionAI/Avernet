@@ -67,7 +67,7 @@ or creating an independent Caller instance. The refresh branch imposes no online
 stage or SERVICE_ONLINE source restriction. Other engines and temporary test
 exchange retain their existing Owner/lock and target-selection policies.
 
-Before signing and again immediately before installation,
+Before signing,
 `validate_owned_shared_session` confirms an ACTIVE Teclaw binding, a nonblank
 session key. Missing keys are invalid requests. This shared refresh branch does
 not query the Backend-owned session index: absent, deleted or differently scoped
@@ -75,13 +75,13 @@ ledger rows do not reject refresh. It does not establish ownership of the suppli
 session key; existing Caller authentication and target authorization remain in
 force. The method retains its existing name for internal call-site compatibility.
 No runtime session lookup or ownership record creation is performed.
-The application resolves AUTO again after signing and rejects a changed binding
-or source instead of installing into a replacement publication. Required signing,
-target and installation errors remain errors; shared refresh is not a fallback
-that turns those failures into success.
+After signing, the application installs into the initially selected binding;
+it does not resolve the target or validate session context a second time. Shared
+refresh does not enforce a signing-time publication fence. Required signing,
+initial-target and installation errors remain errors.
 
 The `caller_shared_target_selected`, `caller_shared_target_rejected`,
-`caller_shared_target_fenced`, `caller_shared_target_refresh_succeeded`, and
+`caller_shared_target_refresh_succeeded`, and
 `caller_shared_session_validated/rejected` events identify the selected Bot,
 Owner, Caller, stage, binding/source and business session key where applicable.
 They never include token values or raw upstream error bodies. Public and

@@ -2,7 +2,7 @@
 
 ## Requirement and scope
 
-Remove the Backend owned-session ledger requirement from shared Teclaw Caller IAM refresh across draft, verify and online, as explicitly requested. A nonblank session key and an ACTIVE Teclaw binding remain required before signing and installation. Existing caller authentication, friend-subject matching, target fencing and required signing/installation failures remain in force.
+Remove the Backend owned-session ledger requirement from shared Teclaw Caller IAM refresh across draft, verify and online, as explicitly requested. A nonblank session key and an ACTIVE Teclaw binding remain required before signing. Existing caller authentication, friend-subject matching, initial target selection and required signing/installation failures remain in force.
 
 This deliberately allows refresh when the supplied session has no matching ACTIVE owned-session row, including deleted or differently scoped ledger rows. It does not claim to establish session ownership. Remove the validator's now-unused repository dependency and update its DI provider. Reuse existing AUTO resolution for the requested stage; do not add a source allowlist in the refresh branch. No HTTP schema, repository behavior or provider transport changes.
 
@@ -19,4 +19,8 @@ This intentionally relaxes session authorization for this shared refresh branch.
 
 ## Additional requirement
 
-Remove the online-only shared-branch condition. Draft and verify use the same shared refresh flow, selecting their own existing stage binding. Remove the SERVICE_ONLINE source guard and keep the post-signing target fence; do not redirect draft/verify to online. Add real-DI success tests for each stage.
+Remove the online-only shared-branch condition. Draft and verify use the same shared refresh flow, selecting their own existing stage binding. Remove the SERVICE_ONLINE source guard and keep the initial target selection; do not redirect draft/verify to online. Add real-DI success tests for each stage.
+
+## Signing-time simplification
+
+Per the explicit follow-up request, remove the post-signing resolver lookup, changed-target rejection, repeated session validation and fenced event. Install into the initially selected binding with the supplied session key. Do not promise target revalidation across signing; initial binding/key checks and required exchange/install failures remain.
