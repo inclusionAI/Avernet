@@ -380,6 +380,9 @@ if [[ "$no_stop" -eq 0 ]]; then
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
     bcs-bot-store/src/memory_authority.rs
+    # Candidate-owner batch spine split from the memory authority facet;
+    # 66 changed instrumentable lines had zero hits in the 2026-11 SQLite E2E measurement.
+    bcs-bot-store/src/memory_ownerships_batch.rs
     bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
