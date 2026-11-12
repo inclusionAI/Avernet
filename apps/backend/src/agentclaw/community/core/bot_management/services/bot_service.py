@@ -4297,8 +4297,13 @@ class BotService(BotServiceProtocol):
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置
             if bot_id != "default":
                 try:
-                    self._cleanup_bot_associated_data(bot_id, resource_owner_id)
-                    logger.info(f"[bot_service.delete_bot] Cleaned up associated data for bot {bot_id}")
+                    # Bot-local Skills and SkillSets use the stable entity as
+                    # their stored user_id, including for personal Bots.
+                    cleanup_result = self._cleanup_bot_associated_data(bot_id, stable_resource_owner_id(bot))
+                    if cleanup_result["errors"] or cleanup_result["skills_retained"]:
+                        logger.warning("[bot_service.delete_bot] Associated data cleanup incomplete for bot %s", bot_id)
+                    else:
+                        logger.info(f"[bot_service.delete_bot] Cleaned up associated data for bot {bot_id}")
                 except Exception as cleanup_error:
                     # 清理失败不影响删除结果，只记录日志
                     logger.warning(f"[bot_service.delete_bot] Failed to cleanup associated data for bot {bot_id}: {cleanup_error}")
@@ -4492,7 +4497,8 @@ class BotService(BotServiceProtocol):
             "resources_deleted": 0,
             "skill_installations_deleted": 0,
             "mcp_installations_deleted": 0,
-            "errors": []
+            "errors": [],
+            "skills_retained": False,
         }
 
         try:
@@ -4509,13 +4515,15 @@ class BotService(BotServiceProtocol):
                 "mcp_installations_deleted", 0
             )
             result["errors"].extend(cleanup_result.get("errors", []))
+            result["skills_retained"] = bool(cleanup_result.get("skills_retained"))
 
-            if result["errors"]:
+            if result["errors"] or result["skills_retained"]:
                 logger.warning(
                     "[bot_service._cleanup_bot_associated_data] Cleanup incomplete "
-                    "for bot %s: errors=%s",
+                    "for bot %s: errors=%s skills_retained=%s",
                     bot_id,
                     result["errors"],
+                    result["skills_retained"],
                 )
             else:
                 logger.info(

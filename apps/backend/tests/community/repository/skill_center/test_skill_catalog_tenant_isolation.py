@@ -38,6 +38,9 @@ class _SqliteDB:
         finally:
             session.close()
 
+    def transactional_orm_session(self):
+        return self.orm_session()
+
 
 @pytest.fixture
 def db(tmp_path):
