@@ -535,7 +535,7 @@ async fn authority_mysql_conformance() {
     // Scenario inventory is reported for the CI gate: the
     // aggregate is not an empty shell — it ran the full
     // harness scenario list and must keep it complete.
-    assert_eq!(authority_scenarios, 39, "authority harness scenarios");
+    assert_eq!(authority_scenarios, 40, "authority harness scenarios");
     assert_eq!(
         scenarios.len() - authority_scenarios,
         24,

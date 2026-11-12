@@ -78,6 +78,13 @@ impl BotAuthorityPort for RuleTableHook {
             ))),
         }
     }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<bcs_service_api::types::bot_authority::BotOwnershipView>>> {
+        Ok(bot_ids.iter().map(|_| None).collect())
+    }
 }
 
 

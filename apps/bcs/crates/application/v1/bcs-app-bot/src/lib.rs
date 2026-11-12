@@ -521,17 +521,34 @@ impl BotServiceImpl {
             .iter()
             .map(|record| record.is_friend)
             .collect::<Vec<_>>();
+        let bot_ids = records
+            .iter()
+            .map(|record| record.bot.record.bot_id.clone())
+            .collect::<Vec<_>>();
+        // Candidate-page owner projection: ONE batched authority read
+        // per page (never per row), aligned positionally with the
+        // page items; the field is display metadata, never an
+        // authorization result.
+        let ownerships = self
+            .authority()?
+            .ownerships_for(&bot_ids)
+            .await
+            .map_err(map_authority_error)?;
         let bots = self
             .project_records(records.into_iter().map(|record| record.bot).collect())
             .await?;
         let mut items = Vec::with_capacity(bots.len());
-        for (bot, is_friend) in bots.into_iter().zip(is_friend) {
+        for ((bot, is_friend), ownership) in bots.into_iter().zip(is_friend).zip(ownerships) {
             let Bot::Physical(bot) = bot else {
                 return Err(ApplicationError::internal(
                     "Candidate store returned a Human record",
                 ));
             };
-            items.push(BotCandidate { bot, is_friend });
+            items.push(BotCandidate {
+                bot,
+                is_friend,
+                owner_user_id: ownership.map(|view| view.owner_user_id),
+            });
         }
         Ok(Page {
             items,

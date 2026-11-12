@@ -176,6 +176,13 @@ impl Bot {
 pub struct BotCandidate {
     pub bot: PhysicalBot,
     pub is_friend: bool,
+    /// Owner user id from the Bot's approved owner authority edge
+    /// (edge-grant `from_id` of `grant_kind='owner'`), read on the
+    /// same page. Absent when the row cannot project an owner
+    /// (e.g. an uninitialized legacy Bot under the strict posture).
+    /// Display metadata, never an authorization result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

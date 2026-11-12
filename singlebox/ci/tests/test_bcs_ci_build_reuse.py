@@ -176,7 +176,7 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
         self.assertIn('bash scripts/ci_test.sh --coverage --reuse-build', bcs_job)
         self.assertEqual(bcs_job.count('python3 scripts/ci_contract_test.py'), 14)
         self.assertNotIn('run: cargo test ', bcs_job)
-        for inventory in ['edge-authority scenarios=63', 'provider-lifecycle scenarios=30',
+        for inventory in ['edge-authority scenarios=64', 'provider-lifecycle scenarios=30',
                           'group-authorization scenarios=9', 'session-authorization scenarios=6']:
             self.assertEqual(bcs_job.count(inventory), 1)
         for gate in ['--pass-rate-min 100', '--overall-line-min 87', '--changed-line-min 85',

@@ -265,6 +265,50 @@ async fn candidate_perspective_follows_the_current_matrix() {
         .expect("manager perspective stays");
 }
 
+// ── Candidate-page owner projection: the page items carry the
+// Bot's approved owner edge as display metadata (§8: 授权边是
+// 事实源), never the legacy creator column; a still
+// uninitialized (version-0) candidate omits the field. ──
+
+#[tokio::test]
+async fn candidates_carry_the_edge_owner_as_display_metadata() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-acting", "alice", ActorStatus::Online).await;
+    grant_owner_edge(&fx.repo, "bot-acting", "alice").await;
+    fx.add_bot("bot-owned", "ignored", ActorStatus::Online).await;
+    grant_owner_edge(&fx.repo, "bot-owned", "bob").await;
+    fx.add_bot("bot-uninit", "ignored", ActorStatus::Online).await;
+
+    let page = fx
+        .service
+        .list_candidates(ListBotCandidates {
+            caller: human_caller("alice"),
+            bot_id: "bot-acting".into(),
+            purpose: BotCandidatePurpose::Discovery,
+            name: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("candidate page");
+    let by_id: std::collections::HashMap<&str, Option<&str>> = page
+        .items
+        .iter()
+        .map(|item| (item.bot.bot_id.as_str(), item.owner_user_id.as_deref()))
+        .collect();
+    assert_eq!(
+        by_id.get("bot-owned"),
+        Some(&Some("bob")),
+        "approved owner edge projects: {page:?}"
+    );
+    assert_eq!(
+        by_id.get("bot-uninit"),
+        Some(&None),
+        "version-0 Bot omits the owner"
+    );
+    assert!(!by_id.contains_key("bot-acting"), "acting Bot is excluded");
+}
+
 // ── Row 2: the descriptor patch follows the CURRENT ROLE ──
 
 #[tokio::test]
