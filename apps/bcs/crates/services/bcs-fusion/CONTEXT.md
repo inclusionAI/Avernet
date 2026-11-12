@@ -4,8 +4,13 @@
 
 - Fuse v2 Card search adaptation and event-triggered Agent/Group publication,
   with a coalesced identity queue and bounded retries. Agent Cards carry both
-  committed visibility labels, including private values; public normal Groups
-  carry the bot visibility label. Bootstrap supplies the control-plane repo and
+  committed visibility labels, including private values; public active normal
+  Manager–Worker/State Machine Groups with stored templates carry the bot
+  visibility label. Group Cards use the store-owned template snapshot, retaining
+  skills/interfaces/extensions and adding only the catalog Group ID and labels.
+  Missing templates, Chat/DM and private Groups are unpublished; read failures
+  retry instead of being treated as deletion. See [catalog contract](../../../docs/bcsfuse-catalog.md).
+  Bootstrap supplies the control-plane repo and
   environment for current-state reads. No startup or master-acquisition scan.
 
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.

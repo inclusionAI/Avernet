@@ -43,6 +43,7 @@ pub mod memory;
 pub use bcs_service_api::port::repo::GroupRepoPort;
 pub use memory::{GroupBuilder, MemoryGroupRepo};
 mod card_template;
+mod card_snapshot;
 mod store_dm;
 mod store_eventful;
 mod store_finds;

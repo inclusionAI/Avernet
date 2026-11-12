@@ -248,15 +248,19 @@ class Story:
         # The public Group API requires its member Bots to be public too.
         self.request("PUT", f"/bots/{target}/visibility", {"visibility": "public"})
         group = self.request("POST", "/groups", {"driver_bot": target,
-            "participants": [{"bot_uuid": target}], "label": "Private group", "visibility": "private"})["id"]
+            "participants": [{"bot_uuid": target, "role": "manager"}], "group_strategy": "manager_worker",
+            "label": "Private group", "visibility": "private"})["id"]
         self.removed(group, 0)
         assert not self.catalog.matching("PUT", "/api/v2/agent-cards/" + group)
         self.request("PATCH", f"/groups/{group}", {"visibility": "public", "name": "Billing group", "context": "Invoices"})
         card = self.wait_card(group, lambda c: c["card"]["name"] == "Billing group")
-        assert card == {"resource_type": "group", "labels": {"visibility": ["public"]},
-                        "card": {"groupId": group, "name": "Billing group", "description": "Invoices", "skills": []}}
+        assert card["resource_type"] == "group" and card["labels"] == {"visibility": ["public"]}
+        assert card["card"]["groupId"] == group and card["card"]["description"] == "Invoices"
+        assert card["card"]["skills"] == [{"id": "group.execute", "name": "Billing group", "description": "Invoices", "tags": ["manager_worker"]}]
+        assert card["card"]["supportedInterfaces"][0]["url"] == f"local://groups/{group}"
+        assert card["card"]["capabilities"]["extensions"][0]["params"]["groupKind"] == "manager_worker"
         self.request("PATCH", f"/groups/{group}", {"context": ""})
-        self.wait_card(group, lambda c: c["card"]["description"] == "")
+        self.wait_card(group, lambda c: c["card"]["description"] == "" and c["card"]["skills"][0]["description"] == "")
         start = self.catalog.count()
         self.request("PATCH", f"/groups/{group}", {"visibility": "private"})
         self.removed(group, start)

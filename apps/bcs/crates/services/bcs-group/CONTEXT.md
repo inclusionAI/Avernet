@@ -4,6 +4,13 @@
 
 - Optional post-commit catalog change notifications for Group creation, provisioning, metadata, visibility and deletion.
 
+- `GroupCoreService::read_card_snapshot` delegates the strict, environment-scoped
+  Group/template snapshot contract to `GroupRepoPort`; it never substitutes the
+  ordinary display cache. The store owns template display projection from the
+  current label/context and preserves its other fields. Catalog publication
+  consumes this snapshot after successful writes; storage failures remain errors.
+  See [Group Card publication](../../../docs/bcsfuse-catalog.md#group-template-ownership).
+
 - Group session service implementation for BCS.
 - Group lifecycle, membership, and session coordination rules.
 - Application-facing orchestration for group creation, updates, and state changes.

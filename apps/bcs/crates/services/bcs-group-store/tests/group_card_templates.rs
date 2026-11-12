@@ -28,6 +28,7 @@ fn group(id: &str, strategy: GroupStrategy) -> Group {
     let mut group = Group::new(id, "manager", vec![Participant::bot("manager", ParticipantRole::Manager)]);
     group.group_strategy = strategy;
     group.label = Some("协作群".into());
+    group.context = Some("排查数据库问题".into());
     group
 }
 
@@ -42,8 +43,7 @@ async fn card(db: &dyn DbPlugin, env: &str, id: &str) -> Option<Value> {
 fn assert_template(card: &Value, name: &str, kind: &str) {
     assert_eq!(card["name"], name);
     assert_eq!(card["skills"][0]["name"], name);
-    let prefix = if kind == "manager_worker" { "Manager–Worker 群：" } else { "State Machine 群：" };
-    assert_eq!(card["description"], format!("{prefix}{name}"));
+    assert_eq!(card["description"], "排查数据库问题");
     assert_eq!(card["skills"][0]["description"], card["description"]);
     assert_eq!(card["capabilities"]["extensions"][0]["params"], json!({"groupKind": kind}));
     assert!(card.get("version").is_none());
@@ -124,9 +124,24 @@ async fn lifecycle(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
     repo.update_label("sm-private", Some("补模板".into())).await.unwrap();
     assert_template(&card(db.as_ref(), ENV, "sm-private").await.unwrap(), "补模板", "state_machine");
 
-    // Dynamic fields remain in their authoritative tables; no template rewrite.
+    // Context-only and combined patches update both descriptions and retain extensions.
+    for (index, context) in ["新的目标与背景", ""].into_iter().enumerate() {
+        let patch = GroupMutableFieldsPatch { context: Some(context.into()), ..Default::default() };
+        if index == 0 { repo.patch_mutable_fields("mw-private", patch).await.unwrap(); }
+        else { mutate(&repo, "mw-private", GroupEventfulMutation::PatchMutableFields(patch)).await; }
+        let saved = card(db.as_ref(), ENV, "mw-private").await.unwrap();
+        assert_eq!(saved["description"], context);
+        assert_eq!(saved["skills"][0]["description"], context);
+        assert_eq!(saved["supportedInterfaces"], retained["supportedInterfaces"]);
+        assert_eq!(saved["opaque"], retained["opaque"]);
+    }
+    repo.patch_mutable_fields("mw-private", GroupMutableFieldsPatch {
+        label: Some("新名称".into()), context: Some("新目标".into()), ..Default::default()
+    }).await.unwrap();
     let before = card(db.as_ref(), ENV, "mw-private").await.unwrap();
-    repo.patch_mutable_fields("mw-private", GroupMutableFieldsPatch { context: Some("new instruction".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(before["name"], "新名称");
+    assert_eq!(before["description"], "新目标");
+    // Membership and visibility do not rewrite the template.
     repo.add_participant("mw-private", Participant::bot("worker", ParticipantRole::Worker)).await.unwrap();
     repo.update_visibility("mw-private", "public").await.unwrap();
     assert_eq!(card(db.as_ref(), ENV, "mw-private").await.unwrap(), before);
@@ -204,10 +219,15 @@ async fn failures_and_cost(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
     g.label = Some("failed upsert".into());
     g.participants.push(Participant::bot("new-worker", ParticipantRole::Worker));
     assert!(repo.upsert(g.clone()).await.is_err());
-    // Context/membership writes should succeed even when template writes fail.
-    repo.patch_mutable_fields(&g.id, GroupMutableFieldsPatch { context: Some("allowed".into()), ..Default::default() }).await.unwrap();
+    assert!(repo.patch_mutable_fields(&g.id, GroupMutableFieldsPatch { context: Some("must rollback".into()), ..Default::default() }).await.is_err());
+    assert!(repo.commit_eventful_mutation(CommitGroupEventfulMutation {
+        group_id: g.id.clone(), expected_version: g.version,
+        mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch { context: Some("must rollback".into()), ..Default::default() }),
+        event: None, mutated_at_ms: 1_800_000_000_000,
+    }).await.is_err());
     let fresh = store(db.clone(), flavor, ENV).try_get(&g.id).await.unwrap().unwrap();
     assert_eq!(fresh.label.as_deref(), Some("协作群"));
+    assert_eq!(fresh.context.as_deref(), Some("排查数据库问题"));
     assert_eq!(fresh.version, g.version);
     assert_eq!(fresh.participants.len(), 1);
     assert_eq!(repo.try_get(&g.id).await.unwrap().unwrap().label, fresh.label);
@@ -226,6 +246,8 @@ async fn failures_and_cost(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
         assert!(!sql.iter().any(|s| s.contains("bcs_bots") || s.contains("bcs_collaboration_definitions")));
     }
     repo.update_label("size-1", Some("updated".into())).await.unwrap();
+    assert_eq!(probe.transactions.lock().unwrap().last().unwrap().len(), 2);
+    repo.patch_mutable_fields("size-1", GroupMutableFieldsPatch { context: Some("updated goal".into()), ..Default::default() }).await.unwrap();
     assert_eq!(probe.transactions.lock().unwrap().last().unwrap().len(), 2);
     repo.delete("size-1").await.unwrap();
     assert_eq!(probe.transactions.lock().unwrap().last().unwrap().len(), 3);

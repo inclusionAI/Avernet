@@ -1,5 +1,23 @@
 # bcs-service-api Context
 
+## Version 5.1.0: Group Card snapshots
+
+`GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning
+`GroupCardSnapshot` with current Group publication metadata and an optional
+stored template from one consistent read. Defaults fail explicitly, preserving
+source compatibility for existing implementations without silently treating
+unsupported reads as deletion. SQL and Memory implement the contract; GroupCore
+forwards it, and Fuse V2 consumes it instead of building Cards from `Group`.
+All workspace consumers rebuild together; no HTTP or Plugin API changes apply.
+
+The store projects template names from label/ID and both Card/skill descriptions
+from context (empty when unset), preserving interfaces and opaque extensions.
+Legacy stored display fields are refreshed only in the read result until a
+normal upsert/name/context write persists them. Missing templates remain missing,
+and query/decode failures propagate. Shared Memory/SQLite conformance and catalog
+integration cover the boundary. No schema migration or startup backfill is added.
+See [Group template ownership](../../../docs/bcsfuse-catalog.md#group-template-ownership).
+
 ## Version 4.0.0: Provider initial authority
 
 `OwnershipInitialization` adds required `initial_manager_user_ids`; existing Rust
