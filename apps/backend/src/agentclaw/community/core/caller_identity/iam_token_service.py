@@ -129,7 +129,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
                 return CallerIamTokenOutcome(iam_token=iam_token)
 
-            if context.shared_teclaw_runtime and stage is CallerIdentityStage.ONLINE:
+            if context.shared_teclaw_runtime:
                 return await self._refresh_shared_teclaw(
                     iam_token=iam_token, caller_user_id=identity.staffId,
                     bot_id=bot_id, owner_id=context.owner_id, entity_id=context.entity_id,
@@ -245,9 +245,6 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         except RuntimeBindingResolutionError:
             logger.warning("caller_shared_target_rejected fields=%s reason=target_unavailable", fields)
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from None
-        if target.source is not RuntimeBindingSource.SERVICE_ONLINE:
-            logger.warning("caller_shared_target_rejected fields=%s reason=unexpected_source", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
         fields.update(binding_id=target.binding_id, source=target.source.value)
         logger.info("caller_shared_target_selected fields=%s", fields)
         validation = dict(

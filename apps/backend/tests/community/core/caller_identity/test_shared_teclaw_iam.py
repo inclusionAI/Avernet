@@ -132,7 +132,7 @@ def shared_world(tmp_path, monkeypatch):
     client.close()
 
 
-async def _http_iam(world, session_key="owned-session"):
+async def _http_iam(world, session_key="owned-session", stage=CallerIdentityStage.ONLINE):
     from starlette.requests import Request
     from agentclaw.community.adapters.http.token_exchange.router import get_iam_token
     from agentclaw.community.api.caller_iam_token_service import CallerIamTokenServiceProtocol
@@ -141,7 +141,7 @@ async def _http_iam(world, session_key="owned-session"):
                        "headers": [(b"cookie", b"IAM_TOKEN=private-iam-token")],
                        "query_string": b"", "scheme": "http", "server": ("test", 80)})
     return await get_iam_token(
-        request=request, bot_id="bot-1", stage=CallerIdentityStage.ONLINE,
+        request=request, bot_id="bot-1", stage=stage,
         publish_id=None, entity_id="entity-1", is_test_exchange=False,
         session_key=session_key, service=world.container.get(CallerIamTokenServiceProtocol),
     )
@@ -300,18 +300,29 @@ async def test_shared_friend_mismatch_is_rejected_before_signing(shared_world):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", [CallerIdentityStage.DRAFT, CallerIdentityStage.VERIFY])
-async def test_shared_capability_does_not_grant_callers_other_stage_service_access(shared_world, stage):
-    from agentclaw.community.api.caller_iam_token_service import CallerIamTokenServiceProtocol
+@pytest.mark.parametrize("stage,binding_id,source", [
+    (CallerIdentityStage.DRAFT, 9, "service_draft"),
+    (CallerIdentityStage.VERIFY, 81, "service_verify"),
+    (CallerIdentityStage.ONLINE, 81, "service_online"),
+])
+async def test_shared_refresh_uses_requested_stage_without_independent_instance(
+    shared_world, stage, binding_id, source, caplog,
+):
+    import logging
 
-    service = shared_world.container.get(CallerIamTokenServiceProtocol)
-    result = await service.get_iam_token(
-        iam_token="iam", auth_request=_request(), bot_id="bot-1", stage=stage,
-        publish_id=None, entity_id="entity-1", is_test_exchange=False, session_key="owned-session",
-    )
-    assert result.error == "CALLER_OUTBOUND_UPDATE_FAILED"
-    assert shared_world.requests == []
-    shared_world.instances.get_instance.assert_called_once()
+    with caplog.at_level(logging.INFO):
+        response = await _http_iam(shared_world, stage=stage)
+    assert response.status_code == 200
+    shared_world.signing.exchange.assert_called_once()
+    puts = [request for request in shared_world.requests if request.method == "PUT"]
+    assert len(puts) == 1
+    assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
+    shared_world.instances.get_instance.assert_not_called()
+    shared_world.locks.get_by_key.assert_not_called()
+    assert f"'stage': '{stage.value}'" in caplog.text
+    assert f"'binding_id': {binding_id}" in caplog.text
+    assert f"'source': '{source}'" in caplog.text
+    assert "caller_shared_target_fenced" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -340,18 +351,3 @@ async def test_shared_first_target_lookup_failure_is_rejected_before_signing(sha
     shared_world.signing.exchange.assert_not_called()
     assert shared_world.requests == []
 
-
-@pytest.mark.asyncio
-async def test_shared_context_cannot_install_into_an_unexpected_runtime_source():
-    context = replace(_context(), shared_teclaw_runtime=True)
-    service, identity, _, _, _, bindings, _ = _service(context=context)
-    bindings.resolve.side_effect = None
-    bindings.resolve.return_value = ResolvedRuntimeBinding(81, RuntimeBindingSource.CALLER_INSTANCE)
-    result = await service.get_iam_token(
-        iam_token="iam", auth_request=_request(), bot_id="bot-1",
-        stage=CallerIdentityStage.ONLINE, publish_id=None, entity_id="entity-1",
-        is_test_exchange=False, session_key="owned-session",
-    )
-    assert result.error == "CALLER_TARGET_NOT_FOUND"
-    identity.exchange_caller_token.assert_not_called()
-    identity.exchange_caller_identity.assert_not_called()

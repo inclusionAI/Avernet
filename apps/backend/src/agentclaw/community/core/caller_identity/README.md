@@ -34,7 +34,7 @@ Explicit OpenAPI friend IAM preparation carries a server-verified
 the effective chat stage, and loads the actual entity address from the exact
 Bot/owner pair. For Caller-mode services, installation is restricted to that
 subject's existing Caller instance, including when the subject is also the Bot
-owner. Online Teclaw shared-runtime refresh is the narrow exception described
+owner. Teclaw shared-runtime refresh is the narrow exception described
 below: it uses the supplied nonblank session key without checking the Backend
 owned-session ledger.
 Owner inspection of another Human's conversation does not authorize
@@ -57,14 +57,15 @@ existing authorized binding resolution and Bot permissions; there is no runtime
 session lookup or session ownership filtering in that legacy method. All existing eligible targets keep the
 existing per-target update success aggregation.
 
-### Shared online Teclaw refresh
+### Shared Teclaw refresh
 
 The server-resolved `CallerIamTokenContext.shared_teclaw_runtime` capability is
-true only for active Caller-mode Teclaw services. Online IAM refresh uses the
-existing runtime resolver's AUTO policy to select the published shared binding,
-matching chat runtime selection without querying or creating an independent
-Caller instance. Draft/verify, other engines and temporary test exchange retain
-their existing Owner/lock and target-selection policies.
+true only for active Caller-mode Teclaw services. IAM refresh across draft,
+verify and online uses the existing runtime resolver's AUTO policy to select the
+requested stage's shared binding, matching chat runtime selection without querying
+or creating an independent Caller instance. The refresh branch imposes no online
+stage or SERVICE_ONLINE source restriction. Other engines and temporary test
+exchange retain their existing Owner/lock and target-selection policies.
 
 Before signing and again immediately before installation,
 `validate_owned_shared_session` confirms an ACTIVE Teclaw binding, a nonblank
