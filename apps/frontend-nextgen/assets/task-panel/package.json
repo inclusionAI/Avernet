@@ -1,6 +1,6 @@
 {
   "name": "@avernet-assets/task-panel",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Shared task side-panel asset and conversation recovery runtime",
   "license": "Apache-2.0",
   "type": "module",
