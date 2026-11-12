@@ -49,12 +49,8 @@ from agentclaw.community.api.task.task_grant_service import (
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
-)
-from agentclaw.community.core.repository.implementations.task.todos import (
-    TodoRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
     ForumAuthorStatsRepository,
@@ -70,9 +66,6 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.task.todos import (
-    TodoRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.feedback import (
     FeedbackRepositoryProtocol,
@@ -121,7 +114,6 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
 from agentclaw.community.core.task.task_center.delivery_lifecycle import (
     TaskDeliveryLifecycle,
 )
-from agentclaw.community.core.task.todos.services.todo_service import TodoService
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
 )
@@ -184,9 +176,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.plugins.community.todo_collaboration import (
-    InProcessTodoCollaborationPlugin,
-)
 from agentclaw.community.plugins.community.context_collab_runtime import (
     CommunityContextCollabRuntimePlugin,
     UnavailableContextCollabRuntimePlugin,
@@ -201,9 +190,6 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
-)
-from agentclaw.community.plugin_api.todo_collaboration import (
-    TodoCollaborationPlugin,
 )
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimePlugin,
@@ -315,8 +301,6 @@ class TaskModule(Module):
         )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
-        binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
-        binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
         # Context collab(BBS context collaboration protocol):service 协议绑定到
         # 实现,repo 协议由 TaskPersistenceModule 绑定(轻量 injector 未装时取
         # 不到即报错,与其余 repo 依赖同语义)。authorizer 协议必须显式绑定:
@@ -343,15 +327,6 @@ class TaskModule(Module):
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
-
-    @singleton
-    @provider
-    @inject
-    def todo_collaboration_plugin(
-        self, context_collab: ContextCollabServiceProtocol
-    ) -> TodoCollaborationPlugin:
-        """Adapt Todo to the ContextCollab Service API in the same process."""
-        return InProcessTodoCollaborationPlugin(context_collab)
 
     @singleton
     @provider

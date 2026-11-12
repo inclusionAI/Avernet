@@ -78,6 +78,14 @@ class TodoModel(Base):
             "gmt_create",
             "id",
         ),
+        Index(
+            "idx_todo_status_scan",
+            "avernet_tenant",
+            "env",
+            "status",
+            "gmt_create",
+            "id",
+        ),
     )
 
     def to_record(self) -> TodoRecord:

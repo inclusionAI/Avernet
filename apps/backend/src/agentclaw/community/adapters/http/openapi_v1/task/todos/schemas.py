@@ -20,21 +20,21 @@ from agentclaw.community.core.task.todos.models import (
 class TodoStatusSchema(_DocumentedEnum):
     """Product state owned by A while execution events stay in B."""
 
-    DRAFT = "draft"
+    PENDING = "pending"
     IN_PROGRESS = "in_progress"
     PENDING_ACCEPTANCE = "pending_acceptance"
     COMPLETED = "completed"
 
     __descriptions__ = {
-        "draft": "Its B Context exists but execution has not started.",
-        "in_progress": "The selected Bot has an active collaboration context.",
-        "pending_acceptance": "The Bot reported a result and awaits Human feedback.",
-        "completed": "The Human approved an execution result.",
+        "pending": "Waiting for automatic dispatch; no B Context is bound yet.",
+        "in_progress": "A B Context has started executing with the selected Bot.",
+        "pending_acceptance": "B completed execution and the result awaits Human acceptance.",
+        "completed": "The Human approved the execution result.",
     }
 
 
 class CreateTodoRequest(BaseModel):
-    """Create one Todo and its collaboration Context in the selected product Space."""
+    """Create one pending Todo in the selected product Space."""
 
     space_id: int = Field(
         gt=0,
@@ -47,7 +47,7 @@ class CreateTodoRequest(BaseModel):
     )
     description: str = Field(
         max_length=MAX_DESCRIPTION_LENGTH,
-        description="Collaboration goal and instructions stored in B when the Todo is created.",
+        description="Todo objective persisted by A and passed to B when automatically dispatched.",
     )
     bot_id: str = Field(
         min_length=1,
@@ -158,17 +158,17 @@ class TodoResponse(BaseModel):
     space_id: int = Field(description="Product Space containing this Todo.")
     title: str = Field(description="Todo title shown in the workbench.")
     description: str = Field(
-        description="Collaboration goal stored in B when the Todo is created."
+        description="Todo objective persisted by A and passed to B at dispatch time."
     )
     bot_id: str = Field(description="Bot selected to execute the Todo.")
     bot_name: str = Field(
         description="Snapshot of the Bot name taken when the Todo was created."
     )
     status: TodoStatusSchema = Field(
-        description="A completion state or the current B runtime-state projection."
+        description="A-owned persisted Todo product state."
     )
     collab_context_id: str | None = Field(
-        description="B collaboration Context bound when the Todo is created."
+        description="B collaboration Context identifier, present only after successful dispatch."
     )
     created_at: str = Field(description="ISO-8601 creation timestamp of the Todo.")
     updated_at: str = Field(description="ISO-8601 last-update timestamp of the Todo.")

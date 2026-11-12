@@ -16,6 +16,7 @@ from injector import inject
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
+    ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
@@ -57,6 +58,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
+    ContextStatusRecord,
     CreateContextRecordRequest,
     InitialEventDraft,
 )
@@ -71,10 +73,13 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     TaskProgressProjectionDTO,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRunRequest,
     ContextCollabRuntimePlugin,
 )
+
+logger = get_logger(__name__)
 
 CREATION_EVENT_KIND = "task.created"
 CREATION_PRIMITIVE_TYPE = "Task"
@@ -436,26 +441,141 @@ class ContextCollabService(ContextCollabServiceProtocol):
             current_status=accepted.current_status,
         )
 
-    def get_status(
-        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
+    async def refresh_run(
+        self,
+        collab_context_id: str,
+        context: ActorContext,
     ) -> ContextCollabStatusProjection:
-        """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
+        """Project the executor's real run state into the Context lifecycle.
 
-        Ruling R6/R9 / spec §12.2 #4:仓储全量返回事件(顺序即接纳
-        顺序),percent / 统计 / current_event 一律从完整可见事件推导;
-        ``trunk_events=True`` 只过滤返回的 ``task_progress.events[]``
-        条目 —— 主干链由 ``active_chain_ids``(current 沿 parent 回溯)
-        推导,过滤不改 current_snapshot / current_event / 统计。
-        visibility 过滤(G1)先于推导,统计与列表都只反映 actor 可见的
-        事件。返回的 ``current_snapshot`` 用 ``build_progress`` 的实时
-        投影替换落库 progress;``current_event`` 按 collet 行指针取投影
-        条目,指针事件不可见时为 ``None``。
+        Runtime reads are side-effect free. Only a confirmed ``COMPLETED`` run
+        appends ``task.completed``; non-terminal and failed terminal states leave
+        the Context ``in_progress`` for later inspection or recovery.
         """
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
+        collet = status.collet
+        snapshot = collet.current_snapshot
+        if snapshot is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot refresh without a current snapshot"
+            )
+        if snapshot.status == "done":
+            return self._project_status_record(
+                status, trunk_events=False, context=context
+            )
+        if snapshot.status != "in_progress":
+            raise ContextCollabValidationError(
+                "collaboration context can refresh only from status "
+                f"'in_progress', got {snapshot.status!r}"
+            )
+
+        started_event = next(
+            (
+                event
+                for event in reversed(status.events)
+                if event.event_kind == "task.started"
+            ),
+            None,
+        )
+        payload = started_event.payload if started_event is not None else None
+        run_id = payload.get("run_id") if isinstance(payload, dict) else None
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ContextCollabValidationError(
+                "in_progress collaboration context requires a task.started event "
+                "with a non-empty run_id"
+            )
+
+        runtime_status = await self._runtime.get_run(run_id)
+        if runtime_status.status in {"PENDING", "RUNNING"}:
+            return self._project_status_record(
+                status, trunk_events=False, context=context
+            )
+        if runtime_status.status != "COMPLETED":
+            logger.warning(
+                "Context executor run did not complete successfully: "
+                "collab_context_id=%s run_id=%s status=%s error=%r",
+                collab_context_id,
+                run_id,
+                runtime_status.status,
+                runtime_status.error,
+            )
+            return self._project_status_record(
+                status, trunk_events=False, context=context
+            )
+
+        executor = collet.context_spec.executor_ref
+        if executor is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot complete without an executor_ref"
+            )
+        completion_payload: dict[str, object] = {"run_id": run_id}
+        if runtime_status.result is not None:
+            completion_payload["result"] = runtime_status.result
+        if runtime_status.session_id is not None:
+            completion_payload["session_id"] = runtime_status.session_id
+        if runtime_status.completed_at is not None:
+            completion_payload["completed_at"] = runtime_status.completed_at
+        executor_actor = PrincipalRef("bot", executor.agent_id)
+        try:
+            self.append_event(
+                collab_context_id,
+                EventAppendCommand(
+                    expected_version=collet.context_version,
+                    event_kind="task.completed",
+                    primitive_type="Task",
+                    actor_ref=executor_actor,
+                    parent_event=collet.current_event_id,
+                    visibility="workspace",
+                    payload=completion_payload,
+                ),
+                ActorContext(actor=executor_actor, source=context.source),
+            )
+        except ContextCollabVersionConflict:
+            concurrent = self._repository.get_current_status(collab_context_id)
+            if (
+                concurrent is not None
+                and concurrent.collet.current_snapshot is not None
+                and concurrent.collet.current_snapshot.status == "done"
+            ):
+                return self._project_status_record(
+                    concurrent, trunk_events=False, context=context
+                )
+            raise
+
+        completed = self._repository.get_current_status(collab_context_id)
+        if completed is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        return self._project_status_record(
+            completed, trunk_events=False, context=context
+        )
+
+    def get_status(
+        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
+    ) -> ContextCollabStatusProjection:
+        """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。"""
+        status = self._repository.get_current_status(collab_context_id)
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        return self._project_status_record(
+            status, trunk_events=trunk_events, context=context
+        )
+
+    def _project_status_record(
+        self,
+        status: ContextStatusRecord,
+        *,
+        trunk_events: bool,
+        context: ActorContext,
+    ) -> ContextCollabStatusProjection:
+        """Build the read projection from one already-loaded aggregate record."""
         collet = status.collet
         visible_events = self._authorizer.filter_visible_events(
             collet, status.events, context

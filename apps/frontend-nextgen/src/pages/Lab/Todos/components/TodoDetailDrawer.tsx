@@ -14,7 +14,7 @@ import type { Space } from '@/domain/admin/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
-import { Bot, CalendarClock, CheckCircle2, CirclePlay, FileText, History, RotateCcw } from 'lucide-react';
+import { Bot, CalendarClock, CheckCircle2, FileText, History, RotateCcw } from 'lucide-react';
 import { TodoAcceptanceActions } from './TodoAcceptanceActions';
 import { TodoEventTimeline } from './TodoEventTimeline';
 import { TodoInteractionPanel } from './TodoInteractionPanel';
@@ -60,7 +60,6 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onListRefresh 
     eventsError,
     refresh,
     refreshEvents,
-    run,
     interact,
     accept,
   } = detail;
@@ -128,17 +127,6 @@ export function TodoDetailDrawer({ todoId, currentSpace, onClose, onListRefresh 
                 />
               </div>
 
-              {selectedTodo.status === 'draft' ? (
-                <div className="flex justify-end">
-                  <Button
-                    onClick={() => void run()}
-                    loading={mutationLoading}
-                    leftIcon={<CirclePlay className="size-4" aria-hidden />}
-                  >
-                    启动执行
-                  </Button>
-                </div>
-              ) : null}
             </section>
 
             <section className="space-y-3">

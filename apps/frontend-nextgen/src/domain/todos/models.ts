@@ -1,5 +1,5 @@
 /** 待办工作台领域模型。组件只依赖这些领域类型，不依赖后端 DTO。 */
-export type TodoStatus = 'draft' | 'in_progress' | 'pending_acceptance' | 'completed';
+export type TodoStatus = 'pending' | 'in_progress' | 'pending_acceptance' | 'completed';
 
 export type AcceptanceVerdict = 'approved' | 'rejected';
 

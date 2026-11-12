@@ -37,12 +37,26 @@ class ContextCollabRunResult:
     session_id: str | None
 
 
+@dataclass(frozen=True)
+class ContextCollabRunStatus:
+    """Transport-neutral snapshot of one external executor run."""
+
+    run_id: str
+    status: str
+    result: object | None
+    error: object | None
+    completed_at: str | None
+    session_id: str | None
+
+
 @runtime_checkable
 class ContextCollabRuntimePlugin(Plugin, Protocol):
     """External runtime boundary consumed by ``ContextCollabService``."""
 
-    async def run(
-        self, request: ContextCollabRunRequest
-    ) -> ContextCollabRunResult:
+    async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
         """Start the bound executor without changing Context state directly."""
+        ...
+
+    async def get_run(self, run_id: str) -> ContextCollabRunStatus:
+        """Read the external executor's real run state without mutating Context."""
         ...

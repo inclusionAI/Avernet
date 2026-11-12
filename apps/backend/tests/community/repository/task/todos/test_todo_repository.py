@@ -22,7 +22,7 @@ def _create(repo: TodoRepository, **overrides):
     values = {
         "space_id": 7,
         "title": "Build workbench",
-        "description": "Implement Todo create and run",
+        "description": "Implement automatic Todo execution",
         "bot_id": "bot_1",
         "bot_name": "Bot One",
         "created_by": "user_1",
@@ -31,7 +31,20 @@ def _create(repo: TodoRepository, **overrides):
     return repo.create_todo(**values)
 
 
-def test_create_and_get_todo(db):
+def _transition(
+    repo: TodoRepository,
+    todo_id: str,
+    expected: TodoStatus,
+    target: TodoStatus,
+):
+    return repo.transition_status(
+        todo_id=todo_id,
+        expected_status=expected,
+        new_status=target,
+    )
+
+
+def test_create_and_get_todo_defaults_to_pending(db):
     repo = TodoRepository(db)
 
     created = _create(repo)
@@ -39,42 +52,13 @@ def test_create_and_get_todo(db):
 
     assert created.todo_id.startswith("todo_")
     assert loaded == created
-    assert loaded.status is TodoStatus.DRAFT
+    assert loaded.status is TodoStatus.PENDING
     assert loaded.collab_context_id is None
 
 
-def test_bind_context_if_draft_attaches_context_without_changing_status(db):
+def test_list_todos_filters_status_search_bot_and_paginates_in_database(db):
     repo = TodoRepository(db)
-    created = _create(repo)
-
-    bound = repo.bind_context_if_draft(
-        todo_id=created.todo_id,
-        collab_context_id="context_1",
-    )
-
-    assert bound.status is TodoStatus.DRAFT
-    assert bound.collab_context_id == "context_1"
-    with pytest.raises(TodoStateConflictError, match="already has"):
-        repo.bind_context_if_draft(
-            todo_id=created.todo_id,
-            collab_context_id="context_2",
-        )
-
-
-def test_bind_context_rejects_empty_context_id(db):
-    repo = TodoRepository(db)
-    created = _create(repo)
-
-    with pytest.raises(TodoStateConflictError, match="required"):
-        repo.bind_context_if_draft(
-            todo_id=created.todo_id,
-            collab_context_id="",
-        )
-
-
-def test_list_todo_candidates_filters_search_and_bot_without_pagination(db):
-    repo = TodoRepository(db)
-    _create(repo, title="Alpha", description="first", bot_name="Research Bot")
+    first = _create(repo, title="Alpha", bot_name="Research Bot")
     second = _create(
         repo,
         title="Beta",
@@ -82,19 +66,92 @@ def test_list_todo_candidates_filters_search_and_bot_without_pagination(db):
         bot_id="bot_2",
         bot_name="Writer",
     )
+    _transition(repo, second.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
     _create(repo, title="Gamma", description="alpha", bot_id="bot_3")
     _create(repo, space_id=8, title="Alpha elsewhere")
 
-    candidates = repo.list_todo_candidates(
+    page = repo.list_todos(
         space_id=7,
         keyword="alpha",
-        bot_id="bot_2",
+        status=TodoStatus.PENDING,
+        bot_id=None,
+        page=1,
+        page_size=1,
     )
 
-    assert candidates == (repo.get_todo(todo_id=second.todo_id),)
+    assert page.total == 2
+    assert page.items == (repo.get_todo(todo_id=first.todo_id),)
 
 
-def test_repository_isolates_tenants(db):
+def test_list_todos_by_status_is_oldest_first_and_limited(db):
+    repo = TodoRepository(db)
+    first = _create(repo, title="first")
+    second = _create(repo, title="second")
+    _create(repo, title="third")
+    _transition(repo, second.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+
+    pending = repo.list_todos_by_status(status=TodoStatus.PENDING, limit=1)
+    running = repo.list_todos_by_status(status=TodoStatus.IN_PROGRESS, limit=10)
+
+    assert [todo.todo_id for todo in pending] == [first.todo_id]
+    assert [todo.todo_id for todo in running] == [second.todo_id]
+
+
+def test_bind_context_if_pending_attaches_once_without_changing_status(db):
+    repo = TodoRepository(db)
+    created = _create(repo)
+
+    bound = repo.bind_context_if_pending(
+        todo_id=created.todo_id,
+        collab_context_id="context_1",
+    )
+
+    assert bound.status is TodoStatus.PENDING
+    assert bound.collab_context_id == "context_1"
+    with pytest.raises(TodoStateConflictError, match="already has"):
+        repo.bind_context_if_pending(
+            todo_id=created.todo_id,
+            collab_context_id="context_2",
+        )
+
+
+def test_bind_context_requires_pending_and_non_empty_id(db):
+    repo = TodoRepository(db)
+    created = _create(repo)
+
+    with pytest.raises(TodoStateConflictError, match="required"):
+        repo.bind_context_if_pending(todo_id=created.todo_id, collab_context_id="")
+
+    _transition(repo, created.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    with pytest.raises(TodoStateConflictError, match="pending"):
+        repo.bind_context_if_pending(
+            todo_id=created.todo_id,
+            collab_context_id="context_1",
+        )
+
+
+def test_transition_status_requires_expected_status(db):
+    repo = TodoRepository(db)
+    created = _create(repo)
+
+    running = _transition(
+        repo,
+        created.todo_id,
+        TodoStatus.PENDING,
+        TodoStatus.IN_PROGRESS,
+    )
+
+    assert running.status is TodoStatus.IN_PROGRESS
+    with pytest.raises(TodoStateConflictError, match="expected pending"):
+        _transition(
+            repo,
+            created.todo_id,
+            TodoStatus.PENDING,
+            TodoStatus.IN_PROGRESS,
+        )
+
+
+def test_repository_isolates_tenants_for_reads_and_scheduler_scans(db):
     repo = TodoRepository(db)
     with avernet_tenant_scope("tenant-a"):
         created = _create(repo)
@@ -102,12 +159,17 @@ def test_repository_isolates_tenants(db):
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(TodoNotFoundError):
             repo.get_todo(todo_id=created.todo_id)
+        assert repo.list_todos_by_status(status=TodoStatus.PENDING, limit=10) == ()
         assert (
-            repo.list_todo_candidates(
+            repo.list_todos(
                 space_id=7,
                 keyword=None,
-            )
-            == ()
+                status=None,
+                bot_id=None,
+                page=1,
+                page_size=20,
+            ).total
+            == 0
         )
 
 
@@ -119,6 +181,7 @@ def test_repository_isolates_environments(db, monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "prod")
     with pytest.raises(TodoNotFoundError):
         repo.get_todo(todo_id=created.todo_id)
+    assert repo.list_todos_by_status(status=TodoStatus.PENDING, limit=10) == ()
 
 
 @pytest.mark.parametrize(
@@ -128,11 +191,18 @@ def test_repository_isolates_environments(db, monkeypatch):
         (AcceptanceVerdict.REJECTED, TodoStatus.PENDING_ACCEPTANCE),
     ],
 )
-def test_record_acceptance_persists_decision_and_a_side_status(
+def test_record_acceptance_requires_pending_acceptance_and_persists_decision(
     db, verdict, target_status
 ):
     repo = TodoRepository(db)
     created = _create(repo)
+    _transition(repo, created.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    _transition(
+        repo,
+        created.todo_id,
+        TodoStatus.IN_PROGRESS,
+        TodoStatus.PENDING_ACCEPTANCE,
+    )
 
     updated = repo.record_acceptance(
         todo_id=created.todo_id,
@@ -149,26 +219,20 @@ def test_record_acceptance_persists_decision_and_a_side_status(
         assert decisions[0].verdict == verdict.value
 
 
-def test_completed_todo_cannot_be_accepted_again(db):
+def test_record_acceptance_rejects_other_states_without_writing_history(db):
     repo = TodoRepository(db)
     created = _create(repo)
-    repo.record_acceptance(
-        todo_id=created.todo_id,
-        verdict=AcceptanceVerdict.APPROVED,
-        message="ok",
-        author_id="user_1",
-    )
 
-    with pytest.raises(TodoStateConflictError, match="Completed"):
+    with pytest.raises(TodoStateConflictError, match="pending acceptance"):
         repo.record_acceptance(
             todo_id=created.todo_id,
-            verdict=AcceptanceVerdict.REJECTED,
-            message="retry",
+            verdict=AcceptanceVerdict.APPROVED,
+            message="ok",
             author_id="user_1",
         )
 
     with db.orm_session() as session:
-        assert session.query(TodoAcceptanceModel).count() == 1
+        assert session.query(TodoAcceptanceModel).count() == 0
 
 
 def test_unknown_todo_raises_not_found_for_addressed_operations(db):
@@ -177,9 +241,15 @@ def test_unknown_todo_raises_not_found_for_addressed_operations(db):
     with pytest.raises(TodoNotFoundError):
         repo.get_todo(todo_id="todo_missing")
     with pytest.raises(TodoNotFoundError):
-        repo.bind_context_if_draft(
+        repo.bind_context_if_pending(
             todo_id="todo_missing",
             collab_context_id="context",
+        )
+    with pytest.raises(TodoNotFoundError):
+        repo.transition_status(
+            todo_id="todo_missing",
+            expected_status=TodoStatus.PENDING,
+            new_status=TodoStatus.IN_PROGRESS,
         )
     with pytest.raises(TodoNotFoundError):
         repo.record_acceptance(

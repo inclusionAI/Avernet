@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.task.todos.models import (
         AcceptanceVerdict,
+        TodoPage,
         TodoRecord,
+        TodoStatus,
     )
 
 
@@ -30,21 +32,45 @@ class TodoRepositoryProtocol(Protocol):
     def get_todo(self, *, todo_id: str) -> TodoRecord: ...
 
     @abstractmethod
-    def list_todo_candidates(
+    def list_todos(
         self,
         *,
         space_id: int,
         keyword: str | None,
-        bot_id: str | None = None,
-    ) -> tuple[TodoRecord, ...]:
-        """Return all A-side candidates before live B-status projection."""
+        status: TodoStatus | None,
+        bot_id: str | None,
+        page: int,
+        page_size: int,
+    ) -> TodoPage:
+        """Return a database-filtered page of persisted product Todos."""
         ...
 
     @abstractmethod
-    def bind_context_if_draft(
+    def list_todos_by_status(
+        self,
+        *,
+        status: TodoStatus,
+        limit: int,
+    ) -> tuple[TodoRecord, ...]:
+        """Return the oldest persisted Todos in one state for scheduler work."""
+        ...
+
+    @abstractmethod
+    def bind_context_if_pending(
         self, *, todo_id: str, collab_context_id: str
     ) -> TodoRecord:
-        """Attach the newly created B Context without changing A status."""
+        """Attach a B Context only while the Todo remains pending."""
+        ...
+
+    @abstractmethod
+    def transition_status(
+        self,
+        *,
+        todo_id: str,
+        expected_status: TodoStatus,
+        new_status: TodoStatus,
+    ) -> TodoRecord:
+        """Compare and set the persisted product state under a row lock."""
         ...
 
     @abstractmethod

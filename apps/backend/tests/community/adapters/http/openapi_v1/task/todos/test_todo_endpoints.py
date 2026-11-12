@@ -122,7 +122,7 @@ class _RecordedService:
 
     def create_todo(self, **kwargs):
         self._record("create_todo", **kwargs)
-        return _todo(status=TodoStatus.DRAFT)
+        return _todo(status=TodoStatus.PENDING, collab_context_id=None)
 
     async def start_todo(self, **kwargs):
         self._record("start_todo", **kwargs)
@@ -217,8 +217,8 @@ async def test_create_todo_returns_201_and_passes_body_fields():
     assert response.status_code == 201
     assert payload.code == 201000
     assert payload.message == "Created"
-    assert payload.data.status == TodoStatus.DRAFT
-    assert payload.data.collab_context_id == "context_todo_1"
+    assert payload.data.status == TodoStatus.PENDING
+    assert payload.data.collab_context_id is None
     assert service.calls == [
         {
             "op": "create_todo",

@@ -20,6 +20,7 @@ from agentclaw.community.core.task.todos.errors import (
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
+    TodoPage,
     TodoRecord,
     TodoStatus,
 )
@@ -41,12 +42,18 @@ class TodoRepository(TodoRepositoryProtocol):
 
     @classmethod
     def _todo_query(cls, db, *, todo_id: str):
-        query = db.query(TodoModel).filter(
+        return db.query(TodoModel).filter(
             TodoModel.todo_id == todo_id,
             TodoModel.env == get_current_env(),
             TodoModel.avernet_tenant == get_current_avernet_tenant(),
         )
-        return query
+
+    @classmethod
+    def _scoped_query(cls, db):
+        return db.query(TodoModel).filter(
+            TodoModel.env == get_current_env(),
+            TodoModel.avernet_tenant == get_current_avernet_tenant(),
+        )
 
     @classmethod
     def _require_todo(cls, db, *, todo_id: str, lock: bool = False) -> TodoModel:
@@ -74,7 +81,7 @@ class TodoRepository(TodoRepositoryProtocol):
                 description=description,
                 bot_id=bot_id,
                 bot_name=bot_name,
-                status=TodoStatus.DRAFT.value,
+                status=TodoStatus.PENDING.value,
                 collab_context_id=None,
                 created_by=created_by,
                 env=get_current_env(),
@@ -89,19 +96,18 @@ class TodoRepository(TodoRepositoryProtocol):
         with self._db.orm_session() as db:
             return self._require_todo(db, todo_id=todo_id).to_record()
 
-    def list_todo_candidates(
+    def list_todos(
         self,
         *,
         space_id: int,
         keyword: str | None,
-        bot_id: str | None = None,
-    ) -> tuple[TodoRecord, ...]:
+        status: TodoStatus | None,
+        bot_id: str | None,
+        page: int,
+        page_size: int,
+    ) -> TodoPage:
         with self._db.orm_session() as db:
-            query = db.query(TodoModel).filter(
-                TodoModel.space_id == space_id,
-                TodoModel.env == get_current_env(),
-                TodoModel.avernet_tenant == get_current_avernet_tenant(),
-            )
+            query = self._scoped_query(db).filter(TodoModel.space_id == space_id)
             if keyword is not None:
                 pattern = f"%{keyword}%"
                 query = query.filter(
@@ -111,25 +117,67 @@ class TodoRepository(TodoRepositoryProtocol):
                         TodoModel.bot_name.ilike(pattern),
                     )
                 )
+            if status is not None:
+                query = query.filter(TodoModel.status == status.value)
             if bot_id is not None:
                 query = query.filter(TodoModel.bot_id == bot_id)
-            rows = query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id)).all()
+            total = query.count()
+            rows = (
+                query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id))
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return TodoPage(total=total, items=tuple(row.to_record() for row in rows))
+
+    def list_todos_by_status(
+        self,
+        *,
+        status: TodoStatus,
+        limit: int,
+    ) -> tuple[TodoRecord, ...]:
+        with self._db.orm_session() as db:
+            rows = (
+                self._scoped_query(db)
+                .filter(TodoModel.status == status.value)
+                .order_by(asc(TodoModel.gmt_create), asc(TodoModel.id))
+                .limit(limit)
+                .all()
+            )
             return tuple(row.to_record() for row in rows)
 
-    def bind_context_if_draft(
+    def bind_context_if_pending(
         self, *, todo_id: str, collab_context_id: str
     ) -> TodoRecord:
         with self._transaction() as db:
             row = self._require_todo(db, todo_id=todo_id, lock=True)
-            if row.status != TodoStatus.DRAFT.value:
-                raise TodoStateConflictError(
-                    "Only draft Todos can bind a collaboration Context"
-                )
             if not collab_context_id:
                 raise TodoStateConflictError("collab_context_id is required")
+            if row.status != TodoStatus.PENDING.value:
+                raise TodoStateConflictError(
+                    "Only pending Todos can bind a collaboration Context"
+                )
             if row.collab_context_id is not None:
                 raise TodoStateConflictError("Todo already has a collaboration Context")
             row.collab_context_id = collab_context_id
+            db.flush()
+            db.refresh(row)
+            return row.to_record()
+
+    def transition_status(
+        self,
+        *,
+        todo_id: str,
+        expected_status: TodoStatus,
+        new_status: TodoStatus,
+    ) -> TodoRecord:
+        with self._transaction() as db:
+            row = self._require_todo(db, todo_id=todo_id, lock=True)
+            if row.status != expected_status.value:
+                raise TodoStateConflictError(
+                    f"Todo status is {row.status}; expected {expected_status.value}"
+                )
+            row.status = new_status.value
             db.flush()
             db.refresh(row)
             return row.to_record()
@@ -144,8 +192,8 @@ class TodoRepository(TodoRepositoryProtocol):
     ) -> TodoRecord:
         with self._transaction() as db:
             todo = self._require_todo(db, todo_id=todo_id, lock=True)
-            if todo.status == TodoStatus.COMPLETED.value:
-                raise TodoStateConflictError("Completed Todo cannot be accepted again")
+            if todo.status != TodoStatus.PENDING_ACCEPTANCE.value:
+                raise TodoStateConflictError("Todo is not pending acceptance")
             decision = TodoAcceptanceModel(
                 acceptance_id=f"acceptance_{uuid.uuid4().hex}",
                 todo_id=todo_id,

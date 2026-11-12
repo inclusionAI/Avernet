@@ -35,10 +35,12 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
 
     def __init__(self) -> None:
         self._contexts: dict[str, _LocalContext] = {}
+        self._run_statuses: dict[str, str] = {}
         self._ids = itertools.count(1)
 
     def reset(self) -> None:
         self._contexts.clear()
+        self._run_statuses.clear()
         self._ids = itertools.count(1)
 
     def create_context(
@@ -103,7 +105,30 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         local.events.append(event)
         local.current_event_id = event.event_id
         local.status = "in_progress"
+        self._run_statuses[collab_context_id] = "RUNNING"
         return self._snapshot(collab_context_id, local)
+
+    async def refresh_context_run(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        local = self._require_context(collab_context_id)
+        if local.status == "done":
+            return self._snapshot(collab_context_id, local)
+        if local.status != "in_progress":
+            raise TodoCollaborationError(
+                "Context runtime can refresh only from in_progress"
+            )
+        if self._run_statuses.get(collab_context_id) == "COMPLETED":
+            return self.complete_context(collab_context_id)
+        return self._snapshot(collab_context_id, local)
+
+    def set_run_status_for_test(self, *, collab_context_id: str, status: str) -> None:
+        local = self._require_context(collab_context_id)
+        if local.status != "in_progress":
+            raise TodoCollaborationError(
+                "Context runtime status can change only while in_progress"
+            )
+        self._run_statuses[collab_context_id] = status.strip().upper()
 
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
@@ -149,6 +174,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         local.events.append(event)
         local.current_event_id = event.event_id
         local.status = "done"
+        self._run_statuses[collab_context_id] = "COMPLETED"
         return self._snapshot(collab_context_id, local)
 
     def _require_context(self, collab_context_id: str) -> _LocalContext:

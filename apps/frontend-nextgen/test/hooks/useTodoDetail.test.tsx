@@ -24,8 +24,8 @@ const runningTodo: TodoRecord = {
   updatedAt: '2026-11-10T02:00:00Z',
 };
 
-const pendingTodo: TodoRecord = { ...runningTodo, status: 'pending_acceptance' };
-const draftTodo: TodoRecord = { ...runningTodo, status: 'draft' };
+const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_acceptance' };
+const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'pending', collabContextId: undefined };
 
 function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent {
   return {
@@ -60,7 +60,7 @@ beforeEach(() => {
     detailError: null,
     eventsError: null,
   });
-  mockedService.loadTodo.mockResolvedValue(pendingTodo);
+  mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.loadTodoInteractions.mockResolvedValue([]);
   mockedService.loadTodoEvents.mockResolvedValue([]);
 });
@@ -70,7 +70,7 @@ test('B 事件接口失败时不阻断 A 的详情和互动加载', async () => 
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
 
-  await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingTodo));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
   await waitFor(() => expect(result.current.eventsLoading).toBe(false));
 
   expect(result.current.loading).toBe(false);
@@ -97,11 +97,11 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
 });
 
 test('待验收互动只提交 message，不再组装本快照事件', async () => {
-  mockedService.loadTodo.mockResolvedValue(pendingTodo);
+  mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
-  await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingTodo));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
 
   await act(async () => {
     expect(await result.current.interact(' 补充回滚方案 ')).toBe(true);
@@ -112,10 +112,10 @@ test('待验收互动只提交 message，不再组装本快照事件', async () 
 });
 
 test('拒绝验收只提交 A 的验收决策，不再调用 Run 接口', async () => {
-  mockedService.acceptTodo.mockResolvedValue(pendingTodo);
+  mockedService.acceptTodo.mockResolvedValue(awaitingAcceptanceTodo);
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
-  await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingTodo));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
 
   await act(async () => {
     expect(await result.current.accept('rejected', ' 请修改 ')).toBe(true);
@@ -125,18 +125,14 @@ test('拒绝验收只提交 A 的验收决策，不再调用 Run 接口', async 
   expect(mockedService.startTodoRun).not.toHaveBeenCalled();
 });
 
-test('草稿 Run 调用无 body 的 A 接口', async () => {
-  mockedService.loadTodo.mockResolvedValue(draftTodo);
-  mockedService.startTodoRun.mockResolvedValue({ ...draftTodo, status: 'in_progress' });
+test('待处理 Todo 不暴露普通用户 Run 操作', async () => {
+  mockedService.loadTodo.mockResolvedValue(pendingDispatchTodo);
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
-  await waitFor(() => expect(result.current.selectedTodo).toEqual(draftTodo));
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(pendingDispatchTodo));
 
-  await act(async () => {
-    expect(await result.current.run()).toBe(true);
-  });
-
-  expect(mockedService.startTodoRun).toHaveBeenCalledWith('todo-1');
+  expect('run' in result.current).toBe(false);
+  expect(mockedService.startTodoRun).not.toHaveBeenCalled();
 });
 
 test('执行中详情打开期间轮询刷新 Todo 和事件', async () => {

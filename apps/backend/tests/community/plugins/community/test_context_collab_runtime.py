@@ -18,15 +18,30 @@ from agentclaw.community.plugins.community.context_collab_runtime import (
 
 
 class _RecordingOpenApiBot:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        *,
+        run_payload: dict | None = None,
+        get_run_error: Exception | None = None,
+    ) -> None:
         self.calls = []
         self.error = error
+        self.run_payload = run_payload or {"status": "RUNNING"}
+        self.get_run_error = get_run_error
+        self.get_run_calls: list[str] = []
 
     async def send_message(self, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return BotSendResult(run_id="run_1", session_id="session_1")
+
+    async def get_run(self, run_id: str):
+        self.get_run_calls.append(run_id)
+        if self.get_run_error is not None:
+            raise self.get_run_error
+        return self.run_payload
 
 
 def _request(*, owner_id: str | None = "another_user") -> ContextCollabRunRequest:
@@ -98,3 +113,50 @@ async def test_runtime_does_not_hide_unexpected_programming_error() -> None:
 
     with pytest.raises(AssertionError, match="unexpected adapter bug"):
         await runtime.run(_request())
+
+
+@pytest.mark.asyncio
+async def test_get_run_normalizes_bot_port_payload() -> None:
+    openapi_bot = _RecordingOpenApiBot(
+        run_payload={
+            "status": " completed ",
+            "result": {"content": "done"},
+            "error": None,
+            "completed_at": "2026-11-12T04:00:00Z",
+            "session_id": "session_1",
+        }
+    )
+    runtime = CommunityContextCollabRuntimePlugin(openapi_bot)
+
+    result = await runtime.get_run("run_1")
+
+    assert result.run_id == "run_1"
+    assert result.status == "COMPLETED"
+    assert result.result == {"content": "done"}
+    assert result.error is None
+    assert result.completed_at == "2026-11-12T04:00:00Z"
+    assert result.session_id == "session_1"
+    assert openapi_bot.get_run_calls == ["run_1"]
+
+
+@pytest.mark.asyncio
+async def test_get_run_translates_bot_port_failure() -> None:
+    delivery_error = OpenApiBotError("upstream unavailable")
+    runtime = CommunityContextCollabRuntimePlugin(
+        _RecordingOpenApiBot(get_run_error=delivery_error)
+    )
+
+    with pytest.raises(ContextCollabRuntimeError, match="status") as exc_info:
+        await runtime.get_run("run_1")
+
+    assert exc_info.value.__cause__ is delivery_error
+
+
+@pytest.mark.asyncio
+async def test_get_run_does_not_hide_unexpected_programming_error() -> None:
+    runtime = CommunityContextCollabRuntimePlugin(
+        _RecordingOpenApiBot(get_run_error=AssertionError("unexpected adapter bug"))
+    )
+
+    with pytest.raises(AssertionError, match="unexpected adapter bug"):
+        await runtime.get_run("run_1")

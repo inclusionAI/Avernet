@@ -128,6 +128,7 @@ from agentclaw.community.di.modules.task_artifact_config_module import (
 )
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.todo_module import TodoModule
 from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
@@ -147,6 +148,7 @@ from agentclaw.community.di.openapi_user_id_bypass_config import (
 )
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.di.space_knowledge_capture_config import (
     SpaceKnowledgeCaptureConfig,
 )
@@ -243,6 +245,7 @@ def build_injector(
         BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),
+        TodoModule(),
         TaskConfigModule(),
         DevicesModule(),
         McpModule(),
@@ -328,6 +331,9 @@ def build_injector(
 
     _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    # Todo scheduler config is strict; resolve it outside lifecycle discovery,
+    # whose compatibility behavior intentionally skips raising providers.
+    _app_injector.get(TodoSchedulerConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)

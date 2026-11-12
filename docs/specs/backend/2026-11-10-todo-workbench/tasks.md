@@ -1,21 +1,36 @@
-# 待办工作台实施任务
+# 待办工作台自动执行实施任务
 
-## Slice 1：Todo 创建、查询与空间权限
+## Slice 1：Todo 持久状态与 Repository CAS
 
-- Covers AC-001, AC-002, AC-005
-- Todo 核心模型、Repository、Service、OpenAPI 创建/查询、租户隔离。
-- 状态约束：查询校验 Space member；创建校验 Bot scope；本阶段不提供 Todo 编辑。
+- Covers AC-001, AC-002, AC-005, AC-006
+- 测试先覆盖：创建 `pending` 且不创建 Context、list/get 不读 B、数据库状态过滤分页、oldest-first 扫描、条件绑定/迁移、严格验收。
+- 实现 TodoStatus、Repository contract/implementation、共享 Bot scope 校验和 TodoService。
 
-## Slice 2：B 协作契约与状态流转
+## Slice 2：Context runtime 状态刷新契约
 
-- Covers AC-001, AC-003, AC-004, AC-005
-- `TodoCollaborationPlugin`、in-process/local 实现、`collab_context_id` 持久化。
-- Run 和事件投影走 B；Human 互动写 B 事件流；验收只更新 A 的 Todo 状态。
-- 测试：Service、Repository、HTTP endpoint、Plugin contract、同进程适配与 Bot owner 运行时寻址。
+- Covers AC-004, AC-006
+- 先扩展两个 Plugin Protocol contract tests。
+- 为 Context runtime 增加 `get_run`，为 ContextCollab Service 增加 `refresh_run`，仅 COMPLETED 追加 `task.completed`。
+- 为 TodoCollaborationPlugin 增加 `refresh_context_run`，同步实现 production/local adapter。
 
-## Slice 3：前端工作台
+## Slice 3：执行服务与 Scheduler
 
-- Covers AC-006
-- 当前空间 Todo 列表、当前空间 Bot 工坊清单、创建/Run；本阶段不提供编辑。
-- 事件时间线和产物、待验收互动、验收、执行中轮询。
-- 测试：hooks/page tests、typecheck、frontend CI。
+- Covers AC-002, AC-003, AC-004, AC-006
+- 新增 TodoExecutionService，覆盖派发、状态补偿、完成刷新和失败终态保持。
+- 新增 Scheduler 锁/续租/lease lost/批量/单条失败隔离测试。
+- 新增 Todo config/module，将 Todo bindings 从接近文件上限的 TaskModule 移出并接入 container lifecycle。
+
+## Slice 4：HTTP、前端与知识同步
+
+- Covers AC-001, AC-005, AC-007
+- HTTP schema/docstring 改为四状态和自动调度语义，`/run` 标记补偿入口。
+- 前端四状态 Tab，移除编辑和手动 Run，更新创建提示；不修改旧 Tasks 和 `.umi-production`。
+- 更新 Todo Context Boundary README、规格和验收台账。
+
+## 验证
+
+- Backend Todo/Repository/HTTP/endpoint focused tests。
+- ContextCollab core、两个 Plugin contract 与 production/local adapter tests。
+- Scheduler/DI/architecture tests。
+- Frontend Todo page/hook tests、typecheck、lint。
+- `git diff --check` 与所有修改/新增源码文件行数检查。

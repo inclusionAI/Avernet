@@ -114,6 +114,22 @@ class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
             ) from exc
         return _projected_context(self._get_projection(collab_context_id, actor))
 
+    async def refresh_context_run(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        actor = _actor_context(actor_id, "human")
+        try:
+            projection = await self._service.refresh_run(collab_context_id, actor)
+        except ContextCollabRuntimeError as exc:
+            raise TodoCollaborationError(
+                "ContextCollab runtime could not refresh the Todo executor"
+            ) from exc
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
+            raise TodoCollaborationError(
+                "ContextCollab rejected the Todo runtime refresh"
+            ) from exc
+        return _projected_context(projection)
+
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:

@@ -1,10 +1,9 @@
-import { Button } from '@/components/ui/Button';
+import { Button, Segmented } from '@/components/ui';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { Space } from '@/domain/admin/models';
 import type { TodoBotOption, TodoStatus } from '@/domain/todos/models';
 import { TODO_STATUS_OPTIONS } from '@/domain/todos/status';
-import { cn } from '@/utils/cn';
 import { Plus, Search } from 'lucide-react';
 
 interface TodoToolbarProps {
@@ -46,29 +45,15 @@ export function TodoToolbar({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div role="tablist" aria-label="待办状态" className="flex flex-wrap items-center gap-1.5">
-          {TODO_STATUS_OPTIONS.map((option) => {
-            const active = activeStatus === option.value;
-            return (
-              <Button
-                key={option.value}
-                variant="ghost"
-                size="sm"
-                role="tab"
-                aria-selected={active}
-                className={cn(
-                  'h-7 rounded-lg px-2.5 text-xs',
-                  active
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted/40 text-foreground/70 hover:bg-accent',
-                )}
-                onClick={() => onStatusChange(option.value === 'all' ? undefined : option.value)}
-              >
-                {option.label}
-              </Button>
-            );
-          })}
-        </div>
+        <Segmented
+          aria-label="待办状态"
+          value={activeStatus}
+          options={TODO_STATUS_OPTIONS}
+          onChange={(value) => onStatusChange(value === 'all' ? undefined : value)}
+          className="flex-wrap"
+          activeOptionClassName="bg-primary text-primary-foreground hover:bg-primary"
+          inactiveOptionClassName="text-foreground/70"
+        />
 
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
 

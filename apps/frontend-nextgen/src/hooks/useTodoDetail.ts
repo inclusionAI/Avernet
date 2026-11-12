@@ -7,7 +7,6 @@ import {
   loadTodo,
   loadTodoEvents,
   loadTodoInteractions,
-  startTodoRun,
 } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
@@ -101,23 +100,6 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     return () => clearInterval(timer);
   }, [refresh, selectedTodo?.status, todoId]);
 
-  const run = useCallback(async () => {
-    if (!todoId || selectedTodo?.status !== 'draft') return false;
-    setMutationLoading(true);
-    try {
-      await startTodoRun(todoId);
-      notifySuccess('已启动执行');
-      await refresh();
-      await onListRefresh?.();
-      return true;
-    } catch (cause) {
-      safeReportError(cause, { title: '启动执行失败' });
-      return false;
-    } finally {
-      setMutationLoading(false);
-    }
-  }, [onListRefresh, refresh, selectedTodo?.status, setMutationLoading, todoId]);
-
   const interact = useCallback(
     async (message: string) => {
       if (!todoId || !selectedTodo || !canInteractWithTodo(selectedTodo.status)) {
@@ -183,7 +165,6 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     eventsError,
     refresh,
     refreshEvents,
-    run,
     interact,
     accept,
   };

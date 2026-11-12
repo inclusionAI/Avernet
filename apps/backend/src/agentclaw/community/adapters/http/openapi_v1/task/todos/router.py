@@ -126,7 +126,7 @@ async def create_todo(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[TodoResponse]:
-    """Create one Todo and its B collaboration Context for a Space-eligible Bot."""
+    """Create one pending Todo for a Space-eligible Bot and await dispatch."""
     actor_id = call_user(user_id=user_id, principal=principal)
     result = await run_in_threadpool(  # allow-run-in-threadpool
         service.create_todo,
@@ -168,7 +168,7 @@ async def run_todo(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[TodoResponse]:
-    """Start the B collaboration Context already bound to a draft Todo."""
+    """Compensate automatic dispatch by running one still-pending Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
     result = await service.start_todo(
         todo_id=todo_id,
@@ -186,7 +186,7 @@ async def list_todo_events(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[list[TodoEventResponse]]:
-    """Project the complete B event stream for one running Todo."""
+    """Project B events for one Todo, or return empty before dispatch."""
     actor_id = call_user(user_id=user_id, principal=principal)
     events = await run_in_threadpool(
         service.list_events,

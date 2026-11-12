@@ -1,94 +1,71 @@
-# 待办工作台 A 侧设计
+# 待办工作台自动执行设计
 
-## 架构事实
+## 架构与领域归属
 
-- Backend 遵循 `Core Service -> Repository Protocol -> HTTP Adapter -> DI composition root`。
-- Public OpenAPI 路由使用 `PublicAPIRoute`、`require_principal`、`refuse_app_only_caller`，并维护 Authorization/Admission 库存。
-- 空间权限复用 `SpaceAccessServiceProtocol.require_space_member`；Bot 归属复用 `BotRepository.list_live_by_bot_id`。
-- Context、事件排序、Bot 执行和 Human 互动持久化均属于 B，不进入 A 的 Core。
+- Todo Core 拥有产品记录、四状态生命周期、空间/Bot eligibility、验收历史和调度用例。
+- ContextCollab 拥有 Context、事件顺序和真实运行状态，状态仅为 `created/in_progress/done`。
+- Bot runtime 通过 `ContextCollabRuntimePlugin` 启动并按 `run_id` 查询；Todo Core 只通过 `TodoCollaborationPlugin` 消费 ContextCollab，不直接依赖 runtime port。
+- HTTP 仅负责身份和 DTO；Scheduler、插件选择和配置在 DI composition root。
 
-## 领域归属
-
-`core/task/todos` 拥有：
-
-- Todo 产品状态机：`draft -> in_progress -> pending_acceptance -> completed`
-- Space/Bot eligibility
-- Todo 与 `collab_context_id` 的关联
-- 验收决策和 A 侧验收历史
-- B 事件到公开 Todo API 的投影
-
-它不拥有 Context 组装、Context 版本、事件写入顺序或 Bot Run resume 逻辑。
-
-## 持久化模型
-
-- `ac_todo`
-  - Todo 基础信息、Bot 名称快照、产品状态、`collab_context_id`、创建者和时间。
-- `ac_todo_acceptance`
-  - 不可覆盖的验收结论、意见、作者和时间。
-
-A 不创建 `ac_todo_interaction`。Human 互动是 B 协作事件，A 的 `/interactions` 接口从 B 事件流中筛选 `user_interaction.posted`；验收是 Todo 产品状态，只在 A 持久化。
-
-所有索引和 ORM tenant guard 包含 `avernet_tenant/env`。状态更新使用行锁和数据库状态条件，避免并发双写。
-
-## 协作插件
-
-`TodoCollaborationPlugin` 是 Todo Core 消费 ContextCollab 的唯一边界：
+## 持久状态
 
 ```text
-create_context(request) -> context
-get_context(collab_context_id, actor_id) -> context
-run_context(collab_context_id, actor_id) -> context
-append_event(collab_context_id, request) -> event
+Todo:    pending -> in_progress -> pending_acceptance -> completed
+Context: created -> in_progress -> done
 ```
 
-A、B 当前部署在同一 Backend 进程。生产实现
-`InProcessTodoCollaborationPlugin` 直接依赖 transport-agnostic 的
-`ContextCollabServiceProtocol`，负责 Todo DTO、`ActorContext` 与 B 命令/投影之间的
-适配，不经过内部 HTTP 自调用。`LocalTodoCollaborationPlugin` 仅提供离线开发与契约测试模拟。
+Todo 状态是 A 的持久产品事实，不再在 list/get 时从 Context 动态投影。Context 的 `done` 表示真实运行完成，不表示人工验收完成。
 
-身份字段必须分离：`principal_id` 是创建或操作 Todo 的 Human，`executor_id` 是
-Bot 产品 ID，`executor_owner_id` 来自已解析 Bot 记录的 `owner_id`，用于组合真实运行时
-地址 `bot_id:owner_id`。不得用 Todo 创建人的 `principal_id` 代替 Bot owner。
+## 创建流程
 
-## 服务流程
+1. 校验 actor 是 Space member。
+2. 校验 Bot 在 Space scope 内并取得真实 `owner_id`。
+3. 仅创建 Todo，状态 `pending`、`collab_context_id = null`。
+4. 返回成功；不创建 Context，不调用 runtime。
 
-### 创建 Todo 与 Context
+## 自动派发
 
-创建 Todo 时先校验 Space member 与 Bot scope，从 Bot 记录读取并校验 owner，然后创建
-B Context 并把 `collab_context_id` 绑定回 Todo。Context 创建时不自动 Run。本阶段不提供
-跨 Todo/Context 两次写入的事务一致性，失败会显式返回错误，不伪装成功。
+`TodoScheduler` 每 tick oldest-first 扫描有限数量的 `pending` Todo，并逐条调用 `TodoExecutionService.dispatch_pending`：
 
-### Draft -> in_progress
+1. 重读 Todo；非 `pending` 幂等返回。
+2. 以 `created_by` 重验 Space member 和 Bot scope/owner。
+3. 无 Context 时创建 Context，并通过 `bind_context_if_pending` 条件绑定。
+4. Context 为 `created` 时调用 `run_context`；运行启动并写入 `task.started` 后，Todo 条件迁移 `pending -> in_progress`。
+5. Context 已 `in_progress` 时补偿 Todo 到 `in_progress`；已 `done` 时先补到 `in_progress`，由刷新阶段再进入待验收。
 
-`POST /run` 仅允许 B Context 投影为 `created` 的 Todo。A 通过同进程插件调用 B
-`run_context`；B 调用 Bot runtime 并写入 `task.started` 后，A 将 B 的 `in_progress`
-状态投影为公开 Todo 状态。重复 Run 返回 409。
+Context 创建成功但 Todo 绑定失败可能产生孤儿 Context；本轮明确不做跨库事务。Run 成功而 Todo 状态写失败时，下次调度通过已绑定 Context 补偿。
 
-### in_progress -> pending_acceptance
+`POST /todos/{id}/run` 调用同一执行服务，仅作补偿/运维入口。
 
-除 A 已持久化的 `completed` 外，Todo 状态在读取时直接由 B Context 状态投影：
-`created -> draft`，`in_progress/reviewing/blocked -> in_progress`，
-`done/cancelled -> pending_acceptance`。其中 `reviewing` 是 B 内部运行时评审，不替代 A 的
-Human 验收；B 进入成功或取消等终态后，都交由 A 的验收流程决定 Todo 是否关闭。A 不另存一份
-运行时状态。
+## Runtime 刷新
 
-### pending_acceptance 互动
+Scheduler 再 oldest-first 扫描 `in_progress` Todo，逐条调用 `refresh_in_progress`：
 
-`POST /interactions` 仅在投影为 `pending_acceptance` 时追加
-`user_interaction.posted` 事件。A 不创建互动表，也不在本阶段支持 Todo 编辑。
+1. Context 已 `done` 时直接条件迁移 Todo 到 `pending_acceptance`。
+2. 否则调用 `TodoCollaborationPlugin.refresh_context_run`。
+3. ContextCollab 从最后一个 `task.started` payload 读取 `run_id`，调用 `ContextCollabRuntimePlugin.get_run`。
+4. `PENDING/RUNNING` 不追加事件。
+5. `COMPLETED` 以 executor Bot 追加 `task.completed`，状态机把 Context 推进为 `done`。
+6. `FAILED/TIME_OUT/ABORTED` 不伪造成功事件，Context/Todo 保持 `in_progress` 并记录日志。
+7. 刷新后 Context 为 `done` 时，Todo 条件迁移 `in_progress -> pending_acceptance`。
 
-### pending_acceptance -> completed / pending_acceptance
+并发 append 发生版本冲突时重读；若已 `done` 则视为幂等成功，否则传播错误。
 
-`POST /acceptance` 只在 A 持久化 Todo 验收结论，不修改 B Context 状态。通过后 A 状态置为
-`completed`；拒绝后 Todo 保持 `pending_acceptance`。
+## Repository 并发语义
 
-## 错误与兼容
+- `list_todos` 在数据库内完成状态过滤和分页。
+- `list_todos_by_status(status, limit)` 按创建时间 oldest-first 扫描当前 tenant/env。
+- `bind_context_if_pending` 和 `transition_status(expected, new)` 均持行锁并严格校验 expected status。
+- `record_acceptance` 严格要求 `pending_acceptance`；approved -> completed，rejected -> pending_acceptance。
 
-新增 Todo 接口和表没有旧 API 兼容负担。回滚时停止 A 路由流量后删除新增表；B 事件数据由 ContextCollab 自行保留。生产装配不再依赖 B base URL；若 Context runtime 缺少可用的 Bot delivery port，Run 会 fail closed，Todo 读与草稿创建仍保持可诊断。
+## Scheduler 可靠性
 
-同进程适配器不得把 ContextCollab 的领域异常直接泄漏到 Todo HTTP 语义。已知的 B
-校验、版本冲突、父事件错误、Context 缺失以及 runtime 启动失败统一转换为
-`TodoCollaborationError`，由 Todo 路由返回稳定的 503；Todo 自身的参数校验和状态冲突仍由
-Todo Core 决定，例如非草稿状态执行 `/run` 返回 409。Bot delivery port 通过
-transport-neutral 的 `OpenApiBotError` 暴露已知投递失败，Context runtime 再转换为
-`ContextCollabRuntimeError`；未声明的编程错误不被宽泛捕获。
+Scheduler 复用论坛定时任务的 `LifecycleBase + CachePlugin` 模式：启动/停止可控；获取 `todo:scheduler` 锁后用 heartbeat 续租；lease 丢失取消/停止剩余工作；单 Todo 异常只记录并继续；顶层 tick 异常不终止循环。配置包括 enabled、interval、batch_size、jitter、lock_ttl、heartbeat，且 `heartbeat < lock_ttl`。
+
+## 前端
+
+状态固定为 `pending/in_progress/pending_acceptance/completed`，Tab 顺序为全部、待处理、进行中、待验收、已完成。保留负责人 Bot 选择和搜索。创建成功提示等待自动调度，移除草稿编辑和普通手动 Run 操作；后台 `/run` controller 可以保留。
+
+## 兼容与恢复
+
+不修改旧 Tasks。数据库 status 字段是字符串，不需要 schema migration；若环境存在旧 `draft` 数据，本轮不自动迁移，发布前需确认目标环境是否已有正式数据。回滚可停止 Todo Scheduler 并恢复旧应用版本；已创建的 Context/事件由 ContextCollab 保留。

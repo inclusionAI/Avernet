@@ -87,7 +87,7 @@ export function useTodos() {
       setMutationLoading(true);
       try {
         const todo = await addTodo({ ...input, spaceId: currentSpaceId });
-        notifySuccess('待办已创建');
+        notifySuccess('待办已创建，将等待系统自动调度');
         await refresh();
         return todo;
       } catch (cause) {

@@ -24,7 +24,7 @@ MAX_ACTOR_NAME_LENGTH = 256
 
 
 class TodoStatus(StrEnum):
-    DRAFT = "draft"
+    PENDING = "pending"
     IN_PROGRESS = "in_progress"
     PENDING_ACCEPTANCE = "pending_acceptance"
     COMPLETED = "completed"

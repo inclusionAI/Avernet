@@ -108,6 +108,12 @@ class TodoCollaborationPlugin(Plugin, Protocol):
         """Start the configured executor and return the refreshed Context."""
         ...
 
+    async def refresh_context_run(
+        self, *, collab_context_id: str, actor_id: str
+    ) -> TodoCollaborationContext:
+        """Refresh real executor state and return the current Context projection."""
+        ...
+
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:

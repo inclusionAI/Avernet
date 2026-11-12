@@ -16,10 +16,10 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function statusValue(value: unknown): TodoStatus {
   const status = stringValue(value).toLowerCase();
-  if (status === 'draft' || status === 'in_progress' || status === 'pending_acceptance' || status === 'completed') {
+  if (status === 'pending' || status === 'in_progress' || status === 'pending_acceptance' || status === 'completed') {
     return status;
   }
-  return 'draft';
+  return 'pending';
 }
 
 export function mapTodoDto(dto: TodoDto): TodoRecord {

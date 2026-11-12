@@ -102,6 +102,7 @@ class _RecordingContextService:
         self.create_calls = []
         self.get_calls = []
         self.run_calls = []
+        self.refresh_calls = []
         self.append_calls = []
         self.projection = _projection()
         self.accepted_event_id = "event_2"
@@ -132,6 +133,11 @@ class _RecordingContextService:
             context_version=2,
             current_status="in_progress",
         )
+
+    async def refresh_run(self, collab_context_id, context):
+        self.refresh_calls.append((collab_context_id, context))
+        self.projection = _projection(status="done")
+        return self.projection
 
     def append_event(self, collab_context_id, command, context):
         self.append_calls.append((collab_context_id, command, context))
@@ -263,6 +269,44 @@ async def test_run_context_calls_service_then_refreshes_with_same_actor() -> Non
     assert run_actor == get_actor
     assert run_actor.actor.principal_id == "user_1"
     assert run_actor.source == "todo"
+
+
+@pytest.mark.asyncio
+async def test_refresh_context_run_calls_service_with_human_actor() -> None:
+    service = _RecordingContextService()
+    plugin = InProcessTodoCollaborationPlugin(service)
+
+    context = await plugin.refresh_context_run(
+        collab_context_id=_CONTEXT_ID,
+        actor_id="user_1",
+    )
+
+    assert context.status == "done"
+    collab_context_id, actor = service.refresh_calls[0]
+    assert collab_context_id == _CONTEXT_ID
+    assert actor.actor.principal_id == "user_1"
+    assert actor.actor.principal_type == "human"
+    assert actor.source == "todo"
+
+
+@pytest.mark.asyncio
+async def test_refresh_context_run_translates_runtime_failure() -> None:
+    service = _RecordingContextService()
+    failure = ContextCollabRuntimeError("runtime unavailable")
+
+    async def fail_refresh(collab_context_id, context):
+        raise failure
+
+    service.refresh_run = fail_refresh
+    plugin = InProcessTodoCollaborationPlugin(service)
+
+    with pytest.raises(TodoCollaborationError, match="refresh") as exc_info:
+        await plugin.refresh_context_run(
+            collab_context_id=_CONTEXT_ID,
+            actor_id="user_1",
+        )
+
+    assert exc_info.value.__cause__ is failure
 
 
 @pytest.mark.asyncio

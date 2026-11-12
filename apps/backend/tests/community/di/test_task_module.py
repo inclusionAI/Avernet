@@ -46,10 +46,6 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
 )
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.di.modules.task_module import TaskModule
-from agentclaw.community.plugins.community.todo_collaboration import (
-    InProcessTodoCollaborationPlugin,
-)
-
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,
@@ -153,15 +149,6 @@ class _StubBbsCronModule(Module):
     @provider
     def bbs_browse_scheduler(self) -> BbsBrowseLoopScheduler:
         return object()  # type: ignore[return-value]
-
-
-def test_task_module_wires_todo_collaboration_in_process():
-    context_collab = object()
-
-    plugin = TaskModule().todo_collaboration_plugin(context_collab)
-
-    assert isinstance(plugin, InProcessTodoCollaborationPlugin)
-    assert plugin._service is context_collab
 
 
 def test_task_module_wires_bbs_browse_cron_manager():

@@ -22,9 +22,13 @@ from agentclaw.community.core.spaces.models import (
     SpaceType,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.core.task.todos.errors import TodoNotFoundError
+from agentclaw.community.core.task.todos.errors import (
+    TodoNotFoundError,
+    TodoStateConflictError,
+)
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
+    TodoPage,
     TodoRecord,
     TodoStatus,
 )
@@ -137,7 +141,7 @@ class _FixedBots:
 
 def _todo(
     *,
-    status: TodoStatus = TodoStatus.DRAFT,
+    status: TodoStatus = TodoStatus.PENDING,
     context_id: str | None = None,
     todo_id: str = "todo_1",
 ) -> TodoRecord:
@@ -164,7 +168,7 @@ class _InMemoryTodos:
         self.todo = _todo(
             todo_id="todo_created",
             context_id=None,
-            status=TodoStatus.DRAFT,
+            status=TodoStatus.PENDING,
         )
         self.todo = replace(
             self.todo,
@@ -182,14 +186,40 @@ class _InMemoryTodos:
             raise TodoNotFoundError(f"Todo {kwargs['todo_id']} not found")
         return self.todo
 
-    def list_todo_candidates(self, **_kwargs: Any) -> tuple[TodoRecord, ...]:
-        return (self.todo,)
+    def list_todos(self, **kwargs: Any) -> TodoPage:
+        if self.todo.space_id != kwargs["space_id"]:
+            return TodoPage(total=0, items=())
+        status = kwargs.get("status")
+        if status is not None and self.todo.status is not status:
+            return TodoPage(total=0, items=())
+        bot_id = kwargs.get("bot_id")
+        if bot_id is not None and self.todo.bot_id != bot_id:
+            return TodoPage(total=0, items=())
+        keyword = kwargs.get("keyword")
+        if keyword and keyword.lower() not in (
+            f"{self.todo.title} {self.todo.description} {self.todo.bot_name}".lower()
+        ):
+            return TodoPage(total=0, items=())
+        return TodoPage(total=1, items=(self.todo,))
 
-    def bind_context_if_draft(self, **kwargs: Any) -> TodoRecord:
+    def list_todos_by_status(self, **kwargs: Any) -> tuple[TodoRecord, ...]:
+        if self.todo.status is not kwargs["status"]:
+            return ()
+        return (self.todo,)[: kwargs["limit"]]
+
+    def bind_context_if_pending(self, **kwargs: Any) -> TodoRecord:
+        if self.todo.status is not TodoStatus.PENDING or self.todo.collab_context_id:
+            raise TodoStateConflictError("Todo is not available for context binding")
         self.todo = replace(
             self.todo,
             collab_context_id=kwargs["collab_context_id"],
         )
+        return self.todo
+
+    def transition_status(self, **kwargs: Any) -> TodoRecord:
+        if self.todo.status is not kwargs["expected_status"]:
+            raise TodoStateConflictError("Todo status conflict")
+        self.todo = replace(self.todo, status=kwargs["new_status"])
         return self.todo
 
     def record_acceptance(self, **kwargs: Any) -> TodoRecord:
@@ -207,7 +237,7 @@ class _InMemoryTodos:
 def _bind_todo_world(
     world,
     *,
-    status: TodoStatus = TodoStatus.DRAFT,
+    status: TodoStatus = TodoStatus.PENDING,
     context_id: str | None = None,
     seed_context: bool = False,
     seed_interaction: str | None = None,
@@ -304,7 +334,7 @@ def list_todos_forbidden():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/todos",
-    scenario="create_draft",
+    scenario="create_pending",
     input=CaseInput(
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
@@ -321,7 +351,7 @@ def list_todos_forbidden():
     ),
 )
 def create_todo_ok():
-    """A Space member creates a draft Todo for an eligible Bot."""
+    """A Space member creates a pending Todo for an eligible Bot."""
 
 
 @endpoint_test(
@@ -348,7 +378,7 @@ def create_todo_validation_failed():
 @endpoint_test(
     method="GET",
     path="/openapi/v1/todos/{todo_id}",
-    scenario="get_draft",
+    scenario="get_pending",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},
@@ -357,11 +387,11 @@ def create_todo_validation_failed():
     seed=lambda world: _bind_todo_world(world),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"code": 200000, "data": {"status": "draft"}},
+        json_contains={"code": 200000, "data": {"status": "pending"}},
     ),
 )
 def get_todo_ok():
-    """The owner reads a draft Todo."""
+    """The owner reads a pending Todo."""
 
 
 @endpoint_test(
@@ -383,7 +413,7 @@ def get_todo_not_found():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/todos/{todo_id}/run",
-    scenario="start_draft",
+    scenario="dispatch_pending",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},
@@ -546,7 +576,7 @@ def create_todo_interaction_ok():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/todos/{todo_id}/interactions",
-    scenario="draft_conflict",
+    scenario="pending_conflict",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params=QUERY,
@@ -559,7 +589,7 @@ def create_todo_interaction_ok():
     expect=ExpectError(status=409),
 )
 def create_todo_interaction_conflict():
-    """A draft Todo cannot accept post-execution feedback."""
+    """A pending Todo cannot accept post-execution feedback."""
 
 
 @endpoint_test(
@@ -593,7 +623,7 @@ def accept_todo_ok():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/todos/{todo_id}/acceptance",
-    scenario="draft_conflict",
+    scenario="pending_conflict",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params=QUERY,
@@ -606,4 +636,4 @@ def accept_todo_ok():
     expect=ExpectError(status=409),
 )
 def accept_todo_conflict():
-    """A draft Todo cannot be accepted before B reports completion."""
+    """A pending Todo cannot be accepted before B reports completion."""

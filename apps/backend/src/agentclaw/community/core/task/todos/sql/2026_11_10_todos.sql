@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS `ac_todo` (
     `description`       text          NOT NULL                COMMENT '待办描述',
     `bot_id`            varchar(256)  NOT NULL                COMMENT '选中的 Bot 标识',
     `bot_name`          varchar(256)  NOT NULL                COMMENT '创建或修改时的 Bot 名称快照',
-    `status`            varchar(32)   NOT NULL                COMMENT 'draft/in_progress/pending_acceptance/completed',
+    `status`            varchar(32)   NOT NULL                COMMENT 'pending/in_progress/pending_acceptance/completed',
     `collab_context_id` varchar(256)  DEFAULT NULL            COMMENT 'B 侧协作上下文标识',
     `created_by`        varchar(256)  NOT NULL                COMMENT '创建人标识',
     `env`               varchar(20)   NOT NULL                COMMENT '环境分区',
@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS `ac_todo` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_todo_tenant_env_id` (`avernet_tenant`, `env`, `todo_id`),
     KEY `idx_todo_space_status` (`avernet_tenant`, `env`, `space_id`, `status`, `gmt_create`, `id`),
-    KEY `idx_todo_space_list` (`avernet_tenant`, `env`, `space_id`, `gmt_create`, `id`)
+    KEY `idx_todo_space_list` (`avernet_tenant`, `env`, `space_id`, `gmt_create`, `id`),
+    KEY `idx_todo_status_scan` (`avernet_tenant`, `env`, `status`, `gmt_create`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='待办工作台主体表';
 
 CREATE TABLE IF NOT EXISTS `ac_todo_acceptance` (

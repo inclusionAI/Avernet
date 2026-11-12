@@ -17,6 +17,9 @@ from agentclaw.community.core.repository.protocols.task.todos import (
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
+from agentclaw.community.core.task.todos.execution_protocol import (
+    TodoExecutionServiceProtocol,
+)
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.plugin_api.todo_collaboration import TodoCollaborationPlugin
 from agentclaw.community.plugins.local.todo_collaboration import (
@@ -35,7 +38,7 @@ class FakeTodoRepository:
             description="Exercise B boundary",
             bot_id="bot_1",
             bot_name="Contract Bot",
-            status=TodoStatus.DRAFT,
+            status=TodoStatus.PENDING,
             collab_context_id=None,
             created_by="user_1",
             created_at=NOW,
@@ -48,15 +51,23 @@ class FakeTodoRepository:
     def get_todo(self, **_kwargs: Any) -> TodoRecord:
         return self.todo
 
-    def list_todo_candidates(self, **_kwargs: Any) -> tuple[TodoRecord, ...]:
+    def list_todos(self, **_kwargs: Any):
+        return type("Page", (), {"total": 1, "items": (self.todo,)})()
+
+    def list_todos_by_status(self, **_kwargs: Any) -> tuple[TodoRecord, ...]:
         return (self.todo,)
 
-    def bind_context_if_draft(self, **kwargs: Any) -> TodoRecord:
+    def bind_context_if_pending(self, **kwargs: Any) -> TodoRecord:
         assert kwargs["collab_context_id"] == "context_todo_contract"
         self.todo = replace(
             self.todo,
             collab_context_id=kwargs["collab_context_id"],
         )
+        return self.todo
+
+    def transition_status(self, **kwargs: Any) -> TodoRecord:
+        assert self.todo.status is kwargs["expected_status"]
+        self.todo = replace(self.todo, status=kwargs["new_status"])
         return self.todo
 
     def record_acceptance(self, **_kwargs: Any) -> TodoRecord:
@@ -142,6 +153,8 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
         actor_id="user_1",
     )
     collaboration.complete_context(started.collab_context_id)
+    execution = world.get(TodoExecutionServiceProtocol)
+    await execution.refresh_in_progress(todo_id=started.todo_id)
     pending = service.get_todo(todo_id=started.todo_id, actor_id="user_1")
     event = service.create_interaction(
         todo_id=started.todo_id,
@@ -151,7 +164,7 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
     )
 
     assert repository.todo.collab_context_id == "context_todo_contract"
-    assert created.status is TodoStatus.DRAFT
+    assert created.status is TodoStatus.PENDING
     assert started.status is TodoStatus.IN_PROGRESS
     assert pending.status is TodoStatus.PENDING_ACCEPTANCE
     assert collaboration.context_calls == 1

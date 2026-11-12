@@ -42,7 +42,7 @@ export function TodoCreateModal({ open, bots, loading, onOpenChange, onSubmit }:
       <ModalContent size="lg" aria-describedby={undefined}>
         <ModalHeader>
           <ModalTitle>创建待办</ModalTitle>
-          <ModalDescription>待办会绑定当前空间、Bot 和运行 Context，创建后可手动启动执行。</ModalDescription>
+          <ModalDescription>待办创建后进入待处理状态，系统将自动调度所选 Bot 执行。</ModalDescription>
         </ModalHeader>
         <div className="space-y-4">
           <label className="block space-y-1.5 text-xs font-medium text-foreground">

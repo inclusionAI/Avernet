@@ -41,6 +41,10 @@ internal_dependencies:
 
 ### Change impact
 
+`ContextCollabRuntimePlugin` is the transport-neutral executor boundary for Context collaboration. `run()` starts one executor run and returns stable run/session identifiers; `get_run(run_id)` reads the real runtime state without mutating Context. Consumers normalize runtime status values and may append `task.completed` only for `COMPLETED`; pending, running, failed, timed-out, aborted, and unknown states must not be projected as successful completion. The local adapter is the executable contract fixture, while the community adapter delegates to `OpenApiBotPort`.
+
+`TodoCollaborationPlugin` is the Todo-owned consumer boundary to ContextCollab. `refresh_context_run()` delegates the real-runtime refresh through the ContextCollab Service API and returns only the transport-neutral Context projection; Todo Core must not import or query `OpenApiBotPort` directly. The local adapter mirrors the completed-only transition so scheduler tests exercise the same consumer contract.
+
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
 Passport create, metadata-update, and credential-reissue operations may carry

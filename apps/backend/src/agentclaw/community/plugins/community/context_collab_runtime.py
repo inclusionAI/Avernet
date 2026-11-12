@@ -11,6 +11,7 @@ from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimeError,
     ContextCollabRunRequest,
     ContextCollabRunResult,
+    ContextCollabRunStatus,
     ContextCollabRuntimePlugin,
 )
 from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
@@ -26,9 +27,7 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
     def __init__(self, openapi_bot: OpenApiBotPort) -> None:
         self._openapi_bot = openapi_bot
 
-    async def run(
-        self, request: ContextCollabRunRequest
-    ) -> ContextCollabRunResult:
+    async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
         if not request.executor_owner_id:
             raise ContextCollabRuntimeError(
                 "Context executor owner is required for Bot runtime addressing"
@@ -45,12 +44,26 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
                 },
             )
         except OpenApiBotError as exc:
-            raise ContextCollabRuntimeError(
-                "Context executor delivery failed"
-            ) from exc
+            raise ContextCollabRuntimeError("Context executor delivery failed") from exc
         return ContextCollabRunResult(
             run_id=result.run_id,
             session_id=result.session_id,
+        )
+
+    async def get_run(self, run_id: str) -> ContextCollabRunStatus:
+        try:
+            payload = await self._openapi_bot.get_run(run_id)
+        except OpenApiBotError as exc:
+            raise ContextCollabRuntimeError(
+                "Context executor status lookup failed"
+            ) from exc
+        return ContextCollabRunStatus(
+            run_id=run_id,
+            status=str(payload.get("status") or "").strip().upper(),
+            result=payload.get("result"),
+            error=payload.get("error"),
+            completed_at=payload.get("completed_at"),
+            session_id=payload.get("session_id"),
         )
 
 
@@ -60,9 +73,12 @@ class UnavailableContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
     def __init__(self, reason: str) -> None:
         self._reason = reason
 
-    async def run(
-        self, request: ContextCollabRunRequest
-    ) -> ContextCollabRunResult:
+    async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
+        raise ContextCollabRuntimeError(
+            "Context collaboration runtime is unavailable: " + self._reason
+        )
+
+    async def get_run(self, run_id: str) -> ContextCollabRunStatus:
         raise ContextCollabRuntimeError(
             "Context collaboration runtime is unavailable: " + self._reason
         )
