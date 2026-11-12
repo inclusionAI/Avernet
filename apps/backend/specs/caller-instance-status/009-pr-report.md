@@ -51,7 +51,7 @@ No human review/comment at creation-time readback.
 - Other module jobs were successful through unchanged-scope skips, not full module test execution. Singlebox was still running at this observation; an older-head result cannot substitute for the next pushed head.
 
 ## Final delivery head and request template
-- Current PR head: `8fc3c3634488c2e29225ba6b52b57fe90ce9700b`; base: GitHub `inclusionAI/Avernet:dev`. The latest head contains the exact inventory pin correction; previous-head results are historical evidence only.
+- Current PR head: `b6167ad5a73e7eb64d3eb0651a97d7567f41ce70`; base: GitHub `inclusionAI/Avernet:dev`. The latest head contains the exact inventory pin correction; previous-head results are historical evidence only.
 - The remote correction follows 23 explicit-user contract tests and 98 router inventory/namespace/parity tests, all passed.
 - Final checks: Backend run `43148622567` / job `130952282155`; Singlebox run `43148622546` / job `130952395672`. Both were running at this observation.
 - Request template below assumes the normal authenticated public gateway client/required authentication headers; it embeds no credentials and has not been executed against production:
@@ -94,3 +94,16 @@ This report's final CI observations are maintained locally without further repor
 - Full OpenAPI adapter suite then found one additional schema-description gap before the next push: `CallerInstanceStatus` lacked model-level documentation. Added a class docstring; field descriptions and runtime behavior remain unchanged.
 - Targeted two failing suites: 28 passed. Complete OpenAPI adapter suite after both corrections: **2505 passed, 2 skipped**, zero failed, 83.21s; JUnit `/tmp/caller-status-full-openapi-final-junit.xml`. This includes all stage, address, admission, authorization, count, schema and routing inventories, not only selected inventory files.
 - Same-head Singlebox 43153450587/job130967813274: **SUCCESS**, actual new acceptance story executed; exact artifact metrics are being extracted. The next pushed head still requires its own checks.
+
+## Latest public-contract-fix head
+- Latest pushed head: `b6167ad5a73e7eb64d3eb0651a97d7567f41ce70`; base GitHub dev. No runtime control-flow changes since acceptance-fix head; new DTO docstring and exact owner-address inventory only.
+- Backend: https://github.com/inclusionAI/Avernet/actions/runs/43156194469/job/130976578582 — PENDING.
+- Singlebox: https://github.com/inclusionAI/Avernet/actions/runs/43156194488/job/130976578388 — PENDING.
+- Previous-head actual Singlebox artifact: 74/74 passed, zero failed/skipped; new status acceptance story passed in 1.290s. ExpertChat core589/936=62.93% (threshold61.18%), router12/12=100%. This is historical live evidence, not a substitute for the current head's check.
+- Artifact path: `/tmp/caller-instance-status-singlebox-ci-8fc3/singlebox/.dependencies/coverage/singlebox/reports/summary.json`; artifact13915267684.
+
+## Full Backend closure after endpoint-framework registration
+- Previous-head Backend failed only the global endpoint coverage gate: new GET lacked registered happy/error cases. Added four real DI/SQLite framework cases (absent, pending unchanged, private denied, missing Bot); no mocking, baseline exemption or threshold change.
+- Real endpoint runner4 passed; complete framework128 passed; schema/path/error-schema/namespace27 passed. Independent second review PASS.
+- Entire local Backend community suite, four workers, no fail-fast: **31081 passed, 40 skipped, 0 failed/0 errors**, plus **6 subtests passed**, 414.76s. JUnit aggregate tests31127 includes subtests; artifact `/tmp/caller-status-full-backend-junit.xml`. Coverage was not enabled for this local closure; do not infer repository coverage from it.
+- Current-head Singlebox b6167 run43156194488/job130976578388 was SUCCESS. The new pushed head still requires its own remote Backend/Singlebox checks.
