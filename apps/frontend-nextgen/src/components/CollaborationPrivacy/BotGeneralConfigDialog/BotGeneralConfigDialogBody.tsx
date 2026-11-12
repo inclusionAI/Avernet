@@ -99,7 +99,10 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   const displayId = targetBot?.id ?? bot.id;
   const showPublishApproval =
     getCapabilities().getGeneralConfigPublishApprovalEnabled().value && bot.spaceKind === 'team';
-  const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, showPublishApproval);
+  // 分区仍仅团队空间渲染；开关仅服务 Bot 可用——个人 Bot 切到团队空间后无协作者语义，
+  // 禁用置关并提示原因，且不发审批配置请求（后端对非服务 Bot 拒绝）。
+  const publishApprovalEnabled = showPublishApproval && bot.serviceMode === 'service';
+  const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, publishApprovalEnabled);
   // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；failed/attention 恢复编辑不在行上展示。
   const userRiskStatus = useMemo(() => {
     const { uiState, record } = privacy.userRisk;
@@ -115,6 +118,8 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   const publishApprovalSection = showPublishApproval ? (
     <PublishApprovalSettings
       checked={publishApproval.required}
+      disabled={!publishApprovalEnabled}
+      notice={publishApprovalEnabled ? undefined : '个人 Bot 暂不支持协作者申请'}
       loading={publishApproval.loading || publishApproval.updating}
       error={publishApproval.error}
       onChange={(checked) => void publishApproval.update(checked)}

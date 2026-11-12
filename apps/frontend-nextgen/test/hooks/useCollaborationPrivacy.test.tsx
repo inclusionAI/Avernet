@@ -600,3 +600,38 @@ describe('静默刷新（silent 选项，修复后自动刷新不闪整面板）
     expect(state.loading).toEqual(storeAfterReset.loading);
   });
 });
+
+describe('useCollaborationPrivacy 检测进入审批边沿静默刷新协作数据', () => {
+  it('risk 记录进入 APPROVING 后触发一次 silent load，让 friend_ext 审批信息进入视图', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    const loadOverview = jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBots);
+    jest.spyOn(riskController, 'getCurrentBotPublicRiskCheck').mockResolvedValue({
+      code: 20000,
+      data: {
+        risk_check_id: 'risk-1',
+        phase: 'APPROVING',
+        security_status: 'PASS',
+        detail_url: null,
+        auto_poll_paused: false,
+        auto_poll_until: null,
+        next_action_at: null,
+        target: { public_scope: 'user', visibility: 'protected', view_depts: [] },
+        error_reason: null,
+        invalidation_reason: null,
+        approval_puid: 'puid-1',
+      },
+    } as never);
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-1' }));
+
+    await waitFor(() => expect(result.current.userRisk.uiState.kind).toBe('approving'));
+    // 初次加载 + approving 边沿的静默刷新各一次，且静默刷新不翻转 loading。
+    await waitFor(() => expect(loadOverview).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.overview).toEqual(overviewWithBots);
+  });
+});
