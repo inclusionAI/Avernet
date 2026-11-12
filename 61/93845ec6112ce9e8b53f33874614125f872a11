@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/task/context_collab/test_l5_method_e2e.py
+  s_f44d5bdd34238d::t_bae1363c48d8e5 411
+  s_f44d5bdd34238d::t_bee0e26ae69ab7 45
+  s_f44d5bdd34238d::t_b0a6e4b151e6e5 1-44,46-410,412-415
+apps/backend/specs/README.md
+  s_f44d5bdd34238d::t_f8ba83c12fbe21 144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6193845ec6112ce9e8b53f33874614125f872a11",
+  "prompts": {},
+  "sessions": {
+    "s_f44d5bdd34238d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a40d10e5-4f25-4d4e-b484-fdd2ddf45506",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

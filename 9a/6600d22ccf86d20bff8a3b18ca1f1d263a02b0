@@ -1,0 +1,51 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/services/single_group_method_service.py
+  s_3f41ed3b174fb4::t_4cc877d8379a74 244-247,273-299
+  s_3f41ed3b174fb4::t_aebcce04507596 420-422
+  s_3f41ed3b174fb4::t_c1a185f97d5883 83,89-104
+  s_3f41ed3b174fb4::t_0f0c59aca18967 397-399
+  s_3f41ed3b174fb4::t_f8878eda193f51 330-332
+  s_3f41ed3b174fb4::t_386808aa850d96 365-367
+  s_3f41ed3b174fb4::t_9c8c57bcd4f99e 458-461
+  s_3f41ed3b174fb4::t_2d81e41600e642 105
+apps/backend/tests/community/core/task/context_collab/test_single_profile.py
+  s_3f41ed3b174fb4::t_4bf80d20c3380e 722
+  s_3f41ed3b174fb4::t_ef279069f8db22 790
+  s_3f41ed3b174fb4::t_73a4441d1fb558 683
+  s_3f41ed3b174fb4::t_94b1cbabe93f99 556-661
+  s_3f41ed3b174fb4::t_3e8716414bff58 754
+  s_3f41ed3b174fb4::t_74a4f30b3c5a0f 759
+  s_3f41ed3b174fb4::t_fb22cf16d9d017 700-701
+  s_3f41ed3b174fb4::t_e7e4b0329b93dd 335-337,342,346,350,352-353,355,359,363,367
+  s_3f41ed3b174fb4::t_a0eff06ad4e83e 378-380,396,398,402,412,422,430,439
+  s_3f41ed3b174fb4::t_5aa5cef3cb6805 203,214
+  s_3f41ed3b174fb4::t_1f8bf81f64ad01 796-812
+  s_3f41ed3b174fb4::t_a6641a2e02a5c5 320,322,329
+  s_3f41ed3b174fb4::t_d4ced103cedee6 728
+  s_3f41ed3b174fb4::t_12b958ed0296b5 177-178,181,191
+  s_3f41ed3b174fb4::t_d5e65d29da3352 444-446,455,457,462-502
+  s_3f41ed3b174fb4::t_dc6039dc98e65e 527
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  s_3f41ed3b174fb4::t_c505bd5fc1a4cf 8-10
+  s_3f41ed3b174fb4::t_47db248341bc2e 118-121,129,133-136,140-144,148-152,156-159
+  s_3f41ed3b174fb4::t_4d41c72dcce664 176
+  s_3f41ed3b174fb4::t_a138c7f7725708 72-74
+  s_3f41ed3b174fb4::t_af2daf31a29ed3 523-530,534,540-544,546,551-552
+  s_3f41ed3b174fb4::t_05755857ead021 42-46
+  s_3f41ed3b174fb4::t_2b3f9b3014186b 321-324,328-333,335,347-348,366,368-374,379-382,384-385,392-393,397-401,403-404,407,411-415,441,446-447,450-451,461-463,466-469,474,479-480,484-485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a6600d22ccf86d20bff8a3b18ca1f1d263a02b0",
+  "prompts": {},
+  "sessions": {
+    "s_3f41ed3b174fb4": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7d09ecd4-15a4-4cae-9a0f-c06620b0c68e",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
