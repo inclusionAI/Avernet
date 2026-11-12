@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import '../../helpers/registerOpenTaskPanelHostSlot';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { PersistentChatLayoutPanelProvider } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';

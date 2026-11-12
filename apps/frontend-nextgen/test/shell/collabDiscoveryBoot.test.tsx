@@ -40,7 +40,7 @@ const paths = {
 const candidate = (id: string, name: string, createdBy = '8', friend = false) => ({
   bot: { bot_id: id, name, avatar_url: null, created_by: createdBy,
     descriptor: { summary: '公开简介' }, visibility: 'public', user_visibility: 'public', status: 'online' },
-  is_friend: friend,
+  is_friend: friend, owner_user_id: createdBy,
 });
 const group = {
   group_id: 'public-group', version: 1, kind: 'normal', status: 'active', visibility: 'public',
@@ -72,7 +72,7 @@ beforeEach(() => {
     if (url === paths.candidates) return envelope({ items: [
       candidate('friend:8', '好友助手', '8', true), candidate('owned:7', '管理助手', '7'),
       candidate('new:8', '新助手'),
-    ], total: 3, offset: 0, limit: 100 });
+    ], total: 3, offset: 0, limit: 20 });
     if (url === paths.requests && options.method === 'POST') return envelope({ status: 'approved' }, 20100);
     if (url === paths.requests || url === paths.relations) return envelope({ items: [], total: 0 });
     if (url === paths.groups) return envelope({ items: [group], total: 1 });

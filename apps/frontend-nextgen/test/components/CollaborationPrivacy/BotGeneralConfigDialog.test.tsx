@@ -295,7 +295,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     expect(screen.getByText('个人 Bot 暂不支持协作者申请')).toBeInTheDocument();
     const approvalSwitch = screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' });
     expect(approvalSwitch).toBeDisabled();
-    expect(botEditorService.loadApproval).not.toHaveBeenCalled();
+    expect(botPublishApprovalService.loadApproval).not.toHaveBeenCalled();
   });
 
   it('Open Core × 团队空间 Bot：不渲染发布审批（SHAPE:INTERNAL，AC-06）', async () => {

@@ -52,3 +52,36 @@ image test was run. OCB must update the public source revision, inherit the
 collab capabilities, update artifact navigation assertions, and re-run its
 isolated export and deployment gates. Historical export evidence does not
 validate the newly expanded artifact.
+
+## Release rebase — 2026-11-12
+
+Rebased the feature history from release base `20e689418f` onto
+`origin/REL20261112` at `cbfe8225d2`, preserving the previous merge resolutions.
+Release task-panel componentization required an explicit `taskPanelHost` slot:
+Open retains trusted task rendering, recovery and SDK lifecycle, while collab
+keeps generic BCS UMD panels without importing the task runtime. The host
+RichContent facade reuses the existing task-free shared HTML implementation;
+the independently delivered task asset is unchanged from the release tree.
+The discovery fixture now supplies candidates' `owner_user_id`, matching the
+release ownership contract instead of inferring ownership from `created_by`.
+
+Verification for the rebased public source:
+
+- `npm run check:open-core`: passed.
+- `npm run ci`: passed, **811 suites / 6714 tests**, guardrails, typecheck,
+  lint, **26 closure fixtures**, source-slice checks and Open production build.
+- Runtime closure: **13 entries / 605 files / 0 violations**. New negative
+  fixtures cover shared-task runtime/asset adapters and recovery hooks.
+- Focused Open/collab lifecycle, UMD and recovery coverage: **5 suites / 49 tests**.
+- The group-service slot tests were subsequently moved into their own suite to
+  keep changed source files below 1000 lines. Fresh typecheck and the final
+  group-service/HTML/discovery regression run passed: **4 suites / 57 tests**.
+- Fresh lint and `npm run build:collab`: passed. Output has **7 named page
+  chunks**, including public Bots/groups and excluding experts/tasks/single chat.
+- `git diff --check` and changed source-file size checks: passed.
+- Focused independent review found no actionable task-panel integration issues.
+
+No live browser/BCS-stack E2E, private OCB export or Docker image validation was
+run. Private assemblies must adopt the new slot contract and rerun their source
+export/typecheck and deployment gates. These local results do not establish
+private integration or deployment status.

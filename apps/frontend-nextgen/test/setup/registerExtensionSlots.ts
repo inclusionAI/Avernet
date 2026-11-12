@@ -55,4 +55,5 @@ registerExtensionSlots({
   taskSessionNavigationObserver: () => null,
   taskPanelBootstrap: useSessionTaskPanelBootstrapStub,
   sessionTaskPanelTab: useSessionTaskPanelTabStub,
+  taskPanelHost: null,
 } satisfies AppExtensionSlots);

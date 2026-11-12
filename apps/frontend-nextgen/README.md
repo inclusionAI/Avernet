@@ -164,6 +164,18 @@ full/task shell, hook, adapter and BBS transport. OCB export/overlay tests must
 consume this public assembly and update their navigation expectations; private
 artifact/image verification must be run separately in that repository.
 
+### Shared task-panel isolation
+
+Open registers the shared task asset through the `taskPanelHost` extension slot:
+trusted rendering of historical task UMD declarations, SDK handle/tab lifecycle,
+and stale-conversation cleanup. Collab registers `null`, keeps generic BCS UMD
+panels, and rejects historical task declarations without loading their CDN URLs.
+The closure guard rejects the new `services/tasks/panel/` runtime as well as the
+legacy task tree. Open group recovery uses a slot-owned history reader and exposes
+incomplete/error retry state; collab uses idle recovery without task requests.
+The pure slot contract remains independent of the standalone task asset so a
+collab source slice can still typecheck after that asset is omitted.
+
 ### Collab friend requests
 
 The public Bot header adds **好友申请** after the identity picker only in collab

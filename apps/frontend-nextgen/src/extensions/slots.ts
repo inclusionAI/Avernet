@@ -8,6 +8,7 @@ let slots: AppExtensionSlots = {
   taskSessionNavigationObserver: null,
   taskPanelBootstrap: null,
   sessionTaskPanelTab: null,
+  taskPanelHost: null,
 };
 
 export function registerExtensionSlots(next: AppExtensionSlots): void {

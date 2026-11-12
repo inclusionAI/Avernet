@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

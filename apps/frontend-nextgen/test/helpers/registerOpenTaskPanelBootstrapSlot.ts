@@ -9,7 +9,7 @@
 // 需要真实 bootstrap 行为但自身 jest.mock 了其下游服务的套件照常注册到真实 hook
 // （消化的是套件自身 mock 后的下游）；确要桩掉本 hook 模块自身的套件，注册到的是其自身 mock。
 // 其余槽位沿用全局 setup 默认，本文件只升级 taskPanelBootstrap（与 src/extensions/empty.ts 同构）。
-import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useGroupTaskPanelBootstrap } from '@/hooks/useGroupTaskPanelBootstrap';
 import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
 import { getExtensionSlots, registerExtensionSlots } from '@/extensions/slots';
 import type { AppExtensionSlots } from '@/extensions/contract';
@@ -18,6 +18,6 @@ import type { AppExtensionSlots } from '@/extensions/contract';
 // 供「关闭后 Monitor 仍可点并用 task tab 快照重开」等真实行为断言消费。
 registerExtensionSlots({
   ...getExtensionSlots(),
-  taskPanelBootstrap: useSessionTaskPanelBootstrap,
+  taskPanelBootstrap: useGroupTaskPanelBootstrap,
   sessionTaskPanelTab: useSessionTaskPanelTab,
 } satisfies AppExtensionSlots);

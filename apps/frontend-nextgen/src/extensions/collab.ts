@@ -82,6 +82,7 @@ registerExtensionSlots({
   taskSessionNavigationObserver: null,
   taskPanelBootstrap: null,
   sessionTaskPanelTab: null,
+  taskPanelHost: null,
 });
 
 export const appExtension: AppExtension = {

@@ -1,5 +1,5 @@
-import { sanitizeMarkdownHtml, sanitizeRichHtml } from '@/shared/html/sanitizeHtml';
 /** @jest-environment jsdom */
+import { sanitizeMarkdownHtml, sanitizeRichHtml } from '@/shared/html/sanitizeHtml';
 import { SafeHtml } from '@/shared/html/SafeHtml';
 import { describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';

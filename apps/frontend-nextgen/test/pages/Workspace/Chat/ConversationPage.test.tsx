@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 // 槽位真实装配必须先于 CollaborationPage/GroupWorkspaceArea 模块求值
 // （useGroupChatHeaderPanels 在模块作用域解析槽位）：import 按声明序求值，
 // 页面 require 于文件体执行、必然晚于本行。
@@ -12,7 +13,6 @@ import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';

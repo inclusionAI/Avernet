@@ -1,7 +1,7 @@
 import type { PanelHandle } from '@tc-chat/core';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import { peekTaskPanelController } from '@/services/tasks/panel/taskPanelRuntime';
+import { getExtensionSlots } from '@/extensions/slots';
 import { useEffect } from 'react';
 
 /**
@@ -16,7 +16,7 @@ export function useStaleTaskPanelRelease(handle: PanelHandle): void {
     const taskNavigationStore = useTaskConversationNavigationStore.getState();
     const navigation = taskNavigationStore.navigation;
     if (navigation) taskNavigationStore.completeNavigation(navigation.id);
-    peekTaskPanelController()?.leaveConversation();
+    getExtensionSlots().taskPanelHost?.leaveConversation();
     handle.closePanelForce();
     taskNavigationStore.resetAll();
     useTaskSidePanelStore.getState().resetAll();

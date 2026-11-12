@@ -1,6 +1,4 @@
-/** @vitest-environment jsdom */
-// 与共享资产源码一起运行，不依赖宿主或聊天 SDK。
-import { describe, expect, it } from 'vitest';
+/** @jest-environment jsdom */
 
 // shared/html/SafeHtml(发布说明富文本渲染)行覆盖补全:
 // href/src 协议白名单、richText style 二道裁决(颜色/字号)、空白标题剪枝、非白名单标签 Fragment 降级、

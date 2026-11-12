@@ -46,6 +46,7 @@ describe('collab 装配', () => {
       taskSessionNavigationObserver: null,
       taskPanelBootstrap: null,
       sessionTaskPanelTab: null,
+      taskPanelHost: null,
     });
     expect(appExtension.avatarEditor).toBeNull();
   });

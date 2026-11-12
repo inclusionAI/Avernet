@@ -1,4 +1,4 @@
-import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
+import { getExtensionSlots } from '@/extensions/slots';
 // @sdd: 方式② CDN UMD 副屏加载器（迁移自 ocb UmdPanel，适配新 `@tc-chat/ui` SDK）。
 //
 // 背景：新引擎 `@tc-chat/ui` 的 `resolveBusinessEntry` 在「全局 CDN map 命中」分支把
@@ -175,7 +175,10 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
   if (key === 'taskPanel.TaskLoopView' || key === 'task-loop' ||
     (payload._libraryName === 'taskPanel' && key === 'TaskLoopView')) {
     const data = (payload.data ?? payload) as Record<string, unknown>;
-    return <TaskPanelAdapter {...props} params={data} />;
+    const TaskPanelAdapter = getExtensionSlots().taskPanelHost?.Adapter;
+    return TaskPanelAdapter
+      ? <TaskPanelAdapter {...props} params={data} />
+      : <p className="p-6 text-sm text-muted-foreground">当前站点不支持任务副屏</p>;
   }
   return <GenericUmdPanel {...props} />;
 }

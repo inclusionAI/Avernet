@@ -5,6 +5,8 @@
 // 头像编辑实现后仍可独立 typecheck（见 test/extensions/featureContracts.test.ts）。
 import type { AppCapabilities } from '@/capabilities';
 import type { ComponentType, LazyExoticComponent } from 'react';
+import type { PanelHandle } from '@tc-chat/core';
+import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
 import type { AvatarEditorComponent } from './contracts/avatar';
 import type {
   BuildTaskInstructions,
@@ -52,6 +54,13 @@ export interface AppExtensionSlots {
   taskPanelBootstrap: TaskPanelBootstrapHook | null;
   /** 当前会话可重开的 TaskPanel 快照（Monitor 判空/重建；collab 形态 null：无任务栈恒无快照）。 */
   sessionTaskPanelTab: SessionTaskPanelTabHook | null;
+  /** 任务资产和 SDK 生命周期适配；collab 为 null，仅保留普通 BCS UMD 副屏。 */
+  taskPanelHost: {
+    Adapter: ComponentType<PanelContentProps>;
+    wrapHandle: (handle: PanelHandle) => PanelHandle;
+    onTabClosed: (id: string) => void;
+    leaveConversation: () => void;
+  } | null;
 }
 
 /** appExtension 本体（capabilities + 组件装配），三形态各自在装配文件内注解满足。 */

@@ -2,7 +2,7 @@
 // 与共享资产源码一起运行，不依赖宿主或聊天 SDK。
 import { describe, expect, it } from 'vitest';
 
-// shared/html/SafeHtml(发布说明富文本渲染)行覆盖补全:
+// assets/TaskPanel/SafeHtml(发布说明富文本渲染)行覆盖补全:
 // href/src 协议白名单、richText style 二道裁决(颜色/字号)、空白标题剪枝、非白名单标签 Fragment 降级、
 // VOID 标签、注释节点、table 空白文本节点过滤等。
 // 与 src/components/ui/SafeHtml.tsx 是两个同名组件,此处只管 assets 下这份。

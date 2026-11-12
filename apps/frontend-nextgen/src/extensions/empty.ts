@@ -1,11 +1,12 @@
-import { createGroupTaskHistoryReader } from '@/services/tasks/panel/taskPanelHistoryAdapter';
+import { taskNavigationAwareHandle, onTaskPanelTabClosed } from '@/services/tasks/panel/taskPanelHandleAdapter';
+import { peekTaskPanelController } from '@/services/tasks/panel/taskPanelRuntime';
 import { registerTaskPanel } from '@/services/tasks/panel/registerTaskPanel';
 import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
-import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useGroupTaskPanelBootstrap } from '@/hooks/useGroupTaskPanelBootstrap';
 import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
 import { ManagerWorkerTasks } from '@/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks';
 import { ServiceBotRoutingControl } from '@/pages/Workspace/components/Modals/ServiceBotRoutingControl';
@@ -21,7 +22,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
 import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
-import React, { type ComponentType, useMemo } from 'react';
+import React, { type ComponentType } from 'react';
 import type { SessionTaskPanelTabHook, TaskPanelBootstrapHook } from './contracts/taskPanelBootstrap';
 import { registerExtensionSlots } from './slots';
 import type {
@@ -119,12 +120,9 @@ const openGroupServiceBotRoutingSlots: GroupServiceBotRoutingExtension = {
   useServiceBotRouting,
   ServiceBotRoutingControl,
 };
-// 任务会话联动观察者按槽位形状双边注解；任务副屏 bootstrap 直接以契约 hook 名注解（contracts/taskPanelBootstrap）。
+// 共享任务 controller 已接管会话导航，不再挂载旧全局观察者；保留 null 槽位兼容装配契约。
 const openTaskSessionNavigationObserver = null;
-const openTaskPanelBootstrap: TaskPanelBootstrapHook = (options) => {
-  const history = useMemo(() => createGroupTaskHistoryReader(null), [options.sessionId]);
-  return useSessionTaskPanelBootstrap({ ...options, kind: 'group', history });
-};
+const openTaskPanelBootstrap: TaskPanelBootstrapHook = useGroupTaskPanelBootstrap;
 const openSessionTaskPanelTab: SessionTaskPanelTabHook = useSessionTaskPanelTab;
 registerExtensionSlots({
   groupTasks: openGroupTasksSlots,
@@ -132,6 +130,12 @@ registerExtensionSlots({
   taskSessionNavigationObserver: openTaskSessionNavigationObserver,
   taskPanelBootstrap: openTaskPanelBootstrap,
   sessionTaskPanelTab: openSessionTaskPanelTab,
+  taskPanelHost: {
+    Adapter: TaskPanelAdapter,
+    wrapHandle: taskNavigationAwareHandle,
+    onTabClosed: onTaskPanelTabClosed,
+    leaveConversation: () => peekTaskPanelController()?.leaveConversation(),
+  },
 });
 
 export const appExtension: AppExtension = {

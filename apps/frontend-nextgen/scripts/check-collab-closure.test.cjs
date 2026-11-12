@@ -128,6 +128,11 @@ for (const page of ['Bots', 'Groups']) {
 }
 
 for (const forbidden of [
+  'src/services/tasks/panel/taskPanelRuntime.ts',
+  'src/components/Workspace/TaskPanelAdapter.tsx',
+  'src/components/Workspace/TaskPanelAssetBoundary.tsx',
+  'src/hooks/useGroupTaskPanelBootstrap.ts',
+  'src/hooks/useSharedTaskPanelRecovery.ts',
   'src/pages/CollaborationSquare/Experts/index.tsx',
   'src/pages/CollaborationSquare/Tasks/index.tsx',
   'src/pages/CollaborationSquare/Bots/Hidden.tsx',
