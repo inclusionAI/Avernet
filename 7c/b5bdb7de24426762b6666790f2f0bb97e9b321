@@ -1,0 +1,19 @@
+tools/a2a-json-tool/README.md
+  s_a5600e99ae94e6::t_4c5757967cd5de 100,104,107,115-118,120-121,123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7cb5bdb7de24426762b6666790f2f0bb97e9b321",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}
