@@ -18,7 +18,11 @@ class FriendAuthSyncAction(str, Enum):
 
 class FriendAuthSyncRequest(BaseModel):
     bot_id: str = Field(..., min_length=1, description="backend bot_id")
-    owner_work_no: str = Field(..., min_length=1, description="bot owner work no")
+    owner_work_no: str = Field(
+        ...,
+        min_length=1,
+        description="bot locator: current owner work no or stable entity id",
+    )
     human_work_no: str = Field(
         ..., min_length=1, description="friend work no (bare, no human_ prefix)"
     )
