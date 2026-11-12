@@ -117,6 +117,7 @@ def create_tc_app(context, *, search_router=None):
 
     app = FastAPI(title="BCSFuse", lifespan=lifespan)
     app.state.context = context
+    from app.adapters.http.cors_middleware import RegexCORSMiddleware
     from app.adapters.http.fusion_parity_routes import router as fusion_router
     from app.adapters.http.verify_routes import router as verify_router
     from app.infra.public.observability.trace_middleware import TraceIdMiddleware
@@ -125,6 +126,21 @@ def create_tc_app(context, *, search_router=None):
     from app.tc.routes import create_router
 
     app.add_middleware(TraceIdMiddleware)
+    origin_patterns = [
+        pattern.strip()
+        for pattern in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+        if pattern.strip()
+    ]
+    if context.mode in {"test", "dev", "dev_smoke"}:
+        origin_patterns.append(r"http://(?:localhost|127\.0\.0\.1):\d+")
+    app.add_middleware(
+        RegexCORSMiddleware,
+        allow_origins=context.config.get("tc.cors_allowed_origins", []),
+        allow_origin_regex=origin_patterns,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     compatibility_router, core_router = create_compat_router(), create_router()
     for prefix in ("/v1", "/api/v1"):
         app.include_router(compatibility_router, prefix=prefix)
