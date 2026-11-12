@@ -6069,6 +6069,7 @@ class BotService(BotServiceProtocol):
         agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
 
         # 3. 热更新设备 header
+        partial_errors: list[str] = []
         try:
             if bot_type == "service":
                 logger.info(
@@ -6077,10 +6078,12 @@ class BotService(BotServiceProtocol):
                 )
                 from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
                 resource_owner_id = stable_resource_owner_id(bot) if bot_id != "default" else user_id
-                bindings = self._hot_update_service_bot_passport_token(
+                service_result = self._hot_update_service_bot_passport_token(
                     bot_id=bot_id, user_id=resource_owner_id, token=new_token, bot=bot,
                     agent_code=agent_code,
                 )
+                bindings = service_result["bindings"]
+                partial_errors = service_result.get("errors", [])
             elif bot_type == "personal":
                 logger.info(
                     f"[bot_service.refresh_passport_token] Routing to personal bot: "
@@ -6152,10 +6155,13 @@ class BotService(BotServiceProtocol):
             )
             raise BotServiceError(f"设备热更新失败: {e}") from e
 
-        return {
+        result = {
             "token_prefix": token_prefix,
             "bindings": bindings,
         }
+        if partial_errors:
+            result["partial_errors"] = partial_errors
+        return result
 
     def _hot_update_by_device_binding(
         self, bot_id: str, user_id: str, token: str, binding_id: int | None, agent_code: str = ""
@@ -6398,7 +6404,7 @@ class BotService(BotServiceProtocol):
                 f"bot_id={bot_id}, user_id={user_id}, env={env}"
             )
 
-        if errors:
+        if errors and not updated_bindings:
             error_detail = "; ".join(errors)
             raise BotServiceError(f"部分设备热更新失败: {error_detail}")
 
@@ -6409,7 +6415,7 @@ class BotService(BotServiceProtocol):
             f"[_hot_update_service_bot_passport_token] Hot-update completed: "
             f"bot_id={bot_id}, user_id={user_id}, updated_bindings={updated_bindings}"
         )
-        return updated_bindings
+        return {"bindings": updated_bindings, "errors": errors}
 
     def _hot_update_by_caller_binding(
         self,

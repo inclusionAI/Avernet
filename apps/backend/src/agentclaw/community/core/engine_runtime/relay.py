@@ -42,6 +42,10 @@ from agentclaw.community.core.repository.protocols.devices import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+    BaasServiceError,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
@@ -203,9 +207,20 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
                 return self._resolve_published_device(facts, stage, device_uuid)
             selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
             return self._resolver.resolve_for_bot(facts.bot_id, facts.owner_id, **selection)
+        except BaasNoActiveDevicesError as exc:
+            raise EngineDeviceNotReadyError(
+                f"device unavailable for bot={facts.bot_id}"
+            ) from exc
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
                 f"device not ready for bot={facts.bot_id}"
+            ) from exc
+        except BaasServiceError as exc:
+            # The provider itself failed — a BaaS ws-info call that timed out or
+            # answered an error. The bot's device may be perfectly healthy, so
+            # this is an upstream fault, not "your device is not ready".
+            raise EngineUpstreamError(
+                f"device provider failed for bot={facts.bot_id}"
             ) from exc
         except (EngineStageNotLiveError, UnknownProviderError):
             raise
