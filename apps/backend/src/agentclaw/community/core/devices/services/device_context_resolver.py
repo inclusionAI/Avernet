@@ -80,6 +80,10 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: no active binding for bot={bot_id}"
             )
+        if binding.status == "RELEASED":
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: binding {binding.id} is RELEASED for bot={bot_id}"
+            )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -128,7 +132,7 @@ class DeviceContextResolver:
                 抛 ``ConnInfoBuildError`` — **不静默回落**到其它实例。
 
         Raises:
-            DeviceNotBoundError: binding_id 不存在
+            DeviceNotBoundError: binding_id 不存在或已释放
             UnknownProviderError: binding.device_provider 是未知值(DB 异常)
             ConnInfoBuildError: 底层 conn_info 计算失败(含 device_uuid 命不中)
         """
@@ -136,6 +140,10 @@ class DeviceContextResolver:
         if binding is None:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
+            )
+        if binding.status == "RELEASED":
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: binding {binding_id} is RELEASED"
             )
 
         provider = binding.device_provider
@@ -179,6 +187,10 @@ class DeviceContextResolver:
         if binding is None:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
+            )
+        if binding.status == "RELEASED":
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: binding {binding_id} is RELEASED"
             )
 
         provider = binding.device_provider
