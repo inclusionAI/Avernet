@@ -14,6 +14,12 @@ class PublishFlowServiceError(Exception):
     pass
 
 
+class BuildStageChangedError(PublishFlowServiceError):
+    """The publish record was changed while a build-stage artifact was in flight."""
+
+    pass
+
+
 class DraftRestoreRetryableError(PublishFlowServiceError):
     """Draft restore failed in an in-doubt/transient external-workflow window.
 

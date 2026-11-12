@@ -40,6 +40,7 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
+    BuildStageChangedError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
@@ -112,6 +113,25 @@ class BuildStageRunner:
         self._provider_behaviors = provider_behaviors
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
+
+    async def _fetch_and_assert_building(self, publish_id: int) -> None:
+        """Fresh read the publish record and assert it is still BUILDING.
+
+        Unlike checking the caller's snapshot, this method re-reads the
+        record from the database so it can detect a concurrent status change
+        made after the build was enqueued.
+        """
+        latest = self._ext_state.get_publish_by_id(publish_id)
+        if latest is None:
+            raise BuildStageChangedError(
+                f"Publish record not found during build: publish_id={publish_id}"
+            )
+        if PublishStatus(latest.status) != PublishStatus.BUILDING:
+            raise BuildStageChangedError(
+                f"Publish record changed before Artifact commit: "
+                f"publish_id={publish_id}"
+            )
+
 
     async def build_artifact_only(
         self,
@@ -307,6 +327,9 @@ class BuildStageRunner:
                     }
                 )
             )
+
+            # Final fence before committing: the record must still be BUILDING.
+            await self._fetch_and_assert_building(publish_id)
             self._ext_state.commit_built_artifact(
                 publish_id=publish_id,
                 ext=ext,
@@ -324,6 +347,30 @@ class BuildStageRunner:
                 publish_id=publish_id,
                 status=PublishStatus.BUILT,
                 message="Build completed",
+                action="process",
+            )
+
+        except BuildStageChangedError:
+            # A concurrent writer changed the status while this build was in
+            # flight (for example, moving the record back to DRAFT). This build
+            # no longer matches the record's current intent: do not stamp it
+            # FAILED on the newer record or overwrite the newer owner's ext.
+            latest_record = self._ext_state.get_publish_by_id(publish_id)
+            current_status = (
+                PublishStatus(latest_record.status)
+                if latest_record
+                else PublishStatus.DRAFT
+            )
+            logger.warning(
+                "[BuildStageRunner] Build stage superseded: publish_id=%s, "
+                "current_status=%s",
+                publish_id,
+                current_status,
+            )
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message="Build superseded by concurrent publish status change",
                 action="process",
             )
 
