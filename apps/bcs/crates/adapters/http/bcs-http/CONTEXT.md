@@ -139,10 +139,11 @@ saved source. Both extract a Provider-admin Bearer and call
 service. Memory-only test servers may omit this durable capability and return
 503 explicitly. Neither route submits a probe task or exposes credential values.
 
-The versioned A2A control plane is owned by `bcs-api-http` at
+Versioned A2A registration and Card management are owned by `bcs-api-http` at
 `/api/v1/collaboration/a2a/` and is not mounted in this adapter. Legacy root
 `/a2a/...` paths retain their bare success objects and v0.1 error shape.
-Both adapters reuse the same application capabilities and BCS-owned credentials;
+Chat and run controls remain on the legacy root routes.
+Both management adapters reuse the same application capabilities and Provider-admin credentials;
 V1 wraps results in its standard envelope through a dedicated application facade.
 Remote AgentCard interface URLs and persistence are unchanged.
 

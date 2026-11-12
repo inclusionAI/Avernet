@@ -79,18 +79,14 @@ Public Agent registration accepts BCN visibility (protected by default, or publi
 
 ## V1 A2A application facade
 
-`v1::A2aApiService` implements `application::v1::a2a::A2aService` for the
-versioned control plane. It reuses existing management and chat-run use cases,
-translates their errors into ApplicationError, authenticates Bot/Actor using the
-injected BotSelfService before target resolution, applies existing session and
-run/poll limits, and projects only safe public run fields. Raw upstream errors,
-internal Bot/Provider IDs and delivery diagnostics are excluded. Card admission,
-ownership, persistence, cancellation and runtime policy remain in the existing
-use cases. There is no new network or persistence implementation.
+`v1::A2aApiService` implements `application::v1::a2a::A2aService` for
+registration, Provider/ref ID recovery, Card read/update/refresh and Provider-name
+registration. It reuses the existing Provider-admin management use cases and
+translates their errors into safe ApplicationErrors, retaining machine codes.
+Raw upstream diagnostics are excluded. Card admission, ownership, authorization
+and persistence remain in the existing management application. The facade adds
+no store calls, network implementation or cache, and has no Bot identity or
+chat-run dependency. Legacy chat/run handling is unchanged.
 
-`tests/conformance_a2a_v1.rs` covers all facade operations, identity ordering,
-Actor substitution, timeout bounds, Card source/visibility forwarding and run
-redaction. The registered-Bot lookup uses the existing identity/registry path,
-not an adapter-owned Core handle or a new cache. Management adds no store calls;
-chat/run auth uses one existing BotSelf lookup per operation, replacing the
-legacy HTTP caller lookup (named chat previously resolved it twice).
+`tests/conformance_a2a_v1.rs` covers all six management operations, Provider-admin
+credential forwarding, Card source/visibility forwarding and machine errors.

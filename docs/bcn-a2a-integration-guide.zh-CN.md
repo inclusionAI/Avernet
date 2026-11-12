@@ -130,7 +130,7 @@ party 可省略，支持 first_party、second_party、third_party；不表示权
 
 ## 3. 注册 Agent
 
-BCS 控制面 A2A 接口使用 `/api/v1/collaboration/a2a/` 前缀，由 `bcs-api-http` 提供。成功和错误均采用 v1 `{code, message, data, request_id}` 格式：业务结果位于 `data`，错误码位于 `data.error_code`；HTTP 200/201/202 对应 code 20000/20100/20200。以下管理结果字段与示例 JSON 指 envelope 内的 `data`。注册 `Location` 指向同前缀的 Card 资源。旧 `/a2a/` 入口保留原始裸响应和 v0.1 错误格式，切换路径时需同步读取 `data`。网关透传 Bearer，由 BCS 校验 Provider 管理或 Bot 凭据；远端 AgentCard 协议地址保持不变。
+BCS 注册及 Card 管理接口使用 `/api/v1/collaboration/a2a/` 前缀，由 `bcs-api-http` 提供。成功和错误均采用 v1 `{code, message, data, request_id}` 格式：业务结果位于 `data`，错误码位于 `data.error_code`；HTTP 200/201 对应 code 20000/20100。以下管理结果字段与示例 JSON 指 envelope 内的 `data`。注册 `Location` 指向同前缀的 Card 资源。旧 `/a2a/` 入口保留原始裸响应和 v0.1 错误格式，切换路径时需同步读取 `data`。网关透传 Bearer，由 BCS 校验 Provider 管理凭据。聊天及运行查询/取消继续使用旧 `/a2a/` 路径，不提供对应的 v1 路由；远端 AgentCard 协议地址保持不变。
 
 调用以下管理接口：
 

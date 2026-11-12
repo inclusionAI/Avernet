@@ -110,42 +110,13 @@ impl A2aService for Service {
             bot_runtime_token: Some("runtime-test".into()),
         })
     }
-    async fn chat(&self, command: StartNamedA2aChat) -> Result<Value, ApplicationError> {
-        self.authenticate(&command.token)?;
-        assert_eq!(command.provider_name, "orders");
-        assert_eq!(command.provider_bot_ref, "remote");
-        assert_eq!(command.message, "hello");
-        assert_eq!(command.actor.as_deref(), Some("caller"));
-        assert_eq!(
-            command.provider_bypass_headers,
-            vec![("x-routing-test".into(), "allowed".into())]
-        );
-        Ok(json!({"run_id":"run","status":"pending"}))
-    }
-    async fn get_run(&self, command: QueryA2aRun) -> Result<Value, ApplicationError> {
-        self.authenticate(&command.token)?;
-        assert_eq!(command.run_id, "run");
-        assert_eq!(command.wait_ms, 100);
-        assert_eq!(command.since_version, 3);
-        Ok(json!({"run_id":"run","state":"completed","response":{"content":"answer"}}))
-    }
-    async fn cancel_run(
-        &self,
-        token: &str,
-        actor: Option<&str>,
-        run: &str,
-    ) -> Result<Value, ApplicationError> {
-        self.authenticate(token)?;
-        assert_eq!(actor, Some("caller"));
-        assert_eq!(run, "run");
-        Ok(json!({"run_id":"run","cancelled":true}))
-    }
 }
+
 fn app(service: Arc<Service>) -> axum::Router {
     bcs_api_http::router(
         register_support::test_state(Arc::new(UnusedRegister))
             .with_invite_code_gate_enabled(true)
-            .with_a2a_service(service, vec!["x-routing-test".parse().unwrap()]),
+            .with_a2a_service(service),
     )
 }
 fn request(method: &str, suffix: &str, bearer: Option<&str>, body: Value) -> Request<Body> {
@@ -153,10 +124,7 @@ fn request(method: &str, suffix: &str, bearer: Option<&str>, body: Value) -> Req
         .method(method)
         .uri(format!("/api/v1/collaboration/a2a{suffix}"))
         .header("content-type", "application/json")
-        .header("x-request-id", "a2a-request")
-        .header("x-bcn-actor-bot-id", "caller")
-        .header("x-routing-test", "allowed")
-        .header("x-secret-test", "never-forward");
+        .header("x-request-id", "a2a-request");
     if let Some(token) = bearer {
         request = request.header("authorization", format!("Bearer {token}"));
     }
@@ -247,7 +215,7 @@ async fn management_uses_v1_envelopes_without_gateway_or_invite_principals() {
 }
 
 #[tokio::test]
-async fn named_registration_chat_and_run_controls_have_v1_responses_and_allowlisted_headers() {
+async fn named_registration_has_v1_response() {
     let app = app(Arc::new(Service::default()));
     let data = read(
         app.clone()
@@ -265,47 +233,6 @@ async fn named_registration_chat_and_run_controls_have_v1_responses_and_allowlis
     .await;
     assert_eq!(data["bot_runtime_token"], "runtime-test");
     assert!(data.get("provider_id").is_none());
-    let data = read(
-        app.clone()
-            .oneshot(request(
-                "POST",
-                "/providers/orders/bots/remote/chat-async",
-                Some("admin"),
-                json!({"message":"hello"}),
-            ))
-            .await
-            .unwrap(),
-        StatusCode::ACCEPTED,
-    )
-    .await;
-    assert_eq!(data["run_id"], "run");
-    let data = read(
-        app.clone()
-            .oneshot(request(
-                "GET",
-                "/chat/runs/run?wait_ms=100&since_version=3",
-                Some("admin"),
-                Value::Null,
-            ))
-            .await
-            .unwrap(),
-        StatusCode::OK,
-    )
-    .await;
-    assert_eq!(data["response"]["content"], "answer");
-    let data = read(
-        app.oneshot(request(
-            "POST",
-            "/chat/runs/run/cancel",
-            Some("admin"),
-            Value::Null,
-        ))
-        .await
-        .unwrap(),
-        StatusCode::OK,
-    )
-    .await;
-    assert_eq!(data["cancelled"], true);
 }
 
 #[tokio::test]
@@ -347,20 +274,6 @@ async fn errors_use_v1_request_ids_and_fail_before_service_dispatch() {
             Value::Null,
             StatusCode::METHOD_NOT_ALLOWED,
             "method_not_allowed",
-        ),
-        (
-            "DELETE",
-            "/chat/runs/run",
-            Value::Null,
-            StatusCode::METHOD_NOT_ALLOWED,
-            "method_not_allowed",
-        ),
-        (
-            "GET",
-            "/chat/runs/run?wait_ms=bad",
-            Value::Null,
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
         ),
     ] {
         let response = app
@@ -498,8 +411,6 @@ async fn accept_precedence_size_limits_and_invalid_credentials_have_v1_errors() 
             "/agents/bot/agent-card:refresh",
             json!({"unexpected":true}),
         ),
-        ("POST", "/chat/runs/run/cancel", json!({})),
-        ("GET", "/chat/runs/run", json!({})),
     ] {
         read(
             app.clone()
@@ -528,4 +439,23 @@ async fn generated_request_id_is_pinned_once_for_success_and_errors() {
             serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
         assert_eq!(value["request_id"], id);
     }
+}
+
+#[tokio::test]
+async fn chat_and_run_routes_are_not_exposed_by_v1_a2a() {
+    let service = Arc::new(Service::default());
+    let app = app(service.clone());
+    for (method, path) in [
+        ("POST", "/providers/orders/bots/remote/chat-async"),
+        ("GET", "/chat/runs/run"),
+        ("POST", "/chat/runs/run/cancel"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request(method, path, Some("admin"), Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    assert_eq!(service.calls.load(Ordering::SeqCst), 0);
 }

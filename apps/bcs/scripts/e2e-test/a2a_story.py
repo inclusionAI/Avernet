@@ -478,13 +478,13 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = self.a2a_prefix + "/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
             assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
-            run_path = self.a2a_prefix + "/chat/runs/" + accepted["run_id"]
+            run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 result = self.request("GET", run_path + "?wait_ms=500", token=token)

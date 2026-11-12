@@ -2,15 +2,15 @@
 
 ## Provides
 
-- The A2A control-plane routes at `/api/v1/collaboration/a2a/**`, owned by
-  `v1/a2a`, call the injected `application::v1::a2a::A2aService`. Provider
-  administration and Bot chat/run controls use raw Bearer credentials, outside
-  Gateway Principal and Human invite-code middleware. The application verifies
-  credentials and Actor before resolving a chat target. Every response uses the
-  V1 `code/message/data/request_id` envelope and no-store headers; creation
-  Location stays under this prefix. Framework/path/body/method errors are also
-  enveloped. Card payloads preserve unknown fields. Only configured bypass
-  headers are forwarded; request-supplied Human identity is not trusted.
+- A2A registration and Card management at `/api/v1/collaboration/a2a/**`,
+  owned by `v1/a2a`, call the injected `application::v1::a2a::A2aService`.
+  Provider administration uses raw Provider-admin Bearer credentials, outside
+  Gateway Principal and Human invite-code middleware. The existing management
+  application enforces Provider/resource authorization. Responses use the V1
+  `code/message/data/request_id` envelope and no-store headers; creation Location
+  stays under this prefix. Framework/path/body/method errors are also enveloped.
+  Card payloads preserve unknown fields. Chat and run controls remain exclusively
+  on the legacy `/a2a/...` routes.
 
 - Immutable Draft GET/validate at `/api/v1/collaboration/drafts/**`, outside
   Gateway middleware, using public fixed-revision reads without credentials. The native
@@ -119,7 +119,7 @@ selection, and business policy.
 ## Tests
 
 - `tests/a2a_routes.rs`: V1 routing, envelopes, strict parsing, request IDs,
-  Provider/Bot credential forwarding, safe views and allowlisted headers.
+  Provider-admin credential forwarding, Card views and absent chat/run routes.
 - `tests/boundary_contract.rs`: new A2A namespace belongs to this crate and is
   injected from production bootstrap, with no legacy HTTP dependency.
 
