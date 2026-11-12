@@ -931,7 +931,8 @@ mod tests {
             for step in &plan.steps {
                 let statement = match step {
                     DbTransactionStep::Query(statement) | DbTransactionStep::Execute(statement)
-                    | DbTransactionStep::ExecuteChecked { statement, .. } => {
+                    | DbTransactionStep::ExecuteChecked { statement, .. }
+                    | DbTransactionStep::QueryChecked { statement, .. } => {
                         statement
                     }
                 };

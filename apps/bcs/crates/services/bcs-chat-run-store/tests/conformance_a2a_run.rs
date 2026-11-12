@@ -160,7 +160,7 @@ impl DbPlugin for CountedDb {
     async fn transaction(&self, steps:Vec<bcs_db_api::DbTransactionStep>)->bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
         for step in &steps {
             let statement=match step {bcs_db_api::DbTransactionStep::Query(s)|bcs_db_api::DbTransactionStep::Execute(s)=>s,
-                bcs_db_api::DbTransactionStep::ExecuteChecked {statement,..}=>statement};
+                bcs_db_api::DbTransactionStep::ExecuteChecked {statement,..}|bcs_db_api::DbTransactionStep::QueryChecked{statement,..}=>statement};
             self.calls.lock().unwrap().push(statement.sql().into());
         }
         self.inner.transaction(steps).await

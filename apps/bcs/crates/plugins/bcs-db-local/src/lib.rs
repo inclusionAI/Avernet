@@ -267,7 +267,7 @@ impl DbPlugin for LocalSqliteDbPlugin {
         // Note: acquiring the write lock is bounded by
         // `PRAGMA busy_timeout`, not by the between-step
         // deadline below.
-        let behavior = if steps.iter().all(|step| matches!(step, DbTransactionStep::Query(_))) {
+        let behavior = if steps.iter().all(|step| matches!(step, DbTransactionStep::Query(_) | DbTransactionStep::QueryChecked { .. })) {
             rusqlite::TransactionBehavior::Deferred
         } else {
             rusqlite::TransactionBehavior::Immediate
@@ -289,6 +289,18 @@ impl DbPlugin for LocalSqliteDbPlugin {
                         statement.sql(),
                         &params,
                     )?));
+                }
+                DbTransactionStep::QueryChecked { statement, expected_min_rows } => {
+                    let params = statement.resolve_transaction_params(&results, step_index)?;
+                    let rows = query_with_connection_params(&tx, statement.sql(), &params)?;
+                    let count = u64::try_from(rows.len()).map_err(|_| DbError::Conversion(
+                        "query result count exceeds u64".into(),
+                    ))?;
+                    if count < expected_min_rows {
+                        results.push(DbTransactionStepResult::Rows(rows));
+                        break;
+                    }
+                    results.push(DbTransactionStepResult::Rows(rows));
                 }
                 DbTransactionStep::Execute(statement) => {
                     let params = statement.resolve_transaction_params(&results, step_index)?;
