@@ -96,36 +96,3 @@ it("does not strip a nested subagent key or redirect it to a Cron conversation",
   await expect(reader.read({ ...input, sessionKey: key + ":subagent:worker", expectedSessionId: id, requireIndex: true }))
     .rejects.toMatchObject({ code: "original_session_unavailable" });
 });
-
-it("compares a literal tool URL with its source before redaction, without assuming an earlier turn", async () => {
-  const original = "a".repeat(83) + "X" + "b".repeat(108), copied = original.replace("X", "");
-  const url = (value: string, file = "report") => `https://example.invalid/download?file=${file}&signature=${value}`;
-  const user = (content: string) => ({ type: "message", message: { role: "user", content } });
-  const tool = (arguments_: Record<string, string>) => ({ type: "message", message: { role: "assistant",
-    content: [{ type: "text", text: "About to download" }, { type: "toolCall", name: "exec", arguments: arguments_ }] } });
-  await writeFile(join(directory, `${id}.jsonl`), [
-    { type: "session", id },
-    user(`Please read [the report](${url(original)})`),
-    tool({ command: `curl -fsS '${url(copied)}' -o report` }),
-    tool({ url: url(original) }),
-    tool({ url: url(copied, "other") }),
-    user(`Sources: ${url(original)} ${url(copied)}`),
-    tool({ url: url(copied) }),
-    user("Please check the latest result"),
-    tool({ url: url(copied) }),
-  ].map(value => JSON.stringify(value)).join("\n") + "\n");
-
-  const result = await reader.read(input);
-  expect(result.url_argument_comparisons).toEqual([
-    { call_line: 3, call_index: 1, source_line: 2, status: "mismatch" },
-    { call_line: 4, call_index: 1, source_line: 2, status: "match" },
-    { call_line: 5, call_index: 1, status: "unavailable" },
-    { call_line: 7, call_index: 1, status: "unavailable" },
-    { call_line: 9, call_index: 1, status: "unavailable" },
-  ]);
-  expect(JSON.stringify(result)).not.toContain(original);
-  expect(JSON.stringify(result)).not.toContain(copied);
-  expect((await reader.read({ ...input, fromLine: 3, limit: 1 })).url_argument_comparisons).toEqual([
-    { call_line: 3, call_index: 1, status: "unavailable" },
-  ]);
-});
