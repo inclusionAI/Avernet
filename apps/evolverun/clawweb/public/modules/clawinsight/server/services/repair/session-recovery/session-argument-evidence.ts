@@ -1,7 +1,7 @@
 import { containsSecret, redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
 
 type ObjectValue = Record<string, unknown>;
-type ComparableUrl = { resource: string; credentials: string };
+type ComparableUrl = { original: string; resource: string; credentials: string };
 type Comparison = { call_line: number; call_index: number } & (
   | { status: "match" | "mismatch"; source_line: number }
   | { status: "unavailable" }
@@ -28,7 +28,7 @@ function comparableUrl(text: string): ComparableUrl | undefined {
   if (!credentials.length) return;
   // Sort by key only: the order of repeated resource parameters can be significant.
   const byKey = ([a]: [string, string], [b]: [string, string]) => a < b ? -1 : a > b ? 1 : 0;
-  return { resource: JSON.stringify([url.origin, url.pathname, resource.sort(byKey)]),
+  return { original: text, resource: JSON.stringify([url.origin, url.pathname, resource.sort(byKey)]),
     credentials: JSON.stringify(credentials.sort(byKey)) };
 }
 
@@ -55,16 +55,18 @@ function argumentUrls(value: unknown, depth = 0): ComparableUrl[] {
   });
 }
 
-function uniqueUrls(values: ComparableUrl[]): ComparableUrl[] {
-  return [...new Map(values.map(url => [JSON.stringify([url.resource, url.credentials]), url])).values()];
+function uniqueUrls(values: ComparableUrl[], key: "original" | "normalized"): ComparableUrl[] {
+  return [...new Map(values.map(url => [
+    key === "original" ? url.original : JSON.stringify([url.resource, url.credentials]), url,
+  ])).values()];
 }
 
-function compareCredentials(sources: ComparableUrl[], args: ComparableUrl[]) {
-  if (args.length !== 1) return "unavailable";
-  const [arg] = args;
-  const matches = sources.filter(source => source.resource === arg.resource);
-  if (matches.length !== 1) return "unavailable";
-  return matches[0].credentials === arg.credentials ? "match" : "mismatch";
+function pairUrls(sources: ComparableUrl[], args: ComparableUrl[]) {
+  if (args.length !== 1) return;
+  const [argument] = args;
+  const matches = sources.filter(source => source.resource === argument.resource);
+  if (matches.length !== 1) return;
+  return { source: matches[0], argument };
 }
 
 function decode(value: unknown): unknown {
@@ -82,10 +84,14 @@ export function compareTraceUrlArguments(traceInput: unknown, toolInput: unknown
   let sourceIndex = messages.length - 1;
   while (sourceIndex >= 0 && object(messages[sourceIndex])?.role !== "user") sourceIndex--;
   if (sourceIndex < 0) return { status: "unavailable" } as const;
-  const sources = uniqueUrls(sourceUrls(object(messages[sourceIndex])?.content));
-  const args = uniqueUrls(argumentUrls(decode(toolInput)));
-  const status = compareCredentials(sources, args);
-  return status === "unavailable" ? { status } : { status, source_message_index: sourceIndex };
+  const sources = uniqueUrls(sourceUrls(object(messages[sourceIndex])?.content), "original");
+  const args = uniqueUrls(argumentUrls(decode(toolInput)), "original");
+  const pair = pairUrls(sources, args);
+  if (!pair) return { status: "unavailable" };
+  return {
+    status: pair.source.original === pair.argument.original ? "match" : "mismatch",
+    source_message_index: sourceIndex,
+  };
 }
 
 function compareArguments(evidence: ObjectValue): Comparison[] {
@@ -107,17 +113,22 @@ function compareArguments(evidence: ObjectValue): Comparison[] {
     if (message?.role === "user") {
       // Claude Code encodes tool returns as user-role records as well.
       if (Array.isArray(content) && content.length && content.every(part => part?.type === "tool_result")) continue;
-      sources = uniqueUrls(sourceUrls(content));
+      sources = uniqueUrls(sourceUrls(content), "normalized");
       sourceLine = line;
     }
     if (message?.role !== "assistant" || !Array.isArray(content)) continue;
     for (const [index, part] of content.entries()) {
       if (part?.type !== "toolCall" && part?.type !== "tool_use") continue;
-      const args = uniqueUrls(argumentUrls(part.type === "toolCall" ? part.arguments : part.input));
+      const args = uniqueUrls(argumentUrls(part.type === "toolCall" ? part.arguments : part.input), "normalized");
       if (!args.length) continue;
       const position = { call_line: line, call_index: index };
-      const status = compareCredentials(sources, args);
-      results.push(status === "unavailable" ? { ...position, status } : { ...position, source_line: sourceLine, status });
+      const pair = pairUrls(sources, args);
+      if (pair) {
+        const status = pair.source.credentials === pair.argument.credentials ? "match" : "mismatch";
+        results.push({ ...position, source_line: sourceLine, status });
+      } else {
+        results.push({ ...position, status: "unavailable" });
+      }
       if (results.length === 20) return results;
     }
   }
