@@ -2,7 +2,7 @@ import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
 import { assertEditorWorkflowReadable } from '../editor/workflowWriteGuard'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom'
-import { useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
+import { useCloneWorkflow, useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
 import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
 import ApprovalWorkbench from '../components/workflow-workspace/ApprovalWorkbench'
 import Sidebar, { type WorkspaceView } from '../components/workflow-workspace/Sidebar'
@@ -10,7 +10,7 @@ import OverviewTab from '../components/workflow-workspace/OverviewTab'
 import EditorTab from '../components/workflow-workspace/EditorTab'
 import ManagementTab from '../components/workflow-workspace/ManagementTab'
 import EvolutionTab from '../components/workflow-workspace/EvolutionTab'
-import CreateWorkflowModal from '../components/workflow-workspace/CreateWorkflowModal'
+import CreateWorkflowModal, { type CreateWorkflowSubmitInput } from '../components/workflow-workspace/CreateWorkflowModal'
 import WorkflowPicker from '../components/workflow-workspace/WorkflowPicker'
 import StatusBadge from '../components/StatusBadge'
 import EmptyState from '../components/EmptyState'
@@ -65,6 +65,7 @@ export default function WorkflowWorkspace() {
 
   const { data: workflows, isLoading, isError, error, refetch } = useWorkflowTypes(isAdmin ? undefined : user?.userId)
   const createMutation = useCreateWorkflow()
+  const cloneMutation = useCloneWorkflow()
   const selectedWorkflow = useMemo(() => {
     if (!workflows) return null
     const urlSelection = urlWorkflowId && workflows.some((workflow) => workflow.workflow_id === urlWorkflowId)
@@ -309,7 +310,7 @@ export default function WorkflowWorkspace() {
     selectWorkflow(remaining[0]?.workflow_id ?? '')
   }
 
-  const handleCreate = useCallback(async (input: { workflowId: string; spec: WorkflowSpec; facade?: { command?: string; remark?: string } }) => {
+  const handleCreate = useCallback(async (input: { source: Exclude<CreateWorkflowSubmitInput['source'], 'clone'>; workflowId: string; spec: WorkflowSpec; facade?: { command?: string; remark?: string } }) => {
     if (!user?.userId) throw new Error('无法获取用户信息，请重新登录')
     assertEditorWorkflowReadable(input.workflowId)
     const request = ++transitionRequest.current
@@ -345,6 +346,57 @@ export default function WorkflowWorkspace() {
     }
   }, [createMutation, refetch, searchParams, setSearchParams, user?.userId])
 
+  const handleCloneCreate = useCallback(async (input: {
+    sourceWorkflowId: string
+    workflowId: string
+    title: string
+    facade?: { command?: string; remark?: string }
+  }) => {
+    assertEditorWorkflowReadable(input.workflowId)
+    const request = ++transitionRequest.current
+    const sourceLocation = locationRef.current
+    const approval = beginWorkflowTransition()
+    if (!approval) throw new Error('已取消切换，原草稿仍保留')
+    const otherPacksUnchanged = checkpointOtherPackSessions(input.workflowId)
+    let created = false
+    setTransitionPending(true)
+    try {
+      await cloneMutation.mutateAsync({
+        sourceWorkflowId: input.sourceWorkflowId,
+        targetWorkflowId: input.workflowId,
+        targetTitle: input.title,
+        facade: input.facade,
+      })
+      created = true
+      const { spec: target, databaseSpec, activeDeployNumber } = await readEditorWorkflowSource(input.workflowId)
+      const refreshed = await refetch()
+      if (request !== transitionRequest.current || sourceLocation !== locationRef.current) throw new Error('页面已变化')
+      if (!refreshed.data?.some(workflow => workflow.workflow_id === input.workflowId)) throw new Error('新工作流尚未出现在列表中')
+      if (useEditorStore.getState() !== approval.state || !otherPacksUnchanged()) throw new Error('确认后编辑内容已变化')
+      const creationApproval = { ...approval, packRevision: packVersionsRevision() }
+      const prepared = prepareWorkflowTransition(creationApproval, target, input.workflowId)
+      if (!prepared) throw new Error('目标无效或确认后编辑内容已变化')
+      const committed = commitWorkflowRoute(creationApproval,
+        () => setSearchParams({ workflowId: input.workflowId, tab: 'editor' }),
+        () => commitWorkflowTransition(creationApproval, prepared, input.workflowId, false, databaseSpec, activeDeployNumber),
+        () => setSearchParams(searchParams, { replace: true }))
+      if (!committed) throw new Error('路由或画布状态已变化')
+      setSelectedId(input.workflowId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '请求失败'
+      throw new Error(`${created ? '源工作流内容已创建，但未切换；请勿盲目重试。' : '创建结果未确认，请先检查是否已创建后再重试。'}原草稿仍保留：${message}`)
+    } finally {
+      setTransitionPending(false)
+    }
+  }, [cloneMutation, refetch, searchParams, setSearchParams])
+
+  const submitWorkflowCreate = useCallback(async (input: CreateWorkflowSubmitInput) => {
+    if (input.source === 'clone') {
+      await handleCloneCreate(input)
+      return
+    }
+    await handleCreate(input)
+  }, [handleCloneCreate, handleCreate])
 
   return <WorkspacePopPendingContext.Provider value={pendingWorkspacePop}><div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-50">
     <Sidebar compact={activeView === 'editor'} activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} />
@@ -409,6 +461,6 @@ export default function WorkflowWorkspace() {
       ) : <div className="flex flex-1 items-center justify-center"><EmptyState title="暂无可访问的工作流" description="新建工作流后即可开始任务护航" /></div>}
     </main>
 
-    <CreateWorkflowModal open={createOpen} onClose={() => setCreateOpen(false)} onSubmit={handleCreate} isPending={createMutation.isPending || transitionPending} />
+    <CreateWorkflowModal open={createOpen} onClose={() => setCreateOpen(false)} onSubmit={submitWorkflowCreate} isPending={createMutation.isPending || cloneMutation.isPending || transitionPending} />
   </div></WorkspacePopPendingContext.Provider>
 }
