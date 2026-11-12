@@ -87,10 +87,11 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
   if (pairByKey.size === 0) return bots;
 
   // 逐批 ≤100 组精确身份对；响应按稳定引用（bcn_bot_id，缺失时回退 bot_id:owner_id 复合引用）
-  // 匹配，不按响应数组顺序拼接。匹配到记录的候选回填 owner_name 到卡片 ownerName，
-  // 未匹配记录或 owner_name 空白的候选保持「未公开」。
+  // 匹配，不按响应数组顺序拼接。非空 owner_id 优先于 candidates 的归属判断；
+  // owner_name 单独回填到卡片 ownerName，缺失或空白时保持「未公开」。
   const unavailableReferences = new Set<string>();
   const ownerNameByReference = new Map<string, string>();
+  const ownershipByReference = new Map<string, boolean>();
   try {
     const pairs = [...pairByKey.values()];
     for (let start = 0; start < pairs.length; start += BOT_METADATA_QUERY_CHUNK_SIZE) {
@@ -104,6 +105,7 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
         if (!reference) continue;
         const ownerName = record.owner_name?.trim();
         if (ownerName) ownerNameByReference.set(reference, ownerName);
+        if (ownerId) ownershipByReference.set(reference, Boolean(userId.trim() && ownerId === userId.trim()));
         if (isServiceUnavailableRecord(record)) unavailableReferences.add(reference);
       }
     }
@@ -129,7 +131,16 @@ export async function filterPublicBotsByMetadata<T extends PublicBot>(
       const ownerName =
         (pair ? ownerNameByReference.get(botOwnerKey(pair.bot_id, pair.owner_id)) : undefined) ??
         ownerNameByReference.get(bot.id.trim());
-      // 仅命中非空 owner_name 时生成新对象；其余候选保留原引用与「未公开」默认值。
-      return ownerName ? { ...bot, ownerName } : bot;
+      const ownership =
+        (pair ? ownershipByReference.get(botOwnerKey(pair.bot_id, pair.owner_id)) : undefined) ??
+        ownershipByReference.get(bot.id.trim());
+      // 未匹配 Owner 时保留 candidates 判断；显式 false 必须覆盖先前的 true。
+      const ownershipChanged = ownership !== undefined && ownership !== (bot.isOwnedByLoggedInUser === true);
+      if (!ownerName && !ownershipChanged) return bot;
+      return {
+        ...bot,
+        ...(ownerName ? { ownerName } : {}),
+        ...(ownership !== undefined ? { isOwnedByLoggedInUser: ownership } : {}),
+      };
     });
 }

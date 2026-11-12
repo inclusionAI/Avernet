@@ -28,7 +28,7 @@ function candidateAt(rawIndex: number): BcsCandidateItem {
   };
 }
 
-/** 以 BCS 原始 offset 提供虚拟候选页（固定 100 上限由游标下发）。 */
+/** 以 BCS 原始 offset 提供虚拟候选页（固定 20 上限由游标下发）。 */
 function bcsPageFetcher(total: number, onFetch?: (offset: number) => void): jest.MockedFunction<FetchBcsCandidatePage> {
   return jest.fn(async (actorId: string, query: { offset: number; limit: number }) => {
     void actorId;
@@ -77,6 +77,25 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
     onEnhancementUnavailable.mockClear();
   });
 
+  it.each([
+    [true, 'owner-0', true, 1],
+    [true, 'candidate-owner', false, 1],
+    [false, 'candidate-owner', true, 0],
+    [false, 'owner-0', undefined, 0],
+  ] as const)('页面使用最终归属判断：backendEnabled=%s，userId=%s', async (backendEnabled, userId, expected, metadataRequests) => {
+    const candidate = { ...candidateAt(0), owner_user_id: 'candidate-owner' };
+    const fetchCandidates = jest.fn(async () => ({ items: [candidate], total: 1, offset: 0, limit: 20 }));
+    const fetchMetadata = metadataFetcher([]);
+
+    const result = await readPublicBotPage({
+      actorId: 'selected-bot:other-owner', userId, offset: 0, pageSize: 24,
+      backendEnabled, fetchCandidates, fetchMetadata,
+    });
+
+    expect(result.items[0].isOwnedByLoggedInUser).toBe(expected);
+    expect(fetchMetadata).toHaveBeenCalledTimes(metadataRequests);
+  });
+
   it('metadata 返回 owner_name 时展示项回填 ownerName（不丢失 filter 产出的增强对象）', async () => {
     const fetchCandidates = bcsPageFetcher(10);
     const fetchMetadata = jest.fn(async (userId: string, pairs: { bot_id: string; owner_id: string }[]) => {
@@ -110,7 +129,7 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
   });
 
   it('服务过滤后展示页 24 条、按 BCS 原顺序，nextOffset 指向第 25 条合格记录的原始位置（30），下一页不重叠', async () => {
-    // 候选页 100 条里多条 metadata service,false（原始下标 0..5），下一 BCS 页仍有可展示项（total=200）。
+    // 候选页 20 条里多条 metadata service,false（原始下标 0..5），下一 BCS 页仍有可展示项（total=200）。
     const fetchCandidates = bcsPageFetcher(200);
     const fetchMetadata = metadataFetcher([0, 1, 2, 3, 4, 5]);
 
@@ -133,15 +152,17 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
     expect(result.nextOffset).toBe(30);
     expect(onEnhancementUnavailable).not.toHaveBeenCalled();
 
-    // 上游读：每批固定 ≤100，offset 从 0 开始；显式 signal 透传。
-    expect(fetchCandidates).toHaveBeenCalledTimes(1);
-    expect(fetchCandidates).toHaveBeenCalledWith('human_7', { offset: 0, limit: BCS_CANDIDATE_SCAN_PAGE_SIZE }, signal);
+    // 上游每批 20 条，跨批补齐 24 条展示项及第 25 条预读项；signal 透传。
+    expect(fetchCandidates.mock.calls).toEqual([
+      ['human_7', { offset: 0, limit: 20 }, signal],
+      ['human_7', { offset: 20, limit: 20 }, signal],
+    ]);
 
     // metadata/queries 每批最多 100 对，显式带登录 Human 的 user_id（不用所选 Bot 身份代替）。
-    expect(fetchMetadata).toHaveBeenCalledTimes(1);
+    expect(fetchMetadata).toHaveBeenCalledTimes(2);
     const [userIdArg, pairsArg, signalArg] = fetchMetadata.mock.calls[0];
     expect(userIdArg).toBe('7');
-    expect(pairsArg).toHaveLength(100);
+    expect(pairsArg).toHaveLength(20);
     expect(pairsArg[6]).toEqual({ bot_id: 'assistant', owner_id: 'owner-6' });
     expect(signalArg).toBe(signal);
 
@@ -212,7 +233,7 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
     expect(result.hasMore).toBe(true);
     expect(result.nextOffset).toBe(24);
     expect(fetchMetadata).not.toHaveBeenCalled();
-    expect(fetchCandidates).toHaveBeenCalledTimes(1);
+    expect(fetchCandidates).toHaveBeenCalledTimes(2);
   });
 
   it('无候选与全部候选被过滤完时返回 hasMore=false，不重复扫描同一 offset', async () => {
@@ -245,10 +266,10 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
     });
     expect(filteredAllResult.items).toEqual([]);
     expect(filteredAllResult.hasMore).toBe(false);
-    expect(filteredAllCandidates).toHaveBeenCalledTimes(1);
+    expect(filteredAllCandidates).toHaveBeenCalledTimes(2);
   });
 
-  it('上千条全被过滤的候选：每次上游读 ≤100、扫描受 BCS total 限制，无无限循环', async () => {
+  it('上千条全被过滤的候选：每次上游读 ≤20、扫描受 BCS total 限制，无无限循环', async () => {
     const total = 1024;
     const allFiltered = Array.from({ length: total }, (_, index) => index);
     const fetchCandidates = bcsPageFetcher(total);
@@ -267,18 +288,18 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
 
     expect(result.items).toEqual([]);
     expect(result.hasMore).toBe(false);
-    // 扫描受 total 限制：11 批各读 ≤100 条即自然终止；每批 metadata 一次、每批 ≤100 对。
+    // 扫描受 total 限制：52 批各读 ≤20 条即自然终止；每批 metadata 一次、每批 ≤20 对。
     expect(fetchCandidates).toHaveBeenCalledTimes(Math.ceil(total / BCS_CANDIDATE_SCAN_PAGE_SIZE));
     expect(fetchMetadata).toHaveBeenCalledTimes(Math.ceil(total / BCS_CANDIDATE_SCAN_PAGE_SIZE));
     for (const [, query] of fetchCandidates.mock.calls) {
-      expect(query.limit).toBe(BCS_CANDIDATE_SCAN_PAGE_SIZE);
+      expect(query.limit).toBe(20);
     }
     for (const [, pairs] of fetchMetadata.mock.calls) {
-      expect(pairs.length).toBeLessThanOrEqual(100);
+      expect(pairs.length).toBeLessThanOrEqual(20);
     }
   });
 
-  it('最坏情况记录：前 1000 条全被过滤时，需 11 批上游读才凑满 24 条展示页', async () => {
+  it('最坏情况记录：前 1000 条全被过滤时，需 52 批上游读才凑满 24 条展示页', async () => {
     const total = 1024;
     // 原始下标 0..999 全部 service,false；1000..1023 共 24 条合格记录。
     const serviceFalse = Array.from({ length: 1000 }, (_, index) => index);
@@ -297,19 +318,19 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
       signal,
     });
 
-    // 10 批全过滤（0..999）+ 第 11 批（1000..1023）恰好 24 条合格 → 11 批凑满展示页；
+    // 50 批全过滤（0..999）+ 最后 2 批（1000..1023）恰好 24 条合格 → 52 批凑满展示页；
     // 合格数不足 pageSize+1，hasMore=false。
-    expect(offsetsSeen).toEqual([0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]);
+    expect(offsetsSeen).toEqual(Array.from({ length: 52 }, (_, index) => index * 20));
     expect(result.items.map((bot) => bot.id)).toEqual(expectedIds(1000, 1024));
     expect(result.items).toHaveLength(24);
     expect(result.hasMore).toBe(false);
-    expect(fetchCandidates).toHaveBeenCalledTimes(11);
+    expect(fetchCandidates).toHaveBeenCalledTimes(52);
   });
 
   it('mid-scan AbortSignal 中止扫描：上抛 AbortError，不再继续读下一批', async () => {
     const controller = new AbortController();
     const fetchCandidates = bcsPageFetcher(1024, (offset) => {
-      if (offset === 200) controller.abort();
+      if (offset === 40) controller.abort();
     });
     // 全部候选 service,false：扫描无法在第一批凑页，必须越过第 3 批才会因中止停止。
     const fetchMetadata = metadataFetcher(Array.from({ length: 1024 }, (_, index) => index));
@@ -327,7 +348,7 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
       }),
     ).rejects.toMatchObject({ name: 'AbortError' });
 
-    // 第 3 批（offset=200）后即止：不重复扫描、无无限循环。
+    // 第 3 批（offset=40）后即止：不重复扫描、无无限循环。
     expect(fetchCandidates).toHaveBeenCalledTimes(3);
   });
 
@@ -371,7 +392,7 @@ describe('readPublicBotPage（BCS 原始 offset 游标）', () => {
       },
     );
 
-    // pageSize=150 > 单批 100，保证首个降级批次后继续扫描第二页，验证「继续保留 BCS 候选」
+    // pageSize=150 > 单批 20，保证首个降级批次后继续扫描第二页，验证「继续保留 BCS 候选」
     // 与「同一读取内 metadata 只尝试一次（不重复向不可用服务发请求）」。
     const result = await readPublicBotPage({
       actorId: 'human_7',

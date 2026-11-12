@@ -124,7 +124,8 @@ function isBcsCandidateItem(value: unknown): value is BcsCandidateItem {
     isCandidateVisibility(visibility) &&
     isCandidateVisibility(user_visibility) &&
     (status === 'online' || status === 'hidden') &&
-    typeof candidate.is_friend === 'boolean'
+    typeof candidate.is_friend === 'boolean' &&
+    (candidate.owner_user_id === undefined || typeof candidate.owner_user_id === 'string')
   );
 }
 

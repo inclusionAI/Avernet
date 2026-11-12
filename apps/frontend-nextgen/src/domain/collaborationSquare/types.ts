@@ -136,7 +136,7 @@ export interface PublicBot {
   description: string;
   capabilities: string[];
   relationshipStatus: BotRelationshipStatus;
-  /** entity_id 与登录用户 ID 一致时，表示目标 Bot 归登录用户管理。 */
+  /** Owner 与登录用户 ID 一致：BCS 候选使用 owner_user_id，匹配的 Backend metadata owner_id 优先。 */
   isOwnedByLoggedInUser?: boolean;
   /**
    * 智能搜索命中返回的语义相关度（BCS candidates/search 的 score，仅 semantic 命中携带）。

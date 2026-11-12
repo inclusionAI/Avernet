@@ -27,6 +27,27 @@ npm run check:open-core
 npm run ci
 ```
 
+## Discovery public Bots
+
+The [public Bot cursor](src/services/collaborationSquare/publicBotCursor.ts)
+requests BCS candidates with `limit=20`. This is independent of the UI's 24-item
+batch: filtering and lookahead may require multiple requests, and the next page
+resumes from the original BCS offset without dropping the lookahead item.
+
+The “我的 Bot” badge compares the signed-in user's ID with the candidate's
+`owner_user_id`, not `bot.created_by`. Older services may omit `owner_user_id`;
+the frontend then leaves ownership unconfirmed. When Backend enhancement is
+enabled and a matching metadata record supplies a nonblank `owner_id`, that ID
+takes precedence, including when it clears a candidate's ownership flag. Missing
+metadata or an unavailable enhancement service preserves the candidate-based
+judgment; authentication failures still propagate. Owner names are independent
+of this check. The shared mapping also applies to discovery search results.
+
+Regression coverage lives in
+[`bcsBotMapper.test.ts`](test/domain/collaborationSquare/bcsBotMapper.test.ts),
+[`publicBotMetadata.test.ts`](test/services/collaborationSquare/publicBotMetadata.test.ts)
+and [`publicBotCursor.test.ts`](test/services/collaborationSquare/publicBotCursor.test.ts).
+
 ## Discovery public groups
 
 The [public group card](src/components/CollaborationSquare/GroupCard/index.tsx)
