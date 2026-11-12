@@ -162,7 +162,7 @@ class DiscussionDetailView:
     body: DiscussionDetailBody | None      # 孤儿帖 None（合法领域态）
     replies: list[DiscussionReplyItem]
 ```
-- 投影规则（spec §3.1 权威转写）：标题=`context_spec.objective`；`initiator_id`/`author_id` 取 `PrincipalRef.principal_id`；正文=事件流第一条 `user_interaction.posted`+`Message` 事件（payload 从 `EventRecord.payload["content"]` 读）；replies=其余 Message 事件、**只投影 public**（visibility NULL 按 private 处理）、按表插入序；外 profile Collet → NotFound。
+- 投影规则（spec §3.1 权威转写）：标题=初始事件 payload["objective"]，NULL-payload 外部行回退伴随 `context_spec.objective`（P3 撤列时移除；[创建事实 spec](../2026-11-12-context-collab-l4-creation-event-facts/) §3 裁决 1）；`initiator_id`/`author_id` 取 `PrincipalRef.principal_id`；正文=事件流第一条 `user_interaction.posted`+`Message` 事件（payload 从 `EventRecord.payload["content"]` 读）；replies=其余 Message 事件、**只投影 public**（visibility NULL 按 private 处理）、按表插入序；外 profile Collet → NotFound。
 - DI：`binder.bind(BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService, scope=singleton)`，注释风格沿 MethodStoreProtocol 段；服务构造 `@inject(ContextCollabServiceProtocol, ContextCollabRepositoryProtocol)`。
 
 - [ ] **Step 1: 写失败测试**——夹具沿 Task 2（假仓储或真 SQLite 二选一，照 Task 2 已立模式）：

@@ -27,7 +27,7 @@
 | BBS 概念 | 协议对象 |
 | --- | --- |
 | 帖子（主题帖） | 一个 **Collet**（`collet_id` 即帖子 ID） |
-| 帖子标题 | `ContextSpec.objective`（协议 wire 既有字段，聚合不改） |
+| 帖子标题 | **初始事件 payload 的 `objective`**（读源合同新主，[创建事实 spec](../2026-11-12-context-collab-l4-creation-event-facts/) §3）；列表视图过渡期伴随读（`ContextSpec.objective`，P3 随过滤源升级） |
 | 帖子正文 | **首帖正文事件**：`user_interaction.posted` / `Message` / `public`，payload=正文 |
 | 回帖 | 一条 `user_interaction.posted` / `Message` / `public` 事件（payload=回帖内容） |
 | 楼中楼 | 事件 `parent_event` 指针（指向被回复回帖的 event_id）；**回复主题帖 = `parent_event=None`**（与旧 forum `reply_to_post_id` 为空语义对齐，读投影把 None 解为顶层回帖，首正文事件不参与回复树） |
@@ -80,7 +80,7 @@ context_collab/
 **详情 `get_discussion(collet_id)`**
 
 1. `get_current_status`：不存在/非本 profile → `ContextCollabNotFoundError`；
-2. 组装 `DiscussionDetailView`：`{collet_id, title(objective), body: {event_id, content, author, created_at}(首帖正文事件), replies: [{event_id, content, author, parent_event_id, created_at}, …](扁平有序、不做树形重塑)}`；
+2. 组装 `DiscussionDetailView`：`{collet_id, title=初始事件 payload["objective"]、NULL-payload 外部行回退伴随 context_spec.objective（P3 撤列时移除）, body: {event_id, content, author, created_at}(首帖正文事件), replies: [{event_id, content, author, parent_event_id, created_at}, …](扁平有序、不做树形重塑)}`；
 3. 首帖正文事件的识别：该 Collet 事件流中第一条 primitive_type=Message 的 user_interaction.posted 事件（协议初始事件是 `task.created`/Task，不冲突）；**未经裁决 D 接受窗口态**：正文事件可能不存在（发帖两步的第二步失败且未重试），此时 `body=None` 回 `T | None`（合法领域态：发帖窗口孤儿行），不 422；
 4. 详情只投影 `user_interaction.posted` / Message 事件为回帖列表；同流的私有/工作区事件不在公开讨论产品视图展开（可见性语义待作者裁决 F，本条为默认形态）。
 
@@ -92,7 +92,7 @@ context_collab/
 @dataclass
 class ContextSummaryRecord:
     collet: Collet                      # 六字段聚合根（L4 对齐已定形）
-    context_spec: ContextSpec           # 伴随字段（同 Task 2 record 风格）：objective=标题必须从这里读
+    context_spec: ContextSpec           # 伴随字段（同 Task 2 record 风格）：列表过滤源(product_kind) + 过渡期 title 伴随读（[创建事实 spec](../2026-11-12-context-collab-l4-creation-event-facts/) §3 裁决 2）
     created_at: str                     # gmt_create 列（_base_axes mixin，非 created_at）
 
 def list_collab_contexts_by_product(
