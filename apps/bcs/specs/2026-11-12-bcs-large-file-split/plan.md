@@ -1,12 +1,17 @@
 # Avernet BCS 五个超限 Rust 文件拆分实施计划
 
-- **状态**：draft / 待审阅，尚未开始 Rust 实施。
+- **状态**：实施完成（执行记录见文末「实施执行记录（2026-11-12）」）；集成门禁未全部通过，不标记为完成。
 - **Design**：[五文件设计](spec.md)。
 - **目标**：只在 Avernet `apps/bcs` 内完成 design 的 F1–F5；五个入口和全部本次新增/修改
   Rust 文件 ≤1000 物理行，目标 ≤800，行为和现有契约保持不变。
 - **基线**：`9a61798cb7752308aaa01f8e59d78a46809066cb`；下列映射来自此版本，实施前重新采样。
+  （映射采样自该基线；实际实施在 `b98b580a870050eebcd9d98602d45c9553d1d1e4` 上执行，
+  Task 0 重采确认零漂移，SOURCE_BASE 记录见文末执行记录。）
 - **技术**：当前 workspace 声明的 Rust edition/toolchain、Cargo、nextest 和既有公共 CI。
   不把某次工作机的工具版本或缺失状态写成仓库前置事实。
+
+> 本文的勾选框、逐阶段流程与“预计/约”行数保留**原始计划**形态；实际执行结果、最终行数
+> 和门禁状态以文末「实施执行记录（2026-11-12）」为准。
 
 ## 执行约束与共同验收
 
@@ -505,11 +510,13 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
   原五文件基线检查如预期返回 1；这些是文档内工具的验证，不是产品实现完成。
 - 原稿内部 workspace 方案已被本公共 BCS 方案替代，不能沿用原稿的测试通过/工具环境结论。
 - 本次只修订方案；Rust 实施、实际测试发现、测试执行、覆盖率与 Singlebox 尚未进行。
+  （该节为文档修订时期的验证记录；实际实施结果见下文执行记录。）
 
 ## 实施执行记录（2026-11-12）
 
-- **状态**：实施完成、集成门禁证据待补。尺寸、测试清单、单元测试与 Cargo metadata
-  已在本地通过；arch-check、覆盖率与 Singlebox 结果见文末占位项，完成后补记。
+- **状态**：实施完成；集成门禁未全部通过（unit pass-rate 99.98%、changed-line
+  66.08%、Singlebox 未验收）。尺寸、测试清单、单元测试（四个目标 crate）与 Cargo
+  metadata 已在本地通过；门禁明细见文末「集成门禁」。
 - **基线**：`b98b580a870050eebcd9d98602d45c9553d1d1e4`。实施按 F5 → F4 → F2 → F3 → F1
   推进，每个目标单独提交，未改动 dependencies、Cargo.lock、schema、业务逻辑和测试属性。
 
@@ -565,6 +572,11 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
 根 809 行高于建议的 800 行目标，属于计划已明确接受的例外（设计估算约 880 行，
 实际更小），仍低于 1000 行硬上限；根保留 `task_rpc_scope` 声明与其他共享设施。
 
+计划指定的主题名 `tracing` 会遮蔽 bcs-ws 测试根中的同名 extern crate，因此相对纯移动
+恰有 2 行改为绝对路径：根的 `use ::tracing::instrument::WithSubscriber;` 和
+`frame_compat/diagnostics.rs` 的 `::tracing::dispatcher::get_default`（同一 crate、
+同一符号）；另在 `mod tracing;` 挂载处加 2 行注释说明该遮蔽风险。
+
 **F3 `web_frame_compat`**
 
 | 文件（相对仓库根） | 行数 |
@@ -602,6 +614,10 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
 | `apps/bcs/crates/services/bcs-organization/tests/management/candidates.rs` | 242 |
 | `apps/bcs/crates/services/bcs-organization/tests/management/runtime_membership.rs` | 251 |
 
+挂载位置的既有约定：F2/F3 的 `#[path]` 挂载块放在既有 `mod task_rpc_scope;` /
+`mod support;` 声明旁；F4/F5 根文件没有既有 mod 声明，挂载块位于文件末尾（机械插入
+锚点，已在 Task 1 记录中说明）。
+
 ### 测试清单与映射
 
 - 161 个直接测试一一映射：F2 58、F3 40、F4 37、F5 26；映射表逐行记录
@@ -622,8 +638,10 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
 | `bcs-bot` | 299 passed / 0 failed / 0 ignored |
 | `bcs-organization` | 26 passed / 0 failed / 0 ignored |
 
-合计 1278 passed、0 failed，与 Task 0 基线完全一致（基线记录见
-`$EVIDENCE/cargo-test-totals.txt`）；因此 unit pass rate = 100%。
+以上为**四个目标 crate 的范围**：合计 1278 passed、0 failed，与 Task 0 基线完全一致
+（基线记录见 `$EVIDENCE/cargo-test-totals.txt`）。workspace 全量 unit gate 为
+8237 tests / 8235 passed / 2 failed = **99.98%**；两个预存失败与本工单无关，
+详见「集成门禁 / unit 与覆盖率」。不能把四个 crate 的 100% 当作 workspace 门禁结论。
 
 ### Cargo metadata 与 targets
 
@@ -658,9 +676,96 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
 
 ### 集成门禁
 
-- （待集成门禁完成后补记）arch-check 逐子检查对比、覆盖率、Singlebox 与 artifact verifier。
+门禁在文档提交 `68a6e84af7` 上执行；最终提交只追加本节记录，不改 Rust、配置或
+验收范围，因此按计划无需重跑受影响检查。证据日志均位于 Task 0 的 `$EVIDENCE`。
+
+#### arch-check
+
+`BCS_BASE_REF="$SOURCE_BASE" PR_BODY_FILE="$EVIDENCE/pr-body.md" bash apps/bcs/scripts/ci/arch-check.sh`
+在 HEAD 上 **exit 5**：`Total: 15 Pass: 9 Skip: 1 Fail: 5`，`Score: 55/100`（skip 不计分）。
+同一命令在 `$SOURCE_BASE` 临时 worktree（`b98b580a87`）上也是 **exit 5**，逐子检查状态与
+失败清单一致：
+
+| 检查 | HEAD | 基线 `b98b580a87` | 说明 |
+| --- | --- | --- | --- |
+| DEP-1~8 | FAIL | FAIL | DEP-1 ×2、DEP-6；DEP-8 SKIP（cargo-machete 未安装） |
+| LINT-1 | FAIL | FAIL | 4 处匹配集合相同（adapters/services 源码，非本次文件） |
+| LINT-2 | PASS | PASS | — |
+| LINT-3 | PASS | PASS | — |
+| CFG-1 | PASS | PASS | 159 个 bootstrap config 测试通过 |
+| R10 | PASS | PASS | — |
+| R12 | PASS | PASS | — |
+| LINT-4 | FAIL | FAIL | 10 处命名匹配相同 |
+| TEST-1 | FAIL | FAIL | R25.1/R25.2 清单 194 行，集合相同 |
+| TEST-2 | PASS | PASS | — |
+| PR-1 | PASS | PASS | 未修改契约 crate |
+| WAIVER-1 | PASS | PASS | 从 `apps/bcs` 运行，真正校验而非 SKIP |
+| API-1 | SKIP | SKIP | cargo-public-api 未安装；SKIP 不计为通过 |
+| R25 | FAIL | FAIL | R25.1/R25.2/R25.3，清单集合相同 |
+| BASELINE | PASS | PASS | base=1/1/9，head=1/1/9 |
+
+逐子检查清单按多重集比较：除 `rg` 在另一 worktree 的文件枚举顺序、以及 CFG-1 的
+cargo test 进度/耗时文本外，**没有任何新增失败或新增条目**。聚合 55 分与 exit 5 来自
+既有问题；本次未把 SKIP 当覆盖，也未通过路径排除或豁免判绿。
+
+#### unit 与覆盖率
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `ci_test.sh --fast-fail --coverage --base $SOURCE_BASE --head HEAD` | 100 | 跑到 2550/8237 因 2 个失败 fail-fast 中止 |
+| `ci_test.sh --coverage --base $SOURCE_BASE --head HEAD` | 0（脚本设计：非 fast-fail 不阻断） | 8237 tests：8235 passed、2 failed、67 skipped（99.98%） |
+| `python3 scripts/cov_gate.py --base-ref $SOURCE_BASE ... --pass-rate-min 100 --overall-line-min 87 --changed-line-min 85 --changed-line-min-lines 51` | 1 | 见下 |
+
+`cov_gate.py` 实测：pass-rate 99.98%（<100%，FAIL）；overall line **87.26%**（>87%，OK）；
+changed-line **931/1409 = 66.08%**（<85%，FAIL）。changed 行全部落在 F1 的 8 个生产文件
+（测试文件无 instrumentable 行），是这些既有 handler 的历史覆盖水平被“纯移动”计入
+changed 后暴露出来，不是本次新增逻辑；本次未新增、未删除任何测试。
+
+两个失败均为 `bcs-bot-store::conformance_bot_control_plane_repo` 的
+`cases_2::persistent_capability_save_preserves_patched_internal_attributes` 与
+`cases_3::memory_control_plane_list_by_task_modes_filters_visibility_status_user_visibility`。
+在 `$SOURCE_BASE` worktree 用同一 test target 复现（22 passed / 2 failed，同样两项），
+确认是**基线既有失败**，与本次五个目标 crate 无关；四个受影响 crate 本身仍是
+bcs-http 666、bcs-ws 287+14 ignored、bcs-bot 299、bcs-organization 26，全部通过。
+
+结论：unit 100% 与 changed-line >85% 两项门槛**未通过**；不降低门槛，不把既有失败
+算作本次通过。changed-line 是**确定性的 diff 计算**：PR CI（`unit-tests.yml`）运行
+同一 `cov_gate.py`、同一阈值（>85%、≥51 行），会在**同一提交**上同样失败；要达到 85%
+需再覆盖约 267 行（1409 × 0.85 − 931 ≈ 267），或由 owner 给出显式例外，不能靠“CI
+复验”消除。相较之下，workspace unit pass-rate 的 2 个失败属既有测试问题，仍须在同一
+提交上补齐通过证据，但结果可能随环境不同。Singlebox 才适合“CI 对同一提交补验”。
+另注：E2E changed-line 门槛是 >65%；若其 scope 同为这 1409 行，66.08% 仅高出约 1.08pp。
+本工单不做超出“纯拆分”范围的改动。
+
+#### Singlebox
+
+- 默认 coverage root：`stack_start` exit=1。原因：既有 OpenClaw bot profiles
+  （`ceo`、`product-manager`、`engineering`、`verification`、`customer-service`）属于
+  另一个本地栈，端口/BCS URL/workspace 与本次预期不符；脚本拒绝覆盖。
+- 改用隔离 root（`--coverage-root $EVIDENCE/singlebox-coverage`）后：`stack_start`
+  exit=1，原因是 8000 端口被**本仓库之外另一 checkout 的前端进程**占用；
+  singlebox 脚本拒绝停止外部进程。
+- `verify_singlebox_coverage_artifacts.py` 在两个 root 上均 exit 1（缺少
+  `summary.json` 等必需产物）。
+
+Singlebox 因此列为**未验收（NOT passed）**：属本机环境冲突（陈旧本地栈 + 外部端口占用），
+不是工具缺失或代码失败。需要干净环境（或由用户确认清理隔离 bots 并释放 8000 端口）
+重跑，或由 CI 对同一最终提交补验；未使用任何陈旧（2026-11-06）产物冒充结果。
 
 ### 回滚与范围
 
 回滚按目标文件单元（入口 + 主题文件 + 接线）进行，无 schema/config/数据迁移。
 本计划完成只覆盖这五个文件；其他豁免条目和全仓历史超限文件不受影响。
+
+### 交付清单与最终状态
+
+- 相对 `$SOURCE_BASE` 的范围：**43 个文件 = 40 个 `.rs`（35 新增 + 5 修改）+ 3 个
+  Markdown**（server waiver、plan、spec）。清单见 `$EVIDENCE/task6.inventory.after-docs.txt`。
+- 文档提交：`68a6e84af7`（执行记录与豁免清理）；其后的证据提交只追加本节及门禁结果，
+  不改 Rust、配置或验收范围。
+- **最终状态：实施完成，但集成门禁未全部通过**——unit pass-rate 99.98%（2 个基线既有
+  失败）、changed-line 66.08%（<85%）、Singlebox 未验收。因此本计划不标记为“完成”，
+  也未声明可合并。
+- 未执行 push、未创建 PR（由 controller 在用户确认后处理）；未绕过 hooks，未设置任何
+  门禁旁路环境变量。pushed 之前的最终裁决需要：处理 2 个既有失败与 changed-line 门槛，
+  并在干净环境补 Singlebox 证据。

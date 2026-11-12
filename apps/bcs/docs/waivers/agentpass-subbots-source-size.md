@@ -27,19 +27,25 @@ Base: `1f2014f6cc17cf99eabc45a19afae25a6d2d9af5` (origin/dev, 2026-10-19).
 
 ## Completed entries (split 2026-11-12)
 
-The following entries are no longer an active exception. They were removed from
-the table above after the dedicated responsibility split
-(`apps/bcs/specs/2026-11-12-bcs-large-file-split/`); the recorded base/current
-counts stay in history here, not as a claim about the files now.
+The following rows were removed from the active table after the dedicated
+responsibility split (`apps/bcs/specs/2026-11-12-bcs-large-file-split/`). Their
+base/current counts remain in Git history at commit `68a6e84af7` and its parent
+`e811eac9ca`; this file records only the post-split root line counts.
 
-| File (relative to apps/bcs) | Lines at removal | Split commit |
-| --- | ---: | --- |
-| crates/adapters/http/bcs-http/src/routes/sessions.rs | 245 | e811eac9cadb62b1224e093ab93efcd82d7deee5 |
-| crates/adapters/ws/bcs-ws/tests/frame_compat.rs | 809 | 50e537ae03 |
-| crates/services/bcs-bot/tests/bot_use_cases.rs | 450 | a5cfe9ce45 |
-| crates/services/bcs-organization/tests/management.rs | 190 | 5268a2dae7 |
+| File (relative to apps/bcs) | Before | After | Split commit |
+| --- | ---: | ---: | --- |
+| crates/adapters/http/bcs-http/src/routes/sessions.rs | 2279 | 245 | e811eac9cadb62b1224e093ab93efcd82d7deee5 |
+| crates/adapters/ws/bcs-ws/tests/frame_compat.rs | 3424 | 809 | 50e537ae03 |
+| crates/services/bcs-bot/tests/bot_use_cases.rs | 2299 | 450 | a5cfe9ce45 |
+| crates/services/bcs-organization/tests/management.rs | 1294 | 190 | 5268a2dae7 |
 
-`crates/adapters/ws/bcs-ws/tests/web_frame_compat.rs` was split in the same
-change (624 lines) but had no row in this exception; it is listed only for
-traceability. This does not close the whole waiver: the rows above and the
-client-side record remain in force.
+"Before" is the actual size measured at
+`b98b580a870050eebcd9d98602d45c9553d1d1e4`. Three removed rows carried stale
+"Current lines" values (sessions 2126, frame_compat 3437, bot_use_cases 2097);
+only management (1294) matched then. Those recorded values remain visible at the
+parent commit above and are not reused here.
+
+`crates/adapters/ws/bcs-ws/tests/web_frame_compat.rs` (2840 lines before, now
+624) was split in the same change but had no row in this exception; it is
+listed only for traceability. This does not close the whole waiver: the rows
+above and the client-side record remain in force.
