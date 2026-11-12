@@ -15,3 +15,5 @@ Plan:
 Logs: caller_cron_sessions_request/success/failed record Bot/user/owner/binding, method/route, offset/limit, selected keys/count, elapsed time, and error type. Never log connection credentials or upstream exception text.
 
 Review/QA: test service behavior against controlled adapter responses. No claim of preproduction deployment or validation.
+
+Singlebox regression: exercise the existing independent Caller fixture through live Backend HTTP and the runtime session API, without seeding ownership. Assert missing/pending instance behavior, cron discovery, persisted ownership and underlying-runtime detail/history. Keep the existing expert_chat core coverage floor (61.18%) unchanged.
