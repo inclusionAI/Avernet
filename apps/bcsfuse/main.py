@@ -14,9 +14,9 @@ Usage:
 
 Modes:
     - runtime: Production mode with MySQL + Qdrant + Real HTTP providers
-    - dev: Development mode with SQLite + Qdrant Local + Real HTTP providers
-    - dev_smoke: Dev smoke test mode with SQLite + Qdrant Local + Fake/Noop providers (offline)
-    - test: Test mode with InMemory + Fake/Noop providers
+    - dev: Development mode with SQLite + Qdrant Server + Real HTTP providers
+    - dev_smoke: SQLite + Qdrant Server + Fake/Noop model providers
+    - test: Temporary SQLite + Qdrant Server + Fake/Noop model providers
 
 Environment Variables:
     BCSFUSE_PROVIDER_MODE: Provider mode (default: dev)

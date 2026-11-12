@@ -85,8 +85,14 @@ def storage(context):
             path,
             environment=environment,
         )
-        connection = QdrantConnection.from_mapping(os.environ, default_mode="local")
-        index_path = os.getenv("QDRANT_LOCAL_PATH") or str(default_dir / "tc_qdrant")
+        connection = QdrantConnection.from_mapping(
+            {
+                **os.environ,
+                "QDRANT_URL": os.getenv("QDRANT_URL") or "http://127.0.0.1:6333",
+            },
+            default_mode="server",
+        )
+        index_path = ""
         if not registry.has("fused_profile_store"):
             from app.infra.adapters.sqlite_fused_profile_store import (
                 SQLiteFusedProfileStore,
