@@ -3,8 +3,10 @@ import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
-test.each(['mine', 'other'] as const)('%s lock stays below the name and does not navigate the row', (status) => {
+test.each(['mine', 'other'] as const)('%s lock stays below the name and does not navigate the row', async (status) => {
+  const user = userEvent.setup();
   const bot = {
     ...mapBotDto({
       bot_id: 'team-service-bot',
@@ -23,9 +25,14 @@ test.each(['mine', 'other'] as const)('%s lock stays below the name and does not
     </div>,
   );
   const name = screen.getByText(bot.name);
-  expect(name).toHaveAttribute('title', bot.name);
+  expect(name).not.toHaveAttribute('title');
+  await user.hover(name);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(bot.name);
+  await user.unhover(name);
   expect(within(name.parentElement!).queryByRole('button')).not.toBeInTheDocument();
-  const metadataRow = screen.getByText(bot.entityKey).parentElement!;
+  const entityKey = screen.getByText(bot.entityKey);
+  expect(entityKey).not.toHaveAttribute('title');
+  const metadataRow = entityKey.parentElement!;
   const lockButton = within(metadataRow).getByRole('button', {
     name: status === 'mine' ? `释放锁：${bot.name}` : `抢占 ${bot.name} 的编辑锁`,
   });
