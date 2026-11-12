@@ -16,6 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNodePatch,
     TaskReportCommand,
+    TaskReportEventType,
     TaskReportResult,
     TaskRuntimeProfile,
     task_spec_instruction,
@@ -72,11 +73,30 @@ class TaskServiceRelayMixin:
         幂等:发射前查图 ``_relay_report_event_ids`` ——该 event_id 已有回执 =
         重放上报,跳过发射(apply 自身对重放返回既有结果,不重记账)。预查失败
         best-effort 视为未见过(宁可多发,不可漏观测)。"""
+        self._load_relay_report_action_log(command)
         already_known = self._relay_report_event_known(command)
         result = self._graph.apply_relay_report(command)
         if not already_known and command.trace is not None and command.trace.steps:
             self._emit_trace_step_rows(command)
         return result
+
+    def _load_relay_report_action_log(self, command: TaskReportCommand) -> None:
+        """Hydrate persisted search receipts on the report worker.
+
+        ``load_graph()`` intentionally does not hydrate diagnostic action logs.
+        A successor PLAN_RESULT, however, validates the assignee against the
+        current generation's persisted search receipt.  /search and report can
+        land on different application workers, so the report worker must load
+        the node action history after hydrating the graph and before applying
+        the successor plan.
+        """
+        if (
+            command.event_type != TaskReportEventType.PLAN_RESULT
+            or command.event is None
+        ):
+            return
+        graph = self._graph.query_task_dashboard(command.task_id)
+        self._graph.load_action_logs(graph)
 
     def _relay_report_event_known(self, command: TaskReportCommand) -> bool:
         """该 ``event_id`` 是否已有 relay 回执(= 重放上报)。读图失败 → False
@@ -183,6 +203,8 @@ class TaskServiceRelayMixin:
                 description=str(item.get("bot_desc") or item.get("description") or ""),
                 score=score,
             ))
+        augmentation = self._search_candidate_augmentor.augment(candidates)
+        candidates = list(augmentation.candidates)
         self._graph.append_action_event(
             task_id,
             node_id,
@@ -201,6 +223,8 @@ class TaskServiceRelayMixin:
                     }
                     for candidate in candidates
                 ],
+                "candidate_source": augmentation.candidate_source,
+                "fallback_candidate_count": augmentation.fallback_candidate_count,
                 "raw_item_count": raw.get("raw_item_count"),
                 "failed_keywords": list(raw.get("failed_keywords") or []),
             },

@@ -76,6 +76,10 @@ from agentclaw.community.core.task.task_center.task_service_execution import (
 from agentclaw.community.core.task.task_context.task_context_service import (
     TaskContextServiceProtocol,
 )
+from agentclaw.community.core.task.task_dispatch.candidate_augmentation import (
+    NullSearchCandidateAugmentor,
+    SearchCandidateAugmentor,
+)
 from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
 )
@@ -127,6 +131,7 @@ class TaskService(TaskServiceControlMixin, TaskServiceIntakeMixin, TaskServiceDe
         task_context_service: "TaskContextServiceProtocol | None" = None,
         delivery_intents=None,
         intake_handler=None,
+        search_candidate_augmentor: SearchCandidateAugmentor | None = None,
     ) -> None:
         """Build the facade from graph, execution ports and optional repositories.
 
@@ -154,6 +159,9 @@ class TaskService(TaskServiceControlMixin, TaskServiceIntakeMixin, TaskServiceDe
         self._task_context_service = task_context_service
         self._delivery_intents = delivery_intents
         self._intake_handler = intake_handler
+        self._search_candidate_augmentor = (
+            search_candidate_augmentor or NullSearchCandidateAugmentor()
+        )
         self._centralized_adapter = self._build_centralized_adapter(
             bot=bot, bcs=bcs, discover=discover
         )

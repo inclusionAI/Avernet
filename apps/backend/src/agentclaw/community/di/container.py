@@ -131,6 +131,7 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
+from agentclaw.community.di.modules.temporary_duty_module import TemporaryDutyModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
 )
@@ -243,6 +244,9 @@ def build_injector(
         BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),
+        # Temporary deployment-owned duty fallback candidate fallback. Remove this
+        # module registration together with the implementation when retired.
+        TemporaryDutyModule(),
         TaskConfigModule(),
         DevicesModule(),
         McpModule(),
