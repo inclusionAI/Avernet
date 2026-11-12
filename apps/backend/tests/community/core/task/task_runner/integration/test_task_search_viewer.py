@@ -31,6 +31,7 @@ class _Service(TaskServiceRelayMixin):
             append_action_event=lambda *a, **kw: self.events.append((a, kw))
         )
         self._relay_adapter = SimpleNamespace(search=search)
+        self._temporary_duty_candidates = ()
 
 
 @pytest.mark.asyncio
