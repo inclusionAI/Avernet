@@ -24,12 +24,15 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
     format_relay_execution_instruction,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = logging.getLogger("task.relay")
 
-# Temporary duty-domain fallback. Search quality work is still in progress; once
-# the normal catalog consistently returns duty bots, remove this table and the
-# private fallback helper below with it.
+# Temporary production duty-domain fallback. Search quality work is still in
+# progress; once the normal catalog consistently returns duty bots, remove this
+# table and the private fallback helper below with it. Bot catalogs are
+# environment-isolated, so these production identities must not be injected
+# into the pre catalog.
 _TEMPORARY_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
     BotCandidate(
         bot_id="20260407_025zmn4f:378611",
@@ -200,10 +203,14 @@ class TaskServiceRelayMixin:
         """Apply the temporary duty fallback directly inside search.
 
         This is intentionally one small, removable policy method in the search
-        interface rather than a separate pluggable module.  If normal search
-        already returns one duty bot, keep the search result unchanged so the
-        fallback does not overwhelm relevance ranking.
+        interface rather than a separate pluggable module.  The fallback is
+        production-only: pre has a different Bot catalog and must not receive
+        these production identities.  If normal search already returns one duty
+        bot, keep the search result unchanged so the fallback does not overwhelm
+        relevance ranking.
         """
+        if get_current_env() != "prod":
+            return candidates, "search", 0
         duty_ids = {candidate.bot_id for candidate in self._temporary_duty_candidates}
         if any(candidate.bot_id in duty_ids for candidate in candidates):
             return candidates, "search", 0
