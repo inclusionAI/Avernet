@@ -20,6 +20,7 @@ import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-sha
 import { SessionRecoveryError } from "./errors.js";
 import { parseOwnerHandoffContent } from "./validation.js";
 import { RecoverySessionReader } from "./session-reader.js";
+import { redactSessionReadEvidence } from "./session-argument-evidence.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
@@ -357,7 +358,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         ? message.content.filter((part: { type?: string; text?: string }) => part?.type === "text" && typeof part.text === "string").map((part: { text: string }) => part.text).join("\n") : "";
       return content.includes(marker) ? [{ message_id: record.id ?? record.uuid ?? null, line_no: item.line_no, text: content }] : [];
     });
-    return redactEvidenceValue({ ...evidence, delivery: matches[0] ?? null, delivery_confirmed: matches.length > 0, delivery_matches: matches }) as Record<string, unknown>;
+    return redactSessionReadEvidence({ ...evidence, delivery: matches[0] ?? null, delivery_confirmed: matches.length > 0, delivery_matches: matches }, task.request.target.engine === "CC");
   }
   async trajectoryRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (!this.deps.trajectory) fail(503, "轨迹读取未配置");
