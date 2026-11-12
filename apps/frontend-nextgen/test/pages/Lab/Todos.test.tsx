@@ -187,6 +187,51 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     );
   });
 
+  it('待处理切换回全部时保留条件且不携带状态键', async () => {
+    render(<LabTodosPage />);
+    const toolbar = await screen.findByRole('region', { name: '待办筛选' });
+    const tabs = within(within(toolbar).getByRole('group', { name: '待办状态' })).getAllByRole('button');
+    const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
+    const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
+
+    fireEvent.change(search, { target: { value: '编写' } });
+    fireEvent.click(owner);
+    fireEvent.click(await screen.findByRole('option', { name: '写作助手' }));
+    await waitFor(() => {
+      const latestQuery = mockedService.loadTodos.mock.calls.at(-1)?.[0];
+      expect(latestQuery).toEqual({
+        spaceId: 10,
+        keyword: '编写',
+        botId: 'bot-owned:u-1',
+        page: 1,
+        pageSize: 10,
+      });
+      expect(latestQuery).not.toHaveProperty('status');
+    });
+
+    fireEvent.click(tabs[1]);
+    await waitFor(() =>
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: 'pending', keyword: '编写', botId: 'bot-owned:u-1' }),
+      ),
+    );
+
+    fireEvent.click(tabs[0]);
+    await waitFor(() => {
+      const lastQuery = mockedService.loadTodos.mock.calls.at(-1)?.[0];
+      expect(lastQuery).toEqual({
+        spaceId: 10,
+        keyword: '编写',
+        botId: 'bot-owned:u-1',
+        page: 1,
+        pageSize: 10,
+      });
+      expect(lastQuery).not.toHaveProperty('status');
+    });
+
+    expect(await screen.findByText('编写实施方案')).toBeInTheDocument();
+  });
+
   it('创建待办进入待处理，不在前端自动 Run', async () => {
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');

@@ -71,16 +71,18 @@ export const TODO_ENDPOINTS = {
 };
 
 export function listTodos(query: TodoListQuery) {
+  const listingParams: BackendUnknownRecord = {
+    space_id: query.spaceId,
+    page: query.page,
+    page_size: query.pageSize,
+  };
+  if (query.keyword) listingParams.keyword = query.keyword;
+  if (query.status) listingParams.status = query.status;
+  if (query.botId) listingParams.bot_id = query.botId;
+
   return backendRequest<BackendApiEnvelope<BackendApiPage<TodoDto> | TodoDto[]>>(TODO_ENDPOINTS.list, {
     method: 'GET',
-    params: userScopedParams({
-      space_id: query.spaceId,
-      keyword: query.keyword || undefined,
-      status: query.status,
-      bot_id: query.botId,
-      page: query.page,
-      page_size: query.pageSize,
-    }),
+    params: userScopedParams(listingParams),
     operation: 'list-todos',
     retryOnTransient: true,
   });

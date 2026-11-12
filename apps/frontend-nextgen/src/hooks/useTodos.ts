@@ -38,12 +38,13 @@ export function useTodos() {
     const currentRequestId = ++requestId.current;
     setLoading(true);
     setError(null);
+    const trimmedKeyword = keyword.trim();
     try {
       const result = await loadTodos({
         spaceId: currentSpaceId,
-        keyword: keyword.trim() || undefined,
-        status,
-        botId,
+        ...(trimmedKeyword ? { keyword: trimmedKeyword } : {}),
+        ...(status ? { status } : {}),
+        ...(botId ? { botId } : {}),
         page,
         pageSize,
       });

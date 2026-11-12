@@ -28,6 +28,26 @@ describe('todoController', () => {
     request.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } } as never);
   });
 
+  it('全量查询不下发空筛选键', async () => {
+    await listTodos({
+      spaceId: 10,
+      page: 1,
+      pageSize: 10,
+    });
+
+    expect(request).toHaveBeenCalledWith('/openapi/v1/todos', {
+      method: 'GET',
+      params: {
+        space_id: 10,
+        page: 1,
+        page_size: 10,
+        user_id: 'human-1',
+      },
+      operation: 'list-todos',
+      retryOnTransient: true,
+    });
+  });
+
   it('下发当前用户、空间、状态、负责人和搜索条件', async () => {
     await listTodos({
       spaceId: 10,
@@ -85,7 +105,6 @@ describe('todoController', () => {
       operation: 'create-todo',
     });
   });
-
 
   it('提交验收时下发当前用户', async () => {
     await submitTodoAcceptance('todo/1', {
