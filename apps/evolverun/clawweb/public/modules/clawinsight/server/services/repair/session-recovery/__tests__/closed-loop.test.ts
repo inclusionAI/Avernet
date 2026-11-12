@@ -997,7 +997,8 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
   const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
   read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });
   const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-observe", purpose: "从真实用户轨迹核实触达" });
-  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`, notBeforeMs: receipt.started_at_ms }));
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`,
+    sentMessage: receipt.message, notBeforeMs: receipt.started_at_ms }));
   await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");
