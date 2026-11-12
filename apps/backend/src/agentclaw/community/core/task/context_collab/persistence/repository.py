@@ -13,12 +13,14 @@ Collet CAS 更新;追加不设幂等键,顺序即自增 id,主干在投影层推
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable, Sequence
 from uuid import uuid4
 
 from injector import inject
+from sqlalchemy import func
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -55,6 +57,9 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 # 初始事件对进入 Collet 的主体可见(G4 visibility 白名单内,spec §6.3)。
 _CREATION_EVENT_VISIBILITY = "public"
+
+# 列表读的坏行告警通道(方案 i 保留给单点读,列表跳过时如实留痕)。
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -145,6 +150,12 @@ class ContextCollabRepositoryProtocol(Protocol):
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord: ...
     def append_event(self, collab_context_id: str, request: "AppendEventRecordRequest") -> "EventAppendedRecord": ...
     def get_current_status(self, collab_context_id: str) -> "ContextStatusRecord | None": ...
+    def list_collets_by_product(
+        self, product_kind: str
+    ) -> "list[tuple[Collet, ContextSpec, datetime]]": ...
+    def count_message_events(
+        self, collab_context_ids: "Sequence[str]"
+    ) -> "dict[str, int]": ...
 
 
 def _dump_json(data: dict) -> str:
@@ -422,6 +433,71 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 current_snapshot=snapshot,
                 events=[_event_from_row(event_row) for event_row in event_rows],
             )
+
+    def list_collets_by_product(
+        self, product_kind: str
+    ) -> list[tuple[Collet, ContextSpec, datetime]]:
+        """按 product profile 列 Collet(产品列表读,spec bbs-public-discussion §4)。
+
+        域类型直出,零发明 record:元组三元素 = 聚合根、创建参数
+        (过滤源 + 过渡期 title 伴随)、``gmt_create``。过滤在 Python 侧
+        解 ``context_spec`` JSON 后进行(§6-E 裁决:表小、方言差异大);
+        按 ``gmt_create`` 倒序。**列表容错**:严格解码(``_collet_from_row``
+        抛 ``ContextCollabValidationError``)的外部部分行跳过并告警——
+        单点 ``get_current_status`` 维持方案 i 响亮失败,不动。
+        """
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(ContextCollabColletModel)
+                .filter(ContextCollabColletModel.env == get_current_env())
+                .order_by(ContextCollabColletModel.gmt_create.desc())
+                .all()
+            )
+            listed: list[tuple[Collet, ContextSpec, datetime]] = []
+            for row in rows:
+                try:
+                    collet, spec, _snapshot = _collet_from_row(row)
+                except ContextCollabValidationError as error:
+                    _logger.warning(
+                        "skip undecodable collab context row %s in product "
+                        "listing: %s",
+                        row.collab_context_id,
+                        error,
+                    )
+                    continue
+                if spec.product_kind != product_kind:
+                    continue
+                listed.append((collet, spec, row.gmt_create))
+            return listed
+
+    def count_message_events(
+        self, collab_context_ids: Sequence[str]
+    ) -> dict[str, int]:
+        """按 Collet 计 Message 事件数(GROUP BY 单查询,禁 N+1)。
+
+        键=collab_context_id,值=``primitive_type='Message'`` 事件总数
+        (含首帖正文);请求中没有事件的 id 不出现在结果键里。Task 类
+        控制事件不参与计数。
+        """
+        if not collab_context_ids:
+            return {}
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(
+                    ContextCollabEventModel.collab_context_id,
+                    func.count(ContextCollabEventModel.id),
+                )
+                .filter(
+                    ContextCollabEventModel.collab_context_id.in_(
+                        collab_context_ids
+                    ),
+                    ContextCollabEventModel.primitive_type == "Message",
+                    ContextCollabEventModel.env == get_current_env(),
+                )
+                .group_by(ContextCollabEventModel.collab_context_id)
+                .all()
+            )
+            return {collab_context_id: int(count) for collab_context_id, count in rows}
 
     @staticmethod
     def _collet_row(
