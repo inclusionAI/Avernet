@@ -321,7 +321,7 @@ Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢�
 }
 ```
 
-`reason` 接受 `permission` 或 `configuration`。后者适用于已核实的配置缺项，且补齐后可用受控只读方法验证配置与待续接步骤。配置待办在 `assess` 有本轮消息已受理或投递结果未知时先回收效果。补材料和其他非反馈事项使用普通转交，省略 `owner_request`。使用 `handoff` 时待办直接复用它的问题说明和处理事项；旧包的待办 `summary` 与 `instructions` 仍为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
+`reason` 仅接受 `permission`。补齐配置、补材料和其他非权限事项使用普通转交，省略 `owner_request`。使用 `handoff` 时待办直接复用它的问题说明和处理事项；旧包的待办 `summary` 与 `instructions` 仍为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。历史配置待办保留原类型，已发出的卡片可以继续确认和更新。
 
 新增 Task 可选 `ownerRequest`：后台生成 `requestId`、递增 `revision`、`status=pending|confirmed`，保存 `reason/summary/instructions/evidence_ids/resumePhase/createdAtMs` 和可选 `feedback={userId,text,atMs}`。复用 waiting_owner，无新业务状态、表、上游结果字段或空环境Plan。当前身份和状态留在Task配置；完整内容及反馈走已有详情对象。初始待办不会向上游发最终结果，不声明恢复，也不要求先干预Bot。
 
@@ -341,7 +341,7 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，处理反馈待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
-内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限处理显示“已获取权限，继续任务”，配置补齐显示“已补齐配置，继续核验”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。后端通过 bootstrap 声明 `ownerCooperationProtocol=session-recovery-owner/v1`。仅收到该声明时才可输出 `owner_request`。权限保持兼容，配置另需 `ownerCooperationReasons` 包含 `configuration`。runner 拒绝当前服务未声明的反馈类型。旧服务按其声明选择权限反馈或普通转交。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
+内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限卡显示“已获取权限，继续任务”；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备。后端通过 bootstrap 声明 `ownerCooperationProtocol=session-recovery-owner/v1`，新建待办的 `ownerCooperationReasons` 只包含 `permission`。仅收到该协议声明时才可输出权限类 `owner_request`。
 
 原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅处理反馈待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 

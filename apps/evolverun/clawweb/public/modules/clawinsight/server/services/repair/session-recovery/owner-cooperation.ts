@@ -32,7 +32,7 @@ export function requestOwnerCooperation(state: RecoveryTaskState, input: Recover
   if (state.ownerRequest?.status === "confirmed" && state.requiresFreshObservation) fail(409, "先核验 Owner 反馈后的最新原会话，再确认剩余缺项");
   if (!input || !RECOVERY_OWNER_REQUEST_REASONS.includes(input.reason)
     || [input.summary, input.instructions].some(value => typeof value !== "string" || !value.trim() || value.length > 4000)
-    || containsSecret(JSON.stringify(input)) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) fail(422, "Owner 反馈仅支持权限处理或可核验的配置补齐，需要具体处理事项和现场证据；其他事项请普通转交并省略 owner_request");
+    || containsSecret(JSON.stringify(input)) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) fail(422, "Owner 反馈仅支持权限处理，需要具体处理事项和现场证据；其他事项请普通转交并省略 owner_request");
   validateRecoveryEvidenceReferences(state, input.evidence_ids);
   if (!state.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
     && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) fail(422, "Owner 处理事项必须引用受控现场读取");
