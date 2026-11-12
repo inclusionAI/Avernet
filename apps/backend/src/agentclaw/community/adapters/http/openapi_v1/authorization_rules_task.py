@@ -214,6 +214,13 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
         "interaction history inherits the Todo Space membership check"
     ),
+    ("GET", "/openapi/v1/todos/{todo_id}/artifacts"): NoCheck(
+        "artifact list inherits the Todo Space membership check"
+    ),
+    (
+        "GET",
+        "/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    ): NoCheck("artifact content inherits the Todo Space membership check"),
     ("POST", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
         "human interaction inherits Todo Space and pending-acceptance checks"
     ),

@@ -39,10 +39,7 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
                     request.executor_id, request.executor_owner_id
                 ),
                 message=request.objective,
-                metadata={
-                    "biz_task_id": request.todo_id,
-                    "collab_context_id": request.collab_context_id,
-                },
+                metadata=_runtime_metadata(request),
             )
         except OpenApiBotError as exc:
             raise ContextCollabRuntimeError("Context executor delivery failed") from exc
@@ -64,12 +61,7 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
                     request.executor_id, request.executor_owner_id
                 ),
                 message=request.message,
-                metadata={
-                    "session_id": request.session_id,
-                    "biz_task_id": request.todo_id,
-                    "collab_context_id": request.collab_context_id,
-                    "interaction_event_id": request.interaction_event_id,
-                },
+                metadata=_runtime_metadata(request),
                 message_id=request.interaction_event_id,
             )
         except OpenApiBotError as exc:
@@ -96,6 +88,24 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
             completed_at=payload.get("completed_at"),
             session_id=payload.get("session_id"),
         )
+
+
+def _runtime_metadata(request: ContextCollabRunRequest | ContextCollabResumeRequest) -> dict[str, str]:
+    metadata = {
+        "biz_task_id": request.todo_id,
+        "todo_id": request.todo_id,
+        "collab_context_id": request.collab_context_id,
+        "todo_report_path": f"/api/v1/collaboration/todos/{request.todo_id}/report",
+        "todo_upload_path": f"/api/v1/collaboration/todos/{request.todo_id}/artifacts/object-file",
+    }
+    if isinstance(request, ContextCollabResumeRequest):
+        metadata["session_id"] = request.session_id
+        metadata["interaction_event_id"] = request.interaction_event_id
+    if request.todo_execution_id:
+        metadata["todo_execution_id"] = request.todo_execution_id
+    if request.todo_execution_token:
+        metadata["todo_execution_token"] = request.todo_execution_token
+    return metadata
 
 
 class UnavailableContextCollabRuntimePlugin(ContextCollabRuntimePlugin):

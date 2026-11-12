@@ -39,3 +39,42 @@ CREATE TABLE IF NOT EXISTS `ac_todo_acceptance` (
     UNIQUE KEY `uk_todo_acceptance_tenant_env_id` (`avernet_tenant`, `env`, `acceptance_id`),
     KEY `idx_todo_acceptance_history` (`avernet_tenant`, `env`, `todo_id`, `gmt_create`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='待办验收历史表';
+
+CREATE TABLE IF NOT EXISTS `ac_todo_execution` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `execution_id` varchar(64) NOT NULL,
+    `todo_id` varchar(64) NOT NULL,
+    `collab_context_id` varchar(256) NOT NULL,
+    `run_id` varchar(256) DEFAULT NULL,
+    `token_hash` varchar(64) NOT NULL COMMENT 'SHA-256; plaintext token is never persisted',
+    `status` varchar(32) NOT NULL COMMENT 'active/replaced/completed',
+    `executor_id` varchar(256) NOT NULL,
+    `env` varchar(20) NOT NULL,
+    `avernet_tenant` varchar(64) NOT NULL DEFAULT 'teamclaw',
+    `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_todo_execution_tenant_env_id` (`avernet_tenant`, `env`, `execution_id`),
+    KEY `idx_todo_execution_active` (`avernet_tenant`, `env`, `todo_id`, `status`, `gmt_create`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Todo Bot execution credentials';
+
+CREATE TABLE IF NOT EXISTS `ac_todo_artifact` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `artifact_id` varchar(64) NOT NULL,
+    `todo_id` varchar(64) NOT NULL,
+    `collab_context_id` varchar(256) NOT NULL,
+    `execution_id` varchar(64) NOT NULL,
+    `artifact_name` varchar(256) NOT NULL,
+    `artifact_kind` varchar(32) NOT NULL COMMENT 'text/file/url_link/code',
+    `content` text NOT NULL COMMENT 'Stable metadata JSON; file bytes stay in object storage',
+    `content_hash` varchar(64) NOT NULL,
+    `creator` varchar(256) NOT NULL,
+    `env` varchar(20) NOT NULL,
+    `avernet_tenant` varchar(64) NOT NULL DEFAULT 'teamclaw',
+    `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_todo_artifact_tenant_env_id` (`avernet_tenant`, `env`, `artifact_id`),
+    UNIQUE KEY `uk_todo_artifact_content` (`avernet_tenant`, `env`, `todo_id`, `execution_id`, `content_hash`),
+    KEY `idx_todo_artifact_list` (`avernet_tenant`, `env`, `todo_id`, `gmt_create`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Todo reported artifacts';

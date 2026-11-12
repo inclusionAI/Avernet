@@ -275,3 +275,72 @@ def test_database_write_failure_is_not_swallowed(db):
 
     with pytest.raises(RuntimeError, match="write failed"):
         _create(repo)
+
+
+def test_todo_execution_replaces_previous_active_credential(db):
+    import hashlib
+
+    from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
+        TodoArtifactRepository,
+    )
+    from agentclaw.community.core.task.todos.artifact_models import TodoExecutionStatus
+
+    todo_repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(todo_repo)
+    todo_repo.bind_context_if_pending(todo_id=todo.todo_id, collab_context_id="ctx_1")
+
+    first = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+        token_hash=hashlib.sha256(b"first").hexdigest(),
+        executor_id="bot_1",
+    )
+    second = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+        token_hash=hashlib.sha256(b"second").hexdigest(),
+        executor_id="bot_1",
+    )
+
+    assert artifact_repo.get_execution(execution_id=first.execution_id).status is TodoExecutionStatus.REPLACED
+    assert artifact_repo.get_execution(execution_id=second.execution_id).status is TodoExecutionStatus.ACTIVE
+    assert artifact_repo.get_execution(execution_id=second.execution_id).token_hash != "second"
+
+
+def test_todo_artifact_repository_is_idempotent_and_scopes_artifact_to_todo(db):
+    from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
+        TodoArtifactRepository,
+    )
+    from agentclaw.community.core.task.todos.artifact_models import TodoArtifactKind
+    from agentclaw.community.core.task.todos.errors import TodoArtifactNotFoundError
+
+    todo_repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(todo_repo)
+    other = _create(todo_repo)
+    todo_repo.bind_context_if_pending(todo_id=todo.todo_id, collab_context_id="ctx_1")
+    execution = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+        token_hash="a" * 64,
+        executor_id="bot_1",
+    )
+    values = dict(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+        execution_id=execution.execution_id,
+        artifact_name="summary",
+        artifact_kind=TodoArtifactKind.TEXT,
+        content={"kind": "text", "text": "done"},
+        content_hash="b" * 64,
+        creator="bot_1",
+    )
+
+    first = artifact_repo.create_artifact(**values)
+    second = artifact_repo.create_artifact(**values)
+
+    assert first.artifact_id == second.artifact_id
+    assert artifact_repo.list_artifacts(todo_id=todo.todo_id) == (first,)
+    with pytest.raises(TodoArtifactNotFoundError):
+        artifact_repo.get_artifact(todo_id=other.todo_id, artifact_id=first.artifact_id)

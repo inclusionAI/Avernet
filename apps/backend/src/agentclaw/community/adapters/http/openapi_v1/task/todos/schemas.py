@@ -7,6 +7,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoArtifactKind,
+    TodoArtifactRecord,
+)
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -92,6 +96,33 @@ class TodoArtifactResponse(BaseModel):
     url: str = Field(
         description="Address from which the artifact can be opened or downloaded."
     )
+
+
+class TodoArtifactRecordResponse(BaseModel):
+    """One persisted Todo execution artifact."""
+
+    artifact_id: str
+    todo_id: str
+    execution_id: str
+    artifact_name: str
+    kind: TodoArtifactKind
+    content: dict[str, object]
+    created_at: str
+
+    @classmethod
+    def from_record(cls, record: TodoArtifactRecord) -> "TodoArtifactRecordResponse":
+        content = dict(record.content)
+        if record.artifact_kind is TodoArtifactKind.FILE:
+            content.pop("storage_id", None)
+        return cls(
+            artifact_id=record.artifact_id,
+            todo_id=record.todo_id,
+            execution_id=record.execution_id,
+            artifact_name=record.artifact_name,
+            kind=record.artifact_kind,
+            content=content,
+            created_at=record.created_at.isoformat(),
+        )
 
 
 class TodoEventResponse(BaseModel):

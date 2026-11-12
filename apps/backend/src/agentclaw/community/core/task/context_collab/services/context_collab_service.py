@@ -377,6 +377,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
         self,
         collab_context_id: str,
         context: ActorContext,
+        *,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> ContextCollabRunResultDTO:
         """Start the bound executor, then append the authoritative start event.
 
@@ -424,6 +427,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 objective=collet.context_spec.objective,
                 todo_id=todo_refs[0].resource_id,
                 executor_owner_id=collet.context_spec.executor_owner_id,
+                todo_execution_id=todo_execution_id,
+                todo_execution_token=todo_execution_token,
             )
         )
         payload = {"run_id": runtime_result.run_id}
@@ -461,6 +466,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
         *,
         triggered_by_event_id: str,
         context: ActorContext,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> ContextCollabRunResultDTO:
         """Continue the previous executor session from a Human interaction.
 
@@ -545,6 +552,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 message=message,
                 interaction_event_id=trigger.event_id,
                 executor_owner_id=collet.context_spec.executor_owner_id,
+                todo_execution_id=todo_execution_id,
+                todo_execution_token=todo_execution_token,
             )
         )
         runtime_session_id = runtime_result.session_id or session_id

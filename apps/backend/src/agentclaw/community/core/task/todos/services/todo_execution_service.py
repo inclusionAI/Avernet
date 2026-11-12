@@ -9,6 +9,9 @@ from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.task.todos.artifact_service_protocol import (
+    TodoArtifactServiceProtocol,
+)
 from agentclaw.community.core.task.todos.bot_scope import (
     require_todo_bot_owner_id,
     resolve_todo_bot,
@@ -56,11 +59,13 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
         collaboration: TodoCollaborationPlugin,
+        artifacts: TodoArtifactServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
         self._collaboration = collaboration
+        self._artifacts = artifacts
 
     async def dispatch_pending(
         self,
@@ -93,10 +98,22 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             owner_id=owner_id,
         )
         if context.status == _CONTEXT_CREATED:
+            credential = self._artifacts.issue_execution(
+                todo_id=todo.todo_id,
+                collab_context_id=context.collab_context_id,
+                executor_id=todo.bot_id,
+            )
             context = await self._collaboration.run_context(
                 collab_context_id=context.collab_context_id,
                 actor_id=todo.created_by,
+                todo_execution_id=credential.execution_id,
+                todo_execution_token=credential.token,
             )
+            if context.run_id:
+                self._artifacts.bind_run_id(
+                    execution_id=credential.execution_id,
+                    run_id=context.run_id,
+                )
             if context.status not in {_CONTEXT_IN_PROGRESS, _CONTEXT_DONE}:
                 raise TodoStateConflictError(
                     "Todo Context remained in unexpected state after run: "
@@ -139,11 +156,23 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
                 "Interacting Todo has inconsistent Context state "
                 f"{context.status}"
             )
+        credential = self._artifacts.issue_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=todo.collab_context_id,
+            executor_id=todo.bot_id,
+        )
         context = await self._collaboration.resume_context(
             collab_context_id=todo.collab_context_id,
             actor_id=actor_id,
             triggered_by_event_id=triggered_by_event_id,
+            todo_execution_id=credential.execution_id,
+            todo_execution_token=credential.token,
         )
+        if context.run_id:
+            self._artifacts.bind_run_id(
+                execution_id=credential.execution_id,
+                run_id=context.run_id,
+            )
         if context.status != _CONTEXT_IN_PROGRESS:
             raise TodoStateConflictError(
                 f"Context resume returned unexpected state {context.status}"

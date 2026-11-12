@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -29,6 +30,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.api.task.todo_artifact_service import (
+    TodoArtifactServiceProtocol,
+)
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
@@ -40,6 +44,7 @@ from .schemas import (
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
+    TodoArtifactRecordResponse,
     TodoEventResponse,
     TodoResponse,
     TodoStatusSchema,
@@ -258,3 +263,61 @@ async def submit_todo_acceptance(
         message=body.message,
     )
     return envelope(TodoResponse.from_record(result), request)
+
+
+@router.get(
+    "/{todo_id}/artifacts",
+    response_model=Envelope[list[TodoArtifactRecordResponse]],
+)
+@envelope_errors
+async def list_todo_artifacts(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoArtifactServiceProtocol = Injected(TodoArtifactServiceProtocol),
+) -> Envelope[list[TodoArtifactRecordResponse]]:
+    """List independently persisted execution artifacts for one visible Todo."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    records = await run_in_threadpool(
+        service.list_artifacts,
+        todo_id=todo_id,
+        actor_id=actor_id,
+    )
+    return envelope(
+        [TodoArtifactRecordResponse.from_record(record) for record in records],
+        request,
+    )
+
+
+@router.get("/{todo_id}/artifacts/{artifact_id}/content")
+@envelope_errors
+async def read_todo_artifact_content(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    artifact_id: Annotated[str, Path(description="Todo artifact identifier.")],
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    disposition: Literal["inline", "attachment"] = Query(default="attachment"),
+    service: TodoArtifactServiceProtocol = Injected(TodoArtifactServiceProtocol),
+) -> Response:
+    """Proxy one file artifact for browser preview or download."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    download = await run_in_threadpool(
+        service.read_file,
+        todo_id=todo_id,
+        artifact_id=artifact_id,
+        actor_id=actor_id,
+    )
+    content = download.record.content
+    file_name = str(content.get("file_name") or "artifact.bin")
+    file_type = str(content.get("file_type") or "application/octet-stream")
+    return Response(
+        content=download.payload,
+        media_type=file_type,
+        headers={
+            "Content-Disposition": (
+                f"{disposition}; filename*=UTF-8''{quote(file_name)}"
+            ),
+            "Content-Length": str(len(download.payload)),
+        },
+    )

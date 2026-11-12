@@ -27,6 +27,8 @@ class ContextCollabRunRequest:
     objective: str
     todo_id: str
     executor_owner_id: str | None = None
+    todo_execution_id: str | None = None
+    todo_execution_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class ContextCollabResumeRequest:
     message: str
     interaction_event_id: str
     executor_owner_id: str | None = None
+    todo_execution_id: str | None = None
+    todo_execution_token: str | None = None
 
 
 @dataclass(frozen=True)

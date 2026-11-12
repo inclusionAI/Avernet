@@ -145,6 +145,7 @@ from agentclaw.community.adapters.http.service_bot.router_file_count import rout
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.task.context_collab import router as context_collab_router  # noqa: E402
+from agentclaw.community.adapters.http.task.todo_artifact_routes import router as todo_artifact_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
@@ -373,6 +374,13 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     SkillSetRuntimeReconcileError: 500,
     _TodoErrors.TodoNotFoundError: 404, _TodoErrors.TodoStateConflictError: 409,
     _TodoErrors.TodoBotScopeError: 403, _TodoErrors.TodoBotAmbiguousError: 409,
+    _TodoErrors.TodoExecutionAuthError: 401,
+    _TodoErrors.TodoArtifactNotFoundError: 404,
+    _TodoErrors.TodoArtifactContentError: 422,
+    _TodoErrors.TodoArtifactUploadTooLargeError: 413,
+    _TodoErrors.TodoArtifactObjectNotFoundError: 404,
+    _TodoErrors.TodoArtifactStorageNotConfiguredError: 503,
+    _TodoErrors.TodoArtifactStorageError: 502,
     **ACLI_CLI_ERROR_STATUS,
     **CONTEXT_COLLAB_ERROR_STATUS,
 
@@ -898,6 +906,7 @@ app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
 app.include_router(context_collab_router)  # /api/v1/collaboration/task/context_collab — BBS context collab (spec §6.1)
+app.include_router(todo_artifact_router)
 app.include_router(work_orders_http_router)
 app.include_router(agentswarm_router_module.router)
 agentswarm_router_module.register_exception_handlers(app)

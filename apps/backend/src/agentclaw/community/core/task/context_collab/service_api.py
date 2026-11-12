@@ -138,6 +138,9 @@ class ContextCollabServiceProtocol(Protocol):
         self,
         collab_context_id: str,
         context: ActorContext,
+        *,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> ContextCollabRunResultDTO: ...
     async def resume_context(
         self,
@@ -145,6 +148,8 @@ class ContextCollabServiceProtocol(Protocol):
         *,
         triggered_by_event_id: str,
         context: ActorContext,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> ContextCollabRunResultDTO: ...
     async def refresh_run(
         self,

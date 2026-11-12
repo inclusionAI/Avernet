@@ -70,6 +70,7 @@ class TodoCollaborationContext:
     context_version: int
     current_event_id: str | None
     events: tuple[TodoCollaborationEvent, ...] = ()
+    run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,12 @@ class TodoCollaborationPlugin(Plugin, Protocol):
         ...
 
     async def run_context(
-        self, *, collab_context_id: str, actor_id: str
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> TodoCollaborationContext:
         """Start the configured executor and return the refreshed Context."""
         ...
@@ -120,6 +126,8 @@ class TodoCollaborationPlugin(Plugin, Protocol):
         collab_context_id: str,
         actor_id: str,
         triggered_by_event_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> TodoCollaborationContext:
         """Continue the prior executor session from a Human interaction event."""
         ...

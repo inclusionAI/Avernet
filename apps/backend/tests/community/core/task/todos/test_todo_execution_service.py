@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from agentclaw.community.core.spaces.models import SpaceType
+from agentclaw.community.core.task.todos.artifact_models import TodoExecutionCredential
 from agentclaw.community.core.task.todos.errors import (
     TodoBotScopeError,
     TodoStateConflictError,
@@ -157,9 +158,11 @@ class _Collaboration:
         self.refreshed_context = refreshed_context
         self.create_calls: list[Any] = []
         self.get_calls: list[tuple[str, str]] = []
-        self.run_calls: list[tuple[str, str]] = []
+        self.run_calls: list[tuple[str, str, str | None, str | None]] = []
         self.refresh_calls: list[tuple[str, str]] = []
-        self.resume_calls: list[tuple[str, str, str]] = []
+        self.resume_calls: list[
+            tuple[str, str, str, str | None, str | None]
+        ] = []
 
     def create_context(self, request):
         self.create_calls.append(request)
@@ -170,8 +173,22 @@ class _Collaboration:
         self.get_calls.append((collab_context_id, actor_id))
         return self.contexts[collab_context_id]
 
-    async def run_context(self, *, collab_context_id: str, actor_id: str):
-        self.run_calls.append((collab_context_id, actor_id))
+    async def run_context(
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
+    ):
+        self.run_calls.append(
+            (
+                collab_context_id,
+                actor_id,
+                todo_execution_id,
+                todo_execution_token,
+            )
+        )
         context = replace(self.contexts[collab_context_id], status="in_progress")
         self.contexts[collab_context_id] = context
         return context
@@ -188,11 +205,46 @@ class _Collaboration:
         collab_context_id: str,
         actor_id: str,
         triggered_by_event_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ):
-        self.resume_calls.append((collab_context_id, actor_id, triggered_by_event_id))
+        self.resume_calls.append(
+            (
+                collab_context_id,
+                actor_id,
+                triggered_by_event_id,
+                todo_execution_id,
+                todo_execution_token,
+            )
+        )
         context = replace(self.contexts[collab_context_id], status="in_progress")
         self.contexts[collab_context_id] = context
         return context
+
+
+
+class _Artifacts:
+    def __init__(self) -> None:
+        self.issue_calls: list[dict[str, str]] = []
+        self.bind_calls: list[dict[str, str]] = []
+
+    def issue_execution(
+        self, *, todo_id: str, collab_context_id: str, executor_id: str
+    ) -> TodoExecutionCredential:
+        self.issue_calls.append(
+            {
+                "todo_id": todo_id,
+                "collab_context_id": collab_context_id,
+                "executor_id": executor_id,
+            }
+        )
+        return TodoExecutionCredential(
+            execution_id=f"todoexec_{len(self.issue_calls)}",
+            token=f"token_{len(self.issue_calls)}",
+        )
+
+    def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
+        self.bind_calls.append({"execution_id": execution_id, "run_id": run_id})
 
 
 def _service(
@@ -223,7 +275,8 @@ def _service(
         created_context=created_context,
         refreshed_context=refreshed_context,
     )
-    service = TodoExecutionService(repository, access, bots, collaboration)
+    artifacts = _Artifacts()
+    service = TodoExecutionService(repository, access, bots, collaboration, artifacts)
     return service, repository, access, bots, collaboration
 
 
@@ -250,7 +303,9 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
     assert request.executor_owner_id == "bot_owner_1"
     assert request.objective == "Detailed objective"
     assert request.todo_id == "todo_1"
-    assert collaboration.run_calls == [("context_created", "creator_1")]
+    assert collaboration.run_calls == [
+        ("context_created", "creator_1", "todoexec_1", "token_1")
+    ]
     assert repository.calls[-1] == (
         "transition",
         "todo_1",
@@ -279,7 +334,13 @@ async def test_resume_interaction_reuses_context_for_claimed_todo():
     assert result.status is TodoStatus.IN_PROGRESS
     assert collaboration.get_calls == [("context_1", "creator_1")]
     assert collaboration.resume_calls == [
-        ("context_1", "creator_1", "event_interaction")
+        (
+            "context_1",
+            "creator_1",
+            "event_interaction",
+            "todoexec_1",
+            "token_1",
+        )
     ]
     assert all(call[0] != "transition" for call in repository.calls)
 

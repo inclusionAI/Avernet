@@ -5,22 +5,39 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import Any
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.core.repository.implementations.task.todos import (
+    TodoArtifactRepository,
     TodoRepository,
+)
+from agentclaw.community.core.repository.protocols.task.todo_artifacts import (
+    TodoArtifactRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
+    TaskArtifactObjectStoragePlugin,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage_config import (
+    TaskArtifactStorageConfig,
+)
+from agentclaw.community.core.task.todos.artifact_service_protocol import (
+    TodoArtifactServiceProtocol,
 )
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
+from agentclaw.community.core.task.todos.services.todo_artifact_service import (
+    TodoArtifactService,
+)
 from agentclaw.community.core.task.todos.services.todo_execution_service import (
     TodoExecutionService,
 )
@@ -44,6 +61,11 @@ class TodoModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
+        binder.bind(
+            TodoArtifactRepositoryProtocol,
+            to=TodoArtifactRepository,
+            scope=singleton,
+        )
         binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
         binder.bind(
             TodoExecutionServiceProtocol,
@@ -113,6 +135,30 @@ class TodoModule(Module):
                 f"({config.heartbeat} >= {config.lock_ttl})"
             )
         return config
+
+    @singleton
+    @provider
+    @inject
+    def todo_artifact_service(
+        self,
+        repository: TodoRepositoryProtocol,
+        artifact_repository: TodoArtifactRepositoryProtocol,
+        space_access: SpaceAccessServiceProtocol,
+        storage_config: TaskArtifactStorageConfig,
+        injector: Injector,
+    ) -> TodoArtifactServiceProtocol:
+        storage: TaskArtifactObjectStoragePlugin | None = None
+        try:
+            storage = injector.get(TaskArtifactObjectStoragePlugin)
+        except Exception:  # noqa: BLE001 -- optional storage seam may be unbound
+            storage = None
+        return TodoArtifactService(
+            repository=repository,
+            artifact_repository=artifact_repository,
+            space_access=space_access,
+            storage=storage,
+            storage_config=storage_config,
+        )
 
     @singleton
     @provider
