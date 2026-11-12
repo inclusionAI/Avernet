@@ -1,0 +1,21 @@
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/tasks.md
+  s_a5600e99ae94e6::t_344f2badacba95 27
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/validation.md
+  s_a5600e99ae94e6::t_344f2badacba95 104-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "362d9923467460574e4052f4f1484052636f5f48",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}
