@@ -489,10 +489,13 @@ async def test_bare_forwarder_creates_and_closes_own_client() -> None:
 
 # ── retry tests ──────────────────────────────────────────────────────────
 
+
 class _FlakyTransport(httpx.AsyncBaseTransport):
     """Fails the first *failures* calls, then succeeds."""
 
-    def __init__(self, failures: int, error: type[Exception] = httpx.ConnectError) -> None:
+    def __init__(
+        self, failures: int, error: type[Exception] = httpx.ConnectError
+    ) -> None:
         self._failures = failures
         self._error = error
         self.attempts = 0
@@ -501,7 +504,9 @@ class _FlakyTransport(httpx.AsyncBaseTransport):
         self.attempts += 1
         if self.attempts <= self._failures:
             raise self._error(f"simulated failure {self.attempts}", request=request)
-        return httpx.Response(200, request=request, stream=_RecordingResponseStream([b"ok"]))
+        return httpx.Response(
+            200, request=request, stream=_RecordingResponseStream([b"ok"])
+        )
 
 
 class _AlwaysFailingTransport(httpx.AsyncBaseTransport):
