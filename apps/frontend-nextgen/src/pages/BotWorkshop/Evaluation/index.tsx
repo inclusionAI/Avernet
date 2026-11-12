@@ -3,12 +3,14 @@ import { EvaluationHistoryCard } from '@/components/BotWorkshop/ServiceBotEvalua
 import { EvaluationSubmissionCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard';
 import { evaluationStatusLabel } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
 import { Badge } from '@/components/ui/Badge';
+import { Empty } from '@/components/ui/Empty';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import { Textarea } from '@/components/ui/Textarea';
+import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
 import { history, useParams, useSearchParams } from '@umijs/max';
 import { RefreshCw } from 'lucide-react';
@@ -28,7 +30,8 @@ const EvaluationPage: React.FC = () => {
   const botId = params.botId ?? '';
   const botVersion = params.botVersion ?? '';
   const ownerId = searchParams.get('owner_id') ?? undefined;
-  const evaluation = useServiceBotEval(botId, botVersion, ownerId);
+  const requestIdentity = useBotWorkshopRequestIdentity();
+  const evaluation = useServiceBotEval(botId, botVersion, ownerId, requestIdentity.ready);
   const detail = evaluation.detail as Record<string, any> | undefined;
   const tabs = detail?.tabs as
     | Record<string, { enabled?: boolean; visible?: boolean; visible_reason?: string }>
@@ -81,6 +84,30 @@ const EvaluationPage: React.FC = () => {
 
   const certStatus = String(certState?.cert_status ?? '');
   const certResult = certState?.cert_result as string | null | undefined;
+
+  if (requestIdentity.loading) {
+    return (
+      <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
+        <div className="flex h-full items-center justify-center">
+          <Spin tip="正在获取当前用户身份…" />
+        </div>
+      </main>
+    );
+  }
+
+  if (!requestIdentity.ready) {
+    return (
+      <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
+        <div className="flex h-full items-center justify-center px-6">
+          <Empty
+            title="无法加载用户身份"
+            description={requestIdentity.error ?? '当前用户身份不可用'}
+            action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 管理</Button>}
+          />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
@@ -156,10 +183,17 @@ const EvaluationPage: React.FC = () => {
                         已有评测样本集和结果报告时，可直接上传并提交认证审核。
                       </p>
                       <div className="grid gap-3 md:grid-cols-2">
-                        <EvalFileInput label="评测样本集" file={sampleFile} onSelect={setSampleFile} />
+                        <EvalFileInput
+                          label="评测样本集"
+                          accept=".jsonl,.csv,.xls,.xlsx"
+                          supportedFileTypes="JSONL、CSV、Excel"
+                          file={sampleFile}
+                          onSelect={setSampleFile}
+                        />
                         <EvalFileInput
                           label="评测结果报告"
-                          accept=".json,.pdf,.md"
+                          accept=".html,.htm,.md,.markdown,.json,.txt,.pdf,.xls,.xlsx,.doc,.docx"
+                          supportedFileTypes="HTML、Markdown、JSON、TXT、PDF、Excel、Word"
                           file={reportFile}
                           onSelect={setReportFile}
                         />

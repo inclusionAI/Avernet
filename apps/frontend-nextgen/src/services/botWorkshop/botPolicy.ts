@@ -31,6 +31,24 @@ export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boole
 }
 
 /**
+ * 服务 Bot 历史评测记录入口只对具有编辑权限的当前用户开放。
+ *
+ * Draft 卡片由生命周期动作直接给出 EDIT；在线发布卡片出于权限最小化不一定
+ * 暴露 EDIT，但显式协作者会持有 VIEW_CONFIG 站位。Owner 以 owner_id 判定。
+ */
+export function canOpenServiceBotEvalHistory(
+  bot: BotDomain,
+  currentUserId?: string,
+): boolean {
+  if (!currentUserId || bot.serviceMode !== 'service') return false;
+  return (
+    bot.ownerId === currentUserId ||
+    bot.actions.includes('edit') ||
+    bot.actions.includes('view_config')
+  );
+}
+
+/**
  * TeamClaw's managed chat directory only exposes online service bots. For a
  * service Coding Bot that is still draft/prestable, AIXCoding owns the usable
  * runtime and is reached through its standalone route instead.
