@@ -161,14 +161,12 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
                 logger.debug(
                     "[TeclawDeviceFileSystem.read_file] not found: %s", file_path
                 )
-            else:
-                logger.error(
-                    "[TeclawDeviceFileSystem.read_file] HTTP %d: %s",
-                    e.response.status_code, file_path,
-                )
-                if preserve_read_errors:
-                    raise
-            return None
+                return None
+            logger.error(
+                "[TeclawDeviceFileSystem.read_file] HTTP %d: %s",
+                e.response.status_code, file_path,
+            )
+            raise
         except Exception as e:
             logger.error("[TeclawDeviceFileSystem.read_file] error: %s", e)
             if preserve_read_errors:
