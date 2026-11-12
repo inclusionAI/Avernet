@@ -20,10 +20,11 @@ const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 const CRON_WAIT_MS = 5 * 60 * 1000;
 
 function sameRecoveryRequest(stored: RecoveryRequest, incoming: RecoveryRequest): boolean {
-  const { trace_id: storedTrace, ...storedRequest } = stored;
-  const { trace_id: incomingTrace, ...incomingRequest } = incoming;
-  // A diagnostic delivered before trace IDs were persisted can still be retried after rollout.
+  const { trace_id: storedTrace, fault_at_ms: storedFaultAt, ...storedRequest } = stored;
+  const { trace_id: incomingTrace, fault_at_ms: incomingFaultAt, ...incomingRequest } = incoming;
+  // A diagnostic delivered before these evidence hints were persisted can still be retried.
   return (!storedTrace || !incomingTrace || storedTrace === incomingTrace)
+    && (storedFaultAt === undefined || incomingFaultAt === undefined || storedFaultAt === incomingFaultAt)
     && JSON.stringify(storedRequest) === JSON.stringify(incomingRequest);
 }
 

@@ -9,6 +9,7 @@ export type RecoveryRequest = {
   session_key: string;
   session_id?: string;
   trace_id?: string;
+  fault_at_ms?: number;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;

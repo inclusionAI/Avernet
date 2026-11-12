@@ -94,6 +94,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 | `session_key` | 是 | 发生故障、需要继续的原会话键；不是会话名称或 `session_id`。 |
 | `session_id` | 否 | 上游确认的物理会话 ID，只允许字母、数字、下划线和连字符。用于固定原会话文件，不替代 `session_key`。OpenClaw Cron 键若包含 `:run:<id>`，两者必须一致。 |
 | `trace_id` | 否 | 上游诊断所指的故障轮次 ID，支持 1–128 位字母、数字、下划线或连字符。TE 初评据此查找故障轮次。 |
+| `fault_at_ms` | 否 | 原故障时间（正整数 Unix 毫秒）。OC 自动触发沿用上报的 `occurredAt`，用于初评列表补查。 |
 | `delivery_key` | 是 | 本次尝试的唯一投递键。同一次请求重试复用，新尝试换新键。 |
 | `diagnosis` | 是 | 脱敏诊断摘要，最多 8000 字符。 |
 | `error_location` | 否 | 错误的具体位置，例如消息 ID、文件行号或工具调用位置。供 Agent 读取原故障证据。 |
