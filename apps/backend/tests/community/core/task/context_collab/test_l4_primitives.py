@@ -145,7 +145,7 @@ def test_context_spec_round_trip_with_executor_and_optional_profiles():
 @pytest.mark.parametrize(
     "data",
     [
-        {**SPEC_DICT, "method_kind": "Swarm"},
+        {**SPEC_DICT, "method_kind": "swarm"},
         {**SPEC_DICT, "method_kind": ""},
         {**SPEC_DICT, "objective": ""},
         {**SPEC_DICT, "space": {}},
@@ -201,7 +201,7 @@ def test_current_snapshot_from_dict_rejects_unknown_status(bad):
 @pytest.mark.parametrize(
     "data",
     [
-        {**SNAPSHOT_DICT, "method_kind": "Swarm"},
+        {**SNAPSHOT_DICT, "method_kind": "swarm"},
         {**SNAPSHOT_DICT, "objective": ""},
         {**SNAPSHOT_DICT, "progress": None},
     ],

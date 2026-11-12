@@ -29,6 +29,9 @@ import agentclaw.community.core.task.context_collab.persistence.models  # noqa: 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     StructuralContextCollabAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
@@ -122,6 +125,7 @@ def client_world():
     service = RecordingContextCollabService(
         ContextCollabService(
             repository=ContextCollabRepository(InMemorySqliteDB(engine)),
+            method_store=InMemoryMethodStore(),
             authorizer=StructuralContextCollabAuthorizer(),
         )
     )

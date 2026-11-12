@@ -140,13 +140,14 @@ class ContextSpec(BaseModel):
     )
     product_kind: str | None = Field(
         default=None,
-        description="Optional L6 product kind, e.g. team_todo or "
-        "public_discussion.",
+        description="Optional L6 product kind, e.g. team_todo, "
+        "public_discussion, bbs_public_discussion, or bbs_help_request.",
     )
     workflow_kind: str | None = Field(
         default=None,
-        description="Optional L6 workflow kind; stored as a plain string, no "
-        "profile table is created.",
+        description="Optional L6 workflow kind, e.g. team_todo_execution, "
+        "bbs_public_discussion, or bbs_help_request_goal; stored as a plain "
+        "string, no profile table is created.",
     )
     method_kind: str = Field(
         min_length=1,

@@ -43,6 +43,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
@@ -215,7 +218,10 @@ class _FakeContextCollabRepository:
 def _make_service(**command_overrides):
     repo = _FakeContextCollabRepository()
     assert isinstance(repo, ContextCollabRepositoryProtocol)
-    service = ContextCollabService(repository=repo)
+    service = ContextCollabService(
+            method_store=InMemoryMethodStore(),
+            repository=repo,
+ )
     assert isinstance(service, ContextCollabServiceProtocol)
     created = service.create_context(
         make_create_command(**command_overrides), make_actor()
@@ -490,7 +496,7 @@ class TestAppendEventRejections:
         repo, service, created = _make_service()
         outsider = make_actor("human", "u_9999")
         command = make_append_command("task.started", actor_ref=outsider.actor)
-        with pytest.raises(ContextCollabValidationError, match="executor may append"):
+        with pytest.raises(ContextCollabValidationError, match="only the principal"):
             service.append_event(created.collab_context_id, command, outsider)
         assert repo.append_calls == []
 

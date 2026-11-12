@@ -40,6 +40,9 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
@@ -115,7 +118,10 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 @pytest.fixture
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
-    return ContextCollabService(repository=ContextCollabRepository(db))
+    return ContextCollabService(
+            method_store=InMemoryMethodStore(),
+            repository=ContextCollabRepository(db),
+ )
 
 
 def _count(engine, model) -> int:

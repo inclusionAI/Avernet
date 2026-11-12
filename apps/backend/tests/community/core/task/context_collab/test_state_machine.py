@@ -1,6 +1,6 @@
 """G4 状态机单测(Task 5):声明式定义校验(spec §4.4)+ 迁移裁决 + 守卫事实(§4.3)。
 
-钉死:内置 team_todo_machine 六状态/六迁移(状态词汇经 ready→created、
+钉死:内置 team_todo / BBS help goal 状态机(状态词汇经 ready→created、
 active→in_progress 重命名);blocked 无入边由可达性豁免进入;守卫返回明确
 PASS/FAIL 事实,禁止静默失败。纯函数,无 IO。
 """
@@ -16,6 +16,7 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
     GUARD_REGISTRY,
     GuardEvaluationInput,
     GuardOutcome,
+    BBS_HELP_REQUEST_GOAL_MACHINE,
     MACHINE_REGISTRY,
     TEAM_TODO_EXECUTION_MACHINE,
     StateDefinition,
@@ -42,7 +43,10 @@ A_EXECUTOR_BOT = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 def test_builtin_machine_pinned():
     """六状态 / 六迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
-    assert MACHINE_REGISTRY == {"team_todo_execution": TEAM_TODO_EXECUTION_MACHINE}
+    assert MACHINE_REGISTRY == {
+        "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
+        "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
+    }
     assert TEAM_TODO_EXECUTION_MACHINE.schema_version == "context-state-machine/1"
     assert TEAM_TODO_EXECUTION_MACHINE.profile_ref == "team_todo_execution"
     assert TEAM_TODO_EXECUTION_MACHINE.profile_version == 1
@@ -82,6 +86,28 @@ def test_builtin_machine_pinned():
         ("cancel_task", ("created", "in_progress", "reviewing", "blocked"),
          "task.cancelled", ("actor_can_cancel",), "cancelled"),
     ]
+
+
+def test_bbs_help_request_goal_machine_pinned():
+    """BBS 求助(带目标)复用目标状态语义,但 L5 方法保持 Open+Group。"""
+    assert BBS_HELP_REQUEST_GOAL_MACHINE.profile_ref == "bbs_help_request_goal"
+    assert BBS_HELP_REQUEST_GOAL_MACHINE.initial_state == "created"
+    assert all(
+        state.allowed_methods == ("Open + Group",)
+        for state in BBS_HELP_REQUEST_GOAL_MACHINE.states
+    )
+    assert [
+        (rule.event_name, rule.from_states, rule.to_state)
+        for rule in BBS_HELP_REQUEST_GOAL_MACHINE.transitions
+    ] == [
+        ("task.started", ("created",), "in_progress"),
+        ("task.progress.updated", ("in_progress",), "in_progress"),
+        ("task.submitted", ("in_progress",), "reviewing"),
+        ("task.accepted", ("reviewing",), "done"),
+        ("task.rejected", ("reviewing",), "in_progress"),
+        ("task.cancelled", ("created", "in_progress", "reviewing", "blocked"), "cancelled"),
+    ]
+    validate_definition(BBS_HELP_REQUEST_GOAL_MACHINE)
 
 
 def test_governance_kinds_within_vocab():
@@ -235,7 +261,7 @@ def test_invalid_governance_kind_rejected():
 
 def test_invalid_allowed_method_rejected():
     stale = StateDefinition(
-        name="created", governance_kind="waiting", allowed_methods=("Swarm",),
+        name="created", governance_kind="waiting", allowed_methods=("swarm",),
     )
     states = tuple(
         stale if s.name == "created" else s
@@ -244,6 +270,18 @@ def test_invalid_allowed_method_rejected():
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
     with pytest.raises(ContextCollabValidationError, match="declares unknown method"):
         validate_definition(bad)
+
+
+def test_allowed_method_accepts_swarm():
+    updated = StateDefinition(
+        name="created", governance_kind="waiting", allowed_methods=("Swarm",),
+    )
+    states = tuple(
+        updated if s.name == "created" else s
+        for s in TEAM_TODO_EXECUTION_MACHINE.states
+    )
+    valid = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
+    validate_definition(valid)  # Swarm 已是合法值,不抛即通过
 
 
 # ---------------------------------------------------------------- 迁移裁决

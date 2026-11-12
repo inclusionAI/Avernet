@@ -51,6 +51,9 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
     WorkflowKind,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
@@ -66,6 +69,11 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAcceptedResult,
     EventAppendCommand,
     TaskProgressProjectionDTO,
+)
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    _now,
+    current_axes,
+    project_created_context,
 )
 
 CREATION_EVENT_KIND = "task.created"
@@ -205,19 +213,23 @@ class ContextCollabService(ContextCollabServiceProtocol):
     def __init__(
         self,
         repository: ContextCollabRepositoryProtocol,
+        method_store: MethodStoreProtocol,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
     ) -> None:
         self._repository = repository
+        self._method_store = method_store
         self._authorizer = authorizer
 
     def create_context(
         self, command: ContextCreateCommand, context: ActorContext
     ) -> ContextCollabCreatedResult:
-        """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → 组装结果。
+        """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
+        → 组装结果。
 
         枚举校验(method_kind / product_kind / workflow_kind)与必填字符串
-        校验(objective)在本层完成;Single 必须有 executor 由结构授权器
-        完成。创建不设幂等键(spec 作者裁决):重复调用即重复创建。
+        校验(objective)在本层完成;Single 必须有 executor 与顶层 method
+        白名单(Single / Open + Group)由结构授权器完成。创建不设幂等键
+        (spec 作者裁决):重复调用即重复创建。
         """
         objective = _required_str(command.objective, "objective")
         spec = ContextSpec(
@@ -250,6 +262,19 @@ class ContextCollabService(ContextCollabServiceProtocol):
                     payload={"objective": objective},
                 ),
             )
+        )
+
+        # L5 顶层投影(2026-11-12 L5 method objects spec §3.2/§9.2):Collet
+        # 落库成功后同步落顶层 ACTIVE MethodBinding——由上面的 ``spec`` 单向
+        # 派生,不回写 ``context_spec``;store 写失败如实上抛,绝不让
+        # "有 Collet 无 binding"的响应伪装成功。同上下文重复投影幂等。
+        project_created_context(
+            self._method_store,
+            current_axes(),
+            record.collet.collab_context_id,
+            spec,
+            context,
+            now=_now(),
         )
 
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照

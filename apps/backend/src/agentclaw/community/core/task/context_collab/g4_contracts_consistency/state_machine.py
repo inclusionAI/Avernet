@@ -1,4 +1,4 @@
-"""G4 状态机:声明式定义 + Conformance 校验 + 守卫 + 内置 team_todo_execution profile。
+"""G4 状态机:声明式定义 + Conformance 校验 + 守卫 + 内置 team_todo_execution / bbs_help_request_goal profile。
 
 属 G4 ``State Machine``,不是 L4 新增上下文类(spec §4)。全部为纯声明式内容
 与纯谓词守卫:禁止脚本、内联 SQL、网络、文件访问或框架 import 进入 Core
@@ -469,10 +469,65 @@ TEAM_TODO_EXECUTION_MACHINE = StateMachineDefinition(
     ),
 )
 
-# P1 唯一内置 machine;不发明 forum 状态。
+# BBS 求助(带目标)复用目标推进语义,但不伪装成 Single:公开求助仍以
+# Open+Group 为协作方法,executor_ref 只表示被委托/指定的辅助 Agent,不把
+# 公开贡献者提升为验收或状态迁移权威。
+BBS_HELP_REQUEST_GOAL_MACHINE = StateMachineDefinition(
+    schema_version="context-state-machine/1",
+    profile_ref="bbs_help_request_goal",
+    profile_version=1,
+    compatibility_policy="new_contexts_only",
+    initial_state="created",
+    states=(
+        StateDefinition(name="created", governance_kind="waiting",
+                        allowed_methods=("Open + Group",)),
+        StateDefinition(name="in_progress", governance_kind="active",
+                        allowed_methods=("Open + Group",)),
+        StateDefinition(name="reviewing", governance_kind="review",
+                        allowed_methods=("Open + Group",)),
+        StateDefinition(name="blocked", governance_kind="blocked",
+                        allowed_methods=("Open + Group",)),
+        StateDefinition(name="done", governance_kind="terminal_success",
+                        allowed_methods=("Open + Group",)),
+        StateDefinition(name="cancelled", governance_kind="terminal_cancelled",
+                        allowed_methods=("Open + Group",)),
+    ),
+    transitions=(
+        TransitionRule(rule_id="start_help", from_states=("created",),
+                       event_name="task.started",
+                       guard_refs=("actor_can_start_task",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="update_help_progress", from_states=("in_progress",),
+                       event_name="task.progress.updated",
+                       guard_refs=("event_matches_task",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="submit_help_for_acceptance",
+                       from_states=("in_progress",),
+                       event_name="task.submitted",
+                       guard_refs=("required_artifacts_present",),
+                       to_state="reviewing"),
+        TransitionRule(rule_id="accept_help", from_states=("reviewing",),
+                       event_name="task.accepted",
+                       guard_refs=("actor_is_responsible_principal",),
+                       to_state="done"),
+        TransitionRule(rule_id="reject_help", from_states=("reviewing",),
+                       event_name="task.rejected",
+                       guard_refs=("actor_is_responsible_principal",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="cancel_help",
+                       from_states=("created", "in_progress", "reviewing", "blocked"),
+                       event_name="task.cancelled",
+                       guard_refs=("actor_can_cancel",),
+                       to_state="cancelled"),
+    ),
+)
+
+# P1 内置 machine;BBS 公开讨论不发明状态机,仍以事件流/查询投影表达。
 MACHINE_REGISTRY: dict[str, StateMachineDefinition] = {
     "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
+    "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
 }
 
 # 内置 machine 注册即过 Conformance:若字面量漂移,导入期立即失败。
 validate_definition(TEAM_TODO_EXECUTION_MACHINE)
+validate_definition(BBS_HELP_REQUEST_GOAL_MACHINE)

@@ -101,6 +101,32 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
+    StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    GroupMethodOpsServiceProtocol,
+    MethodLifecycleServiceProtocol,
+    OpenMethodOpsServiceProtocol,
+    SwarmMethodOpsServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.services.open_method_service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
+    SwarmMethodService,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
@@ -304,6 +330,41 @@ class TaskModule(Module):
         binder.bind(
             ContextCollabAuthorizerProtocol,
             to=StructuralContextCollabAuthorizer,
+            scope=singleton,
+        )
+        # L5 method 内存存储(2026-11-12 L5 method objects spec §6):进程内
+        # singleton,``ContextCollabService`` 构造路径新增 method_store 依赖
+        # 后必须绑定;P2 持久化经同一 MethodStoreProtocol 键整体替换,服务层
+        # (method_lifecycle_service 等)零改动。
+        binder.bind(
+            MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton
+        )
+        # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
+        # 授权器与四个服务协议全部显式 singleton 绑定——python-injector
+        # 不自动解析未绑定键;四服务共享上面同一 MethodStoreProtocol
+        # singleton(binding / edge / profile 对象切片互为同域),P2 的
+        # Membership/Grant/Policy 授权器与持久化 store 各经同一协议键
+        # 整体替换,服务层零改动。collab_repo 协议由
+        # TaskPersistenceModule 绑定(Collet/Event ORM 仓储)。
+        binder.bind(
+            MethodOpsAuthorizerProtocol,
+            to=StructuralMethodOpsAuthorizer,
+            scope=singleton,
+        )
+        binder.bind(
+            MethodLifecycleServiceProtocol, to=MethodLifecycleService,
+            scope=singleton,
+        )
+        binder.bind(
+            GroupMethodOpsServiceProtocol, to=SingleGroupMethodService,
+            scope=singleton,
+        )
+        binder.bind(
+            SwarmMethodOpsServiceProtocol, to=SwarmMethodService,
+            scope=singleton,
+        )
+        binder.bind(
+            OpenMethodOpsServiceProtocol, to=OpenMethodService,
             scope=singleton,
         )
         binder.bind(

@@ -32,6 +32,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
     ContextStatusRecord,
@@ -207,7 +210,10 @@ def _make_service(
 ):
     repo = _FakeStatusRepository(collet or _collet(), events or _fixture_events())
     assert isinstance(repo, ContextCollabRepositoryProtocol)
-    service = ContextCollabService(repository=repo)
+    service = ContextCollabService(
+            method_store=InMemoryMethodStore(),
+            repository=repo,
+ )
     assert isinstance(service, ContextCollabServiceProtocol)
     return repo, service
 
