@@ -696,16 +696,17 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
     }
 
 #[tokio::test]
-async fn first_lag_pair_is_selected_without_dropping_frames() {
+async fn selected_diagnostics_preserve_stream_frames_and_terminal_outcomes() {
     use tracing_subscriber::{Layer, prelude::*};
     const TEST_RUN: &str = "log-correlation-lag-test";
     #[derive(Default)]
-    struct Row { run: String, code: String, key: bool, frame: bool }
+    struct Row { run: String, code: String, key: bool, frame: bool, reason: String, terminal: bool, frames: u64 }
     impl tracing::field::Visit for Row {
         fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
             match field.name() {
                 "run_id" => self.run = value.into(),
                 "event_code" => self.code = value.into(),
+                "reason" => self.reason = value.into(),
                 "log_class" => self.key = value == "business_key",
                 "message" => self.frame = value == "sse frame recv",
                 _ => {}
@@ -713,6 +714,12 @@ async fn first_lag_pair_is_selected_without_dropping_frames() {
         }
         fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
             if matches!(field.name(), "run_id" | "message") { self.record_str(field, &format!("{value:?}")); }
+        }
+        fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+            if field.name() == "saw_terminal" { self.terminal = value; }
+        }
+        fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+            if field.name() == "frames" { self.frames = value; }
         }
     }
     #[derive(Clone, Default)]
@@ -722,7 +729,7 @@ async fn first_lag_pair_is_selected_without_dropping_frames() {
             if event.metadata().target() != "bcs_sse_detail" { return; }
             let mut row = Row::default(); event.record(&mut row);
             // Retain only this fixture's small metadata, never sibling payloads.
-            if row.run == TEST_RUN { self.0.lock().unwrap().push(row); }
+            if row.run.starts_with("log-correlation-") { self.0.lock().unwrap().push(row); }
         }
     }
     let capture = Capture::default(); let output = capture.clone();
@@ -748,4 +755,36 @@ async fn first_lag_pair_is_selected_without_dropping_frames() {
     assert_eq!(rows.iter().filter(|r| r.code == "sse.lag_recovered").count(), 4);
     assert_eq!(rows.iter().filter(|r| r.frame).count(), 8);
     assert_eq!(recording.snapshot().len(), 8, "diagnostics must not drop business frames");
+    drop(rows);
+
+    // Exercise the response reader, not just the frame parser: each close
+    // summary must agree with the terminal delivered to the business consumer.
+    const FINAL: &str = "event: chat\ndata: {\"state\":\"final\",\"seq\":1,\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
+    let read_error = reqwest::Body::wrap_stream(futures::stream::once(async {
+        Err::<Vec<u8>, _>(std::io::Error::other("fixture stream interrupted"))
+    }));
+    let oversized = "x".repeat(SSE_MAX_FRAME_BYTES + 1);
+    for (run, body, deadline, reason, terminal, frames, state) in [
+        ("log-correlation-terminal", reqwest::Body::from(FINAL), u64::MAX, "terminal", true, 1, ChatEventState::Final),
+        ("log-correlation-eof", reqwest::Body::from(""), u64::MAX, "eof", false, 0, ChatEventState::Error),
+        ("log-correlation-deadline", reqwest::Body::from(FINAL), 0, "run_deadline", false, 0, ChatEventState::Error),
+        ("log-correlation-read-error", read_error, u64::MAX, "read_error", false, 0, ChatEventState::Error),
+        ("log-correlation-oversized-frame", reqwest::Body::from(format!("{oversized}\n\n")), u64::MAX, "oversized_frame", false, 0, ChatEventState::Error),
+        ("log-correlation-oversized-buffer", reqwest::Body::from(oversized), u64::MAX, "oversized_frame", false, 0, ChatEventState::Error),
+    ] {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: deadline });
+        let response = axum::http::Response::new(body).into();
+        stream_and_drive(response, run.into(), "bot-1".into(), flow, ctx, None).await;
+        assert_eq!(recording.pairs(), vec![("chat.event".into(), state)], "{run}: exactly one terminal must be delivered");
+        let rows = output.0.lock().unwrap();
+        let selected: Vec<_> = rows.iter().filter(|row| row.run == run && row.key).collect();
+        assert_eq!(selected.len(), 1, "{run}: exactly one close summary");
+        let summary = selected[0];
+        assert_eq!(summary.code, "sse.closed");
+        assert_eq!(summary.reason, reason);
+        assert_eq!(summary.terminal, terminal);
+        assert_eq!(summary.frames, frames);
+    }
 }

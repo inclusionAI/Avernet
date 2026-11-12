@@ -101,3 +101,24 @@ fn panic_restores_override() {
     assert!(result.is_err());
     assert!(current_log_correlation().is_none());
 }
+
+#[tokio::test]
+async fn provider_without_log_hook_does_not_revive_a_captured_identity() {
+    struct LegacyProvider;
+    impl NetworkTracer for LegacyProvider {
+        fn start(&self, _: &crate::RequestInfo<'_>, _: &crate::Carrier, _: crate::ParentContext<'_>) -> crate::StartedTrace {
+            panic!("reading identity must not start a network call")
+        }
+    }
+    let captured = with_provider(Some(Arc::new(Provider)), with_context(context("captured"), async {
+        in_current_log_context(async {
+            assert_eq!(current_log_correlation(), Some(ids("captured")));
+            with_provider(Some(Arc::new(LegacyProvider)), with_context(context("legacy"), async {
+                assert!(current_log_correlation().is_none(), "the default hook must suppress the older snapshot");
+            })).await;
+            assert_eq!(current_log_correlation(), Some(ids("captured")));
+        })
+    })).await;
+    tokio::spawn(captured).await.unwrap();
+    assert!(current_log_correlation().is_none());
+}
