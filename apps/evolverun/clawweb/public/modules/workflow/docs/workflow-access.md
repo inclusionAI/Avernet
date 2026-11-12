@@ -33,3 +33,10 @@ credentials or raw database errors.
 Only workflow creation writes the initial permission grant. Editing through an
 inherited grant does not create a permanent user grant. Removing a collaborator
 therefore removes inherited access while preserving separately assigned grants.
+
+## Cloning exact Bot grants
+
+The backend-facing Clone route preserves its HTTP contract and merges exact Bot
+permissions without duplicate rows. See [Clone persistence and OceanBase index
+preflight](bot-workflow-permission-clone.md) for its unique-key invariant,
+concurrency limits and the deploy-before-code index DDL.

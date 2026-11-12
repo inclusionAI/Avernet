@@ -132,6 +132,42 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
     return rows[0];
   }
 
+  /** Clone-only union of exact-Bot grants; admin replacement stays in upsert.
+   * Requires the provisioned UNIQUE(bot_id, bot_owner_id, workflow_id, env).
+   * Conflict updates use database-current bits, never a caller's stale snapshot.
+   */
+  async mergeGrants(data: BotWorkflowPermissionUpsert & { bot_id: string }): Promise<BotWorkflowPermissionRow> {
+    const dbType = this.db.dbType;
+    if (dbType !== "sqlite" && dbType !== "mysql" && dbType !== "zdas") {
+      throw new Error(`Permission grant merge unsupported for database type: ${dbType}`);
+    }
+    const env = getCurrentEnv();
+    const now = this.db.dialect.now();
+    const incoming = (field: string) => dbType === "sqlite" ? `excluded.${field}` : `VALUES(${field})`;
+    const updates = ["can_view", "can_execute", "can_edit"].map(field =>
+      `${field} = CASE WHEN bot_workflow_permissions.${field} <> 0 OR ${incoming(field)} <> 0 THEN 1 ELSE 0 END`,
+    );
+    const conflict = dbType === "sqlite"
+      ? "ON CONFLICT (bot_id, bot_owner_id, workflow_id, env) DO UPDATE SET"
+      : "ON DUPLICATE KEY UPDATE";
+    await this.db.exec(
+      `INSERT INTO bot_workflow_permissions (bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ${conflict} ${updates.join(", ")}, gmt_modified = ${incoming("gmt_modified")}`,
+      [data.bot_id, data.bot_owner_id, data.workflow_id, env,
+        data.can_view ? 1 : 0, data.can_execute ? 1 : 0, data.can_edit ? 1 : 0, now, now],
+    );
+
+    // An unchanged MySQL duplicate may report affectedRows=0; read back by key,
+    // not insertId (which is not a reliable identity for a conflict update).
+    const rows = await this.db.query<BotWorkflowPermissionRow>(
+      `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions WHERE bot_id = ? AND bot_owner_id = ? AND workflow_id = ? AND env = ?`,
+      [data.bot_id, data.bot_owner_id, data.workflow_id, env],
+    );
+    if (!rows[0]) throw new Error("Permission grant missing after merge");
+    return rows[0];
+  }
+
   async delete(botId: string | null, botOwnerId: string, workflowId: string): Promise<boolean> {
     const env = getCurrentEnv();
     const normalizedBotId = (botId === "" || botId === undefined) ? null : botId;
