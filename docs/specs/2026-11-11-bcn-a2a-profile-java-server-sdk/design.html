@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.25</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.26</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -218,7 +218,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag d">D9</span></td><td>提供可选的托管模式，给没有运行记录的简单 Agent</td><td>平台只写输入到输出的逻辑，SDK 代管 Task；不支持 exec 审批，不承诺停机恢复（8.10、9.5）。</td><td>只提供引擎模式：简单 Agent 要自己实现运行记录，门槛过高。</td></tr>
 <tr><td><span class="tag d">D10</span></td><td>支持只返回消息的消息模式（L0），不支持“有 Task 但不保存”的无状态流式</td><td>最轻的 Agent 只需实现一个方法，完全符合 A2A 标准，BCS 已支持，多实例天然满足。代价是回答一次性到达、断线后结果丢失、不能取消。需要逐段输出又不想自己存状态的 Agent 使用托管模式。</td><td>无状态流式：能逐段输出，但换一台机器就查不到 Task，违背“任意实例可查询”；断线、取消都要在标准里开例外，BCS 也要改。</td></tr>
 <tr><td><span class="tag d">D11</span></td><td>调用上下文从等级中拆出，作为任何等级都可以声明的独立能力</td><td>等级只描述交互形态（消息、非流式任务、流式任务、审批）。L0 的 Agent 也可以拿到用户身份。</td><td>保留原来“L2 = 调用上下文”的逐级包含：只返回消息的 Agent 需要用户身份时无法达到相应等级。</td></tr>
-<tr><td><span class="tag d">D12</span></td><td>工具观察改为 v2：记录格式定义在内容片段层；没有 Task 时放在回复消息中，有 Task 时放在产出物中；并从等级中拆出，作为可选能力</td><td>L0 到 L3 都能使用；查询能拿到完整记录；与文本的顺序确定。L3 只剩 exec 审批。v1 过渡期保留（7.9）。</td><td>v1 放在状态消息中：没有 Task 时无处可放，历史记录会被覆盖。移出 A2A、走单独的观测服务：直连的调用方都要另接观测服务才能看到，与统一协议的目标相反；审计用的完整数据仍可另行上报观测服务。</td></tr>
+<tr><td><span class="tag d">D12</span></td><td>工具观察是尽力投递的过程信息：有 Task 时放在状态消息中（与 v1 相同），没有 Task 时放在回复消息中（v2 新增）；从等级中拆出，作为可选能力</td><td>符合 A2A 对状态消息和产出物的划分。丢失的记录不补发；需要保存的一方自己保存，BCS 本来就持久化收到的工具调用。L3 只剩 exec 审批（7.9）。</td><td>放在产出物中：产出物是任务结果，工具调用是过程，语义不对。要求 Agent 把工具记录保存进 Task 历史：增加引擎负担，而 A2A 本来就把过程信息视为可以丢失。移出 A2A、走单独的观测服务：直连的调用方都要另接观测服务，与统一协议的目标相反。</td></tr>
 </table></div>
 
 <h2 id="s6"><span class="n">6</span>Profile 规范</h2>
@@ -247,7 +247,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>SubscribeToTask</td><td>返回 <code>TASK_NOT_FOUND</code></td><td>—</td><td>必须</td><td>必须</td></tr>
 <tr><td>Card 声明 <code>streaming: true</code></td><td>可选</td><td>否</td><td>是</td><td>是</td></tr>
 <tr><td>exec 审批扩展</td><td>—</td><td>—</td><td>—</td><td>必须</td></tr>
-<tr><td>工具观察扩展（7.9）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级。L0 随回复到达；L1 查询可得；L2 以上实时可见</td></tr>
+<tr><td>工具观察扩展（7.9）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级。L0 随回复到达；L2 以上实时可见；尽力投递，不补发</td></tr>
 <tr><td>调用上下文扩展（7.2）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>文本以外的模态（6.13）</td><td colspan="4">可选能力，任何等级都可以声明，不影响等级</td></tr>
 <tr><td>推送通知（6.12）</td><td>不适用，没有 Task</td><td colspan="3">可选能力，不影响等级</td></tr>
@@ -413,7 +413,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-41</span></td><td>对终态 Task 订阅必须返回协议错误（<code>UNSUPPORTED_OPERATION</code>），客户端改用 GetTask。</td></tr>
 <tr><td><span class="tag p">P-42</span></td><td>订阅不得触发重新执行。同一 Task 可以有多个并发订阅者。</td></tr>
 <tr><td><span class="tag p">P-43</span></td><td>首个快照之后的文本事件只包含快照之后的新增后缀，不得重复快照中已有的文本。</td></tr>
-<tr><td><span class="tag p">P-44</span></td><td>订阅首帧的快照包含此前的全部块，包括工具记录（7.9）。过程事件（E4）不保证补齐。</td></tr>
+<tr><td><span class="tag p">P-44</span></td><td>订阅流不保证补齐订阅前的工具记录（7.9）和过程事件（E4）。</td></tr>
 </table></div>
 
 <h4>CancelTask</h4>
@@ -527,7 +527,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><span class="tag p">P-114</span></td><td>只有 CancelTask 的响应状态为 <code>CANCELED</code> 才能视为已取消。其他响应必须通过 GetTask 核对。</td></tr>
 <tr><td><span class="tag p">P-115</span></td><td>终态后的 GetTask 快照是权威文本。流上收到的文本与它不一致时，以快照为准补齐后缀。</td></tr>
 <tr><td><span class="tag p">P-116</span></td><td>遇到不认识的 metadata 键、DataPart 或扩展 URI 必须忽略。不得报错，不得据此路由或授权。</td></tr>
-<tr><td><span class="tag p">P-117</span></td><td>不得依赖 <code>history</code>，不得假设过程事件（E4）完整。</td></tr>
+<tr><td><span class="tag p">P-117</span></td><td>不得依赖 <code>history</code>，不得假设工具记录和过程事件（E4）完整。</td></tr>
 <tr><td><span class="tag p">P-118</span></td><td>调用上下文的字段只能来自 Client 已认证的来源，不得来自用户输入或模型输出。</td></tr>
 </table></div>
 
@@ -598,7 +598,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><th>扩展</th><th>类型</th><th>等级</th><th>状态</th><th>SDK 支持方式</th></tr>
 <tr><td>profile 声明</td><td>Card 数据</td><td>全部</td><td><span class="tag q">新增</span></td><td>starter 自动写入 Card</td></tr>
 <tr><td>调用上下文</td><td>请求 metadata</td><td>可选</td><td><span class="tag q">新增</span></td><td>SDK 解析，通过 <code>BcnCall.caller()</code> 提供</td></tr>
-<tr><td>工具观察 v2（7.9）</td><td>内容片段：回复消息或产出物</td><td>可选</td><td><span class="tag q">新增</span></td><td>工具库 <code>ToolRecords</code>；消息模式和托管模式由 SDK 编码</td></tr>
+<tr><td>工具观察 v2（7.9）</td><td>状态消息；L0 为回复消息</td><td>可选</td><td><span class="tag q">新增</span></td><td>工具库 <code>ToolRecords</code>；消息模式和托管模式由 SDK 编码</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>—</td><td><span class="tag ok">已有</span>，过渡期保留</td><td>SDK 不发出</td></tr>
 <tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td>工具库 <code>Approvals</code>；仅引擎模式</td></tr>
 <tr><td>协作（群协作感知）</td><td>请求 metadata 加 Task 字段</td><td>可选</td><td><span class="tag q">待设计</span></td><td>后续阶段，见 7.8</td></tr>
@@ -670,7 +670,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td class="nw"><b>E1</b> 描述</td><td>Agent 的静态业务属性：分类、标签、所属业务域</td><td>Card 的 <code>capabilities.extensions[].params</code></td><td>Agent 到注册中心</td><td>随 Card</td><td>16 KB</td></tr>
 <tr><td class="nw"><b>E2</b> 请求参数</td><td>调用时的业务输入：调用上下文、场景码、UI 操作的回传</td><td><code>SendMessageRequest.metadata[URI]</code>；结构化输入用带 URI 标记的 DataPart</td><td>Client 到 Agent</td><td>随请求；SDK 存入 Task 记录</td><td>16 KB</td></tr>
 <tr><td class="nw"><b>E3</b> 结果字段</td><td>挂在 Task 或 Artifact 上的自定义字段：用量统计、引用来源、业务状态码、追踪标识</td><td><code>Task.metadata[URI]</code>、<code>Artifact.metadata[URI]</code></td><td>Agent 到 Client</td><td><b>持久</b>：随 Task 保存，GetTask 返回，跨实例可见</td><td>每个 URI 16 KB</td></tr>
-<tr><td class="nw"><b>E4</b> 过程事件</td><td>执行过程中的瞬时信息：进度、阶段、思考过程</td><td><code>statusUpdate.status.message</code> 中带 URI 标记的 DataPart</td><td>Agent 到 Client</td><td><b>瞬时</b>：只在流上；断流后不保证补齐</td><td>单条 64 KB</td></tr>
+<tr><td class="nw"><b>E4</b> 过程事件</td><td>执行过程中的瞬时信息：进度、阶段、思考过程、工具调用</td><td><code>statusUpdate.status.message</code> 中带 URI 标记的 DataPart</td><td>Agent 到 Client</td><td><b>瞬时</b>：只在流上；断流后不保证补齐</td><td>单条 64 KB</td></tr>
 <tr><td class="nw"><b>E5</b> 内容块</td><td>给用户看的结构化内容：卡片、表格、图表、表单等 UI 渲染数据</td><td>独立的 Artifact，内容为 DataPart 加 <code>mediaType</code>，<code>artifact.extensions</code> 列出 URI</td><td>Agent 到 Client</td><td><b>持久</b>：同 E3</td><td>单块 256 KB</td></tr>
 </table></div>
 <p class="cap">大小上限是初值，见 <span class="tag q">Q18</span>。</p>
@@ -688,7 +688,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><th>平台扩展</th><th>使用的扩展点</th></tr>
 <tr><td>profile 声明、来源分类</td><td>E1</td></tr>
 <tr><td>调用上下文</td><td>E2</td></tr>
-<tr><td>工具观察 v2</td><td>E5 的特例：没有降级文本，未协商时整块过滤（7.9）</td></tr>
+<tr><td>工具观察 v2</td><td>E4 的载体；L0 时为回复消息中的 Part（7.9）</td></tr>
 <tr><td>exec 审批</td><td>请求在 <code>INPUT_REQUIRED</code> 的状态消息中（E4 的载体，但因 Task 暂停而保留在快照里）；回复为 E2；已接受的决定为 E3</td></tr>
 </table></div>
 <div class="tw"><table>
@@ -850,44 +850,28 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </ul></div>
 
 <h3 id="s7-9"><span class="n">7.9</span>工具观察（v2）</h3>
-<p>工具观察 v1 把记录放在任务的状态消息里。状态消息每次更新都会覆盖上一条，因此 v1 有这些问题：没有 Task 时无处可放；断线重连后查询只能拿到最后一条，历史记录丢失；非流式靠轮询基本看不到；和文本的先后顺序在快照里体现不出来。v2 改为把工具记录当作输出内容的一部分（<span class="tag d">D12</span>）。</p>
-<h4>为什么有 Task 时放在产出物中，而不是状态消息中</h4>
-<p>A2A 的 Task 中，<code>status</code> 只有一个对象，每次状态更新都整体替换它；<code>artifacts</code> 是按 <code>artifactId</code> 区分的列表，不同标识的项并存。假设一次执行是“说一句、调用工具 A、再说一句、调用工具 B、给出结论”，结束后查询得到的快照：</p>
-<pre><code>// 工具记录放在状态消息中：每条状态更新替换上一条，终态又替换了最后一条工具记录
-{"status": {"state": "TASK_STATE_COMPLETED"},
- "artifacts": [{"artifactId": "seg-1", ...}, {"artifactId": "seg-2", ...}, {"artifactId": "seg-3", ...}]}
-
-// 工具记录放在产出物中：每次调用一个块，互不覆盖，且保留了与文本的先后顺序
-{"status": {"state": "TASK_STATE_COMPLETED"},
- "artifacts": [{"artifactId": "seg-1", ...}, {"artifactId": "tool-t1", ...}, {"artifactId": "seg-2", ...},
-               {"artifactId": "tool-t2", ...}, {"artifactId": "seg-3", ...}]}</code></pre>
-<p>也不依赖另外两个字段：<code>history</code> 可被 <code>historyLength</code> 截断，各实现是否写入状态消息也不一致，调用方不得依赖它（P-117）；在 <code>metadata</code> 中累积列表可以不丢记录，但失去了与文本的顺序，且每次更新都要整体替换（P-132）。</p>
+<p>工具调用是执行过程信息，不是任务的产出（<span class="tag d">D12</span>）。A2A 规范对此有明确划分：状态消息用于"告知任务进展、请求输入或提供信息性更新"；产出物是"作为任务结果生成的输出"；断线重连时调用方可能收不到全部状态消息，消息不能作为关键信息的可靠投递手段。工具观察按这个划分定位为<b>尽力投递的过程信息</b>：</p>
+<ul>
+<li>在线时实时可见，断线、轮询或跨实例订阅时丢失的记录不补发。</li>
+<li>需要保存工具调用的一方自己保存。BCS 在群协作和会话历史中本来就持久化收到的工具调用，不依赖 Agent 提供历史。</li>
+<li>v2 相对 v1 只增加一种载体：没有 Task 的 L0 回复也能带工具记录。</li>
+</ul>
 <h4>格式与载体</h4>
-<p>格式定义在内容片段这一层，与装在哪里无关：一条工具记录就是一个 DataPart，<code>mediaType</code> 为 <code>application/vnd.bcn.tool-call+json</code>，Part 的 <code>metadata</code> 在扩展 URI 下写入 <code>{"version":"2"}</code>。装在哪里取决于有没有 Task：</p>
+<p>记录格式沿用 v1：一条工具记录是一个 DataPart，字段为 <code>toolCallId</code>、<code>name</code>、<code>phase</code>（<code>start</code> 或 <code>result</code>）、<code>args</code>、<code>isError</code>、<code>result.content</code>，另加可选的 <code>truncated</code>。Part 的 <code>metadata</code> 在扩展 URI 下写入 <code>{"version":"2"}</code>。</p>
 <div class="tw"><table>
 <tr><th></th><th>没有 Task（L0）</th><th>有 Task（L1 到 L3）</th></tr>
-<tr><td>载体</td><td>那条唯一回复消息的 <code>parts</code></td><td>每次工具调用一个产出物，<code>artifactId</code> 为 <code>tool-&lt;toolCallId&gt;</code></td></tr>
-<tr><td>顺序</td><td>与文本 Part 按出现顺序交错</td><td>与文本块、内容块共用一个块序列（P-140）</td></tr>
-<tr><td>记录的阶段</td><td>只有结束后的记录</td><td>开始时建块，结束时整块替换为带结果的记录</td></tr>
-<tr><td>查询可见</td><td>随回复一起到达</td><td>随 Task 保存，查询和订阅首帧都包含完整记录</td></tr>
-</table></div>
-<div class="tw"><table>
-<tr><th>字段</th><th>说明</th></tr>
-<tr><td><code>toolCallId</code></td><td>Task 或回复内唯一且稳定</td></tr>
-<tr><td><code>name</code></td><td>工具名</td></tr>
-<tr><td><code>phase</code></td><td><code>start</code> 或 <code>result</code></td></tr>
-<tr><td><code>args</code></td><td>参数快照，对象</td></tr>
-<tr><td><code>isError</code></td><td><code>result</code> 阶段必填</td></tr>
-<tr><td><code>result.content</code></td><td><code>result</code> 阶段必填，有序的结果片段，文本片段为 <code>{"type":"text","text":...}</code></td></tr>
-<tr><td><code>truncated</code></td><td>可选。参数或结果因大小上限被摘要时为 true</td></tr>
+<tr><td>载体</td><td>那条唯一回复消息的 <code>parts</code>，与文本 Part 按发生顺序交错</td><td><code>statusUpdate.status.message</code>，每条状态消息一条记录，与 v1 相同</td></tr>
+<tr><td>记录的阶段</td><td>只有结束后的记录</td><td><code>start</code> 和 <code>result</code> 各一条</td></tr>
+<tr><td>可见性</td><td>随回复一起到达</td><td>流上实时可见；L1 靠轮询，基本看不到</td></tr>
+<tr><td>丢失</td><td>回复丢失时一起丢失</td><td>断线、轮询、跨实例订阅时可能丢失，不补发</td></tr>
 </table></div>
 <div class="tw"><table>
 <tr><th>条款</th><th>内容</th></tr>
-<tr><td><span class="tag p">P-180</span></td><td>两种载体使用同一种记录格式。调用方按 <code>mediaType</code> 和扩展 URI 识别工具记录，不依赖它所在的位置。</td></tr>
+<tr><td><span class="tag p">P-180</span></td><td>两种载体使用同一种记录格式。调用方按扩展 URI 识别工具记录。</td></tr>
 <tr><td><span class="tag p">P-181</span></td><td>L0 的回复中，每次工具调用对应一个 <code>result</code> 阶段的记录，按实际发生顺序与文本 Part 交错排列。</td></tr>
-<tr><td><span class="tag p">P-182</span></td><td>有 Task 时，工具开始时以 <code>append: false, lastChunk: false</code> 建块，结束时以 <code>append: false, lastChunk: true</code> 整块替换为 <code>result</code> 记录，之后不再更新。块中只有这一个 DataPart。</td></tr>
-<tr><td><span class="tag p">P-183</span></td><td>工具记录不带降级文本，是 P-142 的例外。调用方没有协商本扩展时，Agent 不发出工具记录；SDK 整块或整个 Part 过滤，回复中不留任何痕迹。</td></tr>
-<tr><td><span class="tag p">P-184</span></td><td>每条记录不超过 64 KB，超过时由 Agent 摘要参数或结果并置 <code>truncated: true</code>，不得静默截断。每个 Task 或回复最多 256 条工具记录，不计入 P-147 的块数量上限。</td></tr>
+<tr><td><span class="tag p">P-182</span></td><td>有 Task 时，工具记录放在状态更新的消息中，发出时保持真实的 Task 状态，不得为了发记录而改变状态（P-133）。不得放在产出物中。</td></tr>
+<tr><td><span class="tag p">P-183</span></td><td>工具记录不保证可靠投递。Agent 不需要把它保存进 Task 历史；调用方不得依赖查询或订阅补齐丢失的记录。</td></tr>
+<tr><td><span class="tag p">P-184</span></td><td>调用方没有协商本扩展时，Agent 不发出工具记录，SDK 过滤。每条记录不超过 64 KB，超过时由 Agent 摘要并置 <code>truncated: true</code>，不得静默截断。L0 的一条回复中最多 256 条。</td></tr>
 <tr><td><span class="tag p">P-185</span></td><td>工具记录只用于展示，不表示审批，不改变 Task 状态。工具失败不等于 Task 失败。记录中不得包含凭据和 <code>userId</code>（P-105）。</td></tr>
 </table></div>
 <pre><code>// L0：一条回复消息，文本与工具记录交错
@@ -895,24 +879,16 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
   {"text": "我先查一下订单。"},
   {"data": {"toolCallId": "t1", "name": "query_order", "phase": "result", "args": {"orderId": "ORD-001"},
             "isError": false, "result": {"content": [{"type": "text", "text": "已发货"}]}},
-   "mediaType": "application/vnd.bcn.tool-call+json",
    "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}},
   {"text": "订单 ORD-001 已发货。"}]}}
 
-// 有 Task：开始时建块，结束时整块替换
-{"artifactUpdate": {"taskId": "t-001", "contextId": "c-001", "append": false, "lastChunk": false,
-  "artifact": {"artifactId": "tool-t1", "extensions": ["&lt;工具观察扩展 v2 URI&gt;"], "parts": [
-    {"data": {"toolCallId": "t1", "name": "query_order", "phase": "start", "args": {"orderId": "ORD-001"}},
-     "mediaType": "application/vnd.bcn.tool-call+json",
-     "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}}]}}}
-{"artifactUpdate": {"taskId": "t-001", "contextId": "c-001", "append": false, "lastChunk": true,
-  "artifact": {"artifactId": "tool-t1", "extensions": ["&lt;工具观察扩展 v2 URI&gt;"], "parts": [
-    {"data": {"toolCallId": "t1", "name": "query_order", "phase": "result", "args": {"orderId": "ORD-001"},
-              "isError": false, "result": {"content": [{"type": "text", "text": "已发货"}]}},
-     "mediaType": "application/vnd.bcn.tool-call+json",
-     "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}}]}}}</code></pre>
+// 有 Task：与 v1 相同，放在状态消息中
+{"statusUpdate": {"taskId": "t-001", "contextId": "c-001", "status": {"state": "TASK_STATE_WORKING",
+  "message": {"messageId": "tool-t1-start", "role": "ROLE_AGENT", "taskId": "t-001", "contextId": "c-001",
+    "parts": [{"data": {"toolCallId": "t1", "name": "query_order", "phase": "start", "args": {"orderId": "ORD-001"}},
+               "metadata": {"&lt;工具观察扩展 v2 URI&gt;": {"version": "2"}}}]}}}}</code></pre>
 <h4>与 v1 的关系</h4>
-<p>v2 使用新的 URI，是不兼容的版本（P-95）。v1 在过渡期保留：BCS 同时支持 v1 和 v2，调用方两者都声明时 Agent 使用 v2；SDK 只发出 v2；Harness adapter 迁移到 v2 后，v1 进入废弃流程。exec 审批不受影响，仍然在 <code>INPUT_REQUIRED</code> 的状态消息中，因为等待审批确实是 Task 的状态。</p>
+<p>有 Task 时 v2 与 v1 完全相同。v2 使用新的 URI，因为只认识 v1 的调用方遇到 L0 回复中的工具记录会出错：BCS 现在处理独立回复消息时只接受文本 Part。过渡期 BCS 同时支持 v1 和 v2；Agent 可以同时声明两者，调用方两者都声明时使用 v2。exec 审批不受影响，仍然在 <code>INPUT_REQUIRED</code> 的状态消息中。</p>
 
 <h2 id="s8"><span class="n">8</span>Java Server SDK</h2>
 <h3 id="s8-1"><span class="n">8.1</span>设计原则</h3>
@@ -1081,11 +1057,11 @@ public final class Approvals {
 
 // 工具观察 v2（7.9）
 public final class ToolRecords {
-    public static Artifact started(String toolCallId, String name, Map<String, Object> args);         // 有 Task：建块
-    public static Artifact finished(String toolCallId, String name, Map<String, Object> args,
-                                    boolean isError, String text);                                   // 有 Task：整块替换
+    public static TaskStatusUpdateEvent started(Task task, String toolCallId, String name, Map<String, Object> args);
+    public static TaskStatusUpdateEvent finished(Task task, String toolCallId, String name, Map<String, Object> args,
+                                                 boolean isError, String text);
     public static Part part(String toolCallId, String name, Map<String, Object> args,
-                            boolean isError, String text);                                           // 没有 Task：回复中的 Part
+                            boolean isError, String text);          // L0：回复消息中的 Part
 }
 
 // 内容块（扩展点 E5）和文件块（6.13）
@@ -1165,8 +1141,8 @@ final class RunMapper {
     StreamResponse toEvent(RunRecord r, RunEvent e, Set&lt;String&gt; ext) {
         return switch (e) {
             case TextDelta t    -&gt; textUpdate(r, "seg-" + t.segmentId(), t.text(), t.isFirst());
-            case ToolStarted t  -&gt; blockUpdate(r, ToolRecords.started(t.callId(), t.name(), t.args()));
-            case ToolFinished t -&gt; blockUpdate(r, ToolRecords.finished(t.callId(), t.name(), t.args(), t.failed(), t.summary()));
+            case ToolStarted t  -&gt; StreamResponse.of(ToolRecords.started(task(r), t.callId(), t.name(), t.args()));
+            case ToolFinished t -&gt; StreamResponse.of(ToolRecords.finished(task(r), t.callId(), t.name(), t.args(), t.failed(), t.summary()));
             case NeedsConfirm c -&gt; statusUpdate(r, TaskState.TASK_STATE_INPUT_REQUIRED,
                                                 Approvals.request(c.batchId(), c.expiresAtMs(), c.calls()));
             case OrderCard c    -&gt; blockUpdate(r, ext.contains(OrderUi.URI)
@@ -1257,7 +1233,7 @@ public interface AgentResponseSink {
     void append(String text);                        // 追加文本；线程安全
     void complete();
     void fail(String reason);
-    ToolEventEmitter tools();                        // 工具观察 v2，SDK 编码为工具块；未协商时丢弃
+    ToolEventEmitter tools();                        // 工具观察 v2，SDK 编码为状态消息；未协商时丢弃
     ExtensionChannel extension(String uri);          // 业务扩展在 E2 到 E5 上的读写
     void putFile(String blockId, String mediaType, String filename,
                  URI url, String description, String fallbackText);
@@ -1472,7 +1448,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td>文本追加</td><td>合并后节流写入，最长 1 秒一次；缓存实现只写增量</td></tr>
 <tr><td>无输出期间</td><td>每 5 秒续租一次；租约 15 秒，判定过期时加 5 秒时钟偏差容忍</td></tr>
 <tr><td>其他实例上的 GetTask</td><td>读存储</td></tr>
-<tr><td>其他实例上的 SubscribeToTask</td><td>先发当前快照，再每秒读一次存储，把新增后缀合成为事件；读到终态时结束。工具记录作为块保存，不会丢失；过程事件（E4）看不到</td></tr>
+<tr><td>其他实例上的 SubscribeToTask</td><td>先发当前快照，再每秒读一次存储，把新增后缀合成为事件；读到终态时结束。工具记录和过程事件（E4）看不到</td></tr>
 <tr><td>其他实例上的 CancelTask</td><td>比较并写入取消标记；执行实例在下一次写入时发现并取消；接到请求的实例等待终态，最多 8 秒，超时返回当前的非终态 Task</td></tr>
 <tr><td>执行实例宕机</td><td>任一实例读到租约过期的非终态 Task 时，比较并写入置为 <code>FAILED</code>，保留已写入的文本。不重跑</td></tr>
 </table></div>
@@ -1500,7 +1476,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <ul>
 <li>引擎不满足 9.2 的要求时，SDK 无法补救。TCK 的引擎要求分组用于发现这类问题。</li>
 <li>SDK 的校验只覆盖单个请求内的输出（8.6）。</li>
-<li>托管模式：停机或宕机后在途 Task 失败；跨实例订阅粒度约 1 秒，看不到过程事件（E4）；跨实例取消有秒级延迟。</li>
+<li>托管模式：停机或宕机后在途 Task 失败；跨实例订阅粒度约 1 秒，看不到工具记录和过程事件（E4）；跨实例取消有秒级延迟。</li>
 <li>会话记忆由引擎负责，SDK 不管理。</li>
 </ul>
 
@@ -1535,7 +1511,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><td>断流恢复</td><td>断开后 Task 继续、订阅首帧为快照、不重复文本、终态订阅报错</td><td>L2</td></tr>
 <tr><td>协商与错误</td><td>版本不支持、必需扩展缺失、未协商扩展不出数据、错误原因</td><td>全部</td></tr>
 <tr><td>调用上下文</td><td>有 <code>userId</code>、缺失拒绝、续交不一致拒绝</td><td>声明了调用上下文的 Agent</td></tr>
-<tr><td>工具观察</td><td>v2 记录格式；L0 回复中的顺序；有 Task 时的建块和整块替换；查询和订阅首帧包含完整记录；未协商时不留痕迹；大小和数量上限</td><td>声明了工具观察的 Agent</td></tr>
+<tr><td>工具观察</td><td>v2 记录格式；L0 回复中与文本的顺序；有 Task 时只出现在状态消息中、不改变状态；未协商时不发出；大小上限</td><td>声明了工具观察的 Agent</td></tr>
 <tr><td>审批</td><td>允许、拒绝、分批、过期、重复</td><td>L3</td></tr>
 <tr><td>引擎要求</td><td>引擎模式。至少两个实例：请求分别发到不同实例，验证 R-01 到 R-09；终止并重启实例后运行恢复或置为失败，且已输出内容不变；同一批审批回复同时发到两个实例只生效一次</td><td>全部</td></tr>
 <tr><td>托管模式</td><td>两个实例共用缓存：9.5 中每种跨实例行为；终止执行实例后的回收；TaskStore 合同测试</td><td>L1、L2</td></tr>
@@ -1573,7 +1549,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <tr><th>改动</th><th>原因</th><th>阶段</th></tr>
 <tr><td>下行调用生成调用上下文 metadata 并协商该扩展</td><td>7.2，即待办 A2A-003</td><td>P3</td></tr>
 <tr><td>注册时识别 profile 声明扩展，校验等级自洽</td><td>7.1</td><td>P1</td></tr>
-<tr><td>工具观察 v2：从回复消息和产出物中解码工具记录；文本投影跳过非文本的块和 Part；对所有等级的 Agent 协商；过渡期同时支持 v1</td><td>7.9</td><td>P4</td></tr>
+<tr><td>工具观察 v2：独立回复消息中解码工具记录，文本投影跳过非文本 Part；对声明了工具观察的 L0 Agent 也协商；过渡期同时支持 v1。工具调用继续由 BCS 自己持久化</td><td>7.9</td><td>P4</td></tr>
 <tr><td>接入文档更新：无凭据调用从"本期限制"改为 Profile 要求，三种绑定都适用</td><td><span class="tag d">D1</span>、P-02</td><td>P1</td></tr>
 <tr><td>下行合同测试与 TCK 的 Client 方向用例对齐</td><td>第 10 节</td><td>P2 起逐步</td></tr>
 <tr><td>确认取消超时与托管模式的 <code>cancel-wait</code> 默认值匹配</td><td>9.5</td><td>P2</td></tr>
