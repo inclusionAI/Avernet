@@ -23,6 +23,24 @@ it.each([
   expect(compareTraceUrlArguments(trace(original), { url: argument.href })).toEqual({ status, source_message_index: 0 });
 });
 
+it.each([
+  ["Alpha", "match"],
+  ["Alphb", "mismatch"],
+])("compares literal curl input against the latest OC OpenTelemetry user message (%s)", (signature, status) => {
+  const argument = new URL(original);
+  argument.searchParams.set("signature", signature);
+  const input = [
+    { role: "user", parts: [{ type: "text", content: reordered.href }] },
+    { role: "user", parts: [
+      { type: "tool_result", content: reordered.href },
+      { type: "text", content: original.href },
+    ] },
+    { role: "assistant", parts: [{ type: "text", content: reordered.href }] },
+  ];
+  expect(compareTraceUrlArguments(input, { command: `curl '${argument.href}'` }))
+    .toEqual({ status, source_message_index: 1 });
+});
+
 it("keeps distinct source links and tool arguments ambiguous even if they normalize to the same URL", () => {
   expect(compareTraceUrlArguments(trace(original, encoded), { url: original.href })).toEqual({ status: "unavailable" });
   expect(compareTraceUrlArguments(trace(original), { urls: [original.href, reordered.href] })).toEqual({ status: "unavailable" });
