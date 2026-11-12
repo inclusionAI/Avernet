@@ -202,6 +202,7 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
         # 2、执行git扫描
         try:
             logger.info(f"exec_task started: scanning {git_url}")
+            private_token = private_token or self._config.get("git_private_token") or None
             results = self.scan_git(git_url=git_url, private_token=private_token)
             success_count = sum(
                 1
@@ -354,6 +355,7 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
             logger.debug("Daily task already running")
             return True
 
+        private_token = private_token or self._config.get("git_private_token") or None
         self._daily_task_stop_event.clear()
         self._daily_task_thread = threading.Thread(
             target=self._daily_task_loop,
