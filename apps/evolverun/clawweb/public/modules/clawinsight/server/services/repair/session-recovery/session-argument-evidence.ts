@@ -84,7 +84,14 @@ export function compareTraceUrlArguments(traceInput: unknown, toolInput: unknown
   let sourceIndex = messages.length - 1;
   while (sourceIndex >= 0 && object(messages[sourceIndex])?.role !== "user") sourceIndex--;
   if (sourceIndex < 0) return { status: "unavailable" } as const;
-  const sources = uniqueUrls(sourceUrls(object(messages[sourceIndex])?.content), "original");
+  const source = object(messages[sourceIndex]);
+  let content = source?.content;
+  if (content == null && Array.isArray(source?.parts)) {
+    // OpenTelemetry stores text in parts[].content instead of content[].text.
+    content = source.parts.flatMap(part => part?.type === "text" && typeof part.content === "string"
+      ? [{ type: "text", text: part.content }] : []);
+  }
+  const sources = uniqueUrls(sourceUrls(content), "original");
   const args = uniqueUrls(argumentUrls(decode(toolInput)), "original");
   const pair = pairUrls(sources, args);
   if (!pair) return { status: "unavailable" };
