@@ -17,6 +17,8 @@ export interface BotSessionTrajectoryReader {
    * Without maxBytes, preserve existing full-record reads. Missing uploads are not proof of failure. */
   read(input: { target: BotTarget; sessionKey: string; offset: number; limit: number; traceId?: string;
     maxBytes?: number; observationId?: string; field?: "input" | "output"; contentOffset?: number; contentLimit?: number;
+    /** Enable OpenClaw trajectory evidence for a live recovery assessment. */
+    ocAssessmentEvidence?: boolean;
     /** Observed fault time used as a hint for finding the original trace in a session list. */
     faultAtMs?: number;
     /** Optional exact user-message match in the scoped trace input; never infer it from previews or tool output. */
