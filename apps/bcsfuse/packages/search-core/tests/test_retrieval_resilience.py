@@ -162,3 +162,46 @@ def test_no_success_when_all_recall_paths_fail():
             await service.rank(request, recall)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("stage", ["embedding", "keyword", "reranker"])
+@pytest.mark.parametrize("kind", ["timeout", "http_429", "http_503"])
+def test_degraded_reasons_explain_wrapped_model_failures(stage, kind):
+    class UpstreamError(Exception):
+        status_code = int(kind[5:]) if kind.startswith("http_") else None
+
+    def fail(*args):
+        try:
+            if kind == "timeout":
+                raise TimeoutError("private request details")
+            raise UpstreamError("private token and response")
+        except Exception as error:
+            raise RuntimeError("SDK wrapper") from error
+
+    index, embedding = Index(), Embedding()
+    reranker = None
+    if stage == "embedding":
+        embedding.embed = fail
+    elif stage == "keyword":
+        index.keyword_search = fail
+        index.vector_search = lambda *args: Index().keyword_search()
+    else:
+        from types import SimpleNamespace
+        reranker = SimpleNamespace(rerank=fail)
+    service = HybridRetrievalService(
+        index=index, embedding=embedding, reranker=reranker, allow_partial=True
+    )
+    result = asyncio.run(service.retrieve(RetrievalRequest("x", 1, {})))
+    assert result.items
+    assert result.reasons == (f"{stage}_unavailable", f"{stage}_{kind}")
+
+
+@pytest.mark.parametrize("vector", [[], [float("nan")]])
+def test_invalid_embedding_response_is_distinct_from_timeout(vector):
+    embedding = Embedding()
+    embedding.embed = lambda text: vector
+    service = HybridRetrievalService(
+        index=Index(), embedding=embedding, allow_partial=True
+    )
+    result = asyncio.run(service.retrieve(RetrievalRequest("x", 1, {})))
+    assert result.reasons == ("embedding_unavailable", "embedding_invalid_response")

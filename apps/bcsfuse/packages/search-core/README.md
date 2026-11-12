@@ -133,3 +133,8 @@ removes retained values immediately, and revision checks prevent late old loads
 from repopulating the cache. Empty or hard-expired entries wait for the shared
 load. This coordination is process-local; retained values and dependencies count
 toward the existing capacity limits. Other cache types keep strict TTL expiry.
+
+Keyword deadlines can be set independently through `emergencyConfig.keyword_timeout_ms`
+(positive, at most 4000 ms). When omitted by older DRM payloads, the host startup
+`SearchSettings.keyword_timeout` applies (shared default: 0.5 seconds).
+This setting does not change vector-index or Card metadata deadlines.

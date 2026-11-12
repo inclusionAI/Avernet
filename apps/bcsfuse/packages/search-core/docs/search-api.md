@@ -107,6 +107,10 @@ not proof that every provider ran; `degraded` still returns usable results
 (possibly empty) with reasons such as `embedding_unavailable`,
 `reranker_unavailable`, or intentionally disabled branches. HTTP errors retain
 the existing error contract below, rather than masquerading as degraded success.
+Recognized failures also append a specific reason: `embedding_timeout`,
+`embedding_http_429`, or `embedding_invalid_response`, for example. Keyword and
+reranker failures use the same suffixes with their stage prefix. Original
+`*_unavailable` codes remain present; SDK exception text is never returned.
 
 The business application supplies these values from the same configuration
 snapshot used to execute the request, after retrieval/cache lookup. It must not

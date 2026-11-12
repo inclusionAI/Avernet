@@ -98,7 +98,7 @@ def create_catalog_search_app(
         for name, timeout in {
             "embedding": settings.embedding_timeout,
             "vector": settings.index_timeout,
-            "keyword": settings.index_timeout,
+            "keyword": settings.keyword_timeout,
             "reranker": settings.reranker_timeout,
             "probe": 2 * settings.index_timeout,
             "card_metadata": settings.index_timeout,
@@ -188,6 +188,7 @@ def create_catalog_search_app(
             )
         execution = dict(calls)
         for name, timeout in (
+            ("keyword", policy.keyword_timeout_ms / 1000),
             ("embedding", policy.embedding_timeout_ms / 1000),
             ("reranker", policy.reranker_timeout_ms / 1000),
         ):
@@ -254,6 +255,7 @@ def create_catalog_search_app(
                 "vector_enabled": True,
                 "rerank_enabled": True,
             },
+            keyword_timeout_ms=settings.keyword_timeout * 1000,
             embedding_timeout_ms=settings.embedding_timeout * 1000,
             reranker_timeout_ms=settings.reranker_timeout * 1000,
         ),
