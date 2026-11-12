@@ -17,9 +17,6 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
 )
-from agentclaw.community.core.task.task_dispatch.candidate_augmentation import (
-    TemporaryDutySearchCandidateAugmentor,
-)
 
 
 class _Graph:
@@ -57,7 +54,7 @@ class _Service(TaskServiceRelayMixin):
     def __init__(self) -> None:
         self._graph = _Graph()
         self._relay_adapter = SimpleNamespace(search=_Search())
-        self._search_candidate_augmentor = TemporaryDutySearchCandidateAugmentor([])
+        self._temporary_duty_candidates = ()
 
 
 @pytest.mark.asyncio
@@ -81,12 +78,11 @@ async def test_search_bots_records_relay_search_trace() -> None:
 
 @pytest.mark.asyncio
 async def test_search_bots_uses_configured_temporary_duty_fallback_without_overlap() -> None:
-    fallback = TemporaryDutySearchCandidateAugmentor([
+    service = _Service()
+    service._temporary_duty_candidates = (
         BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
         BotCandidate(bot_id="bot-3", name="Other", description="", score=None),
-    ])
-    service = _Service()
-    service._search_candidate_augmentor = fallback
+    )
 
     candidates = await service.search_bots(
         query="payment risk",
@@ -104,11 +100,10 @@ async def test_search_bots_uses_configured_temporary_duty_fallback_without_overl
 
 @pytest.mark.asyncio
 async def test_search_bots_does_not_add_fallback_candidates_when_search_overlaps() -> None:
-    fallback = TemporaryDutySearchCandidateAugmentor([
-        BotCandidate(bot_id="bot-1", name="Risk Bot", description="duty", score=None),
-    ])
     service = _Service()
-    service._search_candidate_augmentor = fallback
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-1", name="Risk Bot", description="duty", score=None),
+    )
 
     candidates = await service.search_bots(
         query="payment risk",

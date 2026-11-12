@@ -27,8 +27,46 @@ from agentclaw.community.core.task.task_runner.client.relay_prompt import (
 
 logger = logging.getLogger("task.relay")
 
+# Temporary duty-domain fallback. Search quality work is still in progress; once
+# the normal catalog consistently returns duty bots, remove this table and the
+# private fallback helper below with it.
+_TEMPORARY_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
+    BotCandidate(
+        bot_id="20260407_025zmn4f:378611",
+        name="RiskProfilePlus BOT",
+        description="RP+ platform diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260403_wb2jcaof:328947",
+        name="UCT2.0 值班助手",
+        description="Strategy and dispatch diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260525_civbnttp:453718",
+        name="aliuct 值班助手",
+        description="UCT/aliuct strategy diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260407_jmg31orw:152819",
+        name="FeaturePro",
+        description="Feature creation and verification diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260415_w7wokfyw:323749",
+        name="处罚中心官方答疑助手",
+        description="Penalty and appeal guidance",
+    ),
+    BotCandidate(
+        bot_id="20260724_tilcdwii:272477",
+        name="yofa-agent",
+        description="Natural-language data and feature generation",
+    ),
+)
+
 
 class TaskServiceRelayMixin:
+    _temporary_duty_candidates: tuple[BotCandidate, ...] = _TEMPORARY_DUTY_CANDIDATES
+
     def _build_relay_root_execution_instruction(self, task_id: str) -> str:
         """Build the first baton for the existing requester/Bot session."""
         backend_url = str(self._api_base_url or "").strip().rstrip("/")
@@ -156,6 +194,25 @@ class TaskServiceRelayMixin:
     def _report_node_patch(self, patch: TaskNodePatch) -> Any:
         return self._report_fact("NODE_PATCH", {"patch": patch})
 
+    def _temporary_duty_fallback(
+        self, candidates: list[BotCandidate]
+    ) -> tuple[list[BotCandidate], str, int]:
+        """Apply the temporary duty fallback directly inside search.
+
+        This is intentionally one small, removable policy method in the search
+        interface rather than a separate pluggable module.  If normal search
+        already returns one duty bot, keep the search result unchanged so the
+        fallback does not overwhelm relevance ranking.
+        """
+        duty_ids = {candidate.bot_id for candidate in self._temporary_duty_candidates}
+        if any(candidate.bot_id in duty_ids for candidate in candidates):
+            return candidates, "search", 0
+        return (
+            [*candidates, *self._temporary_duty_candidates],
+            "search_plus_fallback",
+            len(self._temporary_duty_candidates),
+        )
+
     async def search_bots(
         self, *, query: str, task_id: str, node_id: str, relay_token: str,
         viewer_actor_type: SearchViewerType | None = None,
@@ -203,8 +260,9 @@ class TaskServiceRelayMixin:
                 description=str(item.get("bot_desc") or item.get("description") or ""),
                 score=score,
             ))
-        augmentation = self._search_candidate_augmentor.augment(candidates)
-        candidates = list(augmentation.candidates)
+        candidates, candidate_source, fallback_candidate_count = (
+            self._temporary_duty_fallback(candidates)
+        )
         self._graph.append_action_event(
             task_id,
             node_id,
@@ -223,8 +281,8 @@ class TaskServiceRelayMixin:
                     }
                     for candidate in candidates
                 ],
-                "candidate_source": augmentation.candidate_source,
-                "fallback_candidate_count": augmentation.fallback_candidate_count,
+                "candidate_source": candidate_source,
+                "fallback_candidate_count": fallback_candidate_count,
                 "raw_item_count": raw.get("raw_item_count"),
                 "failed_keywords": list(raw.get("failed_keywords") or []),
             },

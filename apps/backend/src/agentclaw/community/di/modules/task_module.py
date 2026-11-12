@@ -99,10 +99,6 @@ from agentclaw.community.core.task.task_center.intake_target_resolver import (
 from agentclaw.community.core.task.repository.task_intake_repository import (
     TaskIntakeRepositoryProtocol,
 )
-from agentclaw.community.core.task.task_dispatch.candidate_augmentation import (
-    NullSearchCandidateAugmentor,
-    SearchCandidateAugmentor,
-)
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
@@ -299,12 +295,6 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
-        )
-        # Search augmentation is an internal pluggable seam. Unbound deployments
-        # keep the public /search contract unchanged; deployment overlays may
-        # override this binding with a provider such as the temporary duty fallback pool.
-        binder.bind(
-            SearchCandidateAugmentor, to=NullSearchCandidateAugmentor, scope=singleton
         )
 
     @singleton
@@ -623,14 +613,9 @@ class TaskModule(Module):
             bot_bindings = injector.get(MerchantTaskBotBindingsConfig)
         except Exception:  # noqa: BLE101 未绑定时降级 None(占位符字面保留)
             bot_bindings = None
-        try:
-            candidate_augmentor = injector.get(SearchCandidateAugmentor)
-        except Exception:  # noqa: BLE001 lightweight DI keeps search unchanged
-            candidate_augmentor = NullSearchCandidateAugmentor()
         return TaskService(
             graph,
             harness=harness,
-            search_candidate_augmentor=candidate_augmentor,
             bot=bot,
             bcs=bcs,
             discover=discover_port,

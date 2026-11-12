@@ -14,9 +14,6 @@ from agentclaw.community.core.bot_public.services.bot_discover_service import (
 from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
 )
-from agentclaw.community.core.task.task_dispatch.candidate_augmentation import (
-    NullSearchCandidateAugmentor,
-)
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     search_candidates,
@@ -34,7 +31,7 @@ class _Service(TaskServiceRelayMixin):
             append_action_event=lambda *a, **kw: self.events.append((a, kw))
         )
         self._relay_adapter = SimpleNamespace(search=search)
-        self._search_candidate_augmentor = NullSearchCandidateAugmentor()
+        self._temporary_duty_candidates = ()
 
 
 @pytest.mark.asyncio
