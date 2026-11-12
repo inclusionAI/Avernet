@@ -153,3 +153,28 @@ def test_bcsfuse_changes_trigger_singlebox_coverage():
     detection = workflow.split("- name: Detect singlebox-relevant changes vs base", 1)[1]
     detection = detection.split("- name: Mark singlebox coverage as passed", 1)[0]
     assert "            apps/bcsfuse \\\n" in detection
+
+
+def test_singlebox_has_one_cargo_cache_and_excludes_only_rebuildable_dependencies():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    upload = workflow.split("- name: Upload singlebox artifacts", 1)[1]
+
+    assert "~/.cargo/registry" not in workflow
+    assert "~/.cargo/git" not in workflow
+    assert workflow.count("uses: Swatinem/rust-cache@") == 1
+    assert "cache-workspace-crates: false" in workflow
+    assert "cache-bin: false" in workflow
+    assert "save-if: ${{ github.event_name == 'push' }}" in workflow
+
+    assert "!**/node_modules/**" in upload
+    for preserved in (
+        "singlebox/.dependencies/logs/**",
+        "singlebox/.dependencies/coverage/singlebox/**",
+        "singlebox/.dependencies/standalone/**",
+        "singlebox/.dependencies/coverage/singlebox/reports/phase-timings.tsv",
+        "!singlebox/.dependencies/coverage/**/collaboration-repair-provider.json",
+        "!singlebox/.dependencies/coverage/**/.repair-provider-*",
+    ):
+        assert preserved in upload
+
+    assert "singlebox/ci/tests/test_bcs_panel_asset.py" in workflow

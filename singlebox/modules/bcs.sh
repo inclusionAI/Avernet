@@ -130,6 +130,26 @@ bcs_panel_asset_deps_stale() {
     return 1
 }
 
+bcs_panel_asset_stale() {
+    local output="${BCS_PANEL_ASSET_DIR}/dist/index.umd.js"
+    local input
+
+    if [ ! -f "$output" ]; then
+        return 0
+    fi
+    while IFS= read -r input; do
+        if [ "$input" -nt "$output" ]; then
+            return 0
+        fi
+    done < <(
+        find "${BCS_PANEL_ASSET_DIR}" \
+            -path "${BCS_PANEL_ASSET_DIR}/node_modules" -prune -o \
+            -path "${BCS_PANEL_ASSET_DIR}/dist" -prune -o \
+            -type f -print
+    )
+    return 1
+}
+
 build_bcs_panel_asset() {
     if [ ! -f "${BCS_PANEL_ASSET_DIR}/package.json" ]; then
         log_info "BCS panel asset package not found, skipping build"
@@ -147,6 +167,11 @@ build_bcs_panel_asset() {
 
     if bcs_panel_asset_deps_stale; then
         install_bcs_panel_asset_deps || return 1
+    fi
+
+    if ! bcs_panel_asset_stale; then
+        log_info "BCS panel asset is up to date, skipping npm build"
+        return 0
     fi
 
     log_info "Building BCS panel asset..."

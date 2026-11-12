@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 
@@ -43,7 +44,65 @@ raise SystemExit(int(os.environ.get('COMPANION_RC', '0')))
   test -f "$CASE_ROOT/companion-started"
   touch "$CASE_ROOT/acceptance-started"
   junit=""''')
+    s = s.replace('      [ -n "${COVERAGE_FILE:-}" ] || exit 22', '''      [ -n "${COVERAGE_FILE:-}" ] || exit 22
+      # `coverage combine` deletes its raw inputs, so the services must already
+      # have exited and saved their final shutdown/lifespan coverage.
+      test -f "$CASE_ROOT/python-services-stopped"
+      component="$(basename "$COVERAGE_FILE" .coverage)"
+      # Mirror real combine input deletion so a stale post-combine flush shows
+      # up as recreated raw files instead of passing silently.
+      rm -f "$CASE_ROOT/singlebox/.dependencies/coverage/singlebox/raw/$component"/.coverage*
+      touch "$CASE_ROOT/python-${component}-started"
+      for attempt in {1..100}; do
+        [[ -f "$CASE_ROOT/aggregate-started" ]] && break
+        sleep 0.02
+      done
+      test -f "$CASE_ROOT/aggregate-started"''')
     uv.write_text(s)
+    fake_bin = tmp_path / 'fake-bin'
+    (fake_bin / 'ps').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$CASE_ROOT/ps.log"
+# Model the real `ps ax -o pid= -o command=` shape only while the services are
+# still live, so the post-combine cleanup flush can never recreate raw inputs.
+if [[ ! -f "$CASE_ROOT/python-services-stopped" ]]; then
+  printf '%s %s\\n' 424242 "$CASE_ROOT/.venv/bin/coverage run --parallel-mode --save-signal=USR1 backend"
+fi
+''')
+    (fake_bin / 'kill').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$CASE_ROOT/kill.log"
+if [[ "${1:-}" == "-USR1" ]]; then
+  raw="$CASE_ROOT/singlebox/.dependencies/coverage/singlebox/raw"
+  for component in backend baas; do
+    mkdir -p "$raw/$component"
+    printf '%s\\n' 'fake parallel coverage data' > "$raw/$component/.coverage.usr1save"
+  done
+  exit 0
+fi
+exec /bin/kill "$@"
+''')
+    # bash resolves `kill` as a builtin before PATH. Disable the builtin so the
+    # fake receives the USR1 save signal; it forwards every other signal.
+    (fake_bin / 'bashenv').write_text('enable -n kill\n')
+    for name in ('ps', 'kill'):
+        (fake_bin / name).chmod(0o755)
+    launcher = tmp_path / 'singlebox/singlebox.sh'
+    launcher_source = launcher.read_text().replace(
+        '''  printf '%s\\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/backend/.coverage.fake"
+  printf '%s\\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/baas/.coverage.fake"
+''',
+        '''  # BaaS persists parallel coverage only on USR1 and has no SIGTERM
+  # handling, so this fixture starts with no raw `.coverage*` inputs.
+''',
+    )
+    launcher.write_text(launcher_source.replace(
+        "printf '%s\\n' \"$*\"",
+        '''if [[ "$*" == "--standalone stop backend baas" ]]; then
+  touch "$CASE_ROOT/python-services-stopped"
+fi
+printf '%s\\n' "$*"''',
+    ))
     e2e = scripts / 'e2e_coverage.sh'
     e2e_source = e2e.read_text()
     start = e2e_source.index('if [[ "$*" == *--shared-tests-only* ]]')
@@ -55,6 +114,13 @@ raise SystemExit(int(os.environ.get('COMPANION_RC', '0')))
   exit "${SHARED_RC:-0}"
 fi
 test -f "$CASE_ROOT/companion-finished"
+for attempt in {1..500}; do
+  [[ -f "$CASE_ROOT/python-backend-started" && -f "$CASE_ROOT/python-baas-started" ]] && break
+  sleep 0.02
+done
+test -f "$CASE_ROOT/python-backend-started"
+test -f "$CASE_ROOT/python-baas-started"
+touch "$CASE_ROOT/aggregate-started"
 echo aggregate >> "$CASE_ROOT/order"
 cov_dir="${PWD}/apps/bcs/target/cov-e2e"''')
     e2e.write_text(s)
@@ -65,6 +131,7 @@ cov_dir="${PWD}/apps/bcs/target/cov-e2e"''')
 def test_overlap_join_before_aggregation_and_failure_status(pipeline, companion_rc, shared_rc):
     root = pipeline
     env = {**os.environ, 'PATH': str(root / 'fake-bin') + ':' + os.environ['PATH'],
+           'BASH_ENV': str(root / 'fake-bin/bashenv'),
            'PYTHON': sys.executable, 'CASE_ROOT': str(root),
            'SINGLEBOX_STUB_LOG': str(root / 'singlebox.log'), 'UV_STUB_LOG': str(root / 'uv.log'),
            'COMPANION_RC': companion_rc, 'SHARED_RC': shared_rc}
@@ -73,9 +140,30 @@ def test_overlap_join_before_aggregation_and_failure_status(pipeline, companion_
     expected = int(shared_rc) or int(companion_rc)
     assert result.returncode == expected, result.stdout + result.stderr
     assert (root / 'order').read_text().splitlines() == ['aggregate']
+    assert (root / 'python-backend-started').exists()
+    assert (root / 'python-baas-started').exists()
+    assert (root / 'aggregate-started').exists()
+    assert (root / 'python-services-stopped').exists()
+    raw = root / 'singlebox/.dependencies/coverage/singlebox/raw'
+    for component in ('backend', 'baas'):
+        # USR1-created inputs are consumed by combine and must not be recreated
+        # by the post-combine cleanup flush.
+        assert not list((raw / component).glob('.coverage*'))
+    # The live writers must be signalled exactly once, while the fake `kill`
+    # still recreates raw inputs; the post-combine cleanup flush must not.
+    assert (root / 'kill.log').read_text().splitlines() == ['-USR1 424242']
+    # One probe before the stop and one in final cleanup. A duplicate
+    # post-combine flush is visible here even after `ps` stops matching.
+    assert (root / 'ps.log').read_text().splitlines() == ['ax -o pid= -o command='] * 2
     reports = root / 'singlebox/.dependencies/coverage/singlebox/reports'
     assert (reports / 'bcs/companion-timings.json').exists()
     assert (reports / 'bcs/cobertura.xml').exists()
+    phase_rows = {
+        line.split('\t', 1)[0]
+        for line in (reports / 'phase-timings.tsv').read_text().splitlines()[1:]
+    }
+    assert 'python_backend_report' in phase_rows
+    assert 'python_baas_report' in phase_rows
     summary = json.loads((reports / 'summary.json').read_text())
     assert summary['systems']['bcs']['e2e_status'] == ('passed' if expected == 0 else 'failed')
 
@@ -103,6 +191,7 @@ while True: time.sleep(.02)
 fi
 printf '%s\\n' "$*"'''))
     env = {**os.environ, 'PATH': str(root / 'fake-bin') + ':' + os.environ['PATH'],
+           'BASH_ENV': str(root / 'fake-bin/bashenv'),
            'PYTHON': sys.executable, 'CASE_ROOT': str(root),
            'SINGLEBOX_STUB_LOG': str(root / 'singlebox.log'), 'UV_STUB_LOG': str(root / 'uv.log')}
     with (root / 'run.log').open('w') as log:
@@ -117,6 +206,73 @@ printf '%s\\n' "$*"'''))
             process.send_signal(signal.SIGTERM)
             assert process.wait(timeout=15) == 143
             assert (root / 'companion-cancelled').exists()
+            assert (root / 'cleanup-after-cancel').exists()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+
+def test_parent_cancellation_reaps_python_reports_before_stack_cleanup(pipeline):
+    import time
+
+    root = pipeline
+    uv = root / 'fake-bin/uv'
+    source = uv.read_text()
+    source = source.replace(
+        'test -f "$CASE_ROOT/aggregate-started"',
+        '''test -f "$CASE_ROOT/aggregate-started"
+      for attempt in {1..400}; do
+        [[ -f "$CASE_ROOT/allow-python-finish" ]] && break
+        sleep 0.02
+      done
+      test -f "$CASE_ROOT/allow-python-finish"''',
+        1,
+    )
+    source = source.replace(
+        "printf '%s\\n' 'Name Stmts Miss Cover'",
+        '''component="$(basename "$COVERAGE_FILE" .coverage)"
+      touch "$CASE_ROOT/python-${component}-finished"
+      printf '%s\\n' 'Name Stmts Miss Cover' ''',
+        1,
+    )
+    uv.write_text(source)
+
+    launcher = root / 'singlebox/singlebox.sh'
+    launcher.write_text(launcher.read_text().replace(
+        "printf '%s\\n' \"$*\"",
+        '''if [[ "$*" == "--standalone stop all" ]]; then
+  test -f "$CASE_ROOT/python-backend-finished" || exit 81
+  test -f "$CASE_ROOT/python-baas-finished" || exit 82
+  touch "$CASE_ROOT/cleanup-after-cancel"
+fi
+printf '%s\\n' "$*"''',
+    ))
+
+    env = {**os.environ, 'PATH': str(root / 'fake-bin') + ':' + os.environ['PATH'],
+           'BASH_ENV': str(root / 'fake-bin/bashenv'),
+           'PYTHON': sys.executable, 'CASE_ROOT': str(root),
+           'SINGLEBOX_STUB_LOG': str(root / 'singlebox.log'),
+           'UV_STUB_LOG': str(root / 'uv.log')}
+    with (root / 'cancel-python.log').open('w') as log:
+        process = subprocess.Popen(
+            ['bash', 'singlebox/ci/singlebox_coverage.sh'],
+            cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not (root / 'aggregate-started').exists():
+                assert process.poll() is None, (root / 'cancel-python.log').read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            process.send_signal(signal.SIGTERM)
+            time.sleep(1.0)
+            # The reports are gated on allow-python-finish; cleanup must not
+            # reach `stop all` while they are still writing.
+            assert not (root / 'python-backend-finished').exists()
+            assert not (root / 'python-baas-finished').exists()
+            (root / 'allow-python-finish').touch()
+            assert process.wait(timeout=15) == 143
             assert (root / 'cleanup-after-cancel').exists()
         finally:
             if process.poll() is None:

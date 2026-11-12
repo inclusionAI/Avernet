@@ -153,6 +153,17 @@ DEPLOY_PROFILE=test uv run --no-sync pytest tests/community/architecture -q
 bash scripts/ci_test.sh
 ```
 
+GitHub runs this same gate in
+[`backend-unit-tests.yml`](../../.github/workflows/backend-unit-tests.yml) as the
+stable `Backend unit tests` job. That dedicated workflow watches only Backend
+sources (`apps/backend/`), the Legacy Skill entrypoint
+(`singlebox/ci/legacy_skill_compatibility.sh`) and its own workflow file. It has
+no `on.paths` filter: for every matching `pull_request`/`push` event the
+workflow and its `Backend unit tests` job are created, the detection step runs,
+and only the setup/test/upload steps are skipped when no Backend-relevant path
+changed. In that case the detection job reports success, so a BCS-only edit to
+the shared `unit-tests.yml` does not run full Backend tests.
+
 For a changed HTTP interface, run the existing fast gate before review/PR:
 
 ```bash
