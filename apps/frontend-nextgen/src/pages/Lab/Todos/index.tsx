@@ -4,13 +4,12 @@ import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext, useSpaceContextActions } from '@/hooks/useSpaceContext';
 import { useTodos } from '@/hooks/useTodos';
 import { botWorkshopService } from '@/services/botWorkshop';
-import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
+import { history } from '@umijs/max';
 import { useEffect, useState } from 'react';
 import { eligibleTodoBots } from './botScope';
 import { TodoCreateModal } from './components/TodoCreateModal';
-import { TodoDetailDrawer } from './components/TodoDetailDrawer';
-import { TodoTable } from './components/TodoTable';
+import { TodoBoard } from './components/TodoBoard';
 import { TodoToolbar } from './components/TodoToolbar';
 
 /** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
@@ -21,13 +20,11 @@ export default function LabTodosPage() {
   const spaceInitialized = useSpaceContext((state) => state.initialized);
   const { identity: humanIdentity } = useHumanIdentity();
   const currentUserId = humanIdentity?.userId.trim() || undefined;
-  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [bots, setBots] = useState<TodoBotOption[]>([]);
   const [botsLoading, setBotsLoading] = useState(false);
 
   const todos = useTodos();
-  const selectedTodo = useTodoStore((state) => state.selectedTodo);
 
   useEffect(() => {
     if (!spaceInitialized) void init();
@@ -61,12 +58,6 @@ export default function LabTodosPage() {
     };
   }, [currentSpace, currentSpaceId, currentUserId, spaceInitialized]);
 
-  useEffect(() => {
-    if (selectedTodoId && currentSpaceId !== undefined && selectedTodo && selectedTodo.spaceId !== currentSpaceId) {
-      setSelectedTodoId(null);
-    }
-  }, [currentSpaceId, selectedTodo, selectedTodoId]);
-
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
@@ -85,7 +76,7 @@ export default function LabTodosPage() {
           onCreate={() => setCreateOpen(true)}
         />
 
-        <TodoTable
+        <TodoBoard
           todos={todos.todos}
           total={todos.total}
           page={todos.page}
@@ -93,7 +84,7 @@ export default function LabTodosPage() {
           loading={todos.loading || !spaceInitialized}
           error={todos.error}
           onRetry={() => void todos.refresh()}
-          onSelect={setSelectedTodoId}
+          onSelect={(todoId) => history.push(`/lab/todos/${encodeURIComponent(todoId)}`)}
           onPageChange={todos.setPage}
           onPageSizeChange={todos.setPageSize}
         />
@@ -105,13 +96,6 @@ export default function LabTodosPage() {
         loading={botsLoading}
         onOpenChange={setCreateOpen}
         onSubmit={async (input) => Boolean(await todos.create(input))}
-      />
-
-      <TodoDetailDrawer
-        todoId={selectedTodoId}
-        currentSpace={currentSpace}
-        onClose={() => setSelectedTodoId(null)}
-        onListRefresh={todos.refresh}
       />
     </main>
   );

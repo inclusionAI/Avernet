@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
-import type { TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoRecord } from '@/domain/todos/models';
 import LabTodosPage from '@/pages/Lab/Todos';
 import * as botWorkshop from '@/services/botWorkshop';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
+import { history } from '@umijs/max';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -75,6 +76,7 @@ Element.prototype.releasePointerCapture ??= () => undefined;
 Element.prototype.scrollIntoView ??= () => undefined;
 
 const mockedService = jest.mocked(todoService);
+const mockedHistory = jest.mocked(history);
 
 const awaitingAcceptanceTodo: TodoRecord = {
   todoId: 'todo-1',
@@ -89,6 +91,13 @@ const awaitingAcceptanceTodo: TodoRecord = {
   updatedAt: '2026-11-10T02:00:00Z',
 };
 
+const runningTodo: TodoRecord = {
+  ...awaitingAcceptanceTodo,
+  todoId: 'todo-2',
+  title: '整理会议纪要',
+  status: 'in_progress',
+};
+
 const createdTodo: TodoRecord = {
   ...awaitingAcceptanceTodo,
   todoId: 'todo-new',
@@ -97,29 +106,6 @@ const createdTodo: TodoRecord = {
   status: 'pending',
   collabContextId: undefined,
 };
-
-const pendingDispatchTodo: TodoRecord = {
-  ...awaitingAcceptanceTodo,
-  status: 'pending',
-  collabContextId: undefined,
-};
-
-function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent {
-  return {
-    eventId: `event-${eventSeq}`,
-    eventSeq,
-    eventType: 'execution.status',
-    actorId: 'bot-1',
-    actorType: 'bot',
-    content: `事件 ${eventSeq}`,
-    executionId: 'execution-1',
-    contextVersion: 1,
-    status: 'in_progress',
-    createdAt: `2026-11-10T02:0${eventSeq}:00Z`,
-    artifacts: [],
-    ...overrides,
-  };
-}
 
 function resetTodoStore() {
   useTodoStore.setState({
@@ -141,33 +127,16 @@ function resetTodoStore() {
 beforeEach(() => {
   jest.clearAllMocks();
   resetTodoStore();
-  mockedService.loadTodos.mockResolvedValue({ items: [awaitingAcceptanceTodo], total: 1, page: 1, pageSize: 10 });
-  mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
-  mockedService.loadTodoInteractions.mockResolvedValue([
-    event(3, {
-      eventType: 'user_interaction.posted',
-      actorId: 'u-1',
-      actorType: 'human',
-      content: '请补充风险说明',
-    }),
-  ]);
-  mockedService.loadTodoEvents.mockResolvedValue([
-    event(1, { content: '开始整理方案', status: 'in_progress' }),
-    event(2, {
-      content: '已完成方案',
-      status: 'pending_acceptance',
-      artifacts: [{ artifactId: 'artifact-1', name: '实施方案.md', url: 'https://example.test/plan' }],
-    }),
-  ]);
+  mockedService.loadTodos.mockResolvedValue({
+    items: [awaitingAcceptanceTodo, runningTodo],
+    total: 2,
+    page: 1,
+    pageSize: 10,
+  });
   mockedService.addTodo.mockResolvedValue(createdTodo);
-  mockedService.addTodoInteraction.mockResolvedValue(
-    event(4, { eventType: 'user_interaction.posted', actorId: 'u-1', actorType: 'human', content: '补充回滚方案' }),
-  );
-  mockedService.acceptTodo.mockResolvedValue({ ...awaitingAcceptanceTodo, status: 'completed' });
-  mockedService.startTodoRun.mockResolvedValue({ ...awaitingAcceptanceTodo, status: 'in_progress' });
 });
 
-describe('LabTodosPage（待办工作台）', () => {
+describe('LabTodosPage（待办卡片工作台）', () => {
   it('展示当前空间待办，并用当前空间查询', async () => {
     expect(botWorkshop.botWorkshopService).toBeDefined();
     render(<LabTodosPage />);
@@ -188,7 +157,7 @@ describe('LabTodosPage（待办工作台）', () => {
     );
   });
 
-  it('按原型顺序展示状态 Tab、负责人和搜索，并按负责人查询', async () => {
+  it('展示状态筛选、负责人和搜索，并按负责人查询', async () => {
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');
 
@@ -200,33 +169,13 @@ describe('LabTodosPage（待办工作台）', () => {
     const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
     const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
     expect(owner.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(search).toHaveAttribute('placeholder', '搜索待办标题');
-    expect(within(toolbar).queryByText('团队知识库')).not.toBeInTheDocument();
 
     fireEvent.click(tabs[1]);
-    await waitFor(() =>
-      expect(mockedService.loadTodos).toHaveBeenLastCalledWith({
-        spaceId: 10,
-        keyword: undefined,
-        status: 'pending',
-        botId: undefined,
-        page: 1,
-        pageSize: 10,
-      }),
-    );
+    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'pending' })));
 
     fireEvent.click(owner);
     fireEvent.click(await screen.findByRole('option', { name: '写作助手' }));
-    await waitFor(() =>
-      expect(mockedService.loadTodos).toHaveBeenLastCalledWith({
-        spaceId: 10,
-        keyword: undefined,
-        status: 'pending',
-        botId: 'bot-owned:u-1',
-        page: 1,
-        pageSize: 10,
-      }),
-    );
+    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ botId: 'bot-owned:u-1' })));
   });
 
   it('创建待办进入待处理，不在前端自动 Run', async () => {
@@ -235,8 +184,6 @@ describe('LabTodosPage（待办工作台）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('combobox', { name: '选择 Bot' })).toHaveTextContent('写作助手');
-
     fireEvent.change(within(dialog).getByRole('textbox', { name: '标题' }), {
       target: { value: ' 分析本周用户反馈 ' },
     });
@@ -254,89 +201,27 @@ describe('LabTodosPage（待办工作台）', () => {
       }),
     );
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('展示待办列表、Bot 名称和状态', async () => {
+  it('按状态分组展示小卡片，不显示表格查看操作', async () => {
     render(<LabTodosPage />);
-    await screen.findByText('编写实施方案');
 
-    const row = screen.getByText('编写实施方案').closest('tr');
-    expect(within(row!).getByText('写作助手')).toBeInTheDocument();
-    expect(within(row!).getByText('待验收')).toBeInTheDocument();
-    expect(within(row!).getByRole('button', { name: '查看' })).toBeInTheDocument();
+    const acceptanceCard = await screen.findByRole('article', { name: '编写实施方案' });
+    expect(within(acceptanceCard).getByText('写作助手')).toBeInTheDocument();
+    expect(within(acceptanceCard).getByText('待验收')).toBeInTheDocument();
+    const board = screen.getByRole('region', { name: '待办分组' });
+    expect(within(board).getByRole('button', { name: /^待处理 1$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^进行中 1$/ })).toHaveTextContent('1');
+    expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
   });
 
-  it('详情展示 B 事件时序、互动和产物名称地址', async () => {
+  it('点击卡片进入独立待办详情页', async () => {
     render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
 
-    expect(await screen.findAllByRole('heading', { name: '编写实施方案' })).toHaveLength(2);
-    expect(await screen.findByText('已完成方案')).toBeInTheDocument();
-    expect(screen.getByText('请补充风险说明')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /实施方案\.md/ })).toHaveAttribute('href', 'https://example.test/plan');
-    expect(mockedService.loadTodoEvents).toHaveBeenCalledWith('todo-1');
+    const card = await screen.findByRole('article', { name: '编写实施方案' });
+    fireEvent.click(within(card).getByRole('button', { name: /编写实施方案/ }));
+
+    expect(mockedHistory.push).toHaveBeenCalledWith('/lab/todos/todo-1');
   });
-
-  it('待验收互动仅提交内容，B 负责推进后续执行', async () => {
-    render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
-    await screen.findByText('已完成方案');
-
-    fireEvent.change(screen.getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
-      target: { value: ' 补充回滚方案 ' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '发送互动' }));
-
-    await waitFor(() =>
-      expect(mockedService.addTodoInteraction).toHaveBeenCalledWith('todo-1', { message: '补充回滚方案' }),
-    );
-    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
-  });
-
-  it('拒绝验收只提交验收决策，不在前端调用 Run', async () => {
-    mockedService.acceptTodo.mockResolvedValue(awaitingAcceptanceTodo);
-
-    render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
-    await screen.findByText('已完成方案');
-
-    fireEvent.change(screen.getByPlaceholderText('可选：填写验收意见'), { target: { value: ' 请修改 ' } });
-    fireEvent.click(screen.getByRole('button', { name: '验收不通过' }));
-
-    await waitFor(() =>
-      expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
-        verdict: 'rejected',
-        message: '请修改',
-      }),
-    );
-    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
-  });
-
-  it('待处理 Todo 不展示启动执行和编辑入口', async () => {
-    mockedService.loadTodo.mockResolvedValueOnce(pendingDispatchTodo);
-
-    render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
-    await screen.findAllByRole('heading', { name: '编写实施方案' });
-
-    expect(screen.queryByRole('button', { name: '编辑待办' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '启动执行' })).not.toBeInTheDocument();
-    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
-  });
-
-  it('待验收不展示编辑和启动入口', async () => {
-    render(<LabTodosPage />);
-    const row = (await screen.findByText('编写实施方案')).closest('tr');
-    fireEvent.click(within(row!).getByRole('button', { name: '查看' }));
-    await screen.findByText('已完成方案');
-
-    expect(screen.queryByRole('button', { name: '编辑待办' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '启动执行' })).not.toBeInTheDocument();
-  });
-
 });

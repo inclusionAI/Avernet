@@ -14,7 +14,7 @@ export function TodoAcceptanceActions({ loading, onAccept }: TodoAcceptanceActio
     if (success) setMessage('');
   };
   return (
-    <section className="space-y-3 border-t border-divider pt-4">
+    <section role="region" aria-label="待办验收" className="space-y-3 border-t border-divider pt-4">
       <div>
         <div className="text-sm font-semibold text-foreground">验收</div>
         <p className="m-0 mt-1 text-xs text-muted-foreground">通过后待办完成；不通过会记录意见并保持待验收。</p>

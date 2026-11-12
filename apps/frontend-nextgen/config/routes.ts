@@ -43,6 +43,7 @@ export const routes = [
       // 实验室落地页 = 功能卡网格（社区/待办/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
+      { path: '/lab/todos/:todoId', component: '@/pages/Lab/Todos/TodoDetailPage' },
       { path: '/lab/todos', component: '@/pages/Lab/Todos' },
       { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
