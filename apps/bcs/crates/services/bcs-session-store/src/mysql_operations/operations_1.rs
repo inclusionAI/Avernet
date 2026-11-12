@@ -347,10 +347,16 @@ impl MySqlSessionStore {
         })?;
         steps.extend(event_plan.steps);
         self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
-                "Session '{}' changed during completion: {error}",
-                command.session_id
-            ))
+            if transaction_lock_row_is_missing(&error) {
+                // The CAS lock row vanished: a concurrent writer changed or
+                // deleted the session between the pre-check read and the lock.
+                ServiceError::Conflict(format!(
+                    "Session '{}' changed during completion",
+                    command.session_id
+                ))
+            } else {
+                ServiceError::InternalError(format!("session db: {error}"))
+            }
         })?;
         Ok(Some(candidate))
     }

@@ -190,6 +190,9 @@ impl MySqlMessageStore {
         let tx_results = match self.db.transaction(steps).await {
             Ok(results) => results,
             Err(error) => {
+                if matches!(&error, bcs_db_api::DbError::InvalidInput(msg) if msg.contains("references missing row")) {
+                    return Err(MessageRepoError::SessionNotFound(msg.session_id.clone()));
+                }
                 if error_projection || (stable && error.is_duplicate_key()) {
                     let rows = self.db.query(DbStatement::with_params(
                         format!("SELECT {SELECT_COLS} FROM bcs_messages WHERE env = ? AND session_id = ? AND message_id = ?"),
@@ -417,7 +420,12 @@ impl MessageRepoPort for MySqlMessageStore {
             .db
             .transaction(steps)
             .await
-            .map_err(|error| MessageRepoError::StorageError(format!("transaction: {error}")))?;
+            .map_err(|error| {
+                if matches!(&error, bcs_db_api::DbError::InvalidInput(msg) if msg.contains("references missing row")) {
+                    return MessageRepoError::SessionNotFound(msg.session_id.clone());
+                }
+                MessageRepoError::StorageError(format!("transaction: {error}"))
+            })?;
         let session_seq = match results.get(1) {
             Some(bcs_db_api::DbTransactionStepResult::Rows(rows)) => {
                 let row = rows
