@@ -19,10 +19,9 @@ export function recoveryMessagePending(task: Pick<RecoveryStoredTask, "delivery"
 export function recoveryInterventionStatus(
   calls: readonly AgentToolCall[], delivery?: RecoveryResult["delivery"], timeline: readonly RecoveryTimelineEvent[] = [],
 ): RecoveryInterventionStatus {
-  // Legacy receipts without a reason were permission-only. A configuration click only requests a recheck.
+  // Only the durable accepted permission-handling receipt counts, not card dispatch or Plan approval.
   if (timeline.some(event => event.kind === "owner_decision" && event.actor === "owner"
-    && typeof event.payload.owner_request_id === "string" && event.payload.owner_request_id.trim()
-    && (event.payload.owner_request_reason === undefined || event.payload.owner_request_reason === "permission"))) return "performed";
+    && typeof event.payload.owner_request_id === "string" && event.payload.owner_request_id.trim())) return "performed";
   const confirmedMessages = new Set(calls.filter(call => call.status === "succeeded" && !call.isWrite
     && ["session_read", "trajectory_read"].includes(call.toolName))
     .map(call => call.result as Record<string, unknown> | null)

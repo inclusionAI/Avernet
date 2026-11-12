@@ -27,7 +27,7 @@ import { hasAssessmentDelivery, ownerContinuationState } from "./owner-cooperati
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import { RECOVERY_OWNER_REQUEST_REASONS, type RecoveryAssessment, type RecoveryStoredTask, type RecoveryTaskStore, type RecoveryJudgment, type RecoveryPlan } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
@@ -296,7 +296,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerCooperationReasons: RECOVERY_OWNER_REQUEST_REASONS, ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -589,7 +589,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
         if (handoff && request.instructions !== undefined && request.instructions !== handoff.instructions) fail(422, "Owner 处理事项有冲突，请统一使用 handoff.instructions");
-        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as typeof RECOVERY_OWNER_REQUEST_REASONS[number], instructions: handoff?.instructions ?? request.instructions as string,
+        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission", instructions: handoff?.instructions ?? request.instructions as string,
           summary: handoff?.summary ?? body.summary as string, ...(handoff ? { reportSummary: body.summary as string } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
         return { ok: true };
       }

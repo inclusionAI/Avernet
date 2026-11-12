@@ -14,17 +14,14 @@ export type RecoveryCompletionReason = typeof RECOVERY_COMPLETION_REASONS[number
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 /** Owner-facing business handoff, separate from the full investigation report. */
 export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
-export const RECOVERY_OWNER_REQUEST_REASONS = ["permission"] as const;
 /** Owner processing receipt; neither environment approval nor proof of recovery. */
 export type RecoveryOwnerRequestInput = {
-  reason: typeof RECOVERY_OWNER_REQUEST_REASONS[number];
+  reason: "permission";
   summary: string;
   instructions: string;
   evidence_ids: string[];
 };
-export type RecoveryOwnerRequest = Omit<RecoveryOwnerRequestInput, "reason"> & {
-  // Configuration requests remain readable after new requests stop being accepted.
-  reason: RecoveryOwnerRequestInput["reason"] | "configuration";
+export type RecoveryOwnerRequest = RecoveryOwnerRequestInput & {
   requestId: string;
   revision: number;
   status: "pending" | "confirmed";

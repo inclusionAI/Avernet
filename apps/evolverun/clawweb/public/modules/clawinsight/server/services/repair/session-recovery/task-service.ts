@@ -301,7 +301,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       const confirmed = confirmOwnerRequest(value, requestId, actor.userId, feedback, this.now());
       accepted = confirmed !== value;
       return accepted ? { ...value, ...confirmed, timeline: [...value.timeline,
-        this.event("owner_decision", "owner", "Owner 已反馈处理完成，等待自愈核验", { owner_request_id: requestId, owner_request_reason: confirmed.ownerRequest!.reason, feedback, phase: "assess" })] }
+        this.event("owner_decision", "owner", "Owner 已反馈处理完成，等待自愈核验", { owner_request_id: requestId, feedback, phase: "assess" })] }
         : { ...value, version: value.version + 1 }; // A concurrent duplicate still respects the store CAS contract.
     });
     // The durable state is the queue. Maintenance recovers a crash before this dispatch.
@@ -569,7 +569,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
   private async syncOwnerCard(input: RecoveryStoredTask, refreshSource = "", depth = 0): Promise<void> {
     const task = await this.required(input.taskId), request = task.ownerRequest;
-    if (!request || task.simulation || !this.ownsTask(task)) return;
+    if (request?.reason !== "permission" || task.simulation || !this.ownsTask(task)) return;
     const stateKey = this.ownerCardStateKey(task);
     const key = refreshSource ? `${stateKey}-sync-${createHash("sha256").update(refreshSource).digest("hex").slice(0, 16)}` : stateKey;
     const attempts = task.timeline.filter(event => event.payload.notification_key === key && event.payload.state === "sending");
@@ -582,9 +582,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return;
     }
     const id = `${key}-${attempts.length}`;
-    // A disabled attempt never reached DingTalk. A missing or uncertain receipt may have.
     const notDispatched = new Set(task.timeline.filter(event => event.kind === "notification"
-      && event.payload.channel === "owner_card" && (event.payload.state === "disabled" || event.payload.dispatched === false)).map(event => event.event_id));
+      && event.payload.channel === "owner_card" && event.payload.dispatched === false).map(event => event.event_id));
     const updateOnly = task.timeline.some(event => event.kind === "notification" && event.payload.channel === "owner_card"
       && event.payload.operation === "create" && event.payload.state === "sending" && !notDispatched.has(`${event.event_id}-result`));
     const payload = { channel: "owner_card", owner_request_id: request.requestId, notification_key: key, kind: "owner_request", phase: task.phase, operation: updateOnly ? "update" : "create" };
