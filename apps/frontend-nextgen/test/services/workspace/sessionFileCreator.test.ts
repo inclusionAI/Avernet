@@ -1,6 +1,6 @@
 /**
  * 会话文件创建者信息展示纯函数（2026-11-09 契约）：
- * describeSessionFileCreator（来源+创建者合段）与 formatSessionUploadTime（UTC 锚时间）。
+ * describeSessionFileCreator（来源+创建者合段）与 formatSessionUploadTime（本地时区时间）。
  * 两者驱动单聊 BotSessionFilesRow 元数据行，文案/语义与老前端（oc-web）
  * add-session-file-creator-fields 逐字对齐——灰度切流下同一文件在两套 UI 展示一致。
  */
@@ -31,22 +31,32 @@ describe('describeSessionFileCreator - 创建者信息 → 元数据行来源合
   });
 });
 
-describe('formatSessionUploadTime - created_at ISO 串 → UTC YYYY-MM-DD HH:mm:ss', () => {
-  it('ISO Z 串取 UTC 分量（与后端原值逐字对应，不随查看端时区漂移）', () => {
-    // 2026-11-09T02:15:30Z → 02:15:30；机器在 UTC+8 也不能显示成 10:15:30。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toBe('2026-11-09 02:15:30');
+describe('formatSessionUploadTime - created_at ISO 串 → 查看端本地时区 YYYY-MM-DD HH:mm:ss', () => {
+  // 2026-11-12 用户反馈：展示时间需为查看端本地时间（北京时间即 UTC+8，+8 小时）。
+  // 钉死 Asia/Shanghai 使断言跨 CI 时区确定；跑完恢复，避免污染同 worker 的其他套件。
+  const originalTZ = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = 'Asia/Shanghai';
+  });
+  afterAll(() => {
+    process.env.TZ = originalTZ;
+  });
+
+  it('ISO Z 串取本地时区分量（东八区显示 +8 小时，不与后端原值逐字一致）', () => {
+    // 2026-11-09T02:15:30Z → 北京时间 10:15:30（曾经 UTC 逐字展示被反馈少 8 小时）。
+    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toBe('2026-11-09 10:15:30');
     expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
 
   it('吃微秒精度 ISO（2026-11-09 契约 created_at 秒级截断展示）', () => {
-    // 后端 created_at 可能带 6 位微秒；new Date 按毫秒截断解析，格式化只取秒级分量。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30.123456Z')).toBe('2026-11-09 02:15:30');
-    expect(formatSessionUploadTime('2026-11-09T02:10:00.999999Z')).toBe('2026-11-09 02:10:00');
+    // 后端 created_at 可能带 6 位微秒；new Date 按毫秒截断解析，格式化只取秒级分量。北京时间 +8 → 10:xx:xx。
+    expect(formatSessionUploadTime('2026-11-09T02:15:30.123456Z')).toBe('2026-11-09 10:15:30');
+    expect(formatSessionUploadTime('2026-11-09T02:10:00.999999Z')).toBe('2026-11-09 10:10:00');
   });
 
-  it('带偏移的 ISO 串按其 UTC 瞬时取分量（回归：防 getHours 本地化偏移）', () => {
-    // 2026-11-09T10:15:30+08:00 与 02:15:30Z 同瞬时，UTC 展示恒为 02:15:30。
-    expect(formatSessionUploadTime('2026-11-09T10:15:30+08:00')).toBe('2026-11-09 02:15:30');
+  it('带偏移的 ISO 串按其 UTC 瞬时取本地分量（同瞬时不同写法显示一致）', () => {
+    // 2026-11-09T10:15:30+08:00 与 02:15:30Z 同瞬时，北京时间均显示 10:15:30。
+    expect(formatSessionUploadTime('2026-11-09T10:15:30+08:00')).toBe('2026-11-09 10:15:30');
   });
 
   it('null / undefined / 空串 / 非法日期 → null（legacy 缺 created_at，行内不渲染时间段）', () => {
