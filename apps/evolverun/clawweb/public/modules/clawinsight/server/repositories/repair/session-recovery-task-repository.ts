@@ -128,9 +128,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     }
     return { tasks: result, nextTaskId: rows.length === limit ? rows[rows.length - 1].task_id : "" };
   }
-  async find(taskId: string): Promise<RecoveryStoredTask | null> {
+  async find(taskId: string, options: { forBootstrap?: boolean } = {}): Promise<RecoveryStoredTask | null> {
     const row = await this.tasks.findTask(taskId);
-    return row?.task_type === "session_recovery" ? this.hydrate(this.db, row.config_json) : null;
+    return row?.task_type === "session_recovery" ? this.hydrate(this.db, row.config_json, options.forBootstrap) : null;
   }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]> {
@@ -275,7 +275,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       [JSON.stringify(report), value.judgment?.summary ?? value.plan?.summary ?? null, status, nowForDb(tx.dbType), stepId]);
     await tx.exec("UPDATE ce_steps SET status = 'succeeded' WHERE task_id = ? AND step_no > 0 AND step_no < ? AND status NOT IN ('succeeded','failed','canceled')", [value.taskId, stepNo]);
   }
-  private async hydrate(db: IDatabase, raw: string): Promise<RecoveryStoredTask> {
+  private async hydrate(db: IDatabase, raw: string, forBootstrap = false): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
     if (value.artifactStorage !== 2) return { ...value, interventionStatus: undefined, interventionAuditComplete: undefined };
     const { artifactStorage: _storage, detailsRef, resultDelivery, stoppedResultDelivery, ...state } = value;
@@ -307,7 +307,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     }
     const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery, task.timeline);
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
-    task.trajectoryIndexReads = trajectoryIndexReads(interventionCalls);
+    if (forBootstrap) task.trajectoryIndexReads = trajectoryIndexReads(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);

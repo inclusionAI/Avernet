@@ -293,8 +293,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return calls.length < 500; // Continue settling a larger ledger on the next maintenance pass.
   }
-  async verify(taskId: string, executionId: string, ticket: string, control = false): Promise<RecoveryStoredTask> {
-    const task = await this.required(taskId);
+  async verify(taskId: string, executionId: string, ticket: string, control = false, forBootstrap = false): Promise<RecoveryStoredTask> {
+    const task = await this.required(taskId, forBootstrap);
     if (!control && task.status === "canceled") fail(409, "任务已停止");
     if (!task.execution || task.execution.executionId !== executionId) fail(401, "执行身份已失效");
     try {
@@ -821,7 +821,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const source = task.timeline.find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.session_id);
     return source ? String((source.payload.result as Record<string, unknown>).session_id) : undefined;
   }
-  private async required(id: string) { const task = await this.deps.tasks.find(id); if (!task) fail(404, "自愈任务不存在"); return task; }
+  private async required(id: string, forBootstrap = false) {
+    const task = await this.deps.tasks.find(id, { forBootstrap });
+    if (!task) fail(404, "自愈任务不存在"); return task;
+  }
   private async save(task: RecoveryStoredTask, change: (value: RecoveryStoredTask) => RecoveryStoredTask, executionId?: string) {
     for (let attempt = 0; attempt < 5; attempt++) {
       if (executionId && task.execution?.executionId !== executionId) return task;
