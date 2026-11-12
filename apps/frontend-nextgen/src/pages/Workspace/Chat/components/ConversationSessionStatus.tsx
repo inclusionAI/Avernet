@@ -9,7 +9,6 @@ import {
   Loader2,
   MessageCircleCheck,
   MessageCircleWarning,
-  MessageSquare,
   PauseCircle,
   type LucideIcon,
 } from 'lucide-react';
@@ -40,28 +39,16 @@ const SESSION_STATUS_ICON_MAP: Record<string, SessionStatusIconVisual> = {
   pending: { Icon: CircleDashed, colorClass: 'text-content-hint' },
 };
 
-/**
- * AIXCoding renders explicit idle as a dashed circle. In TeamClaw that state is
- * intentionally merged with the default conversation placeholder.
- */
-/** The slot itself stays 14x14 so swapping placeholder/status never shifts the title. */
+/** The status slot stays 14x14; the row keeps a fixed title inset even when no status is rendered. */
 const SESSION_STATUS_SLOT_CLASS =
   'absolute left-[40px] top-1/2 z-10 size-3.5 flex items-center justify-center -translate-y-1/2';
 const SESSION_STATUS_ICON_CLASS = 'size-3.5';
-const DEFAULT_CONVERSATION_ICON_CLASS = 'size-[13px]';
-
 const REPLYING_ICON: SessionStatusIconVisual = {
   Icon: Loader2,
   colorClass: 'text-muted-foreground',
   animationClass: 'animate-spin',
 };
 
-const DEFAULT_CONVERSATION_ICON: SessionStatusIconVisual = {
-  Icon: MessageSquare,
-  // Keep the empty slot structurally present but visually subordinate: this is
-  // the sidebar's icon token, weaker than muted text on both light and dark.
-  colorClass: 'text-content-icon',
-};
 
 export interface ConversationSessionStatusProps {
   botId: string;
@@ -81,20 +68,6 @@ export function ConversationSessionStatus({ botId, sessionId, showReplying = fal
     const normalizedCode = status.code.trim().toLowerCase();
     statusData = normalizedCode === 'idle' ? 'idle' : normalizedCode;
   }
-  const renderDefaultConversationIcon = () => {
-    const { Icon, colorClass } = DEFAULT_CONVERSATION_ICON;
-    return (
-      <span
-        aria-hidden="true"
-        data-session-status={statusData}
-        data-status-ready={statusGateReady}
-        data-snapshot-ready={statusSnapshotReady}
-        className={SESSION_STATUS_SLOT_CLASS}
-      >
-        <Icon className={cn(DEFAULT_CONVERSATION_ICON_CLASS, colorClass)} aria-hidden="true" />
-      </span>
-    );
-  };
 
   const renderReplying = () => {
     if (!showReplying) return null;
@@ -119,19 +92,13 @@ export function ConversationSessionStatus({ botId, sessionId, showReplying = fal
       </TooltipProvider>
     );
   };
-  if (!status) {
-    if (showReplying) return renderReplying();
-    return renderDefaultConversationIcon();
-  }
+  if (!status) return renderReplying();
 
   const normalizedCode = status.code.trim().toLowerCase();
-  if (normalizedCode === 'idle') {
-    if (showReplying) return renderReplying();
-    return renderDefaultConversationIcon();
-  }
+  if (normalizedCode === 'idle') return renderReplying();
 
   const visual = SESSION_STATUS_ICON_MAP[normalizedCode];
-  if (!visual) return renderDefaultConversationIcon();
+  if (!visual) return renderReplying();
   const { Icon, colorClass, animationClass } = visual;
   const accessibleLabel = `DevFlow：${status.label}`;
   return (
