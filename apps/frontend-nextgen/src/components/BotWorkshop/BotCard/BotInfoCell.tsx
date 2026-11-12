@@ -48,9 +48,9 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
       >
         <img src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />
       </span>
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
+          <span className="truncate text-sm font-semibold text-foreground" title={bot.name}>{bot.name}</span>
           {onOpenEngineUpdate && engineUpdatable ? (
             <TooltipProvider>
               <Tooltip>
@@ -74,14 +74,16 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
               </Tooltip>
             </TooltipProvider>
           ) : null}
-          <span className="inline-flex shrink-0">
-            <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
-          </span>
         </div>
         {bot.expertOriginName && (
           <span className="truncate text-xs text-muted-foreground">来自专家市场 · {bot.expertOriginName}</span>
         )}
-        <span className="truncate text-xs text-content-icon">{bot.entityKey}</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate text-xs text-content-icon" title={bot.entityKey}>{bot.entityKey}</span>
+          <span className="inline-flex shrink-0">
+            <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
+          </span>
+        </div>
       </div>
     </div>
   );
