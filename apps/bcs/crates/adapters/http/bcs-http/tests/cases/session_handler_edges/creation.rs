@@ -199,4 +199,3 @@ async fn create_session_uses_a_human_caller_identity() {
 
     assert_eq!(status, StatusCode::CREATED);
 }
-
