@@ -126,8 +126,8 @@ async def test_cancel_before_the_install_lands_kills_acli_and_leaves_nothing(slo
 
     assert op.state == "cancelled" and op.result is None
     assert not alive(install_pid)
-    # Looked again, found nothing installed, so nothing to undo.
-    assert _args(calls) == [["tool", "list"], ["install", "dataphin"], ["tool", "list"]]
+    # Looked again, found nothing installed; best-effort cleanup tried uninstall.
+    assert _args(calls) == [["tool", "list"], ["install", "dataphin"], ["tool", "list"], ["tool", "uninstall"]]
 
 
 async def test_cancel_after_the_install_landed_uninstalls_it(slot, monkeypatch):
@@ -456,3 +456,42 @@ def test_a_restart_with_no_leftover_process_still_recovers(fake_acli, tmp_path):
     op = AcliOperations(runner, OperationStore(store_dir)).get("5" * 32)
 
     assert op.state == "interrupted"
+
+
+async def test_cancel_install_revert_when_registry_shows_absent_does_best_effort_cleanup(
+    slot, monkeypatch
+):
+    """INSTALL cancel + was_installed=False, registry says absent: tries remove anyway."""
+    ops, calls, _ = slot
+    monkeypatch.setenv("FAKE_ACLI_DELAY", "30")
+
+    op = ops.submit(INSTALL, "dataphin")
+    # Wait for find_installed (tool list) + install to start
+    await _until(lambda: len(calls()) == 2)
+    # Cancel while install is running
+    ops.cancel(INSTALL, "dataphin")
+    await _ended(ops, op)
+
+    # Should be cancelled (best-effort cleanup), not failed
+    assert op.state == "cancelled"
+    # The revert should have tried: find_installed (tool list) then remove (tool uninstall)
+    assert _args(calls)[2:] == [["tool", "list"], ["tool", "uninstall"]]
+
+
+async def test_cancel_install_revert_when_registry_absent_uninstall_fails_still_cancelled(
+    slot, monkeypatch
+):
+    """Best-effort remove fails but we still end cancelled since registry was absent."""
+    ops, calls, _ = slot
+    monkeypatch.setenv("FAKE_ACLI_DELAY", "30")
+    monkeypatch.setenv("FAKE_ACLI_DELAY_FIRST", "1")
+    monkeypatch.setenv("FAKE_ACLI_MODE", "uninstall_fail")
+
+    op = ops.submit(INSTALL, "dataphin")
+    await _until(lambda: len(calls()) == 2)
+    ops.cancel(INSTALL, "dataphin")
+    await _ended(ops, op)
+
+    # Even though uninstall failed, registry was already absent → cancelled
+    assert op.state == "cancelled"
+    assert _args(calls)[2:] == [["tool", "list"], ["tool", "uninstall"]]
