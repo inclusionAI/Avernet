@@ -249,3 +249,27 @@ workspace unit pass-rate 99.98% 由 2 个预存失败导致，CI 仍需在同一
 - 全仓其他历史超限文件（如 1045/1010 行的 WS 文件）不在本工单范围，未通过豁免或
   路径排除判绿。
 - 该项尺寸清理不代表整份 server waiver 已关闭，也不代表其他超限文件已处理。
+
+### 变更行覆盖率补测（2026-11-12 跟进）
+
+changed-line 66.08% 的缺口通过纯测试补测关闭（生产代码零改动、阈值未改、无豁免）：
+
+- 测试提交 `b8767fd8e3` 在既有 `suite_sessions` target 新增
+  `session_handler_edges` 主题模块（入口 fixture + participants / lifecycle /
+  creation / history_chat / SessionService 替身），共 **126 个 HTTP 层用例**（套件由 60 增至 186），
+  覆盖 Session 成员与生命周期路由的错误/边界分支（鉴权阶梯、缺失实体、store
+  错误传播、`SessionLaunchError` 全量映射、history/chat 错误翻译、collection
+  边界），全部通过，未新增 test binary。
+- 复跑门禁（`ci_test.sh --coverage` + `cov_gate.py`，base `$SOURCE_BASE`）：
+  changed-line **1358/1409 = 96.38%（>85%，PASS）**；overall line
+  **87.48%（>87%，PASS）**；unit pass-rate **8361/8363 = 99.98%**，仍是同一组
+  2 个 `bcs-bot-store::conformance_bot_control_plane_repo` 基线既有失败
+  （`cases_2::persistent_capability_save_preserves_patched_internal_attributes`、
+  `cases_3::memory_control_plane_list_by_task_modes_filters_visibility_status_user_visibility`），
+  新增用例 100% 通过。
+- 因此 **unit 100% 门禁仍为红**（owner 决策待定）、Singlebox 仍未验收；本次补测
+  只关闭 changed-line 覆盖率一项，不声称整体门禁绿灯、不声称可合并。
+- 剩余 51 行未覆盖均为可解释区间：状态机 runtime 的错误/Consumed 分支、该路由
+  不可达的 Public/Integration/Admin 防御分支、需脚本化 authority hook 的嵌套错误
+  返回、以及仅日志的 session 文件清理失败分支；详细行号见
+  [plan 的补测记录](plan.md)。
