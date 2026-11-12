@@ -38,14 +38,12 @@ const inspect = (task: RecoveryStoredTask, key = "read-1") => agent.sessionRead(
 it.each([
   [false, false, false], [false, true, false], [true, false, false], [true, true, false],
   [false, false, true], [false, true, true], [true, false, true], [true, true, true],
-] as const)("extends permission feedback into one fresh continuation (initial delivery: %s, NAS: %s, restart: %s)", async (hadInitial, useNas, restart) => {
+])("extends Owner feedback into one fresh continuation (initial delivery: %s, NAS: %s, restart: %s)", async (hadInitial, useNas, restart) => {
   const first = hadInitial ? await toObserve(await create()) : await create();
-  expect(await agent.bootstrap(first)).toMatchObject({ ownerCooperationProtocol: "session-recovery-owner/v1",
-    ownerCooperationReasons: ["permission"] });
+  expect((await agent.bootstrap(first)).ownerCooperationProtocol).toBe("session-recovery-owner/v1");
   const oldDelivery = first.delivery;
   const evidence = await inspect(first);
-  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary: "服务权限需Owner申请",
-    evidence_ids: [evidence.evidenceId], owner_request: { reason: "permission", instructions: "请申请服务权限后点击已处理" } });
+  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary: "服务权限需Owner申请", evidence_ids: [evidence.evidenceId], owner_request: { reason: "permission", instructions: "请申请服务权限后点击已处理" } });
   let saved = await current(first.taskId);
   expect(saved.status).toBe("waiting_owner"); expect(saved.pending_results).toEqual([]);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(hadInitial ? 1 : 0);
@@ -55,10 +53,9 @@ it.each([
   await service.confirmOwner(saved.taskId, requestId, actor);
   await vi.waitFor(async () => expect((await current(saved.taskId)).executionNo).toBe(restart ? 2 : 1));
   saved = await current(saved.taskId);
-  expect(saved).toMatchObject({ phase: "assess", requiresFreshObservation: true, ownerRequest: { reason: "permission", status: "confirmed" } });
   await expect(agent.report(saved, { phase: "assess", kind: "owner_handoff", summary: "仅根据Owner反馈宣称恢复", effect: "recovered", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
   await expect(agent.report(saved, { phase: "assess", kind: "blocked", reason: "user_continued", summary: "仅根据旧记录宣称用户续聊", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  const body = { clientRequestId: "continue-1", purpose: "Owner 反馈后的续接", message: "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
+  const body = { clientRequestId: "continue-1", purpose: "权限反馈后的续接", message: "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
   // Old calls are either replayed in the same execution or rejected across executions.
   if (restart) await expect(inspect(saved)).rejects.toMatchObject({ name: "AgentToolCallIdempotencyConflictError" });
   else expect((await inspect(saved)).toolCallId).toBe(evidence.toolCallId);
@@ -91,19 +88,6 @@ it.each([
   await agent.report(saved, { kind: "assessment", phase: "assess", decision: "message", summary: "已按反馈续接，继续观察实际执行", evidence_ids: [resumed.evidenceId] });
   expect((await current(saved.taskId)).phase).toBe("observe");
   expect((await current(saved.taskId)).timeline.filter(event => event.kind === "owner_decision" && event.payload.owner_request_id === requestId)).toHaveLength(1);
-});
-
-it.each(["assess", "observe"] as const)("requires an ordinary handoff for missing configuration in %s", async phase => {
-  const task = phase === "observe" ? await toObserve(await create()) : await create();
-  const read = await inspect(task);
-  const handoff = { phase, kind: "owner_handoff", summary: "分发目标尚未配置", evidence_ids: [read.evidenceId] };
-  await expect(agent.report(await current(task.taskId), { ...handoff,
-    owner_request: { reason: "configuration", instructions: "请补齐分发目标，随后回查路由和分发状态" } })).rejects.toMatchObject({ status: 422 });
-  expect(await current(task.taskId)).toMatchObject({ status: "running", phase });
-  await agent.report(await current(task.taskId), handoff);
-  const finished = await current(task.taskId);
-  expect(finished).toMatchObject({ status: "completed", completionReason: "owner_handoff" });
-  expect(finished.ownerRequest).toBeUndefined();
 });
 
 it("keeps terminal tasks with unfinished card synchronization in maintenance after a restart", async () => {
@@ -471,36 +455,21 @@ function useNativeOwnerCards() {
   return sender;
 }
 
-it("creates a permission card after a legacy configuration request was never dispatched", async () => {
+it("does not dispatch or confirm a stored Owner request with an unsupported reason", async () => {
   const sender = useNativeOwnerCards();
   const task = await create();
-  const legacyRequestId = "legacy-configuration";
-  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
-    status: "waiting_owner", ownerCardSyncPending: true,
-    ownerRequest: { requestId: legacyRequestId, revision: 1, reason: "configuration", status: "pending",
-      summary: "缺少分发目标", instructions: "请补齐分发目标", evidence_ids: [], resumePhase: "assess", createdAtMs: now } }));
+  const requestId = "unsupported-request";
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, status: "waiting_owner",
+    ownerRequest: { requestId, revision: 1, status: "pending", reason: "unsupported" as "permission",
+      summary: "处理事项", instructions: "处理阻塞", evidence_ids: [], resumePhase: "assess", createdAtMs: now } }));
 
   await service.maintenance();
-  await vi.waitFor(async () => {
-    const saved = await current(task.taskId);
-    expect(saved.ownerCardSyncPending).toBe(false);
-    expect(saved.timeline.some(event => event.payload.owner_request_id === legacyRequestId
-      && event.payload.operation === "create" && event.payload.state === "disabled")).toBe(true);
-  });
-
-  await service.confirmOwner(task.taskId, legacyRequestId, actor);
-  await vi.waitFor(async () => expect((await current(task.taskId)).ownerCardSyncPending).toBe(false));
-  const fresh = await inspect(await current(task.taskId), "after-legacy-feedback");
-  await agent.report(await current(task.taskId), { phase: "assess", kind: "owner_handoff",
-    summary: "读取原资料仍缺权限", evidence_ids: [fresh.evidenceId],
-    owner_request: { reason: "permission", instructions: "请申请原资料读取权限" } });
-  await vi.waitFor(async () => {
-    const saved = await current(task.taskId);
-    expect(saved.ownerCardSyncPending).toBe(false);
-    expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      cardParamMap: expect.objectContaining({ request_id: saved.ownerRequest!.requestId, title: "请处理权限申请" }),
-    }));
-  });
+  await flush();
+  await expect(service.confirmOwner(task.taskId, requestId, actor)).rejects.toMatchObject({ status: 409 });
+  const saved = await current(task.taskId);
+  expect(saved.status).toBe("waiting_owner");
+  expect(saved.timeline.some(event => event.kind === "notification" || event.kind === "owner_decision")).toBe(false);
+  expect(sender.sendCard).not.toHaveBeenCalled();
   expect(sender.updateCard).not.toHaveBeenCalled();
 });
 

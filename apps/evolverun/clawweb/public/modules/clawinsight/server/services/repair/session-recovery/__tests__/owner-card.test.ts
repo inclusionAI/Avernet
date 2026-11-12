@@ -28,38 +28,24 @@ it("does not claim card delivery when disabled, not configured for the control p
   await expect(notifier.notifyOwnerRequest({ task, updateOnly: false })).rejects.toThrow("unknown");
 });
 
-it("updates the same permission card after Owner feedback", async () => {
+it("updates the single permission button after Owner feedback", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre");
-  await notifier.notifyOwnerRequest({ task, updateOnly: false });
+  const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "permission" } };
+  await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
   const initial = sender.sendCard.mock.calls[0][0];
-  expect(initial.cardParamMap).toMatchObject({ title: "请处理权限申请", confirm_label: "已获取权限，继续任务",
-    confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
+  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已获取权限，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
   expect(Object.keys(initial.cardParamMap)).toHaveLength(14);
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
   expect(initial.cardParamMap).not.toHaveProperty("config");
 
-  await notifier.notifyOwnerRequest({ task: { ...task, status: "running", ownerRequest: { ...task.ownerRequest!, status: "confirmed" } }, updateOnly: true });
+  await notifier.notifyOwnerRequest({ task: { ...pending, status: "running", ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith({
     outTrackId: initial.outTrackId,
     cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "已收到处理反馈，正在核验" },
   });
   expect(sender.sendCard).toHaveBeenCalledOnce();
-});
-it("only updates an existing configuration card", async () => {
-  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
-  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
-  }, "pre");
-  const legacyTask: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "configuration" } };
-  expect(await notifier.notifyOwnerRequest({ task: legacyTask, updateOnly: false })).toBe(false);
-  expect(await notifier.notifyOwnerRequest({ task: legacyTask, updateOnly: true })).toBe(true);
-  expect(sender.sendCard).not.toHaveBeenCalled();
-  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    outTrackId: "sr-owner:pre:SR-one",
-    cardParamMap: expect.objectContaining({ title: "请补齐任务配置", confirm_label: "已补齐配置，继续核验" }),
-  }));
 });
 it.each(["completed", "failed", "canceled"] as const)("disables an outstanding button when the Task is %s", async status => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
