@@ -81,3 +81,19 @@ collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
 existing access policies.
+
+### Independent Caller cron sessions
+
+Expert-chat lists also discover actual OpenClaw cron session keys from the
+subject's independent Caller instance. When the ownership index is empty,
+discovery uses a read-only lookup of an existing ready instance; it never
+creates, restarts or upgrades an instance. Missing instances yield an empty list
+and initializing or failed instances remain pending. Existing indexed sessions
+retain their previous connection lifecycle. Discovery does not filter by
+user_id because scheduled sessions have no interactive user identity. Only
+`agent:<agent>:cron:<job>` and actual `:run:<run>` entries returned by that
+instance are registered in the existing Backend ownership index, so connect,
+messages, favorites and mutation retain the normal ownership checks. Shared
+runtimes and other engines keep index-only discovery. Runtime cron timestamps
+are preserved for stable ordering; merge and deduplication precede pagination.
+No cron run key is synthesized from scheduling history.

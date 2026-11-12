@@ -92,6 +92,9 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         return None
 
+    def supports_caller_cron_session_discovery(self, ctx: BotProvisioningContext) -> bool:
+        return ctx.active_engine == "openclaw"
+
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         return True
 

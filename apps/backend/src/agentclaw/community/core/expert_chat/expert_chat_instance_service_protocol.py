@@ -48,6 +48,12 @@ class ExpertChatInstanceServiceProtocol(Protocol):
         """Authorize an actor before entering caller lifecycle operations."""
         ...
 
+    def get_existing_caller_instance(
+        self, user_id: str, bot_id: str, owner_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read an existing exact-subject record or None without lifecycle side effects."""
+        ...
+
     async def get_caller_connection(
         self,
         user_id: str,

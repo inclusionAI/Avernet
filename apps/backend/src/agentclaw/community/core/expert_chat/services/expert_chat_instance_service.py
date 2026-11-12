@@ -250,6 +250,12 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         error.reason = reason
         return error
 
+    def get_existing_caller_instance(
+        self, user_id: str, bot_id: str, owner_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read the exact subject's instance without creating or upgrading it."""
+        return self._instance_repo.get_instance(user_id, bot_id, owner_id)
+
     async def get_caller_connection(
         self,
         user_id: str,
