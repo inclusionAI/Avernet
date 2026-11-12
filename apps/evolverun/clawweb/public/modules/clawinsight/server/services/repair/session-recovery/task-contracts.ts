@@ -137,6 +137,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Transient references to audited index reads, used only to project bootstrap evidence. */
+  trajectoryIndexReads?: import("./bootstrap-evidence.js").TrajectoryIndexRead[];
   /** Transient facts from the existing read audit; never a claim of full session coverage. */
   sessionReadCoverage?: import("./session-read-coverage.js").SessionReadCoverage[];
   /** Transient projection of the complete tool ledger; never persisted or supplied by the Agent. */

@@ -22,6 +22,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseOwnerHandoffContent } from "./validation.js";
 import { RecoverySessionReader } from "./session-reader.js";
 import { redactSessionReadEvidence } from "./session-argument-evidence.js";
+import { bootstrapEvidence } from "./bootstrap-evidence.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
@@ -305,7 +306,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
       && typeof (event.payload.result as Record<string, unknown> | undefined)?.initial_message === "boolean");
@@ -317,7 +318,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         sessionReadCoverage: boundedSessionReadCoverage(sessionReadCoverage ?? []),
         timeline: timeline.map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id,
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
-        evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
+        evidence: bootstrapEvidence(business.evidence, trajectoryIndexReads),
       }, handbook: savedRecoveryHandbook(task),
       timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,

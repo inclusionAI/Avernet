@@ -101,6 +101,46 @@ it("provides cumulative read ranges and gaps without rereading the Bot or changi
   expect(raw).not.toContain("sessionReadCoverage");
 });
 
+it("compacts only bootstrap index excerpts, preserving audit, evidence references and persistence", async () => {
+  const ack = await service.create(request, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const result = { source: "trajectory", read_scope: "traces", coverage: "uploaded_records_only",
+    traces: [{ traceId: "original", name: "original task ".repeat(200), event_summary: { count: 1 } }],
+    offset: 0, next_offset: null };
+  const read = vi.fn().mockResolvedValue(result);
+  (agent as any).deps.trajectory = { read };
+  const receipts = [];
+  for (let i = 0; i < 3; i++) receipts.push(await agent.trajectoryRead((await tasks.find(ack.task_id))!, {
+    clientRequestId: `index-${i}`, purpose: "observe", offset: 0,
+  }));
+  const saved = (await tasks.find(ack.task_id))!, before = structuredClone(saved);
+  const queries = vi.spyOn(db, "query"); queries.mockClear();
+  const bootstrap = await agent.bootstrap(saved);
+  expect(queries).not.toHaveBeenCalled();
+  expect(bootstrap.task).not.toHaveProperty("trajectoryIndexReads");
+  expect(bootstrap.task.evidence.map(item => item.evidence_id)).toEqual(saved.evidence.map(item => item.evidence_id));
+  const first = bootstrap.task.evidence.find(item => item.tool_call_id === receipts[0].toolCallId)!;
+  for (const receipt of receipts.slice(1)) {
+    const item = bootstrap.task.evidence.find(item => item.tool_call_id === receipt.toolCallId)!;
+    expect(item.excerpt).toContain(`same_content_as=${first.evidence_id};`);
+    expect(item.excerpt).toContain(`recorded_at_ms=${(receipt.result as any).recorded_at_ms};`);
+    expect(item.excerpt).toContain(`tool_call_get(toolCallId=${receipt.toolCallId})`);
+    expect((await agent.toolGet(saved, item.tool_call_id)).result).toEqual(receipt.result);
+  }
+  expect(saved).toEqual(before);
+  expect((await service.detail(saved.taskId, actor)).evidence).toEqual(saved.evidence);
+  expect(await service.detail(saved.taskId, actor)).not.toHaveProperty("trajectoryIndexReads");
+  // Referencing a compacted receipt must still pass the unchanged evidence validator.
+  await agent.report(saved, { kind: "assessment", phase: "assess", decision: "observe",
+    summary: "Check actual progress", evidence_ids: [receipts[2].evidenceId] });
+  const reloaded = (await tasks.find(saved.taskId))!;
+  expect(reloaded.evidence).toEqual(saved.evidence);
+  expect((await agent.bootstrap(reloaded)).task.evidence).toEqual(bootstrap.task.evidence);
+  const raw = (await db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ?", [saved.taskId]))[0].config_json;
+  expect(raw).not.toContain("trajectoryIndexReads"); expect(raw).not.toContain("same_content_as");
+  expect(read).toHaveBeenCalledTimes(3); expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
 it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override on initial and resumed dispatches (%s)", async tc_fault_label => {
   const output = vi.mocked(logRepairEvent).mockClear();
   const ack = await service.create({ ...request, tc_fault_label }, actor);
