@@ -9,7 +9,7 @@ import { createSessionRecoveryRuntime } from "../index.js";
 
 it.each([
   { engine: "TE", activeEngine: "teclaw", hint: { trace_id: "fault-trace" }, expected: { traceId: "fault-trace" } },
-  { engine: "OC", activeEngine: "openclaw", hint: { fault_at_ms: 1792107675000 }, expected: { faultAtMs: 1792107675000 } },
+  { engine: "OC", activeEngine: "openclaw", hint: { fault_at_ms: 1792107675000 }, expected: { ocAssessmentEvidence: true, faultAtMs: 1792107675000 } },
 ] as const)("dispatches $engine immediately and passes the diagnostic hint to assessment reads", async ({ engine, activeEngine, hint, expected }) => {
   const db = new SqliteDatabase(new Database(":memory:"));
   try {
@@ -45,14 +45,28 @@ it.each([
     expect(await runtime.agent!.bootstrap(task)).toMatchObject({
       task: { phase: "assess", request: hint }, tools: { trajectory_read: true },
     });
-    const read = (clientRequestId: string) => runtime.agent!.trajectoryRead(task, {
+    const read = (clientRequestId: string, currentTask = task) => runtime.agent!.trajectoryRead(currentTask, {
       clientRequestId, purpose: "核实原会话故障轨迹", ...(engine === "TE" ? hint : {}), limit: 1,
     });
-    expect(await read("first-read")).toMatchObject({ status: "succeeded", result: { traces: [] } });
+    const first = await read("first-read");
+    expect(first).toMatchObject({ status: "succeeded", result: { traces: [] } });
     expect(trajectory.read).toHaveBeenCalledWith(expect.objectContaining(expected));
     expect(await read("followup-read")).toMatchObject({ status: "succeeded", result: { trace: { traceId: "fault-trace" } } });
     expect(await stored.find(task_id)).toMatchObject({ status: "running", phase: "assess" });
     expect(execute).toHaveBeenCalledOnce();
+    if (engine === "OC") {
+      await runtime.agent!.report((await stored.find(task_id))!, {
+        kind: "assessment", phase: "assess", decision: "observe", summary: "原任务已有进展，继续观察", evidence_ids: [first.evidenceId],
+      });
+      const observing = (await stored.find(task_id))!;
+      expect(observing.phase).toBe("observe");
+      trajectory.read.mockResolvedValueOnce({ traces: [] });
+      expect(await read("observe-without-delivery", observing)).toMatchObject({ status: "succeeded" });
+      const [query] = trajectory.read.mock.lastCall!;
+      expect(query).not.toHaveProperty("messageMarker");
+      expect(query).not.toHaveProperty("ocAssessmentEvidence");
+      expect(query).not.toHaveProperty("faultAtMs");
+    }
   } finally {
     await db.close();
   }

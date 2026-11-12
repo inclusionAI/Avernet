@@ -382,12 +382,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const sentMessage = task.request.target.engine === "TE" && typeof receipt?.message === "string" ? receipt.message : undefined;
       const diagnosisTraceId = task.simulation ? undefined : task.request.trace_id;
       const notBeforeMs = startedAt ?? (diagnosisTraceId ? task.timeline.find(event => event.kind === "created")?.at_ms : undefined);
-      const faultAtMs = !task.simulation && task.phase === "assess" && task.request.target.engine === "OC" && body.trace_id === undefined
-        ? task.request.fault_at_ms : undefined;
+      const ocAssessmentEvidence = !task.simulation && task.phase === "assess"
+        && task.request.target.engine === "OC" && startedAt === undefined;
+      const faultAtMs = ocAssessmentEvidence && body.trace_id === undefined ? task.request.fault_at_ms : undefined;
       const result = await this.deps.trajectory!.read({ target: task.runtimeTarget?.target ?? this.logicalTarget(task),
         sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined, maxBytes: 128 * 1024,
         observationId: body.observation_id as string | undefined, field: body.field as "input" | "output" | undefined,
         contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined,
+        ...(ocAssessmentEvidence ? { ocAssessmentEvidence } : {}),
         ...(faultAtMs === undefined ? {} : { faultAtMs }),
         ...(task.simulation ? { until: { atMs: task.simulation.cutoffAtMs, traceId: task.simulation.cutoffNode.traceId,
           observationId: task.simulation.cutoffNode.observationId, sessionId: this.originalSessionId(task) } } : {}),
