@@ -350,4 +350,3 @@ async def test_shared_first_target_lookup_failure_is_rejected_before_signing(sha
     assert json.loads(response.body)["error"] == "CALLER_TARGET_NOT_FOUND"
     shared_world.signing.exchange.assert_not_called()
     assert shared_world.requests == []
-
