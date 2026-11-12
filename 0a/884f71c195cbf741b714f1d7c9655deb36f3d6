@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/bot-workflow-permission-clone-ob-index.sql
+  h_43af82e14600e4 1-19
+apps/evolverun/clawweb/public/modules/workflow/docs/bot-workflow-permission-clone.md
+  h_43af82e14600e4 1-95
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-access.md
+  h_43af82e14600e4 36-42
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.integration.test.ts
+  h_43af82e14600e4 1-214
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.test.ts
+  h_43af82e14600e4 2,9,14,60-64,130,139,155-156,160,169,183,200,210,215,235,249,271-272,280,287,307,319,326-327,332-373
+apps/evolverun/clawweb/public/modules/workflow/server/routes/bot-workflow-permission-clone.ts
+  h_43af82e14600e4 21,233
+apps/evolverun/clawweb/public/shared/server/repositories/__tests__/bot-workflow-permission-merge.test.ts
+  h_43af82e14600e4 1-277
+apps/evolverun/clawweb/public/shared/server/repositories/bot-workflow-permission-repository.ts
+  h_43af82e14600e4 135-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a884f71c195cbf741b714f1d7c9655deb36f3d6",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

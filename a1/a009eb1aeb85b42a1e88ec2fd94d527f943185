@@ -1,0 +1,19 @@
+tools/a2a-json-tool/web/app.js
+  s_a5600e99ae94e6::t_84af9d3007b63f 76,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1a009eb1aeb85b42a1e88ec2fd94d527f943185",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}
