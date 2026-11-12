@@ -36,7 +36,8 @@ function taskStatusLabel(task: SessionRecoveryTask): string {
   if (isOwnerHandoff(task) && task.judgment?.effect === 'recovered') return ownerNotificationSent(task) ? '已恢复，已通知 Owner' : '已恢复，有后续建议';
   if (isOwnerHandoff(task)) return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
   if (task.completionReason === 'no_recovery_needed') return '无需自愈';
-  return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status];
+  return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路'
+    : !task.simulation && task.status === 'completed' && task.judgment?.effect === 'unknown' ? '已结束，效果未确认' : statusLabels[task.status];
 }
 
 const effectLabels: Record<NonNullable<SessionRecoveryTask['judgment']>['effect'], string> = {
