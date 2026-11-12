@@ -101,6 +101,8 @@ pub struct Operation {
     context: Option<RequestContext>,
     started: Instant,
     finished: bool,
+    key: bool,
+    log_correlation: Option<bcs_tracing_api::LogCorrelation>,
 }
 
 impl Operation {
@@ -109,7 +111,15 @@ impl Operation {
         let parent_operation_id = current_operation_id();
         let request_id = current_request_id();
         let context_data = REQUEST_CONTEXT.try_with(Clone::clone).ok();
-        Self { name, id, parent_operation_id, request_id, context: context_data, started: Instant::now(), finished: false }
+        Self { name, id, parent_operation_id, request_id, context: context_data, started: Instant::now(), finished: false, key: false, log_correlation: None }
+    }
+
+    /// Select failures/stalls of an outer business dependency, not its phases.
+    pub fn new_key(name: &'static str) -> Self {
+        let mut operation = Self::new(name);
+        operation.key = true;
+        operation.log_correlation = bcs_tracing_api::current_log_correlation();
+        operation
     }
 
     pub fn elapsed_ms(&self) -> f64 { self.started.elapsed().as_secs_f64() * 1000.0 }
@@ -124,8 +134,12 @@ impl Operation {
         let duration_ms = self.elapsed_ms();
         if let Some(context) = &self.context { accumulate(context, self.name, outcome, duration_ms); }
         if matches!(outcome, "error" | "cancelled" | "panicked") || duration_ms >= 100.0 {
-            tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, outcome,
-                duration_ms, "bcs.operation.finished");
+            let key = self.key && matches!(outcome, "error" | "cancelled" | "panicked");
+            bcs_tracing_api::with_log_correlation(self.log_correlation.clone(), || {
+                tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, outcome,
+                    log_class = key.then_some("business_key"),
+                    duration_ms, "bcs.operation.finished");
+            });
         } else {
             tracing::debug!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, outcome,
                 duration_ms, "bcs.operation.finished");
@@ -158,9 +172,12 @@ async fn wait_inner<T>(operation: &Operation, future: impl Future<Output = T>) -
         }
         if !warned && warning.as_mut().poll(cx).is_ready() {
             warned = true;
-            tracing::warn!(target: "bcs_observation",
-                operation = operation.name, operation_id = %operation.id, parent_operation_id = %operation.parent_operation_id, request_id = %operation.request_id, duration_ms = operation.elapsed_ms(),
-                "bcs.operation.stalled");
+            bcs_tracing_api::with_log_correlation(operation.log_correlation.clone(), || {
+                tracing::warn!(target: "bcs_observation",
+                    operation = operation.name, operation_id = %operation.id, parent_operation_id = %operation.parent_operation_id, request_id = %operation.request_id, duration_ms = operation.elapsed_ms(),
+                    log_class = operation.key.then_some("business_key"),
+                    "bcs.operation.stalled");
+            });
         }
         std::task::Poll::Pending
     }).await
@@ -172,6 +189,18 @@ pub fn observe_result<T, E>(name: &'static str, future: impl Future<Output = Res
     let future = Box::pin(future);
     async move {
         let operation = Operation::new(name);
+        let result = wait(&operation, future).await;
+        operation.finish(if result.is_ok() { "success" } else { "error" });
+        result
+    }
+}
+
+/// Like observe_result, but correlates failure/cancellation and one stalled
+/// warning with the caller's network log identity. Success remains ordinary.
+pub fn observe_key_result<T, E>(name: &'static str, future: impl Future<Output = Result<T, E>>) -> impl Future<Output = Result<T, E>> {
+    let future = Box::pin(future);
+    async move {
+        let operation = Operation::new_key(name);
         let result = wait(&operation, future).await;
         operation.finish(if result.is_ok() { "success" } else { "error" });
         result

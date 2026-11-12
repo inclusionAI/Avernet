@@ -1,6 +1,9 @@
 //! Optional network tracing contract. No vendor SDK, transport or business state.
 use std::{any::Any, future::Future, sync::{Arc, OnceLock}};
 
+mod log_correlation;
+pub use log_correlation::{LogCorrelation, current_log_correlation, in_current_log_context, with_log_correlation};
+
 pub type Carrier = Vec<(String, String)>;
 pub type Context = Arc<dyn Any + Send + Sync>;
 
@@ -65,6 +68,10 @@ pub trait NetworkTracer: Send + Sync {
     /// Optional SDK bridge. Return only valid propagation fields, never bind a
     /// thread-local guard across await. The default preserves SPI-only behavior.
     fn capture_ambient(&self) -> Carrier { Vec::new() }
+
+    /// Read-only log identity. Never creates a span, exports baggage or changes
+    /// child allocation. Unsupported/foreign contexts return None.
+    fn log_correlation(&self, _context: &Context) -> Option<LogCorrelation> { None }
 }
 
 static PROVIDER: OnceLock<Arc<dyn NetworkTracer>> = OnceLock::new();

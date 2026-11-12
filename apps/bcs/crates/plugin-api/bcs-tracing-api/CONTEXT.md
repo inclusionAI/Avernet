@@ -1,6 +1,6 @@
 # Network tracing plugin contract
 
-Contract revision: 2026-11-12 (explicit gRPC invocation metadata).
+Contract revision: 2026-11-12 (explicit gRPC invocation metadata and optional log identity).
 
 ## Provides
 
@@ -108,9 +108,9 @@ captures a closure for `spawn_blocking`. Cloning a context must preserve shared
 child allocation state. Neither helper persists context in queues or messages.
 WebSocket frames and durable recovery are outside this contract.
 
-These scopes propagate network context only. They do not activate an SDK's
-native current context, attach business logs, or make automatic instrumentation
-inherit a span. Such integration requires a concrete SDK bridge with enter/exit
+These scopes do not activate an SDK's native current context or make automatic
+instrumentation inherit a span. Selected logs can read the opaque context via
+the separate read-only contract below. Such integration requires a concrete SDK bridge with enter/exit
 on every future poll; never hold a thread-local guard across `.await` or bind in
 `start` and unbind in `finish`.
 
@@ -121,10 +121,39 @@ then flush/shutdown the exporter (or drop its explicit drain guard). Every
 cancelled call must finish its record before exporter shutdown. The SPI does
 not itself track detached tasks or provide async lifecycle management.
 
+## Read-only business log correlation
+
+`NetworkTracer::log_correlation(&Context)` defaults to `None`; existing providers
+remain source compatible. Supporting providers return a `LogCorrelation` pair
+with static field names (max 64 bytes, ASCII letter followed by letters/digits/_)
+and bounded values (1–256 ASCII letters/digits or `._-:`). Invalid, reserved or
+duplicate names reject the entire pair. No baggage, request bodies or carrier
+maps belong here. Reading must be deterministic, nonblocking and side-effect
+free: no spans, child allocation, SDK activation, I/O or logging.
+
+`current_log_correlation()` first respects explicit `with_provider(None, ...)`.
+A synchronous cancellation override takes precedence over the executing task's
+context. Otherwise the current opaque context is authoritative: a foreign or
+unsupported context returns None, without reviving an older snapshot. Only an
+absent context falls back to the explicitly captured log snapshot.
+`in_current_log_context` captures at construction and scopes the pair in the
+child future, without restoring a provider, network parent or ambient carrier.
+`with_log_correlation` is a synchronous override for a guard's captured identity;
+it restores on return/panic and does not scope later polling of a returned future.
+Neither helper persists or reconstructs correlation from business IDs.
+
+Bootstrap enriches only events with `log_class="business_key"`, using top-level
+JSON fields or text `key=value` suffixes before async writers. Missing context,
+invalid pairs and collisions leave the original formatter output; no placeholders
+are generated. Raw output and `bcn_otel` events bypass enrichment. Network spans,
+wire propagation and existing OTel behavior are unchanged. Event selection is
+owned by callers, not inferred from severity or target names.
+
 ## Consumers and tests
 
 Network adapters and external clients use the hook at transport boundaries.
-Core business behavior and log-only operation observation are independent.
+Core business behavior remains independent. Log-only operation observation may
+read the optional identity for explicitly selected outer failures and stalls.
 The public network adapter conformance suite checks no-op and completion
 semantics. Each exporter must also test propagation, concurrent allocation,
 cancellation, and output. This optional Plugin API does not change business

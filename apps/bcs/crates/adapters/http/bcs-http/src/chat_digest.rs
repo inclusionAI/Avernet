@@ -41,7 +41,7 @@ impl ChatDigestRecord<'_> {
 }
 
 pub(crate) fn log_chat_digest(record: &ChatDigestRecord<'_>) {
-    tracing::info!(target: CHAT_DIGEST_TARGET, "{}", record.to_digest_line());
+    tracing::info!(target: CHAT_DIGEST_TARGET, log_class = "business_key", event_code = "chat.result", "{}", record.to_digest_line());
 }
 
 fn digest_option(value: Option<&str>) -> String {

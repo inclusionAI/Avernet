@@ -25,14 +25,14 @@ required-features = ["test-utils"]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-test-utils = ["dep:bcs-tracing-api", "dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e"]
+test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e"]
 
 [dependencies]
 bcs-a2a-binding-api = { workspace = true, optional = true }
 a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
 reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"], optional = true }
 bcs-network-tracing.workspace = true
-bcs-tracing-api = { workspace = true, optional = true }
+bcs-tracing-api.workspace = true
 bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
@@ -57,6 +57,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender    = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-serde = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }

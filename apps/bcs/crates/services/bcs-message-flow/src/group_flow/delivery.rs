@@ -509,6 +509,7 @@ pub(super) fn log_message_received(cmd: &WebSendCommand, mode: MessageLogMode) {
     let content = MessageLogContent::from_text(&cmd.message);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::MessageReceived.as_str(),
         status = MessageLogStatus::Received.as_str(),
@@ -548,6 +549,7 @@ pub(super) fn log_routing_digest(
 
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RouteDecided.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -590,6 +592,7 @@ pub(super) fn log_bot_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -608,6 +611,7 @@ pub(super) fn log_bot_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

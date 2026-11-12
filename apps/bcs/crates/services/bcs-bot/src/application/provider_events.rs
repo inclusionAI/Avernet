@@ -210,12 +210,12 @@ impl ProviderBotEvents {
                     inflight: self.state_machine_terminals_inflight.clone(),
                     key: inflight_key,
                 };
-                tokio::spawn(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
+                tokio::spawn(bcs_tracing_api::in_current_log_context(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
                     let _inflight_guard = inflight_guard;
                     if let Err(error) = runtime.handle_bot_terminal_event(runtime_command).await {
-                        error!(request_id = %bcs_observability::CurrentRequestId, %error, "provider ingest: async state-machine final failed");
+                        error!(log_class = "business_key", event_code = "provider.final.failed", request_id = %bcs_observability::CurrentRequestId, %error, "provider ingest: async state-machine final failed");
                     }
-                }).with_current_subscriber());
+                })).with_current_subscriber());
             }
             return Ok(provider_state_machine_outcome());
         }
@@ -481,13 +481,13 @@ impl ProviderBotEventService for ProviderBotEvents {
                         attempt = attempt,
                         "provider callback: state-machine final accepted for async processing"
                     );
-                    tokio::spawn(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
-                        let processing = tokio::spawn(bcs_observability::in_current_context(async move {
+                    tokio::spawn(bcs_tracing_api::in_current_log_context(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
+                        let processing = tokio::spawn(bcs_tracing_api::in_current_log_context(bcs_observability::in_current_context(async move {
                             let _inflight_guard = inflight_guard;
                             collaboration_runtime
                                 .handle_bot_terminal_event(terminal_command)
                                 .await
-                        }));
+                        })));
                         match processing.await {
                             Ok(Ok(outcome)) => info!(
                                 provider_id = %provider_id,
@@ -508,6 +508,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 node_id = %node_id,
                                 attempt = attempt,
                                 error = %processing_error,
+                                log_class = "business_key", event_code = "provider.final.failed",
                                 "provider callback: async state-machine final processing failed"
                             ),
                             Err(join_error) => error!(
@@ -519,10 +520,11 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 node_id = %node_id,
                                 attempt = attempt,
                                 error = %join_error,
+                                log_class = "business_key", event_code = "provider.final.failed",
                                 "provider callback: async state-machine final task failed"
                             ),
                         }
-                    }).with_current_subscriber());
+                    })).with_current_subscriber());
                     return Ok(ProviderBotEventOutcome {
                         delivered_count: 1,
                         failed_count: 0,
