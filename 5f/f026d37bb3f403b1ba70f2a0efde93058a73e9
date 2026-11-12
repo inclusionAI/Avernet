@@ -1,0 +1,65 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service.py
+  s_f44d5bdd34238d::t_446b1589c879af 1-40
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/open_slice.py
+  s_f44d5bdd34238d::t_c3054c7fe3709e 160
+  s_f44d5bdd34238d::t_7711bf4e29af0d 1-27,31-46,48-49,52
+  s_f44d5bdd34238d::t_b164204fe471cf 28-30,47,50-51,53-159,161-338,340,345-357
+  s_f44d5bdd34238d::t_c7ccde936d4cf1 339,341-344
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/open_profile.py
+  s_f44d5bdd34238d::t_c2b033683bf774 1-462
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_opportunity_ops.py
+  s_f44d5bdd34238d::t_250ab5efef8473 235-246
+  s_f44d5bdd34238d::t_01ff346e3faf24 31
+  s_f44d5bdd34238d::t_30e7b5a3d269ca 1-30,32-47,49-234,247-347,349-449
+  s_f44d5bdd34238d::t_62195d97df5ad4 348
+  s_f44d5bdd34238d::t_3929a8332e04ba 48
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_method_service_base.py
+  s_f44d5bdd34238d::t_64fe1b3289d575 1-129,131-134,138-153,168-205
+  s_f44d5bdd34238d::t_1d1880bba6ac73 130,135-137,154-167
+apps/backend/tests/community/core/task/context_collab/test_open_profile.py
+  s_f44d5bdd34238d::t_81ababfff6ceb4 747-749
+  s_f44d5bdd34238d::t_0e5def5a238d1b 292-313
+  s_f44d5bdd34238d::t_94742c5fedf6b1 1120
+  s_f44d5bdd34238d::t_61078d1cbd8a05 634-635,637,640
+  s_f44d5bdd34238d::t_a5b440b08a5d48 1-80,83-291,314-633,636,638-639,641-690,692-693,695-746,750-944,948-949,951-958,960-978,981,986-994,996-1026,1028-1093,1095-1116,1119,1124,1129,1131-1132,1145-1318
+  s_f44d5bdd34238d::t_c35dffb90d9127 959
+  s_f44d5bdd34238d::t_f866d7d60f3b7a 982-985
+  s_f44d5bdd34238d::t_2f10032981ef9b 979-980,995
+  s_f44d5bdd34238d::t_13822245fefbbe 945-947
+  s_f44d5bdd34238d::t_81ed01d5bb58fe 691,694
+  s_f44d5bdd34238d::t_51622956eb1e04 82
+  s_f44d5bdd34238d::t_10f1b18eba9903 1027
+  s_f44d5bdd34238d::t_6ac6fd6baf65f6 950
+  s_f44d5bdd34238d::t_6896d120c5ab65 81
+  s_f44d5bdd34238d::t_256290df199dfe 1094,1117-1118,1121-1123,1125-1128,1130,1133-1144
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/__init__.py
+  s_f44d5bdd34238d::t_c27a18cab052e5 17,23,30
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  s_f44d5bdd34238d::t_beb4f2e525a965 39-42
+  s_f44d5bdd34238d::t_7442a07044cbdb 43
+  s_f44d5bdd34238d::t_3b1095f6cc1160 372-458
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  s_f44d5bdd34238d::t_d91669fc8ea518 37-41
+apps/backend/src/agentclaw/community/core/task/context_collab/services/open_application_ops.py
+  s_f44d5bdd34238d::t_687e92aae32a0a 353-355
+  s_f44d5bdd34238d::t_795c268f334cdf 304-308
+  s_f44d5bdd34238d::t_1b4aa3316a9cf1 24-26,56,83,236,286-290,317-320,331-332,337,349-351,382,384-385,387,392-417,456-458,479-482,507,509-510,527
+  s_f44d5bdd34238d::t_d0492c6c7a0c14 2,7-9,11-21,27-55,57-67,71-82,84-86,88-115,119-134,136-216,221-225,227,464
+  s_f44d5bdd34238d::t_d01cd8f6d9a867 1,3-6,10,22-23,68-70,87,116-118,135,217-220,226,228-235,237-285,291-303,309-316,321-330,333-336,338-348,352,356-381,383,386,388-391,418-455,459-463,465-478,483-506,508,511-526,528-540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5ff026d37bb3f403b1ba70f2a0efde93058a73e9",
+  "prompts": {},
+  "sessions": {
+    "s_f44d5bdd34238d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a40d10e5-4f25-4d4e-b484-fdd2ddf45506",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
