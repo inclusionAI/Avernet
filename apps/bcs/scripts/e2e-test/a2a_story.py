@@ -269,6 +269,20 @@ class A2aStory(Story):
         self.original_policy = None
         self.policy_revision = None
 
+    def request(self, method, path, body=None, **kwargs):
+        value = super().request(method, path, body, **kwargs)
+        if path.startswith("/api/v1/collaboration/a2a/"):
+            assert set(value) == {"code", "message", "data", "request_id"}
+            expected = kwargs.get("status", 200)
+            assert value["code"] == expected * 100
+            assert value["request_id"]
+            if expected >= 400:
+                assert "error_code" in value["data"]
+                # Existing rejection cases compare machine codes on both protocols.
+                return {"error": {"code": value["data"]["error_code"], "request_id": value["request_id"]}}
+            return value["data"]
+        return value
+
     def run(self):
         self.request("POST", "/me/ensure-human")
         provider_name = "a2a-e2e-" + uuid.uuid4().hex
@@ -464,13 +478,13 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = self.a2a_prefix + "/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
             assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
-            run_path = self.a2a_prefix + "/chat/runs/" + accepted["run_id"]
+            run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 result = self.request("GET", run_path + "?wait_ms=500", token=token)

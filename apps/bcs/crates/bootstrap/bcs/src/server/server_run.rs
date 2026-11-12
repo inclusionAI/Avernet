@@ -270,11 +270,16 @@ impl BcsServer {
                     .map(|entries| entries.v1_public_base_url.clone()),
             )
         };
-        let mut openapi_v1 = self.state.openapi_v1.clone()
-            .with_bot_self_service(Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
-                crate::agent_identity::build_agent_identity_port()?,
-                self.state.services.registry.clone(),
+        let bot_self = Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
+            crate::agent_identity::build_agent_identity_port()?,
+            self.state.services.registry.clone(),
+        ));
+        let mut openapi_v1 = self.state.openapi_v1.clone().with_bot_self_service(bot_self);
+        if let Some(management) = self.state.services.a2a_bot_management.clone() {
+            openapi_v1 = openapi_v1.with_a2a_service(Arc::new(bcs_app_a2a_bot::v1::A2aApiService::new(
+                management,
             )));
+        }
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
         openapi_v1.worker_task_service = Some(Arc::new(
             bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),
