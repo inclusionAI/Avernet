@@ -58,3 +58,6 @@ No production URL was invoked. Deployment and live container creation/restart ar
 - `apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py`: 24/24; uncovered added executable lines: []
 - `apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py`: 7/7; uncovered added executable lines: []
 - `apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py`: 0/0; uncovered added executable lines: []
+
+## PR CI inventory correction
+- Actual remote Backend found the pinned public route-count contract: new Caller read adds one explicit-user operation (298 to 299) and one Bot-path operation (226 to 227). Updated only those exact pins with a route-specific note; complete explicit-user-id suite passed 23 tests. No runtime changes or relaxed checks.

@@ -659,7 +659,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The relay-session task read is account-level and carries no bot_id parameter.
 # Context collab (this change): the three operations under
 # /collaboration/task/context_collab address no bot, so "none" grows 144 -> 147.
-_BOT_ID_PLACEMENT = {"path": 226, "query": 1, "none": 147}
+_BOT_ID_PLACEMENT = {"path": 227, "query": 1, "none": 147}
 
 
 
@@ -875,7 +875,8 @@ def test_the_pinned_number_of_operations_take_it():
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
     # The six service-Bot evaluation operations add six user-taking,
     # path-addressed operations: 292 -> 298 / 220 -> 226.
-    assert len(taking) == 298
+    # Read-only Caller status adds one explicit-user, Bot-path operation.
+    assert len(taking) == 299
 
 
 def test_the_exempt_operations_take_none():

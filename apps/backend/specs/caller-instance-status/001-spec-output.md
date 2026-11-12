@@ -127,3 +127,6 @@ callers retain their default behavior. This is required to make the new read
 boundary safe, not a general BaaS lifecycle or logging refactor. Verify the real
 BaaS read with MockTransport success, release/404, 503, API error, malformed JSON
 and transport-error credential sentinels.
+
+## Public schema inventory follow-up
+- The additive Caller GET is one explicit-user-scoped and Bot-path operation. Keep exact schema-inventory assertions synchronized: user-scoped 299, Bot-path 227. This maintains the existing strict count gate.
