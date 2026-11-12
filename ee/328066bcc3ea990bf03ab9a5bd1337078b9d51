@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/context_state_machines.py
+  s_f41d6a503ccfa5::t_200aee544dd2a8 1-97,99-101,103-274
+  s_f41d6a503ccfa5::t_58b5f3fe9bfb81 98,102
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_f41d6a503ccfa5::t_c92e8b780b75d5 86-101
+  s_f41d6a503ccfa5::t_e0c73b6df8ff11 12
+apps/backend/tests/community/core/task/context_collab/test_context_g4_conformance.py
+  s_f41d6a503ccfa5::t_2ee7c4a34e256a 1-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee328066bcc3ea990bf03ab9a5bd1337078b9d51",
+  "prompts": {},
+  "sessions": {
+    "s_f41d6a503ccfa5": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0b8ec4c8-e5a2-4e63-93b7-34dde0e92150",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

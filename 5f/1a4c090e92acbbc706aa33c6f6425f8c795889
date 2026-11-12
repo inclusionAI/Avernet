@@ -1,0 +1,24 @@
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_b407ecbadd402c::t_62a1478695a920 282
+apps/bcs/scripts/e2e-test/a2a_management_cases.py
+  s_b407ecbadd402c::t_62a1478695a920 61-63
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_b407ecbadd402c::t_62a1478695a920 91,97,99-102,104,250-273
+  s_b407ecbadd402c::t_f2cccbe73a4289 274-276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f1a4c090e92acbbc706aa33c6f6425f8c795889",
+  "prompts": {},
+  "sessions": {
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+apps/frontend-nextgen/assets/task-panel/.gitignore
+  s_2b26d456bc46f8::t_073c6428925d7d 4-7
+apps/frontend-nextgen/assets/task-panel/src/data/taskStatus.ts
+  s_2b26d456bc46f8::t_073c6428925d7d 1-33
+apps/frontend-nextgen/assets/task-panel/src/data/taskSwitcher.ts
+  s_2b26d456bc46f8::t_073c6428925d7d 1-44
+apps/frontend-nextgen/assets/task-panel/src/data/collectTaskArtifacts.ts
+  s_2b26d456bc46f8::t_073c6428925d7d 1-29
+apps/frontend-nextgen/assets/task-panel/src/data/filePreview.ts
+  s_2b26d456bc46f8::t_073c6428925d7d 1-86
+apps/frontend-nextgen/assets/task-panel/src/data/taskClient.ts
+  s_2b26d456bc46f8::t_073c6428925d7d 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fd11a172d8f271c76372751b8112750011e5090d",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

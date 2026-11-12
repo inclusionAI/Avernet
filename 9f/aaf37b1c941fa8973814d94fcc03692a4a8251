@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/expert_chat/services/test_caller_instance_status.py
+  s_ccda8e611a6d06::t_49dd1d81984feb 16,57,64,72,76,146,148,150,152,155-157,173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9faaf37b1c941fa8973814d94fcc03692a4a8251",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

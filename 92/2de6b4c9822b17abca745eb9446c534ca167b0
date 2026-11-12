@@ -1,0 +1,59 @@
+apps/backend/src/agentclaw/community/di/modules/system_config_module.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 26,45
+apps/backend/src/agentclaw/community/adapters/http/task/manifest_routes.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 1,6,49-72
+  s_2b26d456bc46f8::t_d21cd4c206df31 73
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 1,24-42
+  s_2b26d456bc46f8::t_91470d27ebe507 43
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  s_2b26d456bc46f8::t_a4ad6f5b68dffd 9
+  s_2b26d456bc46f8::t_2344f2fbe6f021 13,60-65,77-84
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 26,28,235
+apps/backend/src/agentclaw/community/adapters/http/system_config/write_access.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 1-37
+apps/backend/src/agentclaw/community/core/system_config/system_config_service_protocol.py
+  s_2b26d456bc46f8::t_a4ad6f5b68dffd 11,13-33
+apps/backend/src/agentclaw/community/core/task/task_panel/README.md
+  s_2b26d456bc46f8::t_a4ad6f5b68dffd 5-6
+  s_2b26d456bc46f8::t_7f3b309d5f2475 3-4,9-17,22
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  s_2b26d456bc46f8::t_a4ad6f5b68dffd 146-147
+  s_2b26d456bc46f8::t_a9247496935274 126,128-131,137-142
+apps/backend/tests/community/endpoints/test_task_panel_manifest.py
+  s_2b26d456bc46f8::t_f9cdff3483ef99 1-48
+apps/backend/src/agentclaw/community/api/task/task_manifest_service.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 4,8
+apps/backend/src/agentclaw/community/api/system_config_service.py
+  s_2b26d456bc46f8::t_a4ad6f5b68dffd 12
+  s_2b26d456bc46f8::t_2344f2fbe6f021 16
+apps/backend/src/agentclaw/community/adapters/http/system_config/router.py
+  s_2b26d456bc46f8::t_2344f2fbe6f021 33-35,109,161,197
+apps/backend/src/agentclaw/community/core/system_config/README.md
+  s_2b26d456bc46f8::t_d04da271b46270 11,31-37
+apps/backend/tests/community/api/system_config/test_vuln_fix_router.py
+  s_2b26d456bc46f8::t_239f466a6253cd 28,33
+apps/backend/tests/community/core/task/task_panel/test_http.py
+  s_2b26d456bc46f8::t_0fef041cd55978 1,6,15,17-21,33-34,36-37,40,43-51,55,58,60,67,69-70,74-75,80-81,83-112,116,119,125-131,134-152,155-162,164-193
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  s_2b26d456bc46f8::t_f258c63882aea2 10,61-62
+apps/backend/tests/community/core/task/task_panel/test_storage.py
+  s_2b26d456bc46f8::t_eebc8b77b771a7 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "922de6b4c9822b17abca745eb9446c534ca167b0",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

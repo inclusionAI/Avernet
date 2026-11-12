@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/method_authorization.py
+  s_a5f125bde83e04::t_c08ff1d8e289c8 1-310
+apps/backend/tests/community/core/task/context_collab/test_method_authorization.py
+  s_a5f125bde83e04::t_f400316814d71b 1-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9dd2be57f76151d9ac4844147dc325f271d88bd4",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

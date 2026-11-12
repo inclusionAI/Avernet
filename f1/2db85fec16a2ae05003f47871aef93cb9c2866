@@ -1,0 +1,25 @@
+apps/frontend-nextgen/test/services/backendApi/httpClient.aceLogin.test.ts
+  s_79439ec6a1b301::t_08a39a35b9b8c1 226
+apps/frontend-nextgen/src/hooks/useLocalSkillUploadError.ts
+  s_79439ec6a1b301::t_b637aab63674de 11
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_79439ec6a1b301::t_f9b2325ffc0f2b 44-45,49,58,247,262,297
+apps/frontend-nextgen/test/components/BotWorkshop/useLocalSkillUploadError.test.tsx
+  s_79439ec6a1b301::t_1a715765bb3517 10-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f12db85fec16a2ae05003f47871aef93cb9c2866",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
