@@ -5,7 +5,9 @@ import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
-import { AgentExecutionService } from "../../common/agent-execution.js";
+import { AgentExecutionService, agentExecutionContract, createAgentExecutionStep } from "../../common/agent-execution.js";
+import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
+import { SessionRecoveryAgentService } from "../agent-service.js";
 import type { RecoveryStoredTask } from "../task-contracts.js";
 
 const hour = 3600000;
@@ -168,4 +170,31 @@ it("does not hold the next maintenance scan while a resumed AIS is being dispatc
   } finally {
     finish?.();
   }
+});
+
+it("releases the slot when a registered execution is canceled before dispatch after a restart", async () => {
+  await enable(1);
+  const identity = { taskId: "interrupted", executionId: "exec-interrupted", executionNo: 1, handler: "session_recovery" };
+  const contract = agentExecutionContract(identity);
+  const executor = new AgentExecutionService({ nowSeconds: () => Math.floor(now / 1000), leaseSeconds: 120 });
+  await seed(identity.taskId, { status: "running", effectResumeSlot: { firstExecutionNo: 1 },
+    executionNo: 1, execution: executor.issue(identity.executionId, contract.stepId).execution, aisExecution: contract });
+  await createAgentExecutionStep(repo, identity);
+  await seed("next");
+  const ais = { execute: vi.fn(), stopExecution: vi.fn(), getJobStatus: vi.fn(), getJobStatusDetail: vi.fn() };
+  const worker = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo,
+    audit: new AgentToolCallRepository(db, "session_recovery"), ais,
+    runtime: { request: vi.fn(), executeShell: vi.fn(), sendMessage: vi.fn() }, targets: { resolve: vi.fn() },
+    business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1,
+    nasRoots: [], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: hour, now: () => now });
+  const restart = new SessionRecoveryTaskService({ ...deps, agent: {
+    ...deps.agent, terminate: task => worker.terminate(task), listExecutions: taskId => worker.listExecutions(taskId),
+  } });
+  const stopped = await restart.terminate(identity.taskId, { userId: "owner", isAdmin: false });
+  expect(stopped.termination).toEqual({ status: "remote_stopped", aisJobId: null });
+  expect(await tasks.claimEffectResumeDispatch(contract.stepId)).toBe(false);
+  await restart.maintenance();
+  expect((await current(identity.taskId)).effectResumeSlot).toBeUndefined();
+  expect((await current("next")).status).toBe("running");
+  expect(ais.stopExecution).not.toHaveBeenCalled();
 });

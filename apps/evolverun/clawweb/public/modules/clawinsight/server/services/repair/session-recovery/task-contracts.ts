@@ -153,6 +153,7 @@ export interface RecoveryTaskStore {
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
     effectResumeClaim?: { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null>;
   effectResumeConfig?(environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryEffectResumeConfig | null>;
+  claimEffectResumeDispatch?(stepId: string): Promise<boolean>;
   settleEffectResumeSlot?(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean>;
   /** Append a notification fact atomically without changing the Agent's business-state version. */
   appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;

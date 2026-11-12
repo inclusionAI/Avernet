@@ -127,16 +127,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       throw error;
     }
     const beforeDispatch = await this.required(task.taskId);
+    const autoResume = Boolean(task.effectResumeSlot && task.effectResumeSlot.lastExecutionNo === undefined);
     if (beforeDispatch.status === "canceled") {
-      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id);
-      if (task.effectResumeSlot) await this.deps.repo.recordCancellationAttempt(contract.stepId, { status: "remote_stopped" });
+      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id, autoResume);
       return;
     }
     if (effectResumeDispatchExpired(beforeDispatch, this.now())) {
       await this.release(beforeDispatch);
-      await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", retryable: false, errorCode: "EFFECT_RESUME_DISPATCH_EXPIRED" });
+      await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", retryable: false, errorCode: "EFFECT_RESUME_DISPATCH_EXPIRED",
+        expectedStep: { status: "created", output_json: null } });
       return;
     }
+    // Persist the dispatch boundary so a restart followed by cancellation can distinguish an unstarted Step.
+    if (autoResume && !await this.deps.tasks.claimEffectResumeDispatch?.(contract.stepId)) return;
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
         ...(task.simulation ? { simulation: true } : {}),
@@ -200,7 +203,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return steps.filter(step => step.step_type === "agent_execution").flatMap(step => {
       const executionId = JSON.parse(step.ext_json ?? "{}").executionId;
       if (typeof executionId !== "string") return [];
-      const cancellation = JSON.parse(step.bot_response_json ?? "{}").evolve_cancel;
+      const cancellation = step.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH" ? { status: "remote_stopped" as const }
+        : JSON.parse(step.bot_response_json ?? "{}").evolve_cancel;
       return [{ executionId, attempt: -step.step_no, status: step.status, jobId: step.bot_run_id,
         jobUrl: step.bot_run_id ? this.deps.ais.jobUrl?.(step.bot_run_id) ?? null : null,
         ...(cancellation?.status === "remote_stopped" || cancellation?.status === "remote_stop_failed"
@@ -216,7 +220,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const stepId = task.aisExecution?.stepId;
     const step = stepId ? await this.deps.repo.findStep(stepId) : null;
     const jobId = task.execution?.jobId ?? step?.bot_run_id ?? null;
-    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId, task.request.target.entity_id) : { status: "stop_pending" as const, aisJobId: null };
+    const slot = task.effectResumeSlot;
+    const isAutoResumeStep = Boolean(slot && step && -step.step_no >= slot.firstExecutionNo && -step.step_no <= (slot.lastExecutionNo ?? Infinity));
+    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId, task.request.target.entity_id, isAutoResumeStep)
+      : { status: "stop_pending" as const, aisJobId: null };
     // Retain interrupted writes as unknown; cancellation never claims to roll back a dispatched operation.
     for (;;) {
       const calls = await this.deps.audit.listActiveToolCalls(task.taskId, 500);
@@ -237,12 +244,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return termination;
   }
-  private async stopTerminatedExecution(stepId: string, jobId: string | null, userId: string): Promise<RecoveryTermination> {
+  private async stopTerminatedExecution(stepId: string, jobId: string | null, userId: string, autoResume = false): Promise<RecoveryTermination> {
     const step = await this.deps.repo.findStep(stepId);
+    if (step?.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH") return { status: "remote_stopped", aisJobId: null };
     if (step && !["succeeded", "failed", "canceled"].includes(step.status)) {
-      await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
-        errorCode: "RECOVERY_TERMINATED_BY_USER", errorMessage: "用户停止本次自愈任务",
-        expectedStep: { status: step.status, output_json: step.output_json } });
+      const beforeDispatch = autoResume && step.status === "created" && !jobId && !step.bot_run_id;
+      const canceled = await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
+        errorCode: beforeDispatch ? "RECOVERY_TERMINATED_BEFORE_DISPATCH" : "RECOVERY_TERMINATED_BY_USER",
+        errorMessage: "用户停止本次自愈任务", expectedStep: { status: step.status, output_json: step.output_json } });
+      if (canceled && beforeDispatch) return { status: "remote_stopped", aisJobId: null };
     }
     if (!jobId) return { status: "stop_pending", aisJobId: null };
     let status: "remote_stopped" | "remote_stop_failed" = "remote_stopped";

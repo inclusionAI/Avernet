@@ -65,14 +65,25 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     return { id: row.id, version: row.version, concurrency };
   }
 
+  async claimEffectResumeDispatch(stepId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      `UPDATE ce_steps SET status = 'dispatching', gmt_modified = ?
+       WHERE step_id = ? AND step_type = 'agent_execution' AND status = 'created'
+       AND EXISTS (SELECT 1 FROM ce_tasks WHERE ce_tasks.task_id = ce_steps.task_id AND ce_tasks.status = 'running')`,
+      [this.db.dialect.now(), stepId],
+    );
+    return result.affectedRows === 1;
+  }
+
   async settleEffectResumeSlot(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean> {
     if (slot.lastExecutionNo === undefined) return false;
-    const steps = await this.db.query<{ status: string; bot_run_id: string | null; bot_response_json: string | null }>(
-      "SELECT status, bot_run_id, bot_response_json FROM ce_steps WHERE task_id = ? AND step_type = 'agent_execution' AND step_no BETWEEN ? AND ?",
+    const steps = await this.db.query<{ status: string; error_code: string | null; bot_run_id: string | null; bot_response_json: string | null }>(
+      "SELECT status, error_code, bot_run_id, bot_response_json FROM ce_steps WHERE task_id = ? AND step_type = 'agent_execution' AND step_no BETWEEN ? AND ?",
       [taskId, -slot.lastExecutionNo, -slot.firstExecutionNo]);
     for (const step of steps) {
       if (step.status === "succeeded" || step.status === "failed") continue;
       if (step.status !== "canceled") return false;
+      if (step.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH") continue;
       const cancellation = JSON.parse(step.bot_response_json ?? "{}").evolve_cancel?.status;
       if (cancellation === "remote_stopped") continue;
       if (cancellation !== "remote_stop_failed" || !step.bot_run_id || !await jobEnded(step.bot_run_id)) return false;
