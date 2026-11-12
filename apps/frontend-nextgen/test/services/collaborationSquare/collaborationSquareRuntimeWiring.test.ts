@@ -48,7 +48,7 @@ const BCS_CANDIDATE_ITEM = {
 const BCS_CANDIDATES_ENVELOPE = {
   code: 20000,
   message: 'ok',
-  data: { items: [BCS_CANDIDATE_ITEM], total: 1, offset: 0, limit: 100 },
+  data: { items: [BCS_CANDIDATE_ITEM], total: 1, offset: 0, limit: 20 },
 };
 
 const EMPTY_FRIEND_CONNECTIONS_ENVELOPE = { code: 20000, data: { items: [], total: 0 } };
@@ -78,9 +78,9 @@ describe('collaboration square BOT runtime wiring（BCS v1）', () => {
       collaborationSquareBotService.listBots({ search: '规划', offset: 0, pageSize: 20 }, humanContext),
     ).resolves.toEqual([expect.objectContaining({ id: 'planner:owner-8', name: '真实候选', bcsStatus: 'online' })]);
 
-    // 首个请求即 BCS 公开候选：purpose=discovery + 名称过滤 + 整批 ≤100 的原始 offset 游标。
+    // 首个请求即 BCS 公开候选：purpose=discovery + 名称过滤 + 整批 ≤20 的原始 offset 游标。
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/collaboration/bots/human_900003/candidates?purpose=discovery&name=%E8%A7%84%E5%88%92&offset=0&limit=100',
+      '/openapi/v1/collaboration/bots/human_900003/candidates?purpose=discovery&name=%E8%A7%84%E5%88%92&offset=0&limit=20',
     );
     expectNoCatalogOrMockFallback(fetchMock);
   });

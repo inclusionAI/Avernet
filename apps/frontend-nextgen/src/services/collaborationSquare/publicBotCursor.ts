@@ -1,15 +1,15 @@
 // BCS 原始 offset 游标 + 可选 Backend metadata 过滤的公开 Bot 拼页服务
 // （bcs-standalone-friend-discovery，无 React 依赖）。发现页“发现 → 公开 Bot”由
 // CollaborationSquareApiAdapter（Task 3）读取能力后调用本服务：以 BCS 原始 offset 扫描
-// 固定上限 100 的候选页，逐条推进原始位置；只有 Backend 已启用时才经共用 metadata 过滤；
+// 固定上限 20 的候选页，逐条推进原始位置；只有 Backend 已启用时才经共用 metadata 过滤；
 // 第 pageSize+1 条合格记录（展示页 24 条时即第 25 条）仅作 hasMore 预读，下一页从它在
 // BCS 的原始下标续读——预读项不丢失、展示页不重叠，不能由未过滤的 BCS total 推导 hasMore。
 import { mapBcsBotCandidate, type BcsCandidatePage } from '@/domain/collaborationSquare/bcsBotMapper';
 import type { BotCandidatePage, PublicBot } from '@/domain/collaborationSquare/types';
 import { filterPublicBotsByMetadata, type FetchPublicBotMetadata } from './publicBotMetadata';
 
-/** BCS 上游每批读取条数上限：与扫描页大小一致（每次上游读 ≤100），扫描总量受 BCS total 约束。 */
-export const BCS_CANDIDATE_SCAN_PAGE_SIZE = 100;
+/** BCS 上游每批读取条数上限：与扫描页大小一致（每次上游读 ≤20），扫描总量受 BCS total 约束。 */
+export const BCS_CANDIDATE_SCAN_PAGE_SIZE = 20;
 
 /** BCS 候选上游读取：由 adapter 封装真实 Controller（listBcsBotCandidates）与信封校验。 */
 export type FetchBcsCandidatePage = (

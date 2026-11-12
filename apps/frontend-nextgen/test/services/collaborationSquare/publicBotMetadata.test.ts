@@ -114,8 +114,58 @@ describe('filterPublicBotsByMetadata', () => {
     expect(kept[0].ownerName).toBe('李四');
   });
 
+  it.each([
+    ['metadata Owner 匹配，覆盖 candidates 的非本人判断', '7', '7', undefined, true],
+    ['metadata Owner 不匹配，覆盖 candidates 的本人判断', '8', '7', true, false],
+    ['Owner 与登录 ID 去除空白', ' 7 ', ' 7 ', undefined, true],
+    ['空白登录用户不标记归属', '7', ' ', true, false],
+    ['metadata Owner 空白时保留 candidates 判断', ' ', '7', true, true],
+  ] as const)('优先按 metadata owner_id 判断归属：%s', async (_label, ownerId, userId, previous, expected) => {
+    const bot = compoundBot(0, { id: 'assistant:provider-ref', isOwnedByLoggedInUser: previous });
+    fetchMetadata.mockResolvedValue([
+      metadataRecord(
+        { bot_id: 'assistant', owner_id: ownerId },
+        { bcn_bot_id: bot.id, owner_name: ' ' },
+      ),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({ bots: [bot], userId, backendEnabled: true, fetchMetadata });
+
+    expect(kept[0].isOwnedByLoggedInUser).toBe(expected);
+    expect(kept[0].ownerName).toBe('未公开');
+    expect(bot.isOwnedByLoggedInUser).toBe(previous);
+  });
+
+  it('metadata 无 bcn_bot_id 时按复合身份匹配 owner_id，不按响应顺序判断归属', async () => {
+    const bots = [compoundBot(0), compoundBot(1, { isOwnedByLoggedInUser: true })];
+    fetchMetadata.mockResolvedValue([
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-1' }, { bcn_bot_id: undefined }),
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-0' }, { bcn_bot_id: undefined }),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots, userId: 'owner-0', backendEnabled: true, fetchMetadata,
+    });
+
+    expect(kept.map((bot) => bot.isOwnedByLoggedInUser)).toEqual([true, false]);
+  });
+
+  it('metadata 无匹配记录时保留 candidates 的归属判断', async () => {
+    const bot = compoundBot(0, { isOwnedByLoggedInUser: true });
+    fetchMetadata.mockResolvedValue([
+      metadataRecord({ bot_id: 'assistant', owner_id: 'owner-0' }, { bcn_bot_id: 'assistant:old-owner' }),
+    ]);
+
+    const kept = await filterPublicBotsByMetadata({
+      bots: [bot], userId: '7', backendEnabled: true, fetchMetadata,
+    });
+
+    expect(kept[0]).toBe(bot);
+    expect(kept[0].isOwnedByLoggedInUser).toBe(true);
+  });
+
   it('backendEnabled=false 时不发任何 metadata 请求，原样保留整批候选', async () => {
-    const bots = [compoundBot(0), compoundBot(1), compoundBot(2)];
+    const bots = [compoundBot(0, { isOwnedByLoggedInUser: true }), compoundBot(1), compoundBot(2)];
 
     const kept = await filterPublicBotsByMetadata({
       bots,
@@ -247,7 +297,7 @@ describe('filterPublicBotsByMetadata', () => {
   });
 
   it('网络/5xx 失败保留全部 BCS 候选并经回调提示增强不可用', async () => {
-    const bots = [compoundBot(0), compoundBot(1)];
+    const bots = [compoundBot(0, { isOwnedByLoggedInUser: true }), compoundBot(1)];
     fetchMetadata.mockRejectedValue(authError(500));
 
     const kept = await filterPublicBotsByMetadata({
