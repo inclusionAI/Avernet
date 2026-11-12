@@ -24,7 +24,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
 )
-from agentclaw.community.core.task.context_collab.service_api import ActorContext
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
 
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_WORKSPACE = "workspace"

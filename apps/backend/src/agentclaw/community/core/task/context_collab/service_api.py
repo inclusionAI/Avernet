@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,  # 兼容再导出:权威居所在 G1(2026-11-13 归位),本模块
+)  # 的既有 import 零破坏;新代码请从 G1 新家 import。
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
     PrincipalRef,
@@ -19,14 +22,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-
-
-@dataclass(frozen=True)
-class ActorContext:
-    """已认证调用者上下文;由 delivery 从 auth 信息构造,核心不解析 HTTP。"""
-
-    actor: PrincipalRef
-    source: str  # "api" | "openapi"
 
 
 @dataclass

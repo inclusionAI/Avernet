@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodBinding,
 )
-from agentclaw.community.core.task.context_collab.service_api import ActorContext
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
 
 # lifecycle 治理面操作(inspect 为读面,单列)。
 LIFECYCLE_OWNER_OPS = frozenset(
