@@ -255,4 +255,23 @@ describe('TodoDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '返回待办列表' }));
     expect(mockedHistory.push).toHaveBeenCalledWith('/lab/todos');
   });
+  it('使用居中紧凑详情阅读列', async () => {
+    render(<TodoDetailPage />);
+    const heading = await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    const backButton = screen.getByRole('button', { name: '返回待办列表' });
+    const contentColumn = document.querySelector("div[class*='max-w-[820px]']");
+    const summary = screen.getByLabelText('待办概要');
+    const card = screen.getByRole('group', { name: '待办详情视图' }).closest('.rounded-xl');
+
+    expect(backButton).toHaveClass('size-8', 'rounded-lg');
+    expect(backButton.querySelector('svg')).toHaveClass('size-4');
+    expect(heading).toHaveClass('text-[18px]', 'font-semibold');
+    expect(document.querySelector('header[class*="px-4 pt-6 pb-4"]')).toBeInTheDocument();
+    expect(contentColumn).toHaveClass('max-w-[820px]', 'gap-5');
+
+    expect(summary.querySelector('p')).toHaveClass('text-sm', 'leading-[22px]');
+    fireEvent.click(screen.getByRole('button', { name: '详情' }));
+    expect(screen.getByRole('button', { name: '详情' })).toHaveClass('text-xs', 'font-medium');
+    expect(card).toHaveClass('rounded-xl');
+  });
 });

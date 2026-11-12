@@ -21,13 +21,13 @@ function formatDateTime(value?: string): string {
 
 function DetailItem({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
         {icon}
       </span>
       <div className="min-w-0">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-1 break-words text-sm font-medium text-foreground">{value || '—'}</div>
+        <div className="mt-0.5 break-words text-xs font-medium text-foreground">{value || '—'}</div>
       </div>
     </div>
   );
@@ -83,18 +83,18 @@ export default function TodoDetailPage() {
         </div>
       ) : todo ? (
         <>
-          <header className="border-b border-divider bg-background px-4 py-4 sm:px-6">
-            <div className="mx-auto flex w-full max-w-[1600px] items-center gap-5">
+          <header className="border-b border-divider bg-background px-4 pt-6 pb-4 sm:px-6 lg:px-10">
+            <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3">
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label="返回待办列表"
-                className="size-[52px] rounded-2xl bg-muted/70 hover:bg-muted"
+                className="size-8 rounded-lg bg-muted/70 hover:bg-muted"
                 onClick={() => history.push('/lab/todos')}
               >
-                <ArrowLeft className="size-6" aria-hidden />
+                <ArrowLeft className="size-4" aria-hidden />
               </Button>
-              <h1 className="m-0 min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              <h1 className="m-0 min-w-0 truncate text-[18px] font-semibold tracking-tight text-foreground">
                 {todo.title}
               </h1>
               <Badge className={cn('shrink-0 border-0 px-3 py-1.5 text-base', TODO_STATUS_CLASS[todo.status])}>
@@ -103,30 +103,30 @@ export default function TodoDetailPage() {
             </div>
           </header>
 
-          <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-7 px-4 py-8 sm:px-6 sm:py-11">
-            <section aria-label="待办概要" className="space-y-7">
-              <p className="m-0 whitespace-pre-wrap text-lg leading-8 text-foreground">
+          <div className="mx-auto flex w-full max-w-[820px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-10">
+            <section aria-label="待办概要" className="space-y-5">
+              <p className="m-0 whitespace-pre-wrap text-sm leading-[22px] text-foreground">
                 {todo.description || '暂无描述'}
               </p>
 
               <div>
                 <Button
                   variant="ghost"
-                  className="h-auto gap-2.5 rounded-md border-0 px-0 py-1 text-base text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  className="h-auto gap-2 rounded-md border-0 px-0 py-1 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
                   aria-expanded={detailsExpanded}
                   onClick={() => setDetailsExpanded((expanded) => !expanded)}
                   leftIcon={
                     detailsExpanded ? (
-                      <ChevronDown className="size-5" aria-hidden />
+                      <ChevronDown className="size-3.5" aria-hidden />
                     ) : (
-                      <ChevronRight className="size-5" aria-hidden />
+                      <ChevronRight className="size-3.5" aria-hidden />
                     )
                   }
                 >
                   详情
                 </Button>
                 {detailsExpanded ? (
-                  <div className="mt-4 grid gap-6 rounded-2xl border border-border bg-muted/15 p-6 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-6 gap-y-2 rounded-xl border border-border bg-muted/15 p-4">
                     <DetailItem icon={<Bot className="size-4" />} label="Bot" value={todo.botName || todo.botId} />
                     <DetailItem
                       icon={<FileText className="size-4" />}
@@ -148,7 +148,7 @@ export default function TodoDetailPage() {
               </div>
             </section>
 
-            <Card className="overflow-hidden rounded-2xl border-border shadow-none">
+            <Card className="overflow-hidden rounded-xl border-border shadow-none">
               <div
                 role="group"
                 aria-label="待办详情视图"
