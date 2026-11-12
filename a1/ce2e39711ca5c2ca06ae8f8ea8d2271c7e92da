@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/trace-argument-evidence.test.ts
+  s_67eaf3663e3fc8::t_81c3def71b9547 82-97
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  s_67eaf3663e3fc8::t_32eaf170036157 127-129,201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1ce2e39711ca5c2ca06ae8f8ea8d2271c7e92da",
+  "prompts": {},
+  "sessions": {
+    "s_67eaf3663e3fc8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c876-1b5b-72a3-a80d-b67a0ceee9ed",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
