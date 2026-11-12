@@ -57,6 +57,12 @@ user_config:
     connect_timeout: 10
     request_timeout: 600
 
+    # Session materialization 配置
+    # session_patch_timeout: PATCH /api/sessions 的超时（秒），大数据量 session 需更大值
+    # session_patch_pool_max: session materialization 专用连接池大小
+    session_patch_timeout: 1200
+    session_patch_pool_max: 20
+
   # Chat client pool 配置
   chat_client_pool:
     max_size: 100                    # 池中最大总连接数
