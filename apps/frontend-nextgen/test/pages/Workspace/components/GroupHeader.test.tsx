@@ -175,7 +175,7 @@ it('摘要驱动成员头像与 Humans/Bots 计数，选中会话加入状态仍
   expect(screen.getByRole('status')).toHaveTextContent('未加入当前会话');
 });
 
-it('右侧六枚图标钮按 artboard-003 顺序：收藏/分享/会话管理/历史消息/资源管理/副屏', () => {
+it('右侧图标将共享信息放在历史消息和资源管理之间', () => {
   const onTogglePanel = jest.fn();
   render(<GroupHeader {...buildProps({ onTogglePanel })} />);
 
@@ -188,6 +188,7 @@ it('右侧六枚图标钮按 artboard-003 顺序：收藏/分享/会话管理/�
     'lucide-share2',
     'lucide-sliders-horizontal',
     'lucide-history',
+    'lucide-layers',
     'lucide-folder-open',
     'lucide-monitor',
   ]);

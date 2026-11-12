@@ -210,3 +210,33 @@ async fn preset_names_are_case_sensitive_in_memory_and_sqlite() {
 async fn sqlite_editing_missing_preset_returns_not_found() {
     common::editing_missing_preset_returns_not_found(&sqlite_repo().await).await;
 }
+
+#[tokio::test]
+async fn shared_info_loads_only_requested_group_and_session_scopes() {
+    use bcs_domain::ScopeLevel::{Group, Round, Session};
+
+    let sqlite = sqlite_repo().await;
+    let memory = MemoryGroupContextRepo::new();
+    for repo in [&sqlite as &dyn GroupContextRepo, &memory] {
+        for (name, level, scope) in [
+            ("group", Group, "group"),
+            ("session", Session, "group:session"),
+            ("first", Round, "group:session:1"),
+            ("second", Round, "group:session:2"),
+            ("other", Round, "group:session2:1"),
+            ("invalid", Round, "group:session:"),
+        ] {
+            let mut entry = common::entry(name, name, scope, "body");
+            entry.scope_level = level;
+            repo.create_active(entry).await.unwrap();
+        }
+
+        let items = repo.list_active_for_shared_info("group", Some("group:session")).await.unwrap();
+        let names: Vec<_> = items.iter().map(|item| item.name.as_str()).collect();
+        assert_eq!(names, ["group", "session", "first", "second"]);
+
+        let group_only = repo.list_active_for_shared_info("group", None).await.unwrap();
+        assert_eq!(group_only.len(), 1);
+        assert_eq!(group_only[0].name, "group");
+    }
+}

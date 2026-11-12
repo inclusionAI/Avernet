@@ -104,6 +104,15 @@ pub trait GroupContextRepo: Send + Sync {
     async fn list_active_meta_by_scopes(&self, scopes: &[String])
     -> StoreResult<Vec<GroupContextEntryMeta>>;
 
+    /// Load active entries for the exact group and, when supplied, its selected session.
+    async fn list_active_for_shared_info(
+        &self,
+        _group_id: &str,
+        _session_id: Option<&str>,
+    ) -> StoreResult<Vec<GroupContextEntry>> {
+        Err(GroupContextStoreError::Backend("shared information storage unavailable".into()))
+    }
+
     async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>>;
 }
 
@@ -551,6 +560,36 @@ impl GroupContextRepo for SqlGroupContextStore {
         rows.into_iter()
             .map(|row| self.row_to_meta(&row))
             .collect()
+    }
+
+    async fn list_active_for_shared_info(
+        &self,
+        group_id: &str,
+        session_id: Option<&str>,
+    ) -> StoreResult<Vec<GroupContextEntry>> {
+        let mut params = vec![DbValue::from(group_id)];
+        let session_filter = if let Some(session_id) = session_id {
+            // The schema uses case-sensitive scope keys. ':' and ';' are adjacent,
+            // so this range matches the literal prefix without LIKE wildcards.
+            params.extend([
+                DbValue::from(session_id),
+                DbValue::from(format!("{session_id}:")),
+                DbValue::from(format!("{session_id};")),
+            ]);
+            " OR (scope_level = 'session' AND scope = ?) \
+              OR (scope_level = 'round' AND scope > ? AND scope < ?)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT {} FROM bcs_group_contexts WHERE is_superseded = FALSE \
+             AND ((scope_level = 'group' AND scope = ?){session_filter}) ORDER BY id ASC",
+            self.select_cols(),
+        );
+        let rows = self.db.query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(GroupContextStoreError::backend)?;
+        rows.into_iter().map(|row| self.row_to_entry(&row)).collect()
     }
 
     async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>> {
