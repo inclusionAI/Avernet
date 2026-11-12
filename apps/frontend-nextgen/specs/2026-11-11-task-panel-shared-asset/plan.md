@@ -9,9 +9,9 @@ owner: task-module
 
 将现有任务副屏迁入 `apps/frontend-nextgen/assets/task-panel/` 独立资产子工程（C6 用户确认的新归属，位于宿主 src 之外），提供单一 UMD 入口和受版本约束的宿主接口；两个产品仅提供 SDK、认证、路由、消息访问、文件访问和稳定挂载适配。共享实现覆盖展示、请求映射、轮询、声明识别、恢复、任务切换和导航编排。状态只在共享控制器持有，不能在宿主 store 再维护第二份任务状态机。
 
-本变更跨 Backend 资产与前端宿主，故实施三件套位于根 `docs/specs`，而非某一个前端的私有 specs。
+实施文档位于 `apps/frontend-nextgen/specs/`，与共享任务副屏资产所属的前端工程保持一致。
 
-相关约束：[架构宪章](../../arch/arch.rules.md)、[开发规则](../../agents/development.md)、[任务领域导航](../../../apps/backend/src/agentclaw/community/core/task/README.md)。既有受保护合同：[Bot S1–S6](../../../apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md)、[Relay 端到端](../../../apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md)、[Task CLI](../../../apps/backend/specs/2026-09-23-task-cli/design.md)。不以早期 task README 或过期 CodeGraph 索引覆盖这些合同。
+相关约束：[架构宪章](../../../../docs/arch/arch.rules.md)、[开发规则](../../../../docs/agents/development.md)、[任务领域导航](../../../backend/src/agentclaw/community/core/task/README.md)。既有受保护合同：[Bot S1–S6](../../../backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md)、[Relay 端到端](../../../backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md)、[Task CLI](../../../backend/specs/2026-09-23-task-cli/design.md)。不以早期 task README 或过期 CodeGraph 索引覆盖这些合同。
 
 - **已经用户确认的方向**：任务模块持有资产，参照 BCS 同仓独立包，保留两种调起体验。
 - **本次新增宿主接口**：已随此次实施方向批准；它不是另一个任务执行协议。
@@ -34,7 +34,7 @@ apps/frontend-nextgen/assets/task-panel/
   test/ / scripts/ / README.md / PUBLISHING.md
 ```
 
-当前 [assets/TaskPanel](../../../apps/frontend-nextgen/src/assets/TaskPanel/index.ts#L1) 的 43 个文件逐项列入迁移清单。资产内部只保留功能实现；SDK 注册、产品路由、登录跳转留在宿主。已有 [GroupDrillDown](../../../apps/frontend-nextgen/src/assets/TaskPanel/GroupDrillDown.tsx#L14)、[Fetcher](../../../apps/frontend-nextgen/src/assets/TaskPanel/TaskPanelFetcher.tsx#L11)、[artifact preview hook](../../../apps/frontend-nextgen/src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts#L2) 的 app/SDK imports 必须剥离。
+当前 [assets/TaskPanel](../../src/assets/TaskPanel/index.ts#L1) 的 43 个文件逐项列入迁移清单。资产内部只保留功能实现；SDK 注册、产品路由、登录跳转留在宿主。已有 [GroupDrillDown](../../src/assets/TaskPanel/GroupDrillDown.tsx#L14)、[Fetcher](../../src/assets/TaskPanel/TaskPanelFetcher.tsx#L11)、[artifact preview hook](../../src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts#L2) 的 app/SDK imports 必须剥离。
 
 ```text
 # nextgen：预期新增/收敛的宿主代码
@@ -166,7 +166,7 @@ export type * from './contracts';
 
 ## 5. 恢复编排：两个触发入口，一个提交点
 
-[当前 bootstrap](../../../apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts#L118) 和 [已载入消息重建](../../../apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sidePaneContent.ts#L35) 不等于全历史扫描。新增行为按以下顺序，提交前再次检查 viewer、session epoch、activeTask 和最新显式 intent。
+[当前 bootstrap](../../src/hooks/useSessionTaskPanelBootstrap.ts#L118) 和 [已载入消息重建](../../src/pages/Workspace/Chat/hooks/sidePaneContent.ts#L35) 不等于全历史扫描。新增行为按以下顺序，提交前再次检查 viewer、session epoch、activeTask 和最新显式 intent。
 
 ```text
 # controller/recoverConversation.ts（new）

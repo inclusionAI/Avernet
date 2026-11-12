@@ -7,19 +7,19 @@
 
 | 事实 | 来源 |
 | --- | --- |
-| BCS 副屏是同仓独立 UMD 资产，React/ReactDOM external | [Vite 配置](../../../apps/bcs/assets/panel/vite.config.ts#L13)、[包定义](../../../apps/bcs/assets/panel/package.json#L2) |
-| 任务副屏当前由 nextgen 本地注册，UMD 仅预留；有既存历史别名 | [注册入口](../../../apps/frontend-nextgen/src/assets/TaskPanel/index.ts#L40) |
+| BCS 副屏是同仓独立 UMD 资产，React/ReactDOM external | [Vite 配置](../../../bcs/assets/panel/vite.config.ts#L13)、[包定义](../../../bcs/assets/panel/package.json#L2) |
+| 任务副屏当前由 nextgen 本地注册，UMD 仅预留；有既存历史别名 | [注册入口](../../src/assets/TaskPanel/index.ts#L40) |
 | 当前资产目录含 43 个文件、7488 行，不是只抽取一个 TSX | `Path.rglob('*')` 对该目录的只读统计；没有单文件超过 1000 行 |
-| 任务副屏轮询依赖应用的登录和信封处理 | [Fetcher](../../../apps/frontend-nextgen/src/assets/TaskPanel/TaskPanelFetcher.tsx#L11) |
-| 产物访问依赖三类应用服务 | [useTaskArtifactPreview](../../../apps/frontend-nextgen/src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts#L2) |
-| 进入会话自动恢复当前为 by_session + list，不是已证实的历史全分页查找 | [bootstrap](../../../apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts#L118) |
-| 已有消息声明重建仅遍历调用方传入的已载入消息，用于 Monitor 重开 | [sidePaneContent](../../../apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sidePaneContent.ts#L35)、[调用处](../../../apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts#L172) |
-| 群侧也复用消息重建和 bootstrap | [群头部接线](../../../apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts#L19) |
-| 单聊历史读取可指定 page/pageSize，但请求身份含 owner/friend 差异，不能改成只传 sessionId | [listMessagesPage](../../../apps/frontend-nextgen/src/services/workspace/botSessionService.ts#L485) |
-| 群聊已有 before 时间戳分页，当前 provider 的分页器会修改 UI 分页状态 | [GroupChatHistoryPaginator](../../../apps/frontend-nextgen/src/services/workspace/groupChatHistoryPaginator.ts#L20) |
-| 因此恢复扫描应持有独立游标，不能调用聊天 provider 的 loadMoreHistory 来推进 | 同上；并参见 [provider](../../../apps/frontend-nextgen/src/services/workspace/groupChatProvider.ts#L654) |
-| 当前应用导航保活含宿主 URL 和 SDK 类型，不能直接搬到共享资产 | [导航 store](../../../apps/frontend-nextgen/src/stores/taskConversationNavigationStore.ts#L1)、[持久容器](../../../apps/frontend-nextgen/src/components/Workspace/PersistentChatLayoutPanelHost.tsx#L1) |
-| 副屏 CSS 会匹配宿主 SDK 内部类，需要移回宿主 presentation 适配 | [CSS](../../../apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskPanelV2.css#L1) |
+| 任务副屏轮询依赖应用的登录和信封处理 | [Fetcher](../../src/assets/TaskPanel/TaskPanelFetcher.tsx#L11) |
+| 产物访问依赖三类应用服务 | [useTaskArtifactPreview](../../src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts#L2) |
+| 进入会话自动恢复当前为 by_session + list，不是已证实的历史全分页查找 | [bootstrap](../../src/hooks/useSessionTaskPanelBootstrap.ts#L118) |
+| 已有消息声明重建仅遍历调用方传入的已载入消息，用于 Monitor 重开 | [sidePaneContent](../../src/pages/Workspace/Chat/hooks/sidePaneContent.ts#L35)、[调用处](../../src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts#L172) |
+| 群侧也复用消息重建和 bootstrap | [群头部接线](../../src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts#L19) |
+| 单聊历史读取可指定 page/pageSize，但请求身份含 owner/friend 差异，不能改成只传 sessionId | [listMessagesPage](../../src/services/workspace/botSessionService.ts#L485) |
+| 群聊已有 before 时间戳分页，当前 provider 的分页器会修改 UI 分页状态 | [GroupChatHistoryPaginator](../../src/services/workspace/groupChatHistoryPaginator.ts#L20) |
+| 因此恢复扫描应持有独立游标，不能调用聊天 provider 的 loadMoreHistory 来推进 | 同上；并参见 [provider](../../src/services/workspace/groupChatProvider.ts#L654) |
+| 当前应用导航保活含宿主 URL 和 SDK 类型，不能直接搬到共享资产 | [导航 store](../../src/stores/taskConversationNavigationStore.ts#L1)、[持久容器](../../src/components/Workspace/PersistentChatLayoutPanelHost.tsx#L1) |
+| 副屏 CSS 会匹配宿主 SDK 内部类，需要移回宿主 presentation 适配 | [CSS](../../src/assets/TaskPanel/v2/TaskPanelV2.css#L1) |
 
 ## 用户确认与源码证据的区分
 
