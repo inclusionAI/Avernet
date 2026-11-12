@@ -1,0 +1,27 @@
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_service.py
+  s_7517e37f6fcee5::t_379932bb23f3de 1707-1744
+  s_7517e37f6fcee5::t_ce330da32b5573 1660,1662,1664,1666-1677,1679-1681,1683-1684,1686-1687,1689-1690,1702,1748,1751-1829,1831,1833,1835-1837,1839-1840,1844-1845,1847,1849-1850,1856,1860,1862,1867-1869,1871
+  s_7517e37f6fcee5::t_9d70a0818bfe99 1659,1661,1663,1665,1678,1682,1685,1688,1691-1701,1703-1706,1745-1747,1749-1750,1830,1832,1834,1838,1841-1843,1846,1848,1851-1855,1857-1859,1861,1863-1866,1870,1872-1873
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_dbdbea53a7aeac 726,856-889,922-925
+  s_7517e37f6fcee5::t_f84518ce134141 438-439,463-484,724-725,901-902,913,915,928-937,946-956
+  s_7517e37f6fcee5::t_12ac2d8be61e7d 926
+src/ecb/ecb/servers/web/app.py
+  s_7517e37f6fcee5::t_3b75cc01991ab8 931,933,935
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "301b4f0ce2c1625129fe99b41d8ed5ca98fe1e27",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

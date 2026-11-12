@@ -1,0 +1,22 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00ba24234d6ca8b005dec23c0ace6522537844c5",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  },
+  "sessions": {
+    "s_ffd6899ba8c9ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3ed-a9b7-7bc0-95e7-7d59c80c865e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback-probe.ts
+  h_b601d8706f5d44 27,32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e5ee367db2687ea4c236dc27e00c1a22c7f3c148",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
