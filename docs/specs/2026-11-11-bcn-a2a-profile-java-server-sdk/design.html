@@ -1371,7 +1371,7 @@ void without_ui_extension_falls_back_to_text() {
 </table></div>
 
 <h3 id="s8-12"><span class="n">8.12</span>推送通知的实现方案（后续阶段）</h3>
-<p>本期只定义推送的语义（6.12）。本节是 SDK 以后实现推送的方案，目的是确认现在预留的字段和接口足够，避免以后改动 SPI。</p>
+<div class="box"><p><b>本期不实现，也不改动任何接口。</b>本期只定义推送的语义（6.12），Task 记录预留 <code>pushConfig</code> 字段，<code>PushSender</code> 只定义不启用。本节说明以后如何在不破坏已有实现的前提下扩展。</p></div>
 <h4>难点</h4>
 <p>推送要求"至少尝试投递一次"，而多实例设计里实例之间不通信、回收是惰性的（9.5）。如果状态写入成功后、推送发出前实例宕机，或执行实例宕机后没有人再查询这个 Task，推送就会丢失。推送存在的意义正是让调用方不必一直查询，所以不能依赖查询来触发。</p>
 <h4>方案：发件箱加到期队列</h4>
@@ -1383,25 +1383,30 @@ void without_ui_extension_falls_back_to_text() {
 <li><div><span class="who">任一实例</span>后台每隔几秒从到期队列取出少量已到期的 Task，重新投递其中未完成的记录。到期队列同时登记租约到期时间，所以执行实例宕机后，任一实例都能主动回收该 Task 为 <code>FAILED</code>，并按同样流程推送。</div></li>
 </ol>
 <p>结果是投递"至少一次"：宕机、重启、推送失败都会由其他实例接着重试；重复投递由接收方按 Task 标识加状态去重（P-154）。</p>
-<h4>需要对现有设计做的补充</h4>
+<h4>以后扩展时增加的内容</h4>
 <div class="tw"><table>
 <tr><th>位置</th><th>补充</th><th>影响</th></tr>
 <tr><td>Task 记录（9.3）</td><td><code>pushConfig</code> 之外增加发件箱 <code>pushOutbox</code>：每条记录包含配置标识、要通知的状态、尝试次数、下次时间</td><td>只增加字段，随 Task 一起写入和过期</td></tr>
-<tr><td>TaskStore（9.2）</td><td>增加两个原语：<code>schedule(taskKey, dueAtMs)</code> 和 <code>pollDue(nowMs, limit)</code>。缓存实现用有序集合，按到期时间取最小的若干项</td><td>新增原语。只有启用推送时需要；未启用推送的 Agent 不受影响</td></tr>
+<tr><td>TaskStore（9.2）</td><td>增加两个原语：<code>schedule(taskKey, dueAtMs)</code> 和 <code>pollDue(nowMs, limit)</code>。缓存实现用有序集合，按到期时间取最小的若干项</td><td>以接口默认方法的形式加入，默认实现抛出“不支持”。已有的 TaskStore 实现不用修改即可继续编译和使用；只有开启推送时，SDK 在启动时检查所用实现是否支持</td></tr>
 <tr><td>回收（9.5）</td><td>启用推送后，回收由到期队列主动触发，不再只依赖查询</td><td>顺带解决了 9.5 中"宕机后没人查询就不会回收"的缺口</td></tr>
 <tr><td>请求处理（8.6）</td><td>初始提交时校验 <code>taskPushNotificationConfig</code> 的地址白名单，写入 Task 记录；未启用推送时返回 <code>PushNotificationNotSupportedError</code>（P-150）</td><td>—</td></tr>
 <tr><td>四个配置方法</td><td>在 Task 记录上增删改查推送配置，用比较并写入；最多 4 个；<code>Get</code> 和 <code>List</code> 返回时隐去凭据</td><td>—</td></tr>
 <tr><td>Card</td><td>只有配置开启推送、且所用 TaskStore 支持到期队列时，SDK 才写入 <code>pushNotifications: true</code></td><td>启动时校验，不满足则启动失败</td></tr>
 </table></div>
 <h4>接口</h4>
-<pre><code>public interface PushSender {
+<pre><code>// 以后启用；本期只定义
+public interface PushSender {
     /** 投递一条推送。返回是否成功（2xx）；超时和网络错误视为失败，由 core 负责重试。 */
     boolean send(URI url, String authorization, byte[] streamResponseJson, Duration timeout);
 }
 
-// TaskStore 增加（仅启用推送时需要）
-void schedule(String agentKey, String taskId, long dueAtMs);
-List&lt;TaskKey&gt; pollDue(long nowMs, int limit);</code></pre>
+// 以后在 TaskStore 上增加的默认方法；本期不加入
+default void schedule(String agentKey, String taskId, long dueAtMs) {
+    throw new UnsupportedOperationException();
+}
+default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) {
+    throw new UnsupportedOperationException();
+}</code></pre>
 <p>SDK 提供基于 JDK HttpClient 的默认 <code>PushSender</code>。平台需要走公司内部的 HTTP 出口或加链路信息时，可以替换它。业务的 Agent 代码不需要任何改动：推送完全由 SDK 根据状态变化触发。</p>
 <h4>配置</h4>
 <pre><code>bcn.a2a.server.push.enabled=true
@@ -1440,6 +1445,7 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 <tr><td>读己之写</td><td>成功写入后，任何实例的读取都必须能看到。不得使用可能读到旧值的从库或缓存。</td></tr>
 <tr><td>不淘汰</td><td>记录在过期时间之前不得被存储主动丢弃。</td></tr>
 <tr><td>失败语义</td><td>存储不可用时抛出异常；不得返回 <code>false</code> 或空来表示故障。</td></tr>
+<tr><td>以后的扩展</td><td>启用推送时会以默认方法的形式增加到期队列两个原语（8.12）。本期的实现不需要为此做任何准备。</td></tr>
 <tr><td>不要求的能力</td><td>发布订阅、分布式锁、范围查询、事务跨多条记录。</td></tr>
 <tr><td>一致性测试</td><td>SDK 提供 TaskStore 的合同测试，自定义实现必须通过。</td></tr>
 </table></div>
