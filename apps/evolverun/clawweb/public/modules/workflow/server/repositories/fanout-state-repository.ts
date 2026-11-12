@@ -6,6 +6,7 @@
  * All persistence errors propagate. No best-effort FlowRunRepository methods here.
  */
 import { createHash } from 'node:crypto';
+import { FlowRunMarkerError, normalizeFlowRunMarkers, type FlowRunMarkers } from '../services/flow-run-markers.js';
 import type { IDatabase, FlowControlAppConfig } from '@avernet/clawweb-shared/server/db';
 import { FlowRunLinkRepository } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
 
@@ -494,6 +495,13 @@ export class FanoutStateRepository {
     for (const key of ['parentNodeId', 'groupExecutionId', 'itemId', 'workflowId', 'sessionKey']) valid(text(input[key]), `Invalid ${key}`);
     valid(input.attemptNumber === 1 && object(input.stateJson), 'Invalid child attempt or stateJson');
     for (const key of ['workflowTitle', 'originBotId', 'userId']) valid(input[key] === undefined || typeof input[key] === 'string', `Invalid ${key}`);
+    // Project existing state metadata into SQL only; launch state and its digest stay unchanged.
+    let markers: FlowRunMarkers;
+    try { markers = normalizeFlowRunMarkers(input.stateJson); }
+    catch (error) {
+      if (error instanceof FlowRunMarkerError) throw new FanoutStorageError(400, error.message);
+      throw error;
+    }
     const initial = cleanChildState(input.stateJson);
     valid(initial._fanoutStarted === undefined || initial._fanoutStarted === false, 'A new child cannot be pre-claimed');
     valid(initial.subworkflowFanouts === undefined || (object(initial.subworkflowFanouts)
@@ -554,11 +562,11 @@ export class FanoutStateRepository {
       const now = tx.dialect.now();
       try {
         const inserted = await tx.exec(`INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json,
-          params_json, node_count, started_at, origin_session_key, origin_bot_id, user_id, gmt_create, gmt_modified)
-          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE 1 = 1${deadline.sql}`,
+          params_json, node_count, started_at, origin_session_key, origin_bot_id, user_id, env, tag, gmt_create, gmt_modified)
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE 1 = 1${deadline.sql}`,
         [childFlowId, input.workflowId, input.workflowTitle ?? null, 'running', JSON.stringify(state),
           JSON.stringify(params), (g.childWorkflow.nodes as unknown[]).length, Math.floor(Date.now() / 1000),
-          child.sessionKey, input.originBotId ?? null, input.userId ?? null, now, now, ...deadline.params]);
+          child.sessionKey, input.originBotId ?? null, input.userId ?? null, markers.env, markers.tag, now, now, ...deadline.params]);
         conflict(inserted.affectedRows > 0, 'Fanout deadline has expired');
       } catch (error) {
         // Only a proven unique collision is a domain conflict. Disk/connection/trigger

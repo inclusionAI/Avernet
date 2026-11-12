@@ -1,3 +1,4 @@
+import { normalizeFlowRunMarkers } from './flow-run-markers.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunLinkRepository, type FlowRunLink } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
 import { parseWorkflowSnapshotBinding, WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
@@ -84,14 +85,15 @@ type ChildRun = ParentRun & { workflow_version: number | null; workflow_deploy_n
 type NodeExecution = { id: number | string; flow_id: string; workflow_id: string; node_id: string; status: string; attempt: number };
 
 function runInsertColumns(run: FlowRunInsert): { sql: string; params: unknown[] } {
+  const markers = normalizeFlowRunMarkers(run);
   return {
-    sql: `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, gmt_create, gmt_modified)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [run.flowId, run.workflowId, run.workflowTitle ?? null, run.status, run.stateJson ?? null, run.paramsJson ?? null,
       run.inputJson ?? null, run.nodeCount ?? 0, run.triggeredBy ?? null, run.identityKey ?? null, run.currentPhase ?? null,
       run.startedAt, run.credentialsJson ?? null, run.originSessionKey ?? null, run.originSessionId ?? null,
       run.originBotId ?? null, run.userId ?? null, run.pluginVersion ?? null, run.engine ?? null,
-      run.workflowVersion ?? null, run.workflowDeployNumber ?? null, run.startedAt, run.startedAt],
+      run.workflowVersion ?? null, run.workflowDeployNumber ?? null, markers.env, markers.tag, run.startedAt, run.startedAt],
   };
 }
 async function insertRun(tx: IDatabase, run: FlowRunInsert): Promise<void> {

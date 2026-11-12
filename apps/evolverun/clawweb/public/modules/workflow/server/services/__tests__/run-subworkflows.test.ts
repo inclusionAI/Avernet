@@ -55,7 +55,7 @@ describe('fanout HTTP reads against durable SQLite state', () => {
 
   beforeEach(async () => {
     raw = new Database(':memory:'); db = new SqliteDatabase(raw); group = groupFixture();
-    raw.exec(`CREATE TABLE flow_runs (
+    raw.exec(`CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '',
       id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, workflow_title TEXT, status TEXT,
       origin_bot_id TEXT, state_json TEXT, input_json TEXT, result_json TEXT, params_json TEXT,
       credentials_json TEXT, origin_session_key TEXT, origin_session_id TEXT, started_at INTEGER,
