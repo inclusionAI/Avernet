@@ -5,6 +5,9 @@
 TC 在同一个服务地址提供 V1 和 V2。V1 的查询、推荐、Fuse、资料和状态更新与 V2 共用
 Card/Doc 后端及索引更新任务。V1 继续使用原路径和返回格式。融合历史沿用原存储。
 
+浏览器直连 TC 时，跨域来源由 `tc.cors_allowed_origins` 配置（完整的 Origin）。已有的
+`CORS_ALLOWED_ORIGINS` 环境变量仍可提供逗号分隔的正则表达式。
+
 旧后端源码归档在 [archive/legacy-tc](../archive/legacy-tc/)。
 迁移期的双后端方案见 [原迁移设计](../../specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)。
 

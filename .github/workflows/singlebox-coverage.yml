@@ -112,7 +112,10 @@ jobs:
             echo "Unable to diff singlebox change range ${base_ref}..${GITHUB_SHA}" >&2
             exit 1
           fi
-          mapfile -d '' -t files < "$changed_file_list"
+          files=()
+          while IFS= read -r -d '' file; do
+            files+=("$file")
+          done < "$changed_file_list"
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"

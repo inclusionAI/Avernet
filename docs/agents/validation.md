@@ -69,6 +69,7 @@ Module gates are selected from the committed files in the resulting diff:
 | `apps/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `engine/adapter/` | Engine SAST, unit tests, and changed-line coverage |
 | `apps/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
+| `apps/bcsfuse/` | Unified singlebox coverage with BCS user-story E2E |
 | `apps/frontend/` | Frontend CI |
 | `apps/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |

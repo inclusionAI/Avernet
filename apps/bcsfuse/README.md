@@ -51,6 +51,8 @@ pip install -e packages/search-core -e .
 
 ### Start Server
 
+Start [Qdrant Server 1.20 or later](docs/qdrant-modes.md) before running any mode.
+
 ```bash
 # Runtime mode (requires MySQL and Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
@@ -58,17 +60,17 @@ export BCSFUSE_PROVIDER_MODE="runtime"
 export QDRANT_URL="http://127.0.0.1:6333"
 python main.py
 
-# Dev mode (SQLite + Qdrant Local)
+# Dev mode (SQLite + Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="dev"
 python main.py
 
-# Dev smoke mode (offline, no external services)
+# Dev smoke mode (SQLite and Qdrant, no external model credentials)
 export BCSFUSE_AUTH_TOKEN="dev-smoke-token"
 export BCSFUSE_PROVIDER_MODE="dev_smoke"
 python main.py
 
-# Test mode (in-memory, ephemeral)
+# Test mode (temporary SQLite and Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="test-token"
 export BCSFUSE_PROVIDER_MODE="test"
 python main.py
@@ -92,9 +94,9 @@ curl -H "Authorization: Bearer your-token-here" http://localhost:8765/providers
 | Mode | Database | Vector Store | HTTP Providers | Auth | Use Case |
 |------|----------|--------------|----------------|------|----------|
 | `runtime` | MySQL | Qdrant Server | Real HTTP | Required | Production deployment |
-| `dev` | SQLite | Qdrant Local + SQLite | Real HTTP | Required | Local development |
-| `dev_smoke` | SQLite | Qdrant Local + SQLite | Fake/Noop | Required | Offline testing |
-| `test` | InMemory | InMemory | Fake/Noop | Required | CI/CD testing |
+| `dev` | SQLite | Qdrant Server | Real HTTP | Required | Local development |
+| `dev_smoke` | SQLite | Qdrant Server | Fake/Noop | Required | Offline testing |
+| `test` | Temporary SQLite | Qdrant Server | Fake/Noop | Required | CI/CD testing |
 
 ## Authentication
 
@@ -179,9 +181,7 @@ export BCSFUSE_PROVIDER_MODE="runtime"
 
 ```bash
 # SQLite (for dev mode, defaults used if not set)
-export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
-export QDRANT_LOCAL_PATH="/tmp/bcsfuse_qdrant"
-export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
+export WORKER_REGISTRY_SQLITE_DB_PATH="/tmp/bcsfuse_dev.db"
 
 # Embedding Provider (optional)
 export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
@@ -247,35 +247,17 @@ provider is an error; fusion must not fall back to a separate SQLite profile sto
 -- - worker_profiles_raw (raw profile storage)
 ```
 
-### Qdrant Server (Runtime and Docker)
+### Qdrant Server
 
-Runtime and Docker use Qdrant Server for both dense and keyword retrieval.
-Set `QDRANT_URL`; gRPC is preferred by default (`QDRANT_GRPC_PORT=6334`).
-The public Compose file starts a separate Qdrant container. Direct local `dev`
-and `dev_smoke` startup still defaults to Qdrant Local.
-See [Qdrant deployment modes](docs/qdrant-modes.md) for startup, ownership and recovery.
+TC uses Qdrant Server for dense and keyword retrieval. Direct startup defaults to
+`http://127.0.0.1:6333`. Set `QDRANT_URL` to use another endpoint. gRPC is
+preferred by default (`QDRANT_GRPC_PORT=6334`). The public Compose file starts
+a Qdrant container. See [Qdrant deployment modes](docs/qdrant-modes.md).
 
-### SQLite (Dev Mode)
+### SQLite (Dev and Test)
 
-For development, BCSFuse can use SQLite with Qdrant Local:
-
-```bash
-# SQLite database
-export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
-
-# Qdrant index and SQLite vector records
-export QDRANT_LOCAL_PATH="/tmp/bcsfuse_qdrant"
-export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
-```
-
-### InMemory (Test Mode)
-
-For testing, everything is in-memory:
-
-```bash
-export BCSFUSE_PROVIDER_MODE="test"
-# No additional storage configuration needed
-```
+Set `WORKER_REGISTRY_SQLITE_DB_PATH` to choose the database. The test and
+dev-smoke modes use a temporary database when no path is set.
 
 ## Testing
 
@@ -450,8 +432,8 @@ rm -rf /var/folders/*/T/bcsfuse_*
    - OSS candidate only includes Python components
 
 5. **Provider Mode `dev_smoke` vs `test`**
-   - `dev_smoke`: Uses SQLite + Qdrant Local + Fake providers (persistent)
-   - `test`: Uses InMemory + Fake providers (ephemeral)
+   - Both modes use Qdrant Server and fake model providers. Set
+     `WORKER_REGISTRY_SQLITE_DB_PATH` to keep the SQLite database across runs.
 
 ## Public Candidate Status
 
@@ -497,16 +479,12 @@ For issues and feature requests, please use the GitHub issue tracker.
 
 ### Local vector store migration
 
-Local `dev` / `dev_smoke` now use Qdrant Local for both dense and keyword
-retrieval, with SQLite as the durable vector/payload source. Startup rebuilds
-indexes before readiness. FAISS is no longer installed or maintained. Existing
-FAISS files are not deleted or imported automatically: re-sync local test Workers
-into a new `BCSFUSE_VECTOR_SQLITE_PATH`, then confirm search before retiring old
-files. Model credentials and dimensions must match the selected local dataset.
-SQLite snapshots use `vector_embeddings.sqlite`; old FAISS snapshots are unsupported.
-Qdrant applies payload filters before top-k, so indexed test records must contain
-the expected runtime state, visibility and other requested filter fields.
+Local TC uses SQLite for durable records and Qdrant Server for both dense and
+keyword retrieval. Startup restores the index from the saved Docs. FAISS
+snapshots and Python Local index files require re-syncing the source Workers
+when the SQLite catalog has no Docs. Qdrant applies payload filters before top-k,
+so indexed test records need the requested runtime state and visibility fields.
 
 ### 独立 Card 搜索示例
 
-只依赖公共包的 SQLite + Qdrant Local 写入/检索/更新/删除示例，见 [独立启动指南](packages/search-core/docs/local-catalog.md)。TC 原有启动方式不变。
+SQLite + Qdrant Server 的 Card 写入、检索、更新和删除示例见 [独立启动指南](packages/search-core/docs/local-catalog.md)。

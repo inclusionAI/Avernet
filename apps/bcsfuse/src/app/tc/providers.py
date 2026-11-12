@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 
 from search_core.catalog.updates import configuration_index_key
@@ -66,6 +67,7 @@ def storage(context):
         "environment", "local" if context.mode != "runtime" else "prod"
     )
     embedding = registry.require("embedding_provider")
+    collection_prefix = f"tc_{environment}"
     temporary = None
     if context.mode in {"test", "dev", "dev_smoke"}:
         if context.mode in {"test", "dev_smoke"} and (
@@ -80,13 +82,22 @@ def storage(context):
         )
         if path == ":memory:":
             path = str(default_dir / "tc_cards.sqlite3")
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        catalog_path = Path(path).resolve()
+        catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        catalog_key = sha256(os.fsencode(catalog_path)).hexdigest()
+        collection_prefix = f"{collection_prefix}_{catalog_key}"
         repository = sqlite_catalog_repository(
-            path,
+            str(catalog_path),
             environment=environment,
         )
-        connection = QdrantConnection.from_mapping(os.environ, default_mode="local")
-        index_path = os.getenv("QDRANT_LOCAL_PATH") or str(default_dir / "tc_qdrant")
+        connection = QdrantConnection.from_mapping(
+            {
+                **os.environ,
+                "QDRANT_URL": os.getenv("QDRANT_URL") or "http://127.0.0.1:6333",
+            },
+            default_mode="server",
+        )
+        index_path = ""
         if not registry.has("fused_profile_store"):
             from app.infra.adapters.sqlite_fused_profile_store import (
                 SQLiteFusedProfileStore,
@@ -141,7 +152,7 @@ def storage(context):
     index = QdrantRetrievalIndex(
         path=index_path,
         dimension=embedding.dimension,
-        collection_name=f"tc_{environment}_{key}",
+        collection_name=f"{collection_prefix}_{key}",
         connection=connection,
     )
     return repository, index

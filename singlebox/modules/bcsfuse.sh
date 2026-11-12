@@ -262,7 +262,6 @@ bcsfuse_start() {
     # are overridden.
     export BCSFUSE_DATABASE_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/bcsfuse.db"
     export BCSFUSE_FAISS_SQLITE_PATH="${BCSFUSE_RUNTIME_DIR}/data/faiss_index.db"
-    export QDRANT_LOCAL_PATH="${BCSFUSE_RUNTIME_DIR}/data/qdrant"
     export BCSFUSE_OBJECT_STORAGE_DIR="${BCSFUSE_RUNTIME_DIR}/data/object_storage"
 
     # WorkerRegistrySettings reads WORKER_REGISTRY_SQLITE_DB_PATH (default:
@@ -296,7 +295,7 @@ bcsfuse_start() {
     # Start runtime
     cd "${BCSFUSE_DIR}"
     log_info "Starting bcsfuse (${mode}) on port ${BCSFUSE_PORT}..."
-    start_in_detached_session uv run python main.py >> "${BCSFUSE_LOG}" 2>&1 &
+    start_in_detached_session uv run python main.py --port "${BCSFUSE_PORT}" >> "${BCSFUSE_LOG}" 2>&1 &
     local pid=$!
     echo "$pid" > "${BCSFUSE_PID_FILE}"
 
@@ -311,13 +310,13 @@ bcsfuse_start() {
         return 1
     fi
 
-    # Wait for health check (up to 30 seconds)
-    local health_url="http://localhost:${BCSFUSE_PORT}/health"
+    # Wait for the Card/Doc index to be ready before BCS starts using it.
+    local ready_url="http://127.0.0.1:${BCSFUSE_PORT}/ready"
     local retries=15
     local passed=false
 
     while [ $retries -gt 0 ]; do
-        if curl -sf --max-time 2 "$health_url" 2>/dev/null | grep -qi "healthy\|ok\|pass\|200"; then
+        if curl -sf --max-time 2 "$ready_url" >/dev/null; then
             passed=true
             break
         fi
@@ -336,7 +335,7 @@ bcsfuse_start() {
         fi
         log_info "bcsfuse started successfully on port ${BCSFUSE_PORT} (${mode} mode; listener PID: ${listener_pid:-unknown})"
     else
-        log_error "bcsfuse: Health check failed after startup"
+        log_error "bcsfuse: Readiness check failed after startup"
         log_error "Check log: ${BCSFUSE_LOG}"
         tail -40 "${BCSFUSE_LOG}" >&2 || true
         return 1

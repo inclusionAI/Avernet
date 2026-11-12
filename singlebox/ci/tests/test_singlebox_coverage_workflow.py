@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -54,6 +55,42 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert 'SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "48"' in workflow
     assert "--bcs-router-min 100" in workflow
     assert "--bcs-cli-min 100" in workflow
+
+
+def test_bcsfuse_change_runs_singlebox_coverage(tmp_path):
+    import yaml
+
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("init", "--initial-branch=dev")
+    git("config", "user.name", "CI Test")
+    git("config", "user.email", "ci-test@example.com")
+    git("commit", "--allow-empty", "-m", "baseline")
+    base = git("rev-parse", "HEAD")
+    changed = tmp_path / "apps/bcsfuse/src/app/tc/providers.py"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("# BCSFuse-only change\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "change BCSFuse")
+
+    job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["singlebox-coverage"]
+    detect = next(step["run"] for step in job["steps"] if step.get("id") == "changes")
+    output = tmp_path / "output"
+    subprocess.run(
+        ["bash", "-e", "-c", detect],
+        cwd=tmp_path,
+        check=True,
+        env={
+            **os.environ,
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_SHA": "HEAD",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_ENV": str(tmp_path / "env"),
+            "SINGLEBOX_BASE_REF": base,
+        },
+    )
+    assert output.read_text().strip() == "skip=false"
 
 
 def test_bcs_changed_line_threshold_has_no_branch_waiver():

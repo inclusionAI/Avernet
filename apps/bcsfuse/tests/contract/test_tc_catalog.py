@@ -1,11 +1,10 @@
 """TC v1 consumers over one durable Card and the public retrieval pipeline."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.bootstrap.app_factory import create_bcsfuse_app
 from app.bootstrap.application_context import ApplicationContext
 from app.bootstrap.opensource import build_opensource_provider_registry
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -56,6 +55,53 @@ def test_tc_status_exposes_shared_doc_and_actual_keyword_details(runtime):
     assert keyword["name"] == "aliuct值班助手"
     assert keyword["text"] == keyword["search_text"]
     assert "uct" in keyword["name_grams"].split()
+
+
+def test_sqlite_catalogs_isolate_qdrant_and_reuse_collections_after_restart(
+    tmp_path, monkeypatch, qdrant_test_client
+):
+    if qdrant_test_client is None:
+        pytest.skip("Set QDRANT_TEST_URL to run against an isolated Qdrant Server")
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("QDRANT_MODE", "server")
+
+    def client_for(path):
+        monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(path))
+        registry = build_opensource_provider_registry("dev_smoke")
+        app = create_bcsfuse_app(
+            ApplicationContext(
+                mode="dev_smoke", startup_profile="opensource", registry=registry
+            )
+        )
+        return TestClient(app, headers={"Authorization": "Bearer test-token"})
+
+    def assert_indexed(client, worker):
+        response = client.get(f"/api/v2/agent-cards/{worker}/index-status")
+        assert response.status_code == 200, response.text
+        status = response.json()
+        assert status["doc_ready"]
+        assert status["qdrant"]["keyword_documents"]
+        assert status["qdrant"]["vector_documents"]
+
+    first_path = tmp_path / "first.sqlite"
+    with client_for(first_path) as first:
+        sync(first, "first")
+        assert_indexed(first, "first")
+        with client_for(tmp_path / "second.sqlite") as second:
+            assert_indexed(first, "first")
+            sync(second, "second")
+            assert_indexed(second, "second")
+
+    collections = {
+        entry.name for entry in qdrant_test_client.get_collections().collections
+    }
+    alias = tmp_path / "alias.sqlite"
+    alias.symlink_to(first_path)
+    with client_for(alias) as restarted:
+        assert_indexed(restarted, "first")
+        assert {
+            entry.name for entry in qdrant_test_client.get_collections().collections
+        } == collections
 
 
 def test_sync_writes_one_card_and_never_imports_md_or_synthetic_capabilities(runtime):
