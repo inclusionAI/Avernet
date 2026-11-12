@@ -219,7 +219,8 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             return False
 
     async def list_dir(
-        self, dir_path: str, *, recursive: bool = False
+        self, dir_path: str, *, recursive: bool = False,
+        preserve_errors: bool = False,
     ) -> list[dict[str, Any]] | None:
         dir_path = self._path_mapper(dir_path)
         logger.info(
