@@ -130,7 +130,7 @@ configuration through `POST /api/v1/collaboration/tasks/manifest`. The task modu
 creates the category if absent and replaces the value if present. The server
 selects its own environment. Existing generic config APIs retain their behavior.
 
-Example (replace 0.1.1 with an actually published and verified release):
+Example (replace 1.0.0 with an actually published and verified release):
 
 ```json
 {
@@ -138,7 +138,7 @@ Example (replace 0.1.1 with an actually published and verified release):
   "bundles": [{
     "name": "taskPanel",
     "type": "url",
-    "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@0.1.1/dist/index.umd.js"
+    "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.0/dist/index.umd.js"
   }]
 }
 ```
