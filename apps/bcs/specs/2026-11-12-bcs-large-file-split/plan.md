@@ -505,3 +505,162 @@ E2E scope ≥20 条 instrumentable changed lines 时 changed-line >65%；更小�
   原五文件基线检查如预期返回 1；这些是文档内工具的验证，不是产品实现完成。
 - 原稿内部 workspace 方案已被本公共 BCS 方案替代，不能沿用原稿的测试通过/工具环境结论。
 - 本次只修订方案；Rust 实施、实际测试发现、测试执行、覆盖率与 Singlebox 尚未进行。
+
+## 实施执行记录（2026-11-12）
+
+- **状态**：实施完成、集成门禁证据待补。尺寸、测试清单、单元测试与 Cargo metadata
+  已在本地通过；arch-check、覆盖率与 Singlebox 结果见文末占位项，完成后补记。
+- **基线**：`b98b580a870050eebcd9d98602d45c9553d1d1e4`。实施按 F5 → F4 → F2 → F3 → F1
+  推进，每个目标单独提交，未改动 dependencies、Cargo.lock、schema、业务逻辑和测试属性。
+
+### 提交
+
+| 提交 | 类型 | 标题 |
+| --- | --- | --- |
+| `03b469c728` | docs | docs(bcs): spec+plan for splitting five 1000-line Rust files (dima 2026111200120552113) |
+| `b98b580a87` | docs | docs(bcs): correct public BCS file-splitting scope and validation plan |
+| `5268a2dae7` | refactor | refactor(bcs): split organization management tests by theme |
+| `a5cfe9ce45` | refactor | refactor(bcs): split bot use case tests by theme |
+| `50e537ae03` | refactor | refactor(bcs): split bot frame compatibility tests by theme |
+| `28cc19274b` | refactor | refactor(bcs): split workbench frame compatibility tests by theme |
+| `e811eac9ca` | refactor | refactor(bcs): split session route handlers by responsibility |
+
+实施基线 `b98b580a87` 之后共 5 个 Rust 提交；`03b469c728` 是同一工单的最初文档提交。
+`$SOURCE_BASE` 为 `b98b580a87`，因此范围 diff 只含 5 个 Rust 提交。
+
+### 最终行数
+
+`python3 "$EVIDENCE/check_size.py"` 默认模式（五个入口 + 相对 `$SOURCE_BASE` 的全部
+新增/修改 `.rs`）返回 0，共 40 个文件，全部 ≤1000。`$EVIDENCE` 为 Task 0 的临时证据目录
+`/tmp/avernet-bcs-split.TLdfXs`，不进入仓库。
+
+**F1 `/` 根**（原入口保留为兼容入口，子模块按职责拆分）
+
+| 文件（相对仓库根） | 行数 |
+| --- | ---: |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions.rs` | 245 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/creation.rs` | 198 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/queries.rs` | 293 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/lifecycle.rs` | 277 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/participants.rs` | 668 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/chat.rs` | 241 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/history.rs` | 347 |
+| `apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/collections.rs` | 140 |
+
+**F2 `frame_compat`**
+
+| 文件（相对仓库根） | 行数 |
+| --- | ---: |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat.rs` | 809 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/connection.rs` | 201 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/diagnostics.rs` | 98 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/v3_events.rs` | 374 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/interactions.rs` | 635 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/task_dispatch.rs` | 145 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/coordination_echo.rs` | 551 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/chat_events.rs` | 239 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/tracing.rs` | 191 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/run_aliases.rs` | 211 |
+
+根 809 行高于建议的 800 行目标，属于计划已明确接受的例外（设计估算约 880 行，
+实际更小），仍低于 1000 行硬上限；根保留 `task_rpc_scope` 声明与其他共享设施。
+
+**F3 `web_frame_compat`**
+
+| 文件（相对仓库根） | 行数 |
+| --- | ---: |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat.rs` | 624 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/diagnostics.rs` | 176 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/subscriptions.rs` | 281 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/chat_send.rs` | 462 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/abort.rs` | 365 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/interactions.rs` | 298 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/bound_connection.rs` | 262 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/bound_messages.rs` | 163 |
+| `apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/ingress_identity.rs` | 235 |
+
+**F4 `bot_use_cases`**
+
+| 文件（相对仓库根） | 行数 |
+| --- | ---: |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases.rs` | 450 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/queries.rs` | 461 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/discovery.rs` | 318 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/organization_discovery.rs` | 278 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/connection.rs` | 255 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/status.rs` | 138 |
+| `apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/authority_writes.rs` | 417 |
+
+**F5 `management`**
+
+| 文件（相对仓库根） | 行数 |
+| --- | ---: |
+| `apps/bcs/crates/services/bcs-organization/tests/management.rs` | 190 |
+| `apps/bcs/crates/services/bcs-organization/tests/management/membership.rs` | 291 |
+| `apps/bcs/crates/services/bcs-organization/tests/management/conformance.rs` | 52 |
+| `apps/bcs/crates/services/bcs-organization/tests/management/member_profile.rs` | 283 |
+| `apps/bcs/crates/services/bcs-organization/tests/management/candidates.rs` | 242 |
+| `apps/bcs/crates/services/bcs-organization/tests/management/runtime_membership.rs` | 251 |
+
+### 测试清单与映射
+
+- 161 个直接测试一一映射：F2 58、F3 40、F4 37、F5 26；映射表逐行记录
+  `old_name -> new_name`，见 `$EVIDENCE/mapping-161.txt`。
+- F2 的 3 个 `task_rpc_scope::*` 测试未迁移、名称逐字节不变。
+- ignored 集合保持同一 14 个测试（全部在 F2 `coordination_echo` 主题），迁移后仍为 ignored。
+- 其余测试目标名称集合逐个 suite 对比完全一致；bcs-http 的 666 个测试名逐字节相同
+  （F1 不移动测试）。
+- 证据：四个 crate 的 `*.before.json` / `*.after.json`、`mapping-161.txt`、
+  `task6.mapping-audit.log`（`RESULT: PASS`）。
+
+### 单元测试结果
+
+| crate | 结果 |
+| --- | --- |
+| `bcs-http` | 666 passed / 0 failed / 0 ignored |
+| `bcs-ws` | 287 passed / 0 failed / 14 ignored（共 301） |
+| `bcs-bot` | 299 passed / 0 failed / 0 ignored |
+| `bcs-organization` | 26 passed / 0 failed / 0 ignored |
+
+合计 1278 passed、0 failed，与 Task 0 基线完全一致（基线记录见
+`$EVIDENCE/cargo-test-totals.txt`）；因此 unit pass rate = 100%。
+
+### Cargo metadata 与 targets
+
+- 四个受影响 crate 的 `targets[]`（name/kind/src_path）before/after 完全一致：
+  `bcs-http` 11、`bcs-ws` 15、`bcs-bot` 35、`bcs-organization` 2。
+- workspace 113 个 member 前后一致；全 workspace 526 个 test/bench target 前后一致，
+  没有新增 integration test binary。
+- 四个 crate 的依赖列表（name/req/kind/optional/default-features）前后一致。
+- 证据：`$EVIDENCE/metadata.before.json`、`metadata.after.json`、
+  `task6.metadata-compare.txt`。
+
+### 豁免处理
+
+- 从 `apps/bcs/docs/waivers/agentpass-subbots-source-size.md` 的活动表移除
+  F1 `sessions.rs`、F2 `frame_compat.rs`、F4 `bot_use_cases.rs`、F5 `management.rs`
+  四行，并在文末追加完成记录（最终行数 + 拆分提交）。
+- header 字段、`expiry: 2026-11-12`、其他活动条目和 client waiver 均未改动；
+  该 waiver 未被整体关闭。
+- `bash scripts/ci/check-waivers.sh`（CWD=`apps/bcs`）exit 0；从仓库根直接运行会
+  exit 77=SKIP，SKIP 不计为通过。证据：`$EVIDENCE/task6.check-waivers.log`、
+  `task6.check-waivers.root-cwd.log`。
+
+### 观察（不在本工单范围，未修改）
+
+- waiver 活动表中 `crates/adapters/ws/bcs-ws/src/bot/dispatcher.rs` 行指向的路径已不存在，
+  实际文件为 `src/web/dispatcher.rs`（1010 行）。
+- 若干活动条目在本次基线时已 ≤1000 行（`providers.rs` 956、`server.rs` 985、
+  `bcs-bot-store/src/lib.rs` 687、`memory.rs` 933、`onboarding.rs` 469、
+  `provider_core.rs` 854），而 `removal_plan` 要求 ≤1000 后移除。
+- 全仓另有历史超限文件（如 `ws/src/gateway/chat_handler.rs` 1045、
+  `ws/src/web/dispatcher.rs` 1010）不属本计划引入，未扩大清理范围。
+
+### 集成门禁
+
+- （待集成门禁完成后补记）arch-check 逐子检查对比、覆盖率、Singlebox 与 artifact verifier。
+
+### 回滚与范围
+
+回滚按目标文件单元（入口 + 主题文件 + 接线）进行，无 schema/config/数据迁移。
+本计划完成只覆盖这五个文件；其他豁免条目和全仓历史超限文件不受影响。

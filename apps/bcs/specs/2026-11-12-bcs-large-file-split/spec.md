@@ -172,3 +172,50 @@ F1 有六处隐式 target 的 tracing 宏：participants 两处、chat 两处、
 及所属 crate 存在。行数脚本的合规、超限、无尾换行、带空格文件名、缺失路径和变更文件发现用例见验证记录。
 这些不是 Rust 测试通过证据。本次不修改 Rust、不运行产品测试/coverage/Singlebox；
 后续实施必须按 plan 重新建立绿色基线并执行验收，不沿用原稿的内部环境探测结果。
+
+## 实施执行记录（2026-11-12）
+
+本节追加实施结果；上文规范内容保持原样。文首「状态：draft / 文档修订，尚未实施」
+已由本节取代。
+
+- **交付状态**：实施完成、集成门禁证据待补。五个目标均已拆分并单独提交，
+  本地尺寸/清单/单元/metadata 验收通过；arch-check、覆盖率、Singlebox 结果见文末占位项。
+- **实施基线**：`b98b580a870050eebcd9d98602d45c9553d1d1e4`；
+  实施提交 `5268a2dae7`（F5）、`a5cfe9ce45`（F4）、`50e537ae03`（F2）、
+  `28cc19274b`（F3）、`e811eac9ca`（F1）。逐文件行数、完整提交表与证据路径见
+  [plan 的实施执行记录](plan.md)。
+
+### 契约与消费者
+
+- 无 Service API / Plugin API、wire schema、数据库、配置或 Cargo manifest/lockfile 变化。
+- F1 保留 `bcs_http::routes::sessions` 下原有 handler/DTO 路径（7 个私有 `mod` +
+  精确 `pub use`），`router.rs`、`channel.rs`、`services.rs`、`session_files.rs`
+  与 `tests/cases/session_create_request_dto.rs` 的调用无需改动。
+- 六处 tracing 宏显式固定 `target: "bcs_http::routes::sessions"`；级别、字段、文案与
+  求值顺序不变。`delete_session` 的 Query 类型路径改为
+  `crate::routes::groups::DeleteSessionQuery`，指向同一类型。
+- F2–F5 只迁移测试，收敛在各自 integration target 的子目录；根仍保留全部 fixtures、
+  recording doubles 与共享 helpers，没有放宽字段可见性，也没有新增 crate/target。
+- 因此本变更是源码布局调整，不改变公共接口、运行语义或部署配置；回滚按目标文件单元进行。
+
+### 验收结果
+
+| 项目 | 结果 |
+| --- | --- |
+| 尺寸 | `check_size.py` 默认模式 exit 0，40 个本次新增/修改 `.rs` 全部 ≤1000 |
+| 测试清单 | 161 直接测试一一映射（58/40/37/26）+ 3 个 `task_rpc_scope::*` 不变；14 个 ignored 保持；bcs-http 666 个测试名逐字节相同 |
+| 单元 | bcs-http 666、bcs-ws 287 passed + 14 ignored、bcs-bot 299、bcs-organization 26，全部 0 failed（1278 passed，pass rate 100%） |
+| Cargo metadata | 四个 crate targets 一致；workspace 526 个 test/bench target 无新增 integration test binary |
+| 豁免 | 四个已完成条目移出活动表并追加完成记录；`check-waivers.sh` 从 `apps/bcs` 运行 exit 0；header/expiry 未改 |
+
+### 集成门禁
+
+- （待集成门禁完成后补记）arch-check 逐子检查对比、覆盖率门槛、Singlebox 与 artifact verifier。
+
+### 遗留观察
+
+- waiver 中 `src/bot/dispatcher.rs` 活动行指向已不存在的路径（实际为
+  `src/web/dispatcher.rs`），且若干活动条目已 ≤1000 行；均按计划保持原样，不在本工单修复。
+- 全仓其他历史超限文件（如 1045/1010 行的 WS 文件）不在本工单范围，未通过豁免或
+  路径排除判绿。
+- 该项尺寸清理不代表整份 server waiver 已关闭，也不代表其他超限文件已处理。
