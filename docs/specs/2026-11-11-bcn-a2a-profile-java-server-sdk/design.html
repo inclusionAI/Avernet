@@ -76,7 +76,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a>
 <a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 与 a2a-java 的关系</a><a class="sub" href="#s8-4">8.4 简易层 SPI</a><a class="sub" href="#s8-5">8.5 完整层 SPI</a><a class="sub" href="#s8-6">8.6 请求处理</a><a class="sub" href="#s8-8">8.8 配置项</a><a class="sub" href="#s8-11">8.11 交付形态</a><a class="sub" href="#s8-12">8.12 推送实现</a>
-<a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 存储选型</a>
+<a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 TaskStore SPI</a><a class="sub" href="#s9-5">9.5 跨实例流程</a><a class="sub" href="#s9-6">9.6 竞争分析</a><a class="sub" href="#s9-8">9.8 存储选型</a><a class="sub" href="#s9-9">9.9 检查点恢复</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
 
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.21</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.22</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -1313,7 +1313,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td>存储写入</td><td>节流写入在独立的调度线程上执行，不阻塞 <code>append</code>。终态写入是同步的：写入成功后才对外发终态。</td></tr>
 <tr><td>优雅停机</td><td>收到停机信号后停止接收新 Task，等待在途 Task 完成（可配置上限）。超时后把剩余 Task 置为 <code>FAILED</code> 并写入存储，不等租约过期。</td></tr>
 </table></div>
-<div class="box q"><p><b>发布的影响。</b>滚动发布会终止实例。执行时间长于停机等待时间的 Task 会失败。这是 <span class="tag d">D3</span>"不做执行迁移"的直接后果，需要评审确认可以接受，或确定停机等待时间的默认值（<span class="tag q">Q9</span>）。</p></div>
+<div class="box q"><p><b>发布的影响。</b>滚动发布会终止实例。执行时间长于停机等待时间的 Task 会失败。这是 <span class="tag d">D3</span>"不做执行迁移"的直接后果，需要评审确认可以接受，或确定停机等待时间的默认值（<span class="tag q">Q9</span>）。支持检查点的引擎可以通过检查点恢复（9.9）在其他实例上继续执行，不再受停机等待时间限制。</p></div>
 
 <h3 id="s8-8"><span class="n">8.8</span>配置项</h3>
 <div class="tw"><table>
@@ -1429,7 +1429,7 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 <h2 id="s9"><span class="n">9</span>多实例设计</h2>
 <h3 id="s9-1"><span class="n">9.1</span>模型</h3>
 <ul>
-<li>接收初始请求的实例是该 Task 的<b>执行实例</b>。执行权不迁移。唯一的例外是审批续交：Task 在 <code>INPUT_REQUIRED</code> 时没有执行实例，接到续交的实例接管。</li>
+<li>接收初始请求的实例是该 Task 的<b>执行实例</b>。执行权不迁移。例外是审批续交：Task 在 <code>INPUT_REQUIRED</code> 时没有执行实例，接到续交的实例接管；以及支持检查点恢复的 Agent（9.9，提议）。</li>
 <li>执行实例是 Task 内容（状态、文本、metadata）的<b>唯一写入者</b>。</li>
 <li>其他实例只做三件事：读快照、写取消标记、回收租约过期的 Task。</li>
 <li>实例之间不直接通信。所有协作通过 TaskStore 的 CAS 完成。</li>
@@ -1628,9 +1628,57 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 </table></div>
 <p>使用持久型缓存实例可以把丢失的窗口降到很小。仍然不能接受的 Agent 需要自行实现 TaskStore。</p>
 
-<h3 id="s9-9"><span class="n">9.9</span>明确不保证的事项</h3>
+<h3 id="s9-9"><span class="n">9.9</span>检查点恢复（提议）</h3>
+<p>公司内大部分引擎已有检查点机制：执行实例停掉后，另一台机器可以从检查点恢复 Agent 的会话和执行状态。SDK 可以利用它，让被发布或宕机打断的 Task 在其他实例上继续执行，而不是直接失败。这是对 <span class="tag d">D3</span>"执行权不迁移"的有条件放宽，需要评审确认（<span class="tag q">Q24</span>）。</p>
+<h4>核心问题：检查点和 Task 输出的对齐</h4>
+<p>引擎的检查点和 SDK 的 Task 记录是两份独立写入的状态。恢复时如果两者不在同一个点上，会出两类错：</p>
+<div class="tw"><table>
+<tr><th>情况</th><th>后果</th></tr>
+<tr><td>检查点比 Task 记录新：引擎已经越过某一步，但这一步的输出还没写进 Task 记录</td><td>这段输出永久丢失。恢复后的引擎不会再产出它，调用方看到的结果有缺口</td></tr>
+<tr><td>Task 记录比检查点新：输出已写入并展示给了调用方，但检查点还停在之前</td><td>恢复后的引擎从检查点重做这一步，再产出一遍。大模型的输出不确定，第二遍和第一遍的文字不同，无法按前缀去重；如果这一步调用了工具，工具会被再执行一次</td></tr>
+</table></div>
+<h4>对齐规则</h4>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th><th>解决的问题</th></tr>
+<tr><td><span class="tag p">P-170</span></td><td>先输出落盘，后记检查点。引擎把状态存进自己的检查点存储后，调用 <code>exec.checkpoint(ref)</code>。SDK 先把到此为止的输出写入 Task 记录，在同一次比较并写入中记下检查点引用 <code>ref</code> 和输出游标（每个块的长度、块的数量）。</td><td>Task 记录中的输出永远不落后于它所记录的检查点，第一类错不会发生</td></tr>
+<tr><td><span class="tag p">P-171</span></td><td>恢复时按引用加载。恢复的实例把 Task 记录中的 <code>ref</code> 交给引擎，引擎加载的是这个版本的检查点，不是"最新的检查点"。</td><td>引擎存了新检查点但还没来得及调用 <code>checkpoint(ref)</code> 就宕机时，Task 记录仍指向旧检查点，两者一致。引擎的检查点存储需要按引用保留最近两个版本</td></tr>
+<tr><td><span class="tag p">P-172</span></td><td>游标之后的输出不撤回，另起新块。恢复前，SDK 把超出游标的块全部关闭，原样保留（P-71 不允许改写）；恢复后的输出使用新的 <code>artifactId</code>，排在后面。SDK 同时发出一条状态消息说明"执行中断，已从检查点恢复"。</td><td>第二类错在文本上的表现：调用方会看到被打断的那一步出现两次，第二次在新块中，并有明确的说明。重复的范围不超过一个检查点间隔</td></tr>
+<tr><td><span class="tag p">P-173</span></td><td>工具调用前后各记一次检查点。恢复时如果检查点显示某个工具已开始但没有结果，引擎不得直接重做：幂等的工具可以重做；非幂等的工具必须查询它的实际结果，或在审批可用时请求审批，否则以失败结束该 Task。</td><td>第二类错在副作用上的表现：防止重复执行</td></tr>
+<tr><td><span class="tag p">P-174</span></td><td>每个 Task 最多恢复 2 次。超过后置为 <code>FAILED</code>。</td><td>防止某个必定导致崩溃的输入在实例之间反复恢复</td></tr>
+</table></div>
+<p>不希望调用方看到重复内容的 Agent，可以选择"只展示已记检查点的输出"：SDK 在下一次 <code>checkpoint(ref)</code> 之前缓存输出，不推给调用方。代价是流式输出变成按检查点间隔成段出现。</p>
+<h4>恢复的触发</h4>
+<ol class="seq">
+<li><div><span class="who">实例 A</span>优雅停机时，等待时间到了仍未结束的 Task：如果 Agent 支持检查点恢复且记录了检查点，A 不把它置为失败，而是清空执行实例、标记"待恢复"，状态对外仍是 <code>WORKING</code>。A 宕机时，租约过期后效果相同。</div></li>
+<li><div><span class="who">调用方</span>流断开后按 P-113 先 GetTask。请求落到实例 B。</div></li>
+<li><div><span class="who">实例 B</span>读到"待恢复"或租约过期且有检查点：通过比较并写入接管执行权，恢复次数加一。接管不成功说明别的实例已接管，按普通查询处理。</div></li>
+<li><div><span class="who">实例 B</span>按 P-172 关闭游标之后的块，发出恢复说明，返回 Task（<code>WORKING</code>）。调用方随后 SubscribeToTask，由 B 直接推送。</div></li>
+<li><div><span class="who">实例 B</span>调用 <code>execute</code>，<code>request.recovery()</code> 中带检查点引用和恢复次数。引擎按引用加载检查点后继续。</div></li>
+</ol>
+<p>恢复由查询触发，复用了"BCS 断流后必定先查询"这个现有行为，不需要后台扫描。以后有了到期队列（8.12），可以改为主动恢复。</p>
+<h4>接口</h4>
+<pre><code>// AgentExecution 增加
+/** 引擎已把状态存入自己的检查点存储后调用。SDK 落盘输出并记下引用和游标，返回后才算检查点生效。 */
+void checkpoint(String checkpointRef);
+
+// AgentRequest 增加
+Optional&lt;Recovery&gt; recovery();     // 恢复执行时：checkpointRef、恢复次数；正常请求时为空
+
+// AgentDescriptor 增加
+.resumableFromCheckpoint(true)</code></pre>
+<p>审批续交和检查点恢复都进入 <code>execute</code>，分别由 <code>request.approval()</code> 和 <code>request.recovery()</code> 区分，与 A2A 只有一个发送方法的语义一致。审批等待其实是检查点恢复的一个特例：停在一个明确的点上，由调用方的回复触发恢复。</p>
+<h4>Task 记录增加的字段</h4>
+<div class="tw"><table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td><code>checkpointRef</code></td><td>最近一次生效的检查点引用</td></tr>
+<tr><td><code>checkpointCursor</code></td><td>该检查点对应的输出游标：每个块的长度、块的数量</td></tr>
+<tr><td><code>recoveryPending</code></td><td>是否等待其他实例接管</td></tr>
+<tr><td><code>recoveryCount</code></td><td>已恢复次数</td></tr>
+</table></div>
+
+<h3 id="s9-10"><span class="n">9.10</span>明确不保证的事项</h3>
 <ul>
-<li>执行实例宕机或被发布终止后，Task 不会在其他实例上继续，结果是 <code>FAILED</code>。</li>
+<li>执行实例宕机或被发布终止后，Task 不会在其他实例上继续，结果是 <code>FAILED</code>；支持检查点恢复的 Agent 除外（9.9）。恢复后被打断的那一步可能在新块中重复出现。</li>
 <li>跨实例订阅不保证工具观察记录完整。</li>
 <li>跨实例取消不保证在一次调用内确认。</li>
 <li>Agent 自身的会话记忆（基于 <code>contextId</code>）是否跨实例可用，由 Agent 负责，SDK 不管理。</li>
@@ -1777,6 +1825,7 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 <tr><td><span class="tag q">Q21</span></td><td><b>待讨论项。</b>调用路径由 BCS 返回的 Card 决定：原生地址模式（直连）或 BCN 地址模式（经 BCS），按 Agent 类型和使用模式确定。需要讨论：各类 Agent 的默认模式；每个 Agent 固定一种还是因调用方而异；派生 Card 的改写规则；必须经 BCS 的 Agent 如何强制；直连调用是否向 BCS 上报摘要</td><td>采用该方案。按 Profile 接入的 Agent 默认原生地址；未按 Profile 接入的 Bot 只用 BCN 地址；每个 Agent 先固定一种；上报摘要为可选。具体设计放在 client SDK 和 BCS A2A 服务阶段</td><td>4.1</td></tr>
 <tr><td><span class="tag q">Q22</span></td><td>群协作：是否需要平台协作扩展让 Agent 感知群，还是维持现在的文本入群；群内两个 Bot 之间是否需要交换结构化数据（目前只广播文本）；Provider 是否可以将 Agent 设为不入群</td><td>首版维持文本入群，增加“不入群”设置；平台协作扩展单独立项设计；群内结构化交换暂不支持</td><td>7.8</td></tr>
 <tr><td><span class="tag q">Q23</span></td><td>异步引擎：提交作业后立即返回、结果稍后经回调或消息到达的引擎。现在 <code>execute</code> 返回而未完成会被视为完成；回调可能落到另一个实例，而那里没有该 Task 的输出接口</td><td>首版只支持同步执行，异步引擎在 <code>execute</code> 中阻塞等待结果。如果存量异步引擎较多，参照审批续交设计“转入后台”：引擎显式声明后 <code>execute</code> 可以返回，任意实例凭任务标识通过比较并写入接管执行权继续写结果。这会改动单一写入者和租约规则，需单独设计</td><td>8.4、8.7、9.1</td></tr>
+<tr><td><span class="tag q">Q24</span></td><td>检查点恢复：是否本期支持；对齐规则（P-170 到 P-174）是否可行，尤其是公司现有检查点机制能否按引用加载指定版本；默认是否允许调用方看到被打断那一步的重复输出</td><td>采用 9.9 的方案。它与异步引擎（<span class="tag q">Q23</span>）共用"任意实例凭记录接管执行权"的机制，建议一起设计；本期范围待评审确定</td><td>9.9</td></tr>
 </table></div>
 
 <h2 id="s17"><span class="n">17</span>参考</h2>
