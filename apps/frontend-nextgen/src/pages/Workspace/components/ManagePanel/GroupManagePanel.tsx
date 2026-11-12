@@ -9,6 +9,8 @@ import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { GroupDingTalkConfig } from './DingTalkConfigPanel';
 import { DingTalkConfigPanel } from './DingTalkConfigPanel';
+import { GroupPresetPanel } from './GroupPresetPanel';
+import { SharedInfoList } from './SharedInfoList';
 import { EditableName } from './EditableName';
 import { HumanNotifyModeField } from './HumanNotifyModeField';
 import { ManagePanelHeader } from './ManagePanelHeader';
@@ -18,6 +20,7 @@ import { SharePopover } from './SharePopover';
 
 export interface GroupManagePanelProps {
   group: GroupView;
+  sessionId?: string;
   canManage: PolicyResult;
   candidates: IdentityView[];
   activeIdentity: IdentityView | null;
@@ -38,6 +41,8 @@ export interface GroupManagePanelProps {
   advancedConfigEnabled: boolean;
 }
 
+type GroupManageTab = 'basic' | 'advanced' | 'presets' | 'sharedInfo';
+
 const KIND_LABEL: Record<GroupView['kind'], string> = {
   free_chat: '自由聊天',
   task_master_slave: '任务协作',
@@ -56,7 +61,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
     onDissolve,
     onLeaveGroup,
   } = props;
-  const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
+  const [tab, setTab] = useState<GroupManageTab>('basic');
   const [shareOpen, setShareOpen] = useState(false);
   const shareAnchorRef = useRef<HTMLButtonElement | null>(null);
 
@@ -90,11 +95,13 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
         onClose={onClose}
       />
 
-      <ManagePanelTabs<'basic' | 'advanced'>
+      <ManagePanelTabs<GroupManageTab>
         value={tab}
         options={[
           { value: 'basic', label: '基础信息' },
           ...(props.advancedConfigEnabled ? [{ value: 'advanced' as const, label: '高级配置' }] : []),
+          { value: 'presets', label: '群规则' },
+          { value: 'sharedInfo', label: '共享信息' },
         ]}
         onChange={setTab}
       />
@@ -242,6 +249,27 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               </div>
             </Card>
           </div>
+        ) : tab === 'presets' ? (
+          <GroupPresetPanel
+            key={JSON.stringify([group.groupId, props.sessionId, activeIdentity?.id, authenticatedUserId])}
+            view={{
+              groupId: group.groupId,
+              sessionId: activeIdentity?.kind === 'bot' ? props.sessionId : undefined,
+              view_bot_id: activeIdentity?.kind === 'bot' ? activeIdentity.id : undefined,
+            }}
+          />
+        ) : tab === 'sharedInfo' ? (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">群共享信息</h3>
+            <SharedInfoList
+              view={{ groupId: group.groupId }}
+              viewerId={authenticatedUserId}
+              names={new Map([
+                ...group.participants.map(({ actorId, name }) => [actorId, name] as const),
+                ...(authenticatedUserId && authenticatedUserName ? [[authenticatedUserId, authenticatedUserName] as const] : []),
+              ])}
+            />
+          </section>
         ) : (
           <DingTalkConfigPanel
             canManage={canManageGroup}

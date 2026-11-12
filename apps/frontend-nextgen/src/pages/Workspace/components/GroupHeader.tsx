@@ -13,6 +13,7 @@ import {
   ChevronRight,
   FolderOpen,
   History,
+  Layers,
   LocateFixed,
   Monitor,
   Settings2,
@@ -28,7 +29,7 @@ import { SharePopover } from './ManagePanel/SharePopover';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 
-export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history';
+export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history' | 'sharedInfo';
 
 const CONNECTION_COPY = {
   connected: { label: '已连接', tone: 'success' },
@@ -266,6 +267,14 @@ export function GroupHeader({
                 onClick={() => onTogglePanel(activePanel === 'history' ? 'none' : 'history')}
               />
             ) : null}
+            {selectedSession && (
+              <HeaderIcon
+                label={activePanel === 'sharedInfo' ? '关闭共享信息' : '共享信息'}
+                icon={<Layers className="size-4" aria-hidden />}
+                active={activePanel === 'sharedInfo'}
+                onClick={() => onTogglePanel(activePanel === 'sharedInfo' ? 'none' : 'sharedInfo')}
+              />
+            )}
             {selectedSession ? (
               <HeaderIcon
                 label={activePanel === 'resources' ? '关闭资源管理' : '资源管理'}

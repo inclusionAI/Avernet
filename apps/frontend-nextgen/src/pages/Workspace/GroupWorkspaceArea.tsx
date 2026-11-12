@@ -6,6 +6,7 @@ import React, { useCallback, useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
 import { GroupHistorySidebar } from './components/GroupChatPane/GroupHistorySidebar';
+import { SharedInfoSidebar } from './components/GroupChatPane/SharedInfoSidebar';
 import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
 import { GroupWorkspaceSidebar } from './components/GroupWorkspaceSidebar';
@@ -278,6 +279,23 @@ export function GroupWorkspaceArea({
               authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
               onClose={closeHeaderPanels}
             />
+            {activePanel === 'sharedInfo' && (
+              <SharedInfoSidebar
+                open
+                view={{
+                  groupId: sessions.selectedSession.groupId,
+                  sessionId: sessions.selectedSession.sessionId,
+                  view_bot_id: ws.activeIdentity?.kind === 'bot' ? ws.activeIdentity.id : undefined,
+                }}
+                viewerId={ws.activeIdentity?.id ?? userIdentityId}
+                names={new Map([
+                  ...(selectedGroup?.participants ?? []).map(({ actorId, name }) => [actorId, name] as const),
+                  ...sessions.selectedSession.participants.map(({ actorId, name }) => [actorId, name] as const),
+                  ...(userIdentityId && userIdentityName ? [[userIdentityId, userIdentityName] as const] : []),
+                ])}
+                onClose={closeHeaderPanels}
+              />
+            )}
             <GroupHistorySidebar
               open={activePanel === 'history'}
               search={headerPanels.historySearch}

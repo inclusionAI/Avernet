@@ -616,7 +616,7 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let add = "/groupcontext/add?groupId=preset-group&sessionId=preset-group:12345678";
     for operation in ["add", "update", "delete"] {
         let (status, _) = post_json(
-            &app, &format!("/groupcontext/{operation}-preset?groupId=preset-group"), token_for("admin"),
+            &app, &format!("/groupcontext/manage/{operation}-preset?groupId=preset-group"), token_for("admin"),
             json!({"name":"timeline"}),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -629,6 +629,12 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["presets"][0]["creator"], "human_owner");
+    assert!(body.get("can_manage").is_none());
+    let (status, _) = post_json(
+        &app, "/groupcontext/manage/list-preset?groupId=preset-group", token_for("judge_bot"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
 
     let (status, body) = post_json(&app, list, token_for("张三"), json!({})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -663,6 +669,28 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let existing = repo.get_active("timeline", "preset-group:12345678").await.unwrap().unwrap();
     assert!(existing.created_from_preset);
     assert_eq!(existing.content, "event");
+
+    let shared = "/groupcontext/shared-info?groupId=preset-group&sessionId=preset-group:12345678";
+    let (status, body) = post_json(&app, shared, token_for("张三"), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"][0]["content"], "event");
+    assert_eq!(body["items"][0]["creator"], "judge_bot");
+    assert_eq!(post_json(&app, shared, token_for("admin"), json!({})).await.0, StatusCode::FORBIDDEN);
+
+    for (uri, expected) in [
+        ("/groupcontext/shared-info", StatusCode::BAD_REQUEST),
+        ("/groupcontext/shared-info?groupId=preset-group&groupId=other-group", StatusCode::BAD_REQUEST),
+    ] {
+        let (status, body) = post_json(&app, uri, token_for("张三"), json!({})).await;
+        assert_eq!(status, expected, "{body}");
+        assert_eq!(body["status"], "invalid_param");
+    }
+    let (status, body) = post_json(&app, shared, "invalid-token", json!({})).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], "invalid_param");
+
+    let other = "/groupcontext/shared-info?groupId=preset-group&sessionId=other-group:12345678";
+    assert_eq!(post_json(&app, other, token_for("张三"), json!({})).await.0, StatusCode::BAD_REQUEST);
 }
 
 struct PresetTestIdentity;
@@ -724,11 +752,26 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
         app.clone().oneshot(request)
     };
 
-    let add = "/groupcontext/add-preset?groupId=preset-group";
-    let update = "/groupcontext/update-preset?groupId=preset-group";
-    let delete = "/groupcontext/delete-preset?groupId=preset-group";
+    let list = "/groupcontext/manage/list-preset?groupId=preset-group";
+    let response = post(list, json!({})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["can_manage"], true);
+
+    for uri in [
+        "/groupcontext/manage/list-preset",
+        "/groupcontext/manage/list-preset?groupId=preset-group&groupId=other-group",
+        "/groupcontext/manage/list-preset?groupId=preset-group&view_bot_id=preset-driver",
+    ] {
+        let response = post(uri, json!({})).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(response_json(response).await["status"], "invalid_param");
+    }
+
+    let add = "/groupcontext/manage/add-preset?groupId=preset-group";
+    let update = "/groupcontext/manage/update-preset?groupId=preset-group";
+    let delete = "/groupcontext/manage/delete-preset?groupId=preset-group";
     for (uri, body) in [
-        ("/groupcontext/add-preset", json!({"name":"timeline"})),
+        ("/groupcontext/manage/add-preset", json!({"name":"timeline"})),
         (add, json!({})),
     ] {
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
@@ -748,7 +791,9 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
     }
     let response = post(add, json!({"name":"events","description":"Duplicate"})).await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert_eq!(response_json(response).await["status"], "conflict");
+    let body = response_json(response).await;
+    assert_eq!(body["status"], "conflict");
+    assert_eq!(body["error_msg"], "events already exists in preset-group。请重命名后重试。");
 
     let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);

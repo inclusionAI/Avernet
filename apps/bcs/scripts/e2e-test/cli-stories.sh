@@ -558,12 +558,21 @@ _cli_story_exercise_context_presets() {
     local query="groupId=$(urlencode "$group_id")"
     local session_query="$query&sessionId=$(urlencode "$session_id")"
 
-    bot_post "/groupcontext/add-preset?$query" PM '{"name":"Timeline"}'
+    api_post "/groupcontext/manage/list-preset?$query" '{}'
+    require_status "driver Bot owner lists presets for management" "200" || return
+    assert_json_eq "Human management response exposes edit capability" "$RESPONSE" "can_manage" "true"
+    bot_post "/groupcontext/manage/list-preset?$query" PM '{}'
+    require_status "Bot cannot list presets through the Human management API" "403" || return
+    bot_post "/groupcontext/manage/add-preset?$query" PM '{"name":"Timeline"}'
     require_status "Bot credentials cannot manage preset definitions" "403" || return
-    api_post "/groupcontext/add-preset?$query" '{"name":"Timeline","description":"Incident timeline"}'
+    api_post "/groupcontext/manage/add-preset?$query" '{"name":"Timeline","description":"Incident timeline"}'
     require_status "driver Bot owner defines a context preset" "200" || return
-    api_post "/groupcontext/add-preset?$query" '{"name":"Timeline"}'
+    api_post "/groupcontext/manage/add-preset?$query" '{"name":"Timeline"}'
     require_status "duplicate preset name is rejected" "409" || return
+    assert_contains "duplicate preset error asks the owner to rename" "$RESPONSE" "请重命名后重试"
+    bot_post "/groupcontext/list-preset?$query" PM '{}'
+    require_status "Bot can discover preset definitions through the runtime API" "200" || return
+    assert_eq "runtime response omits Human edit capability" "$(_cli_json_has_path "$RESPONSE" can_manage)" "0"
 
     _cli_story_run "group member discovers the preset through CLI" PM group-context list-preset \
         --group-id "$group_id" || return
@@ -595,21 +604,53 @@ _cli_story_exercise_context_presets() {
         --name Timeline --content "Incident began at 09:00" --preset || return
     assert_json_eq "preset context add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
 
-    api_post "/groupcontext/update-preset?$query" '{"name":"Timeline","new_name":"IncidentTimeline","description":"Updated timeline"}'
+    api_post "/groupcontext/manage/update-preset?$query" '{"name":"Timeline","new_name":"IncidentTimeline","description":"Updated timeline"}'
     require_status "driver Bot owner renames the preset" "200" || return
     _cli_story_run "group member discovers the renamed preset" PM group-context list-preset \
         --group-id "$group_id" || return
     assert_eq "discovery returns the updated preset name and description" \
         "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name IncidentTimeline description "Updated timeline")" "1"
 
-    api_post "/groupcontext/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    api_post "/groupcontext/manage/delete-preset?$query" '{"name":"IncidentTimeline"}'
     require_status "driver Bot owner deletes the preset definition" "200" || return
-    api_post "/groupcontext/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    api_post "/groupcontext/manage/delete-preset?$query" '{"name":"IncidentTimeline"}'
     require_status "deleting an unknown preset reports not found" "404" || return
     _cli_story_run "Session guest reads the existing context after preset deletion" CEO group-context get \
         --session-id "$session_id" --scope-level session --name Timeline || return
     assert_eq "deleting a preset preserves context content and original name" \
         "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" items name Timeline content "Incident began at 09:00")" "1"
+}
+
+# A Human compares the collaboration session view with the group management view.
+_cli_story_exercise_shared_info() {
+    local group_id="$1" session_id="$2" name="$3" round_id="$4" updated="$5"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+
+    api_post "/groupcontext/shared-info?$session_query" '{}'
+    require_status "Human reads the shared info of a Session through managed Bots" "200" || return
+    assert_eq "Human sees the latest Group context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level group content "$updated")" "1"
+    assert_eq "Human sees the Session context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level session scope "$session_id")" "1"
+    assert_eq "Human sees the Round context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level round scope "$round_id")" "1"
+
+    api_post "/groupcontext/shared-info?$session_query&view_bot_id=$(urlencode "$BOT_PM_UUID")" '{}'
+    require_status "Human opens shared info as the managed Session Bot" "200" || return
+    assert_eq "Bot view exposes the context readable by that Bot" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name "$name" scope_level group)" "1"
+
+    bot_post "/groupcontext/shared-info?$session_query" CEO '{}'
+    require_status "Session-only Bot can open shared info" "200" || return
+    assert_eq "Session-only Bot cannot read a Group entry restricted to the driver" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name "$name" scope_level group)" "0"
+    assert_eq "Session-only Bot can read the public Session entry" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name Timeline scope_level session)" "1"
+
+    api_post "/groupcontext/shared-info?$query" '{}'
+    require_status "Human opens group management shared info" "200" || return
+    assert_json_eq "Group-only Human view excludes entries restricted to a managed Bot" "$RESPONSE" "items" "[]"
 }
 
 # User story: The driver Bot owner manages Preset definitions, and Bots
@@ -718,6 +759,11 @@ story_cli_operator_manages_group_context() {
     assert_eq "CLI group-context get returns the updated content" "$get_has_updated" "1"
 
     _cli_story_exercise_context_presets "$group_id" "$session_id" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+
+    _cli_story_exercise_shared_info "$group_id" "$session_id" "$ctx_name" "$round_id" "$updated" || {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }

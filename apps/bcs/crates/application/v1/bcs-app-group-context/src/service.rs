@@ -9,7 +9,7 @@ use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
     GroupContextApplicationService, GroupContextGetItem, GroupContextGetResponse,
     GroupContextListItem, GroupContextListResponse, ListGroupContexts, SystemSetGroupContext,
-    UpdateGroupContext,
+    ListSharedGroupContexts, SharedGroupContextItem, UpdateGroupContext,
 };
 use chrono::Utc;
 use ulid::Ulid;
@@ -157,7 +157,13 @@ impl GroupContextApplicationServiceImpl {
             GroupContextItemPresetChange::Edit { .. } => "update",
             GroupContextItemPresetChange::Delete { .. } => "delete",
         }, "Group Context preset mutation");
-        self.repo.change_preset(group_id, actor, change).await.map_err(map_store_error)
+        self.repo.change_preset(group_id, actor, change).await.map_err(|error| match error {
+            GroupContextStoreError::DuplicateActive { name, scope } => ApplicationError::conflict(
+                CONFLICT,
+                format!("{name} already exists in {scope}。请重命名后重试。"),
+            ),
+            other => map_store_error(other),
+        })
     }
 }
 
@@ -290,6 +296,27 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         )
         .await?;
         Ok(GroupContextAck::ok())
+    }
+
+    async fn list_shared_contexts(
+        &self,
+        query: ListSharedGroupContexts,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        let entries = self.repo
+            .list_active_for_shared_info(&query.group_id, query.session_id.as_deref())
+            .await
+            .map_err(map_store_error)?;
+        Ok(entries.into_iter()
+            .filter(|entry| query.actor_ids.iter().any(|id| actor_can_read(entry, id)))
+            .map(|entry| SharedGroupContextItem {
+                name: entry.name,
+                scope_level: entry.scope_level,
+                scope: entry.scope,
+                content: entry.content,
+                creator: entry.creator,
+                gmt_modified: entry.gmt_modified,
+            })
+            .collect())
     }
 
     async fn list(
