@@ -16,9 +16,9 @@ export const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
 };
 
 export const TODO_STATUS_CLASS: Record<TodoStatus, string> = {
-  pending: 'border-border bg-muted text-muted-foreground',
+  pending: 'border-destructive/20 bg-destructive/10 text-destructive',
   in_progress: 'border-primary/30 bg-primary/10 text-primary',
-  pending_acceptance: 'border-warning/30 bg-warning/10 text-warning-foreground',
+  pending_acceptance: 'border-warning/20 bg-warning/10 text-warning',
   completed: 'border-success/30 bg-success/10 text-success',
 };
 

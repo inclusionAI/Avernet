@@ -3,10 +3,10 @@ import type { TodoEvent, TodoRecord } from '@/domain/todos/models';
 import TodoDetailPage from '@/pages/Lab/Todos/TodoDetailPage';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
-import { history } from '@umijs/max';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
@@ -110,9 +110,9 @@ describe('TodoDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'Q3 竞品分析' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回待办列表' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: '待办详情视图' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '事件' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '互动' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '产物 1' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '事件' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '互动' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '产物 1' })).toBeInTheDocument();
     expect(await screen.findByText('开始采集竞品资料')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /定价与功能矩阵\.xlsx/ })).toHaveAttribute(
       'href',
@@ -124,7 +124,7 @@ describe('TodoDetailPage', () => {
     render(<TodoDetailPage />);
     await screen.findByText('开始采集竞品资料');
 
-    fireEvent.click(screen.getByRole('button', { name: '互动' }));
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
     expect(await screen.findByText('请补充价格来源')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
       target: { value: ' 补充价格来源 ' },
@@ -143,10 +143,11 @@ describe('TodoDetailPage', () => {
     await screen.findByText('开始采集竞品资料');
 
     const acceptance = screen.getByRole('region', { name: '待办验收' });
-    fireEvent.change(within(acceptance).getByPlaceholderText('可选：填写验收意见'), {
+    fireEvent.click(within(acceptance).getByRole('button', { name: '验收不通过' }));
+    fireEvent.change(within(acceptance).getByPlaceholderText('填写需要 Bot 补充或修改的内容'), {
       target: { value: ' 请修改 ' },
     });
-    fireEvent.click(within(acceptance).getByRole('button', { name: '验收不通过' }));
+    fireEvent.click(within(acceptance).getByRole('button', { name: '提交问题' }));
 
     await waitFor(() =>
       expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
@@ -161,14 +162,14 @@ describe('TodoDetailPage', () => {
     render(<TodoDetailPage />);
     await screen.findByText('开始采集竞品资料');
 
-    fireEvent.click(screen.getByRole('button', { name: '产物 1' }));
+    fireEvent.click(screen.getByRole('tab', { name: '产物 1' }));
     const artifactView = screen.getByRole('region', { name: '待办产物' });
     expect(within(artifactView).getByRole('link', { name: /定价与功能矩阵\.xlsx/ })).toBeInTheDocument();
   });
 
   it('返回列表', async () => {
     render(<TodoDetailPage />);
-    fireEvent.click(screen.getByRole('button', { name: '返回待办列表' }));
+    fireEvent.click(await screen.findByRole('button', { name: '返回待办列表' }));
     expect(mockedHistory.push).toHaveBeenCalledWith('/lab/todos');
   });
 });

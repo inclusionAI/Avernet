@@ -34,10 +34,10 @@ export function TodoToolbar({
   const activeStatus = status ?? 'all';
 
   return (
-    <section role="region" aria-label="待办筛选" className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+    <section role="region" aria-label="待办筛选" className="space-y-5">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>当前空间</span>
-        <span className="rounded-md border border-border bg-muted/40 px-2 py-1 font-medium text-foreground">
+        <span className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 font-medium text-foreground">
           {space?.spaceName ?? '空间加载中…'}
         </span>
         {space?.spaceType === 'PERSONAL' ? <span>个人空间</span> : null}
@@ -50,19 +50,19 @@ export function TodoToolbar({
           value={activeStatus}
           options={TODO_STATUS_OPTIONS}
           onChange={(value) => onStatusChange(value === 'all' ? undefined : value)}
-          className="flex-wrap"
-          activeOptionClassName="bg-primary text-primary-foreground hover:bg-primary"
-          inactiveOptionClassName="text-foreground/70"
+          className="flex-wrap gap-2 bg-transparent p-0"
+          activeOptionClassName="h-10 rounded-xl bg-foreground px-4 text-sm text-background shadow-none hover:bg-foreground hover:text-background"
+          inactiveOptionClassName="h-10 rounded-xl border border-border bg-background px-4 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         />
 
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
+        <span aria-hidden className="mx-1 h-5 w-px bg-border" />
 
         <Select
           value={botId ?? 'all'}
           onValueChange={(value) => onBotIdChange(value === 'all' ? undefined : value)}
           disabled={botsLoading}
         >
-          <SelectTrigger aria-label="负责人" className="h-8 w-40 rounded-lg">
+          <SelectTrigger aria-label="负责人" className="h-10 w-48 rounded-xl text-sm">
             <SelectValue placeholder={botsLoading ? '负责人加载中…' : '全部负责人'} />
           </SelectTrigger>
           <SelectContent>
@@ -75,21 +75,25 @@ export function TodoToolbar({
           </SelectContent>
         </Select>
 
-        <div className="relative w-48 min-w-0">
+        <div className="relative w-60 min-w-0">
           <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
             value={keyword}
             onChange={(event) => onKeywordChange(event.target.value)}
-            placeholder="搜索待办标题"
+            placeholder="搜索待办"
             aria-label="搜索待办"
-            className="pl-8"
+            className="h-10 rounded-xl pl-9 text-sm"
           />
         </div>
 
-        <Button className="ml-auto" onClick={onCreate} leftIcon={<Plus className="size-4" aria-hidden />}>
+        <Button
+          className="ml-auto h-10 rounded-xl bg-foreground px-5 text-sm text-background hover:opacity-85"
+          onClick={onCreate}
+          leftIcon={<Plus className="size-4" aria-hidden />}
+        >
           发起待办
         </Button>
       </div>

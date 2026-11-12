@@ -8,8 +8,8 @@ import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
 import { useEffect, useState } from 'react';
 import { eligibleTodoBots } from './botScope';
-import { TodoCreateModal } from './components/TodoCreateModal';
 import { TodoBoard } from './components/TodoBoard';
+import { TodoCreateModal } from './components/TodoCreateModal';
 import { TodoToolbar } from './components/TodoToolbar';
 
 /** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
@@ -60,8 +60,11 @@ export default function LabTodosPage() {
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <PageHeader title="待办" description="当前空间的 Bot 待办。系统自动调度执行，完成后可查看事件、互动并提交验收。" />
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-7 px-4 py-6 sm:px-6 sm:py-8 2xl:px-8">
+        <PageHeader
+          title="待办"
+          description="当前空间的 Bot 待办。系统自动调度执行，完成后可查看事件、互动并提交验收。"
+        />
 
         <TodoToolbar
           space={currentSpace}

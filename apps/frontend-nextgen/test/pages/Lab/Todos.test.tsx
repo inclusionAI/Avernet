@@ -4,10 +4,10 @@ import LabTodosPage from '@/pages/Lab/Todos';
 import * as botWorkshop from '@/services/botWorkshop';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
-import { history } from '@umijs/max';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
@@ -171,11 +171,15 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(owner.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(tabs[1]);
-    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'pending' })));
+    await waitFor(() =>
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'pending' })),
+    );
 
     fireEvent.click(owner);
     fireEvent.click(await screen.findByRole('option', { name: '写作助手' }));
-    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ botId: 'bot-owned:u-1' })));
+    await waitFor(() =>
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ botId: 'bot-owned:u-1' })),
+    );
   });
 
   it('创建待办进入待处理，不在前端自动 Run', async () => {
@@ -210,8 +214,8 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(within(acceptanceCard).getByText('写作助手')).toBeInTheDocument();
     expect(within(acceptanceCard).getByText('待验收')).toBeInTheDocument();
     const board = screen.getByRole('region', { name: '待办分组' });
-    expect(within(board).getByRole('button', { name: /^待处理 1$/ })).toHaveTextContent('1');
-    expect(within(board).getByRole('button', { name: /^进行中 1$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^待处理 \(1\)$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^进行中 \(1\)$/ })).toHaveTextContent('1');
     expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
   });

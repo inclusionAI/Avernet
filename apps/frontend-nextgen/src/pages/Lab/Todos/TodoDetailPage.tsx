@@ -1,12 +1,11 @@
-import { PageHeader } from '@/components/Common/PageHeader';
-import { Badge, Button, Card, Empty, Segmented, Spin } from '@/components/ui';
+import { Badge, Button, Card, Empty, Spin } from '@/components/ui';
 import type { TodoArtifact } from '@/domain/todos/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
 import { history, useParams } from '@umijs/max';
-import { Bot, CalendarClock, ChevronDown, ChevronUp, FileText, History } from 'lucide-react';
+import { ArrowLeft, Bot, CalendarClock, ChevronDown, ChevronRight, FileText, History } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { TodoAcceptanceActions } from './components/TodoAcceptanceActions';
 import { TodoArtifactList } from './components/TodoArtifactList';
@@ -35,15 +34,38 @@ function uniqueArtifacts(events: ReturnType<typeof useTodoDetail>['events']): To
 
 function DetailItem({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2.5">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
         {icon}
       </span>
       <div className="min-w-0">
-        <div className="text-[11px] text-muted-foreground">{label}</div>
-        <div className="mt-0.5 break-words text-xs font-medium text-foreground">{value || '—'}</div>
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="mt-1 break-words text-sm font-medium text-foreground">{value || '—'}</div>
       </div>
     </div>
+  );
+}
+
+interface DetailTabProps {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}
+
+function DetailTab({ active, children, onClick }: DetailTabProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      className={cn(
+        '-mb-px border-x-0 border-t-0 border-b-2 bg-transparent px-1 pb-4 text-xl font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        active ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -58,20 +80,11 @@ export default function TodoDetailPage() {
   const todo = detail.selectedTodo;
 
   return (
-    <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <Button
-          variant="ghost"
-          aria-label="返回待办列表"
-          className="h-auto w-fit border-0 px-0 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-primary"
-          onClick={() => history.push('/lab/todos')}
-        >
-          ← 返回待办列表
-        </Button>
-
-        {detail.loading && !todo ? (
-          <Spin tip="加载待办详情中…" className="py-16" />
-        ) : detail.error && !todo ? (
+    <main className="app-scrollbar h-full min-h-0 overflow-y-auto bg-background">
+      {detail.loading && !todo ? (
+        <Spin tip="加载待办详情中…" className="py-24" />
+      ) : detail.error && !todo ? (
+        <div className="mx-auto w-full max-w-6xl px-5 py-16">
           <Empty
             title="待办详情加载失败"
             description={detail.error}
@@ -81,96 +94,126 @@ export default function TodoDetailPage() {
               </Button>
             }
           />
-        ) : todo ? (
-          <>
-            <PageHeader
-              title={todo.title}
-              description={todo.description || '暂无描述'}
-              eyebrow="待办详情"
-              actions={
-                <Badge className={cn('border', TODO_STATUS_CLASS[todo.status])}>
-                  {TODO_STATUS_LABEL[todo.status]}
-                </Badge>
-              }
-            />
-
-            <Card className="overflow-hidden border-border/60 shadow-sm">
+        </div>
+      ) : todo ? (
+        <>
+          <header className="border-b border-divider bg-background px-4 py-4 sm:px-6">
+            <div className="mx-auto flex w-full max-w-[1600px] items-center gap-5">
               <Button
                 variant="ghost"
-                className="h-auto w-full justify-between rounded-none border-0 px-4 py-3 text-xs hover:bg-muted/30"
-                aria-expanded={detailsExpanded}
-                onClick={() => setDetailsExpanded((expanded) => !expanded)}
-                rightIcon={
-                  detailsExpanded ? (
-                    <ChevronUp className="size-4" aria-hidden />
-                  ) : (
-                    <ChevronDown className="size-4" aria-hidden />
-                  )
-                }
+                size="icon"
+                aria-label="返回待办列表"
+                className="size-[52px] rounded-2xl bg-muted/70 hover:bg-muted"
+                onClick={() => history.push('/lab/todos')}
               >
-                详情
+                <ArrowLeft className="size-6" aria-hidden />
               </Button>
-              {detailsExpanded ? (
-                <div className="grid gap-4 border-t border-divider px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <DetailItem icon={<Bot className="size-4" />} label="Bot" value={todo.botName || todo.botId} />
-                  <DetailItem
-                    icon={<FileText className="size-4" />}
-                    label="当前空间"
-                    value={currentSpace?.spaceName || `空间 ${todo.spaceId}`}
-                  />
-                  <DetailItem
-                    icon={<CalendarClock className="size-4" />}
-                    label="创建时间"
-                    value={formatDateTime(todo.createdAt)}
-                  />
-                  <DetailItem
-                    icon={<History className="size-4" />}
-                    label="更新时间"
-                    value={formatDateTime(todo.updatedAt)}
-                  />
-                </div>
-              ) : null}
-            </Card>
+              <h1 className="m-0 min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                {todo.title}
+              </h1>
+              <Badge className={cn('shrink-0 border-0 px-3 py-1.5 text-base', TODO_STATUS_CLASS[todo.status])}>
+                {TODO_STATUS_LABEL[todo.status]}
+              </Badge>
+            </div>
+          </header>
 
-            <Segmented
-              aria-label="待办详情视图"
-              value={view}
-              options={[
-                { value: 'events', label: '事件' },
-                { value: 'interactions', label: '互动' },
-                { value: 'artifacts', label: `产物 ${artifacts.length}` },
-              ]}
-              onChange={setView}
-              className="w-full max-w-md"
-              activeOptionClassName="bg-primary text-primary-foreground hover:bg-primary"
-              inactiveOptionClassName="text-foreground/70"
-            />
+          <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-7 px-4 py-8 sm:px-6 sm:py-11">
+            <section aria-label="待办概要" className="space-y-7">
+              <p className="m-0 whitespace-pre-wrap text-lg leading-8 text-foreground">
+                {todo.description || '暂无描述'}
+              </p>
 
-            <Card className="border-border/60 p-4 shadow-sm sm:p-5">
-              {view === 'events' ? (
-                <div className="space-y-6">
-                  <TodoEventTimeline
-                    events={detail.events}
-                    loading={detail.eventsLoading}
-                    error={detail.eventsError}
-                    onRetry={detail.refreshEvents}
+              <div>
+                <Button
+                  variant="ghost"
+                  className="h-auto gap-2.5 rounded-md border-0 px-0 py-1 text-base text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  aria-expanded={detailsExpanded}
+                  onClick={() => setDetailsExpanded((expanded) => !expanded)}
+                  leftIcon={
+                    detailsExpanded ? (
+                      <ChevronDown className="size-5" aria-hidden />
+                    ) : (
+                      <ChevronRight className="size-5" aria-hidden />
+                    )
+                  }
+                >
+                  详情
+                </Button>
+                {detailsExpanded ? (
+                  <div className="mt-4 grid gap-6 rounded-2xl border border-border bg-muted/15 p-6 sm:grid-cols-2 lg:grid-cols-4">
+                    <DetailItem icon={<Bot className="size-4" />} label="Bot" value={todo.botName || todo.botId} />
+                    <DetailItem
+                      icon={<FileText className="size-4" />}
+                      label="当前空间"
+                      value={currentSpace?.spaceName || `空间 ${todo.spaceId}`}
+                    />
+                    <DetailItem
+                      icon={<CalendarClock className="size-4" />}
+                      label="创建时间"
+                      value={formatDateTime(todo.createdAt)}
+                    />
+                    <DetailItem
+                      icon={<History className="size-4" />}
+                      label="更新时间"
+                      value={formatDateTime(todo.updatedAt)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            <Card className="overflow-hidden rounded-2xl border-border shadow-none">
+              <div
+                role="group"
+                aria-label="待办详情视图"
+                className="flex items-center gap-12 border-b border-divider px-8 pt-6"
+              >
+                <DetailTab active={view === 'events'} onClick={() => setView('events')}>
+                  事件
+                </DetailTab>
+                <DetailTab active={view === 'interactions'} onClick={() => setView('interactions')}>
+                  互动
+                </DetailTab>
+                <DetailTab active={view === 'artifacts'} onClick={() => setView('artifacts')}>
+                  产物 {artifacts.length}
+                </DetailTab>
+              </div>
+
+              <div className="px-5 py-7 sm:px-8 sm:py-8">
+                {view === 'events' ? (
+                  <div className="space-y-1">
+                    <TodoEventTimeline
+                      events={detail.events}
+                      botName={todo.botName}
+                      loading={detail.eventsLoading}
+                      error={detail.eventsError}
+                      onRetry={detail.refreshEvents}
+                    />
+                    {todo.status === 'pending_acceptance' ? (
+                      <div className="relative pl-[37px] sm:pl-[156px]">
+                        <span
+                          aria-hidden
+                          className="absolute bottom-0 left-[11.5px] top-[-2.5rem] w-px bg-warning/35 sm:left-[141.5px]"
+                        />
+                        <div className="relative z-10">
+                          <TodoAcceptanceActions loading={detail.mutationLoading} onAccept={detail.accept} />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {view === 'interactions' ? (
+                  <TodoInteractionPanel
+                    interactions={detail.interactions}
+                    enabled={canInteractWithTodo(todo.status)}
+                    loading={detail.mutationLoading}
+                    onSubmit={detail.interact}
                   />
-                  {todo.status === 'pending_acceptance' ? (
-                    <TodoAcceptanceActions loading={detail.mutationLoading} onAccept={detail.accept} />
-                  ) : null}
-                </div>
-              ) : null}
+                ) : null}
 
-              {view === 'interactions' ? (
-                <TodoInteractionPanel
-                  interactions={detail.interactions}
-                  enabled={canInteractWithTodo(todo.status)}
-                  loading={detail.mutationLoading}
-                  onSubmit={detail.interact}
-                />
-              ) : null}
-
-              {view === 'artifacts' ? <TodoArtifactList artifacts={artifacts} /> : null}
+                {view === 'artifacts' ? <TodoArtifactList artifacts={artifacts} /> : null}
+              </div>
             </Card>
 
             {detail.error ? (
@@ -178,9 +221,9 @@ export default function TodoDetailPage() {
                 {detail.error}
               </p>
             ) : null}
-          </>
-        ) : null}
-      </div>
+          </div>
+        </>
+      ) : null}
     </main>
   );
 }
