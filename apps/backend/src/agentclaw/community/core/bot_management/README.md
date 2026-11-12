@@ -162,6 +162,14 @@ this envelope. Other engines do not construct backup dependencies.
 
 ## Stable Bot addressing
 
+Display metadata queries use `bcn_metadata.resolve_metadata_pairs` and the
+repository's [bounded locator candidates](../repository/README.md#metadata-locator-batching).
+They retain exact Owner/entity precedence, ambiguity rejection and stored BCN
+reference validation after handoff; `default` never uses bare-ID fallback.
+The HTTP schema, pagination, avatar and publication projections are unchanged.
+The real-repository compatibility and SQL-count tests live in
+`tests/community/repository/bot/test_metadata_locators.py`.
+
 `addressing.py` owns the Backend-internal compatibility boundary. A request may
 still supply the historical field named `owner_id`; repository lookup matches it
 against either the immutable `entity_id` or the current owner and rejects more
