@@ -18,6 +18,9 @@ fi
 LLVM_PROFILE_FILE="$cov_runtime/caller-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/caller_execution_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e"
+LLVM_PROFILE_FILE="$cov_runtime/caller-pre-%m-%p.profraw" \
+  python3 "$bcs_dir/scripts/e2e-test/caller_execution_story.py" \
+    --binary "$cov_runtime/debug/bcs-caller-e2e" --environment pre
 LLVM_PROFILE_FILE="$cov_runtime/task-cache-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/task_cache_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e"

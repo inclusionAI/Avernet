@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import signal
 import socket
 import sqlite3
@@ -59,8 +60,10 @@ class Provider(BaseHTTPRequestHandler):
 
 
 class Story:
-    def __init__(self, base, key, provider):
+    def __init__(self, base, key, provider, environment='local'):
         self.base, self.key, self.provider = base, key, provider
+        self.environment = environment
+        self.delivered = []
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.checks = 0
 
@@ -96,7 +99,7 @@ class Story:
         result = self.request('POST', '/channels/bindings', {
             'channel_type': 'caller-e2e', 'account_ref': account,
             'target': target or {'bot': {'bot_id': bot}}, 'outbound_visibility': 'full_transcript',
-            'env': 'local', 'config': {'execution_mode': mode}}, status)
+            'env': self.environment, 'config': {'execution_mode': mode}}, status)
         return account, result
 
     def policy(self, paused):
@@ -111,6 +114,7 @@ class Story:
     def receive(self):
         body, auth = self.provider.received.get(timeout=30)
         assert auth == 'Bearer ' + self.registration['bcs_to_provider_token'], 'provider auth changed'
+        self.delivered.append(body)
         return body
 
     def finish_callback(self, body):
@@ -222,9 +226,41 @@ def verify_network_traces(path, provider):
     print(f'Live network tracing: {len(servers)} server and {len(clients)} client records verified', flush=True)
 
 
+def verify_caller_token_logs(root, story):
+    diagnostic_lines = []
+    for log_path in root.rglob('*.log'):
+        for line in log_path.read_text().splitlines():
+            line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+            if 'TEMP_PREPUB_CALLER_TOKEN' in line:
+                diagnostic_lines.append(line)
+            else:
+                assert 'test-token' not in line, 'raw caller token escaped the diagnostic record'
+    if story.environment == 'local':
+        assert not diagnostic_lines, 'caller token diagnostic enabled outside preproduction'
+        return
+    expected = {
+        body['id']: body['extensions']['caller_execution_token']['token']
+        for body in story.delivered
+        if 'caller_execution_token' in body.get('extensions', {})
+    }
+    observed = {}
+    for line in diagnostic_lines:
+        run = re.search(r'\brun_id=([^\s\x1b]+)', line)
+        quoted_match = re.search(r'\bcaller_token_json=("(?:[^"\\]|\\.)*")', line)
+        assert run and quoted_match, 'caller diagnostic missing correlation or JSON-quoted token'
+        value = json.loads(quoted_match[1])
+        # Console and file logging may both contain the same event.
+        assert run[1] not in observed or observed[run[1]] == value, 'conflicting caller diagnostic values'
+        observed[run[1]] = value
+    assert len(expected) == 3, 'expected two queued callers and one SSE caller'
+    assert observed == expected, 'diagnostic tokens differ from the Provider wire values'
+    print('Preproduction caller diagnostic matches actual Provider receipt: PASS', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
+    parser.add_argument('--environment', choices=('local', 'pre'), default='local')
     args = parser.parse_args()
     binary = str(Path(args.binary).resolve())
     provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
@@ -248,9 +284,9 @@ def main():
         config['bots_base_dir'] = str(root / 'bots')
         config['session_files']['backend'] = {'data_dir': str(root / 'files')}
         config['collaboration']['templates']['base_dir'] = str(root / 'templates')
-        config_path = root / 'bcs-config-local.json'
+        config_path = root / f'bcs-config-{args.environment}.json'
         config_path.write_text(json.dumps(config))
-        env = dict(os.environ, SERVER_ENV='local', CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
+        env = dict(os.environ, SERVER_ENV=args.environment, CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
                    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
         # Keep instrumented LLVM_PROFILE_FILE from the runner for real server coverage.
         with (root / 'server.log').open('w') as log:
@@ -258,7 +294,7 @@ def main():
             process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces)],
                 cwd=root, env=env, stdout=log, stderr=log)
             try:
-                story = Story(f'http://127.0.0.1:{port}', key, provider)
+                story = Story(f'http://127.0.0.1:{port}', key, provider, args.environment)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during startup; ' + (root / 'server.log').read_text()[-2000:])
@@ -315,9 +351,8 @@ def main():
             with sqlite3.connect(f'file:{root / "bcs.db"}?mode=ro', uri=True) as db:
                 durable = '\n'.join(db.iterdump())
             assert 'test-token' not in durable, 'raw caller token persisted in SQLite'
-            for log_path in root.rglob('*.log'):
-                assert 'test-token' not in log_path.read_text(), 'raw caller token logged'
-            print('Caller credential persistence and log redaction: PASS', flush=True)
+            verify_caller_token_logs(root, story)
+            print(f'Caller credential persistence and {args.environment} log policy: PASS', flush=True)
 
 
 if __name__ == '__main__':
