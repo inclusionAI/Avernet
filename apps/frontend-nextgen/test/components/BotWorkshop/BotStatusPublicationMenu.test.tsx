@@ -140,6 +140,57 @@ test('锁定时不可执行发布操作', async () => {
   expect(screen.queryByRole('button', { name: '下线' })).not.toBeInTheDocument();
 });
 
+test('历史评测记录入口对无编辑权限用户置灰并展示说明', async () => {
+  const openHistory = jest.fn();
+  const botWithoutPermission = { ...bot, canOpenEvalHistory: false, actions: ['view'] };
+
+  render(
+    <BotManagementRuntimeItems
+      bot={botWithoutPermission}
+      lockedByOther={false}
+      onClose={jest.fn()}
+      onConfirm={jest.fn()}
+      onOpenEvalHistory={openHistory}
+    />,
+  );
+
+  const entry = screen.getByRole('button', { name: /历史评测记录/ });
+  expect(entry).toBeDisabled();
+  fireEvent.mouseMove(entry);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+  const help = screen.getByLabelText('历史评测记录说明');
+  fireEvent.mouseMove(help);
+  fireEvent.pointerMove(help, { pointerType: 'mouse' });
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(
+    '仅具有当前服务 Bot 编辑权限的人可查看历史评测记录',
+  );
+  fireEvent.click(entry);
+  expect(openHistory).not.toHaveBeenCalled();
+
+  const botWithPermission = {
+    ...bot,
+    canOpenEvalHistory: true,
+    actions: ['view', 'edit', 'delete'],
+  };
+  render(
+    <BotManagementRuntimeItems
+      bot={botWithPermission}
+      lockedByOther={false}
+      onClose={jest.fn()}
+      onConfirm={jest.fn()}
+      onOpenEvalHistory={openHistory}
+    />,
+  );
+
+  const historyEntries = screen.getAllByRole('button', { name: /历史评测记录/ });
+  expect(historyEntries).toHaveLength(2);
+  const enabledEntry = historyEntries.find((item) => !item.hasAttribute('disabled'));
+  expect(enabledEntry).toBeDefined();
+  fireEvent.click(enabledEntry!);
+  expect(openHistory).toHaveBeenCalledTimes(1);
+});
+
 test('禁用删除支持整行悬停与键盘聚焦提示，不能触发删除', async () => {
   const confirm = jest.fn();
   render(

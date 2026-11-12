@@ -1,12 +1,12 @@
 import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
-import type { BotDomain } from '@/services/botWorkshop';
+import { canOpenServiceBotEvalHistory, type BotDomain } from '@/services/botWorkshop';
 import { useEffect, useMemo, useState } from 'react';
 
 const evalAvailabilityKey = (bot: BotDomain) =>
   `${bot.id}:${bot.ownerId ?? ''}:${String(bot.publicationVersion ?? bot.liveVersion ?? 'latest')}`;
 
 /** 服务 Bot 草稿态列表项的评测入口可见性。 */
-export function useServiceBotEvalMenuVisibility(bots: BotDomain[]) {
+export function useServiceBotEvalMenuVisibility(bots: BotDomain[], currentUserId?: string) {
   const targets = useMemo(
     () =>
       bots.filter((bot) => bot.serviceMode === 'service' && bot.lifecycle === 'draft'),
@@ -49,8 +49,9 @@ export function useServiceBotEvalMenuVisibility(bots: BotDomain[]) {
       bots.map((bot) => ({
         ...bot,
         evalGateVisible: visibility[evalAvailabilityKey(bot)] ?? false,
+        canOpenEvalHistory: canOpenServiceBotEvalHistory(bot, currentUserId),
       })),
-    [bots, visibility],
+    [bots, currentUserId, visibility],
   );
 
   return decoratedBots;
