@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.19</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.20</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -1460,7 +1460,7 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 <tr><td><code>task</code></td><td>序列化的 Task</td><td>执行实例</td><td>状态消息、累计 Artifact、Task metadata（含审批回执）</td></tr>
 <tr><td><code>negotiatedExtensions</code></td><td>string 列表</td><td>创建时</td><td>初始提交的协商结果</td></tr>
 <tr><td><code>caller</code></td><td>对象</td><td>创建时</td><td><code>userId</code>、调用方应用名</td></tr>
-<tr><td><code>request</code></td><td>对象</td><td>创建时</td><td>原始请求文本，供审批恢复时重建 <code>AgentRequest</code></td></tr>
+<tr><td><code>request</code></td><td>对象</td><td>创建时</td><td>原始请求的全部输入：文本、附件的地址和元信息、E2 扩展数据。供审批续交时在任意实例上重建 <code>AgentRequest</code></td></tr>
 <tr><td><code>ownerInstance</code></td><td>string，可空</td><td>执行实例</td><td>执行实例标识；<code>INPUT_REQUIRED</code> 和终态时为空</td></tr>
 <tr><td><code>leaseExpiresAtMs</code></td><td>long</td><td>执行实例</td><td>租约到期时间</td></tr>
 <tr><td><code>cancelRequested</code></td><td>boolean</td><td>任意实例</td><td>取消标记，只能从 false 变为 true</td></tr>
@@ -1523,8 +1523,18 @@ bcn.a2a.server.push.sweep-interval=5s</code></pre>
 <li><div><span class="who">实例 B</span>读取记录，校验 <code>contextId</code>、审批批次、工具标识、过期时间和 <code>userId</code> 一致性。不合法则返回带校验错误的 <code>INPUT_REQUIRED</code>，不改变已接受的决定。</div></li>
 <li><div><span class="who">实例 B</span>通过 CAS 把决定写入 <code>Task.metadata</code>。仍有工具未决定：保持 <code>INPUT_REQUIRED</code>，返回更新后的 Task。</div></li>
 <li><div><span class="who">实例 B</span>全部已决定：同一次 CAS 把状态改为 <code>WORKING</code>，<code>ownerInstance</code> 设为自己并写入租约。CAS 成功即接管成功。</div></li>
-<li><div><span class="who">实例 B</span>返回 Task，然后在执行线程上调用 <code>execute</code>，<code>request.approval()</code> 中为已解析的决定。</div></li>
+<li><div><span class="who">实例 B</span>从记录重建本地执行状态：已有的 Artifact 及其文本、块的顺序、E3 字段、协商结果、调用上下文。审批之后的新文本使用新的 <code>artifactId</code>，排在已有块之后（P-140），不改写审批前的输出（P-71）。</div></li>
+<li><div><span class="who">实例 B</span>返回 Task，然后在执行线程上调用 <code>execute</code>。<code>request</code> 由记录重建，内容与 A 上收到的原始请求相同；<code>request.approval()</code> 中为已解析的决定。</div></li>
+<li><div><span class="who">Agent</span>从共享存储恢复引擎状态后继续执行。之后的查询、订阅、取消可以落到任意实例，按 9.5 的其他流程处理。</div></li>
 </ol>
+<h4>跨实例续交成立的前提</h4>
+<div class="tw"><table>
+<tr><th>前提</th><th>不满足时</th></tr>
+<tr><td>TaskStore 是共享存储（缓存实现）</td><td>内存实现下 B 读不到记录，续交返回 <code>TASK_NOT_FOUND</code>。SDK 在多实例部署下使用内存实现会告警，生产环境启动失败（8.8）</td></tr>
+<tr><td>Agent 把审批前的引擎状态保存在各实例都能读到的存储中，并在 <code>AgentDescriptor</code> 中声明可跨实例恢复</td><td>SDK 不会把续交转回 A（<span class="tag d">D3</span>），而是返回错误，本次审批失败。这类 Agent 只能单实例部署，或不声明 exec 审批扩展</td></tr>
+<tr><td>Agent 的会话记忆（按 <code>contextId</code>）也在共享存储中</td><td>B 上恢复的执行缺少多轮上下文。这由 Agent 负责，SDK 不管理</td></tr>
+</table></div>
+<p>审批等待期间 Task 不属于任何实例，也没有租约，所以 A 在此期间重启、下线都不影响续交。</p>
 <p>两个实例同时收到同一批决定时，只有一个 CAS 成功，另一个重读后发现状态已是 <code>WORKING</code> 且决定相同，按重复提交处理，返回当前 Task，不再调用 <code>execute</code>。这保证工具只恢复一次。</p>
 
 <h4>宕机回收</h4>
