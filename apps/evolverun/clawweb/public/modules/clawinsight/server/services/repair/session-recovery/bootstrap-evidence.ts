@@ -34,6 +34,9 @@ export function bootstrapEvidence(evidence: readonly RecoveryEvidence[], reads: 
     const projected = { ...item, excerpt: item.excerpt.slice(0, 1500) };
     const read = item.source === "trajectory_read" ? byCall.get(item.tool_call_id) : undefined;
     if (!read) return projected;
+    // Existing AIS closeout already reduces complete JSON receipts to a few facts.
+    // Replacing those with text would enlarge closeout or hide those facts.
+    try { JSON.parse(projected.excerpt); return projected; } catch { /* Truncated excerpt. */ }
     // requestDigest includes clientRequestId, so it also changes on identical polls.
     // All query parameters, coverage,
     // source, trace/event timestamps and fields beyond the displayed excerpt participate.
@@ -45,6 +48,6 @@ export function bootstrapEvidence(evidence: readonly RecoveryEvidence[], reads: 
     // Plain text also survives existing AIS closeout's JSON receipt-field allowlist.
     const reference = previous ? `same_content_as=${previous}; recorded_at_ms=${recorded_at_ms}; full receipt: tool_call_get(toolCallId=${item.tool_call_id}).` : undefined;
     return { ...projected, recorded_at_ms,
-      ...(reference && reference.length < projected.excerpt.length ? { excerpt: reference } : {}) };
+      ...(reference && reference.length <= 400 && reference.length < projected.excerpt.length ? { excerpt: reference } : {}) };
   });
 }

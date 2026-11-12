@@ -83,6 +83,23 @@ it("keeps legacy evidence unchanged when no complete audit is available", () => 
   expect(bootstrapEvidence(saved)).toEqual(saved.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })));
 });
 
+it.each([{}, { delivery_confirmed: true, delivery_key: "current-delivery" }])(
+  "preserves complete short JSON for the existing AIS closeout fact filter: %j", facts => {
+    const calls = Array.from({ length: 500 }, (_, index) => call(index, {
+      result: { source: "trajectory", read_scope: "traces", coverage: "uploaded_records_only", traces: [],
+        offset: 0, next_offset: null, recorded_at_ms: 1000 + index * 60000, ...facts },
+    }));
+    expect(project(calls)).toEqual(bootstrapEvidence(evidence(calls)));
+    expect(project(calls).every(item => JSON.parse(item.excerpt).recorded_at_ms > 0)).toBe(true);
+  });
+
+it("keeps plain-text references within the existing 400-character closeout budget", () => {
+  const calls = [call(1), call(2)];
+  const saved = evidence(calls);
+  saved[0].evidence_id = "evidence-" + "x".repeat(400);
+  expect(bootstrapEvidence(saved, trajectoryIndexReads(calls))[1].excerpt).toBe(saved[1].excerpt.slice(0, 1500));
+});
+
 it("never references an audit item absent from the supplied evidence", () => {
   const calls = [call(1), call(2), call(3)];
   const projected = bootstrapEvidence(evidence(calls).slice(1), trajectoryIndexReads(calls));

@@ -113,8 +113,15 @@ it("compacts only bootstrap index excerpts, preserving audit, evidence reference
   for (let i = 0; i < 3; i++) receipts.push(await agent.trajectoryRead((await tasks.find(ack.task_id))!, {
     clientRequestId: `index-${i}`, purpose: "observe", offset: 0,
   }));
-  const saved = (await tasks.find(ack.task_id))!, before = structuredClone(saved);
+  const task = (await tasks.find(ack.task_id))!;
+  const ticket = JSON.parse(vi.mocked(ais.execute).mock.calls[0][1]["${clawevolve_params}"]).input.credentials.executionTicket;
+  expect(task).not.toHaveProperty("trajectoryIndexReads");
   const queries = vi.spyOn(db, "query"); queries.mockClear();
+  expect(await agent.verify(task.taskId, task.execution!.executionId, ticket, true)).not.toHaveProperty("trajectoryIndexReads");
+  const normalReadQueries = queries.mock.calls.length; queries.mockClear();
+  const saved = await agent.verify(task.taskId, task.execution!.executionId, ticket, true, true), before = structuredClone(saved);
+  expect(saved.trajectoryIndexReads).toHaveLength(3);
+  expect(queries).toHaveBeenCalledTimes(normalReadQueries); queries.mockClear();
   const bootstrap = await agent.bootstrap(saved);
   expect(queries).not.toHaveBeenCalled();
   expect(bootstrap.task).not.toHaveProperty("trajectoryIndexReads");
@@ -133,11 +140,17 @@ it("compacts only bootstrap index excerpts, preserving audit, evidence reference
   // Referencing a compacted receipt must still pass the unchanged evidence validator.
   await agent.report(saved, { kind: "assessment", phase: "assess", decision: "observe",
     summary: "Check actual progress", evidence_ids: [receipts[2].evidenceId] });
-  const reloaded = (await tasks.find(saved.taskId))!;
+  const reloaded = (await tasks.find(saved.taskId, { forBootstrap: true }))!;
   expect(reloaded.evidence).toEqual(saved.evidence);
   expect((await agent.bootstrap(reloaded)).task.evidence).toEqual(bootstrap.task.evidence);
   const raw = (await db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ?", [saved.taskId]))[0].config_json;
   expect(raw).not.toContain("trajectoryIndexReads"); expect(raw).not.toContain("same_content_as");
+  await tasks.update(reloaded.taskId, reloaded.version, value => {
+    expect(value).not.toHaveProperty("trajectoryIndexReads");
+    return { ...value, version: value.version + 1 };
+  });
+  expect((await tasks.listForMaintenance(200)).every(value => !Object.hasOwn(value, "trajectoryIndexReads"))).toBe(true);
+  expect(await tasks.find(saved.taskId)).not.toHaveProperty("trajectoryIndexReads");
   expect(read).toHaveBeenCalledTimes(3); expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
 

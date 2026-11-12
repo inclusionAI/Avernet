@@ -137,7 +137,7 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
-  /** Transient references to audited index reads, used only to project bootstrap evidence. */
+  /** Opt-in bootstrap-only audit references; absent from maintenance and mutation reads. */
   trajectoryIndexReads?: import("./bootstrap-evidence.js").TrajectoryIndexRead[];
   /** Transient facts from the existing read audit; never a claim of full session coverage. */
   sessionReadCoverage?: import("./session-read-coverage.js").SessionReadCoverage[];
@@ -150,7 +150,7 @@ export type RecoveryStoredTask = RecoveryTaskState & {
 };
 export interface RecoveryTaskStore {
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
-  find(taskId: string): Promise<RecoveryStoredTask | null>;
+  find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
     effectResumeClaim?: { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null>;
