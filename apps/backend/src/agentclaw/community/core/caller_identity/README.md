@@ -122,3 +122,19 @@ For direct legacy `BotService` construction, omission of the optional refresh
 port means no scheduled-credential capability is installed. Production DI always
 provides an explicit no-op or enterprise implementation; errors from an installed
 implementation are never treated as an unconfigured capability.
+
+
+## Independent stored-ASC refresh
+
+`ScheduledCallerRefreshProtocol.refresh_for_actor` authorizes the current Bot
+owner and refreshes eligible runtimes independently of the Owner callback flag.
+`POST /openapi/v1/bots/{bot_id}/caller-token/refresh` uses the existing owner
+permission and addressed application-grant checks. Implementations derive the
+current owner, environment, Caller and physical device from trusted records;
+the request cannot choose a credential subject or sandbox. Targets must be alive
+and have at least one enabled Cron task. Results report each binding's outcome,
+safe reason and installed expiry, plus batch counts and status; no token is
+returned. Partial failures remain explicit and do not change Owner callback
+behavior. Public profiles report HTTP 501 for this unsupported capability.
+This endpoint adds no scheduler and requires a supported implementation to be
+bound by the host composition root.

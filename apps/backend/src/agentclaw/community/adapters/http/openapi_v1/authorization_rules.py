@@ -1,6 +1,7 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -10,18 +11,23 @@ from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
 )
+from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS
+from .dws_hosting.admission import PATH as DWS_PATH
 from .models_authorization import (
     EDIT_LOCK,
-    INHERITED as INHERITED,
     OWNER_SCOPED,
-    SCAFFOLDING_MODES as SCAFFOLDING_MODES,
     Authorization,
     Check,
     NoCheck,
     ServiceChecked,
 )
+from .models_authorization import (
+    INHERITED as INHERITED,
+)
+from .models_authorization import (
+    SCAFFOLDING_MODES as SCAFFOLDING_MODES,
+)
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
-from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
@@ -172,6 +178,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
+    ("POST", "/openapi/v1/bots/{bot_id}/caller-token/refresh"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"): ServiceChecked(
         PermissionLevel.MEMBER, "…core.bot_chat.service"

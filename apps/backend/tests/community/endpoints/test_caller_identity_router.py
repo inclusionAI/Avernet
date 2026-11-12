@@ -12,6 +12,7 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.api.scheduled_caller_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
@@ -590,3 +591,94 @@ def update_openapi_cli_call_type_happy():
 )
 def update_openapi_cli_call_type_not_found():
     """The CLI mutation masks an absent Bot behind the standard 404."""
+
+
+_REFRESH_PATH = "/openapi/v1/bots/{bot_id}/caller-token/refresh"
+
+
+class _RecordingScheduledCallerRefresh:
+    """Public adapter contract implementation for the host-provided ASC port.
+
+    Enterprise signing and installation are tested by the host implementation;
+    this public fixture verifies authorization and the replaceable API seam.
+    """
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def refresh(self, *, bot_id, owner_user_id, entity_id, env) -> None:
+        raise AssertionError("Independent refresh must not call the Owner callback")
+
+    def refresh_for_actor(self, *, bot_id, actor_id, entity_id=None) -> dict:
+        self.calls.append((bot_id, actor_id, entity_id))
+        return {
+            "bot_id": bot_id,
+            "status": "succeeded",
+            "succeeded": 1,
+            "skipped": 0,
+            "failed": 0,
+            "results": [{
+                "binding_id": 123,
+                "caller_workno": "authorized-caller",
+                "status": "succeeded",
+                "reason": None,
+                "expires_at": "2026-11-14T00:00:00+00:00",
+            }],
+        }
+
+
+def _seed_openapi_caller_refresh(world) -> None:
+    _enable_openapi_principal()
+    _seed_service_bot(world, acquire_lock=False)
+    service = _RecordingScheduledCallerRefresh()
+    world.injector.binder.bind(ScheduledCallerRefreshProtocol, to=service)
+
+
+def _assert_refresh_uses_verified_owner(response, world) -> None:
+    assert world.get(ScheduledCallerRefreshProtocol).calls == [
+        (_BOT_ID, _OWNER_ID, _OWNER_ID),
+    ]
+    assert response.json()["data"]["results"][0]["caller_workno"] == "authorized-caller"
+    assert "caller_token" not in response.text
+
+
+@endpoint_test(
+    method="POST",
+    path=_REFRESH_PATH,
+    scenario="owner_refreshes_stored_asc_runtimes",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+    ),
+    seed=_seed_openapi_caller_refresh,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"bot_id": _BOT_ID, "succeeded": 1, "skipped": 0, "failed": 0},
+        },
+    ),
+    extra_assertions=(_assert_refresh_uses_verified_owner,),
+)
+def refresh_openapi_caller_token_happy():
+    """The real route checks its owner and returns credential-free results."""
+
+
+@endpoint_test(
+    method="POST",
+    path=_REFRESH_PATH,
+    scenario="missing_bot_is_masked_before_refresh",
+    input=CaseInput(
+        path_params={"bot_id": "missing_caller_identity_bot"},
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+    ),
+    seed=_seed_openapi_owner,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found", "data": None},
+    ),
+)
+def refresh_openapi_caller_token_not_found():
+    """An inaccessible Bot is rejected by the real authorization gate."""

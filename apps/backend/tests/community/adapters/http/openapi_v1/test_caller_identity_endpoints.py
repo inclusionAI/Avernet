@@ -6,26 +6,27 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from fastapi import FastAPI
-from starlette.requests import Request
-
 from agentclaw.community.adapters.http.openapi_v1.caller_identity.router import (
     get_caller_context,
     router,
     update_cli_call_type,
     update_mcp_call_type,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.caller_identity.schemas import (
     CallerCallType,
     McpCallTypeUpdate,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
 from agentclaw.community.api.caller_identity_service import (
     CallerIdentityStage,
+    CliCallTypeUpdateResult,
     McpCallType,
     McpCallTypeUpdateResult,
-    CliCallTypeUpdateResult,
 )
+from fastapi import FastAPI
+from starlette.requests import Request
 
 
 def _request(entity_id: str = "owner") -> Request:
@@ -240,3 +241,79 @@ async def test_transferred_bot_passes_stable_entity_and_keeps_actor(kind):
             call = service.update_cli_call_type.call_args
     assert call.kwargs["entity_id"] == "original-entity"
     assert call.kwargs["actor_id"] == "owner"
+
+
+@pytest.mark.asyncio
+async def test_independent_refresh_passes_only_resolved_identity():
+    from agentclaw.community.adapters.http.openapi_v1.caller_identity.router import (
+        refresh_caller_token,
+    )
+    service = Mock()
+    service.refresh_for_actor.return_value = {"bot_id":"bot-1", "status":"skipped", "succeeded":0,"skipped":0,"failed":0,"results":[]}
+    result = await refresh_caller_token("bot-1", _request("team"), "owner", "owner", service)
+    assert result.data.results == []
+    service.refresh_for_actor.assert_called_once_with(bot_id="bot-1", actor_id="owner", entity_id="team")
+
+
+def test_refresh_contract_requires_owner_and_addressed_grant():
+    from agentclaw.community.adapters.http.openapi_v1.admission_modes import (
+        AdmissionMode,
+    )
+    from agentclaw.community.adapters.http.openapi_v1.admission_routes import ADMISSION
+    from agentclaw.community.adapters.http.openapi_v1.authorization import (
+        AUTHORIZATION,
+        Check,
+        PermissionLevel,
+    )
+    key=("POST", "/openapi/v1/bots/{bot_id}/caller-token/refresh")
+    assert AUTHORIZATION[key] == Check(PermissionLevel.OWNER)
+    assert ADMISSION[key] is AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT
+
+
+def test_community_profile_does_not_claim_asc_refresh_succeeded():
+    from agentclaw.community.api.caller_credential import CallerCredentialError
+    from agentclaw.community.core.caller_identity.scheduled_refresh import (
+        NoopScheduledCallerRefresh,
+    )
+    with pytest.raises(CallerCredentialError, match="CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE"):
+        NoopScheduledCallerRefresh().refresh_for_actor(bot_id="bot", actor_id="owner", entity_id="team")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure,status", [("unsupported",501),("invalid",400),("unknown",502), ("missing",404), ("forbidden",404), ("readonly",409)])
+async def test_refresh_failures_return_safe_envelopes_and_logs(failure,status,caplog):
+    from agentclaw.community.adapters.http.openapi_v1.caller_identity.router import (
+        refresh_caller_token,
+    )
+    from agentclaw.community.api.caller_credential import CallerCredentialError
+    from agentclaw.community.core.caller_identity.contracts import (
+        CallerIdentityNotFoundError,
+        CallerIdentityPermissionError,
+        CallerIdentityReadOnlyError,
+    )
+    errors={"unsupported":CallerCredentialError("CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE"),
+        "invalid":CallerCredentialError("CALLER_CREDENTIAL_REQUEST_INVALID"),"unknown":RuntimeError("credential-sentinel"),
+        "missing":CallerIdentityNotFoundError(),"forbidden":CallerIdentityPermissionError(),"readonly":CallerIdentityReadOnlyError()}
+    service=Mock()
+    service.refresh_for_actor.side_effect=errors[failure]
+    with caplog.at_level("INFO"):
+        response=await refresh_caller_token("bot-1",_request("team"),"owner","owner",service)
+    assert response.status_code==status
+    assert "openapi_caller_refresh_requested" in caplog.text
+    assert "openapi_caller_refresh_failed" in caplog.text
+    assert "credential-sentinel" not in caplog.text+response.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_refresh_partial_outcome_remains_explicit(caplog):
+    from agentclaw.community.adapters.http.openapi_v1.caller_identity.router import (
+        refresh_caller_token,
+    )
+    service=Mock()
+    service.refresh_for_actor.return_value={"bot_id":"bot-1","status":"partial_failure","succeeded":0,"skipped":0,"failed":1,"results":[
+        {"binding_id":1,"caller_workno":"caller","status":"failed","reason":"USER_ASC_REAUTH_REQUIRED","expires_at":None}]}
+    with caplog.at_level("INFO"):
+        response=await refresh_caller_token("bot-1",_request("team"),"owner","owner",service)
+    assert response.data.failed==1
+    assert response.data.status=="partial_failure"
+    assert "status=partial_failure" in caplog.text

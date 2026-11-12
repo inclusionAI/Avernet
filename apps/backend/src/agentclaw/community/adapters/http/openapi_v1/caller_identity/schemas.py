@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CallerCallType(_DocumentedEnum):
@@ -87,3 +86,22 @@ __all__ = [
     "McpCallTypeResult",
     "McpCallTypeUpdate",
 ]
+
+
+class CallerRefreshTarget(BaseModel):
+    """One physical Caller refresh outcome, without credential material."""
+    binding_id: int = Field(description="Selected Caller binding identifier.")
+    caller_workno: str = Field(description="Caller whose stored authorization was used.")
+    status: Literal["succeeded", "skipped", "failed"] = Field(description="Installation outcome.")
+    reason: str | None = Field(default=None, description="Safe skip or failure reason.")
+    expires_at: str | None = Field(default=None, description="Installed Caller token expiry, or null.")
+
+
+class CallerRefreshResult(BaseModel):
+    """Batch results; partial failures remain explicit and no token is returned."""
+    bot_id: str = Field(description="Addressed service Bot.")
+    status: Literal["succeeded", "skipped", "partial_failure"] = Field(description="Aggregate refresh outcome.")
+    succeeded: int = Field(ge=0, description="Bindings successfully updated.")
+    skipped: int = Field(ge=0, description="Bindings skipped by eligibility checks.")
+    failed: int = Field(ge=0, description="Bindings whose refresh failed.")
+    results: list[CallerRefreshTarget] = Field(description="Per-binding refresh outcomes.")

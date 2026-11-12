@@ -2,6 +2,8 @@
 from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
+from .credential import CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE, CallerCredentialError
+
 
 @runtime_checkable
 class ScheduledCallerRefreshProtocol(Protocol):
@@ -19,6 +21,19 @@ class ScheduledCallerRefreshProtocol(Protocol):
         self, *, bot_id: str, owner_user_id: str, entity_id: str, env: str,
     ) -> None: ...
 
+    @abstractmethod
+    def refresh_for_actor(
+        self, *, bot_id: str, actor_id: str, entity_id: str | None = None,
+    ) -> dict:
+        """Authorize the current owner and refresh eligible stored-ASC runtimes.
+
+        Derive owner, environment, Caller and sandbox from trusted records. Return
+        bot_id, succeeded/skipped/failed counts and credential-free per-binding
+        results (binding_id, caller_workno, status, reason, expires_at). Partial
+        target failures are results; authorization/unsupported failures raise.
+        """
+        ...
+
 
 class NoopScheduledCallerRefresh(ScheduledCallerRefreshProtocol):
     """Community profiles do not hold enterprise scheduled credentials."""
@@ -27,3 +42,8 @@ class NoopScheduledCallerRefresh(ScheduledCallerRefreshProtocol):
         self, *, bot_id: str, owner_user_id: str, entity_id: str, env: str,
     ) -> None:
         return None
+
+    def refresh_for_actor(
+        self, *, bot_id: str, actor_id: str, entity_id: str | None = None,
+    ) -> dict:
+        raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)

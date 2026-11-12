@@ -1,8 +1,8 @@
 """Public operation admission table; re-exported by admission."""
 
-from .admission_modes import AdmissionMode
 from .admission_account_routes import ACCOUNT_ADMISSION
 from .admission_genome_routes import GENOME_ADMISSION
+from .admission_modes import AdmissionMode
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
@@ -285,6 +285,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/mcps",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/caller-token/refresh"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/caller-context",
