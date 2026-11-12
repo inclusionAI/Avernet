@@ -32,7 +32,9 @@ export function localSkillUploadErrorMessage(payload: unknown): string {
   if (payload && typeof payload === 'object' && 'data' in payload) {
     const data = payload.data;
     if (data && typeof data === 'object' && 'reason' in data && typeof data.reason === 'string') {
-      return messages[data.reason] ?? 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
+      return Object.prototype.hasOwnProperty.call(messages, data.reason)
+        ? messages[data.reason]
+        : 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';
     }
   }
   return 'Skill 上传失败，请检查目录和 SKILL.md 后重试。';

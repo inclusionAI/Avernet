@@ -142,6 +142,8 @@ export function CapabilityPickerModal({
       if (files.length) {
         const skill = await onUploadFolder(files);
         setSelected((current) => [...new Set([...current, skill.id])]);
+      } else {
+        setUploadError('所选目录没有可上传的文件，请确认目录包含 SKILL.md。');
       }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {

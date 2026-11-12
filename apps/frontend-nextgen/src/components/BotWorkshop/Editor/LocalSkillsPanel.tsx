@@ -2,6 +2,9 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Input } from '@/components/ui/Input';
 import type { BotEditorSkill } from '@/domain/botEditor';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { isLocalSkillPackageError, localSkillUploadErrorMessage } from './localSkillUploadErrors';
 import { useRef, useState } from 'react';
 export function LocalSkillsPanel({
   skills,
@@ -20,6 +23,7 @@ export function LocalSkillsPanel({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -41,12 +45,23 @@ export function LocalSkillsPanel({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) void run(() => onUpload(file)).catch(() => undefined);
+          if (file) {
+            setUploadError('');
+            void run(() => onUpload(file)).catch((error: unknown) => {
+              if (error instanceof BackendRequestError && isLocalSkillPackageError(error.data)) {
+                if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
+                setUploadError(localSkillUploadErrorMessage(error.data));
+              } else if (!(error instanceof BackendRequestError) && !(error instanceof Error && error.name === 'AceLoginRedirectError')) {
+                setUploadError('Skill 上传失败，请检查网络后重试。');
+              }
+            });
+          }
         }}
       />
       <Button variant="outline" size="sm" disabled={!editable || busy} onClick={() => input.current?.click()}>
         {busy ? '处理中…' : '上传 / 替换 ZIP'}
       </Button>
+      {uploadError ? <p role="alert" className="text-sm text-destructive">{uploadError}</p> : null}
       {skills.map((skill) => (
         <div key={skill.id} className="flex items-center gap-2 rounded-md border border-border p-2">
           <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
