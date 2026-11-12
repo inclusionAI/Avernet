@@ -1,5 +1,6 @@
 import type { BotCopyInput, BotCreateAuthorization, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
+import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -42,6 +43,9 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
   // auth_required 路径:dst bot_id 暂存于此。submit 时不立刻起 detail-wait(避免 auth 前 404 轮询),
   // 等 AgentPass 授权完成(AGENT_LICENSE_CLOSE)再把 ref 灌进 pendingIssuedBotId 起 detail-wait。
   const pendingAuthBotIdRef = useRef<string>();
+  const pendingAvatarRef = useRef<string>();
+  const callbacksRef = useRef({ load, onClose });
+  callbacksRef.current = { load, onClose };
 
   // AgentPass 授权页 postMessage 桥(主壳不替 nextgen 清 authorization,nextgen 自己接):
   //   AGENT_LICENSE_CONFIRM = 授权提交成功(auth-done 信号,不改变状态)
@@ -87,13 +91,25 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
       }
       if (!active || terminal) return;
       if (bot) {
+        const avatar = pendingAvatarRef.current;
+        let avatarFailed = false;
+        if (avatar) {
+          try {
+            await botAvatarService.save(pendingIssuedBotId, avatar);
+          } catch {
+            avatarFailed = true;
+          }
+        }
+        if (!active || terminal) return;
         terminal = true;
+        pendingAvatarRef.current = undefined;
         setPendingIssuedBotId(undefined);
         setAuthorization(undefined);
         setCopying(false);
-        onClose();
-        toast.success(`${bot.name} 已复制`);
-        await load();
+        callbacksRef.current.onClose();
+        if (avatarFailed) toast.warning(`${bot.name} 已复制，但头像未保存，请在编辑中重试`);
+        else toast.success(`${bot.name} 已复制`);
+        await callbacksRef.current.load();
         return;
       }
       // 未查到(404):5s 后再发下一轮。
@@ -107,12 +123,13 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
     const timeout = window.setTimeout(() => {
       if (active && !terminal) {
         terminal = true;
+        pendingAvatarRef.current = undefined;
         setPendingIssuedBotId(undefined);
         setAuthorization(undefined);
         setCopying(false);
-        onClose();
-        toast.warning('新 Bot 仍在创建中,请稍后刷新查看');
-        void load();
+        callbacksRef.current.onClose();
+        toast.warning('复制结果和头像状态尚未确认，请先刷新查看，避免重复复制');
+        void callbacksRef.current.load();
       }
     }, 60_000);
     return () => {
@@ -121,11 +138,12 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
       if (pendingTimer) window.clearTimeout(pendingTimer);
       window.clearTimeout(timeout);
     };
-  }, [pendingIssuedBotId, load, onClose]);
+  }, [pendingIssuedBotId]);
 
   const submitCopy = useCallback(
     async (input: BotCopyInput) => {
       setCopying(true);
+      pendingAvatarRef.current = input.avatarUrl;
       try {
         const result = await botWorkshopService.copyBot(input);
         if (result.type === 'authorization_required') {
@@ -145,6 +163,7 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
         toast.success('复制已提交,正在创建新 Bot');
         setPendingIssuedBotId(result.botId);
       } catch (error) {
+        pendingAvatarRef.current = undefined;
         setCopying(false);
         // httpClient 已把默认提示 enqueue 进 errorNotifyStore(由顶层观察者兜底发一条),
         // 此处 hook 自己再 toast.error 会重复(两条相同中文)。catch 内按 toastKey 撤掉默认那条,
@@ -160,6 +179,7 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
   );
 
   const cancelAuthorization = useCallback(() => {
+    pendingAvatarRef.current = undefined;
     setAuthorization(undefined);
     setPendingIssuedBotId(undefined);
     setCopying(false);

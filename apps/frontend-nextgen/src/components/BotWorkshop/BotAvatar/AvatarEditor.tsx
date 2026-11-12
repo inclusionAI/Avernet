@@ -2,9 +2,10 @@ import { notifyError } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { generateBotAvatarBatch } from '@/services/botWorkshop/botAvatarGenerator';
 import { ImageUp, RefreshCw } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { prepareAvatar } from './prepareAvatar';
 
-const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
+export type AvatarProcessingStatus = 'idle' | 'processing' | 'failed';
 export interface BotAvatarEditorProps {
   value: string;
   onChange: (url: string) => void;
@@ -16,28 +17,29 @@ export interface BotAvatarEditorProps {
   extraActions?: React.ReactNode;
   /** 编辑器宿主浮层（上传/AIGC 等）开合上报；宿主据此抑制外层 Popover/Dialog 的外点关闭连坐。 */
   onOverlayOpenChange?: (open: boolean) => void;
+  onProcessingChange?: (status: AvatarProcessingStatus) => void;
 }
-export default function AvatarEditor({ value, onChange, seed, disabled, hideUpload, extraActions }: BotAvatarEditorProps) {
+export default function AvatarEditor({ value, onChange, seed, disabled, hideUpload, extraActions, onProcessingChange }: BotAvatarEditorProps) {
   const [batch, setBatch] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const generation = useRef(0);
   const variants = useMemo(() => generateBotAvatarBatch(seed, batch), [seed, batch]);
+  useEffect(() => () => { generation.current += 1; }, []);
 
-  const handleUpload = (file?: File) => {
+  const handleUpload = async (file?: File) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      notifyError('请选择图片文件');
-      return;
+    const current = ++generation.current;
+    onProcessingChange?.('processing');
+    try {
+      const result = await prepareAvatar(file);
+      if (generation.current !== current) return;
+      onChange(result);
+      onProcessingChange?.('idle');
+    } catch (error) {
+      if (generation.current !== current) return;
+      onProcessingChange?.('failed');
+      notifyError(error instanceof Error ? error.message : '头像处理失败，请重新选择');
     }
-    if (file.size > MAX_AVATAR_SIZE) {
-      notifyError('头像图片不能超过 2 MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onerror = () => notifyError('头像读取失败，请重新选择');
-    reader.onload = () => {
-      if (typeof reader.result === 'string') onChange(reader.result);
-    };
-    reader.readAsDataURL(file);
   };
 
   return (
@@ -51,7 +53,7 @@ export default function AvatarEditor({ value, onChange, seed, disabled, hideUplo
         <p className="m-0 text-[10px] leading-4 text-muted-foreground">
           支持从下方候选里挑选，或上传/生成新头像；
           <br />
-          支持常见图片格式，最大 2 MB
+          支持 PNG、JPEG、GIF、WebP，最大 2 MB；大图会缩小，动态图可能变为静态
         </p>
       </div>
       <div className="grid grid-cols-4 gap-2">
@@ -63,7 +65,7 @@ export default function AvatarEditor({ value, onChange, seed, disabled, hideUplo
             disabled={disabled}
             aria-label={`选择头像 ${i + 1}`}
             className="h-auto p-1"
-            onClick={() => onChange(url)}
+            onClick={() => { generation.current += 1; onChange(url); onProcessingChange?.('idle'); }}
           >
             <img src={url} alt="" className="size-12" />
           </Button>
@@ -87,12 +89,12 @@ export default function AvatarEditor({ value, onChange, seed, disabled, hideUplo
             <input
               ref={uploadRef}
               type="file"
-              accept="image/*"
+              accept="image/png,image/jpeg,image/gif,image/webp"
               aria-label="上传 Bot 头像"
               className="sr-only"
               disabled={disabled}
               onChange={(event) => {
-                handleUpload(event.target.files?.[0]);
+                void handleUpload(event.target.files?.[0]);
                 event.target.value = '';
               }}
             />

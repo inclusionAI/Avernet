@@ -55,6 +55,7 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
@@ -547,6 +548,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LockNotHeldError: (404, "Not found"),
     LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
+    AvatarTooLargeError: (400, "Avatar does not fit in Bot metadata"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
     BotQuotaExceededError: (409, "Bot quota exceeded for this Space"),

@@ -386,3 +386,18 @@ class TestSyncBotToBcn:
 
         # BCN service should not be called
         mock_bcn_service.onboard_bot.assert_not_called()
+
+
+def test_oversized_avatar_preserves_metadata_and_skips_side_effects():
+    from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
+
+    repo = Mock()
+    repo.get_by_id_and_owner.return_value = {
+        'bot_id': 'b', 'owner_id': 'u', 'ext': {'note': '中' * 9000},
+    }
+    service = _make_bot_service(repository=repo)
+    with patch.object(service, '_sync_bot_to_bcn') as sync:
+        with pytest.raises(AvatarTooLargeError):
+            service.update_bot('b', 'u', ext={'avatar_url': 'data:image/png;base64,' + 'a' * 24000})
+    repo.update_by_owner.assert_not_called()
+    sync.assert_not_called()

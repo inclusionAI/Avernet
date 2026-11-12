@@ -6,7 +6,8 @@ import { Textarea } from '@/components/ui/Textarea';
 import type { BotCopyInput, BotCreateSpace } from '@/services/botWorkshop';
 import { cn } from '@/utils/cn';
 import type React from 'react';
-import AvatarEditor from '../BotAvatar/AvatarEditor';
+import { useState } from 'react';
+import AvatarEditor, { type AvatarProcessingStatus } from '../BotAvatar/AvatarEditor';
 
 interface CopyBotFormFieldsProps {
   values: BotCopyInput;
@@ -37,12 +38,13 @@ export const CopyBotFormFields: React.FC<CopyBotFormFieldsProps> = ({
   onCancel,
   onSubmit,
 }) => {
+  const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
   const nameHasInvalidCharacter = values.name.includes('@');
   // 锁定字段只读展示:服务模式从源 Bot 继承,开关只显示状态。
   const sourceSpace = sourceSpaces.find((space) => space.id === values.spaceId);
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" onSubmit={(event) => { if (avatarStatus !== 'idle') event.preventDefault(); else onSubmit(event); }}>
       <div className="space-y-4">
         <label className="block space-y-2 text-xs font-medium text-foreground">
           <span className="flex items-center justify-between gap-2">
@@ -84,6 +86,7 @@ export const CopyBotFormFields: React.FC<CopyBotFormFieldsProps> = ({
         <div className="space-y-2 text-xs font-medium text-foreground">
           <span className="block">Bot 头像(默认继承自源 Bot,可修改)</span>
           <AvatarEditor
+            onProcessingChange={setAvatarStatus}
             value={values.avatarUrl ?? ''}
             seed={values.name.trim() || 'source-bot'}
             onChange={(avatarUrl) =>
@@ -148,7 +151,7 @@ export const CopyBotFormFields: React.FC<CopyBotFormFieldsProps> = ({
           <Button type="button" variant="secondary" disabled={copying} onClick={onCancel}>
             取消
           </Button>
-          <Button type="submit" loading={copying}>
+          <Button type="submit" loading={copying} disabled={copying || avatarStatus !== 'idle'}>
             确认复制
           </Button>
         </div>
