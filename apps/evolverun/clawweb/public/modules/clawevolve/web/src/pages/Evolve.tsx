@@ -1,3 +1,4 @@
+import { CaseSessionSource } from './CaseSessionSource'
 import { EvolveCapabilitiesProvider, useEvolveHostCapabilities } from '../features/evolve/host-capabilities'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
@@ -2854,6 +2855,8 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
     badCount?: number
     items?: Array<{
       caseId?: string
+      sourceSessionId?: string
+      sourceSessionKey?: string
       type?: 'good' | 'bad' | string
       summary?: string
     }>
@@ -3090,6 +3093,7 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
                 <span className="shrink-0 text-[9px] text-gray-400">诊断样本</span>
               </div>
               {item.summary && <p className="mt-1.5 text-[11px] leading-5 text-gray-600">{item.summary}</p>}
+              <CaseSessionSource sourceSessionId={item.sourceSessionId} sourceSessionKey={item.sourceSessionKey} />
             </div>
           })}
         </div>

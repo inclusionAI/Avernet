@@ -1107,6 +1107,7 @@ def _session_row_from_store_candidate(candidate: _SessionStoreCandidate) -> Sess
         first_question = ""
     return SessionRow(
         session_id=candidate.session_id,
+        session_key=candidate.store_key,
         path=str(candidate.path),
         bot_id="",
         created_at=candidate.started_at.isoformat().replace("+00:00", "Z"),
@@ -1135,6 +1136,7 @@ def _session_locator_from_store_candidate(
 ) -> SessionRow:
     return SessionRow(
         session_id=candidate.session_id,
+        session_key=candidate.store_key,
         path=str(candidate.path),
         bot_id="",
         created_at=candidate.started_at.isoformat().replace("+00:00", "Z"),
@@ -1151,6 +1153,7 @@ def _session_locator_from_store_candidate(
 
 def _merge_store_metadata(row: SessionRow, candidate: _SessionStoreCandidate) -> SessionRow:
     row.session_id = candidate.session_id or row.session_id
+    row.session_key = candidate.store_key or row.session_key
     row.path = str(candidate.path)
     row.created_at = candidate.started_at.isoformat().replace("+00:00", "Z")
     raw_label = row.first_question or candidate.label
