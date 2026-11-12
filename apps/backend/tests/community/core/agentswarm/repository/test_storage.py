@@ -106,10 +106,11 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
-def _mk_run(run_id=None, tenant=TENANT_A) -> dm.Run:
+def _mk_run(run_id=None, tenant=TENANT_A, owner_id: str = "") -> dm.Run:
     return dm.Run(
         run_id=dm.RunId(run_id or uuid.uuid4().hex),
         tenant=tenant,
+        owner_id=owner_id,
         goal="test goal",
         agent_catalog=(
             dm.AgentSpec(name="r1", role="research"),
@@ -387,6 +388,27 @@ class TestRunRepository:
         active_page = run_repo.list_page(TENANT_A, status=dm.RunStatus.RUNNING, page=1, page_size=10)
         assert active_page.total == 3
         assert all(r.status == dm.RunStatus.RUNNING for r in active_page.items)
+
+    def test_list_page_scopes_to_one_owner(self, run_repo):
+        # A tenant is a group: listing by tenant alone would show one member
+        # another member's prompts.
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-2"))
+
+        mine = run_repo.list_page(TENANT_A, page=1, page_size=10, owner_id="staff-1")
+        assert mine.total == 2
+        assert all(r.owner_id == "staff-1" for r in mine.items)
+
+        theirs = run_repo.list_page(TENANT_A, page=1, page_size=10, owner_id="staff-2")
+        assert theirs.total == 1
+
+    def test_owner_filter_is_optional_for_internal_callers(self, run_repo):
+        # The reaper and other service-plane readers still need a tenant-wide
+        # view, so an omitted owner must not narrow anything.
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-2"))
+        assert run_repo.list_page(TENANT_A, page=1, page_size=10).total == 2
 
     def test_list_page_tenant_isolated(self, run_repo):
         run_repo.create(_mk_run(tenant=TENANT_A))

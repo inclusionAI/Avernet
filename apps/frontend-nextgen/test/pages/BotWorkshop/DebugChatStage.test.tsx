@@ -43,7 +43,9 @@ jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
 }));
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.mocked(botSessionService.listSessions).mockResolvedValue({ ok: true, data: [] });
+  jest.mocked(botSessionService.listSessions).mockResolvedValue({ ok: true, data: [{
+    sessionId: 'debug-session', botId: 'bot', title: 'Debug', messageCount: 0, gmtCreate: '', gmtModified: '',
+  }] });
   jest.mocked(useBotChat).mockReturnValue({
     chat: { messages: [], isRequesting: false }, connectionStatus: 'disconnected', send: jest.fn(), stop: jest.fn(),
   } as unknown as ReturnType<typeof useBotChat>);
@@ -64,10 +66,11 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
   await waitFor(() => expect(botSessionService.listSessions).toHaveBeenCalledWith(
     expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), 'viewer',
   ));
+  expect(await screen.findByTestId('composer')).toBeInTheDocument();
   expect(useBotChat).toHaveBeenLastCalledWith(expect.objectContaining({ runtimeStage: expected }),
-    null, undefined, expect.any(Function), 'viewer');
-  expect(screen.getByTestId('composer')).toBeInTheDocument();
+    expect.objectContaining({ sessionId: 'debug-session' }), undefined, expect.any(Function), 'viewer');
   expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
-    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }), null, 'viewer', expect.any(Function), expected,
+    expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }),
+    expect.objectContaining({ sessionId: 'debug-session' }), 'viewer', expect.any(Function), expected,
   );
 });

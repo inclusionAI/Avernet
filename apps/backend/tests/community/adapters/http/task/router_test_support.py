@@ -190,7 +190,10 @@ class _StubService:
             current_task_spec=node.task_spec,
         )
 
-    async def search_bots(self, *, query, task_id, node_id, relay_token):
+    async def search_bots(
+        self, *, query, task_id, node_id, relay_token, viewer_actor_type=None,
+        viewer_actor_id=None, visibility=None
+    ):
         self.callback.calls.append(("search_bots", (query, task_id, node_id, relay_token)))
         return [
             BotCandidate(

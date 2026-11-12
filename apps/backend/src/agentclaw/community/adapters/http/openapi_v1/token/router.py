@@ -41,8 +41,15 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_a
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolverProtocol,
+)
+from agentclaw.community.core.bot_management.errors import (
+    BotAddressConflictError,
+    BotAddressNotFoundError,
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 
 token_router = APIRouter(
@@ -85,7 +92,14 @@ async def get_bot_iam_token(
     bot_id: BotIdPath,
     request: Request,
     user_id: UserIdDep,
-    owner_id: str | None = Query(default=None, min_length=1, description="Exact Bot owner for an explicit friend IAM request; defaults to the acting user."),
+    owner_id: str | None = Query(
+        default=None,
+        min_length=1,
+        description=(
+            "Bot entity, current-owner or historical-owner locator for an "
+            "explicit friend IAM request; defaults to the acting user."
+        ),
+    ),
     f_user_id: FriendUserIdQuery = None,
     session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
     session_key: str | None = Query(
@@ -111,7 +125,7 @@ async def get_bot_iam_token(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
+    bot_addresses: BotAddressResolverProtocol = Injected(BotAddressResolverProtocol),
 ) -> Envelope[IamToken]:
     """Return the IAM token and prepare Caller identity when the Bot requires it."""
     normalized_entity_id = (entity_id or "").strip() or None
@@ -128,12 +142,22 @@ async def get_bot_iam_token(
             relay=relay, friendships=friendships, expert=expert,
         )
         stage = RuntimeStage(resolved_stage)
-        # The exact owner address was already verified; do not let a second
-        # client-supplied entity selector switch the token installation target.
-        bot = await asyncio.to_thread(bot_repo.get_by_id_and_owner, bot_id, owner_id)
-        if not bot or not bot.get("entity_id"):
+        # The friend locator was already authorized; resolve it through the
+        # transfer-aware address seam and do not let a second client-supplied
+        # entity selector switch the token installation target.
+        try:
+            bot = await asyncio.to_thread(
+                bot_addresses.resolve,
+                bot_id=bot_id,
+                legacy_owner_id=owner_id,
+            )
+        except (
+            BotAddressConflictError,
+            BotAddressNotFoundError,
+            BotLookupAmbiguousError,
+        ):
             raise EngineResourceNotFoundError("friend Bot identity is unavailable")
-        normalized_entity_id = str(bot["entity_id"])
+        normalized_entity_id = bot.entity_id
         friend_kwargs = {"friend_user_id": f_user_id, "session_key": session_id}
     else:
         # ``session_id`` was the first OpenAPI spelling and remains compatible.

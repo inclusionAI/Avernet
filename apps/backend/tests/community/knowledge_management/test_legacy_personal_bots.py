@@ -75,6 +75,7 @@ def test_legacy_identity_can_read_grant_state_and_submit_grant(personal):
         owner_id="owner",
         granted=True,
         expected_revision=0,
+        bot_name="Real bot",
     )
     row = personal.service.authorized_bots(**ARGS)["items"][0]
     assert row["bot_available"] and row["bot_name"] == "Real bot"

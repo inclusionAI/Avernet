@@ -9,6 +9,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 
 // Lab 系页面统一 mock @umijs/max(esbuild Buffer 不变量 + 页内有 history.push 跳对话/协作群)。
 // hoisted factory 先于 @jest/globals 绑定求值,须用全局 jest(同 LabLandingPage.test 先例)。
+jest.mock('@/components/Workspace/TaskPanelAssetBoundary', () => ({
+  TaskPanelAssetBoundary: require('../../helpers/taskPanelHost').TaskPanelTestAssetBoundary,
+}));
+
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
   useLocation: () => ({ pathname: '/lab/tasks' }),

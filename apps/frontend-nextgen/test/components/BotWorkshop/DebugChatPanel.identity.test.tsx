@@ -73,11 +73,13 @@ it.each(['bot_03e6abae', 'tc-bot:888888', 'human_888888'])(
     await waitFor(() => expect(sessions).toHaveBeenCalledWith(expect.objectContaining({ ownerId: '197262' }), '197262'));
     expect(models).toHaveBeenCalledWith(expect.any(Object), '197262');
     expect(chat).toHaveBeenLastCalledWith(expect.any(Object), null, undefined, expect.any(Function), '197262');
-    expect(jest.mocked(useBotCapabilitySets)).toHaveBeenCalledWith(expect.any(Object), '197262');
-    expect(screen.getByTestId('composer')).toHaveAttribute('data-user-id', '197262');
-    expect(useBotSessionFileUpload).toHaveBeenLastCalledWith('default', null, '197262', '197262');
+    expect(screen.queryByTestId('composer')).not.toBeInTheDocument();
+    expect(useBotSessionFileUpload).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.any(Object), '197262', 'Bot 工坊调试'));
+    expect(await screen.findByTestId('composer')).toHaveAttribute('data-user-id', '197262');
+    expect(jest.mocked(useBotCapabilitySets)).toHaveBeenCalledWith(expect.any(Object), '197262');
+    expect(useBotSessionFileUpload).toHaveBeenLastCalledWith('default', 's1', '197262', '197262');
     await act(async () => useWorkspaceStore.setState({ activeIdentityId: 'another-external-bot' }));
     expect(sessions).toHaveBeenCalledTimes(1);
     expect(models).toHaveBeenCalledTimes(1);
@@ -122,4 +124,41 @@ it.each(['bot', 'owner', 'viewer', 'stage', 'session'] as const)('changing %s re
   }
   expect(screen.getByLabelText('调试草稿')).toHaveValue('');
   expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+
+it('waits for the initial session before mounting the input and its file feature', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof botSessionService.listSessions>>) => void;
+  sessions.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  render(<DebugChatPanel bot={bot} authenticatedUserId="viewer" />);
+  expect(screen.getByText('加载调试会话…')).toBeVisible();
+  expect(screen.queryByTestId('composer')).not.toBeInTheDocument();
+  expect(useBotSessionFileUpload).not.toHaveBeenCalled();
+  await act(async () => finish({ ok: true, data: [{ sessionId: 'ready', botId: bot.id,
+    title: 'Debug', messageCount: 0, gmtCreate: '', gmtModified: '' }] }));
+  expect(await screen.findByTestId('composer')).toHaveAttribute('data-user-id', 'viewer');
+  expect(useBotSessionFileUpload).toHaveBeenLastCalledWith(bot.id, 'ready', 'viewer', bot.ownerId);
+});
+
+it('keeps the mounted input and unsent draft while refreshing an existing session', async () => {
+  const current = { sessionId: 'ready', botId: bot.id, title: 'Debug', messageCount: 0,
+    gmtCreate: '', gmtModified: '' };
+  sessions.mockResolvedValueOnce({ ok: true, data: [current] });
+  render(<DebugChatPanel bot={bot} authenticatedUserId="viewer" />);
+  await waitFor(() => expect(chat.mock.calls.at(-1)?.[1]?.sessionId).toBe('ready'));
+  const input = await screen.findByLabelText('调试草稿');
+  fireEvent.change(input, { target: { value: 'keep this unsent draft' } });
+  const cancel = jest.mocked(useBotSessionFileUpload).mock.results.at(-1)!.value.cancelAll;
+  (cancel as jest.Mock).mockClear();
+  let finish!: (value: Awaited<ReturnType<typeof botSessionService.listSessions>>) => void;
+  sessions.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: '刷新调试会话' }));
+  expect(screen.getByText('加载调试会话…')).toBeVisible();
+  expect(screen.getByLabelText('调试草稿')).toBe(input);
+  expect(input).toHaveValue('keep this unsent draft');
+  expect(cancel).not.toHaveBeenCalled();
+  await act(async () => finish({ ok: true, data: [current] }));
+  expect(screen.getByLabelText('调试草稿')).toBe(input);
+  expect(input).toHaveValue('keep this unsent draft');
+  expect(cancel).not.toHaveBeenCalled();
 });

@@ -3,6 +3,7 @@ import { useTaskExecution } from '@/hooks/useTaskExecution';
 import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
 import { executeTaskService } from '@/services/tasks/taskService';
 import { useTaskStore } from '@/stores/taskStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/hooks/useWorkflowList', () => ({
@@ -64,6 +65,7 @@ function taskRecord(mode?: 'centralized' | 'relay') {
 describe('useTaskExecution relay bootstrap', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    useTaskSidePanelStore.getState().resetAll();
     mockedExecute.mockResolvedValue(taskRecord('centralized'));
     mockedHasTaskIntent.mockResolvedValue({ ok: true, data: false });
     useTaskStore.getState().reset();
@@ -233,6 +235,7 @@ describe('useTaskExecution relay bootstrap', () => {
 
     expect(submitPanelMessage).toHaveBeenCalledWith(expect.stringContaining('<AixUI type="panel"'));
     expect(submitTaskExecutionMessage).not.toHaveBeenCalled();
+    expect(useTaskSidePanelStore.getState()).toMatchObject({ activeTaskId: null, taskPanelOpenIntentTaskId: 'task-1' });
   });
 
   it('relay 任务通过专用出口触发当前 holder 执行首棒', async () => {
@@ -257,6 +260,7 @@ describe('useTaskExecution relay bootstrap', () => {
       'bot-main',
     );
     expect(submitPanelMessage).not.toHaveBeenCalled();
+    expect(useTaskSidePanelStore.getState()).toMatchObject({ activeTaskId: null, taskPanelOpenIntentTaskId: 'task-1' });
   });
 });
 
@@ -264,6 +268,7 @@ describe('useTaskExecution selections（多胶囊叠加态）', () => {
   const resolveWorkflowCommand = jest.requireMock('@/services/tasks/taskService').resolveWorkflowCommand as jest.Mock;
   beforeEach(() => {
     jest.clearAllMocks();
+    useTaskSidePanelStore.getState().resetAll();
     resolveWorkflowCommand.mockResolvedValue({ command: 'cmd-x', title: '工作流X' });
     mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
   });

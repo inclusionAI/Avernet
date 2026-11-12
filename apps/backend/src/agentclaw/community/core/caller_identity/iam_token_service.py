@@ -7,6 +7,7 @@ import asyncio
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_UPDATE_FAILED,
+    CALLER_TARGET_NOT_FOUND,
     CallerCredentialError,
     CallerToken,
 )
@@ -128,6 +129,13 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
                 return CallerIamTokenOutcome(iam_token=iam_token)
 
+            if context.shared_teclaw_runtime:
+                return await self._refresh_shared_teclaw(
+                    iam_token=iam_token, caller_user_id=identity.staffId,
+                    bot_id=bot_id, owner_id=context.owner_id, entity_id=context.entity_id,
+                    stage=stage, publish_id=publish_id, session_key=session_key,
+                )
+
             if friend_user_id is not None:
                 # The delivery boundary verified friendship and session ownership.
                 # Refresh only this caller's chat instance, never the owner's
@@ -210,6 +218,52 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             )
             return CallerIamTokenOutcome(iam_token="", error=CALLER_OUTBOUND_UPDATE_FAILED)
         logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
+        return CallerIamTokenOutcome(iam_token=iam_token)
+
+    async def _refresh_shared_teclaw(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_id: str,
+        entity_id: str,
+        stage: CallerIdentityStage,
+        publish_id: int | None,
+        session_key: str | None,
+    ) -> CallerIamTokenOutcome:
+        request = RuntimeBindingRequest(
+            bot_id=bot_id, owner_id=owner_id, actor_user_id=caller_user_id,
+            stage=stage.value,
+        )
+        fields = {
+            "bot_id": bot_id, "owner_id": owner_id, "entity_id": entity_id,
+            "caller_user_id": caller_user_id, "stage": stage.value, "session_key": session_key,
+        }
+        try:
+            target = await asyncio.to_thread(self._runtime_bindings.resolve, request)
+        except RuntimeBindingResolutionError:
+            logger.warning("caller_shared_target_rejected fields=%s reason=target_unavailable", fields)
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from None
+        fields.update(binding_id=target.binding_id, source=target.source.value)
+        logger.info("caller_shared_target_selected fields=%s", fields)
+        validation = dict(
+            bot_id=bot_id, owner_id=owner_id, caller_user_id=caller_user_id,
+            binding_id=target.binding_id, stage=stage.value, session_key=session_key,
+        )
+        await asyncio.to_thread(self._session_validator.validate_owned_shared_session, **validation)
+        caller_token = await asyncio.to_thread(
+            self._caller_identity.exchange_caller_token,
+            iam_token=iam_token, caller_user_id=caller_user_id,
+            bot_id=bot_id, owner_user_id=owner_id, token_provider=self._token_provider,
+        )
+        await self._exchange_target(
+            iam_token=iam_token, caller_user_id=caller_user_id, bot_id=bot_id,
+            owner_id=owner_id, stage=stage, publish_id=publish_id, entity_id=entity_id,
+            binding_id=target.binding_id, is_test_exchange=False,
+            caller_token=caller_token, session_key=session_key,
+        )
+        logger.info("caller_shared_target_refresh_succeeded fields=%s", fields)
         return CallerIamTokenOutcome(iam_token=iam_token)
 
     async def _exchange_target(

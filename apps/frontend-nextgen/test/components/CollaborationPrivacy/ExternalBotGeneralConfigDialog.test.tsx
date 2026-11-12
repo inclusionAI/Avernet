@@ -16,6 +16,7 @@ jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
     getGeneralConfigPublishApprovalEnabled: () => ({ value: false }),
     getRestrictedPublicationScopeEnabled: () => ({ value: false }),
+    getPublicBotBackendEnabled: () => true,
   }),
 }));
 

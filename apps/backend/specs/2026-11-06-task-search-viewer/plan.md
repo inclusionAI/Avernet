@@ -51,21 +51,23 @@ pair at the public DTO and service boundary so direct callers cannot half-scope.
 Do not silently drop a requested viewer in an adapter that cannot implement it.
 
 ## Behavior matrix
+
+The optional `visibility` field accepts a comma-delimited subset of `public` and
+`protected`. `SemanticKeywordBotDiscover.search_full_query` is the single candidate
+retrieval path whether a viewer is specified or not; it converts that request into
+both BCSFuse recommendation filters and BCS catalog filters. When omitted, the
+default catalog scope is `public,protected`.
+
 | Mode | Recommendation filters | BCS catalog filters |
 | --- | --- | --- |
-| omitted (unchanged) | runtime_state=[online] | visibility=[public], user_visibility=[public,protected,private], status=online; current tc_bot behavior |
-| bot viewer | availability=[public,protected], runtime_state=[online,offline] | visibility=[public,protected], viewer_actor_type=bot, viewer_actor_id supplied; product tc_bot behavior |
-| human viewer | availability=[public,protected,private], runtime_state=[online] | user_visibility=[public,protected], viewer_actor_type=human, viewer_actor_id supplied; existing BCS Human defaults |
+| visibility omitted | runtime_state=[online] | visibility=[public,protected], user_visibility=[public,protected,private], status=online (`_DISPATCH_CATALOG_FILTERS`) |
+| bot viewer, visibility omitted | runtime_state=[online] | visibility=[public,protected], user_visibility=[public,protected,private], status=online, viewer_actor_type=bot, viewer_actor_id supplied |
+| human viewer, visibility omitted | runtime_state=[online] | visibility=[public,protected], user_visibility=[public,protected,private], status=online, viewer_actor_type=human, viewer_actor_id supplied |
+| visibility specified | availability=[selected visibility], runtime_state=[online] | visibility=[selected visibility], user_visibility=[selected visibility], status=online, viewer pair retained when supplied |
 
-Delegate explicit perspectives to BotDiscoverService's existing viewer derivation
-instead of copying that matrix into a second policy implementation. In particular,
-call search_by_keyword with runtime_state="online" and the explicit viewer pair;
-do not also pass _DISPATCH_CATALOG_FILTERS, which would override the viewer scope.
-Preserve _runtime_ready and maximum five returned task candidates in all modes.
-BCS keeps authority over catalog membership and relation semantics. The viewer
-pair is a query perspective, not proof of caller identity or permission to execute.
-Existing internal-network admission and relay-generation checks remain mandatory.
-No changes to task/node/assignee fields, event branches, report fields or S1-S6.
+The selected visibility values are the only visibility scope in this path. They do
+not create a second persistence protocol, do not alter the node executor, and do
+not bypass holder or relay-token checks.
 
 ## Files and seams
 - apps/backend/src/agentclaw/community/core/task/domain/search_viewer.py:

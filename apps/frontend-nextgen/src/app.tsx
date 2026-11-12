@@ -8,7 +8,6 @@ import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
 import { useGatewayLoginRedirect } from '@/hooks/useGatewayLoginRedirect';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { history } from '@umijs/max';
-import { useTaskSessionNavigationObserver } from '@/pages/Workspace/Chat/hooks/taskSessionNavigation';
 import React from 'react';
 
 extendCapabilities(appExtension.capabilities);
@@ -72,12 +71,6 @@ function ErrorNotifyObserver() {
   return null;
 }
 
-/** 任务副屏 V2 会话联动观察者(task-panel-v2 P4):无 UI,消费 pendingNavigation 跳会话 + 时间窗消息定位。 */
-function TaskSessionNavigationObserver() {
-  useTaskSessionNavigationObserver();
-  return null;
-}
-
 export function rootContainer(container: React.ReactNode) {
   return React.createElement(
     React.Fragment,
@@ -85,7 +78,6 @@ export function rootContainer(container: React.ReactNode) {
     container,
     React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
-    React.createElement(TaskSessionNavigationObserver),
     React.createElement(CollaborationGroupLaunchObserver),
     React.createElement(ExternalLoginPromptModal),
     React.createElement(InviteCodeBindingModal),

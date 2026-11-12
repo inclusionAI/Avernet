@@ -9,6 +9,7 @@
  */
 import { getCapabilities } from '@/capabilities';
 import { CollaborationRepairRow } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog/CollaborationRepairRow';
+import { useUserRiskStatus } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus';
 import { FriendApprovalEditor } from '@/components/CollaborationPrivacy/FriendApprovalEditor';
 import { PublicationEditor } from '@/components/CollaborationPrivacy/PublicationEditor';
 import { ScopeViewer } from '@/components/CollaborationPrivacy/ScopeViewer';
@@ -30,9 +31,7 @@ import { useBotPublishApproval } from '@/hooks/useBotPublishApproval';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import type { UseHumanIdentityResult } from '@/hooks/useHumanIdentity';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
-import { history } from '@umijs/max';
 import { Copy, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { useMemo } from 'react';
 
 export interface BotGeneralConfigDialogProps {
   /** BotWorkshop 列表行数据：身份三要素（id / 名称 / 引擎）+ 头像透传；外部 Bot PRD 预留同形复用。 */
@@ -99,22 +98,18 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   const displayId = targetBot?.id ?? bot.id;
   const showPublishApproval =
     getCapabilities().getGeneralConfigPublishApprovalEnabled().value && bot.spaceKind === 'team';
-  const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, showPublishApproval);
-  // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；failed/attention 恢复编辑不在行上展示。
-  const userRiskStatus = useMemo(() => {
-    const { uiState, record } = privacy.userRisk;
-    if (uiState.kind === 'checking' || uiState.kind === 'advancing' || uiState.kind === 'approving') {
-      return {
-        kind: uiState.kind,
-        detailUrl: uiState.kind === 'approving' ? null : record?.detail_url ?? null,
-        onViewApprovalProgress: () => history.push('/ticket-center'),
-      };
-    }
-    return null;
-  }, [privacy.userRisk]);
+  // 分区仍仅团队空间渲染；开关仅服务 Bot 可用——个人 Bot 切到团队空间后无协作者语义，
+  // 禁用置关并提示原因，且不发审批配置请求（后端对非服务 Bot 拒绝）。
+  const publishApprovalEnabled = showPublishApproval && bot.serviceMode === 'service';
+  const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, publishApprovalEnabled);
+  // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；
+  // 行级「刷新状态」双刷（重读风险记录 + 静默重载总览）等派生逻辑见 useUserRiskStatus。
+  const userRiskStatus = useUserRiskStatus(privacy);
   const publishApprovalSection = showPublishApproval ? (
     <PublishApprovalSettings
       checked={publishApproval.required}
+      disabled={!publishApprovalEnabled}
+      notice={publishApprovalEnabled ? undefined : '个人 Bot 暂不支持协作者申请'}
       loading={publishApproval.loading || publishApproval.updating}
       error={publishApproval.error}
       onChange={(checked) => void publishApproval.update(checked)}

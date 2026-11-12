@@ -72,10 +72,8 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
-      {/* 会话左侧活动状态槽(#2990 语义保留 + Coding Bot 2026-11-06 视觉收敛):
-          外层固定 40-54px 缩进区且恒为 14px,标题起点 60px 不随状态切换；
-          AIXCoding 状态在其中渲染 14px DevFlow 图标，默认 13px 对话占位
-          使用更弱的 content-icon，普通 Bot 回复 loading 仍保留原 14px 语义。 */}
+      {/* 会话左侧活动状态槽：标题始终使用固定缩进，因此状态出现/消失不会造成位移；
+          仅在收到 AIXCoding 有效状态或普通 Bot 正在回复时渲染图标，空闲/未知状态留空。 */}
       <ConversationSessionStatus
         botId={session.botId}
         sessionId={session.sessionId}

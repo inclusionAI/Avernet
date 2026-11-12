@@ -31,12 +31,12 @@ export function useBotEditor(
 ) {
   const copyResourcePath = useResourcePathClipboard();
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
-  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
+  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills, ownerId);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
   const skillSetActivation = useSkillSetActivation(botId, setSkillSets, ownerId);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
-  const candidates = useBotEditorCandidates(botId, spaceId);
+  const candidates = useBotEditorCandidates(botId, spaceId, ownerId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
@@ -111,11 +111,11 @@ export function useBotEditor(
     loading,
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
-      act(() => botEditorService.toggleSkill(botId!, skill), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
+      act(() => botEditorService.toggleSkill(botId!, skill, ownerId), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
     deleteSkill: (id: string) =>
       act(
         async () => {
-          await botEditorService.deleteSkill(botId!, id);
+          await botEditorService.deleteSkill(botId!, id, ownerId);
           // 乐观移除卡片，避免静默全量重载期间卡片滞留(~1s)
           setSkills((current) => current.filter((skill) => skill.id !== id));
         },
@@ -123,12 +123,12 @@ export function useBotEditor(
         { silent: true },
       ),
     uploadSkill: async (file: File) => {
-      await botEditorService.uploadSkill(botId!, file);
+      await botEditorService.uploadSkill(botId!, file, ownerId);
       toast.success('Skill 已上传');
       await load();
     },
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
-      act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
+      act(() => botEditorService.setMcpActive(botId!, mcp, active, ownerId), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
       try {

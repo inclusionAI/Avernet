@@ -24,6 +24,8 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
+from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
@@ -693,6 +695,12 @@ class TaskModule(Module):
             )
             bot = None
         return TaskClaimGrantService(bot=bot)
+
+    @singleton
+    @provider
+    @inject
+    def task_panel_manifest_service(self, config: SystemConfigServiceProtocol) -> TaskPanelManifestServiceProtocol:
+        return TaskPanelManifestService(config)
 
     @singleton
     @provider

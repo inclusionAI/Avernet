@@ -292,6 +292,21 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_metadata_locator_candidates(
+        self, pairs: List[tuple[str, str]],
+    ) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+        """At most two live candidates per metadata pair, this tenant/env.
+
+        At most 100 distinct pairs; empty input returns {}. Owner/entity
+        matches (marked by private bool ``_metadata_locator_match``, using
+        database comparison semantics) take precedence over bare-ID candidates;
+        default never falls back to bare ID. The consumer must reject ambiguity and validate any
+        retained BCN reference before accepting a nonmatching locator.
+        This is a display lookup, not an authorization grant.
+        """
+        ...
+
+    @abstractmethod
     def list_bots_by_owner_bot_pairs(
         self,
         pairs: List[tuple[str, str]],

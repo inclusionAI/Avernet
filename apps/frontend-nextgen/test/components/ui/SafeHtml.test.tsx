@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { SafeHtml, sanitizeMarkdownHtml, sanitizeRichHtml } from '@/components/Common/RichContent';
 import { describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { render, screen } from '@testing-library/react';
@@ -103,5 +103,23 @@ describe('SafeHtml richText 模式', () => {
 
     expect(container.querySelector('p')).not.toHaveAttribute('style');
     expect(container.querySelectorAll('h2')).toHaveLength(1);
+  });
+});
+
+describe('host-owned sanitizers', () => {
+
+  it.each([sanitizeMarkdownHtml, sanitizeRichHtml])('removes executable HTML without depending on task assets', (sanitize) => {
+    const html = sanitize('<p onclick="alert(1)">safe</p><script>alert(2)</script><a href="javascript:alert(3)">link</a><iframe src="/x"></iframe>');
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    expect(root.querySelector('p')?.textContent).toBe('safe');
+    expect(root.querySelector('[onclick], script, iframe')).toBeNull();
+    expect(root.querySelector('a')?.hasAttribute('href')).toBe(false);
+  });
+
+  it('keeps rich formatting attributes separate from markdown attributes', () => {
+    const html = '<span class="md" style="color:red" data-secret="x">text</span>';
+    expect(sanitizeMarkdownHtml(html)).toBe('<span class="md">text</span>');
+    expect(sanitizeRichHtml(html)).toBe('<span style="color:red">text</span>');
   });
 });

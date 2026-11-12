@@ -235,9 +235,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         return self._run_repo.get(RunId(run_id), TenantId(tenant))
 
     def list_runs(self, tenant: str, status: RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> RunPage:
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> RunPage:
         return self._run_repo.list_page(
-            TenantId(tenant), status, page, page_size,
+            TenantId(tenant), status, page, page_size, owner_id=owner_id,
         )
 
     async def cancel(self, run_id: str, tenant: str) -> str:

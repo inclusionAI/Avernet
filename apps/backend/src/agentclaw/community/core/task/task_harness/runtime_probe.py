@@ -175,15 +175,23 @@ def _last_message_cursor(messages: Any) -> Any:
         return None
     if not isinstance(last, dict):
         return {"last": str(last), "count": len(messages)}
-    selected = {
+    # Volatile timestamps and a new empty assistant placeholder are not business
+    # progress. Only message payload makes the event semantically observable.
+    payload = {
         key: last.get(key)
         for key in (
-            "id", "message_id", "version", "updated_at", "created_at", "role",
-            "content", "text", "seq",
+            "content", "text", "tool_call", "tool_calls", "tool_result", "result",
         )
+        if last.get(key) not in (None, "", [], {}, "[]", "{}")
+    }
+    if not payload:
+        return None
+    identifiers = {
+        key: last.get(key)
+        for key in ("id", "message_id", "version", "seq")
         if last.get(key) is not None
     }
-    return {"last": selected or last, "count": len(messages)}
+    return {"last": {**identifiers, **payload}, "count": len(messages)}
 
 
 def _join_cursors(*parts: Any) -> str | None:
@@ -198,7 +206,7 @@ def _run_cursor(run: dict[str, Any]) -> Any:
         return None
     return {
         key: run.get(key)
-        for key in ("status", "version", "updated_at", "updated_at_ms", "completed_at")
+        for key in ("status", "version", "completed_at")
         if run.get(key) is not None
     }
 
@@ -210,9 +218,7 @@ def _group_cursor(group: dict[str, Any]) -> Any:
     return {
         "group": {
             key: group.get(key)
-            for key in (
-                "status", "version", "updated_at", "updated_at_ms", "state",
-            )
+            for key in ("status", "version", "state")
             if group.get(key) is not None
         },
         "session": {
@@ -367,7 +373,7 @@ class TaskRuntimeLivenessProbe:
                 },
             )
         cursor = _join_cursors(
-            {"session_id": session_id, "count": len(messages) if isinstance(messages, list) else None},
+            {"session_id": session_id},
             _last_message_cursor(messages),
         )
         return self._active_result(
