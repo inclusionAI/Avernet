@@ -14,6 +14,17 @@ class ExpertChatServiceProtocol(Protocol):
     must be the Bot owner. This is not a client-selectable elevation flag.
     """
 
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Authorize owner/public/collaborator chat access, then read only.
+
+        Return exactly exists/alive for this user's independent Caller. Existence
+        denotes a registered UUID, even after release; liveness is a fresh
+        provider observation. Never create or restart a Caller or write rows.
+        """
+        ...
+
     def resolve_chat_stage(self, bot_id: str, owner_id: str, stage: str) -> str:
         """Resolve an authorized friend stage; services always address online."""
         ...

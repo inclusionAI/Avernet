@@ -1331,6 +1331,8 @@ class BaasService:  # pragma: no cover
         bot_uuid: str,
         health_check: bool = False,
         engine_type: str = "",
+        *,
+        log_response: bool = True,
     ) -> Dict[str, Any]:
         """查询 BaaS 层 bot 详情 / 状态。
 
@@ -1339,6 +1341,7 @@ class BaasService:  # pragma: no cover
             health_check: True 时 BaaS 经 PaaS 层实时探活，刷新 devices 的
                 status/health；False（默认）返回 DB 态，行为与原先一致。
             engine_type: 当前 bot 引擎类型；非空时作为 query 透传，留空则不传。
+            log_response: False omits provider bodies and unsafe error details from logs.
 
         Returns:
             BaaS 层返回的 data 字段（含 ``devices[]``、``bot_uuid``、``status`` 等）。
@@ -1365,6 +1368,7 @@ class BaasService:  # pragma: no cover
                 path=f"/api/v1/bots/{bot_uuid}",
                 action="get_bot",
                 params=params,
+                log_response=log_response,
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
@@ -1373,6 +1377,13 @@ class BaasService:  # pragma: no cover
                 )
                 return {"status": "RELEASED"}
 
+            if not log_response:
+                # COSEC: provider error bodies may contain reusable credentials.
+                logger.warning(
+                    "event=baas.get_bot.failed bot_uuid=%s status=%s error_type=%s",
+                    bot_uuid, e.response.status_code, type(e).__name__,
+                )
+                raise BaasServiceError("BaaS bot health query failed") from None
             logger.error(
                 f"[BaasService.get_bot] HTTP error: {e.response.status_code} - {e.response.text}"
             )
@@ -1382,6 +1393,12 @@ class BaasService:  # pragma: no cover
         except BaasServiceError:
             raise
         except Exception as e:
+            if not log_response:
+                logger.warning(
+                    "event=baas.get_bot.failed bot_uuid=%s error_type=%s",
+                    bot_uuid, type(e).__name__,
+                )
+                raise BaasServiceError("BaaS bot health query failed") from None
             logger.error(
                 f"[BaasService.get_bot] Failed to get bot in BaaS: {e}"
             )

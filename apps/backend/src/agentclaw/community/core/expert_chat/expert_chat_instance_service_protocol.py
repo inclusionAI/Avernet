@@ -15,6 +15,19 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     caller.
     """
 
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Read an authorized subject's registered Caller and current health.
+
+        The caller must already have authorized Bot chat access. Resolve the
+        real Bot owner before ledger lookup. A nonempty registered bot_uuid
+        means exists, including after release; alive requires a current healthy
+        ACTIVE device. Never provision, revive, poll publication or write rows.
+        Provider query failures propagate instead of returning false booleans.
+        """
+        ...
+
     async def get_application_caller_connection(
         self,
         *,
