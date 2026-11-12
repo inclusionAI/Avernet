@@ -90,3 +90,6 @@ provider behavior rather than replacing it.
 
 ## Complete public-contract audit
 - Registered the new GET in the existing owner-addressed/non-stage exact inventory and added CallerInstanceStatus model documentation. Targeted suites28 passed; full OpenAPI adapter suite2505 passed,2 skipped,zero failed (83.21s). No production control flow changed. Prior acceptance-fix head Singlebox job130967813274 actually succeeded; final pushed head remains independently checked.
+
+## Full Backend verification
+- Added four registered real-DI/SQLite endpoint cases to the global framework; no baseline exemptions/mocking. Endpoint runner4 passed, framework128 passed, public schema/path/namespace27 passed. Entire Backend community suite31081 passed,40 skipped,zero failed/errors plus6 subtests passed (414.76s), four workers, no fail-fast, coverage disabled. Remote head-specific coverage remains independently measured.
