@@ -4,7 +4,7 @@ use super::{
 };
 use crate::v1::common::{ApiState, RequestId};
 use axum::{
-    extract::{Path, Request, State},
+    extract::{Extension, Path, Request, State},
     http::StatusCode,
     response::Response,
 };
@@ -145,10 +145,10 @@ async fn execute(
 
 pub async fn handle(
     State(state): State<ApiState>,
+    Extension(id): Extension<RequestId>,
     target: Result<Path<Target>, axum::extract::rejection::PathRejection>,
     request: Request,
 ) -> Response {
-    let id = RequestId::from_headers(request.headers());
     let path = request.uri().path().to_owned();
     let collection = path == "/api/v1/collaboration/a2a/agents";
     let target = if collection {
@@ -208,10 +208,10 @@ pub async fn handle(
 
 pub async fn register_named(
     State(state): State<ApiState>,
+    Extension(id): Extension<RequestId>,
     Path(provider_name): Path<String>,
     request: Request,
 ) -> Response {
-    let id = RequestId::from_headers(request.headers());
     let result = async {
         let (parts, request_body) = request.into_parts();
         let token = bearer(&parts.headers)?;

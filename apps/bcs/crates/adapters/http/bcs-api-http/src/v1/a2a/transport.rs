@@ -93,8 +93,9 @@ pub(super) fn protocol_error(id: &RequestId, status: StatusCode, code: &str) -> 
         .into_response()
 }
 
-pub(super) async fn boundary(request: Request, next: Next) -> Response {
+pub(super) async fn boundary(mut request: Request, next: Next) -> Response {
     let id = RequestId::from_headers(request.headers());
+    request.extensions_mut().insert(id.clone());
     let mut response = if accepts_json(request.headers()) {
         next.run(request).await
     } else {

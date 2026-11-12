@@ -511,3 +511,21 @@ async fn accept_precedence_size_limits_and_invalid_credentials_have_v1_errors() 
         .await;
     }
 }
+
+#[tokio::test]
+async fn generated_request_id_is_pinned_once_for_success_and_errors() {
+    let app = app(Arc::new(Service::default()));
+    for token in [Some("admin"), None] {
+        let mut req = request("GET", "/agents?provider_bot_ref=remote", token, Value::Null);
+        req.headers_mut().remove("x-request-id");
+        let response = app.clone().oneshot(req).await.unwrap();
+        let id = response.headers()["x-request-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(!id.is_empty());
+        let value: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+        assert_eq!(value["request_id"], id);
+    }
+}

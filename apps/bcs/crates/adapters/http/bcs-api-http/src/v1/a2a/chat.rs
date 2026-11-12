@@ -4,7 +4,7 @@ use super::{
 };
 use crate::v1::common::{ApiState, RequestId};
 use axum::{
-    extract::{Path, Query, Request, State},
+    extract::{Extension, Path, Query, Request, State},
     http::{HeaderMap, StatusCode},
     response::Response,
 };
@@ -47,10 +47,10 @@ fn actor(headers: &HeaderMap) -> Result<Option<String>, ApplicationError> {
 
 pub async fn start(
     State(state): State<ApiState>,
+    Extension(id): Extension<RequestId>,
     Path((provider_name, provider_bot_ref)): Path<(String, String)>,
     request: Request,
 ) -> Response {
-    let id = RequestId::from_headers(request.headers());
     let result = async {
         let (parts, request_body) = request.into_parts();
         let token = bearer(&parts.headers)?;
@@ -110,11 +110,11 @@ pub async fn start(
 
 pub async fn get_run(
     State(state): State<ApiState>,
+    Extension(id): Extension<RequestId>,
     Path(run_id): Path<String>,
     query: Result<Query<RunQuery>, axum::extract::rejection::QueryRejection>,
     request: Request,
 ) -> Response {
-    let id = RequestId::from_headers(request.headers());
     let result = async {
         let token = bearer(request.headers())?;
         let actor = actor(request.headers())?;
@@ -145,10 +145,10 @@ pub async fn get_run(
 
 pub async fn cancel_run(
     State(state): State<ApiState>,
+    Extension(id): Extension<RequestId>,
     Path(run_id): Path<String>,
     request: Request,
 ) -> Response {
-    let id = RequestId::from_headers(request.headers());
     let result = async {
         let token = bearer(request.headers())?;
         let actor = actor(request.headers())?;
