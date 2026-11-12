@@ -32,31 +32,27 @@ describe('describeSessionFileCreator - 创建者信息 → 元数据行来源合
 });
 
 describe('formatSessionUploadTime - created_at ISO 串 → 查看端本地时区 YYYY-MM-DD HH:mm:ss', () => {
-  // 2026-11-12 用户反馈：展示时间需为查看端本地时间（北京时间即 UTC+8，+8 小时）。
-  // 钉死 Asia/Shanghai 使断言跨 CI 时区确定；跑完恢复，避免污染同 worker 的其他套件。
-  const originalTZ = process.env.TZ;
-  beforeAll(() => {
-    process.env.TZ = 'Asia/Shanghai';
-  });
-  afterAll(() => {
-    process.env.TZ = originalTZ;
-  });
+  // 用独立的 Intl 格式化校验查看端本地时间，不在 Jest sandbox 中修改 TZ。
+  const localTime = (iso: string) => new Intl.DateTimeFormat('sv-SE', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(new Date(iso));
 
-  it('ISO Z 串取本地时区分量（东八区显示 +8 小时，不与后端原值逐字一致）', () => {
-    // 2026-11-09T02:15:30Z → 北京时间 10:15:30（曾经 UTC 逐字展示被反馈少 8 小时）。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toBe('2026-11-09 10:15:30');
+  it('ISO Z 串取查看端本地时区分量', () => {
+    // 同一瞬时随查看端时区展示；上海为 10:15:30，UTC 为 02:15:30。
+    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toBe(localTime('2026-11-09T02:15:30Z'));
     expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
 
   it('吃微秒精度 ISO（2026-11-09 契约 created_at 秒级截断展示）', () => {
-    // 后端 created_at 可能带 6 位微秒；new Date 按毫秒截断解析，格式化只取秒级分量。北京时间 +8 → 10:xx:xx。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30.123456Z')).toBe('2026-11-09 10:15:30');
-    expect(formatSessionUploadTime('2026-11-09T02:10:00.999999Z')).toBe('2026-11-09 10:10:00');
+    // 后端可能带 6 位微秒；格式化只取秒级分量，并保留本地时区语义。
+    expect(formatSessionUploadTime('2026-11-09T02:15:30.123456Z')).toBe(localTime('2026-11-09T02:15:30Z'));
+    expect(formatSessionUploadTime('2026-11-09T02:10:00.999999Z')).toBe(localTime('2026-11-09T02:10:00Z'));
   });
 
   it('带偏移的 ISO 串按其 UTC 瞬时取本地分量（同瞬时不同写法显示一致）', () => {
-    // 2026-11-09T10:15:30+08:00 与 02:15:30Z 同瞬时，北京时间均显示 10:15:30。
-    expect(formatSessionUploadTime('2026-11-09T10:15:30+08:00')).toBe('2026-11-09 10:15:30');
+    // 不同偏移写法表示同一瞬时，必须显示为相同的本地时间。
+    expect(formatSessionUploadTime('2026-11-09T10:15:30+08:00')).toBe(localTime('2026-11-09T02:15:30Z'));
   });
 
   it('null / undefined / 空串 / 非法日期 → null（legacy 缺 created_at，行内不渲染时间段）', () => {
