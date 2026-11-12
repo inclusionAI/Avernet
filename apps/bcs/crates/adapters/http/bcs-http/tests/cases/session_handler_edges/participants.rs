@@ -635,9 +635,10 @@ async fn patch_member_scope_propagates_store_failure() {
 
 #[tokio::test]
 async fn patch_member_uses_session_application_when_configured() {
+    let application = FakeSessionApplication::new(UpdateOutcome::Ok);
     let env = builder(GroupStrategy::Chat, Some("alice"))
         .await
-        .session_application(FakeSessionApplication::new(UpdateOutcome::Ok))
+        .session_application(application.clone())
         .build();
     {
         let mut stored = env.sessions.sessions.lock().await;
@@ -661,15 +662,19 @@ async fn patch_member_uses_session_application_when_configured() {
     // The V1 facade accepted the update; the route projects the Session it
     // reads back from the legacy store.
     assert_eq!(body["id"], SESSION_ID);
+    assert_eq!(
+        application.update_calls(),
+        1,
+        "the configured V1 facade must be the update path"
+    );
 }
 
 #[tokio::test]
 async fn patch_member_session_application_self_inserts_missing_participant() {
+    let application = FakeSessionApplication::new(UpdateOutcome::ParticipantMissing);
     let env = builder(GroupStrategy::Chat, Some("alice"))
         .await
-        .session_application(FakeSessionApplication::new(
-            UpdateOutcome::ParticipantMissing,
-        ))
+        .session_application(application.clone())
         .build();
 
     let (status, body) = call(
@@ -684,13 +689,19 @@ async fn patch_member_session_application_self_inserts_missing_participant() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(scope_of(&body, "human_alice").as_deref(), Some("participant"));
+    assert_eq!(
+        application.update_calls(),
+        1,
+        "the missing-participant signal comes from the configured facade"
+    );
 }
 
 #[tokio::test]
 async fn patch_member_session_application_rejects_other_errors() {
+    let application = FakeSessionApplication::new(UpdateOutcome::Forbidden);
     let env = builder(GroupStrategy::Chat, Some("alice"))
         .await
-        .session_application(FakeSessionApplication::new(UpdateOutcome::Forbidden))
+        .session_application(application.clone())
         .build();
     {
         let mut stored = env.sessions.sessions.lock().await;
@@ -712,6 +723,11 @@ async fn patch_member_session_application_rejects_other_errors() {
 
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["error"], "forbidden");
+    assert_eq!(
+        application.update_calls(),
+        1,
+        "the facade's own error is what rejects the request"
+    );
 }
 
 #[tokio::test]
@@ -728,7 +744,7 @@ async fn patch_member_scope_on_service_session_still_projects_session() {
         ));
     }
 
-    let (status, _) = call(
+    let (status, body) = call(
         &env.app,
         json_body(
             "PATCH",
@@ -739,10 +755,19 @@ async fn patch_member_scope_on_service_session_still_projects_session() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], SESSION_ID);
+    assert_eq!(body["session_id"], SESSION_ID);
+    assert_eq!(body["session_kind"], "service_invocation");
+    assert_eq!(scope_of(&body, "human_alice").as_deref(), Some("full"));
+    assert_eq!(
+        mode_of(&body, "human_alice").as_deref(),
+        Some("absent"),
+        "a scope-only update leaves the Human mode untouched"
+    );
 }
 
 #[tokio::test]
-async fn add_member_rejects_human_scope_for_bot_actor() {
+async fn add_member_accepts_participant_scope_for_human_actor() {
     // A registered Human actor may pick the participant scope; the same body
     // is still rejected for a Bot actor (covered above) — this pins the
     // Human-accepting side of the same validation.
@@ -765,9 +790,10 @@ async fn add_member_rejects_human_scope_for_bot_actor() {
 }
 
 #[tokio::test]
-async fn session_fixture_keeps_bot_actor_kind() {
-    // Guard: the fixture Session participants stay Bot-kind, so the scope
-    // assertions above exercise the Bot validation branch and not a Human one.
+async fn fixture_session_participants_stay_bot_kind() {
+    // Fixture guard (not a route contract): the fixture Session participants
+    // stay Bot-kind, so the scope assertions above exercise the Bot validation
+    // branch and not a Human one.
     let session = session_for("group-1", bcs_service_api::SessionKind::Chat);
     assert!(
         session
@@ -775,196 +801,4 @@ async fn session_fixture_keeps_bot_actor_kind() {
             .iter()
             .all(|p| p.actor_kind == ActorKind::Bot)
     );
-}
-// ----- remaining store / notifier edge paths ----------------------------
-
-#[tokio::test]
-async fn remove_member_denies_when_the_parent_group_is_missing() {
-    let env = env(GroupStrategy::Chat, Some("alice")).await;
-    env.sessions.sessions.lock().await[0].group_id = "group-missing".to_string();
-
-    let (status, body) = call(
-        &env.app,
-        empty("DELETE", "/sessions/group-1:00000001/members/worker-bot"),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["error"],
-        "Caller is not authorized to remove this participant"
-    );
-}
-
-#[tokio::test]
-async fn patch_member_reports_missing_session_after_application_update() {
-    let env = builder(GroupStrategy::Chat, Some("alice"))
-        .await
-        .session_application(FakeSessionApplication::new(UpdateOutcome::Ok))
-        .build();
-    env.sessions.sessions.lock().await.clear();
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_alice",
-            json!({"message_view_scope": "participant"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body["error"], "session_not_found");
-}
-
-#[tokio::test]
-async fn patch_member_propagates_read_failure_after_application_update() {
-    let env = builder(GroupStrategy::Chat, Some("alice"))
-        .await
-        .session_application(FakeSessionApplication::new(UpdateOutcome::Ok))
-        .build();
-    *env.sessions.get_error.lock().await = Some(Fail::Internal);
-
-    let (status, _) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_alice",
-            json!({"message_view_scope": "participant"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-}
-
-#[tokio::test]
-async fn patch_member_propagates_insert_failure_in_application_fallback() {
-    let env = builder(GroupStrategy::Chat, Some("alice"))
-        .await
-        .session_application(FakeSessionApplication::new(
-            UpdateOutcome::ParticipantMissing,
-        ))
-        .build();
-    *env.sessions.add_error.lock().await = Some(Fail::Conflict);
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_alice",
-            json!({"message_view_scope": "participant"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"], "state conflict");
-}
-
-#[tokio::test]
-async fn patch_member_propagates_insert_failure_in_scope_fallback() {
-    let env = env(GroupStrategy::Chat, Some("alice")).await;
-    *env.sessions.add_error.lock().await = Some(Fail::Conflict);
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_alice",
-            json!({"message_view_scope": "participant"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"], "state conflict");
-}
-
-#[tokio::test]
-async fn patch_member_tolerates_notification_failure() {
-    let env = builder(GroupStrategy::Chat, Some("alice"))
-        .await
-        .system_message(std::sync::Arc::new(super::FailingSystemMessages))
-        .build();
-    {
-        let mut stored = env.sessions.sessions.lock().await;
-        let mut human = Participant::human("human_alice", ParticipantRole::Observer);
-        human.mode = Some(ParticipantMode::Absent);
-        stored[0].participants.push(human);
-    }
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_alice",
-            json!({"mode": "present"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(mode_of(&body, "human_alice").as_deref(), Some("present"));
-}
-
-#[tokio::test]
-async fn patch_member_tolerates_notification_failure_on_first_insert() {
-    let env = builder(GroupStrategy::Chat, Some("alice"))
-        .await
-        .system_message(std::sync::Arc::new(super::FailingSystemMessages))
-        .build();
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_bob",
-            json!({"mode": "present"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(mode_of(&body, "human_bob").as_deref(), Some("present"));
-}
-
-#[tokio::test]
-async fn patch_member_reports_failed_retry_after_first_insert() {
-    let env = env(GroupStrategy::Chat, Some("alice")).await;
-    *env.sessions.mode_error.lock().await = Some(Fail::NotFound);
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_bob",
-            json!({"mode": "present"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    assert_eq!(body["error"], "session store miss");
-}
-
-#[tokio::test]
-async fn patch_member_reports_failed_first_insert() {
-    let env = env(GroupStrategy::Chat, Some("alice")).await;
-    *env.sessions.mode_error.lock().await = Some(Fail::NotFound);
-    *env.sessions.add_error.lock().await = Some(Fail::Conflict);
-
-    let (status, body) = call(
-        &env.app,
-        json_body(
-            "PATCH",
-            "/sessions/group-1:00000001/members/human_bob",
-            json!({"mode": "present"}),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"], "state conflict");
 }

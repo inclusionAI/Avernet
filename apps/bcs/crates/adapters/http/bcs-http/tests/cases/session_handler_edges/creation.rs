@@ -5,7 +5,9 @@
 //! translation (`caller_role`, `session_kind`).
 
 use axum::http::StatusCode;
-use bcs_service_api::GroupStrategy;
+use bcs_service_api::{
+    GroupStrategy, ParticipantRole, RequestedSessionRole, SessionCaller, SessionKind,
+};
 use serde_json::json;
 
 use super::{builder, call, env, json_as, LaunchFailure, ScriptedLaunch};
@@ -163,27 +165,65 @@ async fn create_session_returns_ok_when_not_created() {
 async fn create_session_accepts_every_legacy_creator_role() {
     let env = env(GroupStrategy::Chat, None).await;
 
-    for role in ["driver", "consultant", "manager", "worker", "observer", "intern"] {
+    for (role, expected) in [
+        ("driver", RequestedSessionRole::Known(ParticipantRole::Driver)),
+        (
+            "consultant",
+            RequestedSessionRole::Known(ParticipantRole::Consultant),
+        ),
+        ("manager", RequestedSessionRole::Known(ParticipantRole::Manager)),
+        ("worker", RequestedSessionRole::Known(ParticipantRole::Worker)),
+        ("observer", RequestedSessionRole::Known(ParticipantRole::Observer)),
+        (
+            "intern",
+            RequestedSessionRole::Unknown("intern".to_string()),
+        ),
+    ] {
         let (status, _) = call(
             &env.app,
             create_request(json!({"caller_role": role, "session_title": role})),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "role {role}");
+
+        let calls = env.launch.create_calls.lock().await;
+        let forwarded = calls.last().expect("the launch command is recorded");
+        assert_eq!(
+            forwarded.request.public_creator_role,
+            Some(expected),
+            "caller_role {role} must keep its legacy translation"
+        );
+        assert_eq!(forwarded.request.title.as_deref(), Some(role));
     }
+    assert_eq!(
+        env.launch.create_calls.lock().await.len(),
+        6,
+        "one launch command per request"
+    );
 }
 
 #[tokio::test]
 async fn create_session_treats_unknown_kind_as_chat() {
     let env = env(GroupStrategy::Chat, None).await;
 
-    for kind in ["service_invocation", "unknown_kind"] {
+    for (kind, expected) in [
+        ("service_invocation", SessionKind::ServiceInvocation),
+        ("unknown_kind", SessionKind::Chat),
+    ] {
         let (status, _) = call(
             &env.app,
             create_request(json!({"session_kind": kind, "session_title": kind})),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "kind {kind}");
+
+        let calls = env.launch.create_calls.lock().await;
+        let forwarded = calls.last().expect("the launch command is recorded");
+        assert_eq!(
+            forwarded.request.kind,
+            Some(expected),
+            "session_kind {kind} must keep its legacy translation"
+        );
     }
 }
 
@@ -198,4 +238,15 @@ async fn create_session_uses_a_human_caller_identity() {
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
+    let calls = env.launch.create_calls.lock().await;
+    let forwarded = calls.last().expect("the launch command is recorded");
+    assert_eq!(
+        forwarded.request.caller,
+        SessionCaller::Human {
+            actor_id: "human_alice".to_string(),
+            owner_id: "alice".to_string(),
+            display_name: Some("Test".to_string()),
+        },
+        "the ambient Human identity is forwarded as a Human Session caller"
+    );
 }
