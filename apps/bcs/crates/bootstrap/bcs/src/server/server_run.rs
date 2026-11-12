@@ -341,6 +341,9 @@ impl BcsServer {
 
         let mut untraced_routes = vec![
             "/health".to_string(),
+            "/me/repair-info".to_string(),
+            "/admin/secret/{name}".to_string(),
+            "/groups/{id}/settings".to_string(),
             "/manifest".to_string(),
             "/assets/{bundle_name}/{file_name}".to_string(),
             "/api/v1/collaboration/manifest".to_string(),
@@ -646,3 +649,7 @@ impl BcsServer {
         Ok((addr, handle, state))
     }
 }
+
+#[cfg(test)]
+#[path = "network_tracing_tests.rs"]
+mod network_tracing_tests;

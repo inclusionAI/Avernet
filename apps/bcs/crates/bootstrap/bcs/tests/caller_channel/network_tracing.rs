@@ -28,7 +28,7 @@ impl NetworkTracer for Recorder {
         let trace_id = parent.map(|context| context.trace_id.clone())
             .or_else(|| incoming.iter().find(|(name, _)| name == "x-e2e-trace-id").map(|(_, value)| value.clone()))
             .unwrap_or_else(|| format!("e2e-{span_id}"));
-        let kind = match info.kind { Kind::HttpServer => "http_server", Kind::HttpClient => "http_client", Kind::RpcClient => "rpc_client" };
+        let kind = match info.kind { Kind::HttpServer => "http_server", Kind::HttpClient => "http_client", Kind::RpcClient | Kind::GrpcClient { .. } => "rpc_client" };
         let metadata = json!({
             "kind": kind, "method": info.method, "endpoint": info.endpoint,
             "request_size": info.request_size, "trace_id": trace_id,

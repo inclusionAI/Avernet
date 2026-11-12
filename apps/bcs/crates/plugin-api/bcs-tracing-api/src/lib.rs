@@ -5,7 +5,13 @@ pub type Carrier = Vec<(String, String)>;
 pub type Context = Arc<dyn Any + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind { HttpServer, HttpClient, RpcClient }
+pub enum Kind {
+    HttpServer,
+    HttpClient,
+    RpcClient,
+    /// gRPC status codes and invocation shape, independent of deployment routing.
+    GrpcClient { server_streaming: bool },
+}
 
 /// Transport metadata only: never supply bodies, credentials or raw errors.
 pub struct RequestInfo<'a> {
@@ -19,6 +25,7 @@ pub struct RequestInfo<'a> {
     pub request_size: Option<u64>,
 }
 
+/// `Rpc` carries the transport's status code; gRPC codes must remain unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome { Http(u16), Rpc(u32), TransportError, Timeout, Cancelled }
 

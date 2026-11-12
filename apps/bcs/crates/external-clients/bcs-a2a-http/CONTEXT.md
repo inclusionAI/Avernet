@@ -8,6 +8,8 @@ The standard gRPC binding (`grpc_client`) uses the same pinned SDK models and
 protobuf conversion library. Composition supplies a policy-checked channel and
 trusted MOSN routing metadata; this low-level binding does not discover a target,
 select endpoints, retry submissions, or cancel Tasks when a stream is dropped.
+Its five operations declare gRPC invocation shape to `bcs-tracing-api`, preserving
+original status codes and recording only initial response readiness.
 Its five operations preserve task/event models and bounded typed ErrorInfo while
 excluding peer diagnostics. Bootstrap optionally injects validated `GrpcMeshConfig` into Card selection and
 delivery. Only explicitly configured Card interfaces can select gRPC; the channel
