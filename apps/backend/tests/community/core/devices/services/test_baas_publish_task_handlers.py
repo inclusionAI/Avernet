@@ -680,7 +680,7 @@ def test_create_poll_marks_failed_on_baas_failed():
     assert outcome == Complete()
     baas_device_service._mark_service_start_failed.assert_called_once_with(
         binding_id=42,
-        error="BaaS publish FAILED: publish_id=1001",
+        error="BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=1001",
     )
     task_queue_service.enqueue.assert_not_called()
 
@@ -713,7 +713,7 @@ def test_create_poll_marks_failed_on_business_timeout():
     assert outcome == Complete()
     baas_device_service._mark_service_start_failed.assert_called_once_with(
         binding_id=42,
-        error="BaaS publish polling timeout after 600s (publish_id=1001)",
+        error="BaaS publish 超时，请刷新页面后重新创建 Bot。publish polling timeout after 600s (publish_id=1001)",
     )
     baas_device_service.poll_publish_once.assert_not_called()
     task_queue_service.enqueue.assert_not_called()
