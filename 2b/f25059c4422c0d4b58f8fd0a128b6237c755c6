@@ -1,0 +1,19 @@
+apps/gateway/tests/contracts/spi/test_forwarder.py
+  s_427b8a8eeb3e30::t_113b0466eca9db 521-524
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2bf25059c4422c0d4b58f8fd0a128b6237c755c6",
+  "prompts": {},
+  "sessions": {
+    "s_427b8a8eeb3e30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfd9-be8d-78e1-bde3-da9a7f50e5a5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
