@@ -123,32 +123,28 @@ following this package's README. This stage needs no npm publication. Then
 review/merge the component and host/backend changes into the intended iteration
 branch and publish only when separately authorized.
 
-After confirming both published files are reachable, deploy the single
+After confirming both published files are reachable, deploy the task manifest
 authenticated read endpoint `GET /api/v1/collaboration/tasks/manifest` and configure
-the pre environment. There is no OpenAPI mirror. Reuse the existing operator
-config APIs: create `category=task` via `POST /api/v1/config/categories` if absent,
-then `POST /api/v1/config/set`. The server selects its own environment.
+the pre environment. There is no OpenAPI mirror. Signed-in users save the complete
+configuration through `POST /api/v1/collaboration/tasks/manifest`. The task module
+creates the category if absent and replaces the value if present. The server
+selects its own environment. Existing generic config APIs retain their behavior.
 
-Example (replace 0.1.1 with an actually published and verified release):
+Example (replace 1.0.0 with an actually published and verified release):
 
 ```json
 {
-  "category": "task",
-  "config_key": "panel",
-  "config_value": {
-    "schema_version": 1,
-    "bundles": [{
-      "name": "taskPanel",
-      "type": "url",
-      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@0.1.1/dist/index.umd.js"
-    }]
-  },
-  "description": "Task panel frontend assets"
+  "schema_version": 1,
+  "bundles": [{
+    "name": "taskPanel",
+    "type": "url",
+    "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.0/dist/index.umd.js"
+  }]
 }
 ```
 
-Only an operator can update this key. Invalid values are rejected; a missing
-category/save failure must not be treated as successful. Both hosts read
+The task interface requires login, not operator permission. Invalid values, category creation failures
+and save failures return an error, never success. Both hosts read
 `data.bundles` from the manifest and derive `task-panel.css` beside the JS URL.
 There is no host asset URL injection or application package-version pin. Updates
 need a full page refresh, not an application rebuild or service restart.

@@ -1,4 +1,4 @@
-"""Authenticated task asset discovery; the service owns configuration policy."""
+"""Authenticated task asset configuration and discovery; the service owns configuration policy."""
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
@@ -43,6 +43,31 @@ async def get_task_manifest(
         result = await run_in_threadpool(service.get_manifest, env=get_current_env())
     except InternalError:
         failure = error_response(503, "Task panel configuration is missing or unavailable", request)
+        failure.headers["Cache-Control"] = "no-store"
+        return failure
+    return envelope(TaskPanelManifestDTO.model_validate(result), request)
+
+
+@router.post("/manifest", response_model=Envelope[TaskPanelManifestDTO])
+async def set_task_manifest(
+    value: dict[str, object],
+    request: Request,
+    response: Response,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskPanelManifestServiceProtocol = Injected(TaskPanelManifestServiceProtocol),
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        result = await run_in_threadpool(
+            service.set_manifest, value=value, env=get_current_env(),
+            operator=user.operatorName or user.staffId,
+        )
+    except ValueError:
+        failure = error_response(422, "Invalid task panel configuration", request)
+        failure.headers["Cache-Control"] = "no-store"
+        return failure
+    except InternalError:
+        failure = error_response(503, "Task panel configuration could not be saved", request)
         failure.headers["Cache-Control"] = "no-store"
         return failure
     return envelope(TaskPanelManifestDTO.model_validate(result), request)

@@ -1,17 +1,25 @@
 # Task panel discovery
 
-Only `GET /api/v1/collaboration/tasks/manifest` exposes the authenticated host
-asset descriptor. There is no OpenAPI mirror and no task-execution behavior here.
+`GET /api/v1/collaboration/tasks/manifest` exposes the authenticated host
+asset descriptor. `POST` on the same path requires a signed-in user and
+creates or fully replaces the manifest for the server environment. There is no
+OpenAPI mirror and no task-execution behavior here.
 The service reads `category=task`, `config_key=panel` from system-config using the
 server environment on each request; a missing or malformed value fails closed.
-Administrators use the existing config category/set endpoints to create the
-category and update the value. The task panel writer validates the schema and
-requires operator permission; existing boolean task settings are unchanged.
+The task-owned writer validates the complete schema and asset URL before any
+storage write, creates the category if absent, and rejects storage failures.
+Its request is `{schema_version: 1, bundles: [{name: "taskPanel", type: "url",
+url: "https://<asset-host>/<release>/index.umd.js"}]}`; unknown fields are rejected.
+Both methods return the same manifest envelope; invalid writes return 422,
+storage failures return 503, and successful responses use `Cache-Control: no-store`.
+The task module reuses the existing configuration service without modifying its
+HTTP interfaces, permissions or storage contract.
+Existing boolean task settings are unchanged.
 
 ## Context Boundary
 
 ```yaml
-purpose: Validate and discover environment-scoped task panel frontend assets.
+purpose: Validate, save and discover environment-scoped task panel frontend assets.
 provides:
   - TaskPanelManifestService
   - TaskPanelManifestServiceProtocol

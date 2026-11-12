@@ -1,3 +1,9 @@
 node_modules/
 dist/
 coverage/
+
+# These are package source modules, not runtime data.
+!src/data/
+!src/data/*.ts
+!test/data/
+!test/data/*.test.ts

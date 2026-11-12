@@ -118,10 +118,17 @@ describe('mapBcsBotCandidate', () => {
     expect(serialized).not.toContain('friend_ext');
   });
 
-  it('created_by 与登录 userId 一致才标记本人管理', () => {
-    expect(mapBcsBotCandidate(CANDIDATE, '8')?.isOwnedByLoggedInUser).toBe(true);
-    expect(mapBcsBotCandidate(CANDIDATE, '7')?.isOwnedByLoggedInUser).toBeUndefined();
-    expect(mapBcsBotCandidate(CANDIDATE)?.isOwnedByLoggedInUser).toBeUndefined();
+  it.each([
+    ['Owner 匹配，创建者不匹配', '7', '7', true],
+    ['创建者匹配，Owner 不匹配', '7', '8', undefined],
+    ['Owner 与用户 ID 去除首尾空白', ' 7 ', ' 7 ', true],
+    ['缺少 Owner 时不回退创建者', undefined, '8', undefined],
+    ['空白 Owner 不标记归属', ' ', '8', undefined],
+    ['未登录不标记归属', '7', undefined, undefined],
+    ['空白登录用户不标记归属', ' ', ' ', undefined],
+  ] as const)('以候选项 owner_user_id 判断归属：%s', (_label, ownerUserId, viewerUserId, expected) => {
+    const candidate = { ...CANDIDATE, owner_user_id: ownerUserId };
+    expect(mapBcsBotCandidate(candidate, viewerUserId)?.isOwnedByLoggedInUser).toBe(expected);
   });
 
   it('受众类型与 Catalog mapper 同口径：仅单一维度公开时派生', () => {

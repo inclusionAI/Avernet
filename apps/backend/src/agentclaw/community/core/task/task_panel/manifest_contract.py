@@ -7,8 +7,6 @@ import unicodedata
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
-
-
 CATEGORY = "task"
 KEY = "panel"
 
@@ -67,6 +65,12 @@ class PanelManifestConfig:
             raise ValueError("npm CDN bundles must pin an exact task-panel version")
         return cls(1, (PanelBundle("taskPanel", url),))
 
+    def to_value(self) -> dict[str, object]:
+        return {"schema_version": self.schema_version, "bundles": [
+            {"name": bundle.name, "type": "url", "url": bundle.url}
+            for bundle in self.bundles
+        ]}
+
 
 @dataclass(frozen=True)
 class TaskPanelManifest:
@@ -78,3 +82,12 @@ class TaskPanelManifest:
 @runtime_checkable
 class TaskPanelManifestServiceProtocol(Protocol):
     def get_manifest(self, *, env: str) -> TaskPanelManifest: ...
+
+    def set_manifest(self, *, value: dict[str, object], env: str, operator: str) -> TaskPanelManifest:
+        """Create or fully replace the current environment's validated manifest.
+
+        The caller supplies the authenticated actor for audit fields.
+        Invalid input raises ValueError;
+        storage failure raises InternalError, never a successful response.
+        """
+        ...

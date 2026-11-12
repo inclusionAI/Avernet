@@ -7,6 +7,7 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
+    BotCandidate,
     NodeAction,
     TaskReportCommand,
     TaskReportEventType,
@@ -53,6 +54,7 @@ class _Service(TaskServiceRelayMixin):
     def __init__(self) -> None:
         self._graph = _Graph()
         self._relay_adapter = SimpleNamespace(search=_Search())
+        self._temporary_duty_candidates = ()
 
 
 @pytest.mark.asyncio
@@ -72,6 +74,48 @@ async def test_search_bots_records_relay_search_trace() -> None:
     assert payload["phase"] == "search"
     assert payload["candidate_count"] == 1
     assert payload["candidates"][0]["score"] == 0.91
+
+
+@pytest.mark.asyncio
+async def test_search_bots_uses_configured_temporary_duty_fallback_without_overlap() -> None:
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
+        BotCandidate(bot_id="bot-3", name="Other", description="", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1", "bot-2", "bot-3"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search_plus_fallback"
+    assert payload["fallback_candidate_count"] == 2
+    assert payload["candidates"][-1]["score"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_bots_does_not_add_fallback_candidates_when_search_overlaps() -> None:
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-1", name="Risk Bot", description="duty", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search"
+    assert payload["fallback_candidate_count"] == 0
 
 
 # ===== report():上报即落轨迹(写时发射,读侧不再依赖投影重建) =====

@@ -17,7 +17,7 @@ export interface BcsCandidateBot {
   bot_id: string;
   name: string;
   avatar_url: string | null;
-  /** 创建者 staff_no（旧数据可能缺省）；仅用于「是否本人管理」比对，不是 Owner 展示名。 */
+  /** 创建者 staff_no（旧数据可能缺省）；不用于 Owner 归属判断或展示。 */
   created_by?: string;
   descriptor: { summary: string };
   visibility: BcsCandidateVisibility;
@@ -30,6 +30,8 @@ export interface BcsCandidateBot {
 export interface BcsCandidateItem {
   bot: BcsCandidateBot;
   is_friend: boolean;
+  /** 候选 Owner 用户 ID；旧服务可能不返回，缺失时不推断归属。 */
+  owner_user_id?: string;
 }
 
 /** BCS `BotCandidatePage`：分页字段沿用 BCS 原始 offset/limit 游标语义。 */
@@ -73,7 +75,7 @@ export function mapBcsBotCandidate(candidate: BcsCandidateSearchItem, viewerUser
   const botPublic = bot.visibility === 'public';
   // 两维独立公开设置派生分享链接受众（与 Catalog mapper 同口径，保持分享链接行为一致）。
   const audience = userPublic && !botPublic ? ('user' as const) : botPublic && !userPublic ? ('bot' as const) : undefined;
-  const isOwnedByLoggedInUser = Boolean(viewerUserId?.trim() && bot.created_by?.trim() === viewerUserId.trim());
+  const isOwnedByLoggedInUser = Boolean(viewerUserId?.trim() && candidate.owner_user_id?.trim() === viewerUserId.trim());
   const bcsStatus = bot.status === 'online' || bot.status === 'hidden' ? bot.status : undefined;
   const score = typeof candidate.score === 'number' ? candidate.score : undefined;
   const shortProfile = candidate.short_profile?.trim() || undefined;

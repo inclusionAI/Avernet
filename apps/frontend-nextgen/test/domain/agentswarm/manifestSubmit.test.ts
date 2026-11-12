@@ -18,8 +18,13 @@ test('a blank manifest is omitted from the payload rather than sent as an empty 
 
 test('a real manifest is transmitted verbatim so the platform judges the grammar', () => {
   const dto = toSubmitDTO(draft({ agents: [bot({ config_manifest: MANIFEST_TEMPLATE })] }), 'acme');
-  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE);
-  expect(dto.agents[0].config_manifest).toContain('cli_tools');
+  // Surrounding whitespace is trimmed; the body is untouched.
+  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE.trim());
+  // The template's guidance comments ride along unchanged: the platform's
+  // preflight is authoritative, and trimming them would be this layer rewriting
+  // a document the user chose to submit.
+  expect(dto.agents[0].config_manifest).toContain('schema_version: 1');
+  expect(dto.agents[0].config_manifest).toContain('identity:');
 });
 
 test('a valid manifest does not block submission', () => {
@@ -50,6 +55,7 @@ test('a manifest on one agent does not leak onto another', () => {
     }),
     'acme',
   );
-  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE);
+  // Surrounding whitespace is trimmed; the body is untouched.
+  expect(dto.agents[0].config_manifest).toBe(MANIFEST_TEMPLATE.trim());
   expect(dto.agents[1]).not.toHaveProperty('config_manifest');
 });

@@ -40,16 +40,13 @@ test('absent categories are allowed — the platform only requires schema_versio
 });
 
 test('a category present but not a list is refused', () => {
-  const doc = MANIFEST_TEMPLATE.replace('mcp: []', 'mcp: none');
+  const doc = 'schema_version: 1\nmanifest:\n  identity:\n    - type: SOUL.md\n      content: x\n  mcp: none\n';
   const result = validateManifest(doc);
   expect(result.issues).toContainEqual({ path: 'manifest.mcp', message: 'mcp 必须是列表' });
 });
 
 test('an empty identity list is refused, because a persona needs a soul', () => {
-  const doc = MANIFEST_TEMPLATE.replace(
-    /identity:\n(?:.*\n)*?\s+mcp:/,
-    'identity: []\n  mcp:',
-  );
+  const doc = 'schema_version: 1\nmanifest:\n  identity: []\n';
   const result = validateManifest(doc);
   expect(result.issues.some((issue) => issue.path === 'manifest.identity')).toBe(true);
 });

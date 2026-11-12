@@ -15,7 +15,9 @@ from agentclaw.community.core.bot_public.services.friend_auth_sync_service impor
 
 def _bot_record(owner_name="owner-1", agent_code="ac-123"):
     return {
+        "id": 1,
         "bot_id": "bot-1",
+        "entity_id": "85020",
         "owner_id": "85020",
         "owner_name": owner_name,
         "ext": {"passport": {"agent_code": agent_code}},
@@ -27,7 +29,10 @@ _UNSET = object()
 
 def _svc(bot=_UNSET, agent_code="ac-123", create_result=None, query_result=None):
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = _bot_record(agent_code=agent_code) if bot is _UNSET else bot
+    resolved_bot = _bot_record(agent_code=agent_code) if bot is _UNSET else bot
+    bot_repo.list_matches_by_legacy_locator.return_value = (
+        [resolved_bot] if resolved_bot is not None else []
+    )
     passport = MagicMock()
     auth_rel = MagicMock()
     auth_rel.create_relationship.return_value = create_result
@@ -39,9 +44,10 @@ def _svc(bot=_UNSET, agent_code="ac-123", create_result=None, query_result=None)
 
 
 def test_sync_grant_created_returns_auth_id():
-    svc, _, auth_rel = _svc(create_result={"auth_id": 42})
+    svc, bot_repo, auth_rel = _svc(create_result={"auth_id": 42})
     out = svc.sync(bot_id="bot-1", owner_work_no="85020", human_work_no="88123", action="grant")
     assert out == {"synced": True, "reason": "created", "auth_id": 42}
+    bot_repo.list_matches_by_legacy_locator.assert_called_once_with("bot-1", "85020")
     auth_rel.create_relationship.assert_called_once()
     kwargs = auth_rel.create_relationship.call_args.kwargs
     assert kwargs["work_no"] == "88123"
@@ -87,10 +93,36 @@ def test_sync_strips_human_prefix_from_work_no():
     assert kwargs["operator_work_no"] == "85020"
 
 
+def test_sync_resolves_stable_entity_and_uses_current_owner_as_operator():
+    transferred = {
+        **_bot_record(owner_name="current-owner"),
+        "entity_id": "stable-entity",
+        "owner_id": "99001",
+    }
+    svc, bot_repo, auth_rel = _svc(
+        bot=transferred,
+        create_result={"auth_id": 11},
+    )
+
+    out = svc.sync(
+        bot_id="bot-1",
+        owner_work_no="stable-entity",
+        human_work_no="88123",
+        action="grant",
+    )
+
+    assert out == {"synced": True, "reason": "created", "auth_id": 11}
+    bot_repo.list_matches_by_legacy_locator.assert_called_once_with(
+        "bot-1", "stable-entity"
+    )
+    assert auth_rel.create_relationship.call_args.kwargs["operator_work_no"] == "99001"
+    assert auth_rel.create_relationship.call_args.kwargs["operator_name"] == "current-owner"
+
+
 def test_sync_agent_code_fallback_queries_passport_when_ext_missing():
-    bot = {"bot_id": "bot-1", "owner_id": "85020", "owner_name": "owner-1", "ext": {}}
+    bot = {**_bot_record(), "ext": {}}
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = bot
+    bot_repo.list_matches_by_legacy_locator.return_value = [bot]
     passport = MagicMock()
     passport.query_agent_passport.return_value = {"agent_code": "ac-fb"}
     auth_rel = MagicMock()
@@ -110,9 +142,9 @@ def test_sync_raises_bot_not_found_when_repo_returns_none():
 
 
 def test_sync_raises_agent_code_unavailable_when_neither_ext_nor_query_resolve():
-    bot = {"bot_id": "bot-1", "owner_id": "85020", "owner_name": "owner-1", "ext": {}}
+    bot = {**_bot_record(), "ext": {}}
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = bot
+    bot_repo.list_matches_by_legacy_locator.return_value = [bot]
     passport = MagicMock()
     passport.query_agent_passport.return_value = None
     auth_rel = MagicMock()
