@@ -122,7 +122,11 @@ export function useBotEditor(
         'Skill 已删除',
         { silent: true },
       ),
-    uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
+    uploadSkill: async (file: File) => {
+      await botEditorService.uploadSkill(botId!, file);
+      toast.success('Skill 已上传');
+      await load();
+    },
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
       act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),

@@ -223,6 +223,7 @@ describe('httpClient 未登录反应口与静默', () => {
     await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
       name: 'BackendRequestError',
       status: 500,
+      silent: true,
     });
 
     expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
