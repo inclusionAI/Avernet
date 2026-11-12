@@ -131,8 +131,7 @@ def create_router():
         availability = filters.get("availability")
         # The TC catalog's human view sends all Bot-facing visibility values.
         user_view = (
-            runtime.storage_kind == "card"
-            and filters.keys() == {"runtime_state", "availability"}
+            filters.keys() == {"runtime_state", "availability"}
             and filters["runtime_state"] == ["online"]
             and isinstance(availability, list)
             and len(availability) == 3
@@ -178,7 +177,7 @@ def create_router():
                     "min_score_compat_mode": "deprecated_ignored",
                     "min_score_stage": "none",
                     "enable_rerank": payload.enable_rerank,
-                    "candidate_source": f"tc_{runtime.storage_kind}",
+                    "candidate_source": "tc_card",
                     "status": result.status,
                     "reasons": list(result.reasons),
                     "score_sources": [i.score_source for i in result.items],
