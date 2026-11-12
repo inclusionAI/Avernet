@@ -3,24 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-import unicodedata
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
-
+from agentclaw.community.core.system_config.system_config_service_protocol import ProtectedConfigKey
 
 CATEGORY = "task"
 KEY = "panel"
-
-
-def _canonical(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value).casefold().strip()
-    return "".join(char for char in normalized if not unicodedata.combining(char))
-
-
-def is_panel_config(category: str, key: str) -> bool:
-    """Include aliases that case/width/accent-insensitive DB collations equate."""
-    return _canonical(category) == CATEGORY and _canonical(key) == KEY
+PANEL_CONFIG_KEY = ProtectedConfigKey(CATEGORY, KEY)
 
 
 @dataclass(frozen=True)
@@ -67,6 +57,12 @@ class PanelManifestConfig:
             raise ValueError("npm CDN bundles must pin an exact task-panel version")
         return cls(1, (PanelBundle("taskPanel", url),))
 
+    def to_value(self) -> dict[str, object]:
+        return {"schema_version": self.schema_version, "bundles": [
+            {"name": bundle.name, "type": "url", "url": bundle.url}
+            for bundle in self.bundles
+        ]}
+
 
 @dataclass(frozen=True)
 class TaskPanelManifest:
@@ -78,3 +74,11 @@ class TaskPanelManifest:
 @runtime_checkable
 class TaskPanelManifestServiceProtocol(Protocol):
     def get_manifest(self, *, env: str) -> TaskPanelManifest: ...
+
+    def set_manifest(self, *, value: dict[str, object], env: str, operator: str) -> TaskPanelManifest:
+        """Create or fully replace the current environment's validated manifest.
+
+        The caller authorizes the operator. Invalid input raises ValueError;
+        storage failure raises InternalError, never a successful response.
+        """
+        ...

@@ -9,9 +9,10 @@ it from here.
 from __future__ import annotations
 
 from agentclaw.community.core.system_config.system_config_service_protocol import (
-    SystemConfigServiceProtocol,
+    ProtectedConfigKey, SystemConfigServiceProtocol,
 )
 
 __all__ = [
+    "ProtectedConfigKey",
     "SystemConfigServiceProtocol",
 ]

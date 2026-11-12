@@ -30,7 +30,9 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
 from agentclaw.community.api.device_config_service import DeviceConfigServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
-from agentclaw.community.api.task.task_manifest_service import PanelManifestConfig, is_panel_config
+from agentclaw.community.adapters.http.system_config.write_access import (
+    protect_category_delete, protect_config_delete, protect_config_set,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.utils import env_utils
 from agentclaw.community.log import get_logger
@@ -104,7 +106,7 @@ async def create_category(
     )
 
 
-@router.post("/categories/delete", response_model=ApiResponse[dict])
+@router.post("/categories/delete", response_model=ApiResponse[dict], dependencies=[Depends(protect_category_delete)])
 async def delete_category(
     req: DeleteCategoryRequest,
     user: AuthenticatedUser = Depends(require_operator),
@@ -156,7 +158,7 @@ async def get_config(
     )
 
 
-@router.post("/set", response_model=ApiResponse[dict])
+@router.post("/set", response_model=ApiResponse[dict], dependencies=[Depends(protect_config_set)])
 async def set_config(
     req: SetConfigRequest,
     user: AuthenticatedUser = Depends(get_current_user),
@@ -176,15 +178,6 @@ async def set_config(
             raise HTTPException(422, "Invalid DWS rollout configuration") from None
     env = env_utils.get_current_env()
     operator = get_operator(user)
-    panel_config = is_panel_config(req.category, req.config_key)
-    if panel_config:
-        await require_operator(user, auth_plugin)
-        if req.category != "task" or req.config_key != "panel":
-            raise HTTPException(422, "Use canonical task panel configuration key")
-        try:
-            PanelManifestConfig.from_value(req.config_value)
-        except ValueError:
-            raise HTTPException(422, "Invalid task panel configuration") from None
     config_id = service.set_config(
         category=req.category,
         config_key=req.config_key,
@@ -193,8 +186,6 @@ async def set_config(
         description=req.description,
         operator=operator,
     )
-    if panel_config and config_id <= 0:
-        raise HTTPException(503, "Task panel configuration was not saved; ensure task category exists")
     return ApiResponse(
         success=True,
         message="配置已保存",
@@ -203,7 +194,7 @@ async def set_config(
     )
 
 
-@router.post("/delete", response_model=ApiResponse[dict])
+@router.post("/delete", response_model=ApiResponse[dict], dependencies=[Depends(protect_config_delete)])
 async def delete_config(
     req: DeleteConfigRequest,
     user: AuthenticatedUser = Depends(require_operator),

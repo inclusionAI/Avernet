@@ -23,9 +23,9 @@ from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProto
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
-from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.api.system_config_service import ProtectedConfigKey, SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
-from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
+from agentclaw.community.core.task.task_panel.manifest_contract import PANEL_CONFIG_KEY, TaskPanelManifestServiceProtocol
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
@@ -232,6 +232,7 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
+        binder.multibind(list[ProtectedConfigKey], to=[PANEL_CONFIG_KEY])
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.

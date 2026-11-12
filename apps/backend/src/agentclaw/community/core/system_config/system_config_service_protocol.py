@@ -8,7 +8,29 @@ binding in :mod:`agentclaw.community.di.modules.system_config_module`.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
+import unicodedata
+
+
+def _canonical(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value).casefold().strip()
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+@dataclass(frozen=True)
+class ProtectedConfigKey:
+    category: str
+    config_key: str
+
+    def matches(self, category: str, config_key: str | None = None) -> bool:
+        """Omitting the key checks a category-wide destructive operation.
+
+        Include aliases equated by case/width/accent-insensitive DB collations.
+        """
+        return _canonical(category) == _canonical(self.category) and (
+            config_key is None or _canonical(config_key) == _canonical(self.config_key)
+        )
 
 
 @runtime_checkable
