@@ -130,11 +130,13 @@ describe.each(['WorkflowRuns', 'OverviewTab'] as const)('%s env/tag wiring', (vi
     const firstCells = within(table).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell')[0])
     expect(firstCells.map(cell => cell.firstElementChild?.textContent)).toEqual(runs.map(run => run.flow_id))
     expect(within(runIdCell('z-test')).getByText('test')).toBeInTheDocument()
-    expect(within(runIdCell('z-test')).getByText('release-candidate')).toHaveAttribute('title', 'release-candidate')
+    expect(within(runIdCell('z-test')).getByText('流量标识')).toBeInTheDocument()
+    expect(within(runIdCell('z-test')).getByText('标签')).toBeInTheDocument()
+    expect(within(runIdCell('z-test')).getByText('release-candidate')).toHaveAttribute('title', '标签: release-candidate')
     const expectedMarkers = new Map([
-      ['b-missing', '未记录未记录'],
-      ['a-null', '未记录未记录'],
-      ['c-default', 'prod'],
+      ['b-missing', '流量标识未记录标签未记录'],
+      ['a-null', '流量标识未记录标签未记录'],
+      ['c-default', '流量标识prod标签—'],
     ] as const)
     for (const flowId of ['b-missing', 'a-null', 'c-default'] as const) {
       const cell = runIdCell(flowId)
@@ -146,10 +148,10 @@ describe.each(['WorkflowRuns', 'OverviewTab'] as const)('%s env/tag wiring', (vi
   it('bounds long tags, preserves the full title/text, and keeps row navigation', async () => {
     mockRuns([makeRun('long-tag-run', { env: 'test', tag: longTag })])
     const { container } = renderList(view)
-    const tag = within(runIdCell('long-tag-run')).getByTitle(longTag)
+    const tag = within(runIdCell('long-tag-run')).getByTitle(`标签: ${longTag}`)
     expect(tag.textContent).toBe(longTag)
-    expect(tag).toHaveClass('truncate', 'max-w-40')
-    expect(tag.parentElement).toHaveClass('min-w-0', 'max-w-64')
+    expect(tag).toHaveClass('truncate')
+    expect(tag.parentElement).toHaveClass('min-w-0', 'max-w-48')
     expect(container.querySelector('img, script')).toBeNull()
     await userEvent.click(tag)
     expect(screen.getByText('Run detail destination')).toBeInTheDocument()
@@ -164,6 +166,7 @@ describe('WorkflowRuns purpose and permissions', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: '运行用途' }), 'trial')
     expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ purpose: 'trial', botOwnerId: 'viewer' }))
     expect(within(runIdCell('trial-run')).getByText('test')).toBeInTheDocument()
+    expect(within(runIdCell('trial-run')).getByText('标签')).toBeInTheDocument()
     expect(within(runIdCell('trial-run')).getByText('trial-label')).toBeInTheDocument()
     view.unmount()
     mocks.user.isAdmin = true
@@ -184,8 +187,8 @@ describe('RunSummaryHeader env/tag wiring', () => {
   ])('shows separate env/tag fields for $name responses', ({ fields, env, tag }) => {
     render(<RunSummaryHeader run={makeRun('detail-run', fields)} nodeCount={1} />)
     const summary = screen.getByRole('region', { name: '运行摘要' })
-    expect(within(summary).getByText('环境', { selector: 'dt' }).nextElementSibling?.textContent).toBe(env)
-    expect(within(summary).getByText('Tag', { selector: 'dt' }).nextElementSibling?.textContent).toBe(tag)
+    expect(within(summary).getByText('流量标识', { selector: 'dt' }).nextElementSibling?.textContent).toBe(env)
+    expect(within(summary).getByText('标签', { selector: 'dt' }).nextElementSibling?.textContent).toBe(tag)
     expect(within(summary).getByText('运行引擎', { selector: 'dt' }).nextElementSibling).toHaveTextContent('engine-not-an-env')
   })
 
@@ -198,7 +201,7 @@ describe('RunSummaryHeader env/tag wiring', () => {
     expect(tag.parentElement).toHaveClass('min-w-0')
     expect(tag.closest('dl')).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-3', 'lg:grid-cols-7')
     expect(container.querySelector('img, script')).toBeNull()
-    expect(screen.getByText('环境', { selector: 'dt' }).nextElementSibling).toHaveTextContent('test')
+    expect(screen.getByText('流量标识', { selector: 'dt' }).nextElementSibling).toHaveTextContent('test')
     expect(screen.queryAllByRole('button')).toHaveLength(0)
     expect(mocks.mutation.mutate).not.toHaveBeenCalled()
   })
