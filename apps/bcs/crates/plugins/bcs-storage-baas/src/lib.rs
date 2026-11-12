@@ -215,7 +215,7 @@ impl StoragePlugin for BaasStoragePlugin {
     fn capabilities(&self) -> StorageCapabilities { self.caps }
 
     async fn prepare_upload(&self, req: UploadPrepareRequest, caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError> {
-        bcs_observability::observe_result("storage.baas.prepare_upload", async {
+        bcs_observability::observe_key_result("storage.baas.prepare_upload", async {
         let session_id = session_id_from_key(&req.key);
         let base = self.base_for_session(session_id);
         let body = serde_json::json!({
@@ -287,7 +287,7 @@ impl StoragePlugin for BaasStoragePlugin {
         Err(StorageError::Unsupported("baas")) // presign_put backend: never called by BCS
     }
     async fn complete_upload(&self, handle: &UploadHandle) -> Result<StorageObjectMeta, StorageError> {
-        bcs_observability::observe_result("storage.baas.complete_upload", async {
+        bcs_observability::observe_key_result("storage.baas.complete_upload", async {
         let pending: handle::BaasPendingHandle = serde_json::from_value(handle.backend_handle.clone())
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
@@ -301,7 +301,7 @@ impl StoragePlugin for BaasStoragePlugin {
     }
 
     async fn abort_upload(&self, handle: &UploadHandle) -> Result<(), StorageError> {
-        bcs_observability::observe_result("storage.baas.abort_upload", async {
+        bcs_observability::observe_key_result("storage.baas.abort_upload", async {
         let pending: handle::BaasPendingHandle = serde_json::from_value(handle.backend_handle.clone())
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
@@ -318,7 +318,7 @@ impl StoragePlugin for BaasStoragePlugin {
         Err(StorageError::Unsupported("baas")) // presign_download backend: 302 path used instead
     }
     async fn presign_get(&self, handle: &StorageHandle, opts: PresignGetOptions, caller: Option<&ActorRef>) -> Result<PresignGetTicket, StorageError> {
-        bcs_observability::observe_result("storage.baas.presign_get", async {
+        bcs_observability::observe_key_result("storage.baas.presign_get", async {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
@@ -342,7 +342,7 @@ impl StoragePlugin for BaasStoragePlugin {
             }).await
     }
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError> {
-        bcs_observability::observe_result("storage.baas.delete", async {
+        bcs_observability::observe_key_result("storage.baas.delete", async {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))

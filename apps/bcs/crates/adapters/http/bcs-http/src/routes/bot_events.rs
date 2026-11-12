@@ -208,7 +208,7 @@ pub async fn post_bot_event(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     LoggedBotEventRequest(req): LoggedBotEventRequest,
-) -> Result<Json<Value>, BotEventRouteError> {
+) -> Result<Response, BotEventRouteError> {
     let callback_content = bot_event_trace_content(&req);
     let requested_finish_reason = requested_finish_reason(&req);
     let provider_id = match header_required(&headers, BCN_PROVIDER_ID_HEADER) {
@@ -291,6 +291,7 @@ pub async fn post_bot_event(
                 request_id = %bcs_observability::CurrentRequestId,
                 provider_id = %provider_id,
                 error = %error,
+                log_class = "business_key", event_code = "provider.callback.rejected",
                 "provider callback: bot event rejected"
             );
             let route_error = bot_event_error(error);
@@ -332,11 +333,15 @@ pub async fn post_bot_event(
         false,
     );
 
-    Ok(Json(json!({
+    let mut response = Json(json!({
         "ok": true,
         "delivered_count": outcome.delivered_count,
         "failed_count": outcome.failed_count,
-    })))
+    })).into_response();
+    if !matches!(effective_state, ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted) {
+        response.extensions_mut().insert(crate::gateway_trace::NonTerminalCallback);
+    }
+    Ok(response)
 }
 
 fn record_bot_response_auth_failure(

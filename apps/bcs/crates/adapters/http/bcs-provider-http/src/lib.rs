@@ -83,7 +83,7 @@ async fn read_provider_ack_body(
     response: reqwest::Response,
     timeout: Duration,
 ) -> Result<ProviderAckResponse, ProviderAckBodyError> {
-    bcs_observability::observe_result("provider.read_provider_ack_body", async {
+    bcs_observability::observe_key_result("provider.read_provider_ack_body", async {
     match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
         Ok(Ok(ack)) => Ok(ack),
         Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
@@ -136,6 +136,7 @@ impl ProviderClientPolicy {
 #[derive(Default)]
 struct LagTracker {
     alerting: bool,
+    correlated_pair_completed: bool,
     peak_lag_ms: u64,
 }
 

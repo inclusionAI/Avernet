@@ -694,3 +694,58 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
             .await
             .unwrap()
     }
+
+#[tokio::test]
+async fn first_lag_pair_is_selected_without_dropping_frames() {
+    use tracing_subscriber::{Layer, prelude::*};
+    const TEST_RUN: &str = "log-correlation-lag-test";
+    #[derive(Default)]
+    struct Row { run: String, code: String, key: bool, frame: bool }
+    impl tracing::field::Visit for Row {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            match field.name() {
+                "run_id" => self.run = value.into(),
+                "event_code" => self.code = value.into(),
+                "log_class" => self.key = value == "business_key",
+                "message" => self.frame = value == "sse frame recv",
+                _ => {}
+            }
+        }
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if matches!(field.name(), "run_id" | "message") { self.record_str(field, &format!("{value:?}")); }
+        }
+    }
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<Row>>>);
+    impl<S: tracing::Subscriber> Layer<S> for Capture {
+        fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+            if event.metadata().target() != "bcs_sse_detail" { return; }
+            let mut row = Row::default(); event.record(&mut row);
+            // Retain only this fixture's small metadata, never sibling payloads.
+            if row.run == TEST_RUN { self.0.lock().unwrap().push(row); }
+        }
+    }
+    let capture = Capture::default(); let output = capture.clone();
+    // These callsites run concurrently in sibling tests with no local dispatch.
+    // A process-wide subscriber matches production and avoids cached disabled
+    // callsites racing a short-lived per-future subscriber. This is the only
+    // subscriber installed in this unit-test binary; integration tests are separate.
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(capture)).unwrap();
+    let recording = Arc::new(RecordingFlow::default());
+    let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+    let mut dedup = SeqDedup::default(); let mut lag = LagTracker::default();
+    for seq in 1..=8 {
+        let ts = if seq % 2 == 1 { bcs_protocol::now_ms() - SSE_LAG_ALERT_MS - 1000 } else { bcs_protocol::now_ms() };
+        let frame = format!("event: chat\ndata: {}", serde_json::json!({"state":"delta", "seq":seq,"ts":ts,"deltaText":"token"}));
+        drive_sse_frame(&frame, TEST_RUN, "group", "bot", &None, u64::MAX, &mut dedup, &mut lag, &flow, None).await;
+    }
+    let rows = output.0.lock().unwrap();
+    let selected: Vec<_> = rows.iter().filter(|r| r.key).collect();
+    assert_eq!(selected.len(), 2);
+    assert_eq!(selected[0].code, "sse.lag_alert");
+    assert_eq!(selected[1].code, "sse.lag_recovered");
+    assert_eq!(rows.iter().filter(|r| r.code == "sse.lag_alert").count(), 4);
+    assert_eq!(rows.iter().filter(|r| r.code == "sse.lag_recovered").count(), 4);
+    assert_eq!(rows.iter().filter(|r| r.frame).count(), 8);
+    assert_eq!(recording.snapshot().len(), 8, "diagnostics must not drop business frames");
+}

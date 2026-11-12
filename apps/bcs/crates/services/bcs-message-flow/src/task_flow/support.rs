@@ -546,6 +546,7 @@ pub(super) fn log_task_dispatch_created(
     let content = MessageLogContent::from_text(message);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::TaskDispatchCreated.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -579,6 +580,7 @@ pub(super) fn log_task_complete(
     };
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::TaskComplete.as_str(),
         status = status.as_str(),
@@ -612,6 +614,7 @@ pub(super) fn log_manager_worker_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -632,6 +635,7 @@ pub(super) fn log_manager_worker_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

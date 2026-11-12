@@ -11,6 +11,7 @@ pub(super) fn log_state_machine_node_dispatch(
     let content = MessageLogContent::from_text(prompt);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::NodeDispatch.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -53,6 +54,7 @@ pub(super) fn log_state_machine_delivery_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -75,6 +77,7 @@ pub(super) fn log_state_machine_delivery_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -107,6 +110,7 @@ pub(super) fn log_state_machine_bot_event(
     let content = MessageLogContent::from_text(&text);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = matches!(cmd.state, ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted).then_some("business_key"),
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::BotEvent.as_str(),
         status = MessageLogStatus::Responded.as_str(),
@@ -144,6 +148,7 @@ pub(super) fn log_state_machine_node_result(
     if level_error {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::NodeResult.as_str(),
             status = status.as_str(),
@@ -166,6 +171,7 @@ pub(super) fn log_state_machine_node_result(
     } else {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::NodeResult.as_str(),
             status = status.as_str(),
@@ -197,6 +203,7 @@ pub(super) fn log_state_machine_transition(
 ) {
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::Transition.as_str(),
         status = status.as_str(),
@@ -221,6 +228,7 @@ pub(super) fn log_state_machine_run_complete(
 ) {
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RunComplete.as_str(),
         status = MessageLogStatus::Completed.as_str(),
@@ -239,6 +247,7 @@ pub(super) fn log_state_machine_run_complete(
 pub(super) fn log_state_machine_run_failed(run: &StateMachineRun, error: &str, session_complete_result: &str) {
     warn!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RunFailed.as_str(),
         status = MessageLogStatus::Failed.as_str(),
@@ -262,6 +271,7 @@ pub(super) fn log_state_machine_timeout(
 ) {
     warn!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::Timeout.as_str(),
         status = MessageLogStatus::Timeout.as_str(),

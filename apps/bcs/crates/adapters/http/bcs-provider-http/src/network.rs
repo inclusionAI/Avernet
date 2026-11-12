@@ -126,7 +126,7 @@ pub(super) async fn send_provider_request_with_policy(
     client_policy: ProviderClientPolicy,
     status_policy: ProviderStatusPolicy,
 ) -> ServiceResult<reqwest::Response> {
-    bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
+    bcs_observability::observe_key_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
         bcs_to_provider_token,

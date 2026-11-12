@@ -467,6 +467,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-opentelemetry",
+ "tracing-serde",
  "tracing-subscriber",
  "url",
  "urlencoding",
@@ -947,6 +948,7 @@ dependencies = [
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
+ "bcs-tracing-api",
  "bcs-user-directory-api",
  "hex",
  "serde_json",
@@ -2030,6 +2032,7 @@ dependencies = [
 name = "bcs-observability"
 version = "0.1.4-beta.3"
 dependencies = [
+ "bcs-tracing-api",
  "serde",
  "serde_json",
  "tokio",
