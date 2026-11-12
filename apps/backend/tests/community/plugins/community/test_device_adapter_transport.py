@@ -165,6 +165,102 @@ def test_404_retains_structured_route_missing_evidence(
     assert caught.value.standard_route_missing is standard_route_missing
 
 
+def test_invoke_retries_get_transient_api_key_not_exist_once():
+    """A matching production-only failure converges on one short GET retry."""
+    first = _response(
+        500,
+        {
+            "code": "11-50005",
+            "message": "ApiKey信息前置校验失败, 原始信息: apikey info not exist",
+        },
+    )
+    second = _response(200, {"success": True, "data": {"items": []}})
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = [first, second]
+
+    with patch(
+        "agentclaw.community.plugins.community.device_adapter_transport.asyncio.sleep",
+        new_callable=AsyncMock,
+    ) as sleep:
+        result = asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 9},
+                method="GET",
+                path="/api/sessions/session/messages",
+            )
+        )
+
+    assert result == {"success": True, "data": {"items": []}}
+    assert baas.invoke_http.call_count == 2
+    assert baas.invoke_http.call_args.kwargs == {
+        "bind_id": 9,
+        "port": 20003,
+        "path": "/api/sessions/session/messages",
+        "method": "GET",
+        "json": None,
+        "params": None,
+        "tenant": None,
+        "device_affinity": None,
+        "device_uuid": None,
+        "auth_header": "x-proxypass-token",
+    }
+    sleep.assert_awaited_once_with(0.05)
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE"])
+def test_invoke_does_not_retry_api_key_mismatch_on_write(method):
+    """Only GET participates; writes keep their fail-fast HTTP contract."""
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = [
+        _response(
+            500,
+            {
+                "code": "11-50005",
+                "message": "ApiKey信息前置校验失败, 原始信息: apikey info not exist",
+            },
+        ),
+        _response(200, {"success": True}),
+    ]
+
+    with pytest.raises(DeviceAdapterHTTPStatusError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 9},
+                method=method,
+                path="/api/test",
+            )
+        )
+
+    assert baas.invoke_http.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "payload"),
+    [
+        (500, {"code": "11-50005", "message": "unrelated upstream failure"}),
+        (500, {"code": "11-50006", "message": "ApiKey信息前置校验失败, 原始信息: apikey info not exist"}),
+        (500, {"message": "ApiKey信息前置校验失败, 原始信息: apikey info not exist"}),
+        (500, {"code": "11-50005", "message": {"nested": "ApiKey信息前置校验失败, 原始信息: apikey info not exist"}}),
+        (500, "non-json body"),
+        (502, {"code": "11-50005", "message": "ApiKey信息前置校验失败, 原始信息: apikey info not exist"}),
+    ],
+)
+def test_invoke_does_not_retry_unmatching_api_key_error(status, payload):
+    """The retry signal stays tied to the observed production JSON shape."""
+    transport, baas = _transport(_response(status, payload))
+
+    with pytest.raises(DeviceAdapterHTTPStatusError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 9},
+                method="GET",
+                path="/api/test",
+            )
+        )
+
+    assert baas.invoke_http.call_count == 1
+
+
 def test_invoke_maps_explicit_timeout():
     transport, baas = _transport()
     baas.invoke_http.side_effect = httpx.ReadTimeout(
