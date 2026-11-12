@@ -257,12 +257,7 @@ def verify_caller_token_logs(root, story):
     print('Preproduction caller diagnostic matches actual Provider receipt: PASS', flush=True)
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--binary', required=True)
-    parser.add_argument('--environment', choices=('local', 'pre'), default='local')
-    args = parser.parse_args()
-    binary = str(Path(args.binary).resolve())
+def run_story(binary, environment):
     provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
     provider.received = queue.Queue()
     provider.traces = queue.Queue()
@@ -284,9 +279,9 @@ def main():
         config['bots_base_dir'] = str(root / 'bots')
         config['session_files']['backend'] = {'data_dir': str(root / 'files')}
         config['collaboration']['templates']['base_dir'] = str(root / 'templates')
-        config_path = root / f'bcs-config-{args.environment}.json'
+        config_path = root / f'bcs-config-{environment}.json'
         config_path.write_text(json.dumps(config))
-        env = dict(os.environ, SERVER_ENV=args.environment, CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
+        env = dict(os.environ, SERVER_ENV=environment, CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
                    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
         # Keep instrumented LLVM_PROFILE_FILE from the runner for real server coverage.
         with (root / 'server.log').open('w') as log:
@@ -294,7 +289,7 @@ def main():
             process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces)],
                 cwd=root, env=env, stdout=log, stderr=log)
             try:
-                story = Story(f'http://127.0.0.1:{port}', key, provider, args.environment)
+                story = Story(f'http://127.0.0.1:{port}', key, provider, environment)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during startup; ' + (root / 'server.log').read_text()[-2000:])
@@ -352,7 +347,18 @@ def main():
                 durable = '\n'.join(db.iterdump())
             assert 'test-token' not in durable, 'raw caller token persisted in SQLite'
             verify_caller_token_logs(root, story)
-            print(f'Caller credential persistence and {args.environment} log policy: PASS', flush=True)
+            print(f'Caller credential persistence and {environment} log policy: PASS', flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--binary', required=True)
+    parser.add_argument('--environment', choices=('local', 'pre'))
+    args = parser.parse_args()
+    binary = str(Path(args.binary).resolve())
+    environments = (args.environment,) if args.environment else ('local', 'pre')
+    for environment in environments:
+        run_story(binary, environment)
 
 
 if __name__ == '__main__':
