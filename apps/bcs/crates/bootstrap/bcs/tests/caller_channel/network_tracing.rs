@@ -22,6 +22,13 @@ impl Record for Completion {
 }
 
 impl NetworkTracer for Recorder {
+    fn log_correlation(&self, context: &bcs_tracing_api::Context) -> Option<bcs_tracing_api::LogCorrelation> {
+        let context = context.downcast_ref::<TraceContext>()?;
+        bcs_tracing_api::LogCorrelation::new(
+            "e2e_trace_id", &context.trace_id, "e2e_span_id", &context.span_id.to_string(),
+        )
+    }
+
     fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         let span_id = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         let parent = parent.local.and_then(|context| context.downcast_ref::<TraceContext>());

@@ -18,7 +18,18 @@ Bot-only binding validation, authenticated ingress, missing credentials, concurr
 DM/group identities, queued caller behavior after configuration changes, default
 mode, callback/SSE delivery, provider authentication, and durable queue failure
 when ephemeral credentials are lost on process restart. Synthetic credentials
-must not appear in the database or debug logs.
+must not appear in the database. Both local and preproduction environments run:
+local logs remain redacted; temporary preproduction diagnostics must match the
+Provider wire values in console, text and JSON outputs.
+
+The recording network provider implements the optional read-only log identity
+hook. The story compares real HTTP success, authentication and validation error
+logs with completed network records and checks matching identity pairs in the
+production text and JSON outputs. It also checks that ordinary request logs and
+excluded health requests stay uncorrelated, the SSE terminal produces one close
+summary without changing delivery, and restart without a provider emits no
+identity. All assertions observe process output after graceful writer shutdown;
+they do not invoke domain logic or formatters from the test.
 
 `scripts/caller_e2e_coverage.sh` instruments this
 story into the same profile pool as `scripts/e2e_coverage.sh`. Existing global
