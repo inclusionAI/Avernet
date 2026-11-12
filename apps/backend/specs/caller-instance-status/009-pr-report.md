@@ -1,33 +1,45 @@
 # PR 收敛报告：caller-instance-status
 
 ## 范围
-- Worktree: caller-instance-status-20261112
-- Source repo: GitHub inclusionAI/Avernet, explicit push_remote/source_remote=github.
-- Initial head / base: feat/caller-instance-status-20261112 / github/dev.
-- Initial verified base: d0cdd023453055304418c6170897936f321746b3.
-- PR: NOT_CREATED (implementation verification in progress).
+- Worktree: `/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/caller-instance-status-20261112`.
+- Source repo: GitHub inclusionAI/Avernet; push/source remote explicitly `github`; internal mirror excluded.
+- Head / base: `rebase/caller-instance-status-on-dev-20261112` / `dev`.
+- Base (bottom): d0cdd023453055304418c6170897936f321746b3; implementation replayed on top via git rebase github/dev, no conflict.
+- PR: https://github.com/inclusionAI/Avernet/pull/3914
 - PR title: feat(backend): expose read-only caller instance status
 - PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec.
 - Reviewers: no user-specified reviewers; OCB defaults do not apply to Avernet.
 - Human comments mode: auto.
-- OCB: excluded by explicit user instruction; no gitlink update, OCB worktree, or OCB PR.
+- OCB: excluded per user instruction; no worktree, gitlink change or PR.
+
+## PR 判定
+| 结果 | 证据 | 说明 |
+|---|---|---|
+| OPEN | PR #3914 | Repo, head, base and semantic metadata read back. |
+| Local review/regression PASS | 003 / 003b reports | Independent signed-principal, health, no-write and logging tests. |
+| ACI/CI PENDING | Head-specific checks on PR | Actual jobs started; local results are not remote results. |
 
 ## 自动意见
-Remote review has not started. Independent local review identified inherited BaaS detail logging on the new health-query path; a scoped opt-out and transport-level credential-sentinel regression are being implemented before delivery.
+No remote review/comment at creation-time readback. Local independent review found inherited BaaS detail logging; a compatible per-read safe-log switch and six real MockTransport credential-sentinel regressions resolved it.
 
 ## ACI/CI
 | Job/指标 | 状态 | 证据 | 说明 |
 |---|---|---|---|
-| Remote checks | PENDING | No PR yet | Local evidence is not remote CI evidence. |
-| Local focused suites | PASS | Independent reviewer: 87 passed, 21.54s | Domain, HTTP, admission, authorization suites; final post-fix rerun pending. |
-| Local static hygiene | PASS | Independent reviewer | ruff F401/F841/E9 and git diff --check. |
+| Affected local suites | PASS | 002-code-report.md | 308 passed, zero failed/skipped. |
+| API/architecture local suites | PASS | 002-code-report.md | 233 passed. |
+| Independent final regression | PASS | 003b-regression-report.md | 43 passed, zero failed/skipped. |
+| Focused executable changed lines | PASS | /tmp/caller-instance-status-coverage.json | 60/61 = 98.36%; BaaS inherited class exclusion is 0/0, not claimed as covered. |
+| Focused runtime module lines | PASS | 002-code-report.md | 790/902 = 87.58%; not repository-wide coverage. |
+| Local static/size/diff hygiene | PASS | 002 / 003 | No new unused-import/variable issues; inherited findings retained. |
+| Plaintext secret scan | PASS | check_secrets.py --base github/dev --head HEAD | Synthetic marker literals were initially false positives; named marker fixture preserves assertions. No scanner rules changed. |
+| Remote PR title, unit-test jobs, Singlebox | PENDING | PR checks | Monitor final pushed head; no pass inferred from pending. |
 
 ## 人工意见
-No remote PR exists yet.
+No human review/comment at creation-time readback.
 
 ## 当前结论
-- PR: NOT_CREATED
-- 自动意见: PENDING
+- PR: OPEN
+- 自动意见: CLEAR at creation-time observation; recheck latest head.
 - ACI/CI: PENDING
-- 人工意见: PENDING
-- 下一步: finish safe provider logging regression, independent regression and review; commit, fresh rebase onto GitHub dev, push, create PR, inspect actual reviews and checks.
+- 人工意见: CLEAR at creation-time observation; recheck latest head.
+- 下一步: observe actual checks and reviews for final pushed head; fix actionable failures, retain infrastructure failures as such.
