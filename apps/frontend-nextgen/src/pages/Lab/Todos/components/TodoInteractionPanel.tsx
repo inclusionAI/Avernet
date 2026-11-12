@@ -25,12 +25,15 @@ export function TodoInteractionPanel({ interactions, enabled, loading, onSubmit 
     if (success) setMessage('');
   };
   return (
-    <section className="space-y-3">
+    <section role="region" aria-label="待办互动" className="space-y-3">
       <div className="text-sm font-semibold text-foreground">互动</div>
       {interactions.length > 0 ? (
         <div className="space-y-2">
           {interactions.map((item) => (
-            <Card key={item.eventId || `${item.executionId}-${item.eventSeq}`} className="rounded-lg bg-muted/20 p-3">
+            <Card
+              key={item.eventId || `${item.executionId}-${item.eventSeq}`}
+              className="rounded-xl border border-border bg-card p-3"
+            >
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>{item.actorType === 'bot' ? 'Bot' : '我'}</span>
                 <span>{formatDateTime(item.createdAt)}</span>
@@ -53,6 +56,7 @@ export function TodoInteractionPanel({ interactions, enabled, loading, onSubmit 
           />
           <div className="flex justify-end">
             <Button
+              className="h-8 rounded-lg px-4 text-xs"
               onClick={() => void submit()}
               loading={loading}
               disabled={!message.trim()}

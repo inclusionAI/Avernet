@@ -283,6 +283,34 @@ describe('TodoDetailPage', () => {
     expect(screen.queryByRole('region', { name: '待办验收' })).not.toBeInTheDocument();
   });
 
+  it('使用紧凑产物与互动层级', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('开始采集竞品资料');
+
+    fireEvent.click(screen.getByRole('tab', { name: '产物 4' }));
+    const artifactView = screen.getByRole('region', { name: '待办产物' });
+    const artifactTitle = within(artifactView).getByText('执行摘要');
+    const artifactMeta = within(artifactView).getByText('文本产物');
+    const artifactCard = artifactTitle.closest('article');
+
+    expect(artifactTitle).toHaveClass('text-sm', 'font-medium');
+    expect(artifactMeta).toHaveClass('text-xs');
+    expect(artifactCard).toHaveClass('rounded-xl', 'border', 'border-border', 'bg-card');
+    expect(within(artifactView).getByText('已完成三款产品的定价对比。')).toHaveClass('text-xs', 'leading-5');
+
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const interactionTitle = within(interactionView).getByText('互动');
+    const feedback = within(interactionView).getByText('请补充价格来源');
+    const interactionCard = feedback.closest('.rounded-xl');
+    const sendButton = within(interactionView).getByRole('button', { name: '发送互动' });
+
+    expect(interactionTitle).toHaveClass('text-sm', 'font-semibold');
+    expect(feedback).toHaveClass('text-xs', 'leading-5');
+    expect(interactionCard).toHaveClass('rounded-xl', 'border', 'border-border', 'bg-card');
+    expect(sendButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
+  });
+
   it('使用居中紧凑详情阅读列', async () => {
     render(<TodoDetailPage />);
     const heading = await screen.findByRole('heading', { name: 'Q3 竞品分析' });

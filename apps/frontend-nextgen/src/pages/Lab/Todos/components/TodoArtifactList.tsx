@@ -30,15 +30,15 @@ function ArtifactShell({
   children: React.ReactNode;
 }) {
   return (
-    <article className="rounded-2xl border border-border bg-background px-5 py-4 text-foreground">
-      <div className="flex items-start gap-4">
-        <span className="flex size-[52px] shrink-0 items-center justify-center rounded-2xl bg-muted text-foreground">
+    <article className="rounded-xl border border-border bg-card px-4 py-3 text-card-foreground">
+      <div className="flex items-start gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
           {icon}
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 break-words text-base font-semibold">{title}</h3>
-          <div className="mt-1 text-sm text-muted-foreground">{meta}</div>
-          <div className="mt-4">{children}</div>
+          <h3 className="m-0 break-words text-sm font-medium">{title}</h3>
+          <div className="mt-0.5 text-xs text-muted-foreground">{meta}</div>
+          <div className="mt-3">{children}</div>
         </div>
       </div>
     </article>
@@ -115,12 +115,12 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
   return (
     <section role="region" aria-label="待办产物" className="space-y-3">
       {error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {error}
         </div>
       ) : null}
       {actionError ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {actionError}
         </div>
       ) : null}
@@ -130,11 +130,11 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
           return (
             <ArtifactShell
               key={artifact.artifactId}
-              icon={<FileText className="size-6" aria-hidden />}
+              icon={<FileText className="size-4" aria-hidden />}
               title={artifact.artifactName}
               meta="文本产物"
             >
-              <p className="m-0 whitespace-pre-wrap break-words rounded-xl bg-muted/40 px-4 py-3 text-sm leading-6">
+              <p className="m-0 whitespace-pre-wrap break-words rounded-lg bg-muted px-3 py-2 text-xs leading-5">
                 {artifact.content.text}
               </p>
             </ArtifactShell>
@@ -145,7 +145,7 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
           return (
             <ArtifactShell
               key={artifact.artifactId}
-              icon={<File className="size-6" aria-hidden />}
+              icon={<File className="size-4" aria-hidden />}
               title={artifact.artifactName}
               meta={`${artifact.content.fileName} · ${formatFileSize(artifact.content.size)}`}
             >
@@ -177,7 +177,7 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
           return (
             <ArtifactShell
               key={artifact.artifactId}
-              icon={<Link2 className="size-6" aria-hidden />}
+              icon={<Link2 className="size-4" aria-hidden />}
               title={artifact.artifactName}
               meta={artifact.content.type || '链接产物'}
             >
@@ -197,11 +197,11 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
         return (
           <ArtifactShell
             key={artifact.artifactId}
-            icon={<Code2 className="size-6" aria-hidden />}
+            icon={<Code2 className="size-4" aria-hidden />}
             title={artifact.artifactName}
             meta="代码产物"
           >
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 text-xs">
               <div>
                 <div className="text-muted-foreground">代码库</div>
                 <a
