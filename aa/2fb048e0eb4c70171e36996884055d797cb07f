@@ -1,0 +1,75 @@
+docs/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_2b26d456bc46f8::t_e9983ed9323140 246-247,249
+  s_2b26d456bc46f8::t_ba3c73e0f9a94d 255
+  s_2b26d456bc46f8::t_d67e9e2149e164 248,250-254,256
+apps/frontend-nextgen/tsconfig.json
+  s_2b26d456bc46f8::t_b72caf49c2c72a 8-14,17
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  s_2b26d456bc46f8::t_dda510f575b58c 5,7-18,22,25-26,28,30-32,34,36-38,40,42-49,51-56,59-98,101-105
+  s_2b26d456bc46f8::t_e6fb6ba7373cbf 106-117
+  s_2b26d456bc46f8::t_18f80ca579da77 3,21,27
+apps/frontend-nextgen/assets/task-panel/test/asset-delivery.mjs
+  s_2b26d456bc46f8::t_e6fb6ba7373cbf 7-10,17
+  s_2b26d456bc46f8::t_fa046da399a0c0 11
+apps/frontend-nextgen/assets/task-panel/README.md
+  s_2b26d456bc46f8::t_f3862e5427b8bf 45-51,53,56-57,67-74,76
+  s_2b26d456bc46f8::t_c6dd82174bb30a 44,61-66,75
+docs/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_2b26d456bc46f8::t_ba3c73e0f9a94d 36
+  s_2b26d456bc46f8::t_a09a6acdb88c33 40,44
+docs/specs/2026-11-11-task-panel-shared-asset/verification.md
+  s_2b26d456bc46f8::t_ba3c73e0f9a94d 53-55,88
+apps/frontend-nextgen/assets/task-panel/scripts/serve-assets.mjs
+  s_2b26d456bc46f8::t_e6fb6ba7373cbf 13-14,28
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetLoader.ts
+  s_2b26d456bc46f8::t_e6fb6ba7373cbf 25-27
+  s_2b26d456bc46f8::t_b72caf49c2c72a 6-13,15-19,21,23-24,32-33,35-40,42-44,47,49-51,55-57,61-63,65-66,78,80,82-88,93
+  s_2b26d456bc46f8::t_5ecbc8e02d04de 3,28-31,34,41
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  s_2b26d456bc46f8::t_e9983ed9323140 82-84,121-124,126-130,132-148,150-155,157-160,174-175,179
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAssetBoundary.test.tsx
+  s_2b26d456bc46f8::t_dda510f575b58c 136,138,141,153
+  s_2b26d456bc46f8::t_ff2ade739a28e7 3,9,123
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  s_2b26d456bc46f8::t_b4536e546818db 1-80
+apps/backend/src/agentclaw/community/adapters/http/system_config/router.py
+  s_2b26d456bc46f8::t_bb191858851f6a 33,179-187,196-197
+apps/backend/src/agentclaw/community/adapters/http/task/manifest_routes.py
+  s_2b26d456bc46f8::t_53d149943d72be 1-48
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  s_2b26d456bc46f8::t_ecf056fbd6345e 40,102
+apps/backend/src/agentclaw/community/api/README.md
+  s_2b26d456bc46f8::t_af89c22722f680 323
+apps/backend/src/agentclaw/community/api/task/task_manifest_service.py
+  s_2b26d456bc46f8::t_b79ca12a62edc1 1-8
+apps/backend/src/agentclaw/community/core/task/task_panel/README.md
+  s_2b26d456bc46f8::t_4ff18b1fcf766a 1-32
+apps/backend/src/agentclaw/community/core/task/task_panel/__init__.py
+  s_2b26d456bc46f8::t_c787c15f2a3a6d 1
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest.py
+  s_2b26d456bc46f8::t_3b7be3a9c58253 1-23
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_2b26d456bc46f8::t_9b00d7d4dd59e0 27-28,672-677
+apps/backend/tests/community/core/task/task_panel/test_http.py
+  s_2b26d456bc46f8::t_d1dfd30f53ba51 1-115
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  s_2b26d456bc46f8::t_08fef2ba2b76de 1-62
+docs/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_2b26d456bc46f8::t_4f9a70b91ddc78 54,254-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aa2fb048e0eb4c70171e36996884055d797cb07f",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
