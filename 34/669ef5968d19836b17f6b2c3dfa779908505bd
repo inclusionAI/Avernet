@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_task_endpoints.py
+  s_7d8e6acd12a072::t_a0d3c307f10b9d 288-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34669ef5968d19836b17f6b2c3dfa779908505bd",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

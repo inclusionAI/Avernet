@@ -1,0 +1,49 @@
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_a801d8b7be7674 26-27
+AGENTS.md
+  s_47ed8e91e4b8af::t_8563c0c50ae5bf 31
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_13ad517f26f6e0 24,30-36
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_5a8094d22943ff 1-11
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_7263931299e833 1-11
+apps/backend/specs/README.md
+  s_47ed8e91e4b8af::t_2d77f31d1c1508 1-11
+docs/adr/README.md
+  s_47ed8e91e4b8af::t_f93a553f97fb82 1-11
+docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_82e154ac742d44 1-12
+docs/agents/templates/adr.md
+  s_47ed8e91e4b8af::t_7ad0df5aa95c66 1-13
+docs/agents/templates/app.md
+  s_47ed8e91e4b8af::t_90c15b0c8ff865 1-13
+docs/agents/templates/diagnostic.md
+  s_47ed8e91e4b8af::t_30211591b20800 1-13
+docs/agents/templates/domain.md
+  s_47ed8e91e4b8af::t_18f4b06908029c 1-13
+docs/agents/templates/flow.md
+  s_47ed8e91e4b8af::t_33a9cea5191b9b 1-13
+docs/agents/templates/spec.md
+  s_47ed8e91e4b8af::t_6fd79fb3d13b5b 1-13
+docs/arch/README.md
+  s_47ed8e91e4b8af::t_7dd0068520347d 1-11
+docs/flows/README.md
+  s_47ed8e91e4b8af::t_7df88e3303be42 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "30cac357c6b7bd349338733259731396470d3c92",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

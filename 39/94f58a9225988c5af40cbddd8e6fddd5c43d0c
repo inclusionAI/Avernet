@@ -1,0 +1,67 @@
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_f383cd789117d8 54-56
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_f383cd789117d8 6-7,24-26,49-50
+apps/baas/AGENTS.md
+  s_47ed8e91e4b8af::t_8de87fbf123c29 51-52
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_88adffe5ab0d1c 3-9
+apps/baas/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_cf54dd8597dc71 1-16
+apps/baas/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_0b028a3ac8b79b 1-3
+apps/baas/docs/arch/README.md
+  s_47ed8e91e4b8af::t_09d6dc788ae4f3 1-11
+apps/backend/AGENTS.md
+  s_47ed8e91e4b8af::t_a1d026ab297749 6-7
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_f5ca09324ff81f 3-9
+apps/backend/docs/adr/README.md
+  s_47ed8e91e4b8af::t_7009e2a863c9d4 1-5
+apps/backend/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_766f049f1bcbae 1-16
+apps/backend/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_9c2b4ff62c1496 1-3
+apps/backend/docs/arch/README.md
+  s_47ed8e91e4b8af::t_60491ed3b889db 1-11
+apps/bcs/AGENTS.md
+  s_47ed8e91e4b8af::t_38b2b96fae8bd2 90-91
+apps/bcs/README.md
+  s_47ed8e91e4b8af::t_b34b2650169889 3-9
+apps/bcs/docs/adr/README.md
+  s_47ed8e91e4b8af::t_9f08eba3ffd656 1-5
+apps/bcs/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_ddc2199441174d 1-16
+apps/bcs/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_05d99803b4e714 1-3
+apps/bcs/docs/arch/README.md
+  s_47ed8e91e4b8af::t_aaceed80fc33b4 1-11
+apps/bcsfuse/AGENTS.md
+  s_47ed8e91e4b8af::t_a150202da60288 4-5
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_cd35627cbf2783 3-9
+apps/bcsfuse/docs/adr/README.md
+  s_47ed8e91e4b8af::t_afa3396891668d 1-5
+apps/bcsfuse/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_aeec52a5313b4e 1-16
+apps/bcsfuse/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_13e70d65d2de8e 1-3
+apps/bcsfuse/docs/arch/README.md
+  s_47ed8e91e4b8af::t_7ba15b5ecb3e78 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3994f58a9225988c5af40cbddd8e6fddd5c43d0c",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
