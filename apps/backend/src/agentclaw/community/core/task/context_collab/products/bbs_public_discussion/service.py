@@ -64,7 +64,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.views import (
+    DiscussionDetailBody,
     DiscussionDetailView,
+    DiscussionReplyItem,
     DiscussionSummaryView,
 )
 from agentclaw.community.core.task.context_collab.products.service_api import (
@@ -110,6 +112,21 @@ class _PublicMessageIntent:
 def _identity_updater(snapshot):
     """恒等快照推进(裁决 J)。"""
     return snapshot
+
+
+def _principal_id(ref) -> str:
+    """读投影作者标识;外部部分行(NULL actor 列)读为空串。"""
+    return ref.principal_id if ref is not None else ""
+
+
+def _content_of(event) -> str:
+    """读投影正文;payload 为 NULL 的部分行读为空串(读面容错,不 422)。"""
+    payload = event.payload
+    if isinstance(payload, dict):
+        content = payload.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
 
 
 class BbsPublicDiscussionService:
@@ -290,7 +307,94 @@ class BbsPublicDiscussionService:
     # ------------------------------------------------------------- 读(T4)
 
     def list_discussions(self) -> list[DiscussionSummaryView]:
-        raise NotImplementedError("read cases land in T4")
+        """Query.search/filter:按 product profile 列帖,gmt_create 倒序。
+
+        ``message_count`` 由仓储单 GROUP BY 聚合(无事件 id 取 0);
+        title 过渡期伴随读(裁决 2,自 spec JSON;P3 随过滤源升级)。
+        """
+        rows = self._repo.list_collets_by_product(
+            ProductProfile.BBS_PUBLIC_DISCUSSION.value
+        )
+        counts = self._repo.count_message_events(
+            [collet.collet_id for collet, _, _ in rows]
+        )
+        return [
+            DiscussionSummaryView(
+                collet_id=collet.collet_id,
+                title=spec.objective,
+                initiator_id=collet.initiator_ref.principal_id,
+                message_count=counts.get(collet.collet_id, 0),
+                created_at=gmt_create,
+            )
+            for collet, spec, gmt_create in rows
+        ]
 
     def get_discussion(self, collab_context_id: str) -> DiscussionDetailView:
-        raise NotImplementedError("read cases land in T4")
+        """Query.project:一次给齐标题/正文/全部公开回帖。
+
+        title 读源合同(创建事实 spec §3 裁决 1):初始事件 payload 的
+        ``objective``,NULL-payload 外部行回退伴随 ``context_spec.objective``
+        (P3 撤列时移除)。body 与 replies **只投影 public**(读可见性
+        裁决 F;visibility NULL 按 private 处理,事件 envelope 语义);
+        孤儿帖 ``body=None``(发帖两步窗口态,合法领域可空)。
+        """
+        record = self._repo.get_current_status(collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        if (
+            record.context_spec.product_kind
+            != ProductProfile.BBS_PUBLIC_DISCUSSION.value
+        ):
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} is not "
+                "a bbs public discussion"
+            )
+
+        title = record.context_spec.objective
+        for event in record.events:
+            if event.event_kind == _CREATION_EVENT_KIND:
+                # title 新主:初始事件 payload 的 objective(创建事实 spec
+                # §3 裁决 1);NULL-payload/缺键外部行回退伴随 spec.objective。
+                payload = event.payload
+                if isinstance(payload, dict):
+                    objective = payload.get("objective")
+                    if isinstance(objective, str) and objective.strip():
+                        title = objective
+                break
+        messages = [
+            event
+            for event in record.events
+            if event.primitive_type == _MESSAGE_PRIMITIVE
+            and event.visibility == VISIBILITY_PUBLIC
+        ]
+        # body 取首条 public Message;孤儿帖(窗口态/外部行)为 None。
+        body_event = messages[0] if messages else None
+        body_view = (
+            DiscussionDetailBody(
+                event_id=body_event.event_id,
+                content=_content_of(body_event),
+                author_id=_principal_id(body_event.actor_ref),
+                occurred_at=body_event.occurred_at,
+            )
+            if body_event is not None
+            else None
+        )
+        replies = [
+            DiscussionReplyItem(
+                event_id=event.event_id,
+                content=_content_of(event),
+                author_id=_principal_id(event.actor_ref),
+                parent_event_id=event.parent_event,
+                occurred_at=event.occurred_at,
+            )
+            for event in messages[1:]
+        ]
+        return DiscussionDetailView(
+            collet_id=collab_context_id,
+            title=title,
+            state=record.collet.state.value,
+            body=body_view,
+            replies=replies,
+        )
