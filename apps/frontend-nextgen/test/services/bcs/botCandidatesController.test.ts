@@ -154,6 +154,24 @@ describe('listBcsBotCandidates 普通候选列表', () => {
   });
 });
 
+describe('候选 Owner 字段消费契约', () => {
+  it.each([undefined, '7'])('兼容未返回 owner_user_id 的服务，并保留有效 Owner：%s', async (ownerUserId) => {
+    const candidate = { bot: CANDIDATE_BOT, is_friend: false, owner_user_id: ownerUserId };
+    backendRequest.mockResolvedValue({ ...LIST_ENVELOPE, data: { ...LIST_ENVELOPE.data, items: [candidate] } });
+
+    const page = await listBcsBotCandidates('human_7', {});
+
+    expect(page.data.items).toEqual([candidate]);
+  });
+
+  it.each([42, {}])('拒绝类型无效的 owner_user_id：%s', async (ownerUserId) => {
+    const candidate = { bot: CANDIDATE_BOT, is_friend: false, owner_user_id: ownerUserId };
+    backendRequest.mockResolvedValue({ ...LIST_ENVELOPE, data: { ...LIST_ENVELOPE.data, items: [candidate] } });
+
+    await expect(listBcsBotCandidates('human_7', {})).rejects.toBeInstanceOf(BackendRequestError);
+  });
+});
+
 describe('listBcsBotCandidates 失败不伪装为空列表', () => {
   it('HTTP 401 拒绝原样上抛，不吞成空页', async () => {
     backendRequest.mockRejectedValueOnce(

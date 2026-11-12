@@ -43,7 +43,7 @@ class FriendCatalogActions:
                 legacy_owner_id=locator,
             )
         except BotAddressNotFoundError as exc:
-            raise BotPublicServiceError(
+            raise BotNotFoundError(
                 f"Bot not found: bot_id={bot_id}, owner_id={locator}"
             ) from exc
         except BotLookupAmbiguousError as exc:
@@ -326,12 +326,10 @@ class FriendCatalogActions:
                 f"bot_friend_id={bot_friend_id}"
             )
 
-        bot = self._bot_repository.get_by_id_and_owner(
-            bot_id,
-            friend_record.get("target_entity_id"),
+        bot = self._resolve_friend_bot(
+            str(bot_id),
+            str(friend_record.get("target_entity_id") or ""),
         )
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
 
         # 判断 Bot 当前是否为 RESTRICTED 模式，OPEN 模式不需要授权关系
         bot_ext = bot.get("ext") or {}

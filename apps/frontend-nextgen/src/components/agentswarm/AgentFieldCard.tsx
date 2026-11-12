@@ -1,4 +1,4 @@
-import { Copy, Trash2 } from 'lucide-react';
+import { CircleHelp, Copy, Trash2 } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { YamlCodeEditor } from '@/pages/Workspace/components/Modals/YamlEditor';
 import { Button } from '@/components/ui/Button';
@@ -6,8 +6,16 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AgentDraft } from '@/domain/agentswarm/draft';
-import { MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { MANIFEST_DOCS_URL, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { VerticalResizeHandle } from './VerticalResizeHandle';
+import { useState } from 'react';
 import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
+
+/** The manifest editor opens at a readable height and can be dragged taller. */
+const EDITOR_DEFAULT_HEIGHT = 260;
+const EDITOR_MIN_HEIGHT = 160;
+const EDITOR_MAX_HEIGHT = 640;
 
 export interface AgentFieldCardProps {
   agent: AgentDraft;
@@ -44,16 +52,41 @@ function ManifestField({
   error?: string;
   onChange: (patch: Partial<AgentDraft>) => void;
 }) {
+  const [editorHeight, setEditorHeight] = useState(EDITOR_DEFAULT_HEIGHT);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <Label htmlFor={`compute-manifest-${agent.key}`}>能力配置 YAML</Label>
+        <span className="flex items-center gap-1">
+          <Label htmlFor={`compute-manifest-${agent.key}`}>能力配置 YAML</Label>
+          {/* 语法与各类目的限制都在那份文档里；一个图标比在 440px 面板里
+              重复一遍更好维护，也不会随平台演进过期。 */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={MANIFEST_DOCS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="查看配置清单的完整语法"
+                  className="inline-flex items-center text-muted-foreground hover:text-primary"
+                >
+                  <CircleHelp className="h-3.5 w-3.5" />
+                </a>
+              </TooltipTrigger>
+              <TooltipContent>查看配置清单的完整语法</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </span>
         {synthesized ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => onChange({ config_manifest: synthesizeManifest(agent.instructions ?? '') })}
+            onClick={() =>
+              // 自写的起点是模板，不是合成的 identity-only 预览：那个形状里
+              // 没有 mcp/skills 的字段可循，用户只能对着空白猜。
+              onChange({ config_manifest: MANIFEST_TEMPLATE })
+            }
           >
             改为自定义 YAML
           </Button>
@@ -78,19 +111,17 @@ function ManifestField({
           <YamlCodeEditor
             value={agent.config_manifest ?? ''}
             onChange={(manifest) => onChange({ config_manifest: manifest })}
-            height={200}
+            height={editorHeight}
           />
-          <div className="flex items-center justify-between">
-            <p className="text-xs leading-5 text-muted-foreground">已填写 YAML 时原样提交，「指令」不再参与人设。</p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => onChange({ config_manifest: MANIFEST_TEMPLATE })}
-            >
-              填入样例
-            </Button>
-          </div>
+          {/* 清单可能很长，固定 200px 读不下；高度给用户自己调。 */}
+          <VerticalResizeHandle
+            height={editorHeight}
+            onHeightChange={setEditorHeight}
+            min={EDITOR_MIN_HEIGHT}
+            max={EDITOR_MAX_HEIGHT}
+            label="调整配置清单编辑器高度"
+          />
+          <p className="text-xs leading-5 text-muted-foreground">已填写 YAML 时原样提交，「指令」不再参与人设。</p>
         </>
       )}
 
