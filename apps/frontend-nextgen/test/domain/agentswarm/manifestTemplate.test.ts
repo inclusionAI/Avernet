@@ -17,9 +17,16 @@ test('the template declares only identity, so subscribing to it removes nothing 
   expect(Object.keys(parsed.manifest)).toEqual(['identity']);
 });
 
-test('the two most-used categories are shown as commented examples', () => {
+test('mcp and skills are shown as commented keys, and nothing else is', () => {
+  // Two examples are enough to say "you can configure these here"; a longer
+  // list turns the template back into the reference document it replaced.
   for (const category of ['mcp', 'skills']) {
     expect(MANIFEST_TEMPLATE).toMatch(new RegExp(`#\\s*${category}:`));
+    // Commented out, so an unedited template declares nothing about them.
+    expect(MANIFEST_TEMPLATE).not.toMatch(new RegExp(`^\\s*${category}:`, 'm'));
+  }
+  for (const absent of ['cli_tools', 'resources']) {
+    expect(MANIFEST_TEMPLATE).not.toContain(absent);
   }
 });
 
@@ -28,16 +35,23 @@ test('the template interpolates its values rather than shipping placeholders', (
   expect(MANIFEST_TEMPLATE.split('\n')[0]).toContain('https://github.com');
 });
 
-test('uncommenting the two examples yields valid YAML', () => {
+test('uncommenting the two categories yields valid YAML with their keys present', () => {
   // Uncommenting is the one edit a user is meant to make, so the commented
   // shape must be valid the moment it loses its `#`. Prose comments stay
   // commented, which is why this drops only lines that look like configuration.
   const uncommented = MANIFEST_TEMPLATE.split('\n')
-    .map((line) => (/^(\s*)# (.+:|- .+)/.test(line) ? line.replace(/^(\s*)# /, '$1') : line))
+    // Only a line whose payload is `<key>:` or `- <key>:` is configuration;
+    // an explanatory comment that happens to contain a colon is prose.
+    .map((line) => (/^(\s*)#\s+((?:- )?[A-Za-z_]+:)/.test(line) ? line.replace(/^(\s*)#\s?/, '$1') : line))
     .join('\n');
   const parsed = parseYaml(uncommented) as Record<string, any>;
-  expect(parsed.manifest.mcp[0].server_code).toBe('github');
-  expect(parsed.manifest.skills[0].source.protocol).toBe('oss');
+  // The template lists keys, not worked examples: the values are the user's,
+  // and the field rules live in the linked document.
+  expect(parsed.manifest.mcp[0]).toHaveProperty('server_code');
+  expect(parsed.manifest.mcp[0]).toHaveProperty('config');
+  expect(parsed.manifest.skills[0]).toHaveProperty('name');
+  expect(parsed.manifest.skills[0].source).toHaveProperty('protocol');
+  expect(parsed.manifest.skills[0]).toHaveProperty('digest');
 });
 
 test('the template points at the full grammar', () => {
