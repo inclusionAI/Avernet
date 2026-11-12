@@ -139,14 +139,12 @@ saved source. Both extract a Provider-admin Bearer and call
 service. Memory-only test servers may omit this durable capability and return
 503 explicitly. Neither route submits a probe task or exposes credential values.
 
-The canonical A2A control-plane prefix is `/api/v1/collaboration/a2a/`.
-All seven `/a2a/...` route patterns below are also mounted under
-`/api/v1/collaboration` using the same handlers and BCS-owned credentials.
-Legacy root paths remain compatibility aliases. Creation `Location` uses the
-caller's entry-point prefix. The Gateway forwards the original Bearer on this
-namespace without interpreting it as a Gateway principal; BCS still authorizes
-each operation. No database calls, persistence semantics or outbound AgentCard
-interface URLs change.
+The versioned A2A control plane is owned by `bcs-api-http` at
+`/api/v1/collaboration/a2a/` and is not mounted in this adapter. Legacy root
+`/a2a/...` paths retain their bare success objects and v0.1 error shape.
+Both adapters reuse the same application capabilities and BCS-owned credentials;
+V1 wraps results in its standard envelope through a dedicated application facade.
+Remote AgentCard interface URLs and persistence are unchanged.
 
 Public AgentCard management uses POST `/a2a/agents`, GET/PUT
 `/a2a/agents/{bot_id}/agent-card` and POST `.../agent-card:refresh`. Location

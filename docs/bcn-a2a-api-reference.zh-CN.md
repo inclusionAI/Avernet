@@ -214,7 +214,7 @@ Card URL 需允许无 Provider 凭据的读取，返回 JSON；BCN 不会把下�
 
 ## 4. 注册 Bot
 
-BCS 控制面 A2A 接口统一使用 `/api/v1/collaboration/a2a/` 前缀。旧 `/a2a/` 路径保留为兼容入口，凭据、请求及响应合同相同；注册响应的 `Location` 保持调用入口的前缀。网关透传原始 Bearer，由 BCS 校验 Provider 管理或 Bot 凭据。远端 AgentCard 声明的 A2A 协议地址不受此迁移影响。
+BCS 控制面 A2A 接口使用 `/api/v1/collaboration/a2a/` 前缀，由 `bcs-api-http` 提供。成功和错误均采用 v1 `{code, message, data, request_id}` 格式：业务结果位于 `data`，错误码位于 `data.error_code`；HTTP 200/201/202 对应 code 20000/20100/20200。以下管理结果字段与示例 JSON 指 envelope 内的 `data`。注册 `Location` 指向同前缀的 Card 资源。旧 `/a2a/` 入口保留原始裸响应和 v0.1 错误格式，切换路径时需同步读取 `data`。网关透传 Bearer，由 BCS 校验 Provider 管理或 Bot 凭据；远端 AgentCard 协议地址保持不变。
 
 ### 名称入口
 
@@ -231,7 +231,7 @@ BCS 控制面 A2A 接口统一使用 `/api/v1/collaboration/a2a/` 前缀。旧 `
 | 查询运行 | GET /api/v1/collaboration/a2a/chat/runs/{run_id} | 支持原运行查询的等待参数 |
 | 取消运行 | POST /api/v1/collaboration/a2a/chat/runs/{run_id}/cancel | 无业务请求体 |
 
-provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。四个管理接口统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。完整字段和错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
+provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。四个管理接口统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。Card 业务字段和旧入口错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
 
 取消是异步流程：请求后继续查询运行，直到 state 为 cancelled 或其他终态；不能把一次取消响应中的 cancelled=false 当作远端拒绝的充分依据。当前注册适用于 StaticBearer Provider；AgentPass 身份映射仍使用原身份感知注册入口。
 
@@ -862,7 +862,7 @@ Agent 需记录接受结果：Task.metadata 在 profile URI 下包含 `version:1
 | 409 | 重复 Provider/ref 或 Card revision 冲突 | 复用原 Bot，或重新 GET 后确认更新 |
 | 500 / 503 | 存储或服务不可用、A2A 管理能力未配置等 | 保留响应与请求标识，联系平台排查；不要据此假定注册一定未落库 |
 
-以上表格描述兼容 ID 入口，其错误通常包含 error 字符串。新管理入口统一使用 error.code/message/request_id/details，并区分 400、409、422、502、504 等状态，详见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。A2A Agent 端错误遵守所选绑定的标准格式：HTTP+JSON 使用对应 HTTP 错误对象，JSONRPC 使用 JSON-RPC 错误对象，gRPC 使用对应状态。认证失败、Task 不存在、Task 不可取消、扩展不支持等应明确报告，不能返回成功空对象。
+以上表格描述兼容 ID 入口，其错误通常包含 error 字符串。旧 `/a2a/` 管理入口使用 error.code/message/request_id/details，详见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。`/api/v1/collaboration/a2a/` 使用 v1 envelope，错误码读取 `data.error_code`；Card 语义校验为 422，冲突为 409，上游 Card 获取失败（包括超时）按 v1 BadGateway 映射为 502。A2A Agent 端错误遵守所选绑定的标准格式：HTTP+JSON 使用对应 HTTP 错误对象，JSONRPC 使用 JSON-RPC 错误对象，gRPC 使用对应状态。认证失败、Task 不存在、Task 不可取消、扩展不支持等应明确报告，不能返回成功空对象。
 
 ### 9.2 运行恢复
 

@@ -269,6 +269,20 @@ class A2aStory(Story):
         self.original_policy = None
         self.policy_revision = None
 
+    def request(self, method, path, body=None, **kwargs):
+        value = super().request(method, path, body, **kwargs)
+        if path.startswith("/api/v1/collaboration/a2a/"):
+            assert set(value) == {"code", "message", "data", "request_id"}
+            expected = kwargs.get("status", 200)
+            assert value["code"] == expected * 100
+            assert value["request_id"]
+            if expected >= 400:
+                assert "error_code" in value["data"]
+                # Existing rejection cases compare machine codes on both protocols.
+                return {"error": {"code": value["data"]["error_code"]}}
+            return value["data"]
+        return value
+
     def run(self):
         self.request("POST", "/me/ensure-human")
         provider_name = "a2a-e2e-" + uuid.uuid4().hex

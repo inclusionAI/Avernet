@@ -75,3 +75,22 @@ The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
 
 Public Agent registration accepts BCN visibility (protected by default, or public/private). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility. This policy does not alter user_visibility or existing discovery, connection and invocation authorization; private is not an owner-only Human access mode.
+
+
+## V1 A2A application facade
+
+`v1::A2aApiService` implements `application::v1::a2a::A2aService` for the
+versioned control plane. It reuses existing management and chat-run use cases,
+translates their errors into ApplicationError, authenticates Bot/Actor using the
+injected BotSelfService before target resolution, applies existing session and
+run/poll limits, and projects only safe public run fields. Raw upstream errors,
+internal Bot/Provider IDs and delivery diagnostics are excluded. Card admission,
+ownership, persistence, cancellation and runtime policy remain in the existing
+use cases. There is no new network or persistence implementation.
+
+`tests/conformance_a2a_v1.rs` covers all facade operations, identity ordering,
+Actor substitution, timeout bounds, Card source/visibility forwarding and run
+redaction. The registered-Bot lookup uses the existing identity/registry path,
+not an adapter-owned Core handle or a new cache. Management adds no store calls;
+chat/run auth uses one existing BotSelf lookup per operation, replacing the
+legacy HTTP caller lookup (named chat previously resolved it twice).
