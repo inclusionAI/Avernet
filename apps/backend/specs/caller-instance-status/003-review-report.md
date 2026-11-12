@@ -39,3 +39,15 @@ BaasService has a pre-existing class-level coverage exclusion. Its safe option b
 ## Remaining work
 
 No blocking code finding. Independent regression, commit/rebase, PR creation and remote job/review convergence remain orchestration stages. Do not interpret this local PASS as remote ACI PASS or deployment verification.
+
+
+## Post-PR contract and acceptance review (iteration 2)
+
+**Verdict: PASS for the reviewed changes. Current-head remote ACI remains pending until observed by the orchestrator.** Reviewed committed corrections through `b6167ad5a7` plus the new, uncommitted `tests/community/endpoints/test_openapi_caller_instance_status.py`. Runtime control flow is unchanged; the DTO adds only model documentation.
+
+- Exact user-taking operation count increases 298 -> 299 and Bot-path placement 226 -> 227, retaining exact-equality inventory gates. The one new GET is explicitly classified as owner-addressed without stage input; no broad route exemption or loosened assertion was added.
+- The Singlebox manifest adds the exact new GET to the existing ExpertChat router denominator. Existing thresholds, Core paths, Plugin classification and gate implementation remain unchanged. The live story runs actual public HTTP and BaaS not-found behavior, uses isolated generated Bot/user identities, verifies absent/pending/registered-but-missing states, and compares complete caller ledger snapshots (including timestamps) after each read. It does not mock the runtime handler, inject a fake health result, or count an unexecuted direct service call as live coverage.
+- The four new endpoint-framework registrations use the real DI services and SQLite repository. Two successful reads assert absence remains absent or the pending row remains unchanged; two negative cases exercise private-Bot denial and missing Bot through valid signed principals. They register genuine happy/error behavior rather than adding a coverage baseline exception or changing the framework gate. Test-only signing configuration follows existing local principal fixtures; no production principal or credential is introduced.
+- Scope and static review: all corrections serve the new endpoint's actual contract/acceptance coverage. No threshold reduction, new ignore/waiver, generic auth relaxation, lifecycle write, or assertion-free gate filling found. `git diff --check` passed during this review. Full-suite reruns are intentionally left to the ongoing independent regression run rather than duplicated here.
+
+Historical live Singlebox result reported by the orchestrator (74/74 cases, ExpertChat 589/936 Core lines and 12/12 router endpoints) belongs to its recorded prior head. It is useful behavioral evidence but does not establish success for the pending next head. No new blocking findings.
