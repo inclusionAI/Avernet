@@ -9,6 +9,7 @@ const queryHooks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../api/hooks', () => ({
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useWorkflowTypes: () => ({
     data: [
       { workflow_id: 'wf-1', workflow_title: '示例工作流', run_count: 4, last_status: 'succeeded', last_run_at: 1, updated_at: 1 },
