@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.17</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.18</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -582,7 +582,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>profile 声明</td><td>Card 数据</td><td>全部</td><td><span class="tag q">新增</span></td><td>starter 自动写入 Card</td></tr>
 <tr><td>调用上下文</td><td>请求 metadata</td><td>L2</td><td><span class="tag q">新增</span></td><td>解析后通过 <code>CallerContext</code> 提供</td></tr>
 <tr><td>工具观察 <code>tools/v1</code></td><td>状态消息 DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>ToolEventEmitter</code></td></tr>
-<tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>AdvancedBcnAgent</code> 的 <code>requestApproval</code> 和 <code>resume</code></td></tr>
+<tr><td>exec 审批 <code>structured-input-exec/v1</code></td><td>INPUT_REQUIRED + DataPart</td><td>L3</td><td><span class="tag ok">已有</span></td><td><code>AgentExecution.requestApproval</code> 和 <code>AgentRequest.approval()</code></td></tr>
 <tr><td>协作（群协作感知）</td><td>请求 metadata 加 Task 字段</td><td>可选</td><td><span class="tag q">待设计</span></td><td>后续阶段，见 7.8</td></tr>
 <tr><td>来源分类 <code>source-agent/v2</code></td><td>Card 数据</td><td>可选</td><td><span class="tag ok">已有</span></td><td>配置项写入 Card</td></tr>
 </table></div>
@@ -856,7 +856,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th>A2A 方法</th><th>SDK 做的</th><th>交给业务的 SPI</th></tr>
 <tr><td><code>SendMessage</code>、<code>SendStreamingMessage</code>（新 Task）</td><td>校验、协商、授权、创建并持久化 Task、返回首帧、把输出编码成事件、写存储、发终态</td><td><code>execute</code></td></tr>
-<tr><td><code>SendMessage</code>（带 <code>taskId</code> 的审批续交）</td><td>校验回复、持久化决定、分批处理、跨实例接管执行权</td><td><code>resume</code></td></tr>
+<tr><td><code>SendMessage</code>（带 <code>taskId</code> 的审批续交）</td><td>校验回复、持久化决定、分批处理、跨实例接管执行权</td><td><code>execute</code>，<code>request.approval()</code> 带已解析的审批结果</td></tr>
 <tr><td><code>GetTask</code></td><td>读存储；租约过期时回收</td><td>无</td></tr>
 <tr><td><code>SubscribeToTask</code></td><td>本实例推送或跨实例轮询合成</td><td>无</td></tr>
 <tr><td><code>CancelTask</code></td><td>本实例中断或写取消标记、等待终态、如实返回</td><td><code>cancel</code></td></tr>
@@ -885,13 +885,13 @@ public interface TaskStore {
 }</code></pre>
 <div class="tw"><table>
 <tr><th></th><th>a2a-java</th><th>本 SDK</th><th>差异的原因</th></tr>
-<tr><td>业务实现的接口</td><td><code>AgentExecutor</code>：<code>execute</code>、<code>cancel</code></td><td><code>BcnAgent</code>：<code>execute</code>、<code>cancel</code>；<code>AdvancedBcnAgent</code> 增加 <code>resume</code></td><td>分层一致。本 SDK 把审批续交单独拆成 <code>resume</code>，由 SDK 解析并校验回复后交给业务；a2a-java 中续交也走 <code>execute</code>，由业务自己从 <code>RequestContext.getTask()</code> 判断并解析</td></tr>
+<tr><td>业务实现的接口</td><td><code>AgentExecutor</code>：<code>execute</code>、<code>cancel</code></td><td><code>BcnAgent</code>：<code>execute</code>、<code>cancel</code>；续交同样进入 <code>execute</code></td><td>分层和入口都一致。差别在于续交时本 SDK 已把审批回复解析、校验好，放在 <code>request.approval()</code> 中；a2a-java 由业务自己从 <code>RequestContext.getTask()</code> 判断并解析</td></tr>
 <tr><td>业务的输出接口</td><td><code>AgentEmitter</code>：可以设置任意状态（包括 <code>requiresAuth</code>）、以任意 <code>append</code> 和 <code>lastChunk</code> 组合发 Artifact、发任意事件</td><td><code>AgentResponseSink</code>：<code>append</code>、<code>complete</code>、<code>fail</code>，以及扩展通道和文件块</td><td>本 SDK 故意收窄。Profile 禁止的行为（改写已输出文本、<code>AUTH_REQUIRED</code>、未协商的扩展数据）在接口上就做不出来</td></tr>
 <tr><td>五个方法</td><td><code>DefaultRequestHandler</code></td><td><code>server-core</code></td><td>见下一行</td></tr>
 <tr><td>存储接口</td><td><code>save</code>、<code>get</code>、<code>delete</code>、<code>list</code>，没有版本号和比较并写入</td><td><code>get</code>、<code>create</code>、<code>compareAndSet</code>，记录带版本、租约、取消标记</td><td>9.5 的跨实例协作全部依赖比较并写入，a2a-java 的存储接口提供不了</td></tr>
 <tr><td>多实例</td><td><code>extras/queue-manager-replicated</code>：通过消息中间件在实例间复制事件队列</td><td>只通过共享存储协作</td><td><span class="tag d">D3</span> 已否决事件复制</td></tr>
 </table></div>
-<div class="box d"><p><b>续交保留单独的 <code>resume</code>，不合并进 <code>execute</code>。</b>审批回复的校验规则很细：批次标识、工具标识、参数摘要、过期时间、分批回复、已接受的决定不得改写。交给每个业务在 <code>execute</code> 里自己解析容易出错，这与收窄输出接口是同一个理由。SDK 校验通过、持久化决定、全部工具都有决定并拿到执行权后，才调用一次 <code>resume</code>，传入已解析的 <code>ApprovalResult</code>。代价是接口形态与 a2a-java 不完全一致，熟悉官方 SDK 的开发者需要知道续交走另一个入口。</p></div>
+<div class="box d"><p><b>续交和新请求共用 <code>execute</code>。</b>A2A 中审批续交就是带 <code>taskId</code> 的 SendMessage，和新请求是同一个方法，SPI 也保持一个入口，与 a2a-java 一致，平台方不需要多理解一个概念。审批回复的校验规则很细（批次标识、工具标识、参数摘要、过期时间、分批回复、已接受的决定不得改写），这部分仍由 SDK 完成：只有校验通过、决定已持久化、所有工具都有决定并拿到执行权之后，SDK 才调用 <code>execute</code>，并在 <code>request.approval()</code> 中放入已解析的结果。分批回复的中间状态和不合法的回复不会到达业务代码。</p></div>
 <p>后两行是 8.2 建议方案 B（只复用协议模型，请求处理自己实现）的直接依据：复用 <code>DefaultRequestHandler</code> 就要继承它的存储和队列模型，而这两者和本设计的多实例方案不兼容。</p>
 
 <h3 id="s8-3"><span class="n">8.3</span>模块</h3>
@@ -1001,11 +1001,12 @@ public class OrderAgent implements BcnAgent {
 <h4>L3：扩展执行接口</h4>
 <p>需要工具观察或审批的 Agent 实现 <code>BcnAgent</code> 的扩展接口，得到功能更全的上下文。</p>
 <pre><code>public interface AdvancedBcnAgent extends BcnAgent {
+    /** 新请求和审批续交都进入这里。续交时 request.approval() 不为空，可能在另一个实例上调用。 */
     void execute(AgentRequest request, AgentExecution execution) throws Exception;
-
-    /** 审批完成后恢复执行。可能在另一个实例上调用。 */
-    void resume(AgentRequest original, ApprovalResult result, AgentExecution execution) throws Exception;
 }
+
+// AgentRequest 增加
+Optional&lt;ApprovalResult&gt; approval();   // 审批续交时为已解析、已校验的结果；新请求时为空
 
 public interface AgentExecution extends AgentResponseSink {
     ToolEventEmitter tools();
@@ -1025,7 +1026,7 @@ public record ApprovalResult(String requestId, Map&lt;String, Decision&gt; decis
 <tr><th>SDK 负责</th><th>Agent 负责</th></tr>
 <tr><td>把工具记录编码成 <code>tools/v1</code> 格式；未协商时静默丢弃</td><td>提供稳定的 <code>toolCallId</code></td></tr>
 <tr><td>生成审批 Schema、参数快照和摘要；校验回复；持久化已接受的决定；处理分批回复和过期</td><td>在 <code>requestApproval</code> 前保存好可恢复的引擎状态</td></tr>
-<tr><td>全部工具都有决定后，通过 CAS 接管执行权并调用 <code>resume</code></td><td><code>resume</code> 必须能在任意实例上从存储恢复；做不到则在 <code>AgentDescriptor</code> 中声明，SDK 会在跨实例续交时返回错误</td></tr>
+<tr><td>全部工具都有决定后，通过 CAS 接管执行权，带着 <code>request.approval()</code> 调用 <code>execute</code></td><td>续交分支必须能在任意实例上从存储恢复；做不到则在 <code>AgentDescriptor</code> 中声明，SDK 会在跨实例续交时返回错误</td></tr>
 </table></div>
 
 <h4>多模态：附件与文件块</h4>
@@ -1088,9 +1089,8 @@ sink.complete();</code></pre>
 <h4>补充的接口定义</h4>
 <pre><code>public interface AdvancedBcnAgent extends BcnAgent {
     void execute(AgentRequest request, AgentExecution execution) throws Exception;
-    void resume(AgentRequest original, ApprovalResult result, AgentExecution execution) throws Exception;
 
-    /** SDK 对 AdvancedBcnAgent 只调用上面两个方法，简易层的入口不会被调用。 */
+    /** SDK 对 AdvancedBcnAgent 只调用上面的方法，简易层的入口不会被调用。 */
     @Override
     default void execute(AgentRequest request, AgentResponseSink sink) {
         throw new UnsupportedOperationException();
@@ -1128,15 +1128,18 @@ public class OrderAgent implements AdvancedBcnAgent {
 
     @Override
     public void execute(AgentRequest request, AgentExecution exec) {
+        if (request.approval().isPresent()) {
+            continueAfterApproval(request, request.approval().get(), exec);
+            return;
+        }
         String userId = request.caller().userId().orElseThrow();
         EngineRun run = engine.start(userId, request.contextId(), request.text(), request.attachments());
         drive(run, request, exec);
     }
 
-    /** 审批全部完成后由 SDK 调用。可能在另一个实例上，所以只依赖存储里的状态。 */
-    @Override
-    public void resume(AgentRequest original, ApprovalResult result, AgentExecution exec) {
-        Checkpoint cp = checkpoints.take(original.taskId());
+    /** 审批续交。可能在另一个实例上，所以只依赖存储里的状态。 */
+    private void continueAfterApproval(AgentRequest request, ApprovalResult result, AgentExecution exec) {
+        Checkpoint cp = checkpoints.take(request.taskId());
         EngineRun run = engine.restore(cp.engineState());
         ToolStep step = cp.pendingTool();
 
@@ -1146,7 +1149,7 @@ public class OrderAgent implements AdvancedBcnAgent {
         } else {
             invokeTool(step, run, exec);
         }
-        drive(run, original, exec);
+        drive(run, request, exec);
     }
 
     /** 把引擎的步骤逐个翻译成 SDK 调用。 */
@@ -1201,7 +1204,7 @@ public class OrderAgent implements AdvancedBcnAgent {
 <tr><td><code>exec.append</code></td><td>文本块，只追加（6.7）</td></tr>
 <tr><td><code>exec.tools().start / result</code></td><td>工具观察，扩展点 E4。未协商时 SDK 丢弃，代码不用判断</td></tr>
 <tr><td><code>checkpoints.save</code> 然后 <code>requestApproval</code> 然后 <code>return</code></td><td>审批的固定写法：先保存可恢复状态，再请求，立即返回。Task 进入 <code>INPUT_REQUIRED</code>，不占线程</td></tr>
-<tr><td><code>resume</code></td><td>全部工具有决定后调用一次。可能在另一个实例上（9.5）。SDK 保证并发续交只调用一次</td></tr>
+<tr><td><code>request.approval()</code></td><td>审批续交也进入 <code>execute</code>，以此区分。全部工具有决定后才调用一次，可能在另一个实例上（9.5）。SDK 保证并发续交只调用一次</td></tr>
 <tr><td><code>ui.putBlock</code></td><td>结构化块，扩展点 E5。未协商时 SDK 改为输出降级文本（7.5）</td></tr>
 <tr><td><code>ui.setTaskField</code></td><td>结果字段，扩展点 E3，随 Task 持久化</td></tr>
 <tr><td><code>request.cancelled()</code> 和 <code>cancel()</code></td><td>协作式取消。跨实例取消时由 SDK 在读到取消标记后触发（9.5）</td></tr>
@@ -1471,9 +1474,9 @@ void without_ui_extension_falls_back_to_text() {
 <li><div><span class="who">实例 B</span>读取记录，校验 <code>contextId</code>、审批批次、工具标识、过期时间和 <code>userId</code> 一致性。不合法则返回带校验错误的 <code>INPUT_REQUIRED</code>，不改变已接受的决定。</div></li>
 <li><div><span class="who">实例 B</span>通过 CAS 把决定写入 <code>Task.metadata</code>。仍有工具未决定：保持 <code>INPUT_REQUIRED</code>，返回更新后的 Task。</div></li>
 <li><div><span class="who">实例 B</span>全部已决定：同一次 CAS 把状态改为 <code>WORKING</code>，<code>ownerInstance</code> 设为自己并写入租约。CAS 成功即接管成功。</div></li>
-<li><div><span class="who">实例 B</span>返回 Task，然后在执行线程上调用 <code>resume</code>。</div></li>
+<li><div><span class="who">实例 B</span>返回 Task，然后在执行线程上调用 <code>execute</code>，<code>request.approval()</code> 中为已解析的决定。</div></li>
 </ol>
-<p>两个实例同时收到同一批决定时，只有一个 CAS 成功，另一个重读后发现状态已是 <code>WORKING</code> 且决定相同，按重复提交处理，返回当前 Task，不调用 <code>resume</code>。这保证工具只恢复一次。</p>
+<p>两个实例同时收到同一批决定时，只有一个 CAS 成功，另一个重读后发现状态已是 <code>WORKING</code> 且决定相同，按重复提交处理，返回当前 Task，不再调用 <code>execute</code>。这保证工具只恢复一次。</p>
 
 <h4>宕机回收</h4>
 <ol class="seq">
@@ -1609,7 +1612,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td>流式接口：回调或迭代器逐段输出</td><td>实现 <code>BcnAgent</code>，把回调接到 <code>sink.append</code></td><td>L1</td><td>小</td></tr>
 <tr><td>需要用户身份</td><td>在上面的基础上声明 <code>requireUserId</code>，从 <code>caller().userId()</code> 取值</td><td>L2</td><td>小</td></tr>
 <tr><td>有工具调用过程要展示</td><td>实现 <code>AdvancedBcnAgent</code>，在工具前后调用 <code>tools()</code></td><td>L3</td><td>中</td></tr>
-<tr><td>有执行前审批</td><td>实现 <code>AdvancedBcnAgent</code> 的 <code>resume</code>；引擎状态需要可持久化</td><td>L3</td><td>大，取决于引擎</td></tr>
+<tr><td>有执行前审批</td><td>实现 <code>AdvancedBcnAgent</code>，在 <code>execute</code> 中处理 <code>request.approval()</code>；引擎状态需要可持久化</td><td>L3</td><td>大，取决于引擎</td></tr>
 <tr><td>平台上有大量动态创建的 Agent</td><td>实现 <code>AgentResolver</code>，一个进程承载全部 Agent，以 <code>tenant</code> 区分</td><td>按 Agent</td><td>中</td></tr>
 <tr><td>非 Java 技术栈</td><td>按 Profile 自行实现，通过 TCK</td><td>按实现</td><td>—</td></tr>
 </table></div>
