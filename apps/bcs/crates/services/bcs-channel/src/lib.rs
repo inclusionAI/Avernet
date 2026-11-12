@@ -160,7 +160,10 @@ impl BcsChannelService {
         &self,
         msg: &InboundMessage,
     ) -> Result<String, ChannelUseCaseError> {
-        let staff_no = normalize_required(&msg.im_user_id, "im_user_id")?;
+        let im_user_id = normalize_required(&msg.im_user_id, "im_user_id")?;
+        let user_id = self.provider_for(&msg.channel_type)?
+            .resolve_inbound_user_id(im_user_id).map_err(provider_error)?;
+        let staff_no = normalize_required(&user_id, "resolved_user_id")?;
         let actor_id = human_actor_id(staff_no);
         let display_name = msg
             .im_user_nick
@@ -176,7 +179,7 @@ impl BcsChannelService {
             .upsert(ImParticipantMap {
                 channel_type: msg.channel_type.clone(),
                 account_ref: msg.account_ref.trim().to_string(),
-                im_user_id: staff_no.to_string(),
+                im_user_id: im_user_id.to_string(),
                 actor_id: actor_id.clone(),
                 display_name: Some(display_name.to_string()),
             })

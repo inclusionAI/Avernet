@@ -411,6 +411,7 @@ impl ChannelDeliveryPort for RecordingDelivery {
 pub(super) struct RecordingProvider {
     pub(super) delivery: Arc<RecordingDelivery>,
     pub(super) validate_calls: std::sync::Mutex<Vec<serde_json::Value>>,
+    pub(super) inbound_user_ids: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl RecordingProvider {
@@ -418,6 +419,7 @@ impl RecordingProvider {
         Self {
             delivery,
             validate_calls: std::sync::Mutex::new(Vec::new()),
+            inbound_user_ids: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -460,6 +462,11 @@ impl ChannelProvider for RecordingProvider {
             object.insert("client_secret".to_string(), serde_json::json!("<redacted>"));
         }
         redacted
+    }
+
+    fn resolve_inbound_user_id(&self, im_user_id: &str) -> ChannelProviderResult<String> {
+        Ok(self.inbound_user_ids.lock().unwrap().get(im_user_id)
+            .cloned().unwrap_or_else(|| im_user_id.to_string()))
     }
 
     fn resolve_direct_recipient(

@@ -48,3 +48,15 @@ The `group_new_session_per_message_*` tests in `bcs-channel` exercise the public
 application service for configuration validation, both target/scope combinations,
 DM compatibility, duplicate and concurrent delivery, old-session outbound routing,
 and independent workflow starts.
+
+## Inbound Human identity
+
+Before ensuring the sender's Human actor, the channel service calls
+`ChannelProvider::resolve_inbound_user_id`. Its default returns the native
+sender ID unchanged. Providers with verified user-ID alias conventions may
+return the stable BCS User ID instead; an empty result fails actor resolution
+before any Human is created. The resolved ID is used for Human creation,
+session participation and message attribution. Native IDs remain in
+conversation scope keys, channel metadata and IM participant mappings so
+provider replies and session isolation retain their original addressing.
+This does not migrate existing actors or sessions.

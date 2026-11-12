@@ -54,6 +54,15 @@ pub trait ChannelProvider: Send + Sync {
 
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value;
 
+    /// Resolve a provider-native sender into the stable BCS User ID used to
+    /// ensure a Human actor. Called only for accepted inbound messages.
+    /// The default preserves the sender ID. Providers may normalize aliases;
+    /// the result must be nonempty. The native ID remains unchanged in channel
+    /// conversation/participant mappings and outbound delivery.
+    fn resolve_inbound_user_id(&self, im_user_id: &str) -> ChannelProviderResult<String> {
+        Ok(im_user_id.to_string())
+    }
+
     /// Resolve a BCS Human actor into a provider-native direct-message recipient.
     ///
     /// Providers that do not define a stable actor-to-recipient convention may
@@ -345,6 +354,11 @@ mod tests {
         ) -> Option<Arc<dyn ServiceLifecycle>> {
             None
         }
+    }
+
+    #[test]
+    fn inbound_user_id_defaults_to_native_identity() {
+        assert_eq!(TestProvider.resolve_inbound_user_id("000123").unwrap(), "000123");
     }
 
     struct DuplicateRouteProvider;
