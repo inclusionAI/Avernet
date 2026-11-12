@@ -3,46 +3,62 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Annotated
-
-from fastapi import APIRouter, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.bot_address import resolve_bot_entity
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
-    OwnerIdDep,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityInvalidError,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
+    error_response,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.api.caller_credential import CallerCredentialError
 from agentclaw.community.api.caller_identity_service import (
     CallerIdentityServiceProtocol,
+)
+from agentclaw.community.api.caller_identity_service import (
     CallerIdentityStage as CoreCallerIdentityStage,
+)
+from agentclaw.community.api.caller_identity_service import (
     McpCallType as CoreMcpCallType,
 )
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
+from agentclaw.community.api.scheduled_caller_refresh import (
+    ScheduledCallerRefreshProtocol,
+)
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from fastapi import APIRouter, Path, Query, Request
 
 from .schemas import (
     CallerCallType,
     CallerContext,
+    CallerRefreshResult,
     CliCallTypeResult,
     McpCallTypeResult,
     McpCallTypeUpdate,
 )
-
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}",
@@ -225,3 +241,39 @@ async def update_cli_call_type(
 
 
 __all__ = ["router"]
+
+
+@router.post("/caller-token/refresh", response_model=Envelope[CallerRefreshResult])
+@envelope_errors
+async def refresh_caller_token(
+    bot_id: BotIdPath, request: Request, user_id: UserIdDep, owner_id: OwnerIdDep,
+    service: ScheduledCallerRefreshProtocol = Injected(ScheduledCallerRefreshProtocol),
+) -> Envelope[CallerRefreshResult]:
+    """Refresh eligible Caller runtimes from stored ASC independently of Owner renewal.
+
+    Requires the current Bot owner and an addressed Bot application grant. Runtime
+    targets must be alive and have an enabled Cron task. Partial failures are
+    returned explicitly; credentials are installed directly and never returned.
+    """
+    started = time.monotonic()
+    fields = {"bot_id": bot_id, "actor_id": user_id, "locator": owner_id,
+              "trace_id": getattr(request.state, "trace_id", None)}
+    logger.info("openapi_caller_refresh_requested system=backend direction=inbound operation=refresh_caller_token method=POST route=/openapi/v1/bots/{bot_id}/caller-token/refresh fields=%s", fields)
+    try:
+        entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
+        result = await asyncio.to_thread(service.refresh_for_actor,
+            bot_id=bot_id, actor_id=user_id, entity_id=entity_id)
+        data = CallerRefreshResult.model_validate(result)
+    except Exception as exc:
+        logger.warning("openapi_caller_refresh_failed system=backend operation=refresh_caller_token fields=%s error_type=%s duration_ms=%.1f",
+                       fields, type(exc).__name__, (time.monotonic() - started) * 1000)
+        if isinstance(exc, (CallerIdentityNotFoundError, CallerIdentityPermissionError, CallerIdentityReadOnlyError)):
+            raise
+        if isinstance(exc, CallerCredentialError):
+            if exc.code == "CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE":
+                return error_response(501, "Stored ASC Caller refresh is not supported", request)
+            return error_response(400, "Caller refresh is not available for this Bot", request)
+        return error_response(502, "Caller refresh failed", request)
+    logger.info("openapi_caller_refresh_succeeded system=backend operation=refresh_caller_token fields=%s status=%s results=%s duration_ms=%.1f",
+                fields, data.status, data.model_dump(), (time.monotonic() - started) * 1000)
+    return envelope(data, request)

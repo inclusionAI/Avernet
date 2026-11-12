@@ -1,6 +1,7 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -10,18 +11,24 @@ from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
 )
+from .caller_identity.authorization_rules import CALLER_IDENTITY_AUTHORIZATION
+from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS
+from .dws_hosting.admission import PATH as DWS_PATH
 from .models_authorization import (
     EDIT_LOCK,
-    INHERITED as INHERITED,
     OWNER_SCOPED,
-    SCAFFOLDING_MODES as SCAFFOLDING_MODES,
     Authorization,
     Check,
     NoCheck,
     ServiceChecked,
 )
+from .models_authorization import (
+    INHERITED as INHERITED,
+)
+from .models_authorization import (
+    SCAFFOLDING_MODES as SCAFFOLDING_MODES,
+)
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
-from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
@@ -33,6 +40,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
     **SERVICE_EVAL_AUTHORIZATION,
+    **CALLER_IDENTITY_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),
@@ -172,7 +180,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
-    ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"): ServiceChecked(
         PermissionLevel.MEMBER, "…core.bot_chat.service"
     ),
@@ -332,12 +339,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(
         PermissionLevel.MEMBER, explicit=True
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.OWNER, EDIT_LOCK),

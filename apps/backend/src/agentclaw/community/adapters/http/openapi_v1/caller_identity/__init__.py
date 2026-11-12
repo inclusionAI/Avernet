@@ -1,5 +1,5 @@
-"""Public Caller identity configuration endpoints."""
+"""Public Caller identity configuration endpoints and authorization policy.
 
-from .router import router
-
-__all__ = ["router"]
+The HTTP composition root imports the router explicitly so the policy table can
+be loaded before route construction without initializing the HTTP stack.
+"""

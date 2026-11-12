@@ -198,7 +198,7 @@ from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
-from .caller_identity import router as caller_identity_router
+from .caller_identity.router import router as caller_identity_router
 from .containers import router as containers_router
 from .desktop_metadata import router as desktop_metadata_router
 from .diagnostics import router as diagnostics_router
