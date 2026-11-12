@@ -17,7 +17,7 @@
 export const MANIFEST_DOCS_URL =
   'https://github.com/inclusionAI/Avernet/blob/dev/apps/backend/docs/bot-config-manifest/manifest-schema.zh-CN.md';
 
-export const MANIFEST_TEMPLATE = `# Full reference: ${MANIFEST_DOCS_URL}
+export const MANIFEST_TEMPLATE = `# 完整语法：${MANIFEST_DOCS_URL}
 schema_version: 1
 manifest:
   identity:
@@ -27,21 +27,17 @@ manifest:
         Do what the task asks, report results honestly, and do not invent
         information you were not given.
 
-  # MCP servers. server_code must already be registered in the MCP Center
-  # and available to your tenant; this file cannot register a new one.
+  # 可选类目：取消注释后填写，字段说明见上方文档
   # mcp:
-  #   - server_code: github
-  #     config:
-  #       endpoint_env: PRE            # PROD | PRE
-
-  # Skills. An OSS source must pin a digest.
+  #   - server_code:
+  #     config: {}
+  #
   # skills:
-  #   - name: order-lookup
+  #   - name:
   #     source:
-  #       protocol: oss
-  #       bucket: artifacts
-  #       key: tools/order-lookup-1.4.0.zip
-  #       auth: oss-artifacts
-  #     digest: "sha256:<content digest>"
-  #     unpack: zip
+  #       protocol:
+  #       bucket:
+  #       key:
+  #       auth:
+  #     digest:
 `;
