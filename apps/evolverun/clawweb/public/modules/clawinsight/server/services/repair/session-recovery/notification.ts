@@ -72,6 +72,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     private readonly controlPlaneEnvironment?: AgentControlPlaneEnvironment) {}
 
   async notifyOwnerRequest({ task, updateOnly }: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean> {
+    // Existing configuration cards can still be refreshed, but never sent for the first time.
+    if (!updateOnly && task.ownerRequest?.reason !== "permission") return false;
     const prepared = await this.prepareOwnerCard(task).catch(error => { throw new DingTalkCardNotDispatchedError(error); });
     if (!prepared) return false;
     const { request, environment, config, url } = prepared;
