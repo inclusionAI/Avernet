@@ -1,0 +1,60 @@
+---
+agent: tc-code
+status: completed
+created: 2026-11-12
+iteration: 1
+---
+
+# Caller instance status implementation
+
+## Boundary
+
+Existing chain: public Bots delivery -> authenticated acting user/addressed application grant -> ExpertChat application service -> independent Caller ledger and BaaS observation.
+
+Allowed additions: one flat GET route, explicit admission/authorization inventory, two existing service contracts/methods, one small response DTO, necessary safe BaaS read logging, tests and owning documentation. Forbidden: provisioning, restart/upgrade, publication polling, identity exchange, ledger/binding writes, shared-runtime fallback, OCB/gitlink changes.
+
+## Worktree
+
+- `/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/caller-instance-status-20261112`
+- `feat/caller-instance-status-20261112`, initialized from GitHub `dev` `d0cdd02345`.
+
+## Implementation
+
+- `GET /openapi/v1/bots/{bot_id}/caller-instance/status` returns standard Envelope data exactly `{exists, alive}`. UserIdDep prevents human/mixed-principal cross-user queries; OwnerIdDep supports entity_id/owner_id, and application-only calls require an addressed-Bot grant.
+- ExpertChatService reuses existing owner/public/collaborator chat authorization before any Caller read. Its ServiceChecked declaration and exact inventory entry preserve public noncollaborator chat access without broadening the generic gate.
+- ExpertChatInstanceService resolves the real owner, reads only the exact acting user's scoped ledger, and observes the registered UUID with health_check=True. Blank/malformed/no UUID means false/false without provider access. Registered released Caller remains exists=true; only a current ACTIVE device with health="true" yields alive=true. No shared Bot binding is substituted.
+- Two owning Protocols document this read contract. No DI constructors or bindings change.
+- BaaS get_bot adds keyword-only log_response=True; this query supplies False to reuse the existing response-log switch. This mode suppresses provider bodies and unsafe HTTP/transport exception text, while existing call defaults remain unchanged. Provider failure maps safely to HTTP 502 rather than false status.
+- Owning ExpertChat README documents scope, exact boolean meanings, health observation and no-provision behavior.
+
+## Verification
+
+- TDD red: new absent-instance test failed with missing get_caller_instance_status AttributeError before implementation; 8 absent/malformed variants then passed.
+- Affected service/HTTP/BaaS/authorization suites: **308 passed**, no failures or skips.
+- API conformance, Protocol-only API and module boundary suites: **233 passed**.
+- Measured runtime-module total line coverage: **790/902 = 87.58%** on the focused five modules, not the complete repository denominator. Incremental coverage is recorded below from the final JSON artifact.
+- New/changed-line flake8 (`F401,F811,F821,F822,F823,E203,E211,E265`): **0 findings**. Eight pre-existing findings remain in legacy re-exports and slice spacing; no unrelated cleanup performed.
+- `git diff --check`: PASS.
+- New or extended ExpertChat/HTTP source file sizes remain below 1,000 lines (application service 968, instance service 874, Bots router 927). Existing BaaS service is already above 1,000 lines; the narrowly scoped compatible option adds 17 lines and introduces no new size waiver.
+
+## Boundary logging evidence
+
+Inbound events: `caller_instance_status.request`, `.success`, `.failed`; fields include backend/inbound, operation, GET/route, subject/Bot/address, tenant/env, request/trace ID, result/error type, elapsed time and the two boolean outputs.
+
+Outbound events: `caller_instance_status.provider.request`, `.success`, `.failed`; fields include baas/outbound, UUID, Bot/real owner/subject, engine, health-check flag, tenant/env, interpreted provider status/device health and duration. Failure events record exception type without credentials. No generic logging infrastructure is added.
+
+Tests assert success/failure events and no raw credential sentinel. Real BaaS+httpx.MockTransport tests cover healthy success, release/404, HTTP 503, API error, malformed JSON and transport error, proving the lower read helper does not log complete provider payloads or secret-bearing exceptions in this mode.
+
+## Delivery scope
+
+No production URL was invoked. Deployment and live container creation/restart are outside this task. Commit, latest-dev rebase, GitHub PR and remote-check reporting belong to the main workflow; local checks do not substitute for remote CI.
+
+## Final changed-line measurement
+
+- Focused executable changed lines: **60/61 = 98.36%**.
+- Artifact: `/tmp/caller-instance-status-coverage.json`; intersection of added Git diff lines (including untracked new source files) with coverage executed/missing lines; Protocol/declarative-policy files are not in this runtime-module measurement.
+- `apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py`: 25/26; uncovered added executable lines: [202]
+- `apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_caller_instance.py`: 4/4; uncovered added executable lines: []
+- `apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py`: 24/24; uncovered added executable lines: []
+- `apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py`: 7/7; uncovered added executable lines: []
+- `apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py`: 0/0; uncovered added executable lines: []
