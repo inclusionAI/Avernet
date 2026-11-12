@@ -273,3 +273,9 @@ changed-line 66.08% 的缺口通过纯测试补测关闭（生产代码零改动
   不可达的 Public/Integration/Admin 防御分支、需脚本化 authority hook 的嵌套错误
   返回、以及仅日志的 session 文件清理失败分支；详细行号见
   [plan 的补测记录](plan.md)。
+- 质量复审后 `96d6c2ea8f` 补强断言强度（role/kind 翻译、facade 命中、通知触发、
+  collect identity），移除 1 个冗余项；最终新增用例 **125 个**（套件 185、bcs-http
+  合计 791）全部通过；`c2944b72a5` 为文件结尾修整。最终 HEAD 复跑门禁：
+  changed-line **1358/1409 = 96.38%（PASS）**、overall line **87.49%（PASS）**、
+  unit **8360/8362 = 99.98%**（同一组 2 个既有失败）。另注：`GET /groups/{id}/sessions`
+  当前对未认证调用返回会话列表，已标记待 owner 审议，本工单不改动。
