@@ -2,6 +2,7 @@
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
+from .authorization_rules_caller_identity import CALLER_IDENTITY_AUTHORIZATION
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_metadata import METADATA_AUTHORIZATION
@@ -39,6 +40,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
     **SERVICE_EVAL_AUTHORIZATION,
+    **CALLER_IDENTITY_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),
@@ -178,8 +180,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/caller-token/refresh"): Check(PermissionLevel.OWNER),
-    ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"): ServiceChecked(
         PermissionLevel.MEMBER, "…core.bot_chat.service"
     ),
@@ -339,12 +339,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(
         PermissionLevel.MEMBER, explicit=True
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/clis"): Check(PermissionLevel.OWNER, EDIT_LOCK),
