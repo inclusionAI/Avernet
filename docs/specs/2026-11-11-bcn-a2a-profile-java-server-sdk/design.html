@@ -851,6 +851,17 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 
 <h3 id="s7-9"><span class="n">7.9</span>工具观察（v2）</h3>
 <p>工具观察 v1 把记录放在任务的状态消息里。状态消息每次更新都会覆盖上一条，因此 v1 有这些问题：没有 Task 时无处可放；断线重连后查询只能拿到最后一条，历史记录丢失；非流式靠轮询基本看不到；和文本的先后顺序在快照里体现不出来。v2 改为把工具记录当作输出内容的一部分（<span class="tag d">D12</span>）。</p>
+<h4>为什么有 Task 时放在产出物中，而不是状态消息中</h4>
+<p>A2A 的 Task 中，<code>status</code> 只有一个对象，每次状态更新都整体替换它；<code>artifacts</code> 是按 <code>artifactId</code> 区分的列表，不同标识的项并存。假设一次执行是“说一句、调用工具 A、再说一句、调用工具 B、给出结论”，结束后查询得到的快照：</p>
+<pre><code>// 工具记录放在状态消息中：每条状态更新替换上一条，终态又替换了最后一条工具记录
+{"status": {"state": "TASK_STATE_COMPLETED"},
+ "artifacts": [{"artifactId": "seg-1", ...}, {"artifactId": "seg-2", ...}, {"artifactId": "seg-3", ...}]}
+
+// 工具记录放在产出物中：每次调用一个块，互不覆盖，且保留了与文本的先后顺序
+{"status": {"state": "TASK_STATE_COMPLETED"},
+ "artifacts": [{"artifactId": "seg-1", ...}, {"artifactId": "tool-t1", ...}, {"artifactId": "seg-2", ...},
+               {"artifactId": "tool-t2", ...}, {"artifactId": "seg-3", ...}]}</code></pre>
+<p>也不依赖另外两个字段：<code>history</code> 可被 <code>historyLength</code> 截断，各实现是否写入状态消息也不一致，调用方不得依赖它（P-117）；在 <code>metadata</code> 中累积列表可以不丢记录，但失去了与文本的顺序，且每次更新都要整体替换（P-132）。</p>
 <h4>格式与载体</h4>
 <p>格式定义在内容片段这一层，与装在哪里无关：一条工具记录就是一个 DataPart，<code>mediaType</code> 为 <code>application/vnd.bcn.tool-call+json</code>，Part 的 <code>metadata</code> 在扩展 URI 下写入 <code>{"version":"2"}</code>。装在哪里取决于有没有 Task：</p>
 <div class="tw"><table>
