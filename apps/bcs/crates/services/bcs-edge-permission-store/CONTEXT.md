@@ -68,9 +68,18 @@ owner rows are not deduplicated, so actual integrity failures remain observable.
 
 For B distinct IDs the normal path uses `2*ceil(B/128)` statements (states and
 owner actors); the legacy shim adds `ceil(L/128)` creator reads for L version-0
-IDs. Empty input performs no reads. A 100-item candidate page therefore adds two
-statements, or three with legacy creators. In a healthy initialized state, these
-return at most B state rows plus B owner rows, not B rows in total.
+IDs. Empty input performs no reads. A healthy, fully-owned 100-item candidate
+page therefore adds two statements, or three with legacy creators; zero-owner
+cases add the re-check below. In a healthy initialized state, these return at
+most B state rows plus B owner rows, not B rows in total.
+
+A retirement can commit its tombstone and owner revocation between the state and
+owner SELECTs. For U initialized IDs with no returned owner row, one liveness
+re-check per 128-ID chunk (`ceil(U/128)` extra statements) distinguishes deleted
+Bots (`None`) from still-live corrupt owner state (whole-batch error). Healthy
+pages add no statements; the re-check starts no transaction and takes no lock.
+This reasoning uses the existing single-primary, per-statement read visibility;
+routing these reads to a lagged replica would require a shared snapshot instead.
 
 MySQL state/creator/owner projection reads use an indexable raw identity `IN`
 prefilter plus a binary residual predicate. The residual preserves byte-exact

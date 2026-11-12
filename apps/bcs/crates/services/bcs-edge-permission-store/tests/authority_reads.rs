@@ -17,11 +17,16 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use bcs_db_api::{DbStatement, DbValue};
-use bcs_edge_permission_store::DbBotAuthorityStore;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+use bcs_db_api::{
+    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
+    DbTransactionOptions, DbTransactionStep, DbTransactionStepResult, DbValue,
+};
+use bcs_edge_permission_store::{DbBotAuthorityStore, lifecycle};
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{BotAccessRelation, BotRoleQuery};
-use bcs_test_support::bot_authority_sqlite::{execute, new_fixture};
+use bcs_test_support::bot_authority_sqlite::{execute, new_fixture, new_fixture_with_db};
 use bcs_test_support::contract::bot_authority_contract::BotAuthorityContractFixture;
 use bcs_test_support::contract::bot_authority_contract::run_bot_authority_contract;
 
@@ -251,4 +256,101 @@ async fn legacy_fallback_never_shadows_initialized_or_deleted_bots() {
     )
     .await;
     assert_eq!(repo.role("human_85020", "dead-bot").await.expect("dead role"), None);
+}
+
+/// A retirement commits the tombstone and owner revocation together. If it
+/// lands between the state and owner SELECTs, the batch must re-check liveness
+/// instead of combining the stale live state with the new empty owner set.
+#[tokio::test]
+async fn ownerships_for_rechecks_liveness_when_retirement_races_owner_read() {
+    let db = Arc::new(RetireAfterFirstStateRead {
+        inner: Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap()),
+        armed: AtomicBool::new(true),
+    });
+    let fixture = new_fixture_with_db(ENV, db.clone()).await;
+    for (bot, owner) in [("retired", "human_retired_owner"), ("healthy", "human_healthy_owner")] {
+        fixture.seed_bot(ENV, bot, 1).await;
+        fixture.grant_edge(ENV, bot, owner, BotAccessRelation::Owner).await;
+    }
+
+    let views = fixture
+        .store
+        .ownerships_for(&["retired".to_string(), "healthy".to_string()])
+        .await
+        .expect("concurrent retirement must not fail the whole owner page");
+    assert!(views[0].is_none(), "the retired Bot projects no owner");
+    assert_eq!(
+        views[1].as_ref().expect("healthy Bot keeps its owner").owner_user_id,
+        "healthy_owner",
+    );
+
+    // A still-live initialized Bot without an owner is genuinely corrupt, not
+    // a retirement race, and must retain the strict integrity failure.
+    fixture.seed_bot(ENV, "corrupt", 1).await;
+    let error = fixture
+        .store
+        .ownerships_for(&["corrupt".to_string()])
+        .await
+        .expect_err("a live initialized Bot without an owner must fail");
+    assert!(
+        error.to_string().contains("bot_owner_integrity"),
+        "unexpected non-integrity error: {error}",
+    );
+}
+
+/// Return the first state result, then commit the production retirement effects
+/// before the store can issue its owner query. Subsequent state reads pass
+/// through, allowing the fixed implementation to re-check the tombstone.
+struct RetireAfterFirstStateRead {
+    inner: Arc<bcs_db_local::LocalSqliteDbPlugin>,
+    armed: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl DbPlugin for RetireAfterFirstStateRead {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        let retire = statement
+            .sql()
+            .starts_with("SELECT bot_uuid, ownership_version FROM bcs_bots")
+            && self.armed.swap(false, Ordering::SeqCst);
+        let rows = self.inner.query(statement).await?;
+        if retire {
+            self.inner
+                .transaction(vec![
+                    // The minimal fixture schema predates `updated_at`; this
+                    // has the same tombstone effect as the production builder.
+                    DbTransactionStep::Execute(DbStatement::with_params(
+                        "UPDATE bcs_bots SET is_deleted = 1, gmt_modified = CURRENT_TIMESTAMP \
+                         WHERE bot_uuid = ? AND env = ? AND is_deleted = 0",
+                        vec![DbValue::from("retired"), DbValue::from(ENV)],
+                    )),
+                    DbTransactionStep::Execute(lifecycle::revoke_authority_edges_statement(ENV, "retired")),
+                ])
+                .await?;
+        }
+        Ok(rows)
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn transaction_with_options(
+        &self,
+        steps: Vec<DbTransactionStep>,
+        options: DbTransactionOptions,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction_with_options(steps, options).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
 }

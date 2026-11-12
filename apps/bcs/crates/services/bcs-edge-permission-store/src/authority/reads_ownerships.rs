@@ -4,11 +4,13 @@
 //! `transfers.rs`/`transfers_support.rs` precedent set: the strict
 //! read impl trait stays in `reads.rs`; this file carries ONE
 //! inherent helper with the chunked SQL/mapping spine so the trait
-//! file keeps its 1,000-line budget. Semantics and strictness are
-//! identical to the single `ownership` read — corrupt owner state
+//! file keeps its 1,000-line budget. Semantics and strictness
+//! mirror the single `ownership` read — corrupt owner state
 //! remains a batch error, storage failures never become `None`.
+//! A liveness re-check additionally maps a Bot concurrently
+//! tombstoned between the state and owner reads to `None`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bcs_db_api::{DbStatement, DbValue};
 use bcs_service_api::ServiceResult;
@@ -45,6 +47,33 @@ impl DbBotAuthorityStore {
             }
             for (bot_id, owner) in self.owner_actors_in(&chunk).await? {
                 owners.entry(bot_id).or_default().push(owner);
+            }
+        }
+
+        // Retirement commits the tombstone and owner revocation together, and
+        // may land between the two SELECTs above. Re-check only initialized
+        // Bots with no owner row: a now-deleted Bot projects None, while a
+        // still-live Bot retains the strict owner-integrity error below.
+        // Healthy initialized Bots issue no additional statements.
+        let unowned_initialized: Vec<_> = id_refs
+            .iter()
+            .copied()
+            .filter(|bot| {
+                states.get(*bot).is_some_and(|version| *version > 0)
+                    && !owners.contains_key(*bot)
+            })
+            .collect();
+        for chunk in chunked(&unowned_initialized) {
+            let live: HashSet<String> = self
+                .bot_states_in(&chunk)
+                .await?
+                .into_iter()
+                .map(|(bot_id, _)| bot_id)
+                .collect();
+            for bot_id in chunk {
+                if !live.contains(bot_id) {
+                    states.remove(bot_id);
+                }
             }
         }
 
