@@ -42,7 +42,7 @@ A_EXECUTOR_BOT = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
 def test_builtin_machine_pinned():
-    """六状态 / 六迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
+    """六状态 / 八迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
     assert MACHINE_REGISTRY == {"team_todo_execution": TEAM_TODO_EXECUTION_MACHINE}
     assert TEAM_TODO_EXECUTION_MACHINE.schema_version == "context-state-machine/1"
     assert TEAM_TODO_EXECUTION_MACHINE.profile_ref == "team_todo_execution"
@@ -57,7 +57,7 @@ def test_builtin_machine_pinned():
         ("in_progress", "active", ("Single",)),
         ("reviewing", "review", ("Single",)),
         ("blocked", "blocked", ("Single",)),
-        ("done", "terminal_success", ("Single",)),
+        ("done", "review", ("Single",)),
         ("cancelled", "terminal_cancelled", ("Single",)),
     ]
     assert [
@@ -90,6 +90,13 @@ def test_builtin_machine_pinned():
             "task.completed",
             ("event_matches_task",),
             "done",
+        ),
+        (
+            "resume_task",
+            ("done",),
+            "task.started",
+            ("actor_can_start_task",),
+            "in_progress",
         ),
         (
             "submit_for_review",
@@ -207,16 +214,16 @@ def test_ambiguous_conflicting_rules_rejected():
 
 def test_terminal_outgoing_edge_rejected():
     """terminal_* 状态不能有出边(spec §4.4 第 3 条)。"""
-    reopen = TransitionRule(
-        rule_id="reopen",
-        from_states=("done",),
-        event_name="task.accepted",
-        guard_refs=("actor_is_responsible_principal",),
-        to_state="reviewing",
+    hard_reopen = TransitionRule(
+        rule_id="hard_reopen",
+        from_states=("cancelled",),
+        event_name="task.started",
+        guard_refs=("actor_can_start_task",),
+        to_state="in_progress",
     )
     bad = dataclasses.replace(
         TEAM_TODO_EXECUTION_MACHINE,
-        transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (reopen,),
+        transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (hard_reopen,),
     )
     with pytest.raises(
         ContextCollabValidationError, match="must not have outgoing edges"
@@ -323,15 +330,27 @@ def test_resolve_transition_no_rule_returns_none():
 
 
 def test_resolve_transition_terminal_has_no_outgoing():
-    """done 是 terminal_*,任何事件都无出边可命中。"""
+    """cancelled 是 terminal_*,任何事件都无出边可命中。"""
+    assert (
+        resolve_transition(
+            TEAM_TODO_EXECUTION_MACHINE,
+            "cancelled",
+            "task.started",
+            {},
+        )
+        is None
+    )
+
+
+def test_resolve_transition_resumes_executor_round_from_done():
     assert (
         resolve_transition(
             TEAM_TODO_EXECUTION_MACHINE,
             "done",
-            "task.accepted",
-            {},
+            "task.started",
+            {"actor_can_start_task": PASS_OUTCOME},
         )
-        is None
+        == "in_progress"
     )
 
 

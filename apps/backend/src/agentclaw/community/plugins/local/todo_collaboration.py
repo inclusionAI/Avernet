@@ -122,6 +122,50 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             return self.complete_context(collab_context_id)
         return self._snapshot(collab_context_id, local)
 
+    async def resume_context(
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ) -> TodoCollaborationContext:
+        local = self._require_context(collab_context_id)
+        if local.status != "done":
+            raise TodoCollaborationError("Context can resume only from done")
+        trigger = next(
+            (
+                event
+                for event in local.events
+                if event.event_id == triggered_by_event_id
+            ),
+            None,
+        )
+        if trigger is None or trigger.event_type != "user_interaction.posted":
+            raise TodoCollaborationError("Context resume requires an interaction event")
+        next_version = local.version + 1
+        self.append_event(
+            collab_context_id=collab_context_id,
+            request=TodoCollaborationEventRequest(
+                expected_version=local.version,
+                event_kind="task.started",
+                primitive_type="Task",
+                actor_id=local.request.executor_id,
+                actor_type="bot",
+                parent_event=local.current_event_id,
+                visibility="workspace",
+                payload={
+                    "run_id": f"run_{collab_context_id}_{next_version}",
+                    "session_id": f"session_{collab_context_id}",
+                    "resumed": True,
+                    "triggered_by_event_id": triggered_by_event_id,
+                },
+            ),
+        )
+        resumed = self._require_context(collab_context_id)
+        resumed.status = "in_progress"
+        self._run_statuses[collab_context_id] = "RUNNING"
+        return self._snapshot(collab_context_id, resumed)
+
     def set_run_status_for_test(self, *, collab_context_id: str, status: str) -> None:
         local = self._require_context(collab_context_id)
         if local.status != "in_progress":

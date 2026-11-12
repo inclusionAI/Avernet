@@ -107,6 +107,7 @@ class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
         super().__init__()
         self.context_calls = 0
         self.run_calls = 0
+        self.resume_calls = 0
         self.append_calls = 0
 
     def create_context(self, request):
@@ -116,6 +117,10 @@ class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
     async def run_context(self, **kwargs):
         self.run_calls += 1
         return await super().run_context(**kwargs)
+
+    async def resume_context(self, **kwargs):
+        self.resume_calls += 1
+        return await super().resume_context(**kwargs)
 
     def append_event(self, **kwargs):
         self.append_calls += 1
@@ -156,7 +161,7 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
     execution = world.get(TodoExecutionServiceProtocol)
     await execution.refresh_in_progress(todo_id=started.todo_id)
     pending = service.get_todo(todo_id=started.todo_id, actor_id="user_1")
-    event = service.create_interaction(
+    event = await service.create_interaction(
         todo_id=started.todo_id,
         actor_id="user_1",
         author_name=None,
@@ -167,10 +172,17 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
     assert created.status is TodoStatus.PENDING
     assert started.status is TodoStatus.IN_PROGRESS
     assert pending.status is TodoStatus.PENDING_ACCEPTANCE
+    assert repository.todo.status is TodoStatus.IN_PROGRESS
     assert collaboration.context_calls == 1
     assert collaboration.run_calls == 1
-    assert collaboration.append_calls == 1
+    assert collaboration.resume_calls == 1
+    assert collaboration.append_calls == 2
     assert event.event_type == "user_interaction.posted"
+    resumed_context = collaboration.get_context(
+        collab_context_id=started.collab_context_id,
+        actor_id="user_1",
+    )
+    assert resumed_context.events[-1].event_type == "task.started"
 
 
 @pytest.mark.asyncio
@@ -195,7 +207,7 @@ async def test_todo_interaction_state_failure_does_not_reach_collaboration_plugi
     ).events
 
     with pytest.raises(TodoStateConflictError):
-        service.create_interaction(
+        await service.create_interaction(
             todo_id=started.todo_id,
             actor_id="user_1",
             author_name=None,

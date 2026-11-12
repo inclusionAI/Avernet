@@ -10,6 +10,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 )
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimeError,
+    ContextCollabResumeRequest,
     ContextCollabRunRequest,
 )
 from agentclaw.community.plugins.community.context_collab_runtime import (
@@ -89,6 +90,40 @@ async def test_runtime_rejects_missing_owner_without_invoking_bot(
         await runtime.run(_request(owner_id=owner_id))
 
     assert openapi_bot.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_resume_reuses_previous_session_and_interaction_id() -> None:
+    openapi_bot = _RecordingOpenApiBot()
+    runtime = CommunityContextCollabRuntimePlugin(openapi_bot)
+    request = ContextCollabResumeRequest(
+        collab_context_id="context_1",
+        executor_id="bot_1",
+        principal_id="user_1",
+        todo_id="todo_1",
+        session_id="session_previous",
+        message="Please revise the implementation",
+        interaction_event_id="interaction_1",
+        executor_owner_id="another_user",
+    )
+
+    result = await runtime.resume(request)
+
+    assert result.run_id == "run_1"
+    assert result.session_id == "session_1"
+    assert openapi_bot.calls == [
+        {
+            "bot_id": "bot_1:another_user",
+            "message": "Please revise the implementation",
+            "metadata": {
+                "session_id": "session_previous",
+                "biz_task_id": "todo_1",
+                "collab_context_id": "context_1",
+                "interaction_event_id": "interaction_1",
+            },
+            "message_id": "interaction_1",
+        }
+    ]
 
 
 @pytest.mark.asyncio

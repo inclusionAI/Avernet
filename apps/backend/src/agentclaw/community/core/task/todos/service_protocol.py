@@ -63,7 +63,7 @@ class TodoServiceProtocol(Protocol):
     ) -> tuple[TodoEventRecord, ...]: ...
 
     @abstractmethod
-    def create_interaction(
+    async def create_interaction(
         self,
         *,
         todo_id: str,

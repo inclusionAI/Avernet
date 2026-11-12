@@ -75,6 +75,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRuntimePlugin,
 )
@@ -222,6 +223,19 @@ def _resolve_event_status(
         machine, current_status, command.event_kind, guard_results
     )
     return current_status if new_status is None else new_status
+
+
+def _previous_session_id(events: Sequence[EventRecord]) -> str | None:
+    """Find the executor session left by the previous completed run."""
+    for event in reversed(events):
+        if event.event_kind not in {"task.started", "task.completed"}:
+            continue
+        if not isinstance(event.payload, dict):
+            continue
+        session_id = event.payload.get("session_id")
+        if isinstance(session_id, str) and session_id.strip():
+            return session_id.strip()
+    return None
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
@@ -437,6 +451,139 @@ class ContextCollabService(ContextCollabServiceProtocol):
             collab_context_id=collab_context_id,
             run_id=runtime_result.run_id,
             session_id=runtime_result.session_id,
+            context_version=accepted.context_version,
+            current_status=accepted.current_status,
+        )
+
+    async def resume_context(
+        self,
+        collab_context_id: str,
+        *,
+        triggered_by_event_id: str,
+        context: ActorContext,
+    ) -> ContextCollabRunResultDTO:
+        """Continue the previous executor session from a Human interaction.
+
+        ``user_interaction.posted`` remains the durable input fact. This use case
+        then starts a new executor run in that session and appends the new
+        ``task.started`` fact that moves the Context from ``done`` back to
+        ``in_progress``.
+        """
+        normalized_trigger_id = _required_str(
+            triggered_by_event_id, "triggered_by_event_id"
+        )
+        status = self._repository.get_current_status(collab_context_id)
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        collet = status.collet
+        snapshot = collet.current_snapshot
+        if snapshot is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot resume without a current snapshot"
+            )
+        if snapshot.status != "done":
+            raise ContextCollabValidationError(
+                "collaboration context can resume only from status 'done', "
+                f"got {snapshot.status!r}"
+            )
+        trigger_index = next(
+            (
+                index
+                for index, event in enumerate(status.events)
+                if event.event_id == normalized_trigger_id
+            ),
+            None,
+        )
+        if trigger_index is None:
+            raise ContextCollabValidationError(
+                "collaboration context resume requires an existing interaction event"
+            )
+        trigger = status.events[trigger_index]
+        if trigger.event_kind != "user_interaction.posted":
+            raise ContextCollabValidationError(
+                "collaboration context can resume only from user_interaction.posted"
+            )
+        message = trigger.payload.get("content") if isinstance(trigger.payload, dict) else None
+        if not isinstance(message, str) or not message.strip():
+            raise ContextCollabValidationError(
+                "collaboration context resume requires a non-empty interaction "
+                "message"
+            )
+        session_id = _previous_session_id(status.events[:trigger_index])
+        if session_id is None:
+            raise ContextCollabValidationError(
+                "collaboration context resume requires the previous executor "
+                "session_id"
+            )
+        executor = collet.context_spec.executor_ref
+        if executor is None:
+            raise ContextCollabValidationError(
+                "collaboration context cannot resume without an executor_ref"
+            )
+        todo_ref = next(
+            (
+                ref
+                for ref in collet.context_spec.resource_refs
+                if ref.resource_type == "todo"
+            ),
+            None,
+        )
+        if todo_ref is None:
+            raise ContextCollabValidationError(
+                "collaboration context resume requires one todo resource_ref"
+            )
+
+        runtime_result = await self._runtime.resume(
+            ContextCollabResumeRequest(
+                collab_context_id=collab_context_id,
+                executor_id=executor.agent_id,
+                principal_id=collet.context_spec.principal_ref.principal_id,
+                todo_id=todo_ref.resource_id,
+                session_id=session_id,
+                message=message,
+                interaction_event_id=trigger.event_id,
+                executor_owner_id=collet.context_spec.executor_owner_id,
+            )
+        )
+        runtime_session_id = runtime_result.session_id or session_id
+        if runtime_session_id != session_id:
+            raise ContextCollabValidationError(
+                "Context executor returned a different session; refusing to resume"
+            )
+        executor_actor = PrincipalRef("bot", executor.agent_id)
+        accepted = self.append_event(
+            collab_context_id,
+            EventAppendCommand(
+                expected_version=collet.context_version,
+                event_kind="task.started",
+                primitive_type="Task",
+                actor_ref=executor_actor,
+                parent_event=collet.current_event_id,
+                visibility="workspace",
+                payload={
+                    "run_id": runtime_result.run_id,
+                    "session_id": session_id,
+                    "resumed": True,
+                    "triggered_by_event_id": trigger.event_id,
+                },
+            ),
+            ActorContext(actor=executor_actor, source=context.source),
+        )
+        if accepted.current_status is None:
+            raise ContextCollabValidationError(
+                "collaboration context resume did not produce a current status"
+            )
+        if accepted.current_status != "in_progress":
+            raise ContextCollabValidationError(
+                "collaboration context resume did not produce status "
+                f"'in_progress', got {accepted.current_status!r}"
+            )
+        return ContextCollabRunResultDTO(
+            collab_context_id=collab_context_id,
+            run_id=runtime_result.run_id,
+            session_id=session_id,
             context_version=accepted.context_version,
             current_status=accepted.current_status,
         )

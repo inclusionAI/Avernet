@@ -139,6 +139,13 @@ class ContextCollabServiceProtocol(Protocol):
         collab_context_id: str,
         context: ActorContext,
     ) -> ContextCollabRunResultDTO: ...
+    async def resume_context(
+        self,
+        collab_context_id: str,
+        *,
+        triggered_by_event_id: str,
+        context: ActorContext,
+    ) -> ContextCollabRunResultDTO: ...
     async def refresh_run(
         self,
         collab_context_id: str,

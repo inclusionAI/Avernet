@@ -228,8 +228,7 @@ async def create_todo_interaction(
 ) -> Envelope[TodoEventResponse]:
     """Append one Human interaction event while the Todo awaits acceptance."""
     actor_id = call_user(user_id=user_id, principal=principal)
-    event = await run_in_threadpool(  # allow-run-in-threadpool
-        service.create_interaction,
+    event = await service.create_interaction(
         todo_id=todo_id,
         actor_id=actor_id,
         author_name=None,

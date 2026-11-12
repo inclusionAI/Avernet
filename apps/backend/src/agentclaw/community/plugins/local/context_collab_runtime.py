@@ -6,6 +6,7 @@ import itertools
 
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimeError,
+    ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRunResult,
     ContextCollabRunStatus,
@@ -26,6 +27,7 @@ class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         self.requests: list[ContextCollabRunRequest] = []
         self.get_run_requests: list[str] = []
         self._runs: dict[str, ContextCollabRunStatus] = {}
+        self.resumed_requests: list[ContextCollabResumeRequest] = []
         self._sequence = itertools.count(1)
 
     async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
@@ -44,6 +46,25 @@ class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         return ContextCollabRunResult(
             run_id=run_id,
             session_id=session_id,
+        )
+
+    async def resume(
+        self, request: ContextCollabResumeRequest
+    ) -> ContextCollabRunResult:
+        self.resumed_requests.append(request)
+        sequence = next(self._sequence)
+        run_id = f"run_{sequence}"
+        self._runs[run_id] = ContextCollabRunStatus(
+            run_id=run_id,
+            status="RUNNING",
+            result=None,
+            error=None,
+            completed_at=None,
+            session_id=request.session_id,
+        )
+        return ContextCollabRunResult(
+            run_id=run_id,
+            session_id=request.session_id,
         )
 
     async def get_run(self, run_id: str) -> ContextCollabRunStatus:

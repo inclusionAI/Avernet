@@ -448,8 +448,10 @@ TEAM_TODO_EXECUTION_MACHINE = StateMachineDefinition(
         StateDefinition(
             name="blocked", governance_kind="blocked", allowed_methods=("Single",)
         ),
+        # Todo acceptance is owned by A, so B's ``done`` means "this executor
+        # round is finished"; a Human interaction can resume the same Context.
         StateDefinition(
-            name="done", governance_kind="terminal_success", allowed_methods=("Single",)
+            name="done", governance_kind="review", allowed_methods=("Single",)
         ),
         StateDefinition(
             name="cancelled",
@@ -478,6 +480,13 @@ TEAM_TODO_EXECUTION_MACHINE = StateMachineDefinition(
             event_name="task.completed",
             guard_refs=("event_matches_task",),
             to_state="done",
+        ),
+        TransitionRule(
+            rule_id="resume_task",
+            from_states=("done",),
+            event_name="task.started",
+            guard_refs=("actor_can_start_task",),
+            to_state="in_progress",
         ),
         TransitionRule(
             rule_id="submit_for_review",

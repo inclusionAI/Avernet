@@ -32,7 +32,10 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     ContextStatusRecord,
     EventAppendedRecord,
 )
-from agentclaw.community.core.task.context_collab.service_api import ActorContext
+from agentclaw.community.core.task.context_collab.service_api import (
+    ActorContext,
+    EventAppendCommand,
+)
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
@@ -187,6 +190,58 @@ async def test_local_runtime_exposes_running_status_after_start():
     assert run.status == "RUNNING"
     assert run.session_id == "session_1"
     assert runtime.get_run_requests == ["run_1"]
+
+
+@pytest.mark.asyncio
+async def test_context_resume_uses_previous_session_and_persists_new_start():
+    repository = RecordingContextRepository()
+    runtime = LocalContextCollabRuntimePlugin()
+    service = ContextCollabService(repository=repository, runtime=runtime)
+    actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
+    await service.run_context("context_1", actor)
+    runtime.set_run_status_for_test(
+        "run_1",
+        status="COMPLETED",
+        result={"content": "done"},
+        session_id="session_1",
+    )
+    await service.refresh_run("context_1", actor)
+    interaction = service.append_event(
+        "context_1",
+        EventAppendCommand(
+            expected_version=3,
+            event_kind="user_interaction.posted",
+            primitive_type="Message",
+            actor_ref=PrincipalRef("human", "user_1"),
+            parent_event="event_3",
+            visibility="workspace",
+            payload={"content": "Please revise section 2"},
+        ),
+        actor,
+    )
+
+    result = await service.resume_context(
+        "context_1", triggered_by_event_id=interaction.event_id, context=actor
+    )
+
+    assert len(runtime.resumed_requests) == 1
+    request = runtime.resumed_requests[0]
+    assert request.session_id == "session_1"
+    assert request.message == "Please revise section 2"
+    assert request.interaction_event_id == interaction.event_id
+    assert result.run_id == "run_2"
+    assert result.session_id == "session_1"
+    assert result.current_status == "in_progress"
+    assert repository.collet.current_snapshot.status == "in_progress"
+    started = repository.events[-1]
+    assert started.event_kind == "task.started"
+    assert started.actor_ref == PrincipalRef("bot", "bot_1")
+    assert started.payload == {
+        "run_id": "run_2",
+        "session_id": "session_1",
+        "resumed": True,
+        "triggered_by_event_id": interaction.event_id,
+    }
 
 
 @pytest.mark.asyncio

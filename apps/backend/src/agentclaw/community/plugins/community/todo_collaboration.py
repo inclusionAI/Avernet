@@ -130,6 +130,30 @@ class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
             ) from exc
         return _projected_context(projection)
 
+    async def resume_context(
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ) -> TodoCollaborationContext:
+        actor = _actor_context(actor_id, "human")
+        try:
+            await self._service.resume_context(
+                collab_context_id,
+                triggered_by_event_id=triggered_by_event_id,
+                context=actor,
+            )
+        except ContextCollabRuntimeError as exc:
+            raise TodoCollaborationError(
+                "ContextCollab runtime could not resume the Todo executor"
+            ) from exc
+        except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
+            raise TodoCollaborationError(
+                "ContextCollab rejected the Todo resume request"
+            ) from exc
+        return _projected_context(self._get_projection(collab_context_id, actor))
+
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:

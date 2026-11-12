@@ -30,6 +30,20 @@ class ContextCollabRunRequest:
 
 
 @dataclass(frozen=True)
+class ContextCollabResumeRequest:
+    """Transport-neutral input for continuing the previous executor session."""
+
+    collab_context_id: str
+    executor_id: str
+    principal_id: str
+    todo_id: str
+    session_id: str
+    message: str
+    interaction_event_id: str
+    executor_owner_id: str | None = None
+
+
+@dataclass(frozen=True)
 class ContextCollabRunResult:
     """External runtime handles recorded on the subsequent task.started event."""
 
@@ -55,6 +69,12 @@ class ContextCollabRuntimePlugin(Plugin, Protocol):
 
     async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
         """Start the bound executor without changing Context state directly."""
+        ...
+
+    async def resume(
+        self, request: ContextCollabResumeRequest
+    ) -> ContextCollabRunResult:
+        """Continue the previous executor session without mutating Context state."""
         ...
 
     async def get_run(self, run_id: str) -> ContextCollabRunStatus:

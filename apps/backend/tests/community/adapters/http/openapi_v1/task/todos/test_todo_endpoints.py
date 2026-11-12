@@ -136,7 +136,7 @@ class _RecordedService:
         self._record("list_interactions", **kwargs)
         return (_interaction_event(),)
 
-    def create_interaction(self, **kwargs):
+    async def create_interaction(self, **kwargs):
         self._record("create_interaction", **kwargs)
         return TodoEventRecord(
             event_id="event_4",

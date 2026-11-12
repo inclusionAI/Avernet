@@ -143,6 +143,26 @@ class FakeTodos:
         self._record("get_todo", todo_id=todo_id)
         return self.todos[todo_id]
 
+    def transition_status(
+        self,
+        *,
+        todo_id: str,
+        expected_status: TodoStatus,
+        new_status: TodoStatus,
+    ) -> TodoRecord:
+        self._record(
+            "transition_status",
+            todo_id=todo_id,
+            expected_status=expected_status,
+            new_status=new_status,
+        )
+        todo = self.todos[todo_id]
+        if todo.status is not expected_status:
+            raise TodoStateConflictError("concurrent status transition")
+        updated = replace(todo, status=new_status)
+        self.todos[todo_id] = updated
+        return updated
+
     def list_todos(self, **kwargs) -> TodoPage:
         self._record("list_todos", **kwargs)
         return TodoPage(total=len(self.todos), items=tuple(self.todos.values()))
@@ -175,6 +195,12 @@ class FakeExecution:
 
     async def refresh_in_progress(self, *, todo_id: str) -> TodoRecord:
         raise AssertionError("TodoService must not refresh scheduler state")
+
+    async def resume_interaction(self, **kwargs: Any) -> TodoRecord:
+        self.calls.append({"operation": "resume_interaction", **kwargs})
+        if self.result is None:
+            return _todo(status=TodoStatus.IN_PROGRESS)
+        return self.result
 
 
 class FakeCollaboration:
@@ -443,17 +469,19 @@ def test_list_events_maps_context_artifacts():
     assert collaboration.get_calls == [("context_todo_1", "user_1")]
 
 
-def test_create_interaction_checks_persisted_pending_acceptance_state():
+@pytest.mark.asyncio
+async def test_create_interaction_checks_persisted_pending_acceptance_state():
     todo = _todo(
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, _, _, _, collaboration = _service(
+    service, repository, _, _, collaboration = _service(
         todos=(todo,),
         contexts=(_context(),),
+        execution_result=_todo(status=TodoStatus.IN_PROGRESS),
     )
 
-    event = service.create_interaction(
+    event = await service.create_interaction(
         todo_id="todo_1",
         actor_id="user_1",
         author_name="User One",
@@ -468,9 +496,11 @@ def test_create_interaction_checks_persisted_pending_acceptance_state():
         "content": "please revise section 2",
         "author_name": "User One",
     }
+    assert repository.todos["todo_1"].status is TodoStatus.IN_PROGRESS
 
 
-def test_create_interaction_rejects_non_pending_acceptance_without_reading_context():
+@pytest.mark.asyncio
+async def test_create_interaction_rejects_non_pending_acceptance_without_reading_context():
     todo = _todo(
         status=TodoStatus.IN_PROGRESS,
         collab_context_id="context_todo_1",
@@ -478,7 +508,7 @@ def test_create_interaction_rejects_non_pending_acceptance_without_reading_conte
     service, _, _, _, collaboration = _service(todos=(todo,))
 
     with pytest.raises(TodoStateConflictError):
-        service.create_interaction(
+        await service.create_interaction(
             todo_id="todo_1",
             actor_id="user_1",
             author_name=None,

@@ -17,6 +17,7 @@ from agentclaw.community.core.task.todos.services.todo_execution_service import 
     TodoExecutionService,
 )
 from agentclaw.community.plugin_api.todo_collaboration import (
+    TodoCollaborationEvent,
     TodoCollaborationContext,
 )
 
@@ -60,6 +61,22 @@ def _context(context_id: str, status: str) -> TodoCollaborationContext:
         status=status,
         context_version=1,
         current_event_id=None,
+    )
+
+
+def _event(event_id: str, event_seq: int, event_type: str) -> TodoCollaborationEvent:
+    return TodoCollaborationEvent(
+        event_id=event_id,
+        event_seq=event_seq,
+        event_type=event_type,
+        actor_id="user_1",
+        actor_type="human",
+        content="claimed message",
+        execution_id="run_1",
+        context_version=event_seq,
+        status="active",
+        artifacts=(),
+        created_at="2026-11-12T00:00:00Z",
     )
 
 
@@ -142,6 +159,7 @@ class _Collaboration:
         self.get_calls: list[tuple[str, str]] = []
         self.run_calls: list[tuple[str, str]] = []
         self.refresh_calls: list[tuple[str, str]] = []
+        self.resume_calls: list[tuple[str, str, str]] = []
 
     def create_context(self, request):
         self.create_calls.append(request)
@@ -163,6 +181,18 @@ class _Collaboration:
         if self.refreshed_context is not None:
             self.contexts[collab_context_id] = self.refreshed_context
         return self.contexts[collab_context_id]
+
+    async def resume_context(
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ):
+        self.resume_calls.append((collab_context_id, actor_id, triggered_by_event_id))
+        context = replace(self.contexts[collab_context_id], status="in_progress")
+        self.contexts[collab_context_id] = context
+        return context
 
 
 def _service(
@@ -227,6 +257,53 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
         TodoStatus.PENDING,
         TodoStatus.IN_PROGRESS,
     )
+
+
+@pytest.mark.asyncio
+async def test_resume_interaction_reuses_context_for_claimed_todo():
+    context = _context("context_1", "done")
+    service, repository, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.resume_interaction(
+        todo_id="todo_1",
+        actor_id="creator_1",
+        triggered_by_event_id="event_interaction",
+    )
+
+    assert result.status is TodoStatus.IN_PROGRESS
+    assert collaboration.get_calls == [("context_1", "creator_1")]
+    assert collaboration.resume_calls == [
+        ("context_1", "creator_1", "event_interaction")
+    ]
+    assert all(call[0] != "transition" for call in repository.calls)
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_inconsistent_context_state_without_transition():
+    context = _context("context_1", "in_progress")
+    service, repository, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="in_progress"):
+        await service.resume_interaction(
+            todo_id="todo_1",
+            actor_id="creator_1",
+            triggered_by_event_id="event_interaction",
+        )
+
+    assert collaboration.resume_calls == []
+    assert all(call[0] != "transition" for call in repository.calls)
 
 
 @pytest.mark.asyncio
@@ -309,6 +386,30 @@ async def test_refresh_moves_done_context_to_pending_acceptance_without_runtime_
     result = await service.refresh_in_progress(todo_id="todo_1")
 
     assert result.status is TodoStatus.PENDING_ACCEPTANCE
+    assert collaboration.refresh_calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_keeps_claimed_interaction_waiting_for_resume():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_1", 1, "task.completed"),
+            _event("event_2", 2, "user_interaction.posted"),
+        ),
+    )
+    service, repository, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.refresh_in_progress(todo_id="todo_1")
+
+    assert result.status is TodoStatus.IN_PROGRESS
+    assert all(call[0] != "transition" for call in repository.calls)
     assert collaboration.refresh_calls == []
 
 

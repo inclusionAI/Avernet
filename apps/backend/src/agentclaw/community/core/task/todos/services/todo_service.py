@@ -184,7 +184,7 @@ class TodoService(TodoServiceProtocol):
             if event.event_type == _HUMAN_INTERACTION_EVENT
         )
 
-    def create_interaction(
+    async def create_interaction(
         self,
         *,
         todo_id: str,
@@ -207,6 +207,14 @@ class TodoService(TodoServiceProtocol):
             collab_context_id=context_id,
             actor_id=normalized_actor_id,
         )
+        # Claim the interaction synchronously before delivering it to B. This
+        # closes the product-state window where a persisted Human event can
+        # still be followed by another create-interaction request.
+        self._repository.transition_status(
+            todo_id=todo.todo_id,
+            expected_status=TodoStatus.PENDING_ACCEPTANCE,
+            new_status=TodoStatus.IN_PROGRESS,
+        )
         payload: dict[str, Any] = {"content": normalized_message}
         if normalized_author_name is not None:
             payload["author_name"] = normalized_author_name
@@ -222,6 +230,11 @@ class TodoService(TodoServiceProtocol):
                 visibility="workspace",
                 payload=payload,
             ),
+        )
+        await self._execution.resume_interaction(
+            todo_id=todo.todo_id,
+            actor_id=normalized_actor_id,
+            triggered_by_event_id=event.event_id,
         )
         return self._to_event_record(event)
 

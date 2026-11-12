@@ -114,6 +114,16 @@ class TodoCollaborationPlugin(Plugin, Protocol):
         """Refresh real executor state and return the current Context projection."""
         ...
 
+    async def resume_context(
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ) -> TodoCollaborationContext:
+        """Continue the prior executor session from a Human interaction event."""
+        ...
+
     def append_event(
         self, *, collab_context_id: str, request: TodoCollaborationEventRequest
     ) -> TodoCollaborationEvent:

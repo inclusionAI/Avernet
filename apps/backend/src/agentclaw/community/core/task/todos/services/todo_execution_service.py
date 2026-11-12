@@ -30,6 +30,20 @@ from agentclaw.community.plugin_api.todo_collaboration import (
 _CONTEXT_CREATED = "created"
 _CONTEXT_IN_PROGRESS = "in_progress"
 _CONTEXT_DONE = "done"
+_TASK_STARTED_EVENT = "task.started"
+_INTERACTION_EVENT = "user_interaction.posted"
+
+
+def _has_unstarted_interaction(
+    context: TodoCollaborationContext,
+) -> bool:
+    """Whether a claimed interaction is still awaiting its resumed run."""
+    for event in reversed(context.events):
+        if event.event_type == _TASK_STARTED_EVENT:
+            return False
+        if event.event_type == _INTERACTION_EVENT:
+            return True
+    return False
 
 
 class TodoExecutionService(TodoExecutionServiceProtocol):
@@ -99,6 +113,43 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             target=TodoStatus.IN_PROGRESS,
         )
 
+    async def resume_interaction(
+        self,
+        *,
+        todo_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ) -> TodoRecord:
+        """Continue the Context session for a claimed Human interaction event."""
+        todo = self._repository.get_todo(todo_id=todo_id)
+        if todo.status is not TodoStatus.IN_PROGRESS:
+            raise TodoStateConflictError(
+                "A claimed interaction must keep the Todo in progress"
+            )
+        if not todo.collab_context_id:
+            raise TodoNotFoundError(
+                "Interacting Todo collaboration Context is missing"
+            )
+        context = self._collaboration.get_context(
+            collab_context_id=todo.collab_context_id,
+            actor_id=actor_id,
+        )
+        if context.status != _CONTEXT_DONE:
+            raise TodoStateConflictError(
+                "Interacting Todo has inconsistent Context state "
+                f"{context.status}"
+            )
+        context = await self._collaboration.resume_context(
+            collab_context_id=todo.collab_context_id,
+            actor_id=actor_id,
+            triggered_by_event_id=triggered_by_event_id,
+        )
+        if context.status != _CONTEXT_IN_PROGRESS:
+            raise TodoStateConflictError(
+                f"Context resume returned unexpected state {context.status}"
+            )
+        return self._repository.get_todo(todo_id=todo.todo_id)
+
     async def refresh_in_progress(self, *, todo_id: str) -> TodoRecord:
         """Project a completed B Context into A's pending-acceptance state."""
 
@@ -115,6 +166,8 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             actor_id=todo.created_by,
         )
         if context.status == _CONTEXT_DONE:
+            if _has_unstarted_interaction(context):
+                return todo
             return self._mark_pending_acceptance(todo)
         if context.status != _CONTEXT_IN_PROGRESS:
             raise TodoStateConflictError(

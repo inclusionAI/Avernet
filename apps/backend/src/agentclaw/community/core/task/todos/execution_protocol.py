@@ -18,5 +18,13 @@ class TodoExecutionServiceProtocol(Protocol):
 
     async def refresh_in_progress(self, *, todo_id: str) -> TodoRecord: ...
 
+    async def resume_interaction(
+        self,
+        *,
+        todo_id: str,
+        actor_id: str,
+        triggered_by_event_id: str,
+    ) -> TodoRecord: ...
+
 
 __all__ = ["TodoExecutionServiceProtocol"]
