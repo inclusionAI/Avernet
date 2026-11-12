@@ -1,80 +1,107 @@
-# Context Collab BBS 公开讨论产品层 实现计划
+# Context Collab BBS 公开讨论产品层 实现计划（v2 乙案）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 context_collab 协议原语之上实现 BBS 公开讨论产品层四用例（发帖/回帖/列表/详情），product profile 复用既有 `bbs_public_discussion`，不动 `core/task/forum`、不动表结构与既有 wire。
+**Goal:** 在 context_collab 层之上实现 BBS 公开讨论产品四用例（发帖/回帖/列表/详情）：products/ 只组合协议层模块与三处基建端口（乙案），`service_api.py` 对产品永久不依赖，架构测试执法；不动 forum、DDL、既有 wire。
 
-**Architecture:** 产品层 `products/` 编排既有协议服务——写路径走 `ContextCollabServiceProtocol`（create_context + append_event，复用 G1 窄授权与乐观并发），profile 校验与 parent 域断言经 `ContextCollabRepositoryProtocol` 读 record 伴随字段；列表靠仓储一条**新增只读方法**（按 product_kind 列 Collet + Message 事件聚合计数）；HTTP 新路由两侧（内部 + OpenAPI 镜像）。
+**Architecture:** 平台归位二连（ActorContext 迁 G1、creation_payload 纯函数迁 L4）→ 仓储列表读方法（persistence 内部）→ 产品自持编排（L4 对象 + G1/G4 + 仓储端口 + L5 顶层投影）+ 架构测试 → 读投影 + DI → HTTP 内部+OpenAPI 双侧镜像 → 收尾。
 
 **Tech Stack:** Python 3.12、FastAPI、SQLAlchemy（SQLite 测试）、python-injector DI、pytest。
 
-**Spec:** `apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md`（Accepted；§2 域映射、§6 裁决表 A–F 为权威，本计划不重复）。
+**Spec:** `apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md`（v2 Accepted；§2 域映射、§2a 操作族映射表、§3.1 依赖矩阵、§6 裁决 A–J 为权威，本计划不重复）。
 
 ## Global Constraints
 
-- 分支 `dev_bbs_help_1019_3` 直接叠加 HEAD（`ada09890b`）。
-- **不动** `core/task/forum` 任何代码；**不动** `ac_context_collab_collet`/`ac_context_collab_event` 表结构与既有迁移；**不改**三个既有 context_collab wire 路由。
-- 测试命令：`cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/test_bbs_public_discussion_endpoints.py -v`（用户指示：CI 门禁与全量套件不跑）。
-- 提交规范 `<type>(backend): <outcome>`，末尾 `Co-Authored-By: Claude <noreply@anthropic.com>`。
-- 任一文件 ≤1000 行；不格式化未改动行；不新增依赖。
-- 异常只用既有 `ContextCollabNotFoundError` / `ContextCollabValidationError` / `ContextCollabVersionConflict`；HTTP 侧沿用既有 `ENVELOPE_ERRORS` 映射（404/409/422）。
-- `T | None` 只用于合法领域可空（`parent_event`、孤儿帖 `body`、`parent_event_id` 入参）。
-- 词汇常量从源头 import（`MethodKind.OPEN_GROUP.value`、`ProductProfile.BBS_PUBLIC_DISCUSSION.value`、`VISIBILITY_PUBLIC`），不得写字符串字面量漂移；event_kind `"user_interaction.posted"` / primitive `"Message"` 与 `schema.validate_event_body` 合同一致（payload `{"content": <非空str>}`）。
+- 分支 `dev_bbs_help_1019_3` 直接叠加 HEAD。
+- **乙案依赖禁令**：`src/…/context_collab/products/**/*.py` 的 import 白名单 = 层模块（`l2_agent_network`/`l3_spaces_resources`/`l4_context_primitives`/`l5_methods`/`l6_products`/`g1_secure_govern`/`g2_keep_reliable_live`/`g3_observe_evaluate_evolve`/`g4_contracts_consistency`）+ `errors` + `persistence.repository` + `persistence.method_store` + `services.method_lifecycle_service`；`service_api.py`、`services/context_collab_service.py`、`method_service_api.py` 等其余模块**永久禁止**。
+- 不动 `core/task/forum`；不动 `ac_context_collab_collet`/`ac_context_collab_event` 表结构；不改三个既有 wire 路由。
+- 测试命令：`cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/ -v`（CI 门禁与全量套件不跑——用户指示）。
+- 提交 `<type>(backend): <outcome>`，尾行 `Co-Authored-By: Claude <noreply@anthropic.com>`；任一文件 ≤1000 行；不格式化未改动行；不新增依赖。
+- 异常只用既有 `ContextCollabNotFoundError` / `ContextCollabValidationError` / `ContextCollabVersionConflict`；HTTP 沿 `ENVELOPE_ERRORS`。
+- 词汇常量从源头 import（`MethodKind.OPEN_GROUP.value`、`ProductProfile/WorkflowKind.BBS_PUBLIC_DISCUSSION.value`、`VISIBILITY_PUBLIC`）；`"user_interaction.posted"`/`"Message"` 与 G4 `validate_event_body` 合同一致（payload `{"content": 非空str}`）。
 
 ## Review Focus
 
-1. **骨架事件被当 parent**：回帖 `parent_event_id` 指向 `task.created`/Task 事件能通过仓储同流存在性校验——产品层必须以 Message 域断言拒绝，否则详情投影把骨架吸进回复树。→ Task 2 Step 1 `test_reply_rejects_skeleton_event_parent`。
-2. **跨产品面误入**：其他 profile 的 Collet（如 `team_todo`）凭 collet_id 打本产品回帖/详情——必须 404 拒（协议级 404 由产品先判 profile 再转发）。→ Task 2 Step 1 `test_reply_rejects_foreign_profile_collet`、Task 3 `test_detail_rejects_foreign_profile`。
-3. **私有事件泄漏进公开读面**：经既有通用路由写入的 workspace/private Message 出现在详情回帖列表——只投影 public。→ Task 3 `test_detail_only_projects_public_messages`。
-4. **孤儿帖读面**：发帖两步第二步失败留下的"有标题无正文"行——详情 `body=None` 容忍不 422，列表照常展示。→ Task 3 `test_detail_tolerates_bodyless_collet`。
-5. **不可解码外部行炸整页列表**：裸 SQL 插 `actor_ref=NULL` 行后，列表跳过该行继续返回其它帖；单点 get/详情维持方案 i 严格失败。→ Task 3 `test_list_skips_undecodable_rows` + 单点反例。
-6. **并发回帖 CAS**：两回帖争读同一 version，后落者必须 409 冲突拒绝，不静默覆盖。→ Task 2 `test_reply_version_conflict_propagates`。
+1. 骨架事件被当 parent：回帖指向 `task.created` 能过仓储存在性校验——产品域断言拒。→ T3 `test_reply_rejects_skeleton_event_parent`
+2. 跨产品面误入：他 profile Collet 凭 id 打回帖/详情——404。→ T3 `test_reply_rejects_foreign_profile_collet`、T4 `test_detail_rejects_foreign_profile`
+3. 私有事件泄漏：workspace/private Message 出现在详情回帖列表——只投影 public。→ T4 `test_detail_only_projects_public_messages`
+4. 孤儿帖：正文事件缺失——详情 body=None 不 422。→ T4 `test_detail_tolerates_bodyless_collet`
+5. 坏行炸整页：NULL actor_ref 外部行在列表被跳过带日志；单点照旧严格失败。→ T2 `test_list_skips_undecodable_rows`
+6. 并发 CAS：同 version 争抢后落者 409 不静默覆盖。→ T3 `test_reply_version_conflict_propagates`
+7. **依赖违约**：products 任一文件 import `service_api` 即架构测试红。→ T3 `test_products_import_whitelist`（含故意探针断言）
 
 ---
 
-### Task 1: 仓储列表读路径（按 product_kind 列 Collet + 发言计数）
+### Task 1: 平台归位二连（行为不变重构）
 
 **Files:**
-- Modify: `src/agentclaw/community/core/task/context_collab/persistence/repository.py`（协议类 + 实现类各加一方法；`ContextSummaryRecord` dataclass 放本文件，紧邻 record 定义）
-- Test: `tests/community/repository/task/context_collab/test_repository_listing.py`（新建）
+- Create: `src/agentclaw/community/core/task/context_collab/g1_secure_govern/actor_context.py`（`ActorContext` 定义迁移；`g1` 包 `__init__` 视现状补导出）
+- Modify: `src/agentclaw/community/core/task/context_collab/service_api.py`（类定义换为 `from …g1_secure_govern.actor_context import ActorContext` 再导出）
+- Create: `src/agentclaw/community/core/task/context_collab/l4_context_primitives/creation_facts.py`（`creation_payload(spec: ContextSpec, objective: str) -> dict`）
+- Modify: `src/agentclaw/community/core/task/context_collab/services/context_collab_service.py`（payload inline dict 改调 `creation_payload`）
+- 大约 10 处 `from service_api import ActorContext` 的 import **零改动**（再导出兼容）；`g1_secure_govern/authorization.py` 等 G1 模块可顺手改从 G1 新家 import（属零行为变化）
 
 **Interfaces:**
-- Produces（先于实现者读到的唯一权威签名）：
+- Produces（T3–T5 消费，签名逐字）：
+
+```python
+# g1_secure_govern/actor_context.py
+@dataclass(frozen=True)
+class ActorContext:
+    actor: PrincipalRef
+    source: str  # "api" | "openapi"
+
+# service_api.py 顶部：from …g1_secure_govern.actor_context import ActorContext  # 再导出,既有 import 零破坏
+
+# l4_context_primitives/creation_facts.py
+def creation_payload(spec: ContextSpec, objective: str) -> dict
+# 返回六键全量创建事实(objective/resource_refs/method_kind/executor_ref/
+# product_kind/workflow_kind),与 f91d98cd5 行为逐字一致
+```
+- Consumes: `ContextSpec`、`ResourceRef.to_dict()`。
+
+- [ ] **Step 1:** 先跑 `tests/community/core/task/context_collab/ tests/community/endpoints/test_context_collab_endpoints.py -v` 记基线全绿。
+- [ ] **Step 2:** `creation_facts.py` 实现 + `context_collab_service.py` 改用（服务 pin `test_creates_collet_with_initial_event` 已钉 six-key 全量断言，跑它必须仍绿——这是行为不变的证据）。
+- [ ] **Step 3:** `ActorContext` 定义迁 `g1_secure_govern/actor_context.py`,`service_api` 改再导出;`g1`/`method_authorization`/`authorization` 两处 import 换新家。
+- [ ] **Step 4:** 全回归 `tests/community/core/task/context_collab/ tests/community/endpoints/test_context_collab_endpoints.py tests/community/endpoints/test_context_collab_methods_endpoints.py -v` 零回归。
+- [ ] **Step 5: Commit** `refactor(backend): move ActorContext home to G1 and extract creation payload helper`
+
+### Task 2: 仓储列表读路径（persistence 内部）
+
+**Files:**
+- Modify: `src/…/context_collab/persistence/repository.py`（协议+实现各一方法；`ContextSummaryRecord` dataclass 紧邻 record 定义）
+- Test: `tests/community/repository/task/context_collab/test_repository_listing.py`（新）
+
+**Interfaces:**
+- Produces（T4 消费）：
 
 ```python
 @dataclass
 class ContextSummaryRecord:
-    collet: Collet            # 六字段聚合根（复用 _collet_from_row 的严格解码）
-    context_spec: ContextSpec  # 伴随字段：title(objective)/initiator 从这里读
-    created_at: datetime      # collet 表 gmt_create 列
-    message_count: int        # 该 Collet primitive_type="Message" 事件总数（含首帖正文）
+    collet: Collet
+    context_spec: ContextSpec
+    created_at: datetime      # gmt_create
+    message_count: int       # primitive_type="Message" 计数,含首帖正文
 
 def list_collab_contexts_by_product(self, product_kind: str) -> list[ContextSummaryRecord]: ...
-# SQLAlchemy 实现:collet 行全读 + 单条 GROUP BY 事件计数查询(2 次往返,禁 N+1);
-# product_kind 过滤在 Python 侧解 JSON(spec §6-E);返回按 gmt_create 倒序;
-# _collet_from_row 抛 ContextCollabValidationError 的行跳过并 logger.warning(含 collab_context_id),不炸整页。
+# collet 行全读 + 单条 GROUP BY 计数(2 次往返);Python 侧过滤;gmt_create 倒序;
+# 解码失败行跳过+logger.warning(含 collab_context_id)
 ```
-- Consumes: `_collet_from_row`、`ContextCollabEventModel`/`ContextCollabColletModel`（同文件既有）。
-- 既有手写 fake 仓储（tests 内 `_FakeCollabRepository`、endpoints/DI 测试 stub）不受影响——它们以鸭子类型服务测试，不实现新法；DI/接口 conformance 无 isinstance 检查，无需同步。
+- Consumes: `_collet_from_row`、两 ORM 模型。
 
-- [ ] **Step 1: 写失败测试**——真 SQLite 仓储（沿 `test_repository_create_get.py` 的 engine/session 夹具模式）：`test_lists_only_matching_product_kind`（建 `bbs_public_discussion` 与 `team_todo` 各一帖，只回前者）、`test_message_count_counts_all_message_events`（一 Collet 追加正文+2 回帖 + 一条 Task 类事件，`message_count==3`）、`test_list_orders_by_gmt_create_desc`、`test_list_skips_undecodable_rows`（裸 SQL 插 `actor_ref=NULL` 行 + 一条好行 → 返回只剩好行）。
-
-- [ ] **Step 2: 跑失败**——`uv run pytest tests/community/repository/task/context_collab/test_repository_listing.py -v`，预期 FAIL（方法不存在）。
-- [ ] **Step 3: 实现**——协议抽象方法 + ORM 实现（spec §4：Python 侧过滤、GROUP BY 计数、倒序、坏行跳过+警告日志）；只读，无写路径改动。
-- [ ] **Step 4: 跑通过**，并补跑 `tests/community/repository/task/context_collab/ -v` 零回归。
+- [ ] **Step 1: 失败测试**：真 SQLite（沿 `test_repository_create_get.py` 夹具模式）`test_lists_only_matching_product_kind`、`test_message_count_counts_all_message_events`（正文+2 回帖+1 条 Task 事件 → 3）、`test_list_orders_by_gmt_create_desc`、`test_list_skips_undecodable_rows`（裸 SQL NULL actor_ref 行+好行 → 只回好行）。
+- [ ] **Step 2: 跑失败** → **Step 3: 实现** → **Step 4: 跑绿** + `tests/community/repository/task/context_collab/ -v` 零回归。
 - [ ] **Step 5: Commit** `feat(backend): add collab context list read path by product profile`
 
-### Task 2: 发帖 + 回帖写用例（products 服务）
+### Task 3: products 写用例 + 架构测试
 
 **Files:**
-- Create: `src/agentclaw/community/core/task/context_collab/products/service_api.py`（命令/视图/协议）
-- Create: `src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/__init__.py`
-- Create: `src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/service.py`
-- Create（空文件已在）：`src/agentclaw/community/core/task/context_collab/products/__init__.py`
-- Test: `tests/community/core/task/context_collab/products/test_bbs_public_discussion_write.py`（新建）
+- Create: `src/…/context_collab/products/service_api.py`、`src/…/products/bbs_public_discussion/__init__.py`、`src/…/products/bbs_public_discussion/service.py`
+- Modify: `src/agentclaw/community/di/modules/task_module.py`（产品协议 singleton 绑定）
+- Test: `tests/community/core/task/context_collab/products/test_products_layering.py`（新）、`tests/community/core/task/context_collab/products/test_bbs_public_discussion_write.py`（新）、`tests/community/di/test_task_module.py`（追加）
 
 **Interfaces:**
-- Produces（Task 3/4/5 消费，签名逐字）：
+- Produces（T4/T5 消费，签名逐字）：
 
 ```python
 # products/service_api.py
@@ -83,7 +110,7 @@ class CreateDiscussionCommand:
     title: str
     body: str
     space: SpaceRef
-    resource_refs: list[ResourceRef] = []    # dataclass 默认用 field(default_factory=list)
+    resource_refs: list[ResourceRef] = field(default_factory=list)
 
 @dataclass
 class ReplyDiscussionCommand:
@@ -93,51 +120,42 @@ class ReplyDiscussionCommand:
 
 @dataclass
 class DiscussionCreatedView:
-    collet_id: str
-    title: str
-    body_event_id: str
-    context_version: int
+    collet_id: str; title: str; body_event_id: str; context_version: int
 
 @dataclass
 class ReplyCreatedView:
-    collab_context_id: str
-    event_id: str
-    parent_event_id: str | None
-    context_version: int
+    collab_context_id: str; event_id: str; parent_event_id: str | None; context_version: int
 
 @runtime_checkable
 class BbsPublicDiscussionServiceProtocol(Protocol):
     def create_discussion(self, command: CreateDiscussionCommand, context: ActorContext) -> DiscussionCreatedView: ...
     def reply_discussion(self, command: ReplyDiscussionCommand, context: ActorContext) -> ReplyCreatedView: ...
-    def list_discussions(self) -> list["DiscussionSummaryView"]: ...     # Task 3 实现
-    def get_discussion(self, collet_id: str) -> "DiscussionDetailView": ...  # Task 3 实现
+    def list_discussions(self) -> list["DiscussionSummaryView"]: ...        # T4 实现
+    def get_discussion(self, collab_context_id: str) -> "DiscussionDetailView": ...  # T4 实现
+
+# service.py 编排(spec §3.3 权威转写):
+#   @inject(collab_repo: ContextCollabRepositoryProtocol,
+#           authorizer: ContextCollabAuthorizerProtocol,
+#           method_store: MethodStoreProtocol)
+#   私有 _PublicMessageIntent(event_kind, primitive_type, actor_ref, parent_event,
+#                              visibility, payload) 喂 G1(duck-typed);
+#   回帖 snapshot_updater=恒等(裁决 J);expected_version=record.collet.version;
+#   发帖正文 expected_version=1;creation_payload() 出初始事件 payload。
 ```
-- 读方法本任务签名先钉、体留 `NotImplementedError`（Task 3 用真实现替换）；协议一次性定形避免两改。
-- Consumes: `ContextCollabServiceProtocol.create_context(command, context)` / `.append_event(collab_context_id, command, context)` / `.get_status(...)`、`ContextCollabRepositoryProtocol.get_current_status`（Task 1 前既有）、`ContextCollabCreatedResult` / `EventAcceptedResult`、`MethodKind.OPEN_GROUP`、`ProductProfile`/`WorkflowKind.BBS_PUBLIC_DISCUSSION`、`VISIBILITY_PUBLIC`。
-- 实现要点（spec §3.1 权威转写）：
-  - `create_discussion`：title 非空、body 非空；`ContextCreateCommand(空间=command.space, principal_ref=actor.actor, product_kind=BBS_PUBLIC_DISCUSSION.value, workflow_kind=BBS_PUBLIC_DISCUSSION.value, method_kind=MethodKind.OPEN_GROUP.value, executor_ref=None, objective=title, resource_refs=...)` → `append_event(expected_version=1, event_kind="user_interaction.posted", primitive_type="Message", actor_ref=actor.actor, parent_event=None, visibility=VISIBILITY_PUBLIC, payload={"content": body})`；视图取 `EventAcceptedResult`。
-  - `reply_discussion`：`get_current_status` → None `ContextCollabNotFoundError`；`record.context_spec.product_kind != BBS_PUBLIC_DISCUSSION.value` → `NotFound`；`parent_event_id` 非 None 时找目标事件、非 `primitive_type=="Message"` → `ValidationError`（骨架事件断言；存在性仓储会把守）；`append_event(expected_version=record.collet.version, ...公共承载体同上)`。
+- Consumes: T1 `ActorContext`/`creation_payload`；既有 `project_created_context`/`current_axes`。
+- 架构测试白名单（与 spec §3.1 逐字同表）；含故意探针：临时脚本断言"违规 import 会红"后删探针（自证测试有效）。
 
-- [ ] **Step 1: 写失败测试**——夹具：真 `ContextCollabService`（`InMemoryMethodStore` + 结构授权器 + 内存假仓储，沿 `test_context_collab_service.py` 桩仓储模式）：
-  - `test_create_discussion_wires_title_objective_and_body_event`（发帖后假仓储里 Collet `objective==title`、事件流 `[task.created, Message正文]`、视图四字段）；
-  - `test_reply_baseline`（发帖→回帖 None parent→回帖挂 body_event_id 楼中楼，event_id/parent 往返）；
-  - `test_reply_rejects_skeleton_event_parent`（parent 指向 `task.created` 事件 → Validation 错误）；
-  - `test_reply_rejects_foreign_profile_collet`（假仓储回 `team_todo` spec 的 record → NotFound）；
-  - `test_reply_unknown_collet_not_found`；
-  - `test_reply_version_conflict_propagates`（expected_version 落后 → 冲突异常透传）；
-  - `test_reply_allows_stranger_authenticated_actor`（陌生 actor 走 G1 窄规则放行 public Message）。
-- [ ] **Step 2: 跑失败**（ImportError：模块不存在）。
-- [ ] **Step 3: 实现** service_api.py + service.py（两文件同一次 RED→GREEN）。
-- [ ] **Step 4: 跑通过** + `tests/community/core/task/context_collab/ -v` 目录零回归。
-- [ ] **Step 5: Commit** `feat(backend): add BBS public discussion write use cases`
+- [ ] **Step 1: 失败测试** `test_bbs_public_discussion_write.py`——夹具：真 `InMemoryMethodStore` + 内存假仓储（沿 `test_context_collab_service.py` 桩模式）+ `StructuralContextCollabAuthorizer`：
+  `test_create_discussion_wires_full_creation_facts`（Collet objective==title、初始事件 payload 六键、正文事件落库、L5 顶层 binding 建立、视图四字段）、`test_reply_baseline_and_nested`（None parent=回主题；parent 指正文事件=楼中楼）、`test_reply_rejects_skeleton_event_parent`、`test_reply_rejects_foreign_profile_collet`、`test_reply_unknown_collet_not_found`、`test_reply_version_conflict_propagates`、`test_reply_allows_stranger_authenticated_actor`。
+- [ ] **Step 2: 失败确认（ImportError）** → **Step 3: 实现三文件 + DI 绑定** → **Step 4: 跑绿**：write 测试 + 架构测试产品目录全绿 + `tests/community/di/test_task_module.py -v`（追加产品协议 singleton 用例）零回归。
+- [ ] **Step 5: Commit** `feat(backend): add BBS public discussion write use cases under products layer`
 
-### Task 3: 列表 + 详情读用例 + DI 绑定
+### Task 4: products 读用例 + views + DI 测试
 
 **Files:**
-- Create: `src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/views.py`（读视图 dataclass + 纯函数投影）
-- Modify: `.../products/bbs_public_discussion/service.py`（补两个读方法实现）
-- Modify: `src/agentclaw/community/di/modules/task_module.py`（Import + bind）
-- Test: `tests/community/core/task/context_collab/products/test_bbs_public_discussion_read.py`（新建）、`tests/community/di/test_task_module.py`（追加一用例）
+- Create: `src/…/products/bbs_public_discussion/views.py`
+- Modify: `src/…/products/bbs_public_discussion/service.py`（两读方法）
+- Test: `tests/community/core/task/context_collab/products/test_bbs_public_discussion_read.py`（新）
 
 **Interfaces:**
 - Produces：
@@ -149,7 +167,7 @@ class DiscussionSummaryView:
     collet_id: str; title: str; initiator_id: str; message_count: int; created_at: datetime
 
 @dataclass
-class DiscussionDetailBody:    # 首帖正文事件
+class DiscussionDetailBody:
     event_id: str; content: str; author_id: str; occurred_at: datetime
 
 @dataclass
@@ -159,66 +177,41 @@ class DiscussionReplyItem:
 @dataclass
 class DiscussionDetailView:
     collet_id: str; title: str; state: str  # ColletState.value
-    body: DiscussionDetailBody | None      # 孤儿帖 None（合法领域态）
+    body: DiscussionDetailBody | None      # 孤儿帖 None(合法领域态)
     replies: list[DiscussionReplyItem]
 ```
-- 投影规则（spec §3.1 权威转写）：标题=初始事件 payload["objective"]，NULL-payload 外部行回退伴随 `context_spec.objective`（P3 撤列时移除；[创建事实 spec](../2026-11-12-context-collab-l4-creation-event-facts/) §3 裁决 1）；`initiator_id`/`author_id` 取 `PrincipalRef.principal_id`；正文=事件流第一条 `user_interaction.posted`+`Message` 事件（payload 从 `EventRecord.payload["content"]` 读）；replies=其余 Message 事件、**只投影 public**（visibility NULL 按 private 处理）、按表插入序；外 profile Collet → NotFound。
-- DI：`binder.bind(BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService, scope=singleton)`，注释风格沿 MethodStoreProtocol 段；服务构造 `@inject(ContextCollabServiceProtocol, ContextCollabRepositoryProtocol)`。
+- 投影规则（spec §3.3 权威转写）：标题=初始事件（`events[0]` 且 `event_kind=="task.created"`）payload["objective"]，NULL-payload 回退伴随 `context_spec.objective`；`author_id`/`initiator_id` 取 `PrincipalRef.principal_id`；正文=首条 `user_interaction.posted`+`Message` 事件；replies=其余 Message、**只投影 public**（NULL visibility 按 private）、表插入序；外 profile → NotFound。
 
-- [ ] **Step 1: 写失败测试**——夹具沿 Task 2（假仓储或真 SQLite 二选一，照 Task 2 已立模式）：
-  - `test_lists_discussions_with_message_count_and_order`（两帖不同 gmt_create，断言倒序、title/initiator/message_count）；
-  - `test_get_discussion_assembles_title_body_and_replies`（标题+正文+2 回复+楼中楼 parent 链）；
-  - `test_detail_only_projects_public_messages`（假仓储事件混入 `workspace` Message → 不在 replies）;
-  - `test_detail_tolerates_bodyless_collet`（事件流只有 task.created → `body is None`）；
-  - `test_detail_rejects_foreign_profile`（team_todo record → NotFound）；
-  - `test_get_discussion_unknown_not_found`。
-- [ ] **Step 2: 跑失败 → Step 3: 实现 views.py + service 两读方法 + DI 绑定 → Step 4: 跑通过**（含 `tests/community/di/test_task_module.py -v`：追加 `test_task_module_binds_bbs_public_discussion_service_singleton`——解析协议、instanceof 实现类、两次取同对象、共享注入的 context_collab 服务/repo）。
-- [ ] **Step 5: Commit** `feat(backend): add BBS public discussion read use cases and DI wiring`
+- [ ] **Step 1: 失败测试**：`test_lists_discussions_with_message_count_and_order`、`test_get_discussion_assembles_title_body_and_replies`（含楼中楼 parent 链）、`test_detail_title_reads_initial_event_with_legacy_fallback`（正常行 title 来自事件；NULL-payload 行回退伴随 spec）、`test_detail_only_projects_public_messages`、`test_detail_tolerates_bodyless_collet`、`test_detail_rejects_foreign_profile`、`test_get_discussion_unknown_not_found`。
+- [ ] **Step 2: 失败确认** → **Step 3: 实现 views.py + service 读方法** → **Step 4: 全绿** + products+DI 全回归。
+- [ ] **Step 5: Commit** `feat(backend): add BBS public discussion read use cases`
 
-### Task 4: HTTP 路由（内部 + OpenAPI 镜像）
+### Task 5: HTTP 路由（内部 + OpenAPI 镜像）
 
 **Files:**
-- Create: `src/agentclaw/community/adapters/http/task/schemas_bbs_discussions.py`（Pydantic 请求/响应模型，命名沿 `schemas_context_collab.py` 惯例；响应 DTO 字段名 = 视图字段名，camel 由既有惯例定夺，先钉 snake_case 与 `to_domain()` 对齐三既有 schema 文件风格）
-- Create: `src/agentclaw/community/adapters/http/task/bbs_discussions.py`（内部路由）
-- Create: `src/agentclaw/community/adapters/http/openapi_v1/task/bbs_discussions.py`（镜像路由）
-- Modify: `src/agentclaw/community/adapters/http/app.py`（import + `app.include_router(...)`，紧邻 context_collab 段落与行号）
-- Modify: `src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py`（4 行 NoCheck，理由文案沿 context_collab 既例）
-- Create: `src/agentclaw/community/api/task/bbs_public_discussion_service.py`（协议再导出，沿 `api/task/context_collab_service.py` 惯例）
-- Test: `tests/community/endpoints/test_bbs_public_discussion_endpoints.py`（新建，沿 `test_context_collab_endpoints.py` 配方：fresh FastAPI + 路由 + 认证 override + injector 绑真服务/真仓储 + 内存 SQLite）
+- Create: `src/agentclaw/community/adapters/http/task/schemas_bbs_discussions.py`、`src/agentclaw/community/adapters/http/task/bbs_discussions.py`、`src/agentclaw/community/adapters/http/openapi_v1/task/bbs_discussions.py`
+- Modify: `src/agentclaw/community/adapters/http/app.py`（import + include，紧邻 context_collab 段）、`src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py`（4 行 NoCheck 沿既例）
+- Test: `tests/community/endpoints/test_bbs_public_discussion_endpoints.py`（新，沿 `test_context_collab_endpoints.py` 配方：fresh FastAPI + 认证 override + injector 绑真服务/真仓储 + 内存 SQLite）
 
 **Interfaces:**
-- 路由钉死（spec §5）：
+- 路由四条 + OpenAPI 镜像（spec §5 路由表逐字）；`_actor_context(user)` 同款内部；响应 DTO 字段名=视图字段名（snake_case 与三既有 schema 文件风格对齐时由实现者定夺）。
+- Consumes: T3 `BbsPublicDiscussionServiceProtocol` × `Injected(…)`。delivery 可 import `service_api.ActorContext`（再导出）——依赖禁令只管 products/。
 
-| 路由 | 规格 |
-| --- | --- |
-| `POST /api/v1/collaboration/task/context_collab/bbs/discussions` | body `{"title", "body", "space", "resource_refs"?}` → `DiscussionCreatedView` |
-| `POST /api/v1/collaboration/task/context_collab/bbs/discussions/{collab_context_id}/replies` | body `{"content", "parent_event_id"?}` → `ReplyCreatedView` |
-| `GET /api/v1/collaboration/task/context_collab/bbs/discussions` | → `list[DiscussionSummaryView]` |
-| `GET /api/v1/collaboration/task/context_collab/bbs/discussions/{collab_context_id}` | → `DiscussionDetailView` |
-
-- `/openapi/v1/collaboration/task/context_collab/bbs/discussions` 同四者镜像（路径前缀不同，body/响应合同相同；actor 解析为网关认证主体，沿 `openapi_v1/task/context_collab.py` 既有模式；写入路径拒绝伪造 actor_ref 与三既有路线同款由服务层承载）。
-- 错误映射：`@envelope_errors` + 既有 `ENVELOPE_ERRORS`（NotFound404/冲突409/校验422）零新增；`_actor_context` 同款内部。
-- Consumes: Task 2 `BbsPublicDiscussionServiceProtocol` × DI `Injected(...)`。
-
-- [ ] **Step 1: 写失败测试**——同文件两套客户端（内部 + OpenAPI）：发帖→回帖→列表→详情全链 e2e；断言：路由前缀逐字、列表计数、详情 body/replies、404（乱 id）、回帖 422（parent 骨架）、409 不在本测试重测（服务层已钉）；OpenAPI 客户端同链 smoke 一条。
-- [ ] **Step 2: 跑失败**（路由不存在）→ **Step 3: 实现四文件 + 两处 Wiring 修改** → **Step 4: 跑通过** + `tests/community/endpoints/ -v` 既有 endpoints 零回归。
+- [ ] **Step 1: 失败测试**——双客户端（内部+OpenAPI）：发帖→回帖→列表→详情全链，断言路由前缀逐字、列表 message_count 倒序、详情 body/replies、404（乱 id）、回帖 422（骨架 parent）；OpenAPI 同链 smoke。
+- [ ] **Step 2: 失败确认** → **Step 3: 实现三文件 + 两处接线** → **Step 4: 全绿** + `tests/community/endpoints/ -v` 零回归。
 - [ ] **Step 5: Commit** `feat(backend): expose BBS public discussion product routes`
 
-### Task 5: 收尾——spec 登记 + 回归
+### Task 6: 收尾——回归 + 文档
 
-**Files:**
-- Modify: `specs/README.md`（按字母序插一行）
-- 回归：目录全量
-
-- [ ] **Step 1:** README 索引登记 + 按需把本次工作目录（`apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/`）随同入提交。
-- [ ] **Step 2:** `DEPLOY_PROFILE=test uv run pytest tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/ -v` 整段全绿（原有 745 + 新增 L5/L6 增量）。
-- [ ] **Step 3: Commit** `docs(backend): register BBS public discussion product spec`
+- [ ] **Step 1:** 全目录回归 `tests/community/core/task/context_collab/ tests/community/repository/task/context_collab/ tests/community/di/test_task_module.py tests/community/endpoints/ -v` 整段全绿（≥800 基线 + 本计划增量）。
+- [ ] **Step 2:** spec README 索引核对（已在 2026-11-12 登记，无需动）；plan/spec v2 修订内容随本提交入档。
+- [ ] **Step 3: Commit** `docs(backend): finalize BBS public discussion product docs`
 
 ---
 
 ## Self-Review 结论
 
-- Spec 覆盖：§2 域映射→T2/T3（标题=objective、正文事件、parent=None、楼中楼）；§3.1 四用例→T2/T3；§3.1 写结果视图（无时间字段）与 A 裁决（message_count）→T2/T3 接口块逐字；§4 列表读路径与坏行跳过→T1；§5 路由+镜像→T4；§6 A–F 全数为接口块/实现要点引用；§7 测试表分解到各 Task Step 1。
-- Review Focus 6 处输入类全部有归属测试（骨架 parent/外 profile→T2、泄漏/孤儿/坏行→T3、CAS→T2）。
-- 类型一致：`ContextSummaryRecord`、`CreateDiscussionCommand` 系、视图五元、协议方法名五处引用（T1/T2/T3/T4）逐字对齐。
-- 比例：5 任务约 14 个新文件，签名与测试断言为主、零方法体转写；用户已选的执行法为 subagent-driven 之外——本计划与前两单同库同模式，推荐 native（executing-plans）——5 任务接口顺势依赖，最后有整支评审兜底。
+- Spec 覆盖：§2 域映射→T3/T4；§2a 操作族映射为 spec 层治理（无独立实现动作,T3 编排逐用例对应四族）；§3.1 依赖矩阵→T3 架构测试；§3.2 归位二连→T1；§3.3 四用例→T3/T4；§3.4 DI→T3；§4 列表读路径→T2；§5 路由→T5；§6 A–J 全数落在接口块与嵌注（A/F→T4、B→T5、C/D/E→spec 文本裁决、G→T1 消最大面+T3 编辑距离、H→T3 白名单、I→T1、J→T3 恒等）；§7 测试表 1:1 分解到各 Task Step 1。
+- 类型一致：`ActorContext`/`creation_payload`（T1 产,T3 消）、`ContextSummaryRecord`（T2 产,T4 消）、产品协议/视图（T3/T4 产,T5 消）签名逐字。
+- Review Focus 7 项全有归属测试（骨架 parent/外 product→T3；泄漏/孤儿/NO-title 回退→T4；坏行→T2；CAS→T3；依赖违约→T3）。
+- 比例：6 任务、4 个新源文件 + 3 个端到端测试文件 + 2 架构小步，接口与断言为主、零方法体转写。
