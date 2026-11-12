@@ -60,9 +60,10 @@ export default function LabTodosPage() {
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-7 px-4 py-6 sm:px-6 sm:py-8 2xl:px-8">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-6 py-6">
         <PageHeader
           title="待办"
+          compact
           description="当前空间的 Bot 待办。系统自动调度执行，完成后可查看事件、互动并提交验收。"
         />
 

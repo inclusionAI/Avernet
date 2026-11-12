@@ -146,8 +146,13 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(botWorkshop.botWorkshopService).toBeDefined();
     render(<LabTodosPage />);
 
-    expect(screen.getByRole('heading', { name: '待办' })).toBeInTheDocument();
-    expect(screen.getByText(/当前空间的 Bot 待办/)).toBeInTheDocument();
+    const heading = screen.getByRole('heading', { name: '待办' });
+    const description = screen.getByText(/当前空间的 Bot 待办/)
+      .closest('p') as HTMLElement;
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveClass('text-[20px]', 'font-semibold', 'leading-[30px]');
+    expect(description).toBeInTheDocument();
+    expect(description).toHaveClass('text-[13px]', 'font-normal', 'leading-[20px]');
     expect(screen.getByText('测试用户的个人空间')).toBeInTheDocument();
 
     await waitFor(() =>
@@ -173,7 +178,15 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
     const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
+    const createButton = within(toolbar).getByRole('button', { name: '发起待办' });
+    expect(statusGroup.compareDocumentPosition(owner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(owner.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(search.compareDocumentPosition(createButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(owner).toHaveClass('h-8', 'w-40', 'rounded-lg', 'text-xs');
+    expect(search).toHaveAttribute('placeholder', '搜索待办标题');
+    expect(search).toHaveClass('h-8', 'rounded-lg', 'text-xs');
+    expect(createButton).toHaveClass('h-8', 'rounded-lg', 'bg-primary', 'px-4', 'text-xs', 'font-semibold');
+    expect(tabs[0]).toHaveClass('h-8', 'bg-primary', 'text-primary-foreground', 'text-xs');
 
     fireEvent.click(tabs[1]);
     await waitFor(() =>
