@@ -1,0 +1,78 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 320-358,2473-2475
+apps/bcs/Cargo.toml
+  h_f4a73db4ad12be 3-7,152-156
+apps/bcs/crates/contracts/bcn-runtime-model/Cargo.toml
+  h_f4a73db4ad12be 1-18
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 1-8
+apps/bcs/crates/contracts/bcn-runtime-model/src/connector.rs
+  h_f4a73db4ad12be 1-83
+apps/bcs/crates/contracts/bcn-runtime-model/src/error.rs
+  h_f4a73db4ad12be 1-47
+apps/bcs/crates/contracts/bcn-runtime-model/src/identity.rs
+  h_f4a73db4ad12be 1-53
+apps/bcs/crates/contracts/bcn-runtime-model/src/lib.rs
+  h_f4a73db4ad12be 1-13
+apps/bcs/crates/contracts/bcn-runtime-model/src/runner.rs
+  h_f4a73db4ad12be 1-137
+apps/bcs/crates/contracts/bcn-runtime-model/src/storage.rs
+  h_f4a73db4ad12be 1-128
+apps/bcs/crates/contracts/bcn-runtime-model/src/task.rs
+  h_f4a73db4ad12be 1-60
+apps/bcs/crates/contracts/bcn-runtime-model/tests/contracts.rs
+  h_f4a73db4ad12be 1-29
+apps/bcs/crates/plugin-api/bcn-runtime-storage-api/Cargo.toml
+  h_f4a73db4ad12be 1-14
+apps/bcs/crates/plugin-api/bcn-runtime-storage-api/README.md
+  h_f4a73db4ad12be 1-8
+apps/bcs/crates/plugin-api/bcn-runtime-storage-api/src/conformance.rs
+  h_f4a73db4ad12be 1-131
+apps/bcs/crates/plugin-api/bcn-runtime-storage-api/src/lib.rs
+  h_f4a73db4ad12be 1-34
+apps/bcs/crates/plugin-api/bcn-runtime-storage-api/src/validation.rs
+  h_f4a73db4ad12be 1-53
+apps/bcs/crates/plugins/bcn-storage-memory/Cargo.toml
+  h_f4a73db4ad12be 1-17
+apps/bcs/crates/plugins/bcn-storage-memory/README.md
+  h_f4a73db4ad12be 1-8
+apps/bcs/crates/plugins/bcn-storage-memory/src/lib.rs
+  h_f4a73db4ad12be 1-101
+apps/bcs/crates/plugins/bcn-storage-memory/tests/atomic_contract.rs
+  h_f4a73db4ad12be 1-69
+apps/bcs/crates/service-api/bcn-runtime-api/Cargo.toml
+  h_f4a73db4ad12be 1-18
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 1-8
+apps/bcs/crates/service-api/bcn-runtime-api/src/application.rs
+  h_f4a73db4ad12be 1-42
+apps/bcs/crates/service-api/bcn-runtime-api/src/core.rs
+  h_f4a73db4ad12be 1-10
+apps/bcs/crates/service-api/bcn-runtime-api/src/lib.rs
+  h_f4a73db4ad12be 1-4
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/mod.rs
+  h_f4a73db4ad12be 1-60
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 1-70
+apps/bcs/crates/service-api/bcn-runtime-api/tests/connector_contract.rs
+  h_f4a73db4ad12be 1-44
+apps/bcs/crates/test-support/bcs-test-support/Cargo.toml
+  h_f4a73db4ad12be 17-19
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bcn_runtime.rs
+  h_f4a73db4ad12be 1-66
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  h_f4a73db4ad12be 31-32
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 1-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "88677ebb413180913f6256b94ce123e834cba0c4",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

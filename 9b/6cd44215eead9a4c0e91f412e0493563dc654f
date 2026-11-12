@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/projection.rs
+  s_8538143de29560::t_14c0fe7d71958a 115-124
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_8538143de29560::t_e0caaf4b1448b0 78-97,102,105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b6cd44215eead9a4c0e91f412e0493563dc654f",
+  "prompts": {},
+  "sessions": {
+    "s_8538143de29560": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abe4-191f-7a70-af7d-c9a7cb8741b5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/validation.md
+  s_a5600e99ae94e6::t_2136ded434993b 60-69
+tools/a2a-json-tool/web/message-mapper.js
+  s_a5600e99ae94e6::t_7261173f44aa35 13,15-17,19-21
+  s_a5600e99ae94e6::t_784f3d6afe66ed 18
+  s_a5600e99ae94e6::t_a677c6db3578f6 14
+tools/a2a-json-tool/test/cli.test.js
+  s_a5600e99ae94e6::t_77827c704097e7 70-84
+tools/a2a-json-tool/test/message-mapper.test.js
+  s_a5600e99ae94e6::t_a677c6db3578f6 194-195
+  s_a5600e99ae94e6::t_784f3d6afe66ed 191-193,196,212
+  s_a5600e99ae94e6::t_77827c704097e7 190,197-210,213-221
+  s_a5600e99ae94e6::t_7261173f44aa35 211
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/tasks.md
+  s_a5600e99ae94e6::t_70c4f20dfb27fc 16
+  s_a5600e99ae94e6::t_2136ded434993b 15
+tools/a2a-json-tool/README.md
+  s_a5600e99ae94e6::t_70c4f20dfb27fc 55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0323737f7378a951007ba174217d458c0360f331",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}

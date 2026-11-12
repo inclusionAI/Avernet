@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/eval_publish_mixin.py
+  s_b2651ef7499f7a::t_e8f46135b38e22 88,90-91,123-124,140
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_eval_publish_external_params.py
+  s_16462c91ec5d93::t_340d71abbbf3fe 219-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f715f317d828e6b3ba97b16426e7b69327ae4924",
+  "prompts": {},
+  "sessions": {
+    "s_16462c91ec5d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d51-5517-7430-b6d2-f4ced4c931de",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_b2651ef7499f7a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c13-35af-7600-8afa-ea88cb29ca4c",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
