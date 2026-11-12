@@ -160,9 +160,7 @@ class _Collaboration:
         self.get_calls: list[tuple[str, str]] = []
         self.run_calls: list[tuple[str, str, str | None, str | None]] = []
         self.refresh_calls: list[tuple[str, str]] = []
-        self.resume_calls: list[
-            tuple[str, str, str, str | None, str | None]
-        ] = []
+        self.resume_calls: list[tuple[str, str, str, str | None, str | None]] = []
 
     def create_context(self, request):
         self.create_calls.append(request)
@@ -220,7 +218,6 @@ class _Collaboration:
         context = replace(self.contexts[collab_context_id], status="in_progress")
         self.contexts[collab_context_id] = context
         return context
-
 
 
 class _Artifacts:
@@ -288,9 +285,7 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
 
     assert result.status is TodoStatus.IN_PROGRESS
     assert result.collab_context_id == "context_created"
-    assert access.calls == [
-        {"space_id": 7, "user_id": "creator_1", "env": "pre"}
-    ]
+    assert access.calls == [{"space_id": 7, "user_id": "creator_1", "env": "pre"}]
     assert bots.calls == ["bot_1"]
     request = collaboration.create_calls[0]
     assert request.space_id == "7"
@@ -315,8 +310,14 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
 
 
 @pytest.mark.asyncio
-async def test_resume_interaction_reuses_context_for_claimed_todo():
-    context = _context("context_1", "done")
+async def test_resume_claimed_interaction_resumes_latest_durable_event():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event("event_interaction", 2, "user_interaction.posted"),
+        ),
+    )
     service, repository, _, _, collaboration = _service(
         todo=_todo(
             status=TodoStatus.IN_PROGRESS,
@@ -325,11 +326,7 @@ async def test_resume_interaction_reuses_context_for_claimed_todo():
         contexts=(context,),
     )
 
-    result = await service.resume_interaction(
-        todo_id="todo_1",
-        actor_id="creator_1",
-        triggered_by_event_id="event_interaction",
-    )
+    result = await service.resume_claimed_interaction(todo_id="todo_1")
 
     assert result.status is TodoStatus.IN_PROGRESS
     assert collaboration.get_calls == [("context_1", "creator_1")]
@@ -346,8 +343,36 @@ async def test_resume_interaction_reuses_context_for_claimed_todo():
 
 
 @pytest.mark.asyncio
-async def test_resume_rejects_inconsistent_context_state_without_transition():
-    context = _context("context_1", "in_progress")
+async def test_resume_claimed_interaction_is_idempotent_across_scheduler_ticks():
+    context = replace(
+        _context("context_1", "in_progress"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event("event_interaction", 2, "user_interaction.posted"),
+            _event("event_started", 3, "task.started"),
+        ),
+    )
+    service, _, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.resume_claimed_interaction(todo_id="todo_1")
+
+    assert result.status is TodoStatus.IN_PROGRESS
+    assert collaboration.get_calls == [("context_1", "creator_1")]
+    assert collaboration.resume_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_claimed_interaction_fails_closed_for_inconsistent_context():
+    context = replace(
+        _context("context_1", "created"),
+        events=(_event("event_interaction", 1, "user_interaction.posted"),),
+    )
     service, repository, _, _, collaboration = _service(
         todo=_todo(
             status=TodoStatus.IN_PROGRESS,
@@ -356,12 +381,8 @@ async def test_resume_rejects_inconsistent_context_state_without_transition():
         contexts=(context,),
     )
 
-    with pytest.raises(TodoStateConflictError, match="in_progress"):
-        await service.resume_interaction(
-            todo_id="todo_1",
-            actor_id="creator_1",
-            triggered_by_event_id="event_interaction",
-        )
+    with pytest.raises(TodoStateConflictError, match="created"):
+        await service.resume_claimed_interaction(todo_id="todo_1")
 
     assert collaboration.resume_calls == []
     assert all(call[0] != "transition" for call in repository.calls)

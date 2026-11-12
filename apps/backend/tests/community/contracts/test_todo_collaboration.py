@@ -16,6 +16,12 @@ from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoExecutionCredential,
+)
+from agentclaw.community.core.task.todos.artifact_service_protocol import (
+    TodoArtifactServiceProtocol,
+)
 from agentclaw.community.core.task.todos.errors import TodoStateConflictError
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
@@ -100,6 +106,16 @@ class FakeBotRepository:
         ]
 
 
+class FakeTodoArtifactService:
+    def issue_execution(
+        self, *, todo_id: str, collab_context_id: str, executor_id: str
+    ) -> TodoExecutionCredential:
+        return TodoExecutionCredential(execution_id="todoexec_1", token="token_1")
+
+    def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
+        return None
+
+
 class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
     """Local plugin double with observable call history for the contract."""
 
@@ -137,6 +153,11 @@ def bind_consumer_contract(
     binder.bind(SpaceAccessServiceProtocol, to=FakeSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=FakeBotRepository(), scope=singleton)
     binder.bind(TodoCollaborationPlugin, to=collaboration, scope=singleton)
+    binder.bind(
+        TodoArtifactServiceProtocol,
+        to=FakeTodoArtifactService(),
+        scope=singleton,
+    )
     return world.get(TodoServiceProtocol), repository, collaboration
 
 
@@ -167,6 +188,8 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
         author_name=None,
         message="Please revise section 2",
     )
+    execution = world.get(TodoExecutionServiceProtocol)
+    resumed = await execution.resume_claimed_interaction(todo_id=started.todo_id)
 
     assert repository.todo.collab_context_id == "context_todo_contract"
     assert created.status is TodoStatus.PENDING
@@ -175,14 +198,25 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
     assert repository.todo.status is TodoStatus.IN_PROGRESS
     assert collaboration.context_calls == 1
     assert collaboration.run_calls == 1
-    assert collaboration.resume_calls == 1
     assert collaboration.append_calls == 2
+    assert collaboration.resume_calls == 1
     assert event.event_type == "user_interaction.posted"
+    assert resumed.status is TodoStatus.IN_PROGRESS
     resumed_context = collaboration.get_context(
         collab_context_id=started.collab_context_id,
         actor_id="user_1",
     )
+    assert resumed_context.status == "in_progress"
     assert resumed_context.events[-1].event_type == "task.started"
+
+    await execution.resume_claimed_interaction(todo_id=started.todo_id)
+    assert collaboration.resume_calls == 1
+    collaboration.set_run_status_for_test(
+        collab_context_id=started.collab_context_id,
+        status="COMPLETED",
+    )
+    finished = await execution.refresh_in_progress(todo_id=started.todo_id)
+    assert finished.status is TodoStatus.PENDING_ACCEPTANCE
 
 
 @pytest.mark.asyncio

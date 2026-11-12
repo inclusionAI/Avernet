@@ -123,8 +123,17 @@ class _RecordingContextService:
         self.get_calls.append((collab_context_id, trunk_events, context))
         return self.projection
 
-    async def run_context(self, collab_context_id, context):
-        self.run_calls.append((collab_context_id, context))
+    async def run_context(
+        self,
+        collab_context_id,
+        context,
+        *,
+        todo_execution_id=None,
+        todo_execution_token=None,
+    ):
+        self.run_calls.append(
+            (collab_context_id, context, todo_execution_id, todo_execution_token)
+        )
         self.projection = _projection(status="in_progress")
         return ContextCollabRunResultDTO(
             collab_context_id=collab_context_id,
@@ -314,7 +323,13 @@ async def test_run_context_translates_context_domain_rejection() -> None:
     service = _RecordingContextService()
     failure = ContextCollabValidationError("wrong state")
 
-    async def fail_run(collab_context_id, context):
+    async def fail_run(
+        collab_context_id,
+        context,
+        *,
+        todo_execution_id=None,
+        todo_execution_token=None,
+    ):
         raise failure
 
     service.run_context = fail_run
@@ -334,7 +349,13 @@ async def test_run_context_translates_context_domain_rejection() -> None:
 async def test_run_context_translates_runtime_failure_to_todo_boundary() -> None:
     service = _RecordingContextService()
 
-    async def fail_run(collab_context_id, context):
+    async def fail_run(
+        collab_context_id,
+        context,
+        *,
+        todo_execution_id=None,
+        todo_execution_token=None,
+    ):
         raise ContextCollabRuntimeError("runtime unavailable")
 
     service.run_context = fail_run

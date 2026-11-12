@@ -261,6 +261,8 @@ provides:
   - TaskDiscoveryLockRepositoryProtocol
   - TaskArtifactRepositoryProtocol
   - TodoRepositoryProtocol
+  - TodoArtifactRepositoryProtocol
+  - TodoArtifactRepository
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface

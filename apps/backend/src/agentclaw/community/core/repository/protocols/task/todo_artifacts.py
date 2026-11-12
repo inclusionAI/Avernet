@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from agentclaw.community.core.task.todos.artifact_models import (
-    TodoArtifactKind,
-    TodoArtifactRecord,
-    TodoExecutionRecord,
-)
+if TYPE_CHECKING:
+    from agentclaw.community.core.task.todos.artifact_models import (
+        TodoArtifactKind,
+        TodoArtifactRecord,
+        TodoExecutionRecord,
+    )
 
 
 @runtime_checkable
 class TodoArtifactRepositoryProtocol(Protocol):
+    @abstractmethod
     def create_execution(
         self,
         *,
@@ -22,10 +25,13 @@ class TodoArtifactRepositoryProtocol(Protocol):
         executor_id: str,
     ) -> TodoExecutionRecord: ...
 
+    @abstractmethod
     def get_execution(self, *, execution_id: str) -> TodoExecutionRecord: ...
 
+    @abstractmethod
     def bind_run_id(self, *, execution_id: str, run_id: str) -> TodoExecutionRecord: ...
 
+    @abstractmethod
     def create_artifact(
         self,
         *,
@@ -39,8 +45,8 @@ class TodoArtifactRepositoryProtocol(Protocol):
         creator: str,
     ) -> TodoArtifactRecord: ...
 
+    @abstractmethod
     def list_artifacts(self, *, todo_id: str) -> tuple[TodoArtifactRecord, ...]: ...
 
-    def get_artifact(
-        self, *, todo_id: str, artifact_id: str
-    ) -> TodoArtifactRecord: ...
+    @abstractmethod
+    def get_artifact(self, *, todo_id: str, artifact_id: str) -> TodoArtifactRecord: ...

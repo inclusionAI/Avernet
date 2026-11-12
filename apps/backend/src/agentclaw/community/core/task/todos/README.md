@@ -21,21 +21,24 @@ runtime addressing uses the Bot record owner. The public `/run` operation is a
 compensation/operator entry point; the ordinary frontend neither edits Todos
 nor exposes manual Run.
 
-While a Todo is `pending_acceptance`, posting one Human interaction is an
-immediate resume command. A first atomically claims the Todo as
-`pending_acceptance -> in_progress`, then append-only records
-`user_interaction.posted` in B. B sends that message to the previous executor
-session, appends a new `task.started` with the new run identity, and returns
-`done -> in_progress`. The claim closes the create-interaction window while
-delivery is in flight: another POST sees the persisted Todo as `in_progress`,
-not as an interactive product state. The normal scheduler does not poll
-interaction events; it continues to scan only `pending` for first dispatch and
-`in_progress` for runtime completion. While an already-claimed interaction is
-the latest event and B is still `done`, that guard prevents a refresh from
-prematurely reopening the Todo before its new `task.started` is recorded.
-A delivery failure also leaves the claim as `in_progress` and fails closed rather
+While a Todo is `pending_acceptance`, posting one Human interaction atomically
+claims A as `pending_acceptance -> in_progress`, then append-only records
+`user_interaction.posted` in B. The API returns that durable event; it does not
+require or trigger executor delivery. The normal scheduler scans `in_progress`
+rows. Status refresh recognizes the claim by keeping A `in_progress` while B is
+still `done` and the latest event is the Human interaction. The scheduler then
+resumes B from that event: B reuses the previous executor session, records a
+new `task.started` with the new run identity, and moves `done -> in_progress`.
+When B becomes `done` again after this run, A advances normally to
+`pending_acceptance`.
+
+Scheduler retries are idempotent. Once B is `in_progress` or a later
+`task.started` exists, no additional resume is dispatched; the community
+runtime also sends the interaction event id as the executor message ID. A
+delivery failure leaves the claimed Todo `in_progress` and fails closed rather
 than immediately reopening the interactive state; reopening during uncertainty
-would risk forwarding a second human message to the same executor session.
+could forward the same human message to the executor twice.
+
 
 ## Context Boundary
 

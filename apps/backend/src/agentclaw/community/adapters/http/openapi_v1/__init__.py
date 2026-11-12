@@ -720,6 +720,11 @@ def build_public_router() -> APIRouter:
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    public.include_router(
+        todo_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
     # Context collab public surface (create / append event / status) — the
     # spec §6.1 openapi twin of the internal ``/api/v1/collaboration/task``
     # copy. Not bot-scoped, no grant gate; the operator is the L2

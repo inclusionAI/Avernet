@@ -169,7 +169,12 @@ class TodoScheduler(LifecycleBase):
         return await self._execution.dispatch_pending(todo_id=todo.todo_id)
 
     async def _refresh(self, todo: TodoRecord) -> TodoRecord:
-        return await self._execution.refresh_in_progress(todo_id=todo.todo_id)
+        result = await self._execution.refresh_in_progress(todo_id=todo.todo_id)
+        if result.status is not TodoStatus.IN_PROGRESS:
+            return result
+        return await self._execution.resume_claimed_interaction(
+            todo_id=todo.todo_id,
+        )
 
     async def _renew_lease(
         self,

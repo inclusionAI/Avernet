@@ -231,11 +231,8 @@ class TodoService(TodoServiceProtocol):
                 payload=payload,
             ),
         )
-        await self._execution.resume_interaction(
-            todo_id=todo.todo_id,
-            actor_id=normalized_actor_id,
-            triggered_by_event_id=event.event_id,
-        )
+        # A claimed interaction is durable work for the scheduler. Returning
+        # before executor delivery is intentional and is required by contract.
         return self._to_event_record(event)
 
     def submit_acceptance(

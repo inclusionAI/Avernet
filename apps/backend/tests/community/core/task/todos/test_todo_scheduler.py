@@ -65,9 +65,11 @@ class _Execution:
         *,
         failures: set[str] | None = None,
         delay: float = 0,
+        refresh_result: TodoStatus = TodoStatus.PENDING_ACCEPTANCE,
     ) -> None:
         self.failures = failures or set()
         self.delay = delay
+        self.refresh_result = refresh_result
         self.calls: list[tuple[str, str]] = []
 
     async def dispatch_pending(self, *, todo_id: str, env: str | None = None):
@@ -76,7 +78,9 @@ class _Execution:
             await asyncio.sleep(self.delay)
         if todo_id in self.failures:
             raise RuntimeError(f"dispatch {todo_id} failed")
-        return replace(_todo(todo_id, TodoStatus.PENDING), status=TodoStatus.IN_PROGRESS)
+        return replace(
+            _todo(todo_id, TodoStatus.PENDING), status=TodoStatus.IN_PROGRESS
+        )
 
     async def refresh_in_progress(self, *, todo_id: str):
         self.calls.append(("refresh", todo_id))
@@ -86,8 +90,12 @@ class _Execution:
             raise RuntimeError(f"refresh {todo_id} failed")
         return replace(
             _todo(todo_id, TodoStatus.IN_PROGRESS),
-            status=TodoStatus.PENDING_ACCEPTANCE,
+            status=self.refresh_result,
         )
+
+    async def resume_claimed_interaction(self, *, todo_id: str):
+        self.calls.append(("resume", todo_id))
+        return replace(_todo(todo_id, TodoStatus.IN_PROGRESS))
 
 
 class _Cache:
@@ -161,6 +169,20 @@ async def test_tick_scans_each_status_with_independent_batch_limit_in_order():
         ("refresh", "i2"),
     ]
     assert cache.release_calls == [("todo:scheduler", "lease-token")]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_resumes_claimed_interaction_after_refresh_leaves_it_running():
+    repository = _Repository(
+        in_progress=(_todo("i1", TodoStatus.IN_PROGRESS),),
+    )
+    execution = _Execution(refresh_result=TodoStatus.IN_PROGRESS)
+    scheduler = TodoScheduler(repository, execution, _Cache(), _config())
+
+    result = await scheduler.run_once()
+
+    assert result["processed"] == 1
+    assert execution.calls == [("refresh", "i1"), ("resume", "i1")]
 
 
 @pytest.mark.asyncio

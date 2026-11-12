@@ -77,7 +77,12 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         )
 
     async def run_context(
-        self, *, collab_context_id: str, actor_id: str
+        self,
+        *,
+        collab_context_id: str,
+        actor_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> TodoCollaborationContext:
         return self._run_context(collab_context_id)
 
@@ -128,6 +133,8 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         collab_context_id: str,
         actor_id: str,
         triggered_by_event_id: str,
+        todo_execution_id: str | None = None,
+        todo_execution_token: str | None = None,
     ) -> TodoCollaborationContext:
         local = self._require_context(collab_context_id)
         if local.status != "done":

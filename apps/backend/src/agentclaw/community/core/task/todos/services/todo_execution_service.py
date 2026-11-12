@@ -27,6 +27,7 @@ from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
+    TodoCollaborationEvent,
     TodoCollaborationPlugin,
 )
 
@@ -37,16 +38,16 @@ _TASK_STARTED_EVENT = "task.started"
 _INTERACTION_EVENT = "user_interaction.posted"
 
 
-def _has_unstarted_interaction(
+def _unstarted_interaction(
     context: TodoCollaborationContext,
-) -> bool:
-    """Whether a claimed interaction is still awaiting its resumed run."""
+) -> TodoCollaborationEvent | None:
+    """Return the durable interaction that is still awaiting a resumed run."""
     for event in reversed(context.events):
         if event.event_type == _TASK_STARTED_EVENT:
-            return False
+            return None
         if event.event_type == _INTERACTION_EVENT:
-            return True
-    return False
+            return event
+    return None
 
 
 class TodoExecutionService(TodoExecutionServiceProtocol):
@@ -130,31 +131,35 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             target=TodoStatus.IN_PROGRESS,
         )
 
-    async def resume_interaction(
-        self,
-        *,
-        todo_id: str,
-        actor_id: str,
-        triggered_by_event_id: str,
-    ) -> TodoRecord:
-        """Continue the Context session for a claimed Human interaction event."""
+    async def resume_claimed_interaction(self, *, todo_id: str) -> TodoRecord:
+        """Resume one claimed interaction when the scheduler finds it durable.
+
+        A claim is represented by A as ``pending_acceptance -> in_progress`` and
+        by B as the latest ``user_interaction.posted`` event. A later
+        ``task.started`` event makes the operation a no-op, which makes retries
+        safe even if multiple scheduler ticks for the same row overlap.
+        """
         todo = self._repository.get_todo(todo_id=todo_id)
         if todo.status is not TodoStatus.IN_PROGRESS:
-            raise TodoStateConflictError(
-                "A claimed interaction must keep the Todo in progress"
-            )
+            return todo
         if not todo.collab_context_id:
-            raise TodoNotFoundError(
-                "Interacting Todo collaboration Context is missing"
-            )
+            raise TodoNotFoundError("Interacting Todo collaboration Context is missing")
         context = self._collaboration.get_context(
             collab_context_id=todo.collab_context_id,
-            actor_id=actor_id,
+            actor_id=todo.created_by,
         )
+        trigger = _unstarted_interaction(context)
+        if trigger is None:
+            if context.status != _CONTEXT_IN_PROGRESS:
+                raise TodoStateConflictError(
+                    f"Interacting Todo has inconsistent Context state {context.status}"
+                )
+            return todo
+        if context.status == _CONTEXT_IN_PROGRESS:
+            return todo
         if context.status != _CONTEXT_DONE:
             raise TodoStateConflictError(
-                "Interacting Todo has inconsistent Context state "
-                f"{context.status}"
+                f"Interacting Todo has inconsistent Context state {context.status}"
             )
         credential = self._artifacts.issue_execution(
             todo_id=todo.todo_id,
@@ -163,8 +168,8 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
         context = await self._collaboration.resume_context(
             collab_context_id=todo.collab_context_id,
-            actor_id=actor_id,
-            triggered_by_event_id=triggered_by_event_id,
+            actor_id=todo.created_by,
+            triggered_by_event_id=trigger.event_id,
             todo_execution_id=credential.execution_id,
             todo_execution_token=credential.token,
         )
@@ -186,16 +191,14 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         if todo.status is not TodoStatus.IN_PROGRESS:
             return todo
         if not todo.collab_context_id:
-            raise TodoNotFoundError(
-                "In-progress Todo collaboration Context is missing"
-            )
+            raise TodoNotFoundError("In-progress Todo collaboration Context is missing")
 
         context = self._collaboration.get_context(
             collab_context_id=todo.collab_context_id,
             actor_id=todo.created_by,
         )
         if context.status == _CONTEXT_DONE:
-            if _has_unstarted_interaction(context):
+            if _unstarted_interaction(context) is not None:
                 return todo
             return self._mark_pending_acceptance(todo)
         if context.status != _CONTEXT_IN_PROGRESS:

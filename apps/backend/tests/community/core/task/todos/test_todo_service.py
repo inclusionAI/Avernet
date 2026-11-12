@@ -196,8 +196,10 @@ class FakeExecution:
     async def refresh_in_progress(self, *, todo_id: str) -> TodoRecord:
         raise AssertionError("TodoService must not refresh scheduler state")
 
-    async def resume_interaction(self, **kwargs: Any) -> TodoRecord:
-        self.calls.append({"operation": "resume_interaction", **kwargs})
+    async def resume_claimed_interaction(self, *, todo_id: str) -> TodoRecord:
+        self.calls.append(
+            {"operation": "resume_claimed_interaction", "todo_id": todo_id}
+        )
         if self.result is None:
             return _todo(status=TodoStatus.IN_PROGRESS)
         return self.result
@@ -383,9 +385,7 @@ def test_create_todo_rejects_invalid_text(kwargs):
 def test_list_todos_uses_persisted_status_filter_and_database_pagination():
     persisted = TodoPage(
         total=2,
-        items=(
-            _todo(todo_id="todo_2", status=TodoStatus.PENDING_ACCEPTANCE),
-        ),
+        items=(_todo(todo_id="todo_2", status=TodoStatus.PENDING_ACCEPTANCE),),
     )
     service, repository, access, _, collaboration = _service()
     repository.list_todos = lambda **kwargs: (
@@ -470,15 +470,14 @@ def test_list_events_maps_context_artifacts():
 
 
 @pytest.mark.asyncio
-async def test_create_interaction_checks_persisted_pending_acceptance_state():
+async def test_create_interaction_persists_event_and_claim_without_execution():
     todo = _todo(
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, repository, _, _, collaboration = _service(
+    service, repository, _, execution, collaboration = _service(
         todos=(todo,),
         contexts=(_context(),),
-        execution_result=_todo(status=TodoStatus.IN_PROGRESS),
     )
 
     event = await service.create_interaction(
@@ -497,6 +496,7 @@ async def test_create_interaction_checks_persisted_pending_acceptance_state():
         "author_name": "User One",
     }
     assert repository.todos["todo_1"].status is TodoStatus.IN_PROGRESS
+    assert execution.calls == []
 
 
 @pytest.mark.asyncio
@@ -568,6 +568,7 @@ def test_submit_acceptance_rejects_non_pending_acceptance():
         )
 
     assert all(call["operation"] != "record_acceptance" for call in repository.calls)
+
 
 @pytest.mark.asyncio
 async def test_start_todo_delegates_to_execution_after_actor_space_check():
