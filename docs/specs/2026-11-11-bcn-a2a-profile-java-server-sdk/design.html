@@ -852,7 +852,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="box d"><p><b>建议采用方案 B。</b>Profile 只有五个方法，处理逻辑有限，而多实例语义是本 SDK 的核心，放在自己的代码里更可控。协议模型和 GRPC 定义继续使用官方库，保证线上格式与标准一致。这一点需要评审确认，见 <span class="tag q">Q5</span>。无论选哪个方案，对平台暴露的 SPI 不变。</p></div>
 
 <h4>SPI 为什么不是 A2A 的五个方法</h4>
-<p>A2A 的五个方法是线上协议，由 SDK 实现。SPI 是业务要实现的部分，只包含业务自己才知道怎么做的事。如果让业务直接实现五个方法，Task 生命周期、存储、多实例、文本流规则、断流恢复都要业务自己写，而这些正是 Profile 要统一的部分。官方 a2a-java 也是这种分层：开发者实现一个执行器接口，不实现五个方法。</p>
+<p>A2A 的五个方法是线上协议，由 SDK 实现。SPI 是业务要实现的部分，只包含业务自己才知道怎么做的事。如果让业务直接实现五个方法，Task 生命周期、存储、多实例、文本流规则、断流恢复都要业务自己写，而这些正是 Profile 要统一的部分。官方 a2a-java 也是这种分层，见下方的源码对照。</p>
 <div class="tw"><table>
 <tr><th>A2A 方法</th><th>SDK 做的</th><th>交给业务的 SPI</th></tr>
 <tr><td><code>SendMessage</code>、<code>SendStreamingMessage</code>（新 Task）</td><td>校验、协商、授权、创建并持久化 Task、返回首帧、把输出编码成事件、写存储、发终态</td><td><code>execute</code></td></tr>
@@ -862,6 +862,36 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td><code>CancelTask</code></td><td>本实例中断或写取消标记、等待终态、如实返回</td><td><code>cancel</code></td></tr>
 </table></div>
 <p>已经有自己的标准 A2A Server 的平台不需要使用 SDK，照 Profile 实现并通过 TCK 即可。</p>
+<h4>与 a2a-java 源码的对照</h4>
+<p>依据：<code>a2aproject/a2a-java</code> 主分支，提交 <code>897835e</code>（2026-11-09，版本 <code>1.5.2.Final-SNAPSHOT</code>），<code>server-common</code> 模块。现有 Harness adapter 使用的是 <code>1.4.0.Final</code>，两者的接口可能有差异，实现时以锁定的版本为准。</p>
+<pre><code>// org.a2aproject.sdk.server.agentexecution.AgentExecutor
+public interface AgentExecutor {
+    void execute(RequestContext context, AgentEmitter emitter) throws A2AError;
+    default void cancel(RequestContext context, AgentEmitter emitter) throws A2AError {
+        throw new TaskNotCancelableError("Agent execution is not cancelable.");
+    }
+}
+
+// org.a2aproject.sdk.server.requesthandlers.RequestHandler：五个方法在这一层，由 DefaultRequestHandler 实现
+//   onMessageSend、onMessageSendStream、onGetTask、onSubscribeToTask、onCancelTask，
+//   以及 onListTasks 和四个推送配置方法
+
+// org.a2aproject.sdk.server.tasks.TaskStore
+public interface TaskStore {
+    void save(Task task, boolean isReplicated);
+    @Nullable Task get(String taskId);
+    void delete(String taskId);
+    ListTasksResult list(ListTasksParams params, @Nullable ServerCallContext context);
+}</code></pre>
+<div class="tw"><table>
+<tr><th></th><th>a2a-java</th><th>本 SDK</th><th>差异的原因</th></tr>
+<tr><td>业务实现的接口</td><td><code>AgentExecutor</code>：<code>execute</code>、<code>cancel</code></td><td><code>BcnAgent</code>：<code>execute</code>、<code>cancel</code>；<code>AdvancedBcnAgent</code> 增加 <code>resume</code></td><td>分层一致。本 SDK 把审批续交单独拆成 <code>resume</code>，由 SDK 解析并校验回复后交给业务；a2a-java 中续交也走 <code>execute</code>，由业务自己从 <code>RequestContext.getTask()</code> 判断并解析</td></tr>
+<tr><td>业务的输出接口</td><td><code>AgentEmitter</code>：可以设置任意状态（包括 <code>requiresAuth</code>）、以任意 <code>append</code> 和 <code>lastChunk</code> 组合发 Artifact、发任意事件</td><td><code>AgentResponseSink</code>：<code>append</code>、<code>complete</code>、<code>fail</code>，以及扩展通道和文件块</td><td>本 SDK 故意收窄。Profile 禁止的行为（改写已输出文本、<code>AUTH_REQUIRED</code>、未协商的扩展数据）在接口上就做不出来</td></tr>
+<tr><td>五个方法</td><td><code>DefaultRequestHandler</code></td><td><code>server-core</code></td><td>见下一行</td></tr>
+<tr><td>存储接口</td><td><code>save</code>、<code>get</code>、<code>delete</code>、<code>list</code>，没有版本号和比较并写入</td><td><code>get</code>、<code>create</code>、<code>compareAndSet</code>，记录带版本、租约、取消标记</td><td>9.5 的跨实例协作全部依赖比较并写入，a2a-java 的存储接口提供不了</td></tr>
+<tr><td>多实例</td><td><code>extras/queue-manager-replicated</code>：通过消息中间件在实例间复制事件队列</td><td>只通过共享存储协作</td><td><span class="tag d">D3</span> 已否决事件复制</td></tr>
+</table></div>
+<p>后两行是 8.2 建议方案 B（只复用协议模型，请求处理自己实现）的直接依据：复用 <code>DefaultRequestHandler</code> 就要继承它的存储和队列模型，而这两者和本设计的多实例方案不兼容。</p>
 
 <h3 id="s8-3"><span class="n">8.3</span>模块</h3>
 <div class="tw"><table>
@@ -1657,7 +1687,7 @@ void without_ui_extension_falls_back_to_text() {
 <tr><td><span class="tag q">Q2</span></td><td>扩展 URI 的命名空间、版本和废弃策略。现有扩展使用仓库 <code>dev</code> 分支的文档地址作为标识</td><td>新扩展使用稳定的命名空间；已有扩展 URI 不变，避免破坏已接入方</td><td>7.1、7.2</td></tr>
 <tr><td><span class="tag q">Q3</span></td><td>调用上下文的字段是否足够。首版为 <code>userId</code> 加 <code>source</code>（<code>platform</code>、<code>app</code>、<code>botId</code>、<code>scene</code>）。是否还需要租户、组织、工号等</td><td>首版不再增加；各业务特有的字段走业务扩展（7.4）</td><td>7.2</td></tr>
 <tr><td><span class="tag q">Q4</span></td><td>现有 Harness adapter 的去向</td><td>扩展编解码和审批逻辑迁入 SDK；Harness 改为基于 SDK 的一个 <code>AdvancedBcnAgent</code> 实现</td><td>P4</td></tr>
-<tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>方案 B</td><td>8.2，决定 P1 工作量</td></tr>
+<tr><td><span class="tag q">Q5</span></td><td>与 a2a-java 的关系：方案 A（复用请求处理）还是方案 B（只复用模型）</td><td>方案 B。已核对源码：官方存储接口没有比较并写入，多实例依赖事件复制（8.2 对照表）</td><td>8.2，决定 P1 工作量</td></tr>
 <tr><td><span class="tag q">Q6</span></td><td>存量 Agent 的接口形态分布（同步、流式、是否带工具和审批）。技术栈已确认 90% 以上为 Java</td><td>需要各平台提供</td><td>简易层是否需要更多便捷形式；L3 的优先级</td></tr>
 <tr><td><span class="tag q">Q7</span></td><td>单 Task 文本上限和 Task 保留期的默认值</td><td>文本 1 MiB；保留期默认 24 小时（缓存按内存计费）</td><td>P-74、9.8</td></tr>
 <tr><td><span class="tag q">Q8</span></td><td>来源信息未签名，能直连 Agent 的内部应用可以伪造。是否接受；不接受时选网络层限制还是启用 <code>proof</code></td><td>首版接受，与 <span class="tag d">D1</span> 一致；敏感 Agent 用网络层限制；<code>proof</code> 留作后续版本</td><td>7.2、第 13 节</td></tr>
