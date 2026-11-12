@@ -33,7 +33,7 @@
     "@tc-chat/adapters": "2.1.0",
     "@types/jest": "^30.0.0",
     "@babel/plugin-transform-modules-commonjs": "7.29.7",
-    "@umijs/babel-preset-umi": "4.7.6",
+    "@umijs/babel-preset-umi": "4.7.28",
     "babel-jest": "29.7.0",
     "jest": "^30.3.0",
     "typescript": "^5.6.3"
