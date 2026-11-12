@@ -390,16 +390,14 @@ async fn session_history_maps_unauthorized_history_error() {
 
 #[tokio::test]
 async fn session_history_maps_invalid_limit() {
+    // The history service owns limit validation; this pins the mapping of its
+    // `InvalidHistoryLimit` error rather than any route-level limit parsing.
     let env = builder(GroupStrategy::Chat, None)
         .await
         .history(ScriptedHistory::failing(HistoryFailure::InvalidLimit))
         .build();
 
-    let (status, body) = call(
-        &env.app,
-        get_as("/sessions/group-1:00000001/messages?limit=0", "bot-token"),
-    )
-    .await;
+    let (status, body) = call(&env.app, get_as(&format!("{SESSION}/messages"), "bot-token")).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"], "invalid_limit");

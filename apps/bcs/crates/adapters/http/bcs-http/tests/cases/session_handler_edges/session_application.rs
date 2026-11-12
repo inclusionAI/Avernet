@@ -5,6 +5,7 @@
 //! is unreachable from that route and stays unimplemented.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bcs_service_api::application::v1::{
     ApplicationError, DeleteResult, Page, SessionCompletionResult,
@@ -26,13 +27,20 @@ pub(super) enum UpdateOutcome {
 
 pub(super) struct FakeSessionApplication {
     update: Mutex<UpdateOutcome>,
+    update_calls: AtomicUsize,
 }
 
 impl FakeSessionApplication {
     pub(super) fn new(outcome: UpdateOutcome) -> Arc<Self> {
         Arc::new(Self {
             update: Mutex::new(outcome),
+            update_calls: AtomicUsize::new(0),
         })
+    }
+
+    /// How many times the route consulted the V1 facade.
+    pub(super) fn update_calls(&self) -> usize {
+        self.update_calls.load(Ordering::Relaxed)
     }
 }
 
@@ -93,6 +101,7 @@ impl SessionService for FakeSessionApplication {
         &self,
         command: UpdateSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
+        self.update_calls.fetch_add(1, Ordering::Relaxed);
         match *self.update.lock().await {
             UpdateOutcome::Ok => Ok(SessionParticipant {
                 actor_id: command.bot_uuid,

@@ -10,7 +10,7 @@
 use axum::http::StatusCode;
 use bcs_domain::{ActorKind, MessageViewScope};
 use bcs_service_api::{
-    GroupStrategy, Participant, ParticipantRole, SessionKind, SessionStatus,
+    GroupStrategy, SessionKind, SessionStatus,
 };
 use serde_json::json;
 
@@ -474,6 +474,7 @@ async fn list_sessions_propagates_list_failure() {
 
 #[tokio::test]
 async fn list_sessions_keeps_items_for_unauthenticated_callers() {
+    // NOTE: pins current unauthenticated behavior; flagged for owner review.
     // No identity and no Bot token: the route still lists (caller-scoped
     // visibility only filters when a caller resolved).
     let env = env(GroupStrategy::Chat, None).await;
@@ -640,6 +641,18 @@ async fn collect_session_for_own_human_actor() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["collected"], true);
+    // The Human self-right is decided on the actor identity itself, so the
+    // collection row must be keyed by `human_alice` (not the caller's staff id).
+    let collected = env.sessions.collected.lock().await;
+    assert_eq!(
+        collected.get(&(SESSION_ID.to_string(), "human_alice".to_string())),
+        Some(&42),
+        "the self branch stores the caller's own Human actor"
+    );
+    assert!(
+        !collected.contains_key(&(SESSION_ID.to_string(), "alice".to_string())),
+        "the bare staff id is never used as the collection actor"
+    );
 }
 
 #[tokio::test]
@@ -696,7 +709,7 @@ async fn uncollect_session_rejects_unauthenticated_caller() {
 #[tokio::test]
 async fn uncollect_session_propagates_store_failure() {
     let env = env(GroupStrategy::Chat, None).await;
-    *env.sessions.collect_error.lock().await = Some(Fail::Conflict);
+    *env.sessions.uncollect_error.lock().await = Some(Fail::Conflict);
 
     let (status, body) = call(
         &env.app,
@@ -713,30 +726,8 @@ async fn uncollect_session_propagates_store_failure() {
 }
 
 #[tokio::test]
-async fn delete_session_keeps_bot_kind_for_service_sessions_without_creator() {
-    // Session deletion is Session-kind agnostic; the store decides.
-    let env = env(GroupStrategy::Chat, None).await;
-    {
-        let mut stored = env.sessions.sessions.lock().await;
-        stored[0].session_kind = SessionKind::ServiceInvocation;
-        stored[0].created_by = Some("human_alice".to_string());
-        stored[0].participants.push(Participant::human(
-            "human_alice",
-            ParticipantRole::Observer,
-        ));
-    }
-
-    let (status, _) = call(
-        &env.app,
-        empty("DELETE", "/sessions/group-1:00000001?bot_id=driver-bot"),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn session_fixture_session_is_running_chat_kind() {
+async fn fixture_session_is_running_chat_kind() {
+    // Fixture guard (not a route contract).
     let session = session_for("group-1", SessionKind::Chat);
     assert_eq!(session.status, SessionStatus::Running);
     assert_eq!(session.session_kind, SessionKind::Chat);

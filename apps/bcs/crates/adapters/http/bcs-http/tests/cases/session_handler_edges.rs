@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::{
     body::{to_bytes, Body},
@@ -41,6 +42,8 @@ use tower::ServiceExt;
 mod session_application;
 #[path = "session_handler_edges/participants.rs"]
 mod participants;
+#[path = "session_handler_edges/participants_edges.rs"]
+mod participants_edges;
 #[path = "session_handler_edges/lifecycle.rs"]
 mod lifecycle;
 #[path = "session_handler_edges/creation.rs"]
@@ -100,6 +103,7 @@ pub(super) struct EdgeSessions {
     pub(super) list_error: Mutex<Option<Fail>>,
     pub(super) collected_list_error: Mutex<Option<Fail>>,
     pub(super) collect_error: Mutex<Option<Fail>>,
+    pub(super) uncollect_error: Mutex<Option<Fail>>,
     pub(super) collected: Mutex<HashMap<(String, String), u64>>,
 }
 
@@ -346,7 +350,7 @@ impl SessionManagementService for EdgeSessions {
     }
 
     async fn uncollect(&self, sid: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
-        self.store(&self.collect_error).await?;
+        self.store(&self.uncollect_error).await?;
         self.collected
             .lock()
             .await
@@ -399,10 +403,12 @@ impl SessionManagementService for EdgeSessions {
 // Scripted Session launch
 // ---------------------------------------------------------------
 
-/// Returns one configured launch error, or a freshly created Session.
+/// Returns one configured launch error, or a freshly created Session, and
+/// records every command the route forwarded.
 pub(super) struct ScriptedLaunch {
     pub(super) error: Mutex<Option<LaunchFailure>>,
     pub(super) created: Mutex<bool>,
+    pub(super) create_calls: Mutex<Vec<CreateSessionLaunch>>,
 }
 
 #[derive(Clone, Copy)]
@@ -422,6 +428,7 @@ impl ScriptedLaunch {
         Arc::new(Self {
             error: Mutex::new(Some(error)),
             created: Mutex::new(true),
+            create_calls: Mutex::new(Vec::new()),
         })
     }
 
@@ -434,7 +441,8 @@ impl ScriptedLaunch {
         }
     }
 
-    async fn next(&self) -> Option<LaunchFailure> {
+    /// Keep the configured failure armed: it is a peek, not a one-shot take.
+    async fn configured_failure(&self) -> Option<LaunchFailure> {
         *self.error.lock().await
     }
 }
@@ -445,7 +453,8 @@ impl SessionLaunchService for ScriptedLaunch {
         &self,
         command: CreateSessionLaunch,
     ) -> Result<SessionLaunchOutcome, SessionLaunchError> {
-        match self.next().await {
+        self.create_calls.lock().await.push(command.clone());
+        match self.configured_failure().await {
             Some(LaunchFailure::GroupNotFound) => Err(SessionLaunchError::GroupNotFound(
                 command.request.group_id.clone(),
             )),
@@ -493,7 +502,22 @@ impl SessionLaunchService for ScriptedLaunch {
 // ---------------------------------------------------------------
 
 /// Notification is best-effort: the routes log a warning and still answer.
-pub(super) struct FailingSystemMessages;
+/// The counter proves the route actually attempted the notification.
+pub(super) struct FailingSystemMessages {
+    calls: AtomicUsize,
+}
+
+impl FailingSystemMessages {
+    pub(super) fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    pub(super) fn calls(&self) -> usize {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
 
 #[async_trait::async_trait]
 impl bcs_service_api::SystemMessageService for FailingSystemMessages {
@@ -504,6 +528,7 @@ impl bcs_service_api::SystemMessageService for FailingSystemMessages {
         _session_id: &str,
         _session_participants: &[Participant],
     ) -> bcs_service_api::ServiceResult<usize> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
         Err(bcs_service_api::ServiceError::InternalError(
             "notify down".to_string(),
         ))
@@ -603,8 +628,9 @@ impl EnvBuilder {
     }
 }
 
-/// Build the standard Chat-strategy fixture. `staff` controls the ambient
-/// Human identity (None means unauthenticated unless a Bot token is sent).
+/// Build the standard fixture for the requested Group strategy. `staff`
+/// controls the ambient Human identity (None means unauthenticated unless a
+/// Bot token is sent).
 pub(super) async fn env(strategy: GroupStrategy, staff: Option<&str>) -> Env {
     builder(strategy, staff).await.build()
 }
@@ -656,6 +682,7 @@ pub(super) async fn builder(strategy: GroupStrategy, staff: Option<&str>) -> Env
     let launch = Arc::new(ScriptedLaunch {
         error: Mutex::new(None),
         created: Mutex::new(true),
+        create_calls: Mutex::new(Vec::new()),
     });
     services.session_launch = launch.clone();
 
