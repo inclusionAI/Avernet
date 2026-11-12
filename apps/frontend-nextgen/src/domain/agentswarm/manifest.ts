@@ -13,25 +13,13 @@
  */
 import { load as parseYaml } from 'js-yaml';
 
+export { MANIFEST_TEMPLATE, MANIFEST_LIMITS } from './manifestTemplate';
+
 /** The five content categories a five-category manifest carries. */
 export const MANIFEST_CATEGORIES = ['identity', 'mcp', 'resources', 'skills', 'cli_tools'] as const;
 
 export type ManifestCategory = (typeof MANIFEST_CATEGORIES)[number];
 
-export const MANIFEST_TEMPLATE = `schema_version: 1
-manifest:
-  identity:
-    - type: SOUL.md
-      content: |
-        你是一个通用型助手 Agent。
-        按任务目标执行工作，如实汇报结果，不臆测未提供的信息。
-        遇到无法完成的要求时，说明原因并给出可行的替代方案。
-  mcp: []
-  resources: []
-  skills: []
-  cli_tools: []
-script:
-  body: echo manifest-provisioned`;
 
 
 export interface ManifestIssue {

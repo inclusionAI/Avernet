@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
 import type { AgentDraft } from '@/domain/agentswarm/draft';
-import { MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { MANIFEST_LIMITS, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
 import { isSynthesized, synthesizeManifest } from '@/domain/agentswarm/synthManifest';
 
 export interface AgentFieldCardProps {
@@ -88,9 +88,18 @@ function ManifestField({
               variant="outline"
               onClick={() => onChange({ config_manifest: MANIFEST_TEMPLATE })}
             >
-              填入样例
+              填入带说明的模板
             </Button>
           </div>
+          {/* 平台限制写在编辑器旁边，而不是让用户在提交后从 422 里反推。 */}
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground">配置说明与限制</summary>
+            <ul className="mt-2 flex list-disc flex-col gap-1 pl-4 text-[11px] leading-5 text-muted-foreground">
+              {MANIFEST_LIMITS.map((limit) => (
+                <li key={limit}>{limit}</li>
+              ))}
+            </ul>
+          </details>
         </>
       )}
 
