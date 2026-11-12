@@ -34,6 +34,7 @@ async function fixture(state: string | null) {
     workflow_title TEXT, input_json TEXT, result_json TEXT, credentials_json TEXT,
     origin_bot_id TEXT, origin_session_key TEXT, origin_session_id TEXT, completed_at INTEGER, gmt_modified INTEGER);
     INSERT INTO flow_runs VALUES ('run', 'wf', 'running', NULL, NULL, NULL, NULL, NULL, 'bot', 'session', NULL, NULL, NULL);`);
+  raw.exec("ALTER TABLE flow_runs ADD COLUMN env VARCHAR(32) DEFAULT 'prod'; ALTER TABLE flow_runs ADD COLUMN tag VARCHAR(255) DEFAULT ''");
   raw.prepare('UPDATE flow_runs SET state_json = ?').run(state);
   for (const column of ['params_json', 'node_count', 'succeeded_count', 'failed_count', 'total_duration_ms', 'total_token_usage', 'started_at', 'triggered_by', 'current_phase', 'workflow_version', 'workflow_deploy_number', 'id', 'identity_key', 'user_id', 'plugin_version', 'engine', 'gmt_create']) raw.exec(`ALTER TABLE flow_runs ADD COLUMN ${column} TEXT`);
   const repo = new FlowRunRepository(db);

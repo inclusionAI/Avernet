@@ -61,7 +61,7 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
       const counts = await this.db.query<{ status: string; count: number }>(`SELECT status, COUNT(*) AS count FROM flow_runs${clause} GROUP BY status`, params);
       for (const row of counts) { total += Number(row.count); statusCounts[row.status] = (statusCounts[row.status] ?? 0) + Number(row.count); }
       rows.push(...await this.metadataQuery<RunListMetadata>([
-        'flow_id', 'workflow_id', 'workflow_title', 'status', 'node_count', 'succeeded_count',
+        'flow_id', 'workflow_id', 'workflow_title', 'status', 'env', 'tag', 'node_count', 'succeeded_count',
         'failed_count', 'total_duration_ms', 'total_token_usage', 'started_at', 'completed_at', 'triggered_by',
         'origin_bot_id', 'current_phase', 'workflow_version', 'workflow_deploy_number', 'id', 'identity_key',
         'origin_session_key', 'origin_session_id', 'user_id', 'plugin_version', 'engine', 'gmt_create',
@@ -77,7 +77,7 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
   async readRun(flowId: string): Promise<StoredRunSnapshot | null> {
     const rows = await this.metadataQuery<StoredRunSnapshot>(
       [
-        'flow_id', 'workflow_id', 'workflow_title', 'origin_bot_id', 'status', 'state_json',
+        'flow_id', 'workflow_id', 'workflow_title', 'origin_bot_id', 'status', 'env', 'tag', 'state_json',
         'input_json', 'result_json', 'params_json', 'node_count', 'succeeded_count', 'failed_count',
         'total_duration_ms', 'total_token_usage', 'started_at', 'completed_at', 'triggered_by', 'current_phase',
         'workflow_version', 'workflow_deploy_number', 'origin_session_key', 'origin_session_id', 'id', 'identity_key',

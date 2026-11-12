@@ -51,7 +51,7 @@ it('defers a SQLite v150 CREATE authorization denial without recording progress 
     await real.exec(real.dialect.renderDdl(ordinaryRunRequestDdl));
     await runMigrations(real, 'sqlite');
     await expect(assertOrdinaryRequestSchema(real)).resolves.toBeUndefined();
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 151 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
   } finally { await real.close(); }
 });
 
@@ -74,7 +74,7 @@ it.each([
     await expect(assertOrdinaryRequestSchema(db)).rejects.toThrow('Invalid ordinary request marker columns');
     raw.exec('ALTER TABLE flow_runs DROP COLUMN ordinary_run_marker; ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker VARCHAR(64) DEFAULT NULL');
     await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 151 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
     await expect(assertOrdinaryRequestSchema(db)).resolves.toBeUndefined();
   } finally { await db.close(); }
 });
