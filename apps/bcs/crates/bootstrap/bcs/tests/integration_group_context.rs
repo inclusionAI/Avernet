@@ -729,9 +729,50 @@ impl bcs_http::state::UserIdentityPort for PresetTestIdentity {
 
 #[tokio::test]
 async fn human_preset_management_routes_persist_changes_and_report_validation_errors() {
+    assert_human_preset_management_routes(Arc::new(MemoryGroupContextRepo::new())).await;
+}
+
+#[tokio::test]
+#[ignore = "requires disposable MySQL; run devops/k8s-tests/bcs/test-k8s-bcs-presets.sh"]
+async fn mysql_human_preset_management_routes() {
+    use bcs_config_api::mysql::MysqlConnectionConfig;
+    use bcs_config_api::{MysqlDbConfig, StatementProtocol};
+    use bcs_db_api::{DbPlugin, DbStatement};
+    use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
+    use bcs_group_context_store::SqlGroupContextStore;
+
+    let port = std::env::var("BCS_PRESET_TEST_MYSQL_PORT").unwrap().parse().unwrap();
+    const PASSWORD_ENV: &str = "BCS_PRESET_TEST_MYSQL_PASSWORD";
+    let password = std::env::var(PASSWORD_ENV).unwrap();
+    let config = MysqlDbConfig::new()
+        .with_database("bcs_preset_e2e")
+        .with_connection(MysqlConnectionConfig {
+            connection_type: "direct".into(),
+            host: Some("127.0.0.1".into()),
+            port: Some(port),
+            user: Some("bcs".into()),
+            password: Some(password),
+            extra: Default::default(),
+        })
+        .with_statement_protocol(StatementProtocol::Text);
+    let manager = MysqlDbManager::new(config).await.expect("connect to disposable MySQL");
+    let db = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
+    for migration in [
+        include_str!("../../../../migrations/mysql/033_group_context.sql"),
+        include_str!("../../../../migrations/mysql/034_group_context_owners.sql"),
+        include_str!("../../../../migrations/mysql/046_group_context_preset.sql"),
+    ] {
+        for sql in migration.split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
+            db.execute(DbStatement::new(sql)).await.expect("apply Group Context DDL");
+        }
+    }
+    assert_human_preset_management_routes(Arc::new(SqlGroupContextStore::oceanbase(db))).await;
+    manager.close().await;
+}
+
+async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) {
     use bcs_service_api::{Group, GroupCoreService, Participant, ParticipantRole};
 
-    let repo = Arc::new(MemoryGroupContextRepo::new());
     let authority = bcs_test_support::authority_edge_fixture();
     bcs_test_support::grant_owner_edge(&authority.repo, "preset-driver", "preset-owner").await;
     let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
@@ -795,8 +836,11 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
     assert_eq!(body["status"], "conflict");
     assert_eq!(body["error_msg"], "events already exists in preset-group。请重命名后重试。");
 
-    let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    for _ in 0..2 {
+        let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["status"], "ok");
+    }
 
     let presets = repo.list_presets("preset-group").await.unwrap();
     assert_eq!(presets.len(), 1);
@@ -810,4 +854,8 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
     assert_eq!(post(delete, body.clone()).await.unwrap().status(), StatusCode::OK);
     assert!(repo.list_presets("preset-group").await.unwrap().is_empty());
     assert_eq!(post(delete, body).await.unwrap().status(), StatusCode::NOT_FOUND);
+    let response = post(update, json!({"name":"events","new_name":"timeline"})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(response).await["status"], "not_found");
+    assert!(repo.list_presets("preset-group").await.unwrap().is_empty());
 }
