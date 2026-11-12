@@ -851,6 +851,18 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 </table></div>
 <div class="box d"><p><b>建议采用方案 B。</b>Profile 只有五个方法，处理逻辑有限，而多实例语义是本 SDK 的核心，放在自己的代码里更可控。协议模型和 GRPC 定义继续使用官方库，保证线上格式与标准一致。这一点需要评审确认，见 <span class="tag q">Q5</span>。无论选哪个方案，对平台暴露的 SPI 不变。</p></div>
 
+<h4>SPI 为什么不是 A2A 的五个方法</h4>
+<p>A2A 的五个方法是线上协议，由 SDK 实现。SPI 是业务要实现的部分，只包含业务自己才知道怎么做的事。如果让业务直接实现五个方法，Task 生命周期、存储、多实例、文本流规则、断流恢复都要业务自己写，而这些正是 Profile 要统一的部分。官方 a2a-java 也是这种分层：开发者实现一个执行器接口，不实现五个方法。</p>
+<div class="tw"><table>
+<tr><th>A2A 方法</th><th>SDK 做的</th><th>交给业务的 SPI</th></tr>
+<tr><td><code>SendMessage</code>、<code>SendStreamingMessage</code>（新 Task）</td><td>校验、协商、授权、创建并持久化 Task、返回首帧、把输出编码成事件、写存储、发终态</td><td><code>execute</code></td></tr>
+<tr><td><code>SendMessage</code>（带 <code>taskId</code> 的审批续交）</td><td>校验回复、持久化决定、分批处理、跨实例接管执行权</td><td><code>resume</code></td></tr>
+<tr><td><code>GetTask</code></td><td>读存储；租约过期时回收</td><td>无</td></tr>
+<tr><td><code>SubscribeToTask</code></td><td>本实例推送或跨实例轮询合成</td><td>无</td></tr>
+<tr><td><code>CancelTask</code></td><td>本实例中断或写取消标记、等待终态、如实返回</td><td><code>cancel</code></td></tr>
+</table></div>
+<p>已经有自己的标准 A2A Server 的平台不需要使用 SDK，照 Profile 实现并通过 TCK 即可。</p>
+
 <h3 id="s8-3"><span class="n">8.3</span>模块</h3>
 <div class="tw"><table>
 <tr><th>模块</th><th>内容</th><th>依赖</th></tr>
