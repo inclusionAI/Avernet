@@ -567,3 +567,22 @@ def test_local_nested_documents_require_one_unambiguous_package_root(
         )
 
     assert error.value.reason == "multiple_skill_files"
+
+
+@pytest.mark.parametrize(
+    ("manifest", "detail"),
+    [
+        (b"---\nname: good\n---\n", "MISSING_DESCRIPTION"),
+        (b"---\nname: bad_name\ndescription: okay\n---\n", "INVALID_NAME"),
+        (b"---\nname: skills-local\ndescription: okay\n---\n", "RESERVED_NAME"),
+    ],
+)
+def test_local_manifest_failure_keeps_actionable_detail(
+    manifest: bytes, detail: str
+) -> None:
+    with pytest.raises(SkillPackageInvalidError) as caught:
+        SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+            _zip([("SKILL.md", manifest)])
+        )
+    assert caught.value.reason == "invalid_metadata"
+    assert caught.value.detail == detail

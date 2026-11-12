@@ -40,7 +40,9 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
-from agentclaw.community.core.models.skill_installation_source import BotSkillInstallationSource
+from agentclaw.community.core.models.skill_installation_source import (
+    BotSkillInstallationSource,
+)
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -56,6 +58,8 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
     CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillInvalidPackageError,
+    LocalSkillTooLargeError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
     SkillAssetInUseError,
@@ -1169,3 +1173,52 @@ def test_a_caller_with_no_relation_is_refused_before_the_query_service_runs(
     assert response.json()["data"] is None
     assert query.get_args is None, "the query service was reached despite the refusal"
     assert direct_activation.args is None
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "code", "reason"),
+    [
+        (
+            LocalSkillInvalidPackageError("multiple_skill_files"),
+            400,
+            400101,
+            "multiple_skill_files",
+        ),
+        (
+            LocalSkillInvalidPackageError("invalid_metadata", "MISSING_DESCRIPTION"),
+            400,
+            400101,
+            "MISSING_DESCRIPTION",
+        ),
+        (
+            LocalSkillInvalidPackageError("invalid_metadata", "secret content"),
+            400,
+            400101,
+            "invalid_metadata",
+        ),
+        (LocalSkillTooLargeError("too_many_files"), 413, 413101, "too_many_files"),
+    ],
+)
+def test_folder_upload_returns_safe_actionable_reason(failure, status, code, reason):
+    class FailedUpload(_Upload):
+        async def upload_local_skill_files(self, **kwargs):
+            raise failure
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(SkillQueryServiceProtocol, to=_Query())
+            binder.bind(LocalSkillUploadServiceProtocol, to=FailedUpload())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
+    attach_injector(app, Injector([Bindings()]))
+    response = user_scoped_client(app, "actor").post(
+        "/openapi/v1/bots/bot-1/skills/upload-folder",
+        files=[("files", ("SKILL.md", b"manifest", "text/markdown"))],
+    )
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["data"] == {"reason": reason}
