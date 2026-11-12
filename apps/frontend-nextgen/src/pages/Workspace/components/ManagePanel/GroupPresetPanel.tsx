@@ -1,60 +1,10 @@
 import { Button, Card, Input, Textarea } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { GroupContextPreset, GroupContextView } from '@/services/backendApi/collaboration/groupContextController';
-import { addPreset, deletePreset, listPresets, updatePreset } from '@/services/backendApi/collaboration/groupContextController';
-import { useEffect, useRef, useState } from 'react';
-
-type PresetList = Awaited<ReturnType<typeof listPresets>>;
-type Draft = GroupContextPreset & { originalName?: string };
+import type { GroupContextView } from '@/services/workspace/groupContextService';
+import { useGroupPresets } from '../../hooks/useGroupPresets';
 
 export function GroupPresetPanel({ view }: { view: GroupContextView }) {
-  const { groupId, sessionId, view_bot_id: botId } = view;
-  const [list, setList] = useState<PresetList>();
-  const [draft, setDraft] = useState<Draft>();
-  const [error, setError] = useState('');
-  const [attempt, setAttempt] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const writing = useRef(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    listPresets({ groupId, sessionId, view_bot_id: botId }, controller.signal).then(
-      (result) => {
-        if (controller.signal.aborted) return;
-        if (Array.isArray(result.presets)) setList(result);
-        else setError('群规则加载失败');
-      },
-      () => {
-        if (!controller.signal.aborted) setError('群规则加载失败');
-      },
-    );
-    return () => controller.abort();
-  }, [groupId, sessionId, botId, attempt]);
-
-  function reload() {
-    setList(undefined);
-    setError('');
-    setAttempt((previous) => previous + 1);
-  }
-
-  async function write(action: () => Promise<unknown>) {
-    if (writing.current) return;
-    writing.current = true;
-    setBusy(true);
-    setError('');
-    try {
-      await action();
-      setDraft(undefined);
-      reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '群规则保存失败');
-    } finally {
-      writing.current = false;
-      setBusy(false);
-    }
-  }
-
-  const canWrite = !botId && list?.can_manage === true;
+  const { list, draft, setDraft, error, busy, canWrite, reload, savePreset, removePreset, cancelDraft } = useGroupPresets(view);
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -76,8 +26,7 @@ export function GroupPresetPanel({ view }: { view: GroupContextView }) {
             event.preventDefault();
             const preset = { name: draft.name.trim(), description: draft.description };
             if (!preset.name) return;
-            const originalName = draft.originalName;
-            void write(() => originalName === undefined ? addPreset(groupId, preset) : updatePreset(groupId, originalName, preset));
+            void savePreset(preset, draft.originalName);
           }}>
             <label className="block space-y-1 text-sm">
               <span>名称</span>
@@ -88,7 +37,7 @@ export function GroupPresetPanel({ view }: { view: GroupContextView }) {
               <Textarea value={draft.description} disabled={busy} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
             </label>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" disabled={busy} onClick={() => { setDraft(undefined); setError(''); }}>取消</Button>
+              <Button type="button" variant="outline" disabled={busy} onClick={cancelDraft}>取消</Button>
               <Button type="submit" disabled={busy || !draft.name.trim()}>保存</Button>
             </div>
           </form>
@@ -107,7 +56,7 @@ export function GroupPresetPanel({ view }: { view: GroupContextView }) {
                 confirmText="删除"
                 confirmVariant="destructive"
                 disabled={busy || !!draft}
-                onConfirm={() => write(() => deletePreset(groupId, preset.name))}
+                onConfirm={() => removePreset(preset.name)}
               >
                 <Button size="sm" variant="ghost" className="text-destructive" disabled={busy || !!draft}>删除</Button>
               </ConfirmDialog>

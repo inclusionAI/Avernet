@@ -1,7 +1,6 @@
 import { Button, Card } from '@/components/ui';
-import type { GroupContextView, SharedInfoItem } from '@/services/backendApi/collaboration/groupContextController';
-import { listSharedInfo } from '@/services/backendApi/collaboration/groupContextController';
-import { useEffect, useState } from 'react';
+import type { GroupContextView } from '@/services/workspace/groupContextService';
+import { useSharedInfo } from '../../hooks/useSharedInfo';
 
 const sections = [
   ['group', '群级'],
@@ -15,35 +14,16 @@ interface SharedInfoListProps {
   names: ReadonlyMap<string, string>;
 }
 
-export function SharedInfoList({ view, viewerId, names }: SharedInfoListProps) {
-  const key = JSON.stringify([view.groupId, view.sessionId, view.view_bot_id, viewerId]);
-  return <SharedInfoListContent key={key} view={view} names={names} />;
-}
-
 function SharedInfoListContent({ view, names }: Omit<SharedInfoListProps, 'viewerId'>) {
-  const { groupId, sessionId, view_bot_id: botId } = view;
-  const [attempt, setAttempt] = useState(0);
-  const [result, setResult] = useState<SharedInfoItem[] | null>();
-
-  useEffect(() => {
-    const controller = new AbortController();
-    listSharedInfo({ groupId, sessionId, view_bot_id: botId }, controller.signal).then(
-      ({ items }) => {
-        if (!controller.signal.aborted) setResult(Array.isArray(items) ? items : null);
-      },
-      () => {
-        if (!controller.signal.aborted) setResult(null);
-      },
-    );
-    return () => controller.abort();
-  }, [groupId, sessionId, botId, attempt]);
+  const { sessionId } = view;
+  const { result, reload } = useSharedInfo(view);
 
   if (result === undefined) return <p role="status" className="text-sm text-muted-foreground">正在加载共享信息…</p>;
   if (result === null) {
     return (
       <div role="alert" className="space-y-2 text-sm">
         <p>共享信息加载失败</p>
-        <Button variant="outline" size="sm" onClick={() => { setResult(undefined); setAttempt(attempt + 1); }}>重试</Button>
+        <Button variant="outline" size="sm" onClick={reload}>重试</Button>
       </div>
     );
   }
@@ -84,4 +64,9 @@ function SharedInfoListContent({ view, names }: Omit<SharedInfoListProps, 'viewe
       })}
     </div>
   );
+}
+
+export function SharedInfoList({ view, viewerId, names }: SharedInfoListProps) {
+  const key = JSON.stringify([view.groupId, view.sessionId, view.view_bot_id, viewerId]);
+  return <SharedInfoListContent key={key} view={view} names={names} />;
 }

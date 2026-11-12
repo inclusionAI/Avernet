@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { GroupAvatarStack } from './GroupSidebar/GroupItem';
+import { GroupHeaderIcon } from './GroupHeaderIcon';
 import { GroupSessionIdPill } from './GroupSessionIdPill';
 import { SharePopover } from './ManagePanel/SharePopover';
 import { Points } from '@/tracking/points';
@@ -63,9 +64,8 @@ export interface GroupHeaderProps {
 
 /**
  * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 ID
- * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。六槽位按设计稿 x=0/32/64/96/128/160 全量落地：
- * 收藏会话 / 分享 / 会话管理 / 历史消息 / 资源管理 / 副屏——其中五枚与 chat 页 ChatHeaderActions
- * 同构（Star/SlidersHorizontal/History/FolderOpen/Monitor），分享为协作群特有（SharePopover 气泡）。
+ * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。会话操作依次为收藏、分享、会话管理、历史消息、
+ * 共享信息、资源管理和副屏。收藏、会话管理、历史消息、资源管理和副屏与 ChatHeaderActions 同构。
  * 历史消息由右缘 GroupHistorySidebar 承载；顶栏连接状态与对话页同形，输入帽条保留重连操作。
  *
  * 窄宽让位（container query 量外层 wrapper 宽度而非 viewport，副屏/管理面板挤压主区时同样生效）：
@@ -76,35 +76,6 @@ export interface GroupHeaderProps {
  * 视口与容器双闸经 ChatConnectionStatus 的 labelVisibleClassName（lg:@min-[32.5rem]/…）并查，
  * 正常态无需解释，警示/错误态保留完整文案与语义色，读屏名由 aria-label 恒撑。
  */
-function HeaderIcon({
-  label,
-  icon,
-  active,
-  onClick,
-  disabled,
-  className,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  active: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  className?: string;
-}) {
-  return (
-    <IconButton
-      label={label}
-      icon={icon}
-      size="sm"
-      disabled={disabled}
-      aria-pressed={active}
-      data-workspace-panel-trigger
-      onClick={onClick}
-      className={cn('rounded-md text-muted-foreground', active && 'bg-selected text-foreground', className)}
-    />
-  );
-}
-
 export function GroupHeader({
   historyOnly = false,
   selectedGroup,
@@ -209,7 +180,7 @@ export function GroupHeader({
 
           <div className="flex shrink-0 items-center justify-end gap-1">
             {selectedSession && onLocateSession ? (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label="定位当前会话"
                 icon={<LocateFixed className="size-4" aria-hidden />}
                 active={false}
@@ -218,7 +189,7 @@ export function GroupHeader({
             ) : null}
             {selectedSession || selectedGroup ? (
               /* 收藏会话：chat 同构禁用态（无会话渲染 disabled 而非隐藏）；收藏态星标填充。 */
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={favorites.favorite ? '取消收藏当前会话' : '收藏当前会话'}
                 icon={<Star className={cn('size-4', favorites.favorite && 'fill-star text-star')} aria-hidden />}
                 active={favorites.favorite}
@@ -229,7 +200,7 @@ export function GroupHeader({
             {selectedSession || selectedGroup ? (
               /* 气泡锚点：包住分享图标的空 span（SharePopover 经 virtualRef 定位其下）。 */
               <span ref={shareAnchorRef} className="flex shrink-0">
-                <HeaderIcon
+                <GroupHeaderIcon
                   label={selectedSession ? '分享会话' : '分享协作群'}
                   icon={<Share2 className="size-4" aria-hidden />}
                   active={shareOpen}
@@ -245,14 +216,14 @@ export function GroupHeader({
               </span>
             ) : null}
             {selectedSession && selectedGroup ? (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={activePanel === 'sessionManage' ? '关闭会话管理' : '管理会话'}
                 icon={<SlidersHorizontal className="size-4" aria-hidden />}
                 active={activePanel === 'sessionManage'}
                 onClick={() => onTogglePanel(activePanel === 'sessionManage' ? 'none' : 'sessionManage')}
               />
             ) : selectedGroup ? (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={activePanel === 'manage' ? '关闭管理面板' : '管理协作群'}
                 icon={<Settings2 className="size-4" aria-hidden />}
                 active={activePanel === 'manage'}
@@ -260,7 +231,7 @@ export function GroupHeader({
               />
             ) : null}
             {selectedSession && HISTORY_SEARCH_ENABLED ? (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={activePanel === 'history' ? '关闭历史消息' : '历史消息'}
                 icon={<History className="size-4" aria-hidden />}
                 active={activePanel === 'history'}
@@ -268,7 +239,7 @@ export function GroupHeader({
               />
             ) : null}
             {selectedSession && (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={activePanel === 'sharedInfo' ? '关闭共享信息' : '共享信息'}
                 icon={<Layers className="size-4" aria-hidden />}
                 active={activePanel === 'sharedInfo'}
@@ -276,14 +247,14 @@ export function GroupHeader({
               />
             )}
             {selectedSession ? (
-              <HeaderIcon
+              <GroupHeaderIcon
                 label={activePanel === 'resources' ? '关闭资源管理' : '资源管理'}
                 icon={<FolderOpen className="size-4" aria-hidden />}
                 active={activePanel === 'resources'}
                 onClick={() => onTogglePanel(activePanel === 'resources' ? 'none' : 'resources')}
               />
             ) : null}
-            <HeaderIcon
+            <GroupHeaderIcon
               label="副屏"
               icon={<Monitor className="size-4" aria-hidden />}
               active={sidePaneOpen}

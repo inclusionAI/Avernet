@@ -1,5 +1,5 @@
 import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import type { GroupContextView } from '@/services/backendApi/collaboration/groupContextController';
+import type { GroupContextView } from '@/services/workspace/groupContextService';
 import { ManagePanelHeader } from '../ManagePanel/ManagePanelHeader';
 import { SharedInfoList } from '../ManagePanel/SharedInfoList';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
