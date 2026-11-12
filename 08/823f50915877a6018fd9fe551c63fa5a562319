@@ -1,0 +1,32 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_case_run.py
+  h_12dd6d063428b2 119-123
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_profile.py
+  h_12dd6d063428b2 150-166,169-171
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_runner.py
+  h_12dd6d063428b2 79-85,155-160,169-176,315-318,336-339,346
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_case_run.py
+  h_12dd6d063428b2 138-141
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_profile.py
+  h_12dd6d063428b2 89-107,113-115
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_runner.py
+  h_12dd6d063428b2 135-139,159,171-172,398-403,407,409-410
+apps/bcs/scripts/e2e-runner/next-story-migrations.md
+  h_12dd6d063428b2 4225-4252
+apps/bcs/scripts/e2e-runner/tests/test_channel_cli_case_run.py
+  h_12dd6d063428b2 29-30,87-89,137-146,195-277
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team.py
+  h_12dd6d063428b2 439-532
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team_case_run.py
+  h_12dd6d063428b2 27-29,85,88-89,159-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08823f50915877a6018fd9fe551c63fa5a562319",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

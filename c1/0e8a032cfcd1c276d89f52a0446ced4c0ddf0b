@@ -1,0 +1,21 @@
+apps/backend/tests/community/repository/task/test_intake_atomic_creation.py
+  s_7d8e6acd12a072::t_cfe136d87f8165 6,82-93
+  s_7d8e6acd12a072::t_57ad884e17a28f 81,95-96,100,424,467,511,555,606
+  s_7d8e6acd12a072::t_436e86845be6d6 94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c10e8a032cfcd1c276d89f52a0446ced4c0ddf0b",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
