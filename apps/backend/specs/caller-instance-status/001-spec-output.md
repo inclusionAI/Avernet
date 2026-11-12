@@ -130,3 +130,6 @@ and transport-error credential sentinels.
 
 ## Public schema inventory follow-up
 - The additive Caller GET is one explicit-user-scoped and Bot-path operation. Keep exact schema-inventory assertions synchronized: user-scoped 299, Bot-path 227. This maintains the existing strict count gate.
+
+## Live acceptance coverage
+- Register the new GET in the existing ExpertChat Singlebox router denominator. A live, signed-public-HTTP story observes absent, pending without UUID, and registered-but-missing BaaS instances and compares complete ledger snapshots before/after each read. No provisioning is necessary. Existing core/router thresholds remain unchanged; only actual remote live coverage can establish the gate.
