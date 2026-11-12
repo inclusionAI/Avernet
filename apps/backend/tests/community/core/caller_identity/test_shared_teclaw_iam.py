@@ -1,5 +1,7 @@
 """Shared Teclaw IAM refresh follows the existing published chat runtime."""
 from dataclasses import replace
+from http.cookies import SimpleCookie
+from uuid import uuid4
 
 import pytest
 
@@ -81,8 +83,11 @@ def shared_world(tmp_path, monkeypatch):
     auth = MagicMock()
     auth.resolve_user_from_request = AsyncMock(return_value=SimpleNamespace(staffId="caller-1"))
     signing = MagicMock()
+    caller_value = uuid4().hex
+    iam_value = uuid4().hex
     signing.exchange.return_value = CallerToken(
-        access_token="private-caller-token", subject_user_id="caller-1",
+        access_token=caller_value,
+        subject_user_id="caller-1",
         expires_at=datetime.now(), fingerprint="test-fingerprint",
     )
     requests = []
@@ -101,11 +106,14 @@ def shared_world(tmp_path, monkeypatch):
     baas._tenant = "test"
     baas._http = client
     baas._outbound_rule_provider = MagicMock()
-    baas._outbound_rule_provider.build_caller_rule.side_effect = lambda caller_token: OutBoundOperationRule(
-        header_operation_rules=[HeaderOperationRule(
-            domains=["mcp.example"], action="set", header_name="x-caller-token", value=caller_token,
-        )],
-    )
+    def build_caller_rule(caller_token):
+        return OutBoundOperationRule(
+            header_operation_rules=[HeaderOperationRule(
+                domains=["mcp.example"], action="set", header_name="x-caller-token", value=caller_token,
+            )],
+        )
+
+    baas._outbound_rule_provider.build_caller_rule.side_effect = build_caller_rule
     locks = MagicMock()
     locks.get_by_key.return_value = SimpleNamespace(holder_user_id="owner-1")
 
@@ -128,6 +136,7 @@ def shared_world(tmp_path, monkeypatch):
         container=container, repo=repo, bot=bot, bots=bots, binding=binding, publications=publications,
         signing=signing, requests=requests, env=env, instances=instances, auth=auth, locks=locks,
         http_status=http_status,
+        iam_value=iam_value, caller_value=caller_value,
     )
     client.close()
 
@@ -137,8 +146,10 @@ async def _http_iam(world, session_key="owned-session", stage=CallerIdentityStag
     from agentclaw.community.adapters.http.token_exchange.router import get_iam_token
     from agentclaw.community.api.caller_iam_token_service import CallerIamTokenServiceProtocol
 
+    cookies = SimpleCookie()
+    cookies["IAM_TOKEN"] = world.iam_value
     request = Request({"type": "http", "method": "GET", "path": "/api/v1/token/iam",
-                       "headers": [(b"cookie", b"IAM_TOKEN=private-iam-token")],
+                       "headers": [(b"cookie", cookies.output(header="").strip().encode())],
                        "query_string": b"", "scheme": "http", "server": ("test", 80)})
     return await get_iam_token(
         request=request, bot_id="bot-1", stage=stage,
@@ -156,12 +167,15 @@ async def test_real_shared_refresh_uses_owned_online_session_and_append(shared_w
         response = await _http_iam(shared_world)
 
     assert response.status_code == 200
-    assert json.loads(response.body) == {"success": True, "iam_token": "private-iam-token"}
+    assert json.loads(response.body) == {
+        "success": True,
+        "iam_token": shared_world.iam_value,
+    }
     puts = [request for request in shared_world.requests if request.method == "PUT"]
     assert len(puts) == 1
     assert puts[0].url.path == "/api/v1/paas/devices/shared-runtime@template/outbound-rule"
     assert dict(puts[0].url.params) == {"mode": "append", "session_key": "owned-session"}
-    assert json.loads(puts[0].content)["header_operation_rules"][0]["value"] == "private-caller-token"
+    assert json.loads(puts[0].content)["header_operation_rules"][0]["value"] == shared_world.caller_value
     shared_world.instances.get_instance.assert_not_called()
     shared_world.locks.get_by_key.assert_not_called()
     assert "caller_shared_session_validated" in caplog.text
@@ -169,8 +183,8 @@ async def test_real_shared_refresh_uses_owned_online_session_and_append(shared_w
     assert "caller_shared_target_selected" in caplog.text
     assert "caller_shared_target_refresh_succeeded" in caplog.text
     assert "owned-session" in caplog.text
-    assert "private-caller-token" not in caplog.text
-    assert "private-iam-token" not in caplog.text
+    assert shared_world.caller_value not in caplog.text
+    assert shared_world.iam_value not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -245,7 +259,7 @@ async def test_shared_required_failures_remain_errors(shared_world, failure, cap
     response = await _http_iam(shared_world)
     assert response.status_code == (400 if failure == "subject" else 502)
     assert "private-upstream-secret" not in caplog.text
-    assert "private-caller-token" not in caplog.text
+    assert shared_world.caller_value not in caplog.text
     if failure in {"missing_publication", "wrong_provider"}:
         shared_world.signing.exchange.assert_not_called()
 

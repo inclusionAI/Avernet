@@ -261,7 +261,8 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             iam_token=iam_token, caller_user_id=caller_user_id, bot_id=bot_id,
             owner_id=owner_id, stage=stage, publish_id=publish_id, entity_id=entity_id,
             binding_id=target.binding_id, is_test_exchange=False,
-            caller_token=caller_token, session_key=session_key,
+            caller_token=caller_token,
+            session_key=session_key,
         )
         logger.info("caller_shared_target_refresh_succeeded fields=%s", fields)
         return CallerIamTokenOutcome(iam_token=iam_token)
