@@ -17,12 +17,12 @@ from __future__ import annotations
 import math
 from dataclasses import fields
 from typing import Any
-from urllib.parse import urlparse
 from injector import Module, inject, provider, singleton
 from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.task_dispatch_config_loader import load_task_dispatch_config
 from agentclaw.community.di.modules.ecb_config import resource_ready_settings
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -910,48 +910,12 @@ class ConfigModule(Module):
     @singleton
     @provider
     def task_dispatch(self) -> cfg.TaskDispatchConfig:
-        """Task dispatch runtime configuration loaded from deployment YAML.
-
-        YAML shape::
-
-            task_dispatch:
-              task_search_skill_enabled: false
-              skill_report_enabled: true              # true=skill HTTP Push, false=poller Pull
-
-        The default keeps dispatch deterministic and avoids depending on the
-        owner Bot's task-search skill. Set it to true to restore the skill
-        round-trip for staged experiments.
-        """
-        block = _block("task_dispatch")
-        backend_url = _coerce(block, "backend_url", str, "", "task_dispatch").strip()
-        if not backend_url:
-            callback_url = _coerce(
-                _block("bcs_client"),
-                "task_callback_url",
-                str,
-                "",
-                "bcs_client",
-            ).strip()
-            parsed = urlparse(callback_url)
-            if parsed.scheme in {"http", "https"} and parsed.netloc:
-                backend_url = f"{parsed.scheme}://{parsed.netloc}"
-        defaults = cfg.TaskDispatchConfig()
-        return cfg.TaskDispatchConfig(
-            backend_url=backend_url or defaults.backend_url,
-            task_search_skill_enabled=_coerce(
-                block,
-                "task_search_skill_enabled",
-                _as_bool,
-                defaults.task_search_skill_enabled,
-                "task_dispatch",
-            ),
-            skill_report_enabled=_coerce(
-                block,
-                "skill_report_enabled",
-                _as_bool,
-                defaults.skill_report_enabled,
-                "task_dispatch",
-            ),
+        """Task dispatch runtime configuration loaded from deployment YAML."""
+        return load_task_dispatch_config(
+            task_dispatch_block=_block("task_dispatch"),
+            bcs_client_block=_block("bcs_client"),
+            coerce=_coerce,
+            as_bool=_as_bool,
         )
 
     @singleton

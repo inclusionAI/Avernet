@@ -1,0 +1,27 @@
+import type { TodoStatus } from './models';
+
+export const TODO_STATUS_OPTIONS: Array<{ value: 'all' | TodoStatus; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'pending', label: '待处理' },
+  { value: 'in_progress', label: '进行中' },
+  { value: 'pending_acceptance', label: '待验收' },
+  { value: 'completed', label: '已完成' },
+];
+
+export const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
+  pending: '待处理',
+  in_progress: '进行中',
+  pending_acceptance: '待验收',
+  completed: '已完成',
+};
+
+export const TODO_STATUS_CLASS: Record<TodoStatus, string> = {
+  pending: 'border-destructive/20 bg-destructive/10 text-destructive',
+  in_progress: 'border-primary/30 bg-primary/10 text-primary',
+  pending_acceptance: 'border-warning/20 bg-warning/10 text-warning',
+  completed: 'border-success/30 bg-success/10 text-success',
+};
+
+export function canInteractWithTodo(status: TodoStatus): boolean {
+  return status === 'pending_acceptance';
+}

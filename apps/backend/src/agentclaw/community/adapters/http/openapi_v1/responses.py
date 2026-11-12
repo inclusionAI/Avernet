@@ -119,6 +119,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials impo
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_todo import (
+    TODO_HTTP_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
     WORK_ORDER_ERROR_STATUS, WORK_ORDER_ERROR_CODES,
 )
@@ -657,6 +660,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
+    **TODO_HTTP_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),

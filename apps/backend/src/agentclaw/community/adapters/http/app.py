@@ -235,7 +235,6 @@ app = FastAPI(lifespan=_app_lifespan)
 # middleware, and at construction, because the lifespan guard above only fires
 # on hosts that drive the lifespan protocol.
 install_worker_runtime_guard(app)
-
 def finalize_worker_runtime() -> None:
     """Initialize everything this worker process owns — see :mod:`.boot`.
 
@@ -378,7 +377,6 @@ _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
     EngineUrlNotConfigured: 500,
     EngineUnreachable:      502,
 }
-
 def _trace_headers(request: Request) -> dict[str, str]:
     """Return ``{"X-Trace-ID": <id>}`` for echoing on error responses.
 
@@ -388,7 +386,6 @@ def _trace_headers(request: Request) -> dict[str, str]:
     """
     trace_id = getattr(request.state, "trace_id", None)
     return {"X-Trace-ID": trace_id} if trace_id else {}
-
 def _is_public_api(request: Request) -> bool:
     """Whether this request belongs to the public OpenAPI surface."""
     from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api

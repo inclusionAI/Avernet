@@ -71,9 +71,7 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
-    ): NoCheck(
-        "tenant-wide BBS reply location read; no addressed bot"
-    ),
+    ): NoCheck("tenant-wide BBS reply location read; no addressed bot"),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "public BBS write; author declared in the body, no addressed bot"
     ),
@@ -129,30 +127,42 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
-    ): NoCheck("public A-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"),
+    ): NoCheck(
+        "public A-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self",
-    ): NoCheck("public B-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"),
+    ): NoCheck(
+        "public B-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register",
-    ): NoCheck("public B-mode cron-register trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"),
+    ): NoCheck(
+        "public B-mode cron-register trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove",
-    ): NoCheck("public B-mode cron-remove trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"),
+    ): NoCheck(
+        "public B-mode cron-remove trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/interactions"): NoCheck(
         "public BBS interaction write; actor declared in the body, no addressed bot"
     ),
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/interactions/summary",
-    ): NoCheck("tenant-wide BBS summary read; explicitly requested dimensions, no addressed bot"),
+    ): NoCheck(
+        "tenant-wide BBS summary read; explicitly requested dimensions, no addressed bot"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bbs/interactions/summary/batch",
-    ): NoCheck("tenant-wide BBS summary batch read; requested dimensions, no addressed bot"),
+    ): NoCheck(
+        "tenant-wide BBS summary batch read; requested dimensions, no addressed bot"
+    ),
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
@@ -171,5 +181,41 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"): NoCheck(
         "a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"
+    ),
+}
+
+
+#: Human self-service Todo workbench; Space and Bot scope are service-enforced.
+TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/todos"): NoCheck(
+        "Todo list is Space-scoped and service-enforced; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/todos"): NoCheck(
+        "Todo creation validates Space membership and Bot eligibility in the service"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}"): NoCheck(
+        "Todo detail derives the human actor and verifies the Todo Space in the service"
+    ),
+    ("POST", "/openapi/v1/todos/{todo_id}/run"): NoCheck(
+        "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}/events"): NoCheck(
+        "event projection inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+        "interaction history inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/todos/{todo_id}/artifacts"): NoCheck(
+        "artifact list inherits the Todo Space membership check"
+    ),
+    (
+        "GET",
+        "/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    ): NoCheck("artifact content inherits the Todo Space membership check"),
+    ("POST", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+        "human interaction inherits Todo Space and pending-acceptance checks"
+    ),
+    ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): NoCheck(
+        "human acceptance inherits Todo Space and pending-acceptance checks"
     ),
 }

@@ -239,6 +239,7 @@ from .bot_chats import router as chats_router
 from .task.bbs import read_router as bbs_read_router
 from .task.bbs import browse_open_router
 from .task.feedback import read_router as feedback_read_router
+from .task.todos import router as todo_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router

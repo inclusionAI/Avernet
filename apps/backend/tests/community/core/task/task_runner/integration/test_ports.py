@@ -1,8 +1,8 @@
 from typing import Any, Protocol, runtime_checkable  # noqa: F401
 
 from agentclaw.community.core.task.task_runner.client.ports import (
-    ApiKeyProvider, BcsBotIdentityResolver, BcsClientPort, OpenApiBotPort, PromptFormatter,
-    ResultSink, TaskContextBuilder,
+    ApiKeyProvider, BcsBotIdentityResolver, BcsClientPort, OpenApiBotError,
+    OpenApiBotPort, PromptFormatter, ResultSink, TaskContextBuilder,
 )
 
 
@@ -18,6 +18,10 @@ def test_open_api_bot_port_methods():
     assert hasattr(OpenApiBotPort, "get_run")
     assert hasattr(OpenApiBotPort, "get_session_messages")
     assert hasattr(OpenApiBotPort, "cancel_run")
+
+
+def test_open_api_bot_error_is_transport_neutral_runtime_error():
+    assert issubclass(OpenApiBotError, RuntimeError)
 
 
 def test_bcs_bot_identity_resolver_methods():

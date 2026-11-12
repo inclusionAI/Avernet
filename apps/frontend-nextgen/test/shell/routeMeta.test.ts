@@ -34,6 +34,15 @@ describe('routeMeta 路由归属契约', () => {
     expect(getRouteMeta('/workspace/collaboration/detail')?.navKey).toBe('collaboration');
   });
 
+  it('实验室待办和任务使用独立路由元信息，并共同归属实验室导航', () => {
+    expect(getRouteMeta('/lab/todos')).toEqual(
+      expect.objectContaining({ path: '/lab/todos', title: '待办', navKey: 'lab' }),
+    );
+    expect(getRouteMeta('/lab/tasks')).toEqual(
+      expect.objectContaining({ path: '/lab/tasks', title: '任务', navKey: 'lab' }),
+    );
+  });
+
   it('任务列表保留路由元信息，但不再占产品导航位', () => {
     expect(getRouteMeta('/work/my-task')).toEqual(
       expect.objectContaining({ path: '/work/my-task', title: '任务列表', section: 'legacy' }),

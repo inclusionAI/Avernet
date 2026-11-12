@@ -288,6 +288,12 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
+    # Context collaboration derives the actor from the verified principal;
+    # callers cannot steer execution by supplying a separate user dimension.
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}/run",
+    ),
     # The Bot overview carries only non-user data, identical for every caller.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/overview"),
     # The minimal classification is tenant-wide, not owner-scoped.
@@ -873,9 +879,10 @@ def test_the_pinned_number_of_operations_take_it():
     # The default-model read adds one Bot-addressed user-scoped operation.
     # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
-    # The six service-Bot evaluation operations add six user-taking,
-    # path-addressed operations: 292 -> 298 / 220 -> 226.
-    assert len(taking) == 298
+    # The incoming surface has 298 user-scoped operations. All eight Todo routes
+    # are also user-scoped, so the merged surface has 306. Context-collab derives
+    # its actor from the verified principal and therefore adds no user_id query.
+    assert len(taking) == 306
 
 
 def test_the_exempt_operations_take_none():

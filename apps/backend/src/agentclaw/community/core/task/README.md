@@ -179,6 +179,7 @@ stateDiagram-v2
 - 空内容、非法 JSON、缺 `success`、`success` 非 bool、FAIL 无 gaps 均转 `exec_error=terminal_result_invalid`,进入 Harness;不得默认 PASS。
 - `TaskExecutorResultPoller` 是 worker fire-and-poll 业务 SLA 的唯一所有者。SLA 超时/连续轮询失败属于执行异常(`exec_error`),不是验收 FAIL。
 - Poller 超时后 best-effort `cancel_run`;Singlebox 真实取消后台 WebSocket collector。Singlebox Adapter 仅保留连接/握手/send ACK 等传输超时,不再用更短业务超时提前截断 Bot。
+- `OpenApiBotPort.send_message` 的已知 transport/protocol/business 投递失败统一使用 transport-neutral 的 `OpenApiBotError`；具体 Adapter 可以提供子类，但上层消费者不得依赖具体 HTTP 实现异常。未声明的编程错误不应被宽泛包装。
 
 ### graph 与 harness
 

@@ -9,6 +9,7 @@ from .authorization_rules_service_eval import SERVICE_EVAL_AUTHORIZATION
 from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
+    TASK_TODO_AUTHORIZATION,
 )
 from .models_authorization import (
     EDIT_LOCK,
@@ -980,6 +981,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "the named user's own work orders and notifications"
     ),
     **TASK_PUBLIC_AUTHORIZATION,
+    **TASK_TODO_AUTHORIZATION,
     # ── Retiring addresses in ``deprecated/``: the other half of the table,
     # a same-keyed dict unioned in unchanged — split out to keep this file
     # inside the module-size cap (Rule 9). See

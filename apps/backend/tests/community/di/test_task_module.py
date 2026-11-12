@@ -46,7 +46,6 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
 )
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.di.modules.task_module import TaskModule
-
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,

@@ -126,6 +126,14 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    // 实验室「待办」工作台：当前空间待办、事件时序、互动和验收。
+    path: '/lab/todos',
+    title: '待办',
+    section: 'collab',
+    navKey: 'lab',
+    openCore: true,
+  },
+  {
     // 实验室「任务」体验页:跨Bot跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
     path: '/lab/tasks',
     title: '任务',

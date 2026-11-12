@@ -10,6 +10,7 @@ provides:
   - RecordingBcsOwnershipPlugin
   - RecordingBcsCollaborationMetadataPlugin
   - "Local* and Noop* implementations, including LocalSkillCenterGateway"
+  - LocalTodoCollaborationPlugin
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
@@ -77,6 +78,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.bcs_managers
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.context_collab_runtime
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.device_connection_manager
@@ -113,6 +115,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.storage
   - agentclaw.community.plugin_api.tc_resource_ready
   - agentclaw.community.plugin_api.token_exchange
+  - agentclaw.community.plugin_api.todo_collaboration
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
   - agentclaw.community.plugins.community.agentswarm.bot_subagent  # the local DefaultSubagentFactory builds bot-kind subagents through the community impl

@@ -7,6 +7,7 @@ import pytest
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBadRequestError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotError
 
 
 class _Key:
@@ -113,6 +114,59 @@ def test_send_message_forwards_session_id_when_present():
     rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
     assert rid.run_id == "mid_77"
     assert rid.session_id == "s_99"
+
+
+def test_openapi_error_implements_port_error_contract():
+    assert issubclass(OpenApiError, OpenApiBotError)
+
+
+def test_send_message_normalizes_transport_failure():
+    def h(req):
+        raise httpx.ConnectError("connection failed", request=req)
+
+    with pytest.raises(OpenApiError, match="transport failed") as exc_info:
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
+
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+
+
+def test_send_message_normalizes_non_json_response():
+    def h(req):
+        return httpx.Response(200, content=b"not-json")
+
+    with pytest.raises(OpenApiError, match="not valid JSON") as exc_info:
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_send_message_rejects_non_object_data():
+    def h(req):
+        return httpx.Response(
+            200,
+            json={"code": 0, "data": ["unexpected"]},
+        )
+
+    with pytest.raises(OpenApiError, match="data must be a JSON object"):
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
 
 
 def test_send_message_forwards_runtime_metadata_without_putting_it_in_prompt():
