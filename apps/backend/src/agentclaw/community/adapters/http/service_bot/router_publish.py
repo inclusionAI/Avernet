@@ -68,7 +68,10 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
-from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    EvalBindingNotFoundError,
+    UpgradeDraftRestartError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowServiceError,
 )
@@ -300,6 +303,13 @@ async def get_bot_stage_binding_info(
 
     except BotNotFoundError as e:
         logger.warning(f"[get_bot_stage_binding_info] Bot not found: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+
+    except EvalBindingNotFoundError as e:
+        # Evaluation bindings are lazily created by the quality task and publish
+        # operation paths. A missing binding is an expected 404 for BAAS, not a
+        # platform failure that the caller should treat as an infrastructure error.
+        logger.warning(f"[get_bot_stage_binding_info] Eval binding not found: {e}")
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except BotPublishServiceError as e:

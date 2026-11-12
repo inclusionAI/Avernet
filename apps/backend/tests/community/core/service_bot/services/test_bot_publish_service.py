@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call
 
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
+    EvalBindingNotFoundError,
     PublishNotFoundError,
     PublishStatusInvalidError,
     BotPublishServiceError,
@@ -2739,7 +2740,7 @@ class TestGetBotStageBindingInfo:
             device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
+        with pytest.raises(EvalBindingNotFoundError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", PublishStage.EVAL.value)
 
     def test_service_bot_eval_task_missing_bot_uuid_binding_fallback(self):
@@ -2762,7 +2763,7 @@ class TestGetBotStageBindingInfo:
             device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
+        with pytest.raises(EvalBindingNotFoundError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "eval-task-uuid-001")
 
     def test_service_bot_online_success(self):
@@ -2967,7 +2968,7 @@ class TestGetBotStageBindingInfo:
             device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
+        with pytest.raises(EvalBindingNotFoundError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "eval-biz-001")
 
     def test_service_bot_eval_stage_no_binding_found(self):
@@ -2990,7 +2991,7 @@ class TestGetBotStageBindingInfo:
             device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
+        with pytest.raises(EvalBindingNotFoundError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "eval")
 
     def test_service_bot_eval_binding_path_success(self):

@@ -22,6 +22,7 @@ from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotAlreadyServiceTypeError,
     BotNotFoundError,
+    EvalBindingNotFoundError,
     BotNotServiceTypeError,
     BotPublishServiceError,
     BotTypeNotSupportedError,
@@ -149,6 +150,12 @@ async def test_get_bot_stage_binding_info_paths():
         "bot", "owner-1", "online", publish_service=service,
     )
     assert_error(resp, 404, "bot missing")
+
+    service.get_bot_stage_binding_info.side_effect = EvalBindingNotFoundError("eval binding missing")
+    resp = await router_publish.get_bot_stage_binding_info(
+        "bot", "owner-1", "eval", publish_service=service,
+    )
+    assert_error(resp, 404, "eval binding missing")
 
     service.get_bot_stage_binding_info.side_effect = BotPublishServiceError("service bad")
     resp = await router_publish.get_bot_stage_binding_info(
