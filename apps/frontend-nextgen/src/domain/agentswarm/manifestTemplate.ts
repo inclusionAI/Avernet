@@ -17,7 +17,7 @@
 export const MANIFEST_DOCS_URL =
   'https://github.com/inclusionAI/Avernet/blob/dev/apps/backend/docs/bot-config-manifest/manifest-schema.zh-CN.md';
 
-export const MANIFEST_TEMPLATE = `# 完整语法：${MANIFEST_DOCS_URL}
+export const MANIFEST_TEMPLATE = `# Full grammar: ${MANIFEST_DOCS_URL}
 schema_version: 1
 manifest:
   identity:
@@ -27,17 +27,5 @@ manifest:
         Do what the task asks, report results honestly, and do not invent
         information you were not given.
 
-  # 可选类目：取消注释后填写，字段说明见上方文档
-  # mcp:
-  #   - server_code:
-  #     config: {}
-  #
-  # skills:
-  #   - name:
-  #     source:
-  #       protocol:
-  #       bucket:
-  #       key:
-  #       auth:
-  #     digest:
+  # Optional categories, uncomment and fill in (see the doc above): mcp / skills
 `;
