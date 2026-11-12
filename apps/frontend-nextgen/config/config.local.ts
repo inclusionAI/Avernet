@@ -63,7 +63,6 @@ export default defineConfig({
     },
   },
   define: {
-    TASK_PANEL_ASSET_BASE_URL: process.env.TASK_PANEL_ASSET_BASE_URL || '/task-panel/0.1.1',
     TEAMCLAW_LOGIN_STRATEGY: loginStrategy,
     TEAMCLAW_TASK_API_BASE: taskApiBase,
     TEAMCLAW_DEV_ENV:

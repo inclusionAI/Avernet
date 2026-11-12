@@ -50,8 +50,9 @@
 ## 复现命令
 
 在资产目录运行 `npm ci && npm run verify && npm pack --dry-run`。
-C2 后不再运行 prepare：资产独立 verify/serve，两个宿主设置可信固定版本
-`TASK_PANEL_ASSET_BASE_URL`；然后运行各自类型、测试和 build。本地类型检查
+资产独立 verify/serve；本地开发直接读取 `/task-panel/index.umd.js` 与同目录 CSS，
+不请求 manifest。正式构建只读 `/api/v1/collaboration/tasks/manifest`；
+然后运行各自类型、测试和 build。本地类型检查
 仍需共享公共类型入口；生产构建不需要资产输入。
 资产合成浏览器入口为 `node scripts/serve-smoke.mjs`，仅监听 loopback；不是产品部署入口。
 
@@ -84,7 +85,7 @@ C2 后不再运行 prepare：资产独立 verify/serve，两个宿主设置可�
 **当前实现已删除这些机制，不应再执行其中的 prepare 命令。**
 
 - 共享资产源码唯一位于 backend/assets/task-panel；独立构建和交付 UMD/CSS。
-  两产品读取部署指定 `TASK_PANEL_ASSET_BASE_URL`，不依赖 BCS 业务 manifest，
+  两产品正式构建读取任务模块 manifest，本地开发直接读取当前本地 UMD/CSS；
   不接收消息/Bot 指定任务资源 URL；缺少配置明确报错，不默认回退镜像路径。
 - 删除两个宿主 generated 任务目录、public 资产镜像、prepare/copy 脚本与 hooks、
   helpers 构建。frontend-nextgen Docker 不再 build/COPY 任务资产。

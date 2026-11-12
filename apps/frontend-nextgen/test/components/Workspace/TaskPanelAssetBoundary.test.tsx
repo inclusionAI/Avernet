@@ -1,10 +1,12 @@
 /** @jest-environment jsdom */
 import React from 'react';
+import { backendRequest } from '@/services/backendApi/httpClient';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { TaskPanelAssetBoundary } from '@/components/Workspace/TaskPanelAssetBoundary';
 import { loadTaskPanelAsset, type TaskPanelAsset } from '@/services/tasks/panel/taskPanelAssetLoader';
 import { nextgenTaskPanelHost } from '@/services/tasks/panel/taskPanelRuntime';
 
+jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
 jest.mock('@/services/tasks/panel/taskPanelAssetLoader', () => ({ loadTaskPanelAsset: jest.fn() }));
 jest.mock('@/services/tasks/panel/taskPanelRuntime', () => ({ nextgenTaskPanelHost: { getViewer: () => ({ userId: 'viewer' }) }, getTaskPanelRuntimeGeneration: () => 0, subscribeTaskPanelRuntime: () => () => {} }));
 
@@ -112,15 +114,13 @@ it('shares one real JS/CSS load across mounts and reuses the valid asset on rend
   jest.spyOn(console, 'error').mockImplementation(() => {});
   const global = window as unknown as {
     taskPanel?: TaskPanelAsset;
-    AVERNET_RUNTIME_CONFIG?: { TASK_PANEL_ASSET_BASE_URL: string };
   };
   const previousAsset = global.taskPanel;
-  const previousConfig = global.AVERNET_RUNTIME_CONFIG;
   const realLoader = jest.requireActual<typeof import('@/services/tasks/panel/taskPanelAssetLoader')>(
     '@/services/tasks/panel/taskPanelAssetLoader',
   );
   loadAsset.mockImplementation(realLoader.loadTaskPanelAsset);
-  global.AVERNET_RUNTIME_CONFIG = { TASK_PANEL_ASSET_BASE_URL: `https://assets.example.test/task-panel/${realLoader.TASK_PANEL_ASSET_VERSION}` };
+  jest.mocked(backendRequest).mockResolvedValue({ code: 200000, data: { schema_version: 1, env: 'pre', bundles: [{ name: 'taskPanel', url: 'https://assets.example.test/task-panel/0.2.0/index.umd.js' }] } });
   delete global.taskPanel;
   let fail = true;
   const mounted = render(<>
@@ -133,12 +133,12 @@ it('shares one real JS/CSS load across mounts and reuses the valid asset on rend
   try {
     await act(async () => {});
     expect(document.querySelectorAll('script')).toHaveLength(1);
-    expect(document.querySelectorAll('link[data-task-panel-version]')).toHaveLength(1);
+    expect(document.querySelectorAll('link[data-task-panel-source]')).toHaveLength(1);
     const script = document.querySelector('script')!;
-    const style = document.querySelector('link[data-task-panel-version]')!;
+    const style = document.querySelector('link[data-task-panel-source]')!;
     await act(async () => {
       global.taskPanel = {
-        ...asset, hostApiVersion: 1, assetVersion: realLoader.TASK_PANEL_ASSET_VERSION,
+        ...asset, hostApiVersion: 1, assetVersion: '0.2.0',
         TaskLoopView: () => null, createTaskPanelController: jest.fn(),
       } as unknown as TaskPanelAsset;
       script.dispatchEvent(new Event('load'));
@@ -150,12 +150,11 @@ it('shares one real JS/CSS load across mounts and reuses the valid asset on rend
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(await screen.findByText('retried real asset')).toBeTruthy();
     expect(document.querySelector('script')).toBe(script);
-    expect(document.querySelector('link[data-task-panel-version]')).toBe(style);
+    expect(document.querySelector('link[data-task-panel-source]')).toBe(style);
     script.remove();
     style.remove();
   } finally {
     mounted.unmount();
     global.taskPanel = previousAsset;
-    global.AVERNET_RUNTIME_CONFIG = previousConfig;
   }
 });

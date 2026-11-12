@@ -243,3 +243,14 @@ owner: task-module
 - [x] 共享controller、实际视图点击、任务切换自动选节点、真UMD及真实SDK正反对照测试通过。
 - [x] 资产verify46 suites/340 tests；新宿主相关5 suites/22 tests；旧宿主11 suites/163 tests；新宿主types/lint/门禁通过。
 - [x] 本地固定UMD已重建，同源HTTPS200且文件一致；需整页刷新后人工复测，不发布。
+
+
+## C9：单一 manifest 与最小接入清理
+
+- [x] 后端仅保留已认证的 `/api/v1/collaboration/tasks/manifest`，无 OpenAPI 镜像。
+- [x] 配置读取使用环境隔离的 system-config `task / panel`；既有写口增加该键的管理员校验及严格格式校验。
+- [x] 两端正式构建的 loader 读取 manifest，删除旧资源地址注入及宿主包版本 pin；校验接口、去重、重试、禁止热换与未知全局。
+- [x] 本地开发直接加载独立 server 的当前 UMD/CSS，不请求 manifest，不模拟接口；业务 API 保持预发。
+- [x] 恢复两端 tsconfig 原排版，仅保留必要 task 类型/测试映射；删除无效生产配置修改。
+- [x] 后端接口/权限/架构、新旧宿主回归、资产与构建验证收口。
+- [ ] 用户本地真实会话验收；组件发布后的预发真实 manifest/CDN 与两端验收。

@@ -41,27 +41,39 @@ provider. Explicit and message opens invalidate delayed recovery results.
 ## Independent delivery (workflow-style)
 
 Release through the task-specific tag/OIDC workflow described in
-[PUBLISHING.md](PUBLISHING.md), matching the BCS panel release model. A verified
-published version can be loaded directly from an npm-backed CDN; local frontend
-users then need only its fixed-version asset directory URL, not a local asset
-server. Publication and deployment configuration are separate steps.
+[PUBLISHING.md](PUBLISHING.md). Deployed hosts discover assets only through authenticated
+`GET /api/v1/collaboration/tasks/manifest`; there is no OpenAPI mirror. The backend
+reads the environment-scoped system-config value `task / panel`. Hosts load the
+returned `taskPanel` JS URL and `task-panel.css` from the same directory, checking
+host API compatibility rather than pinning the package version in application
+code. Changing configuration takes effect on the next full page load; an active
+page never hot-swaps an evaluated asset. Missing/invalid discovery fails visibly,
+without silently selecting another version.
 
-Build this package independently and serve the resulting UMD/CSS from a trusted,
-versioned asset location. Neither host copies compiled assets into its source or
-public directory. For local development, after `npm run verify`:
+### Local frontend + pre backend, unpublished asset
 
 ```sh
+# In this package directory
+npm run build
 npm run serve
-# TASK_PANEL_ASSET_BASE_URL=http://127.0.0.1:43820/task-panel/0.1.0
 ```
 
-Start either host with that `TASK_PANEL_ASSET_BASE_URL` environment variable.
-Production deployments must supply an immutable HTTPS directory through the
-same build-time variable or `window.AVERNET_RUNTIME_CONFIG.TASK_PANEL_ASSET_BASE_URL`.
-The runtime value takes precedence. No URL is configured by default: missing
-configuration shows an actionable loading error, not a second implementation.
-The independent server is a development fixture, not a production deployment.
-It exposes only the two versioned public files, never source or node_modules.
+The development server listens on loopback port 43820. Both hosts in development
+load `/task-panel/index.umd.js` and `/task-panel/task-panel.css` directly through
+their existing local proxy, without requesting a manifest. These aliases serve
+the current local build, so host code has no package-version pin. The server also
+supports versioned asset paths, but exposes no manifest fixture. All business
+APIs still use the selected backend preset. Start the
+legacy host normally with `tnpm run devs:pre`; start frontend-nextgen with its
+existing pre-backend parameters. There is no additional asset URL environment
+variable, host-generated file, production runtime injection or build-time version
+pin. Keep the asset process running independently; host startup does not build it.
+
+This verifies unpublished UI against pre business data, **not** the pre backend's
+real discovery endpoint or published CDN delivery. After publication/deployment,
+validate the real manifest, JS/CSS delivery and authenticated product interaction
+in pre separately. The local asset server is not a production API or server;
+it exposes no task execution endpoints, source or node_modules.
 
 `src/public-api.ts` is the type-only public contract. Hosts use `import type`
 and `export type` from `@avernet-assets/task-panel`; these disappear at build

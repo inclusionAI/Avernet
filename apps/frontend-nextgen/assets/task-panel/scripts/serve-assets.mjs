@@ -10,6 +10,8 @@ export function createAssetServer() {
   const files = new Map([
     [`${assetPath}/index.umd.js`, ['index.umd.js', 'application/javascript; charset=utf-8']],
     [`${assetPath}/task-panel.css`, ['task-panel.css', 'text/css; charset=utf-8']],
+    ['/task-panel/index.umd.js', ['index.umd.js', 'application/javascript; charset=utf-8']],
+    ['/task-panel/task-panel.css', ['task-panel.css', 'text/css; charset=utf-8']],
   ]);
   return http.createServer(async (req, res) => {
     const entry = files.get(req.url);
@@ -23,5 +25,5 @@ export function createAssetServer() {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 43820);
-  createAssetServer().listen(port, '127.0.0.1', () => console.log(`TASK_PANEL_ASSET_BASE_URL=http://127.0.0.1:${port}${assetPath}`));
+  createAssetServer().listen(port, '127.0.0.1', () => console.log(`Task panel local assets: http://127.0.0.1:${port}${assetPath}`));
 }

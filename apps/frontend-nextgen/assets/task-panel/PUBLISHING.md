@@ -79,11 +79,9 @@ remote branch before tagging; merging it into `dev` is not required. Exercise bo
 candidate asset; a build alone does not prove authentication, routing or file
 access.
 
-The UMD embeds the package version automatically. Both hosts also pin the expected
-version in their task-specific `assetLoader.ts` / `taskPanelAssetLoader.ts`.
-Review and update those pins when changing the release version; otherwise they
-correctly reject the new asset. Publishing does not change type-only resolution
-or deploy either host.
+The UMD embeds the package version automatically. Hosts check `hostApiVersion`
+and required exports, not a compiled-in package version. Select the verified
+immutable release URL in system-config after publication.
 
 ## Publish from the selected release branch
 
@@ -120,31 +118,46 @@ npm view "@avernet-assets/task-panel@${panel_version}" version dist.integrity
 
 ## Deliver to both hosts
 
-After publishing and verifying both assets are available, configure an exact
-npm-backed CDN version, just like BCS panel delivery. The value is a directory,
-not a JS filename. Example for a successfully published version 0.1.0:
+First validate unpublished assets locally against the pre business backend,
+following this package's README. This stage needs no npm publication. Then
+review/merge the component and host/backend changes into the intended iteration
+branch and publish only when separately authorized.
 
-```bash
-TASK_PANEL_ASSET_BASE_URL=https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@0.1.0/dist
+After confirming both published files are reachable, deploy the single
+authenticated read endpoint `GET /api/v1/collaboration/tasks/manifest` and configure
+the pre environment. There is no OpenAPI mirror. Reuse the existing operator
+config APIs: create `category=task` via `POST /api/v1/config/categories` if absent,
+then `POST /api/v1/config/set`. The server selects its own environment.
+
+Example (replace 0.1.1 with an actually published and verified release):
+
+```json
+{
+  "category": "task",
+  "config_key": "panel",
+  "config_value": {
+    "schema_version": 1,
+    "bundles": [{
+      "name": "taskPanel",
+      "type": "url",
+      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@0.1.1/dist/index.umd.js"
+    }]
+  },
+  "description": "Task panel frontend assets"
+}
 ```
 
-The host appends `/index.umd.js` and `/task-panel.css`. Check both return the
-intended content and work under the page's resource/security policy and target
-network before switching configuration. npm success is not proof of CDN or E2E
-success. A trusted independent static host may serve the same immutable files.
+Only an operator can update this key. Invalid values are rejected; a missing
+category/save failure must not be treated as successful. Both hosts read
+`data.bundles` from the manifest and derive `task-panel.css` beside the JS URL.
+There is no host asset URL injection or application package-version pin. Updates
+need a full page refresh, not an application rebuild or service restart.
+Manifest failures have no implicit asset fallback.
 
-frontend-nextgen and open-claw accept this build-time variable or
-`window.AVERNET_RUNTIME_CONFIG.TASK_PANEL_ASSET_BASE_URL` (runtime takes precedence).
-No BCS business manifest change is required. Do not use `latest`, message/Bot
-URLs, or copies in frontend source/public directories. Missing configuration
-remains an explicit error, not a fallback to another implementation.
-
-With a reachable published release, a local frontend connecting to pre-production
-needs only that asset URL, not a local asset server. To test unpublished source,
-build here and run `npm run serve`; point the host at the printed local directory,
-using a same-origin development proxy if browser policy blocks access. That
-server is a development fixture, not production hosting. Python backend runtime
-does not build or serve these assets.
+Finally verify the actual pre manifest, CDN and both hosts. Local fixture success
+is not pre acceptance. Production rollout follows only after that validation and
+a separate deployment decision; publishing does not deploy it. Never accept
+message/Bot-supplied script URLs or mirror assets into host source/public.
 
 ## Rollback and troubleshooting
 
@@ -158,12 +171,12 @@ does not build or serve these assets.
   `NPM_TOKEN` as a workaround.
 - **Version exists:** increment the version, review and push the release commit to an allowed
   branch, then create a new tag.
-- **Bad release:** configure the previous validated immutable directory together
-  with matching host version pins/configuration and reload the page. Do not
+- **Bad release:** restore the previous validated immutable JS URL in `task / panel`
+  system-config and reload the page. Do not
   hot-swap the global taskPanel version in an active tab. Publish a corrected
   patch; a package owner may deprecate the bad release if necessary.
 - **CDN file unavailable:** inspect the exact version's archive and delivery before
-  changing host configuration. Publication does not itself deploy to pre/prod.
+  changing manifest configuration. Publication does not itself deploy to pre/prod.
 
 Adding this release mechanism is not authorization to commit, push, tag, publish,
 or deploy. Perform each release only after explicit approval.
