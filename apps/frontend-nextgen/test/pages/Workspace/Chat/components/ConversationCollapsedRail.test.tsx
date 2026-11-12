@@ -122,8 +122,10 @@ it.each([false, true])(
 
 it.each([
   ['managed', 'OFFLINE', '已下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['managed', 'RECYCLED', '已回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
   ['managed', 'RELEASED', '已回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
   ['team', 'OFFLINE', '协作下线 Bot', '该 Bot 已下线，暂时无法发起会话'],
+  ['team', 'RECYCLED', '协作回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
   ['team', 'RELEASED', '协作回收 Bot', '该 Bot 已回收，暂时无法发起会话'],
 ] as const)('收起侧栏的 %s/%s Bot 保持置灰且不能快捷打开', async (section, status, name, reason) => {
   const unavailable = botOf(`${section}-${status}:1`, name, { status });

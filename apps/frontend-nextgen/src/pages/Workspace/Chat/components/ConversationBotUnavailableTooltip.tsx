@@ -10,6 +10,7 @@ export const BOT_UNAVAILABLE_REASONS: Record<string, string> = {
   FAILED: '该 Bot 因创建或运行异常暂时无法使用；可在 Bot 管理中尝试运维恢复',
   PENDING: '该 Bot 正在创建或重启中，暂时无法使用，完成后可刷新重试',
   OFFLINE: '该 Bot 已下线，暂时无法发起会话',
+  RECYCLED: '该 Bot 已回收，暂时无法发起会话',
   RELEASED: '该 Bot 已回收，暂时无法发起会话',
 };
 

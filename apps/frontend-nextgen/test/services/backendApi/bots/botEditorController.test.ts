@@ -331,3 +331,20 @@ test('MCP read addresses the Bot owner separately from the acting user', async (
     else Reflect.deleteProperty(globalThis, 'TEAMCLAW_OPENAPI_USER_ID');
   }
 });
+
+test.each([
+  ['activate Skill', () => botEditorController.setSkillActive('shared-bot', 'skill-1', true, 'owner-77')],
+  ['delete Skill', () => botEditorController.deleteSkill('shared-bot', 'skill-1', 'owner-77')],
+  ['upload Skill', () => botEditorController.uploadSkill('shared-bot', new ArrayBuffer(0), 'owner-77')],
+  ['upload Skill folder', () => botEditorController.uploadSkillFolder('shared-bot', [], 'owner-77')],
+  ['activate MCP', () => botEditorController.setMcpActive('shared-bot', 'mcp.weather', true, 'owner-77')],
+  ['create channel', () => botEditorController.createChannel('shared-bot', {}, 'owner-77')],
+  ['update channel', () => botEditorController.updateChannel('shared-bot', 1, {}, 'owner-77')],
+  ['update channel status', () => botEditorController.setChannelStatus('shared-bot', 1, 'active', 'owner-77')],
+  ['delete channel', () => botEditorController.deleteChannel('shared-bot', 1, 'owner-77')],
+])('%s addresses the Bot owner for collaborator mutations', async (_label, invoke) => {
+  const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+  await invoke();
+  const url = new URL(String(fetchSpy.mock.calls[0][0]), 'http://localhost');
+  expect(url.searchParams.get('owner_id')).toBe('owner-77');
+});

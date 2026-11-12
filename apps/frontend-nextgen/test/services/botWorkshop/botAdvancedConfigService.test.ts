@@ -62,7 +62,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
     replyToMessage: true,
     aixEnable: true,
     includeSenderName: true,
-  });
+  }, 'owner-1');
 
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
     type: 'dingding',
@@ -82,7 +82,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
       include_sender_name: true,
       robot_code: '',
     },
-  });
+  }, 'owner-1');
 });
 
 test('渠道列表兼容 OpenAPI 直接数组并保留完整配置', async () => {
@@ -153,7 +153,7 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
     groupChatScope: 'per_sender',
     outboundVisibility: 'full_transcript',
     forwardSenderIdentity: true,
-  });
+  }, 'owner-1');
 
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
     type: 'dingding',
@@ -169,5 +169,5 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
       outbound_visibility: 'full_transcript',
       forward_sender_identity: true,
     },
-  });
+  }, 'owner-1');
 });
