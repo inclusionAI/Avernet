@@ -90,6 +90,20 @@ change, and no database migration; the same 5.0.0 delivery also adds the
 BCSFuse request `filters` field in `bcs-fuse-client` to carry that recall
 scope.
 
+## Version 6.0.0: Candidate current-owner display projection
+
+`BotCandidate` adds `owner_user_id: Option<String>`. Existing Rust struct literals
+must supply the new field, and `BotAuthorityRepoPort`, `BotAuthorityCoreService`,
+and `BotAuthorityPort` add required `ownerships_for` methods without defaults.
+External constructors and trait implementors must therefore migrate together;
+this is a major Rust Service API version change. Workspace consumers use path
+dependencies and rebuild together.
+
+The HTTP JSON field is optional and omitted when no owner projects, so existing
+clients can ignore it. Owner display metadata comes from the current authority
+owner edge rather than the historical `created_by` column. There is no Plugin
+API, route, configuration, database schema, or migration change.
+
 ## Version 3.0.0: Bot response avatars
 
 `PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
