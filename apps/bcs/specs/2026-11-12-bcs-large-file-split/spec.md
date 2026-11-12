@@ -178,8 +178,9 @@ F1 有六处隐式 target 的 tracing 宏：participants 两处、chat 两处、
 本节追加实施结果；上文规范内容保持原样。文首「状态：draft / 文档修订，尚未实施」
 已由本节取代。
 
-- **交付状态**：实施完成、集成门禁证据待补。五个目标均已拆分并单独提交，
-  本地尺寸/清单/单元/metadata 验收通过；arch-check、覆盖率、Singlebox 结果见文末占位项。
+- **交付状态**：实施完成；集成门禁未全部通过（unit pass-rate 99.98%、changed-line
+  66.08%、Singlebox 未验收）。五个目标均已拆分并单独提交，本地尺寸/清单/单元/metadata
+  验收通过；门禁明细见文末。
 - **实施基线**：`b98b580a870050eebcd9d98602d45c9553d1d1e4`；
   实施提交 `5268a2dae7`（F5）、`a5cfe9ce45`（F4）、`50e537ae03`（F2）、
   `28cc19274b`（F3）、`e811eac9ca`（F1）。逐文件行数、完整提交表与证据路径见
@@ -196,6 +197,10 @@ F1 有六处隐式 target 的 tracing 宏：participants 两处、chat 两处、
   `crate::routes::groups::DeleteSessionQuery`，指向同一类型。
 - F2–F5 只迁移测试，收敛在各自 integration target 的子目录；根仍保留全部 fixtures、
   recording doubles 与共享 helpers，没有放宽字段可见性，也没有新增 crate/target。
+- F2 主题名 `tracing` 在 bcs-ws 测试根中遮蔽同名 extern crate，故恰有 2 行偏离纯移动：
+  `use ::tracing::instrument::WithSubscriber;`（根）与
+  `::tracing::dispatcher::get_default`（`frame_compat/diagnostics.rs`），crate 与符号不变；
+  `mod tracing;` 挂载处另有 2 行注释记录该风险。
 - 因此本变更是源码布局调整，不改变公共接口、运行语义或部署配置；回滚按目标文件单元进行。
 
 ### 验收结果
@@ -204,13 +209,38 @@ F1 有六处隐式 target 的 tracing 宏：participants 两处、chat 两处、
 | --- | --- |
 | 尺寸 | `check_size.py` 默认模式 exit 0，40 个本次新增/修改 `.rs` 全部 ≤1000 |
 | 测试清单 | 161 直接测试一一映射（58/40/37/26）+ 3 个 `task_rpc_scope::*` 不变；14 个 ignored 保持；bcs-http 666 个测试名逐字节相同 |
-| 单元 | bcs-http 666、bcs-ws 287 passed + 14 ignored、bcs-bot 299、bcs-organization 26，全部 0 failed（1278 passed，pass rate 100%） |
+| 单元 | 四个目标 crate：bcs-http 666、bcs-ws 287 passed + 14 ignored、bcs-bot 299、bcs-organization 26，共 1278 passed / 0 failed（scope 仅此 4 crate）；workspace 全量 unit pass rate 99.98%（2 个预存失败），见集成门禁 |
 | Cargo metadata | 四个 crate targets 一致；workspace 526 个 test/bench target 无新增 integration test binary |
 | 豁免 | 四个已完成条目移出活动表并追加完成记录；`check-waivers.sh` 从 `apps/bcs` 运行 exit 0；header/expiry 未改 |
 
 ### 集成门禁
 
-- （待集成门禁完成后补记）arch-check 逐子检查对比、覆盖率门槛、Singlebox 与 artifact verifier。
+在 `68a6e84af7` 上实测（最终提交只追加记录，未改 Rust 或验收范围）：
+
+- **arch-check**：HEAD exit 5（**15 项中 9 PASS、1 SKIP（API-1）、5 FAIL**，
+  Score 55/100）；DEP-1~8 bundle 内部 DEP-8 亦为 SKIP（cargo-machete 未安装），
+  但 bundle 因 DEP-1×2 / DEP-6 判 FAIL；SKIP 均不计为通过。
+  与 `$SOURCE_BASE` 临时 worktree 的逐子检查状态和失败清单完全一致（仅 `rg` 枚举顺序与
+  cargo 进度文本不同），没有新增失败。FAIL 为 DEP-1~8、LINT-1、LINT-4、TEST-1、R25。
+  详见 [plan 的集成门禁](plan.md)。
+- **unit**：8237 tests / 8235 passed / 2 failed（99.98%）。两项失败都在
+  `bcs-bot-store::conformance_bot_control_plane_repo`，且已在基线 worktree 用同一 test
+  target 复现（22 passed / 2 failed），属既有失败，与本工单五个 crate 无关；四个目标
+  crate 仍 1278 passed、0 failed。
+- **覆盖率**：overall line 87.26%（>87%，通过）；changed-line 931/1409 = 66.08%
+  （<85%，未通过），changed 行全部来自 F1 的既有生产 handler，非新增逻辑。
+- **Singlebox**：**未验收**。默认 coverage root 因陈旧且属于其他本地栈的 bot profiles
+  而 `stack_start` 失败；隔离 root 因 8000 端口被其他 checkout 的前端进程占用而失败；
+  artifact verifier 因缺少 `summary.json` 等产物 exit 1。未用陈旧产物冒充。
+
+### 最终状态
+
+**实施完成，但集成门禁未全部通过，不标记为完成、不声明可合并**。changed-line
+66.08% 是确定性的 diff 结果：PR CI（`unit-tests.yml`）用同一 `cov_gate.py` 与同一阈值，
+会在**同一提交**上同样失败，只能通过补测试（约再覆盖 267 行）或 owner 显式例外解决；
+workspace unit pass-rate 99.98% 由 2 个预存失败导致，CI 仍需在同一提交上复验（环境
+差异可能影响该两项测试）；Singlebox 属环境冲突，需在干净环境或 CI 复验。未 push、
+未创建 PR；最终裁决由用户/controller 依据上述证据决定。
 
 ### 遗留观察
 
