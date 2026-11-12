@@ -13,6 +13,8 @@ describe('local Skill upload error handling', () => {
     expect(result.current.message).toBe('');
   });
   it.each([
+    [401, '登录状态已失效'],
+    [403, '当前账号没有权限上传'],
     [404, '当前 Bot 不存在或无访问权限'],
     [409, '当前无法上传 Skill'],
     [422, '上传文件信息不正确'],

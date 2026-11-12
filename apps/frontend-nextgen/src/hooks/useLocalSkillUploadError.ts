@@ -12,9 +12,11 @@ export function useLocalSkillUploadError() {
       if (isLocalSkillPackageError(error.data) || error.status === 413) {
         if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
         setMessage(localSkillUploadErrorMessage(error.data, error.status));
-      } else if (error.status === 404 || error.status === 409 || error.status === 422 || (error.status !== undefined && error.status >= 500)) {
+      } else if (error.status === 401 || error.status === 403 || error.status === 404 || error.status === 409 || error.status === 422 || (error.status !== undefined && error.status >= 500)) {
         if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
-        if (error.status === 404) setMessage('当前 Bot 不存在或无访问权限，请刷新页面后重试。');
+        if (error.status === 401) setMessage('登录状态已失效，请重新登录。');
+        else if (error.status === 403) setMessage('当前账号没有权限上传 Skill，请联系 Bot 管理员。');
+        else if (error.status === 404) setMessage('当前 Bot 不存在或无访问权限，请刷新页面后重试。');
         else if (error.status === 409) setMessage('当前无法上传 Skill，请稍后重试。');
         else if (error.status === 422) setMessage('上传文件信息不正确，请重新选择后重试。');
         else setMessage('Skill 服务暂时不可用，上传结果可能未确认，请刷新查看后重试。');
