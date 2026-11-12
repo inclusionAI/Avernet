@@ -255,6 +255,34 @@ describe('TodoDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '返回待办列表' }));
     expect(mockedHistory.push).toHaveBeenCalledWith('/lab/todos');
   });
+  it('使用紧凑事件时间线和验收操作', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('开始采集竞品资料');
+
+    const eventName = screen.getByText('开始采集竞品资料');
+    const actorText = screen.getAllByText('数据分析助手')[0];
+    const eventArtifact = screen.getByText('事件产物');
+    const firstEvent = eventName.closest('li');
+    const acceptanceHeading = screen.getByRole('heading', { name: '待你验收 · Bot 已完成处理' });
+    const acceptance = screen.getByRole('region', { name: '待办验收' });
+    const rejectButton = within(acceptance).getByRole('button', { name: '验收不通过' });
+
+    expect(eventName).toHaveClass('text-sm', 'font-medium');
+    expect(firstEvent).toHaveClass('pb-4');
+    expect(actorText.closest('span.inline-flex')).toHaveClass('px-2', 'py-1', 'text-xs');
+    expect(eventArtifact).toHaveClass('text-sm', 'font-medium');
+    expect(screen.getByText('外部链接')).toHaveClass('text-xs');
+    expect(acceptanceHeading).toHaveClass('text-sm', 'font-semibold');
+    expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
+  });
+
+  it('非待验收待办不显示验收操作', async () => {
+    mockedService.loadTodo.mockResolvedValue({ ...todo, status: 'completed' });
+    render(<TodoDetailPage />);
+    await screen.findByText('开始采集竞品资料');
+    expect(screen.queryByRole('region', { name: '待办验收' })).not.toBeInTheDocument();
+  });
+
   it('使用居中紧凑详情阅读列', async () => {
     render(<TodoDetailPage />);
     const heading = await screen.findByRole('heading', { name: 'Q3 竞品分析' });
