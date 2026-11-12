@@ -43,3 +43,9 @@ No human review/comment at creation-time readback.
 - ACI/CI: PENDING
 - 人工意见: CLEAR at creation-time observation; recheck latest head.
 - 下一步: observe actual checks and reviews for final pushed head; fix actionable failures, retain infrastructure failures as such.
+
+## Remote round 1 — head 06361d0ca6
+- Backend job https://github.com/inclusionAI/Avernet/actions/runs/43146388220/job/130945176613 failed on `test_explicit_user_id.py::test_the_pinned_number_of_operations_take_it`: new status route increases the exact user-scoped operation count from 298 to 299. JUnit: 18,628 executed, 18,615 passed, 1 failed, 12 skipped, 0 errors; fail-fast ended the remaining suite. Empty coverage XML cannot establish remote coverage.
+- Fix: retain exact count assertions, update user-scoped count to 299 and Bot-path placement to 227 (one added path operation), with a route-specific explanatory comment. No thresholds or inventory checks removed.
+- Local reproduction/fix validation: complete explicit-user-id contract suite 23 passed. Additional complete router admission/authorization/namespace/parity suites: 98 passed (75.76s).
+- Other module jobs were successful through unchanged-scope skips, not full module test execution. Singlebox was still running at this observation; an older-head result cannot substitute for the next pushed head.
