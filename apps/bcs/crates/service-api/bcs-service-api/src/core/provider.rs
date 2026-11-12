@@ -105,6 +105,17 @@ pub trait ProviderCoreService: Send + Sync {
         self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, caller_capabilities).await
     }
 
+    async fn register_provider_with_a2a(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        slug: Option<String>, admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
+        a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if a2a.is_some() { return Err(ServiceError::InvalidOperation {message:"Provider A2A configuration is not supported".into(),request_id:None}); }
+        self.register_provider_with_policy(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, scope, caller_capabilities).await
+    }
+
     async fn update_provider_with_policy(
         &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
         name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
@@ -114,6 +125,18 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<ProviderRecord> {
         if scope.is_some() { return Err(ServiceError::InternalError("Provider policy update is not configured".into())); }
         self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, caller_capabilities).await
+    }
+
+    async fn update_provider_with_a2a(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>, admin_callback_url: Option<String>,
+        scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
+        a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
+    ) -> ServiceResult<ProviderRecord> {
+        if a2a.is_some() { return Err(ServiceError::InvalidOperation {message:"Provider A2A configuration is not supported".into(),request_id:None}); }
+        self.update_provider_with_policy(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, scope, caller_capabilities).await
     }
 
     /// Additive registration entry point preserving callers of register_provider.

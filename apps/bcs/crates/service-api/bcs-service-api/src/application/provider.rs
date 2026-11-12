@@ -49,6 +49,7 @@ impl std::fmt::Debug for ProviderBotEventCredential {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderCommand {
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     pub name: String,
     pub slug: Option<String>,
     pub webhook_url: Option<String>,
@@ -74,6 +75,7 @@ pub struct RegisterProviderOutcome {
 
 #[derive(Debug, Clone)]
 pub struct UpdateProviderCommand {
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub authenticated_staff_id: String,

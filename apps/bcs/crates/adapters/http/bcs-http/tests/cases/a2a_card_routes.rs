@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>> }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
@@ -32,7 +32,7 @@ impl A2aBotManagementService for Management {
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.visibility.lock().unwrap().push(command.visibility.as_str().into());
-        assert_eq!(command.owners,Some(vec!["owner".into()]));
+        self.owners.lock().unwrap().push(command.owners);
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
@@ -269,6 +269,21 @@ async fn assert_resource_paths(prefix: &str) {
     for path in ["/a2a/agent-card?agent_name=x", "/a2a/agents/bot/versions"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn registration_translates_omitted_null_and_empty_owners() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for owners in [None,Some(Value::Null),Some(json!([])),Some(json!(["owner"]))] {
+        let mut body=json!({"provider_bot_ref":"remote","agent_card":{}});
+        if let Some(value)=owners {body["owners"]=value;}
+        let response=app.clone().oneshot(Request::builder().method("POST").uri("/a2a/agents")
+            .header("authorization","Bearer test-admin").header("content-type","application/json")
+            .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::CREATED);
+    }
+    assert_eq!(*management.owners.lock().unwrap(),vec![None,None,Some(vec![]),Some(vec!["owner".into()])]);
 }
 
 #[tokio::test]

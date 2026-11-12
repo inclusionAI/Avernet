@@ -145,11 +145,41 @@ async fn public_registration_requires_owner_and_valid_platform_ref_before_fetch(
         let mut command=request(card("注册检查",None));command.owners=Some(owners);
         assert_eq!(code(service.register_agent(command).await.unwrap_err()),Code::InvalidOwner);
     }
+    assert_empty(&chain).await;
     for owners in [None, Some(vec![])] {
         let mut command=request(card("默认负责人",None));command.owners=owners;
         let registered=service.register_agent(command).await.unwrap();
-        assert!(!registered.bot_id.is_empty());
+        assert_eq!(chain.authority_store.role("human_default-owner",&registered.bot_id).await.unwrap(),
+            Some(bcs_service_api::types::bot_authority::BotAccessRelation::Owner));
     }
+}
+
+#[tokio::test]
+async fn provider_config_update_changes_only_future_default_owners() {
+    let (chain,service,fetcher,_)=fixture().await;
+    chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
+    let patch=|owner:Option<&str>| bcs_service_api::ProviderA2aPatch {default_owner:Some(owner.map(str::to_owned))};
+    fetcher.providers.update_provider_with_a2a("provider-a","test-admin","11111111",
+        None,None,None,None,None,None,None,None,None,Some(patch(Some("410025")))).await.unwrap();
+    let mut input=request(card("默认归属",None));input.owners=None;
+    let first=service.register_agent(input).await.unwrap();
+    fetcher.providers.update_provider_with_a2a("provider-a","test-admin","11111111",
+        None,None,None,None,None,None,None,None,None,Some(patch(Some("420031")))).await.unwrap();
+    let mut input=request(card("新默认归属",None));input.owners=Some(vec![]);
+    let second=service.register_agent(input).await.unwrap();
+    for (bot,owner) in [(&first.bot_id,"human_410025"),(&second.bot_id,"human_420031")] {
+        assert_eq!(chain.authority_store.role(owner,bot).await.unwrap(),Some(bcs_service_api::types::bot_authority::BotAccessRelation::Owner));
+    }
+    let explicit=service.register_agent(request(card("显式负责人",None))).await.unwrap();
+    assert_delegated_owner(&chain,&explicit.bot_id).await;
+    fetcher.providers.update_provider_with_a2a("provider-a","test-admin","11111111",
+        None,None,None,None,None,None,None,None,None,Some(patch(None))).await.unwrap();
+    let mut input=request(card("清除后拒绝",None));input.owners=None;
+    input.source=A2aCardSource::Url("invalid-url".into());
+    assert_eq!(code(service.register_agent(input).await.unwrap_err()),Code::InvalidOwner);
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst),0);
+    let rows=chain.db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_bots WHERE actor_kind='bot'")).await.unwrap();
+    assert_eq!(rows[0].get_i64("n").unwrap(),Some(3));
 }
 
 #[tokio::test]

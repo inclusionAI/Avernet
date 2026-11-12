@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit, urlencode, quote
 from provider_scope_story import Story
 from a2a_workbench import abort_task
 from a2a_management_cases import exercise as exercise_management
+from a2a_provider_config_cases import exercise as exercise_provider_config
 from a2a_rpc_peer import dispatch as dispatch_rpc, envelope as rpc_envelope
 
 TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
@@ -274,7 +275,8 @@ class A2aStory(Story):
         provider = self.request("POST", "/providers", {"slug": provider_name,
             "name": "A2A E2E " + uuid.uuid4().hex,
             "webhook_url": self.peer.base + "/legacy-webhook-must-not-be-used",
-            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0"})
+            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
+            "a2a": {"default_owner": self.owner}})
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
@@ -434,6 +436,7 @@ class A2aStory(Story):
         self.request("PUT", control, {"agent_card": poll_card}, token=admin)
         self.poll_rounds(group, bot_id)
         self.named_rounds(provider, provider_name, poll_card)
+        exercise_provider_config(self, provider, poll_card)
         exercise_management(self, provider, poll_card)
         print(f"A2A story: {self.checks} live boundary assertions, thirteen stream and five polling deliveries passed")
 

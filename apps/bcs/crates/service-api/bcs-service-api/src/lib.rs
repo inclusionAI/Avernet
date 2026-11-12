@@ -13,6 +13,7 @@ pub mod bot_runtime_use_cases;
 pub mod bot_use_cases;
 pub mod core;
 pub use bcs_domain::provider::ProviderCollaborationScope;
+pub use bcs_domain::provider_a2a::{ProviderA2aPatch, valid_default_owner};
 pub mod friends;
 pub mod group_use_cases;
 pub mod human_actors;
