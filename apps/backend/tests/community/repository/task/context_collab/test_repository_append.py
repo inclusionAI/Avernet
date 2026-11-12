@@ -76,7 +76,7 @@ def _created_context(repo: ContextCollabRepository) -> str:
             ),
         )
     )
-    return record.collet.collab_context_id
+    return record.collet.collet_id
 
 
 def _append_request(
@@ -135,9 +135,9 @@ class TestAppendEvent:
         assert record.event.parent_event == parent
         assert record.event.context_version_after == 2
         assert isinstance(record.event.occurred_at, datetime)
-        assert record.collet.context_version == 2
+        assert record.collet.version == 2
         assert record.collet.current_event_id == record.event.event_id
-        assert record.collet.current_snapshot.status == "in_progress"
+        assert record.current_snapshot.status == "in_progress"
 
         with db.orm_session() as session:
             row = _collet_row(session, context_id)
@@ -166,7 +166,7 @@ class TestAppendEvent:
             context_id,
             _append_request(expected_version=1, parent_event=parent),
         )
-        assert repo.get_current_status(context_id).collet.context_version == 2
+        assert repo.get_current_status(context_id).collet.version == 2
 
         with pytest.raises(ContextCollabVersionConflict):
             repo.append_event(
@@ -190,7 +190,7 @@ class TestAppendEvent:
             context_id,
             _append_request(expected_version=1, parent_event=parent),
         )
-        assert appended.collet.context_version == 2
+        assert appended.collet.version == 2
 
         with pytest.raises(ContextCollabVersionConflict):
             repo.append_event(
@@ -237,7 +237,7 @@ class TestAppendEvent:
 
         assert branch.event.event_id != head.event.event_id
         assert branch.event.context_version_after == 3
-        assert branch.collet.context_version == 3
+        assert branch.collet.version == 3
         assert [snap.status for snap in seen] == ["in_progress"]
 
         with db.orm_session() as session:

@@ -58,6 +58,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -155,22 +156,28 @@ def _status_record(**overrides) -> ContextStatusRecord:
     spec = _context_spec(method_kind=fields["method_kind"])
     principal_ref = PrincipalRef("human", PRINCIPAL_ID)
     executor_ref = AgentRef("bot", EXECUTOR_ID)
-    collet = Collet(
-        collab_context_id=fields["collab_context_id"],
-        actor_ref=None,
-        context_spec=spec,
-        current_snapshot=CurrentSnapshot(
-            objective=OBJECTIVE,
-            status=fields["status"],
-            principal_ref=principal_ref,
-            executor_ref=executor_ref,
-            method_kind=fields["method_kind"],
-            progress=ProgressSnapshot(),
-        ),
-        current_event_id=None,
-        context_version=1,
+    snapshot = CurrentSnapshot(
+        objective=OBJECTIVE,
+        status=fields["status"],
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        method_kind=fields["method_kind"],
+        progress=ProgressSnapshot(),
     )
-    return ContextStatusRecord(collet=collet, events=[])
+    collet = Collet(
+        collet_id=fields["collab_context_id"],
+        initiator_ref=principal_ref,
+        state=ColletState.ACTIVE,
+        scope=spec.space,
+        current_event_id=None,
+        version=1,
+    )
+    return ContextStatusRecord(
+        collet=collet,
+        context_spec=spec,
+        current_snapshot=snapshot,
+        events=[],
+    )
 
 
 class _FakeCollabRepository:

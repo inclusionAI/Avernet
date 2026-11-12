@@ -80,12 +80,12 @@ class TestCreateContext:
             assert len(events) == 1
 
             row = collets[0]
-            assert row.collab_context_id == record.collet.collab_context_id
+            assert row.collab_context_id == record.collet.collet_id
             assert row.collab_context_id.startswith("collet_")
             # 创建主体引用落列,与初始事件的 actor_ref 同值。
             assert row.actor_ref is not None
             assert json.loads(row.actor_ref) == CREATOR.to_dict()
-            assert record.collet.actor_ref == CREATOR
+            assert record.collet.initiator_ref == CREATOR
             assert row.context_version == 1
             assert row.current_event_id == record.initial_event.event_id
             assert row.env == get_current_env()
@@ -129,7 +129,7 @@ class TestCreateContext:
             evt = events[0]
             assert evt.event_id == record.initial_event.event_id
             assert evt.event_id.startswith("evt_")
-            assert evt.collab_context_id == record.collet.collab_context_id
+            assert evt.collab_context_id == record.collet.collet_id
             assert evt.parent_event is None
             assert evt.event_kind == "task.created"
             assert evt.primitive_type == "Task"
@@ -150,18 +150,18 @@ class TestCreateContext:
 
         # 读路径 round-trip 必须恢复 tz-aware UTC:本仓储只写 UTC,
         # naive 恢复值统一补 UTC,与创建返回值可直接比较、可跨路径排序。
-        status = repo.get_current_status(record.collet.collab_context_id)
+        status = repo.get_current_status(record.collet.collet_id)
         assert status is not None
         round_tripped = status.events[0]
         assert round_tripped.occurred_at == record.initial_event.occurred_at
         assert round_tripped.occurred_at.tzinfo is not None
         assert round_tripped.occurred_at.utcoffset() == timedelta(0)
         # 返回的领域对象与落库行一致。
-        assert record.collet.context_spec == _context_spec()
-        assert record.collet.current_snapshot.status == "created"
-        assert record.collet.current_snapshot.executor_ref == EXECUTOR
+        assert record.context_spec == _context_spec()
+        assert record.current_snapshot.status == "created"
+        assert record.current_snapshot.executor_ref == EXECUTOR
         assert record.collet.current_event_id == record.initial_event.event_id
-        assert record.collet.context_version == 1
+        assert record.collet.version == 1
         assert record.initial_event.actor_ref == CREATOR
         assert record.initial_event.payload == {"objective": OBJECTIVE}
 
@@ -172,15 +172,15 @@ class TestCreateContext:
         first = repo.create_context(_create_request())
         second = repo.create_context(_create_request())
 
-        assert first.collet.collab_context_id != second.collet.collab_context_id
+        assert first.collet.collet_id != second.collet.collet_id
         assert first.initial_event.event_id != second.initial_event.event_id
         with db.orm_session() as session:
             assert session.query(ContextCollabColletModel).count() == 2
             assert session.query(ContextCollabEventModel).count() == 2
         # 每次创建的 JSON 列均独立 round-trip 无损。
-        assert second.collet.context_spec == first.collet.context_spec
-        assert second.collet.current_snapshot == first.collet.current_snapshot
-        assert second.collet.current_snapshot.executor_ref == EXECUTOR
+        assert second.context_spec == first.context_spec
+        assert second.current_snapshot == first.current_snapshot
+        assert second.current_snapshot.executor_ref == EXECUTOR
 
 
 class TestGetCurrentStatus:
@@ -194,10 +194,10 @@ class TestGetCurrentStatus:
         repo = ContextCollabRepository(db)
         # 无执行 Agent 的创建请求:覆盖 executor_ref=None 的 JSON round-trip。
         created = repo.create_context(_create_request(executor=None))
-        assert created.collet.context_spec.executor_ref is None
-        assert created.collet.current_snapshot.executor_ref is None
+        assert created.context_spec.executor_ref is None
+        assert created.current_snapshot.executor_ref is None
 
-        full = repo.get_current_status(created.collet.collab_context_id)
+        full = repo.get_current_status(created.collet.collet_id)
         assert isinstance(full, ContextStatusRecord)
         assert full.collet == created.collet
         assert [event.event_id for event in full.events] == [
@@ -208,7 +208,7 @@ class TestGetCurrentStatus:
         with db.orm_session() as session:
             session.add(
                 ContextCollabEventModel(
-                    collab_context_id=created.collet.collab_context_id,
+                    collab_context_id=created.collet.collet_id,
                     event_id="evt_branch_manual",
                     parent_event=created.initial_event.event_id,
                     event_kind="user_interaction.posted",
@@ -228,7 +228,7 @@ class TestGetCurrentStatus:
                 )
             )
 
-        full = repo.get_current_status(created.collet.collab_context_id)
+        full = repo.get_current_status(created.collet.collet_id)
         # 按 id 升序:初始事件在前,派生事件在后。
         assert [event.event_id for event in full.events] == [
             created.initial_event.event_id,

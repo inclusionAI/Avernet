@@ -339,7 +339,7 @@ def ensure_top_level_binding(
         )
     binding = _build_top_level_binding(
         collab_context_id,
-        record.collet.context_spec,
+        record.context_spec,
         actor,
         now=now,
         bind_reason="create_context_heal",
@@ -420,7 +420,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         record = self._collab_repo.get_current_status(collab_context_id)
         if record is None:
             return None, binding.participant_ref, None
-        spec = record.collet.context_spec
+        spec = record.context_spec
         executor_id = spec.executor_ref.agent_id if spec.executor_ref else None
         return spec.principal_ref.principal_id, executor_id, record
 
@@ -461,7 +461,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         )
         if not is_top_level:
             return
-        snapshot = record.collet.current_snapshot if record is not None else None
+        snapshot = record.current_snapshot if record is not None else None
         status = snapshot.status if snapshot is not None else None
         if status not in _TERMINAL_COLLET_STATUSES:
             raise ContextCollabValidationError(

@@ -96,7 +96,7 @@ class SwarmMethodServiceBase:
         if record is None:
             principal_id, executor_id = None, binding.participant_ref
         else:
-            spec = record.collet.context_spec
+            spec = record.context_spec
             executor_id = spec.executor_ref.agent_id if spec.executor_ref else None
             principal_id = spec.principal_ref.principal_id
         self._authorizer.check_swarm_op(

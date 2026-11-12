@@ -52,6 +52,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -134,22 +135,28 @@ def _status_record(**overrides) -> ContextStatusRecord:
     spec = _context_spec(method_kind=fields["method_kind"])
     principal_ref = PrincipalRef("human", PRINCIPAL_ID)
     executor_ref = AgentRef("bot", EXECUTOR_ID)
-    collet = Collet(
-        collab_context_id=fields["collab_context_id"],
-        actor_ref=None,
-        context_spec=spec,
-        current_snapshot=CurrentSnapshot(
-            objective=OBJECTIVE,
-            status=fields["status"],
-            principal_ref=principal_ref,
-            executor_ref=executor_ref,
-            method_kind=fields["method_kind"],
-            progress=ProgressSnapshot(),
-        ),
-        current_event_id=None,
-        context_version=1,
+    snapshot = CurrentSnapshot(
+        objective=OBJECTIVE,
+        status=fields["status"],
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        method_kind=fields["method_kind"],
+        progress=ProgressSnapshot(),
     )
-    return ContextStatusRecord(collet=collet, events=[])
+    collet = Collet(
+        collet_id=fields["collab_context_id"],
+        initiator_ref=principal_ref,
+        state=ColletState.ACTIVE,
+        scope=spec.space,
+        current_event_id=None,
+        version=1,
+    )
+    return ContextStatusRecord(
+        collet=collet,
+        context_spec=spec,
+        current_snapshot=snapshot,
+        events=[],
+    )
 
 
 class _FakeCollabRepository:
@@ -1321,7 +1328,7 @@ class TestCreatedContextProjection:
         repo = _FakeCollabRepository({COLLET_ID: _status_record()})
         record = repo.get_current_status(COLLET_ID)
         binding = project_created_context(
-            store, AXES, COLLET_ID, record.collet.context_spec,
+            store, AXES, COLLET_ID, record.context_spec,
             make_actor(), now=NOW,
         )
         assert "Group" in binding.method_names
@@ -1345,7 +1352,7 @@ class TestCreatedContextProjection:
             assert row.transitioned_by == PRINCIPAL_ID
         # 重复投影幂等:roster 与成员不重复落。
         again = project_created_context(
-            store, AXES, COLLET_ID, record.collet.context_spec,
+            store, AXES, COLLET_ID, record.context_spec,
             make_actor(), now="2026-11-12T09:30:00+00:00",
         )
         assert again.method_binding_id == binding.method_binding_id
@@ -1365,7 +1372,7 @@ class TestCreatedContextProjection:
         )
         record = repo.get_current_status(COLLET_ID)
         binding = project_created_context(
-            store, AXES, COLLET_ID, record.collet.context_spec,
+            store, AXES, COLLET_ID, record.context_spec,
             make_actor(), now=NOW,
         )
         assert binding.method_names == ("Single",)

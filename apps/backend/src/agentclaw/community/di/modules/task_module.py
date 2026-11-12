@@ -111,9 +111,16 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
     SwarmMethodOpsServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
     MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
+    ColletLifecycleService,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     MethodLifecycleService,
@@ -338,6 +345,17 @@ class TaskModule(Module):
         # (method_lifecycle_service 等)零改动。
         binder.bind(
             MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton
+        )
+        # L4 Collet 生命周期接线(2026-11-12 L4 对齐 spec §5.3):进程内
+        # store singleton(重启归零,P2 持久化经同一 ColletLifecycleStore
+        # 协议键整体替换);生命周期服务 singleton 但 P1 纯内部 API,不上
+        # HTTP wire,collab_repo 同上由 TaskPersistenceModule 绑定。
+        binder.bind(
+            ColletLifecycleStore, to=InMemoryColletLifecycleStore,
+            scope=singleton,
+        )
+        binder.bind(
+            ColletLifecycleService, to=ColletLifecycleService, scope=singleton
         )
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
         # 授权器与四个服务协议全部显式 singleton 绑定——python-injector

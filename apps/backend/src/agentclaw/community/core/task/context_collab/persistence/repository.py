@@ -3,7 +3,8 @@
 协议部分(``ContextCollabRepositoryProtocol`` 与出入参 dataclass)保持纯
 类型声明;``ContextCollabRepository`` 是基于 ``DatabasePlugin`` 的 ORM 实现,
 行 → 领域对象一律显式构造,JSON 列(context_spec / current_snapshot /
-actor_ref / payload)用 L4 ``to_dict`` / ``from_dict`` 编解码。读查询过滤
+actor_ref / payload)用 L4 ``to_dict`` / ``from_dict`` 编解码;collet 行
+的 ``actor_ref`` 严格解码(NULL 即抛校验错误)。读查询过滤
 ``env == get_current_env()``,tenant 由 ORM guard 自动追加,不在此手写。
 ``append_event`` 在持锁事务内完成版本检查 → parent 校验 → 事件落库 →
 Collet CAS 更新;追加不设幂等键,顺序即自增 id,主干在投影层推导。
@@ -22,6 +23,7 @@ from injector import inject
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabParentEventError,
+    ContextCollabValidationError,
     ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
@@ -33,6 +35,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -74,18 +77,30 @@ class CreateContextRecordRequest:
 
 @dataclass
 class ContextCreatedRecord:
-    """仓储创建返回:新建的 Collet 与其初始事件。"""
+    """仓储创建返回:新建的 Collet 与其初始事件。
+
+    ``context_spec`` / ``current_snapshot`` 是创建请求的伴随投影
+    (与落库行 JSON 同值);聚合根只有六字段,不再挂 spec/快照。
+    """
 
     collet: Collet
+    context_spec: ContextSpec
+    current_snapshot: CurrentSnapshot
     initial_event: EventRecord
 
 
 @dataclass
 class ContextStatusRecord:
     """``get_current_status`` 返回;events 按自增 id 升序即接纳顺序,
-    不做可见性过滤(visibility 过滤与 trunk 过滤在 service/Query 层)。"""
+    不做可见性过滤(visibility 过滤与 trunk 过滤在 service/Query 层)。
+
+    ``context_spec`` / ``current_snapshot`` 是落库行的伴随投影字段;
+    ``current_snapshot`` 可空(外部可写入只有 spec 的聚合行)。
+    """
 
     collet: Collet
+    context_spec: ContextSpec
+    current_snapshot: CurrentSnapshot | None
     events: list[EventRecord]
 
 
@@ -110,10 +125,13 @@ class AppendEventRecordRequest:
 
 @dataclass
 class EventAppendedRecord:
-    """``append_event`` 返回;``collet`` 是追加后落库行的解码。"""
+    """``append_event`` 返回;``collet`` 是追加后落库行的解码,
+    伴随投影为该行当前的 spec 与(可能仍为 NULL 的)快照。"""
 
     event: EventRecord
     collet: Collet
+    context_spec: ContextSpec
+    current_snapshot: CurrentSnapshot | None
 
 
 @runtime_checkable
@@ -134,27 +152,38 @@ def _dump_json(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
-def _collet_from_row(row: ContextCollabColletModel) -> Collet:
-    """落库行 → ``Collet`` 领域对象;显式逐字段构造。
+def _collet_from_row(
+    row: ContextCollabColletModel,
+) -> tuple[Collet, ContextSpec, CurrentSnapshot | None]:
+    """落库行 → (``Collet``, spec 伴随投影, 快照伴随投影);显式逐字段构造。
 
-    ``current_snapshot`` 可空:外部可写入只有 spec 的聚合行。
+    严格解码(Ruling 方案 i):``actor_ref`` 列 NULL 的外部部分行不再
+    容忍,直接抛 ``ContextCollabValidationError``(聚合根的
+    ``initiator_ref`` 是必填身份);``current_snapshot`` NULL 保留可空
+    容忍。``scope`` 取 spec JSON 的 space;``state`` 暂以
+    ``ColletState.ACTIVE`` 种子(P2 换列读取)。
     """
-    return Collet(
-        collab_context_id=row.collab_context_id,
-        actor_ref=(
-            PrincipalRef.from_dict(json.loads(row.actor_ref))
-            if row.actor_ref is not None
-            else None
-        ),
-        context_spec=ContextSpec.from_dict(json.loads(row.context_spec)),
-        current_snapshot=(
-            CurrentSnapshot.from_dict(json.loads(row.current_snapshot))
-            if row.current_snapshot is not None
-            else None
-        ),
-        current_event_id=row.current_event_id,
-        context_version=int(row.context_version),
+    if row.actor_ref is None:
+        raise ContextCollabValidationError(
+            f"collaboration context {row.collab_context_id!r} has a NULL "
+            "actor_ref column; the Collet aggregate requires a non-null "
+            "initiator_ref"
+        )
+    spec = ContextSpec.from_dict(json.loads(row.context_spec))
+    snapshot = (
+        CurrentSnapshot.from_dict(json.loads(row.current_snapshot))
+        if row.current_snapshot is not None
+        else None
     )
+    collet = Collet(
+        collet_id=row.collab_context_id,
+        initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
+        state=ColletState.ACTIVE,
+        scope=spec.space,
+        current_event_id=row.current_event_id,
+        version=int(row.context_version),
+    )
+    return collet, spec, snapshot
 
 
 def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
@@ -244,19 +273,24 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             occurred_at=now,
         )
         collet = Collet(
-            collab_context_id=collab_context_id,
+            collet_id=collab_context_id,
             # 创建主体与初始事件的 actor_ref 同源(创建人)。
-            actor_ref=request.initial_event.actor_ref,
-            context_spec=spec,
-            current_snapshot=snapshot,
+            initiator_ref=request.initial_event.actor_ref,
+            state=ColletState.ACTIVE,
+            scope=spec.space,
             current_event_id=initial_event.event_id,
-            context_version=1,
+            version=1,
         )
         with self._transaction() as db:
-            db.add(self._collet_row(collet, now=now))
+            db.add(self._collet_row(collet, spec, snapshot, now=now))
             db.add(self._event_row(initial_event, now=now))
             db.flush()
-            return ContextCreatedRecord(collet=collet, initial_event=initial_event)
+            return ContextCreatedRecord(
+                collet=collet,
+                context_spec=spec,
+                current_snapshot=snapshot,
+                initial_event=initial_event,
+            )
 
     def append_event(
         self, collab_context_id: str, request: "AppendEventRecordRequest"
@@ -294,7 +328,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     f"collaboration context {collab_context_id!r}"
                 )
 
-            previous = _collet_from_row(row)
+            previous, previous_spec, previous_snapshot = _collet_from_row(row)
             context_version = request.expected_version + 1
             now = datetime.now(timezone.utc)
             event = EventRecord(
@@ -312,11 +346,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             # snapshot_updater 在行锁内对持锁读出的快照执行,其视图不可能变陈旧;
             # current_snapshot 为 NULL 的外部部分行保持 NULL(Ruling R10):
             # 只推进 version 与事件指针,不为它虚构快照。
-            if previous.current_snapshot is None:
+            if previous_snapshot is None:
                 new_snapshot = None
                 snapshot_write: str | None = None
             else:
-                new_snapshot = request.snapshot_updater(previous.current_snapshot)
+                new_snapshot = request.snapshot_updater(previous_snapshot)
                 snapshot_write = _dump_json(new_snapshot.to_dict())
             db.add(self._event_row(event, now=now))
             updated_rows = (
@@ -346,10 +380,11 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 event=event,
                 collet=replace(
                     previous,
-                    current_snapshot=new_snapshot,
                     current_event_id=event.event_id,
-                    context_version=context_version,
+                    version=context_version,
                 ),
+                context_spec=previous_spec,
+                current_snapshot=new_snapshot,
             )
 
     def get_current_status(
@@ -380,25 +415,37 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 .order_by(ContextCollabEventModel.id.asc())
                 .all()
             )
+            collet, spec, snapshot = _collet_from_row(row)
             return ContextStatusRecord(
-                collet=_collet_from_row(row),
+                collet=collet,
+                context_spec=spec,
+                current_snapshot=snapshot,
                 events=[_event_from_row(event_row) for event_row in event_rows],
             )
 
     @staticmethod
-    def _collet_row(collet: Collet, *, now: datetime) -> ContextCollabColletModel:
-        """``Collet`` 领域对象 → 落库行;tenant 由 ORM guard 盖章。"""
+    def _collet_row(
+        collet: Collet,
+        spec: ContextSpec,
+        snapshot: CurrentSnapshot | None,
+        *,
+        now: datetime,
+    ) -> ContextCollabColletModel:
+        """``Collet`` 领域对象 + 伴随投影 → 落库行;tenant 由 ORM guard 盖章。
+
+        JSON 列(``context_spec`` / ``current_snapshot``)取伴随投影入参,
+        不再从聚合根上取(spec/快照不在 Collet 六字段内)。
+        """
         return ContextCollabColletModel(
-            collab_context_id=collet.collab_context_id,
-            actor_ref=(
-                _dump_json(collet.actor_ref.to_dict())
-                if collet.actor_ref is not None
-                else None
+            collab_context_id=collet.collet_id,
+            # 创建主体引用与初始事件 actor_ref 同源;严格解码后恒非空。
+            actor_ref=_dump_json(collet.initiator_ref.to_dict()),
+            context_spec=_dump_json(spec.to_dict()),
+            current_snapshot=(
+                _dump_json(snapshot.to_dict()) if snapshot is not None else None
             ),
-            context_spec=_dump_json(collet.context_spec.to_dict()),
-            current_snapshot=_dump_json(collet.current_snapshot.to_dict()),
             current_event_id=collet.current_event_id,
-            context_version=collet.context_version,
+            context_version=collet.version,
             env=get_current_env(),
             gmt_create=now,
             gmt_modified=now,

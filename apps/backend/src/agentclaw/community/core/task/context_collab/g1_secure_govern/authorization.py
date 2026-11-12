@@ -40,28 +40,34 @@ TOP_LEVEL_METHOD_KINDS = frozenset(
 
 @runtime_checkable
 class ContextCollabAuthorizerProtocol(Protocol):
-    """授权接缝;服务层只依赖本协议,不依赖具体实现。"""
+    """授权接缝;服务层只依赖本协议,不依赖具体实现。
+
+    ``spec`` 是仓储 record 的伴随投影字段(载体迁移自 Collet 聚合根,
+    spec §5.2):授权规则与错误语义不因迁移改变。
+    """
 
     def check_create(self, spec: ContextSpec, actor: ActorContext) -> None: ...
-    def check_append(self, collet: Collet, command, actor: ActorContext) -> None: ...
-    def filter_visible_events(self, collet: Collet, events: Sequence[EventRecord],
+    def check_append(self, collet: Collet, spec: ContextSpec, command,
+                     actor: ActorContext) -> None: ...
+    def filter_visible_events(self, collet: Collet, spec: ContextSpec,
+                              events: Sequence[EventRecord],
                               actor: ActorContext) -> list[EventRecord]: ...
 
 
-def _is_principal(collet: Collet, actor: ActorContext) -> bool:
-    # 身份取自创建参数(context_spec 恒在),不经 current_snapshot(可空)。
+def _is_principal(spec: ContextSpec, actor: ActorContext) -> bool:
+    # 身份取自创建参数(record 伴随投影的 context_spec),不经快照(可空)。
     return (
         actor.actor.principal_id
-        == collet.context_spec.principal_ref.principal_id
+        == spec.principal_ref.principal_id
     )
 
 
-def _is_executor(collet: Collet, actor: ActorContext) -> bool:
-    executor = collet.context_spec.executor_ref
+def _is_executor(spec: ContextSpec, actor: ActorContext) -> bool:
+    executor = spec.executor_ref
     return executor is not None and actor.actor.principal_id == executor.agent_id
 
 
-def _is_public_open_message(collet: Collet, command) -> bool:
+def _is_public_open_message(spec: ContextSpec, command) -> bool:
     """Whether Open+Group grants this actor only a public Message append.
 
     Open participation is deliberately narrower than an Open+Group Group
@@ -71,7 +77,7 @@ def _is_public_open_message(collet: Collet, command) -> bool:
     responsibilities under G1.
     """
     return (
-        collet.context_spec.method_kind == MethodKind.OPEN_GROUP.value
+        spec.method_kind == MethodKind.OPEN_GROUP.value
         and command.event_kind == "user_interaction.posted"
         and command.primitive_type == "Message"
         and command.visibility == VISIBILITY_PUBLIC
@@ -106,26 +112,28 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
                 "method_kind 'Single' requires a non-null executor_ref"
             )
 
-    def check_append(self, collet: Collet, command, actor: ActorContext) -> None:
+    def check_append(self, collet: Collet, spec: ContextSpec, command,
+                     actor: ActorContext) -> None:
         # P1 结构规则只看认证 actor;command 保留给 P2 策略引用。
         if (
-            _is_principal(collet, actor)
-            or _is_executor(collet, actor)
-            or _is_public_open_message(collet, command)
+            _is_principal(spec, actor)
+            or _is_executor(spec, actor)
+            or _is_public_open_message(spec, command)
         ):
             return
         raise ContextCollabValidationError(
             "only the principal, executor, or an Open+Group public-message "
             f"contributor may append events to collab_context "
-            f"{collet.collab_context_id!r}"
+            f"{collet.collet_id!r}"
         )
 
     def filter_visible_events(
-        self, collet: Collet, events: Sequence[EventRecord],
+        self, collet: Collet, spec: ContextSpec,
+        events: Sequence[EventRecord],
         actor: ActorContext,
     ) -> list[EventRecord]:
-        is_principal = _is_principal(collet, actor)
-        is_executor = _is_executor(collet, actor)
+        is_principal = _is_principal(spec, actor)
+        is_executor = _is_executor(spec, actor)
         visible: list[EventRecord] = []
         for record in events:
             if record.visibility == VISIBILITY_PUBLIC:

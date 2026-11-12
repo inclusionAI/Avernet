@@ -163,22 +163,27 @@ def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
 
 
 def _resolve_event_status(
-    collet: Collet, command: EventAppendCommand, context: ActorContext
+    collet: Collet,
+    spec: ContextSpec,
+    snapshot: CurrentSnapshot | None,
+    command: EventAppendCommand,
+    context: ActorContext,
 ) -> "str | None":
     """G4 状态机裁决(spec §4):返回事件接纳后的新 status。
 
-    collet 的 ``workflow_kind`` 未命中 ``MACHINE_REGISTRY``,或当前状态
-    对该事件无规则命中 → status 不变(事件仍接纳)。守卫输入按
-    Controller Ruling R4 用值语义构造:actor 取已认证调用者,responsible
-    取 collet 快照 principal,executor 取创建参数 executor。guard
-    FAIL / BLOCKED 由 ``resolve_transition`` 抛 ``ContextCollabValidationError``
-    自然向外传。
+    ``spec`` / ``snapshot`` 是仓储 record 的伴随投影字段(载体迁移自
+    Collet 聚合根);``spec`` 的 ``workflow_kind`` 未命中
+    ``MACHINE_REGISTRY``,或当前状态对该事件无规则命中 → status 不变
+    (事件仍接纳)。守卫输入按 Controller Ruling R4 用值语义构造:
+    actor 取已认证调用者,responsible 取快照 principal,executor 取
+    创建参数 executor。guard FAIL / BLOCKED 由 ``resolve_transition``
+    抛 ``ContextCollabValidationError`` 自然向外传。
     """
-    if collet.current_snapshot is None:
+    if snapshot is None:
         # 可空快照(外部部分行):无状态可裁决,事件照常接纳。
         return None
-    current_status = collet.current_snapshot.status
-    machine = MACHINE_REGISTRY.get(collet.context_spec.workflow_kind)
+    current_status = snapshot.status
+    machine = MACHINE_REGISTRY.get(spec.workflow_kind)
     if machine is None:
         return current_status
     matched_rules = [
@@ -191,8 +196,8 @@ def _resolve_event_status(
         return current_status
     guard_input = GuardEvaluationInput(
         actor=context.actor,
-        responsible=collet.current_snapshot.principal_ref,
-        executor=collet.context_spec.executor_ref,
+        responsible=snapshot.principal_ref,
+        executor=spec.executor_ref,
         payload=command.payload,
     )
     guard_results = {
@@ -271,7 +276,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         project_created_context(
             self._method_store,
             current_axes(),
-            record.collet.collab_context_id,
+            record.collet.collet_id,
             spec,
             context,
             now=_now(),
@@ -279,11 +284,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
         # progress.current_event_id 为 None,权威事件指针在 Event record)。
-        snapshot = _created_snapshot_projection(record.collet.current_snapshot)
+        snapshot = _created_snapshot_projection(record.current_snapshot)
         snapshot["progress"]["current_event_id"] = record.initial_event.event_id
         return ContextCollabCreatedResult(
-            collab_context_id=record.collet.collab_context_id,
-            context_version=record.collet.context_version,
+            collab_context_id=record.collet.collet_id,
+            context_version=record.collet.version,
             current_snapshot=snapshot,
             current_event=_created_event_projection(record.initial_event),
         )
@@ -314,9 +319,14 @@ class ContextCollabService(ContextCollabServiceProtocol):
             visibility=command.visibility,
             payload=command.payload,
         )
-        self._authorizer.check_append(collet, command, context)
+        self._authorizer.check_append(
+            collet, status.context_spec, command, context
+        )
 
-        new_status = _resolve_event_status(collet, command, context)
+        new_status = _resolve_event_status(
+            collet, status.context_spec, status.current_snapshot, command,
+            context,
+        )
 
         def _update_status(
             snapshot: CurrentSnapshot,
@@ -345,10 +355,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
             parent_event=record.event.parent_event,
             event_kind=record.event.event_kind,
             primitive_type=record.event.primitive_type,
-            context_version=record.collet.context_version,
+            context_version=record.collet.version,
             current_status=(
-                record.collet.current_snapshot.status
-                if record.collet.current_snapshot is not None
+                record.current_snapshot.status
+                if record.current_snapshot is not None
                 else None
             ),
         )
@@ -376,7 +386,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             )
         collet = status.collet
         visible_events = self._authorizer.filter_visible_events(
-            collet, status.events, context
+            collet, status.context_spec, status.events, context
         )
         # 投影始终基于全量可见事件,不因 trunk 开关退化;
         # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。
@@ -406,8 +416,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
         # to_dict 返回全新嵌套 dict,替换 progress 不会写回 collet 行。
         snapshot = (
             None
-            if collet.current_snapshot is None
-            else collet.current_snapshot.to_dict()
+            if status.current_snapshot is None
+            else status.current_snapshot.to_dict()
         )
         if snapshot is not None:
             snapshot["progress"] = progress.to_dict()
@@ -420,8 +430,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 }
                 break
         return ContextCollabStatusProjection(
-            collab_context_id=collet.collab_context_id,
-            context_version=collet.context_version,
+            collab_context_id=collet.collet_id,
+            context_version=collet.version,
             current_snapshot=snapshot,
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(

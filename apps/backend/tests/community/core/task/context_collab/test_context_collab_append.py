@@ -34,6 +34,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
+    ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
 )
@@ -125,26 +127,29 @@ class _FakeContextCollabRepository:
 
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
+        self.context_specs: dict[str, ContextSpec] = {}
+        self.snapshots: dict[str, CurrentSnapshot | None] = {}
         self.events: dict[str, list[EventRecord]] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
     def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
+        snapshot = CurrentSnapshot(
+            objective=request.context_spec.objective,
+            status=TaskStatus.CREATED.value,
+            principal_ref=request.context_spec.principal_ref,
+            executor_ref=request.context_spec.executor_ref,
+            method_kind=request.context_spec.method_kind,
+            progress=ProgressSnapshot(),
+        )
         collet = Collet(
-            collab_context_id=collab_context_id,
-            actor_ref=None,
-            context_spec=request.context_spec,
-            current_snapshot=CurrentSnapshot(
-                objective=request.context_spec.objective,
-                status=TaskStatus.CREATED.value,
-                principal_ref=request.context_spec.principal_ref,
-                executor_ref=request.context_spec.executor_ref,
-                method_kind=request.context_spec.method_kind,
-                progress=ProgressSnapshot(),
-            ),
+            collet_id=collab_context_id,
+            initiator_ref=request.initial_event.actor_ref,
+            state=ColletState.ACTIVE,
+            scope=request.context_spec.space,
             current_event_id=event_id,
-            context_version=1,
+            version=1,
         )
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
@@ -159,8 +164,15 @@ class _FakeContextCollabRepository:
             occurred_at=datetime.now(timezone.utc),
         )
         self.collets[collab_context_id] = collet
+        self.context_specs[collab_context_id] = request.context_spec
+        self.snapshots[collab_context_id] = snapshot
         self.events[collab_context_id] = [initial_event]
-        return ContextCreatedRecord(collet=collet, initial_event=initial_event)
+        return ContextCreatedRecord(
+            collet=collet,
+            context_spec=request.context_spec,
+            current_snapshot=snapshot,
+            initial_event=initial_event,
+        )
 
     def get_current_status(
         self, collab_context_id: str
@@ -169,7 +181,12 @@ class _FakeContextCollabRepository:
         if collet is None:
             return None
         events = list(self.events.get(collab_context_id, []))
-        return ContextStatusRecord(collet=collet, events=events)
+        return ContextStatusRecord(
+            collet=collet,
+            context_spec=self.context_specs[collab_context_id],
+            current_snapshot=self.snapshots[collab_context_id],
+            events=events,
+        )
 
     def append_event(
         self, collab_context_id: str, request: "AppendEventRecordRequest"
@@ -181,7 +198,7 @@ class _FakeContextCollabRepository:
                 f"collaboration context {collab_context_id!r} not found"
             )
         events = self.events.setdefault(collab_context_id, [])
-        ensure_expected_version(request.expected_version, collet.context_version)
+        ensure_expected_version(request.expected_version, collet.version)
         if request.parent_event is not None and request.parent_event not in {
             event.event_id for event in events
         }:
@@ -203,16 +220,21 @@ class _FakeContextCollabRepository:
             occurred_at=datetime.now(timezone.utc),
         )
         # snapshot_updater 在"行锁"内对当前快照求值后 CAS 推进版本。
-        new_snapshot = request.snapshot_updater(collet.current_snapshot)
+        new_snapshot = request.snapshot_updater(self.snapshots[collab_context_id])
         updated = replace(
             collet,
-            current_snapshot=new_snapshot,
             current_event_id=event.event_id,
-            context_version=context_version,
+            version=context_version,
         )
         events.append(event)
         self.collets[collab_context_id] = updated
-        return EventAppendedRecord(event=event, collet=updated)
+        self.snapshots[collab_context_id] = new_snapshot
+        return EventAppendedRecord(
+            event=event,
+            collet=updated,
+            context_spec=self.context_specs[collab_context_id],
+            current_snapshot=new_snapshot,
+        )
 
 
 def _make_service(**command_overrides):
@@ -271,8 +293,8 @@ class TestAppendEventHappyPath:
 
         # 仓储真的执行了 snapshot_updater 并 CAS 推进版本。
         collet = repo.collets[created.collab_context_id]
-        assert collet.context_version == 2
-        assert collet.current_snapshot.status == "created"
+        assert collet.version == 2
+        assert repo.snapshots[created.collab_context_id].status == "created"
         assert collet.current_event_id == result.event_id
         assert len(repo.events[created.collab_context_id]) == 2
 
@@ -334,8 +356,8 @@ class TestStateMachineTransitions:
             service.append_event(cid, submit, make_actor())
         # 被拒事件不落库,状态与版本不动。
         collet = repo.collets[cid]
-        assert collet.context_version == 2
-        assert collet.current_snapshot.status == "in_progress"
+        assert collet.version == 2
+        assert repo.snapshots[cid].status == "in_progress"
         assert len(repo.events[cid]) == 2
 
     def test_task_accepted_by_non_principal_rejected(self):
@@ -374,8 +396,8 @@ class TestStateMachineTransitions:
         ):
             service.append_event(cid, accept, executor_actor)
         collet = repo.collets[cid]
-        assert collet.current_snapshot.status == "reviewing"
-        assert collet.context_version == 3
+        assert repo.snapshots[cid].status == "reviewing"
+        assert collet.version == 3
 
     def test_task_lifecycle_reaches_done(self):
         repo, service, created = _make_service()
@@ -412,7 +434,7 @@ class TestStateMachineTransitions:
         assert submitted.current_status == "reviewing"
         assert accepted.current_status == "done"
         assert accepted.context_version == 4
-        assert repo.collets[cid].context_version == 4
+        assert repo.collets[cid].version == 4
 
     def test_task_cancelled_from_created_by_principal(self):
         repo, service, created = _make_service()
@@ -523,7 +545,7 @@ class TestRepositorySemanticsPropagation:
         with pytest.raises(ContextCollabVersionConflict):
             service.append_event(created.collab_context_id, command, make_actor())
         collet = repo.collets[created.collab_context_id]
-        assert collet.context_version == 1
+        assert collet.version == 1
         assert len(repo.events[created.collab_context_id]) == 1
 
     def test_missing_parent_event_rejected(self):
@@ -533,7 +555,7 @@ class TestRepositorySemanticsPropagation:
         )
         with pytest.raises(ContextCollabParentEventError):
             service.append_event(created.collab_context_id, command, make_actor())
-        assert repo.collets[created.collab_context_id].context_version == 1
+        assert repo.collets[created.collab_context_id].version == 1
 
 
 class TestAppendReduplication:

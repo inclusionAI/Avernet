@@ -29,6 +29,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -109,20 +110,21 @@ class _FakeContextCollabRepository:
 
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
+        snapshot = CurrentSnapshot(
+            objective=request.context_spec.objective,
+            status=TaskStatus.CREATED.value,
+            principal_ref=request.context_spec.principal_ref,
+            executor_ref=request.context_spec.executor_ref,
+            method_kind=request.context_spec.method_kind,
+            progress=ProgressSnapshot(percent=0, current_event_id=None),
+        )
         collet = Collet(
-            collab_context_id=collab_context_id,
-            actor_ref=None,
-            context_spec=request.context_spec,
-            current_snapshot=CurrentSnapshot(
-                objective=request.context_spec.objective,
-                status=TaskStatus.CREATED.value,
-                principal_ref=request.context_spec.principal_ref,
-                executor_ref=request.context_spec.executor_ref,
-                method_kind=request.context_spec.method_kind,
-                progress=ProgressSnapshot(percent=0, current_event_id=None),
-            ),
+            collet_id=collab_context_id,
+            initiator_ref=request.initial_event.actor_ref,
+            state=ColletState.ACTIVE,
+            scope=request.context_spec.space,
             current_event_id=event_id,
-            context_version=1,
+            version=1,
         )
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
@@ -136,7 +138,12 @@ class _FakeContextCollabRepository:
             context_version_after=1,
             occurred_at=datetime.now(timezone.utc),
         )
-        return ContextCreatedRecord(collet=collet, initial_event=initial_event)
+        return ContextCreatedRecord(
+            collet=collet,
+            context_spec=request.context_spec,
+            current_snapshot=snapshot,
+            initial_event=initial_event,
+        )
 
     def append_event(self, collab_context_id, request):
         raise NotImplementedError("fake only implements create_context")
@@ -255,20 +262,21 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
         self.create_calls.append(request)
         collab_context_id = "collet_projected_001"
         event_id = "evt_projected_001"
+        snapshot = CurrentSnapshot(
+            objective=request.context_spec.objective,
+            status=TaskStatus.CREATED.value,
+            principal_ref=request.context_spec.principal_ref,
+            executor_ref=request.context_spec.executor_ref,
+            method_kind=request.context_spec.method_kind,
+            progress=ProgressSnapshot(percent=0, current_event_id=None),
+        )
         collet = Collet(
-            collab_context_id=collab_context_id,
-            actor_ref=None,
-            context_spec=request.context_spec,
-            current_snapshot=CurrentSnapshot(
-                objective=request.context_spec.objective,
-                status=TaskStatus.CREATED.value,
-                principal_ref=request.context_spec.principal_ref,
-                executor_ref=request.context_spec.executor_ref,
-                method_kind=request.context_spec.method_kind,
-                progress=ProgressSnapshot(percent=0, current_event_id=None),
-            ),
+            collet_id=collab_context_id,
+            initiator_ref=request.initial_event.actor_ref,
+            state=ColletState.ACTIVE,
+            scope=request.context_spec.space,
             current_event_id=event_id,
-            context_version=1,
+            version=1,
         )
         initial_event = EventRecord(
             collab_context_id=collab_context_id,
@@ -282,7 +290,12 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
             context_version_after=1,
             occurred_at=datetime.now(timezone.utc),
         )
-        return ContextCreatedRecord(collet=collet, initial_event=initial_event)
+        return ContextCreatedRecord(
+            collet=collet,
+            context_spec=request.context_spec,
+            current_snapshot=snapshot,
+            initial_event=initial_event,
+        )
 
 
 class TestTopLevelProjection:
@@ -366,37 +379,29 @@ class TestAuthorizerSeam:
         assert checked_actor is actor
 
 
-def _fake_collet(
-    *, principal_id: str = "u_1001", executor_id: str | None = "bot_coding_001"
-) -> Collet:
-    """构造带 principal/executor 的最小 Collet,供授权器身份测试用。"""
+def _fake_spec() -> ContextSpec:
+    """构造带 principal/executor 的创建参数,供授权器身份测试用。"""
+    return ContextSpec(
+        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+        principal_ref=PrincipalRef("human", "u_1001"),
+        method_kind="Single",
+        executor_ref=AgentRef("bot", "bot_coding_001"),
+        objective=OBJECTIVE,
+        resource_refs=(),
+        product_kind=None,
+        workflow_kind=None,
+    )
+
+
+def _fake_collet() -> Collet:
+    """构造六字段最小 Collet,供授权器身份测试用。"""
     return Collet(
-        collab_context_id="collet_todo_001",
-        actor_ref=None,
-        context_spec=ContextSpec(
-            space=SpaceRef(space_id="space_workspace_001", environment="prod"),
-            principal_ref=PrincipalRef("human", principal_id),
-            method_kind="Single",
-            executor_ref=(
-                AgentRef("bot", executor_id) if executor_id is not None else None
-            ),
-            objective=OBJECTIVE,
-            resource_refs=(),
-            product_kind=None,
-            workflow_kind=None,
-        ),
-        current_snapshot=CurrentSnapshot(
-            objective=OBJECTIVE,
-            status=TaskStatus.CREATED.value,
-            principal_ref=PrincipalRef("human", principal_id),
-            executor_ref=(
-                AgentRef("bot", executor_id) if executor_id is not None else None
-            ),
-            method_kind="Single",
-            progress=ProgressSnapshot(),
-        ),
+        collet_id="collet_todo_001",
+        initiator_ref=PrincipalRef("human", "u_1001"),
+        state=ColletState.ACTIVE,
+        scope=SpaceRef(space_id="space_workspace_001", environment="prod"),
         current_event_id=None,
-        context_version=1,
+        version=1,
     )
 
 
@@ -436,31 +441,33 @@ class TestStructuralAuthorizer:
     def test_check_append_requires_principal_or_executor(self):
         authorizer = StructuralContextCollabAuthorizer()
         collet = _fake_collet()
+        spec = _fake_spec()
         # principal 通过
-        authorizer.check_append(collet, None, make_actor("u_1001"))
+        authorizer.check_append(collet, spec, None, make_actor("u_1001"))
         # executor(agent_id 即 bot_coding_001)通过
-        authorizer.check_append(collet, None, make_actor("bot_coding_001"))
+        authorizer.check_append(collet, spec, None, make_actor("bot_coding_001"))
         # 陌生 actor 拒绝
         with pytest.raises(ContextCollabValidationError):
-            authorizer.check_append(collet, None, make_actor("u_9999"))
+            authorizer.check_append(collet, spec, None, make_actor("u_9999"))
 
     def test_filter_visible_events_by_actor_role(self):
         authorizer = StructuralContextCollabAuthorizer()
         collet = _fake_collet()
+        spec = _fake_spec()
         events = [_event("evt_pub", "public"),
                   _event("evt_ws", "workspace"),
                   _event("evt_priv", "private")]
 
         principal_view = authorizer.filter_visible_events(
-            collet, events, make_actor("u_1001"))
+            collet, spec, events, make_actor("u_1001"))
         assert [e.event_id for e in principal_view] == [
             "evt_pub", "evt_ws", "evt_priv",
         ]
 
         executor_view = authorizer.filter_visible_events(
-            collet, events, make_actor("bot_coding_001"))
+            collet, spec, events, make_actor("bot_coding_001"))
         assert [e.event_id for e in executor_view] == ["evt_pub", "evt_ws"]
 
         outsider_view = authorizer.filter_visible_events(
-            collet, events, make_actor("u_9999"))
+            collet, spec, events, make_actor("u_9999"))
         assert [e.event_id for e in outsider_view] == ["evt_pub"]

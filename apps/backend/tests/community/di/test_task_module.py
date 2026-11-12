@@ -54,8 +54,15 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
+    ColletLifecycleService,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     MethodLifecycleService,
@@ -392,3 +399,21 @@ def test_task_module_binds_l5_method_services_and_authorizer_singletons():
     assert group._store is store  # noqa: SLF001
     assert swarm._store is store  # noqa: SLF001
     assert open_service._store is store  # noqa: SLF001
+
+
+def test_task_module_binds_collet_lifecycle_store_and_service_singletons():
+    """Collet 生命周期接线(2026-11-12 L4 对齐 spec §5.3):store 协议绑
+    进程内 singleton 实现,服务 singleton 且共享同一 store;collab_repo
+    协议由 TaskPersistenceModule 绑定,此处 stub 仅供可解析。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    store = inj.get(ColletLifecycleStore)
+    assert isinstance(store, InMemoryColletLifecycleStore)
+    service = inj.get(ColletLifecycleService)
+    assert isinstance(service, ColletLifecycleService)
+    # singleton:两次解析取同对象。
+    for binding in (ColletLifecycleStore, ColletLifecycleService):
+        assert inj.get(binding) is inj.get(binding)
+    # 服务持有同一 store singleton。
+    assert service._store is store  # noqa: SLF001

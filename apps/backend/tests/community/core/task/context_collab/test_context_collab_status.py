@@ -25,6 +25,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -73,26 +74,31 @@ def _spec() -> ContextSpec:
     )
 
 
-def _collet(*, current_event_id: str = "evt_004") -> Collet:
-    """§6.4 示例形态的 collet:status=in_progress、current=evt_004。
+def _snapshot() -> CurrentSnapshot:
+    """§6.4 示例形态的落库快照:status=in_progress、progress 全 0 初值。
 
     落库的 snapshot progress 保持创建时的全 0 初值(stale),
     查询投影必须用 build_progress 的实时值替换它。
     """
+    return CurrentSnapshot(
+        objective=OBJECTIVE,
+        status="in_progress",
+        principal_ref=PRINCIPAL,
+        executor_ref=EXECUTOR,
+        method_kind="Single",
+        progress=ProgressSnapshot(percent=0, current_event_id=None),
+    )
+
+
+def _collet(*, current_event_id: str = "evt_004") -> Collet:
+    """§6.4 示例形态的聚合根(current=evt_004);spec/快照是 record 伴随投影。"""
     return Collet(
-        collab_context_id=COLLET_ID,
-        actor_ref=None,
-        context_spec=_spec(),
-        current_snapshot=CurrentSnapshot(
-            objective=OBJECTIVE,
-            status="in_progress",
-            principal_ref=PRINCIPAL,
-            executor_ref=EXECUTOR,
-            method_kind="Single",
-            progress=ProgressSnapshot(percent=0, current_event_id=None),
-        ),
+        collet_id=COLLET_ID,
+        initiator_ref=PRINCIPAL,
+        state=ColletState.ACTIVE,
+        scope=_spec().space,
         current_event_id=current_event_id,
-        context_version=4,
+        version=4,
     )
 
 
@@ -177,10 +183,18 @@ class _FakeStatusRepository:
     ``get_calls`` 记录读取入参,用于断言服务只读不写。
     """
 
-    def __init__(self, collet: Collet, events: list[EventRecord]) -> None:
-        self.collets: dict[str, Collet] = {collet.collab_context_id: collet}
+    def __init__(
+        self,
+        collet: Collet,
+        snapshot: CurrentSnapshot | None,
+        events: list[EventRecord],
+    ) -> None:
+        self.collets: dict[str, Collet] = {collet.collet_id: collet}
+        self.snapshots: dict[str, CurrentSnapshot | None] = {
+            collet.collet_id: snapshot
+        }
         self.events: dict[str, list[EventRecord]] = {
-            collet.collab_context_id: list(events)
+            collet.collet_id: list(events)
         }
         self.get_calls: list[str] = []
         self.write_calls: list[tuple] = []
@@ -193,7 +207,12 @@ class _FakeStatusRepository:
         if collet is None:
             return None
         events = list(self.events.get(collab_context_id, []))
-        return ContextStatusRecord(collet=collet, events=events)
+        return ContextStatusRecord(
+            collet=collet,
+            context_spec=_spec(),
+            current_snapshot=self.snapshots[collab_context_id],
+            events=events,
+        )
 
     # 写路径在查询用例中不允许被触达;若被调用记录并报错。
     def create_context(self, request) -> None:
@@ -208,7 +227,9 @@ class _FakeStatusRepository:
 def _make_service(
     *, collet: Collet | None = None, events: list[EventRecord] | None = None
 ):
-    repo = _FakeStatusRepository(collet or _collet(), events or _fixture_events())
+    repo = _FakeStatusRepository(
+        collet or _collet(), _snapshot(), events or _fixture_events()
+    )
     assert isinstance(repo, ContextCollabRepositoryProtocol)
     service = ContextCollabService(
             method_store=InMemoryMethodStore(),
@@ -235,7 +256,7 @@ class TestGetStatusHappyPath:
         assert snapshot["status"] == "in_progress"
         progress = snapshot["progress"]
         # 落库快照的 progress 是全 0 初值,查询必须用实时投影替换。
-        assert repo.collets[COLLET_ID].current_snapshot.progress.percent == 0
+        assert repo.snapshots[COLLET_ID].progress.percent == 0
         assert progress["percent"] == 40
         # completed 只计非 Message 事件:evt_001/evt_003 两个 Task;
         # evt_002(Message)不计数(spec §6.4 示例 completed_count=2)。
@@ -552,8 +573,8 @@ class TestReadOnlyPath:
         assert repo.write_calls == []
         # collet 行未变:版本、落库 progress 都保持原样。
         assert repo.collets[COLLET_ID] is before
-        assert before.context_version == 4
-        assert before.current_snapshot.progress.percent == 0
+        assert before.version == 4
+        assert repo.snapshots[COLLET_ID].progress.percent == 0
         assert before.current_event_id == "evt_004"
         assert len(repo.events[COLLET_ID]) == 5
         # 两次只读结果一致,且未把投影值写回行内。
