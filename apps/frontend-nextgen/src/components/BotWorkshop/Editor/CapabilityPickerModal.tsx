@@ -6,9 +6,7 @@ import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalT
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
-import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
-import { isLocalSkillPackageError, localSkillUploadErrorMessage } from './localSkillUploadErrors';
+import { useLocalSkillUploadError } from '@/hooks/useLocalSkillUploadError';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { readDirectoryFiles, type DirectoryHandle } from './capabilityPickerDirectory';
@@ -67,7 +65,7 @@ export function CapabilityPickerModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
+  const uploadError = useLocalSkillUploadError();
   const [deletingId, setDeletingId] = useState<string>();
   const searchMcpRef = useRef(onSearchMcp);
   searchMcpRef.current = onSearchMcp;
@@ -116,7 +114,7 @@ export function CapabilityPickerModal({
   const close = () => {
     setSelected([]);
     setKeyword('');
-    setUploadError('');
+    uploadError.setMessage('');
     onOpenChange(false);
   };
   const submit = async () => {
@@ -131,7 +129,7 @@ export function CapabilityPickerModal({
   const uploadFolder = async () => {
     if (!onUploadFolder || !canPickDirectory) return;
     setUploading(true);
-    setUploadError('');
+    uploadError.setMessage('');
     try {
       const pickerWindow = window as Window & {
         showDirectoryPicker?: (options?: { mode?: 'read' }) => Promise<DirectoryHandle>;
@@ -143,17 +141,10 @@ export function CapabilityPickerModal({
         const skill = await onUploadFolder(files);
         setSelected((current) => [...new Set([...current, skill.id])]);
       } else {
-        setUploadError('所选目录没有可上传的文件，请确认目录包含 SKILL.md。');
+        uploadError.setMessage('所选目录没有可上传的文件，请确认目录包含 SKILL.md。');
       }
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        if (error instanceof BackendRequestError && isLocalSkillPackageError(error.data)) {
-          if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
-          setUploadError(localSkillUploadErrorMessage(error.data));
-        } else if (!(error instanceof BackendRequestError) && !(error instanceof Error && error.name === 'AceLoginRedirectError')) {
-          setUploadError('本地 Skill 目录上传失败，请检查网络或目录权限后重试。');
-        }
-      }
+      uploadError.handleError(error);
     } finally {
       setUploading(false);
     }
@@ -227,8 +218,8 @@ export function CapabilityPickerModal({
             onLocalDelete={onLocalDelete}
             onLocalUpload={onLocalUpload}
           />
-          {kind === 'skill' && source === 'mine' && uploadError ? (
-            <p role="alert" className="text-sm text-destructive">{uploadError}</p>
+          {kind === 'skill' && source === 'mine' && uploadError.message ? (
+            <p role="alert" className="text-sm text-destructive">{uploadError.message}</p>
           ) : null}
           <div className="relative">
             <Search aria-hidden className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

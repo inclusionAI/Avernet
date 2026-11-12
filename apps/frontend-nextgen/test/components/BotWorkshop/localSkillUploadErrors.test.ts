@@ -1,4 +1,4 @@
-import { isLocalSkillPackageError, localSkillUploadErrorMessage } from '@/components/BotWorkshop/Editor/localSkillUploadErrors';
+import { isLocalSkillPackageError, localSkillUploadErrorMessage } from '@/hooks/localSkillUploadErrors';
 
 describe('local Skill upload errors', () => {
   it('describes the actionable validation reason', () => {
