@@ -3106,6 +3106,7 @@ class BaasService:  # pragma: no cover
 
         Raises:
             BaasServiceError: 更新失败
+            BaasTransientServiceError: 最终仍失败的 5xx / transport transient
         """
         route = f"/api/v1/paas/devices/{paas_device_id}/outbound-rule"
         payload = self._outbound_rule_to_dict(outbound_rule)
@@ -3115,51 +3116,83 @@ class BaasService:  # pragma: no cover
             for rule in outbound_rule.header_operation_rules
         ]
         started = time.perf_counter()
-        status_code = None
-        result_code = None
+        transient_errors: list[Exception] = []
         logger.info(
             "baas_outbound_update_requested system=baas operation=update_device_outbound_rule "
             "method=PUT route=%s paas_device_id=%s mode=%s mode_query_present=%s rules=%s",
             route, paas_device_id, mode, mode == "append", rules,
         )
-        try:
-            response = self._http.put(
-                route,
-                **({"params": {"mode": "append"}} if mode == "append" else {}),
-                json=payload,
-                timeout=30.0,
-            )
-            status_code = response.status_code
-            response.raise_for_status()
-            response_data = response.json()
-            result_code = response_data.get("code")
-
-            if result_code != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+        for attempt in range(1, 4):
+            if attempt > 1:
+                # 1s, 2s；总共 3s 的 bounded backoff，已在测试中冻结。
+                time.sleep(attempt - 1)
+            status_code = None
+            result_code = None
+            try:
+                response = self._http.put(
+                    route,
+                    **({"params": {"mode": "append"}} if mode == "append" else {}),
+                    json=payload,
+                    timeout=30.0,
                 )
+                status_code = response.status_code
+                response.raise_for_status()
+                response_data = response.json()
+                result_code = response_data.get("code")
 
-            logger.info(
-                "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
-                "paas_device_id=%s mode=%s status_code=%s result_code=%s duration_ms=%s",
-                paas_device_id, mode, status_code, result_code,
-                int((time.perf_counter() - started) * 1000),
-            )
-            return True
+                if result_code != 0:
+                    raise BaasServiceError(
+                        f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+                    )
 
-        except Exception as exc:
-            logger.error(
-                "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
-                "paas_device_id=%s mode=%s status_code=%s result_code=%s "
-                "error_type=%s duration_ms=%s",
-                paas_device_id, mode, status_code, result_code, type(exc).__name__,
-                int((time.perf_counter() - started) * 1000),
-            )
-            if isinstance(exc, httpx.HTTPStatusError):
-                raise BaasServiceError(
-                    f"BaaS API error: {exc.response.status_code} - {exc.response.text}"
-                ) from exc
-            raise
+                logger.info(
+                    "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
+                    "paas_device_id=%s mode=%s status_code=%s result_code=%s attempt=%s duration_ms=%s",
+                    paas_device_id, mode, status_code, result_code, attempt,
+                    int((time.perf_counter() - started) * 1000),
+                )
+                return True
+
+            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                if isinstance(exc, httpx.RequestError):
+                    transient_errors.append(exc)
+                    logger.warning(
+                        "baas_outbound_update_transport_transient system=baas operation=update_device_outbound_rule "
+                        "paas_device_id=%s mode=%s attempt=%s error_type=%s duration_ms=%s",
+                        paas_device_id, mode, attempt, type(exc).__name__,
+                        int((time.perf_counter() - started) * 1000),
+                    )
+                    continue
+                status_code = exc.response.status_code
+                if status_code < 500:
+                    logger.error(
+                        "baas_outbound_update_http_failed system=baas operation=update_device_outbound_rule "
+                        "paas_device_id=%s mode=%s status_code=%s attempt=%s duration_ms=%s",
+                        paas_device_id, mode, status_code, attempt,
+                        int((time.perf_counter() - started) * 1000),
+                    )
+                    raise BaasServiceError(
+                        f"BaaS API error: {status_code} - {exc.response.text}"
+                    ) from exc
+                transient_errors.append(exc)
+                logger.warning(
+                    "baas_outbound_update_server_transient system=baas operation=update_device_outbound_rule "
+                    "paas_device_id=%s mode=%s status_code=%s attempt=%s duration_ms=%s",
+                    paas_device_id, mode, status_code, attempt,
+                    int((time.perf_counter() - started) * 1000),
+                )
+                continue
+
+        last_error = transient_errors[-1] if transient_errors else None
+        logger.error(
+            "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+            "paas_device_id=%s mode=%s error_type=%s attempt=%s duration_ms=%s",
+            paas_device_id, mode, type(last_error).__name__ if last_error else "unknown",
+            3, int((time.perf_counter() - started) * 1000),
+        )
+        raise BaasTransientServiceError(
+            f"BaaS device outbound-rule update exceeded transient retries: {last_error}"
+        ) from last_error
 
     def append_token_outbound_rule(
         self,
