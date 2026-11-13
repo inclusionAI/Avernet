@@ -1,0 +1,21 @@
+spring:
+  main:
+    web-application-type: none
+  ai:
+    openai:
+      api-key: "${OPENAI_API_KEY}"
+      chat:
+        options:
+          model: "${OPENAI_MODEL:gpt-4o-mini}"
+          temperature: 0.7
+
+bcn:
+  url: "${BCN_URL:ws://127.0.0.1:21000/ws/bot}"
+  client-kind: "${BCN_CLIENT_KIND:custom-engine}"
+  bot-id: "${BCN_BOT_ID:}"
+  token: "${BCN_TOKEN:}"
+  session-file: "${BCN_SESSION_FILE:.bcs/session.json}"
+  heartbeat-interval: "${BCN_HEARTBEAT_INTERVAL:60s}"
+  connect-timeout: "${BCN_CONNECT_TIMEOUT:30s}"
+  reconnect-initial: "${BCN_RECONNECT_INITIAL:1s}"
+  reconnect-max: "${BCN_RECONNECT_MAX:30s}"
