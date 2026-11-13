@@ -1,0 +1,48 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/support/broken_stderr.rs
+  s_ba174a661badd1::t_74803b4f3176f2 1-40
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_ba174a661badd1::t_520b19df66fa1b 54-55
+  s_ba174a661badd1::t_74803b4f3176f2 50-53
+  s_3c5fd10f284733::t_ccb27528e524f0 23-29
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_ba174a661badd1::t_74803b4f3176f2 83-86,93-97,103,107-122
+  s_ba174a661badd1::t_24c06d48c26aa1 1,10,33-34,37,46-55,65-71,99
+  s_ba174a661badd1::t_fc1452abb491be 123
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_ba174a661badd1::t_74803b4f3176f2 8-11,31,509-512,514-522,524-525,528-569
+  s_3c5fd10f284733::t_ccb27528e524f0 32-54
+  s_3c5fd10f284733::t_2ccc0670ea2052 55-124,570
+  s_ba174a661badd1::t_520b19df66fa1b 513,523,526-527
+  s_3c5fd10f284733::t_75ae6733fd13b8 140,255,308-313,321,323,331
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_3c5fd10f284733::t_75ae6733fd13b8 28-30,36-42,50,53,60-61,65,70,72-74
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/client_versions.rs
+  s_3c5fd10f284733::t_ccb27528e524f0 18-75
+  s_3c5fd10f284733::t_90ce13f7dd8d20 17
+apps/bcs-internal/docs/sofa-tracer.md
+  s_3c5fd10f284733::t_ccb27528e524f0 78-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebf16f5cf2d70f5e7387d9437bdd2cd99bb3b41d",
+  "prompts": {},
+  "sessions": {
+    "s_3c5fd10f284733": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c470-1c6f-7b43-aa65-ecd55faf52ca",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_ba174a661badd1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c37c-3720-7953-b4e0-e9b55fcb9e79",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/corp/plugins/prod/service_bot_eval.py
+  s_502dbf3f3ce405::t_06691f73a4c007 264-267,269-276,387-398,424-435,715-717,817
+apps/backend/tests/corp/plugins/prod/test_service_bot_eval.py
+  s_502dbf3f3ce405::t_06691f73a4c007 9-12,70-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4541cdfcef8eb60cb0212c0c456679bc37ca49d3",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

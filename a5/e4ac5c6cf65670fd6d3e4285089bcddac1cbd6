@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/agent_security.py
+  h_109ba21d0fda5e 6-7,72-83
+apps/backend/tests/corp/plugins/prod/test_risk_approval_recovery.py
+  h_109ba21d0fda5e 37-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a5e4ac5c6cf65670fd6d3e4285089bcddac1cbd6",
+  "prompts": {},
+  "humans": {
+    "h_109ba21d0fda5e": {
+      "author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

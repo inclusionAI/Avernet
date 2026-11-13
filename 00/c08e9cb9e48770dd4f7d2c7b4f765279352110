@@ -1,0 +1,44 @@
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_6d6044b02bd54a::t_c339516655b06a 102-104
+  s_6d6044b02bd54a::t_cce5e695be6167 12
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_6d6044b02bd54a::t_87bd5cc050c56d 1-51
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_6d6044b02bd54a::t_bf409dd3863358 22-25
+  s_6d6044b02bd54a::t_5d7bd95798e81c 97
+  s_6d6044b02bd54a::t_7d43fbcdd1e2d1 4,31-32
+  s_6d6044b02bd54a::t_1914e7d4a51977 98-108
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_6d6044b02bd54a::t_1a8627f458143f 185-186
+  s_6d6044b02bd54a::t_606292479a7dd6 60-62
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_6d6044b02bd54a::t_204fef70fa672d 29-35
+  s_6d6044b02bd54a::t_9430bd2c6b8b3e 6-8
+  s_6d6044b02bd54a::t_0a381155108bb4 671-675
+  s_6d6044b02bd54a::t_6e6cf3920b4bd8 620-670,676-678
+  s_6d6044b02bd54a::t_2d5dc53bda9917 587-619
+  s_6d6044b02bd54a::t_c6417ca2e58add 5
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_6d6044b02bd54a::t_a76adaa45f8181 555-625
+  s_6d6044b02bd54a::t_ad1015db0de208 303,316-317,334
+  s_6d6044b02bd54a::t_9c815349ce140e 284-302,304-315,318-333,335-336
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_6d6044b02bd54a::t_e2b76b3b223a62 12-16,21-22,27-28
+  s_6d6044b02bd54a::t_7e8735c17c0777 64-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00c08e9cb9e48770dd4f7d2c7b4f765279352110",
+  "prompts": {},
+  "sessions": {
+    "s_6d6044b02bd54a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "cd632900-c4d8-457b-b09b-d17673865885",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
