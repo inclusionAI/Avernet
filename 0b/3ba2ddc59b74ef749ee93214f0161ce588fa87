@@ -1,0 +1,39 @@
+apps/backend/specs/teclaw-failed-retry-update/001-spec-output.md
+  s_ca63c911f829c7::t_2a56388b4f1997 1-24
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_ca63c911f829c7::t_2a56388b4f1997 515,517,1465
+apps/backend/specs/teclaw-failed-retry-update/003-review-report.md
+  s_ca63c911f829c7::t_18c2402227bb5d 1-35
+apps/backend/tests/community/core/service_bot/services/test_teclaw_failed_retry_update.py
+  s_ca63c911f829c7::t_1204d71d96a2e2 1-20,24-42,44-69,73-92
+  s_ca63c911f829c7::t_e3a8a9cd63bcd9 21-23,70-72
+  s_ca63c911f829c7::t_987ad6d9f1e77a 43
+apps/backend/specs/teclaw-failed-retry-update/002-code-report.md
+  s_ca63c911f829c7::t_c0f764710487c3 1-21
+apps/backend/specs/teclaw-failed-retry-update/003b-regression-report.md
+  s_ca63c911f829c7::t_c0f764710487c3 1-12
+apps/backend/specs/teclaw-failed-retry-update/009-pr-report.md
+  s_ca63c911f829c7::t_c0a9939ee2ee01 1-19
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_ca63c911f829c7::t_c606246ac08615 13-24
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/provider_behavior.py
+  s_ca63c911f829c7::t_f0434519f93001 120-123,209-210,325-326
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/upgrade_resolution_mixin.py
+  s_ca63c911f829c7::t_06f89fe6f9554d 36-38,181-183,185-186,236,241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b3ba2ddc59b74ef749ee93214f0161ce588fa87",
+  "prompts": {},
+  "sessions": {
+    "s_ca63c911f829c7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18a99-cb6b-79f3-a361-54f9b47a2a91",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

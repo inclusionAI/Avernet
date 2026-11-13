@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/dashboard.mjs
+  s_7041fdb3e974bb::t_cb0ff4cd7626a0 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "98f9b09e047312f44e8999095f6225ac5d3f57c9",
+  "prompts": {},
+  "sessions": {
+    "s_7041fdb3e974bb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2c7-4774-7de1-a174-e229fad34f15",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
