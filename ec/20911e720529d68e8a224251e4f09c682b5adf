@@ -1,0 +1,74 @@
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  h_5b2ec9c12c4d18 304-310
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  h_5b2ec9c12c4d18 308-314
+apps/backend/src/agentclaw/corp/core/service_bot_eval/models.py
+  h_5b2ec9c12c4d18 1-199
+apps/backend/src/agentclaw/corp/di/config_corp.py
+  h_5b2ec9c12c4d18 430-446
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/column.py
+  h_5b2ec9c12c4d18 107-109,180-181
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/config.py
+  h_5b2ec9c12c4d18 408-426
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/service_bot_eval.py
+  h_5b2ec9c12c4d18 1-19
+apps/backend/src/agentclaw/corp/plugins/local/__init__.py
+  h_5b2ec9c12c4d18 1
+apps/backend/src/agentclaw/corp/plugins/local/service_bot_eval.py
+  h_5b2ec9c12c4d18 1-15
+apps/backend/src/agentclaw/corp/plugins/prod/service_bot_eval.py
+  h_5b2ec9c12c4d18 1-1040
+apps/backend/tests/corp/architecture/test_plugin_pairing.py
+  h_5b2ec9c12c4d18 5-6,28-29,31
+apps/backend/tests/corp/di/test_local_k8s_column.py
+  h_5b2ec9c12c4d18 83
+apps/backend/tests/corp/di/test_profile_and_modules_for.py
+  h_5b2ec9c12c4d18 61,105
+apps/backend/tests/corp/plugins/prod/test_service_bot_eval.py
+  h_5b2ec9c12c4d18 1-374
+apps/frontend-nextgen/scripts/public-tests.list
+  h_5b2ec9c12c4d18 111-129
+apps/frontend-nextgen/test/components/BotWorkshop/AuthorizationPanel.test.tsx
+  h_5b2ec9c12c4d18 11-12
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  h_5b2ec9c12c4d18 5,737-738,750,754,760-761,763-766,1041
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.test.tsx
+  h_5b2ec9c12c4d18 43,80,226,232-253
+apps/frontend-nextgen/test/internal/brandAndEngineCapabilities.test.ts
+  h_5b2ec9c12c4d18 3-7
+apps/frontend-nextgen/test/internal/currentOpenApiUserId.test.ts
+  h_5b2ec9c12c4d18 3-7
+apps/frontend-nextgen/test/internal/grayReleaseCapability.test.ts
+  h_5b2ec9c12c4d18 8-12
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  h_5b2ec9c12c4d18 20-22,94-113,134-143,154-183,233-242,281
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  h_5b2ec9c12c4d18 1-93
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  h_5b2ec9c12c4d18 35
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  h_5b2ec9c12c4d18 23-32,54-56,145-150,192-200
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  h_5b2ec9c12c4d18 3,224-232,251-287,299-315
+apps/frontend-nextgen/test/services/workspace/channelBindingService.test.ts
+  h_5b2ec9c12c4d18 13,30,81,105,199
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  h_5b2ec9c12c4d18 1-58
+apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
+  h_5b2ec9c12c4d18 15-26
+docs/singlebox-eval/tier-diff-S4.md
+  h_5b2ec9c12c4d18 38,76
+submodules/avernet
+  h_5b2ec9c12c4d18 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ec20911e720529d68e8a224251e4f09c682b5adf",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

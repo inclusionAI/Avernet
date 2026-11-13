@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/corp/plugins/prod/device_adapter_transport.py
+  s_175b0f22539a3e::t_24d6d00db971a2 383,511
+submodules/avernet
+  s_ca7af9dfba2884::t_b8e0c00f83dd0d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3732ac0a707f607bd50e440607827056aef00672",
+  "prompts": {},
+  "sessions": {
+    "s_175b0f22539a3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a222-37b0-7000-a9b2-4e43be8aaf58",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_ca7af9dfba2884": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-cba6-7be2-89be-5ef06d15a772",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

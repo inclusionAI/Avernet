@@ -1,0 +1,24 @@
+apps/backend/tests/community/core/task/context_collab/products/test_bbs_public_discussion_read.py
+  s_64261436edbb0b::t_ed3b951e457395 1-402
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/service.py
+  s_64261436edbb0b::t_662825ca8cefb7 117-131
+  s_64261436edbb0b::t_cf86831be112a9 310-330,333-355,366-376,378-386,388-400
+  s_64261436edbb0b::t_0ea6c6f5c75b1f 356-365
+  s_64261436edbb0b::t_31ccf6bcea1547 67,69,377,387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74e43d3f443bb0fa6ef0522c7388205662260b9c",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

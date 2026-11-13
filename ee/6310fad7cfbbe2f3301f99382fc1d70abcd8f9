@@ -1,0 +1,27 @@
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_config.py
+  s_10bf1e6587c582::t_fbccbf7535a09b 11,24-48
+src/ecb/docs/task_benchmark/TASK_MONITOR.md
+  s_10bf1e6587c582::t_66bdf3422a9a26 42,44,93-94
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_wiring.py
+  s_10bf1e6587c582::t_66bdf3422a9a26 9
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/config.py
+  s_10bf1e6587c582::t_66bdf3422a9a26 17,95,97
+src/ecb/ecb/configs/application.yaml
+  s_10bf1e6587c582::t_66bdf3422a9a26 133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee6310fad7cfbbe2f3301f99382fc1d70abcd8f9",
+  "prompts": {},
+  "sessions": {
+    "s_10bf1e6587c582": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cae1-4fcb-78d0-8da3-b8728836a6c9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

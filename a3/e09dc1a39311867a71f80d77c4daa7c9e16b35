@@ -1,0 +1,46 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-editor.md
+  h_bb3ca6fb13c5df 1-63
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-validation.md
+  h_bb3ca6fb13c5df 1-92
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflow-ai.ts
+  h_bb3ca6fb13c5df 1-27
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDraftPreview.tsx
+  h_bb3ca6fb13c5df 1-144
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDrawer.tsx
+  h_bb3ca6fb13c5df 1-134
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDraftPreview.test.tsx
+  h_bb3ca6fb13c5df 1-124
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  h_bb3ca6fb13c5df 1-247
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.test.tsx
+  h_bb3ca6fb13c5df 1-142
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useWorkflowAiDraft.ts
+  h_bb3ca6fb13c5df 1-108
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_bb3ca6fb13c5df 40-41,107-109,258-293,778-795,921,938-947
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAi.test.tsx
+  h_bb3ca6fb13c5df 1-79
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAiMode.test.tsx
+  h_bb3ca6fb13c5df 1-191
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.test.ts
+  h_bb3ca6fb13c5df 1-278
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.ts
+  h_bb3ca6fb13c5df 1-107
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-spec.ts
+  h_bb3ca6fb13c5df 1-142
+docs/demos/ai-workflow-yaml-demo-plan.zh-CN.md
+  h_bb3ca6fb13c5df 1-191
+docs/demos/ai-workflow-yaml-demo.html
+  h_bb3ca6fb13c5df 1-804
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a3e09dc1a39311867a71f80d77c4daa7c9e16b35",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

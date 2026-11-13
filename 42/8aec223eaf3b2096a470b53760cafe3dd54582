@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_43af82e14600e4 75-76,576-584
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "428aec223eaf3b2096a470b53760cafe3dd54582",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
