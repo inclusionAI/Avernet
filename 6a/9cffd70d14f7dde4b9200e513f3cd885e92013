@@ -1,0 +1,207 @@
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  s_4a9652da7d4535::t_92b37f63c1f6e5 304-310
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  s_4a9652da7d4535::t_2d18efda10b3dc 308-314
+apps/backend/src/agentclaw/corp/core/service_bot_eval/models.py
+  s_4a9652da7d4535::t_0b408f57290abb 1-199
+apps/backend/src/agentclaw/corp/di/config_corp.py
+  s_4a9652da7d4535::t_71fe7d2acc653b 430-446
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/column.py
+  s_4a9652da7d4535::t_392fc6e191199f 107-109,180-181
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/config.py
+  s_4a9652da7d4535::t_93aef839a0ada4 408-426
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/service_bot_eval.py
+  s_4a9652da7d4535::t_30d46283785f0b 1-19
+apps/backend/src/agentclaw/corp/plugins/local/__init__.py
+  s_4a9652da7d4535::t_d83b397646aeeb 1
+apps/backend/src/agentclaw/corp/plugins/local/service_bot_eval.py
+  s_4a9652da7d4535::t_4df1965cf4d104 1-15
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  s_4a9652da7d4535::t_201046197e5821 774
+apps/backend/src/agentclaw/corp/plugins/prod/service_bot_eval.py
+  s_4a9652da7d4535::t_4d43e180c607b5 1-1040
+apps/backend/tests/corp/architecture/test_plugin_pairing.py
+  s_4a9652da7d4535::t_20a4cb8be1ba34 5-6,28-29,31
+apps/backend/tests/corp/di/test_local_k8s_column.py
+  s_4a9652da7d4535::t_b8a706f0f69088 83
+apps/backend/tests/corp/di/test_profile_and_modules_for.py
+  s_4a9652da7d4535::t_1b6bb6659ce063 61,85,106
+apps/backend/tests/corp/plugins/prod/test_passport_renewal_lineage.py
+  s_4a9652da7d4535::t_baa958cd2df53e 1-30
+apps/backend/tests/corp/plugins/prod/test_service_bot_eval.py
+  s_4a9652da7d4535::t_cd029a30deae2c 1-374
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  s_4a9652da7d4535::t_bcf659f5463190 53-60
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_4a9652da7d4535::t_ea8d15c618427f 90,102,112
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/final_summary.py
+  s_4a9652da7d4535::t_2caf4bc435951a 43-45
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_4a9652da7d4535::t_58466e2b9ed299 20,82
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/simulation.py
+  s_4a9652da7d4535::t_9d8e70ea460973 7
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  s_4a9652da7d4535::t_9b24859ac2c2bc 42-46,92-106
+apps/evolverun/clawweb/docs/session-recovery-handbook-teams.example.json
+  s_4a9652da7d4535::t_40ece7bbaf9671 7-9
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-fanout-auth.test.ts
+  s_4a9652da7d4535::t_41ddab39d0bb0d 103-111
+apps/frontend-nextgen/docs/agent-coding/session-status-bridge.md
+  s_4a9652da7d4535::t_2b682d8f150b5e 1-234
+apps/frontend-nextgen/scripts/test-assemble-public-tests.sh
+  s_4a9652da7d4535::t_0bd6842c3d62ad 18-37
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_4a9652da7d4535::t_d605f6aec7ae0e 34,563
+apps/frontend-nextgen/src/internal/agentCoding/CodingBotEmbeddedStage.tsx
+  s_4a9652da7d4535::t_684df88a13ff48 4,60,71-75,89-96,200
+apps/frontend-nextgen/src/internal/agentCoding/cronMemoryOsSession.ts
+  s_4a9652da7d4535::t_995e6753ae7efc 1-8
+apps/frontend-nextgen/src/internal/conversationInstance/instanceScopeCapability.ts
+  s_4a9652da7d4535::t_f7fa112b8ac5a0 36,40
+apps/frontend-nextgen/src/internal/conversationInstance/instanceScopeService.ts
+  s_4a9652da7d4535::t_a9cfd9a5a9c1b1 14,16-18,84-87,101
+apps/frontend-nextgen/src/internal/help/releaseNoteService.ts
+  s_4a9652da7d4535::t_4a58263fc60e51 46-70,93
+apps/frontend-nextgen/src/internal/help/releaseNotesCapability.ts
+  s_4a9652da7d4535::t_72c5904fd5fdce 2-3,29,32
+apps/frontend-nextgen/src/internal/market/controllers/CapabilitySetController.ts
+  s_4a9652da7d4535::t_b79dcfc1c03217 44,47,52,55,63,66,94,97
+apps/frontend-nextgen/src/internal/market/controllers/SkillCenterReferenceController.ts
+  s_4a9652da7d4535::t_4321b28649f8ed 45,51,73,79,86
+apps/frontend-nextgen/src/internal/market/hooks/referenceFlow.ts
+  s_4a9652da7d4535::t_0748c7e49e39ea 72,192,235,268,358,413
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_4a9652da7d4535::t_391c14779c26f7 88,124,133,156,178,204,224
+apps/frontend-nextgen/src/internal/market/hooks/useSkillCenterReferences.ts
+  s_4a9652da7d4535::t_73cb5a5b9ae433 20,53,76-79,97
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  s_4a9652da7d4535::t_a9143b0b52e03a 246
+apps/frontend-nextgen/src/internal/market/service.ts
+  s_4a9652da7d4535::t_f9ed59844c8d13 295,297,314,323,333,336,511,521,540,550
+apps/frontend-nextgen/src/internal/market/types.ts
+  s_4a9652da7d4535::t_aeb7b92d37a132 163,193
+apps/frontend-nextgen/src/internal/productGuide/components/GuideAssistantPanel.tsx
+  s_4a9652da7d4535::t_334867f934e65e 6-8
+apps/frontend-nextgen/src/internal/productGuide/components/WelcomeGuideModal.tsx
+  s_4a9652da7d4535::t_50465d0f0a6e11 3-4,16-17,42-49,51-66,68-70
+apps/frontend-nextgen/src/internal/productGuide/config/guideConfigTypes.ts
+  s_4a9652da7d4535::t_9b3c2a3f30ff0c 121
+apps/frontend-nextgen/src/internal/productGuide/config/resolveGuideConfig.ts
+  s_4a9652da7d4535::t_3555f74ff5dd3b 171
+apps/frontend-nextgen/src/internal/productGuide/productGuideService.ts
+  s_4a9652da7d4535::t_558c18e9a2a98c 5-8,14-17,35-36,38-43,48-52
+apps/frontend-nextgen/test/components/BotWorkshop/BotDormantLifecycle.test.tsx
+  s_4a9652da7d4535::t_46d8f9b53e29f2 5,94-118,120-128,130-147,149-154
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_4a9652da7d4535::t_08e67957b250d4 5,737-738,750,754,760-761,763-766,1041
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.test.tsx
+  s_4a9652da7d4535::t_21309e5f0da4dc 43,80,226,232-253
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  s_4a9652da7d4535::t_c5d6331a2cdd60 13,32,47-55
+apps/frontend-nextgen/test/hooks/useBotWorkshop.test.tsx
+  s_4a9652da7d4535::t_f750165ae56ac8 204,210,217,220,222,240,242,245-248,509,523-525,530,533,535
+apps/frontend-nextgen/test/hooks/useReleaseNotes.test.ts
+  s_4a9652da7d4535::t_81a561356889ff 30,32,39,47,55,61-63,66,68-70,75,80,82-86,89-90,93-94,99-162,174-175,178,184,188,193-195
+apps/frontend-nextgen/test/internal/agentCoding/cronMemoryOsSession.test.ts
+  s_4a9652da7d4535::t_97489aba86fbfd 1-19
+apps/frontend-nextgen/test/internal/agentCoding/sessionStatusStage.test.tsx
+  s_4a9652da7d4535::t_7677547316cc2e 1-132
+apps/frontend-nextgen/test/internal/conversationInstance/instanceScopeService.test.ts
+  s_4a9652da7d4535::t_e92b501fa05633 17,19,30,65-68,78-95,178-188,256
+apps/frontend-nextgen/test/internal/help/releaseNoteService.test.ts
+  s_4a9652da7d4535::t_6c4d3dbf626c86 19,24,30-31,36-57
+apps/frontend-nextgen/test/internal/market/controllers/CapabilitySetController.test.ts
+  s_4a9652da7d4535::t_109928b49c9dd5 78,83
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySet.test.tsx
+  s_4a9652da7d4535::t_508afb9ce1216f 149-168,175,251
+apps/frontend-nextgen/test/internal/market/scReferenceService.test.ts
+  s_4a9652da7d4535::t_8226b396de4fc9 70,86,101
+apps/frontend-nextgen/test/internal/market/service.test.ts
+  s_4a9652da7d4535::t_18c2b322ccc817 472,485,515,542,554
+apps/frontend-nextgen/test/internal/market/useSkillCenterReferences.test.ts
+  s_4a9652da7d4535::t_a2024466918e17 256,263,425,439,446,449,453,532,535,603,608
+apps/frontend-nextgen/test/internal/productGuide/GuideAssistantPanel.test.tsx
+  s_4a9652da7d4535::t_44c9bbc39d745c 107
+apps/frontend-nextgen/test/internal/productGuide/WelcomeGuideModal.test.tsx
+  s_4a9652da7d4535::t_9d53b0293602ba 10,16-25,42,49-50,55,63,73,85,97,118,125-187
+apps/frontend-nextgen/test/internal/productGuide/productGuideService.test.ts
+  s_4a9652da7d4535::t_5ec40164dcc540 2-6,27,29,32-33,36-40,43-44,46-47
+apps/frontend-nextgen/test/internal/productGuide/resolveGuideConfig.test.ts
+  s_4a9652da7d4535::t_c34ddf69d962d5 156-158
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  s_4a9652da7d4535::t_53fc97d6929430 3,26-49
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  s_4a9652da7d4535::t_d626ac63e9862d 20-22,94-113,134-143,154-183,233-242,281
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_4a9652da7d4535::t_53c68cb7570751 1,3-6,8-21,24-36,38-45,47-51,54-56,59-72,75-78,81-83,86-91
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_4a9652da7d4535::t_cef9a591c11d5c 23-32,54-56,145-150,192-200
+apps/frontend-nextgen/test/services/backendApi/bots/botController.test.ts
+  s_4a9652da7d4535::t_ee66213d820e35 142,151-170
+apps/frontend-nextgen/test/services/botWorkshop/botManagementActionService.test.ts
+  s_4a9652da7d4535::t_15e10bd815443f 39-44
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  s_4a9652da7d4535::t_41356f447362c5 217-218,220-246,252-255
+apps/frontend-nextgen/test/services/botWorkshop/botWorkshopService.test.ts
+  s_4a9652da7d4535::t_70ba9fb60b49a9 2,15,28,464-519
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_4a9652da7d4535::t_fd19fe9891e584 3,224-232,251-287,299-315
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_4a9652da7d4535::t_4d22ae79ddebc0 1-58
+apps/frontend-nextgen/test/shell/HelpMenu.test.tsx
+  s_4a9652da7d4535::t_cbc7b5f8829a7d 4,18-19,25,54,70-76
+apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
+  s_4a9652da7d4535::t_84f02f8be6da6f 15-26
+apps/frontend/src/components/aicoding/FileTree.tsx
+  s_4a9652da7d4535::t_4cdb0c59fcf401 43-47,1645,1656-1658
+apps/frontend/src/hooks/__tests__/useScheduledTasks.list.test.ts
+  s_4a9652da7d4535::t_2b16e60277fcb4 1-203
+apps/frontend/src/hooks/useResources.ts
+  s_4a9652da7d4535::t_ca06cf18d2f8d3 27-31,455-462,491-494,527-534,584-587
+apps/frontend/src/hooks/useScheduledTasks.ts
+  s_4a9652da7d4535::t_e5f9212bdb9a71 382-383,409-420,427,458-465,473,480-482,485,1280-1281
+apps/frontend/src/hooks/useServiceResources.ts
+  s_4a9652da7d4535::t_948b97a5799d11 53-57,534-541,573-576,613-620,675-678
+apps/frontend/src/pages/Cron/ScheduledTaskListPage.tsx
+  s_4a9652da7d4535::t_604e54626e4b27 126-127,170,172-173,177-182,300-307
+apps/frontend/src/services/backend-api/CronController.ts
+  s_4a9652da7d4535::t_2b5a5c739f4860 307-315,317
+apps/frontend/src/stores/scheduledTaskStore.ts
+  s_4a9652da7d4535::t_df937a70539e9c 59-62,74-82,108-111,131-165,277-282
+apps/frontend/src/utils/resourceWriteError.test.ts
+  s_4a9652da7d4535::t_0a738498319ab2 1-90
+apps/frontend/src/utils/resourceWriteError.ts
+  s_4a9652da7d4535::t_7bec9bb391f018 1-30
+apps/frontend/src/utils/vscodeRequestAdapter.ts
+  s_4a9652da7d4535::t_4e7154996e9ba3 28,55,61-89,113
+docs/rfcs/accs.md
+  s_4a9652da7d4535::t_6690a58c1f032e 1-2985
+docs/singlebox-eval/tier-diff-S4.md
+  s_4a9652da7d4535::t_b0c7929223266b 38,76
+submodules/avernet
+  s_1d9cf05cb64a53::t_ccbbb362003731 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a9cffd70d14f7dde4b9200e513f3cd885e92013",
+  "prompts": {},
+  "sessions": {
+    "s_1d9cf05cb64a53": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "11538b87-c8aa-4c8d-a63d-a8a4d0affc4c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_4a9652da7d4535": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d40213d2-3e7b-44e7-8f89-571865678b60",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

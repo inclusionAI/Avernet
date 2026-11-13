@@ -1,0 +1,40 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  s_cf4651e8741385::t_2fa51600646127 92,116-118
+  s_46bcfe8c4c3bdf::t_e2ec7f3638a479 115
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  s_cf4651e8741385::t_3158db1879b3c5 20-22,94-113,134-143,154-183,233-242,281
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_cf4651e8741385::t_d86dc0aaa4b3cf 1-93
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_cf4651e8741385::t_8aa333e75030fb 23-32,54-56,145-150,192-200
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_cf4651e8741385::t_daa105165696d6 3,224-232,251-287,299-315
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_cf4651e8741385::t_339d5abcdc0a9d 1-58
+apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
+  s_cf4651e8741385::t_0fc78836294631 15-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d816def42fa2dd95d40ee29eb900fbd09ec4cf8",
+  "prompts": {},
+  "sessions": {
+    "s_46bcfe8c4c3bdf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5d246eaa-c821-4882-91d4-4aa45f4572de",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_cf4651e8741385": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "405d0e18-19fb-4af4-8160-53148afa5fcd",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
