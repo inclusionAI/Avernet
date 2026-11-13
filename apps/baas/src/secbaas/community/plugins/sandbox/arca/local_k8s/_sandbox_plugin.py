@@ -514,6 +514,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         ready_timeout_in_seconds: int = 60,
     ) -> ArcaSandbox:
         """创建本地 K8s 沙箱。"""
+        # Fail closed before any Kubernetes write: an invalid apparmor mode
+        # must abort sandbox creation with no side effects at all.
+        _apparmor_profile_name()
         deployment_name = _build_deployment_name(template_id)
         container_port = _container_port()
         resolved_image = _resolve_image(image)
