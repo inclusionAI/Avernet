@@ -42,3 +42,4 @@ These entries are task-specific records. Inspect their individual status, eviden
 
 - [2026-11-11-edge-friend-cutover](2026-11-11-edge-friend-cutover/spec.md)
 - [2026-11-11-legacy-friend-cutover-fixes](2026-11-11-legacy-friend-cutover-fixes/spec.md)
+- [2026-11-14-bridge-auto-restart](2026-11-14-bridge-auto-restart/spec.md)

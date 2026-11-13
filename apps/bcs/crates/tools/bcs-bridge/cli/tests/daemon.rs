@@ -40,8 +40,14 @@ cwd = {}
     async fn daemon(&self, flag: &str) -> Output {
         self.output(&["start", flag, "--config", self.config.to_str().unwrap()]).await
     }
+    async fn auto_daemon(&self) -> Output {
+        self.output(&["start", "--daemon", "--auto-restart", "--config", self.config.to_str().unwrap()]).await
+    }
     fn record(&self) -> Value {
         serde_json::from_slice(&fs::read(self.runtime("bridge.pid.json")).unwrap()).unwrap()
+    }
+    fn supervisor_record(&self) -> Value {
+        serde_json::from_slice(&fs::read(self.runtime("bridge-supervisor.pid.json")).unwrap()).unwrap()
     }
     async fn ping(&self) -> bool {
         self.ping_result().await.is_ok()
@@ -82,6 +88,31 @@ fn diagnostic(output: &Output) -> String {
 }
 fn success(output: &Output) { assert!(output.status.success(), "{}", diagnostic(output)); }
 
+async fn wait_for_replacement(fixture: &Fixture, previous_pid: u64) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        if let Ok(bytes) = fs::read(fixture.runtime("bridge.pid.json")) {
+            if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
+                let pid = record["pid"].as_u64().unwrap();
+                if pid != previous_pid && fixture.ping().await { return pid; }
+            }
+        }
+        assert!(Instant::now() < deadline, "worker was not restarted; log={}",
+            fs::read_to_string(fixture.runtime("bridge.log")).unwrap_or_default());
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_restarting(fixture: &Fixture) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let output = fixture.output(&["status", "--json"]).await;
+        if output.status.success() && serde_json::from_slice::<Value>(&output.stdout).is_ok_and(|status| status["state"] == "restarting") { return; }
+        assert!(Instant::now() < deadline, "supervisor did not report restarting: {}", diagnostic(&output));
+        sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[tokio::test]
 async fn daemon_start_discovers_a_unique_profile_and_retains_it_in_status() {
     let fixture = Fixture::new();
@@ -107,6 +138,7 @@ async fn lifecycle_help_and_stopped_commands_need_no_config_or_credentials() {
     let help = fixture.output(&["start", "--help"]).await;
     success(&help);
     assert!(diagnostic(&help).contains("--daemon"));
+    assert!(diagnostic(&help).contains("--auto-restart"));
     for command in ["status", "stop"] {
         let output = fixture.command().arg(command).env("BRIDGE_CONFIG", "/missing/config.toml")
             .env("BCS_BRIDGE_PROVIDER_TOKENS", "invalid").output().await.unwrap();
@@ -239,4 +271,51 @@ async fn crashed_daemon_can_be_started_again_despite_stale_runtime_files() {
     }
     success(&fixture.daemon("--daemon").await);
     success(&fixture.output(&["stop"]).await);
+}
+
+#[tokio::test]
+async fn auto_restart_replaces_a_crashed_worker_and_stop_disables_the_supervisor() {
+    let fixture = Fixture::new();
+    let output = fixture.auto_daemon().await;
+    success(&output);
+    assert!(diagnostic(&output).contains("Auto restart: enabled"));
+    let status = fixture.output(&["status", "--json"]).await;
+    success(&status);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["auto_restart"], true);
+    let supervisor_pid = status["supervisor_pid"].as_u64().unwrap();
+    assert_eq!(fixture.supervisor_record()["pid"].as_u64().unwrap(), supervisor_pid);
+
+    let worker_pid = fixture.record()["pid"].as_u64().unwrap();
+    assert!(Command::new("kill").args(["-KILL", &worker_pid.to_string()]).status().await.unwrap().success());
+    let replacement = wait_for_replacement(&fixture, worker_pid).await;
+    assert_ne!(replacement, worker_pid);
+    assert_eq!(fixture.supervisor_record()["pid"].as_u64().unwrap(), supervisor_pid);
+
+    success(&fixture.output(&["stop"]).await);
+    assert!(!fixture.runtime("bridge-supervisor.pid.json").exists());
+    sleep(Duration::from_millis(5500)).await;
+    assert!(!fixture.ping().await);
+    let status = fixture.output(&["status", "--json"]).await;
+    success(&status);
+    assert_eq!(serde_json::from_slice::<Value>(&status.stdout).unwrap()["state"], "stopped");
+}
+
+#[tokio::test]
+async fn auto_restart_fences_duplicates_and_can_stop_while_the_worker_is_down() {
+    let fixture = Fixture::new();
+    success(&fixture.auto_daemon().await);
+    let worker_pid = fixture.record()["pid"].as_u64().unwrap();
+    assert!(Command::new("kill").args(["-KILL", &worker_pid.to_string()]).status().await.unwrap().success());
+    wait_for_restarting(&fixture).await;
+
+    let duplicate = fixture.daemon("--daemon").await;
+    assert!(!duplicate.status.success());
+    assert!(diagnostic(&duplicate).contains("supervisor"), "{}", diagnostic(&duplicate));
+
+    success(&fixture.output(&["stop"]).await);
+    sleep(Duration::from_millis(5500)).await;
+    assert!(!fixture.ping().await);
+    assert!(!fixture.runtime("bridge-supervisor.pid.json").exists());
+    success(&fixture.output(&["status"]).await);
 }

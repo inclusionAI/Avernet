@@ -58,8 +58,13 @@ struct StartArgs {
     /// Run in the background and wait for successful initialization (Unix only)
     #[arg(long)]
     daemon: bool,
-    #[arg(long, hide = true, conflicts_with = "daemon")]
+    /// Restart the background bridge after an unintended exit (requires --daemon)
+    #[arg(long, requires = "daemon")]
+    auto_restart: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["daemon", "daemon_supervisor"])]
     daemon_child: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["daemon", "daemon_child", "auto_restart"])]
+    daemon_supervisor: bool,
 }
 
 /// Parse the command line, applying the application's help text and defaults.
@@ -98,7 +103,7 @@ fn from_matches(app: &BridgeApp, command: &mut clap::Command, matches: &clap::Ar
 
 /// Detach a newly executed child before initializing the multithreaded Tokio runtime.
 pub fn prepare_process(cli: &Cli) -> anyhow::Result<()> {
-    if matches!(&cli.command, Commands::Start(StartArgs { daemon_child: true, .. })) {
+    if matches!(&cli.command, Commands::Start(args) if args.daemon_child || args.daemon_supervisor) {
         #[cfg(unix)]
         rustix::process::setsid().context("Cannot detach bridge from the terminal")?;
         #[cfg(not(unix))]
@@ -159,11 +164,12 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
             }
             #[cfg(unix)] {
                 let config_path = config_path.canonicalize().context("Cannot resolve bridge configuration path")?;
-                if args.daemon { load_start(&config_path, app, args.cwd.as_deref()).await?; return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
+                if args.daemon_supervisor { return crate::instance::run_supervisor(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
+                if args.daemon { load_start(&config_path, app, args.cwd.as_deref()).await?; return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref(), args.auto_restart).await; }
                 crate::instance::run(app, &config_path, &runtime_dir()?, args.cwd.as_deref()).await
             }
             #[cfg(not(unix))] {
-                if args.daemon || args.daemon_child { bail!("Background mode requires Unix"); }
+                if args.daemon || args.daemon_child || args.daemon_supervisor { bail!("Background mode requires Unix"); }
                 tracing_subscriber::fmt()
                     .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
                         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
@@ -279,5 +285,15 @@ mod tests {
         };
         assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
         assert!(error.to_string().contains("--deamon"));
+    }
+
+    #[test]
+    fn auto_restart_requires_daemon() {
+        let error = match Cli::try_parse_from(["bcs-bridge", "start", "--auto-restart"]) {
+            Err(error) => error,
+            Ok(_) => panic!("--auto-restart must require --daemon"),
+        };
+        assert_eq!(error.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        assert!(error.to_string().contains("--daemon"));
     }
 }
