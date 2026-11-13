@@ -3,7 +3,7 @@ import type { BenchRun } from '@/domain/evolution/types';
 import { DomainRuns } from '@/pages/EvolutionFactory/DomainRuns';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { history } from '@umijs/max';
 jest.mock('@umijs/max', () => ({ history: { push: require('@jest/globals').jest.fn() } }));
 it('shows both scopes with existing run identifiers, fields and real server pagination', () => {
@@ -56,4 +56,26 @@ it('shows genuine empty and error states, not an undeveloped placeholder', () =>
   expect(reload).toHaveBeenCalled();
   rerender(<DomainRuns {...props} error="" data={{ runs: [], total: 0 }} />);
   expect(screen.getByText('暂无关联的 Bench 运行')).toBeInTheDocument();
+});
+
+
+it('keeps long decimal scores separate from pass rate and token columns', () => {
+  // Decimal strings can be returned by the API at runtime; preserve their precision.
+  const run = {
+    benchRunId: 'decimal-run', domainId: 'domain', ownerUserId: 'owner', templateName: 'case', templateVersion: 1,
+    status: 'completed', score: '3.390000', maxScore: '4.000000', passRate: 0.848,
+    tokenUsage: { totalTokens: 260785 }, model: 'GLM-5.2', startedAt: null, completedAt: null,
+    summary: null, errorText: null,
+  } as unknown as BenchRun;
+  render(<DomainRuns data={{ runs: [run], total: 1 }} loading={false} error="" reload={jest.fn()} page={1} onPage={jest.fn()} />);
+  const score = screen.getByText('3.390000 / 4.000000');
+  expect(score).toHaveClass('truncate', 'whitespace-nowrap');
+  expect(screen.getByText('84.8%').closest('td')).not.toBe(score.closest('td'));
+  expect(screen.getByText('260,785').closest('td')).not.toBe(score.closest('td'));
+  const table = screen.getByRole('table');
+  expect(table).toHaveClass('min-w-[2230px]');
+  expect(table.parentElement).toHaveClass('overflow-x-auto');
+  const headers = within(table).getAllByRole('columnheader');
+  const scoreIndex = headers.findIndex((header) => header.textContent === '得分');
+  expect(table.querySelectorAll('col')[scoreIndex]).toHaveStyle({ width: '220px' });
 });

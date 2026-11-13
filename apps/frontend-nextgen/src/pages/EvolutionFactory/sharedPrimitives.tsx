@@ -2,13 +2,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import { cn } from '@/utils/cn';
 import { labelOf, statusLabel } from '@/domain/evolution/types';
+import { cn } from '@/utils/cn';
 import type { ReactElement, ReactNode } from 'react';
 
 /** 结果面板容器：数据视图 = 白底 r10，不描边（与 Bot 管理列表面板同规范）。 */
 export function TablePanel({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('overflow-hidden rounded-[10px] bg-card', className)}>{children}</div>;
+  return <div className={cn('overflow-hidden rounded-lg border border-border bg-card', className)}>{children}</div>;
 }
 /** 结果面板容器：空态 / 错误态 = 40% 灰底留白面板，居中引导（同规范）。 */
 export function PlaceholderPanel({ children, className }: { children: ReactNode; className?: string }) {
@@ -60,14 +60,18 @@ export function ListSkeleton({
   );
 }
 
-export function StatusBadge({ status, dot = false }: { status: string; dot?: boolean }) {
-  const tone = ['completed', 'succeeded'].includes(status)
+function statusTone(status: string) {
+  return ['completed', 'succeeded'].includes(status)
     ? 'success'
     : ['failed', 'canceled', 'cancelled'].includes(status)
     ? 'error'
     : status.startsWith('waiting')
     ? 'warning'
     : 'primary';
+}
+
+export function StatusBadge({ status, dot = false }: { status: string; dot?: boolean }) {
+  const tone = statusTone(status);
   // dot 态与 Bot 管理状态列（dmore 规范）几何一致：8px 圆点 + 13px muted 说明文字。
   if (dot)
     return (
@@ -88,6 +92,47 @@ export function StatusBadge({ status, dot = false }: { status: string; dot?: boo
       </span>
     );
   return <Badge tone={tone}>{statusLabel(status)}</Badge>;
+}
+
+/** 任务列表使用 Figma 里的带描边、浅色背景任务类型标签。 */
+export function TaskTypeBadge({ type }: { type: string }) {
+  const tone =
+    type === 'full'
+      ? 'border-warning/50 bg-warning/5 text-warning'
+      : type === 'bench_optimize'
+      ? 'border-success/50 bg-success/5 text-success'
+      : type === 'bench'
+      ? 'border-purple/50 bg-purple/5 text-purple'
+      : type === 'optimize'
+      ? 'border-success/50 bg-success/5 text-success'
+      : 'border-primary/50 bg-primary/5 text-primary';
+
+  return (
+    <span className={cn('inline-flex whitespace-nowrap rounded border px-2 py-0.5 text-xs font-normal', tone)}>
+      {labelOf(type)}
+    </span>
+  );
+}
+
+/** 任务列表状态胶囊：状态颜色和圆点保持同色，避免影响详情页状态展示。 */
+export function TaskStatusBadge({ status }: { status: string }) {
+  const tone = statusTone(status);
+  const color =
+    tone === 'success'
+      ? 'border-success/20 bg-success/10 text-success'
+      : tone === 'error'
+      ? 'border-destructive/20 bg-destructive/10 text-destructive'
+      : tone === 'warning'
+      ? 'border-warning/20 bg-warning/10 text-warning'
+      : 'border-primary/20 bg-primary/10 text-primary';
+  const label = status === 'running' ? '进行中' : statusLabel(status);
+
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-xs', color)}>
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  );
 }
 export function ErrorBox({ message, retry }: { message: string; retry?: () => void }) {
   if (!message) return null;

@@ -7,9 +7,10 @@ import { Spin } from '@/components/ui/Spin';
 import type { EvolutionVersion } from '@/domain/evolution/types';
 import { activeStatus, formatTime, type Task } from '@/domain/evolution/types';
 import { history, useLocation } from '@umijs/max';
-import { Package, RefreshCw, Search } from 'lucide-react';
+import { Plus, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorBox, FilterSelect, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
+import { useEvolutionBotNames } from './useEvolutionBotNames';
 import { useEvolutionContext } from './useEvolutionContext';
 import { Comparison, stableVersion, VersionActions, versionLabel, versionStatus } from './VersionActions';
 import { buildVersionColumns, COLUMN_WIDTHS } from './VersionListColumns';
@@ -27,11 +28,13 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
     ),
     context.ready,
   );
+  const resolveBotName = useEvolutionBotNames(context, !task);
+  const botNameOf = (v: EvolutionVersion) => resolveBotName(v.userId, v.botId);
   const [query, setQuery] = useState(''),
-    [filter, setFilter] = useState('all'),
+    [kindFilter, setKindFilter] = useState('all'),
     [botFilter, setBotFilter] = useState('all'),
     [page, setPage] = useState(1),
-    [pageSize, setPageSize] = useState(20);
+    [pageSize, setPageSize] = useState(10);
   const [review, setReview] = useState<EvolutionVersion>(),
     [diff, setDiff] = useState(''),
     [error, setError] = useState(''),
@@ -48,7 +51,7 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         : 'all',
     );
     setQuery('');
-    setFilter('all');
+    setKindFilter('all');
     setPage(1);
     setReview(undefined);
     setDiff('');
@@ -75,10 +78,16 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
   const items = (result.data?.items ?? []).filter(
     (v) =>
       (botFilter === 'all' || JSON.stringify([v.userId, v.botId]) === botFilter) &&
-      (filter === 'all' || v.kind === filter || v.acceptanceStatus === filter) &&
-      [v.versionId, v.botId, v.taskId, v.userId, String(v.pack?.artifact?.sha256 ?? '')].some((value) =>
-        value.toLowerCase().includes(query.toLowerCase()),
-      ),
+      (kindFilter === 'all' || v.kind === kindFilter) &&
+      [
+        v.versionId,
+        v.botId,
+        botNameOf(v),
+        v.taskId,
+        String(v.taskName ?? ''),
+        v.userId,
+        String(v.pack?.artifact?.sha256 ?? ''),
+      ].some((value) => value.toLowerCase().includes(query.toLowerCase())),
   );
   const stable = stableVersion(result.data?.items ?? []);
   const candidate = task?.steps?.filter((s) => s.stepType === 'optimize' && activeStatus(s.status)).at(-1);
@@ -152,19 +161,21 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         {reviewModal}
       </aside>
     );
-  const hasActiveFilter = Boolean(query) || filter !== 'all' || botFilter !== 'all';
+  const hasActiveFilter = Boolean(query) || kindFilter !== 'all' || botFilter !== 'all';
   // 位于 task 早退分支之后，不能用 hook —— 直接随渲染推导。
   const botOptions = [
     { value: 'all', label: '全部' },
-    ...[...new Map(
-      (result.data?.items ?? []).map((v) => [
-        JSON.stringify([v.userId, v.botId]),
-        { value: JSON.stringify([v.userId, v.botId]), label: `${v.botId} / ${v.userId}` },
-      ]),
-    ).values()] as { value: string; label: string }[],
+    ...([
+      ...new Map(
+        (result.data?.items ?? []).map((v) => [
+          JSON.stringify([v.userId, v.botId]),
+          { value: JSON.stringify([v.userId, v.botId]), label: `${botNameOf(v)} / ${v.botId} / ${v.userId}` },
+        ]),
+      ).values(),
+    ] as { value: string; label: string }[]),
   ];
   // viewDiff 每渲染重建（依赖 refs 与 setState），故列定义不做 memo，直接随渲染生成。
-  const columns: DataTableColumn<EvolutionVersion>[] = buildVersionColumns((v) => void viewDiff(v));
+  const columns: DataTableColumn<EvolutionVersion>[] = buildVersionColumns((v) => void viewDiff(v), botNameOf);
   return (
     <div className="min-w-0">
       {/* 筛选行：搜索 + 带 Bot / 版本类型下拉 + 右侧刷新与创建 Pack，与 Bot 管理工具行同 idiom。 */}
@@ -172,9 +183,9 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         <div className="relative w-full sm:w-[240px] sm:shrink-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="pl-9"
+            className="h-8 pl-9 text-[13px]"
             aria-label="搜索进化版本"
-            placeholder="版本、Bot、任务或 SHA"
+            placeholder="版本 / Bot / 来源任务"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -190,20 +201,19 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
             setPage(1);
           }}
           options={botOptions}
-          triggerClassName="w-full sm:w-[180px]"
+          triggerClassName="h-8 w-full sm:w-[180px]"
         />
         <FilterSelect
-          label="版本类型"
-          value={filter}
+          label="版本来源"
+          value={kindFilter}
           onChange={(value) => {
-            setFilter(value);
+            setKindFilter(value);
             setPage(1);
           }}
           options={[
             { value: 'all', label: '全部' },
             { value: 'initial', label: '初始版本' },
-            { value: 'accepted', label: '已接受' },
-            { value: 'rejected', label: '未接受' },
+            { value: 'round', label: '进化轮次' },
             { value: 'snapshot', label: '主动快照' },
           ]}
         />
@@ -213,10 +223,11 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
           </Button>
           <Button
             type="button"
-            leftIcon={<Package size={14} />}
+            className="sm:absolute sm:right-0 sm:top-0"
+            leftIcon={<Plus size={14} />}
             onClick={() => history.push('/evolution-factory/new?type=pack')}
           >
-            创建 Pack
+            新建 Pack
           </Button>
         </div>
       </div>
@@ -246,7 +257,7 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
               getRowKey={(v) => v.versionId}
               rowHeight="h-18"
               ariaLabel="进化版本列表"
-              minWidth="min-w-[1370px]"
+              minWidth="min-w-[1360px]"
             />
           </TablePanel>
           <Pagination
@@ -266,7 +277,9 @@ export default function VersionList({ task, revision = 0 }: { task?: Task; revis
         <PlaceholderPanel>
           <Empty
             title={hasActiveFilter ? '没有符合条件的进化版本' : '暂无进化版本'}
-            description={hasActiveFilter ? '尝试清除搜索词或调整筛选条件。' : '发起一次进化任务，验证通过后即可沉淀稳定版本。'}
+            description={
+              hasActiveFilter ? '尝试清除搜索词或调整筛选条件。' : '发起一次进化任务，验证通过后即可沉淀稳定版本。'
+            }
           />
         </PlaceholderPanel>
       )}

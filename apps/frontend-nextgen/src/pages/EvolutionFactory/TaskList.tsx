@@ -8,16 +8,19 @@ import { Plus, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { COLUMN_WIDTHS, useTaskListColumns } from './TaskListColumns';
 import { ErrorBox, FilterSelect, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
+import { useEvolutionBotNames } from './useEvolutionBotNames';
 import { useEvolutionContext } from './useEvolutionContext';
 
 export default function TaskList({ onCreate }: { onCreate?: () => void }) {
   const identity = useEvolutionContext();
   const evolutionApi = identity.api;
+  const botNameOf = useEvolutionBotNames(identity);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [busy, setBusy] = useState('');
   const [operationError, setOperationError] = useState('');
   const load = useCallback(
@@ -27,11 +30,11 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
         category,
         status,
         page,
-        pageSize: 20,
+        pageSize,
         taskTypes: taskTypes.map((item) => item.type).join(','),
         targetType: 'bot',
       }),
-    [query, category, status, page, identity.key],
+    [query, category, status, page, pageSize, identity.key],
   );
   const result = useResource(load, identity.ready);
   const visibleTasks = result.data?.tasks.filter(isBotEvolutionTask) ?? [];
@@ -51,7 +54,7 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
       setBusy('');
     }
   };
-  const columns = useTaskListColumns(busy, action);
+  const columns = useTaskListColumns(busy, action, botNameOf);
   return (
     <div className="min-w-0">
       <ErrorBox message={identity.error ?? result.error} retry={result.reload} />
@@ -69,10 +72,13 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
           setPage(1);
         }}
       >
-        <div className="relative w-full sm:w-[240px] sm:shrink-0">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative w-full sm:w-[260px] sm:shrink-0">
+          <Search
+            size={14}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
-            className="pl-9"
+            className="h-8 pl-9 text-[13px]"
             aria-label="搜索任务"
             placeholder="任务名称 / ID"
             value={search}
@@ -135,7 +141,12 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
             刷新
           </Button>
           {onCreate ? (
-            <Button type="button" leftIcon={<Plus size={14} />} onClick={onCreate}>
+            <Button
+              type="button"
+              className="sm:absolute sm:right-0 sm:top-0"
+              leftIcon={<Plus size={14} />}
+              onClick={onCreate}
+            >
               发起进化
             </Button>
           ) : null}
@@ -155,7 +166,7 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
                 getRowKey={(task) => task.task_id}
                 rowHeight="h-18"
                 ariaLabel="进化任务列表"
-                minWidth="min-w-[1320px]"
+                minWidth="min-w-[1120px]"
               />
             </TablePanel>
             {!visibleTasks.length && !hiddenCount ? (
@@ -174,7 +185,11 @@ export default function TaskList({ onCreate }: { onCreate?: () => void }) {
             {result.data.total > 0 && !hiddenCount ? (
               <Pagination
                 current={page}
-                pageSize={20}
+                pageSize={pageSize}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setPage(1);
+                }}
                 total={result.data.total}
                 onChange={setPage}
                 layout="between"

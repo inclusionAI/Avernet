@@ -32,17 +32,24 @@ export function stableVersion(items: EvolutionVersion[]) {
 const score = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(4)).toString() : '—');
 export function Comparison({ version }: { version: EvolutionVersion }) {
   const c = version.scoreComparison;
-  return c ? (
-    <div className="text-xs">
-      <p className="whitespace-nowrap">
-        {score(c.baseline)} → <strong>{score(c.candidate)}</strong> · Δ {score(c.delta)}
-      </p>
-      <p className="mt-1 text-muted-foreground">{c.name || 'test_score'}</p>
+  if (!c) return <span className="text-xs text-muted-foreground">未评测</span>;
+  const delta = typeof c.delta === 'number' && Number.isFinite(c.delta) ? c.delta : null;
+  return (
+    <div className="flex flex-nowrap items-center gap-x-2 whitespace-nowrap text-[13px]" aria-label={c.name || 'test_score'}>
+      <span className="whitespace-nowrap">
+        {score(c.baseline)} → {score(c.candidate)}
+      </span>
+      <span
+        className={
+          delta === null || delta === 0 ? 'text-muted-foreground' : delta > 0 ? 'text-success' : 'text-destructive'
+        }
+      >
+        {delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(4)}`}
+      </span>
     </div>
-  ) : (
-    <span className="text-xs text-muted-foreground">未评测</span>
   );
 }
+const actionClass = 'h-7 shrink-0 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
 export function VersionActions({
   version,
   onDiff,
@@ -73,27 +80,29 @@ export function VersionActions({
   };
   return (
     <div className="space-y-1">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">
         {version.diff?.available && (
-          <Button size="sm" variant="ghost" onClick={() => onDiff(version)}>
+          <Button size="sm" variant="ghost" className={actionClass} onClick={() => onDiff(version)}>
             Diff
           </Button>
         )}
         {version.pack?.status === 'available' && (
           <>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void download()}>
+            <Button size="sm" variant="ghost" className={actionClass} disabled={busy} onClick={() => void download()}>
               下载
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="ghost"
+              className={actionClass}
+              aria-label="应用 Pack"
               onClick={() =>
                 history.push(
                   `/evolution-factory/new?type=pack_restore&packId=${encodeURIComponent(version.pack!.packId)}`,
                 )
               }
             >
-              应用 Pack
+              应用
             </Button>
           </>
         )}
