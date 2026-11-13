@@ -676,6 +676,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (task.execution?.effectRecheck) {
+      if (body.effect_recheck !== true) fail(422, "此 AIS 包不支持只读补验回报协议");
       if (body.phase !== task.execution.effectRecheck.phase || body.kind !== "observation") fail(422, "只读补验只接受效果回报");
       const judgment = body.judgment as RecoveryJudgment;
       if (!judgment || !["recovered", "not_recovered", "unknown"].includes(judgment.effect)
