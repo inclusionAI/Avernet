@@ -59,6 +59,11 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
               </TooltipTrigger>
               <TooltipContent>{bot.name}</TooltipContent>
             </Tooltip>
+            {bot.isCollaboratorBot ? (
+              <Badge tone="neutral" className="shrink-0 whitespace-nowrap">
+                协作
+              </Badge>
+            ) : null}
             {onOpenEngineUpdate && engineUpdatable ? (
               <Tooltip>
                 <TooltipTrigger asChild>

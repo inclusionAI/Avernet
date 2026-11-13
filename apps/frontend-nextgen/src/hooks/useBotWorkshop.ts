@@ -28,6 +28,8 @@ import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';
+import { useCollaboratorBots } from './useCollaboratorBots';
+
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopHealthCheck } from './useBotWorkshopHealthCheck';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
@@ -110,6 +112,8 @@ export function useBotWorkshop() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useCollaboratorBots({ userId: currentOpenApiUserId, ready: requestIdentity.ready && spaceInitialized && Boolean(spaceId), enabled: Boolean(currentOpenApiUserId), inventoryItems: state.items, setCollaboratorBots: state.setCollaboratorBots });
   const createFlow = useBotWorkshopCreateFlow({ load, setCreateScenario: state.setCreateScenario });
   const copyHost = useBotWorkshopCopyHost({ load, currentOpenApiUserId });
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
@@ -150,8 +154,12 @@ export function useBotWorkshop() {
     (bot: BotDomain) => canEnterBotDetail(bot, currentOpenApiUserId),
     [currentOpenApiUserId],
   );
+  const inventoryIds = new Set(state.items.map((item) => item.id));
+  const mergedItems = [...state.items, ...state.collaboratorBots.filter((b) => !inventoryIds.has(b.id))];
   return {
     ...state,
+    items: mergedItems,
+    total: state.total !== undefined ? state.total + state.collaboratorBots.filter((b) => !inventoryIds.has(b.id)).length : undefined,
     spaceId,
     currentUserId: currentOpenApiUserId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
