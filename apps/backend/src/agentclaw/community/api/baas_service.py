@@ -120,6 +120,7 @@ class BaasServiceProtocol(Protocol):
         cmd: str,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
+        safe_errors: bool = False,
     ) -> dict[str, Any]:
         """Execute a shell command inside a BaaS bot container."""
         ...
