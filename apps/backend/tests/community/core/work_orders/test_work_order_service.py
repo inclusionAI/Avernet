@@ -196,7 +196,7 @@ def _service(
     )
 
 
-def _bot_editor_service():
+def _bot_editor_service(*, staff_dept: StaffDeptPlugin | None = None):
     repository = MagicMock()
     spaces = MagicMock()
     access = MagicMock()
@@ -205,7 +205,14 @@ def _bot_editor_service():
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
-    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    if staff_dept is None:
+        staff_dept = MagicMock(spec=StaffDeptPlugin)
+        # Default directory answer has no nickname, so applicant display falls
+        # back to the raw user id — keeping the legacy copy expectations below.
+        staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+            work_no="applicant-1",
+            nick_name=None,
+        )
     skill_handler = MagicMock()
     decision_callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
     decision_callbacks.requires_callback.return_value = False
@@ -368,6 +375,47 @@ def test_create_bot_editor_request_allows_team_space_bot_without_engine_capabili
         applicant_name="applicant-1",
         apply_reason="joint editing",
         env="dev",
+    )
+
+
+def test_create_bot_editor_request_uses_staff_nickname() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name="  花花  ",
+    )
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        _,
+    ) = _bot_editor_service(staff_dept=staff_dept)
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17,
+        "bot_id": "bot-17",
+        "bot_name": "Editor Bot",
+        "owner_id": "owner-1",
+        "space_id": 7,
+    }
+    access.require_space_reference.return_value = _space()
+    collaborator_repository.get_by_bot_and_user.return_value = None
+    repository.create_bot_editor_request.return_value = _work_order()
+
+    service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="1234",
+        reason="joint editing",
+    )
+
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="001234")
+    assert (
+        repository.create_bot_editor_request.call_args.kwargs["applicant_name"]
+        == "花花"
     )
 
 

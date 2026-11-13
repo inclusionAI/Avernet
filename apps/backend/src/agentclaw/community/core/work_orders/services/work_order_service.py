@@ -662,6 +662,12 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyEditorError(
                 "applicant already has Bot editor access"
             )
+        # Resolve the applicant's display nickname BEFORE entering the timed
+        # creation phase (same contract as the Space-join path above): the
+        # owner-facing pending copy then shows the flower name instead of the
+        # raw work number, falling back to the user id when the staff profile
+        # is unavailable.
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
         with execution_phase(
             "bot_request_create", work_order_id=None, bot_id=bot_id, owner_id=owner_id
         ):
@@ -672,7 +678,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 owner_id=str(bot["owner_id"]),
                 space_id=space.id,
                 applicant_user_id=applicant_user_id,
-                applicant_name=applicant_user_id,
+                applicant_name=applicant_name,
                 apply_reason=reason,
                 env=get_current_env(),
             )
