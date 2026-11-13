@@ -869,3 +869,21 @@ pub struct BcsServer {
     pub(super) config: BcsConfig,
     pub(super) state: Arc<BcsServerState>,
 }
+
+#[cfg(test)]
+mod card_change_extension_tests {
+    use super::*;
+
+    #[test]
+    fn shared_card_changes_extension_follows_v2_wiring() {
+        let mut config = crate::BcsConfig::default();
+        config.bcsfuse.enabled = false;
+        config.bcsfuse.api_version = bcs_fuse_client::BcsFuseApiVersion::V2;
+        let disabled = BcsServerExtensions::with_shared_card_changes(&config);
+        assert!(disabled.card_changes.is_none());
+
+        config.bcsfuse.enabled = true;
+        let enabled = BcsServerExtensions::with_shared_card_changes(&config);
+        assert!(enabled.card_changes.is_some());
+    }
+}
