@@ -419,6 +419,122 @@ def test_create_bot_editor_request_uses_staff_nickname() -> None:
     )
 
 
+def _eligible_bot_editor_setup(service, bots, access, collaborator_repository, repository):
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17,
+        "bot_id": "bot-17",
+        "bot_name": "Editor Bot",
+        "owner_id": "owner-1",
+        "space_id": 7,
+    }
+    access.require_space_reference.return_value = _space()
+    collaborator_repository.get_by_bot_and_user.return_value = None
+    repository.create_bot_editor_request.return_value = _work_order()
+
+
+def test_create_bot_editor_request_falls_back_when_staff_lookup_fails() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError("down")
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        _,
+    ) = _bot_editor_service(staff_dept=staff_dept)
+    _eligible_bot_editor_setup(service, bots, access, collaborator_repository, repository)
+
+    result = service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="applicant-1",
+        reason="joint editing",
+    )
+
+    # The request flow must not be blocked by a staff-directory outage: the
+    # record is still created with the work number as the applicant display.
+    assert result == _work_order()
+    repository.create_bot_editor_request.assert_called_once_with(
+        bot_pk=17,
+        bot_id="bot-17",
+        bot_name="Editor Bot",
+        owner_id="owner-1",
+        space_id=7,
+        applicant_user_id="applicant-1",
+        applicant_name="applicant-1",
+        apply_reason="joint editing",
+        env="dev",
+    )
+
+
+@pytest.mark.parametrize("nickname", [None, "", "   "])
+def test_create_bot_editor_request_falls_back_when_nickname_is_missing(
+    nickname: str | None,
+) -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name=nickname,
+    )
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        _,
+    ) = _bot_editor_service(staff_dept=staff_dept)
+    _eligible_bot_editor_setup(service, bots, access, collaborator_repository, repository)
+
+    service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="applicant-1",
+        reason="joint editing",
+    )
+
+    assert (
+        repository.create_bot_editor_request.call_args.kwargs["applicant_name"]
+        == "applicant-1"
+    )
+
+
+def test_create_bot_editor_request_truncates_staff_nickname() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="applicant-1",
+        nick_name="花" * 129,
+    )
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        _,
+    ) = _bot_editor_service(staff_dept=staff_dept)
+    _eligible_bot_editor_setup(service, bots, access, collaborator_repository, repository)
+
+    service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="applicant-1",
+        reason="joint editing",
+    )
+
+    assert (
+        repository.create_bot_editor_request.call_args.kwargs["applicant_name"]
+        == "花" * 128
+    )
+
+
 def test_bot_owner_cannot_request_editor_access() -> None:
     service, repository, _, _, bots, _, _, _ = _bot_editor_service()
     bots.get_by_id_and_owner.return_value = {
