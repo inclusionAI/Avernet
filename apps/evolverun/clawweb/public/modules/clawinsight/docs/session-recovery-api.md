@@ -346,6 +346,8 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 
+权限待办私聊卡片首次发送成功且回执已写入任务时间线后，沿用现有群通知配置和 Bot 路由发送一条 Markdown 通知。群消息展示受阻原因、Owner 处理事项、发送状态和任务链接。群通知按任务去重，卡片状态更新、失败和未确认回执均不触发。Owner 通过私聊卡片或任务页确认。
+
 ## 任务整体摘要
 
 既有任务详情 `GET /api/insight/v1/monitoring/session-recoveries/:taskId` 增加可选 `final_summary: string`，在线与仿真共用。它由自愈 Agent 在整体收尾时生成，说明原问题、关键判断依据、最终处理方式与实际进展；仿真明确未执行。表格导出可直接读取该字段，无需再从阶段分析、消息与方案拼接摘要。最多 2,000 个 UTF-16 代码单元，支持 Markdown。

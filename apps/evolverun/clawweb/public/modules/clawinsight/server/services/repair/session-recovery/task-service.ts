@@ -732,8 +732,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
     const summary = state === "sent" ? "Owner 待办卡片已同步" : state === "disabled" ? "卡片通知未启用，请在任务页处理"
       : failedBeforeDispatch ? "卡片请求未发出" : "卡片发送结果未确认，请在任务页处理";
-    await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", summary,
-      { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` });
+    const receipt = { ...this.event("notification", "service", summary,
+      { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` };
+    const recorded = await this.deps.tasks.appendNotification(task.taskId, receipt);
+    if (recorded && !updateOnly && state === "sent") this.notifyGroup(task, "owner_card_sent", receipt);
     if (["sent", "disabled"].includes(state) || attempts.length === 2) await this.settleOwnerCard(task.taskId, stateKey);
     // A slow old send must not leave a newer revision/terminal state overwritten.
     const latest = await this.required(task.taskId);
@@ -742,11 +744,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       else logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_state_changed", { taskId: task.taskId });
     }
   }
-  private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
+  private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"], source?: RecoveryTimelineEvent): void {
     if (task.simulation) return;
-    const event = kind === "result" && task.completionReason === "owner_handoff"
+    const event = source ?? (kind === "result" && task.completionReason === "owner_handoff"
       ? task.timeline.findLast(item => item.kind === "termination" && item.payload.completion_reason === "owner_handoff")
-      : task.timeline.at(-1);
+      : task.timeline.at(-1));
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
     catch (error) {
