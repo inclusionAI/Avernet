@@ -1,0 +1,36 @@
+apps/backend/tests/community/di/test_task_module.py
+  s_64261436edbb0b::t_dd8551aa61ada1 44-46
+  s_64261436edbb0b::t_6cf5952108fe0a 429-445
+  s_64261436edbb0b::t_6df14e38797001 60-65
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/service.py
+  s_64261436edbb0b::t_9b4aef6cbe3b8a 1-296
+apps/backend/tests/community/core/task/context_collab/products/test_products_layering.py
+  s_64261436edbb0b::t_5cb32f8a85824f 1-29,31-87
+  s_64261436edbb0b::t_9c64b133fb439a 30
+apps/backend/src/agentclaw/community/core/task/context_collab/products/service_api.py
+  s_64261436edbb0b::t_db1dbb514768f2 1-95
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_64261436edbb0b::t_6cf5952108fe0a 114-119,366-371
+  s_64261436edbb0b::t_41431ccef5ccda 372
+apps/backend/tests/community/core/task/context_collab/products/test_bbs_public_discussion_write.py
+  s_64261436edbb0b::t_106b256a0a955a 1-3,14-15,17-43,45-47,51-54,58-62,64-66,68-82,85,89,91-92,94-106,108-128,130-143,145-156,158,165-169,171-181,185-190,200-210,212,220,229-234,239-250,259,261-262,265,267,273-274,277-278,280-282,284,288-290,292,294-295,297,299-300,303-304,306-309,311,317-321,324-328,330-334,336-339,341-354,357-372,376-386,388,392-393,397-398
+  s_64261436edbb0b::t_45b37f4a86b7fc 4-13,16,44,48-50,55-57,63,67,83-84,86-88,90,93,107,129,144,157,159-164,170,182-184,191-199,211,213-219,221-228,235-238,251-258,260,263-264,266,268-272,275-276,279,283,285-287,291,293,296,298,301-302,305,310,312-316,322-323,329,335,340,355-356,373-375,387,389-391,394-396,399-401
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/views.py
+  s_64261436edbb0b::t_8ad93b7658c08e 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "76097adeeebd873d1f21178fa79ccd1a53f1315a",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

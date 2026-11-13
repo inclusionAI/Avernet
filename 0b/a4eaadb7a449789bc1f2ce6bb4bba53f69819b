@@ -1,0 +1,19 @@
+simulator/modules/storage/sql/agentclawdb-structure.sql
+  s_5f025fbecb2912::t_547b8ef73bb02a 8991-9016
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0ba4eaadb7a449789bc1f2ce6bb4bba53f69819b",
+  "prompts": {},
+  "sessions": {
+    "s_5f025fbecb2912": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c567-74bf-7810-a299-9b1a66cd596c",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

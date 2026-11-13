@@ -1,0 +1,23 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback.ts
+  s_df9e33e486a942::t_fedc8ba471d8b6 4-6,25-29,43-44
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  s_df9e33e486a942::t_95674859d3dd17 38,40,42
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback.test.ts
+  s_df9e33e486a942::t_95674859d3dd17 15,33,45-46,48-53,55-56,58,60,63,81,89-92,105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9040d1738c0c1acda21ae5f2594933f08e11c71",
+  "prompts": {},
+  "sessions": {
+    "s_df9e33e486a942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c461-e821-7eb2-8d5a-02b04e069135",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

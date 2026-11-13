@@ -1,0 +1,50 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  s_64261436edbb0b::t_f2fe0d3cecc483 82-120
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_64261436edbb0b::t_e254fdfdc4c31e 84,98-118
+  s_64261436edbb0b::t_2097cb12ef2ae9 55-58,60,64-65,68
+  s_64261436edbb0b::t_55ad2ace57933d 119
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_64261436edbb0b::t_1c39705f139cc1 431-437
+  s_64261436edbb0b::t_2f400d337c4d02 127-130
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  s_64261436edbb0b::t_809dfbc10ce1b0 140,143-144,150
+  s_64261436edbb0b::t_3a0f2e1f9da581 196-208
+  s_64261436edbb0b::t_8441cab1a830c9 77,84
+apps/backend/src/agentclaw/community/di/modules/task_commission_method_ops_adapter.py
+  s_64261436edbb0b::t_1b9b1b69b4e7f9 1-105
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  s_64261436edbb0b::t_63f61b0d4c6363 49
+  s_64261436edbb0b::t_8286143b93d258 72-73,75,77-78,169-170,172,174-175,192-193,195,197-198
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  s_64261436edbb0b::t_61795a7213bd39 193-214,222
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_lifecycle.py
+  s_64261436edbb0b::t_6e6a7529a8886c 252-255
+  s_64261436edbb0b::t_f0cef96b5b4264 256
+  s_64261436edbb0b::t_a75fc50f244e83 1-49,51-187,189-251,257-260
+  s_64261436edbb0b::t_5699bad31f4051 50
+  s_64261436edbb0b::t_4e93e4ff97d52f 188
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_read.py
+  s_64261436edbb0b::t_4220d6428017fc 110-111,115,119-120
+apps/backend/tests/community/di/test_task_module.py
+  s_64261436edbb0b::t_998f86a24dbc89 74-77
+  s_64261436edbb0b::t_f1268e88f76cff 467-482
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  s_64261436edbb0b::t_157eabf968446a 18,134,163-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "538b6f1c1e700973fe2b5b7661826c342d0b072b",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

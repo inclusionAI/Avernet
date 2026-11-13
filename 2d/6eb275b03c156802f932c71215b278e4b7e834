@@ -1,0 +1,19 @@
+apps/backend/tests/corp/plugins/prod/test_runtime_list_timing.py
+  s_620fb772f449f4::t_a81a2652671b88 1-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d6eb275b03c156802f932c71215b278e4b7e834",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

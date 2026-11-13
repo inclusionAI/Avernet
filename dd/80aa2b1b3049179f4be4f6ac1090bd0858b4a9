@@ -1,0 +1,61 @@
+apps/backend/tests/community/core/task/context_collab/test_context_collab_status.py
+  s_a5f125bde83e04::t_debf8bcd94d3a2 214-216
+  s_a5f125bde83e04::t_6a499ba743ecb3 35-37,213
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  s_a5f125bde83e04::t_debf8bcd94d3a2 115-117,179-182
+  s_a5f125bde83e04::t_36d1378df93d3e 31-33,114
+apps/backend/tests/community/core/task/context_collab/test_spec_acceptance.py
+  s_a5f125bde83e04::t_debf8bcd94d3a2 122-124
+  s_a5f125bde83e04::t_57609dcf59a096 43-45,121
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  s_a5f125bde83e04::t_ac5d683f738a47 32-34,128
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_a5f125bde83e04::t_ffdb09b8fede3b 96-103
+  s_a5f125bde83e04::t_00f287eb38dc54 33-39
+  s_a5f125bde83e04::t_7d06692a4ec9b8 84-86
+apps/backend/tests/community/core/task/context_collab/test_method_lifecycle_service.py
+  s_a5f125bde83e04::t_a6c8820d8836c8 517
+  s_a5f125bde83e04::t_4232dda1298361 1-516,518-625
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_a5f125bde83e04::t_debf8bcd94d3a2 127-129
+  s_a5f125bde83e04::t_13c4a084c6829b 50-52,126
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_a5f125bde83e04::t_d7f40bcbc54ab3 226-227,230-232
+  s_a5f125bde83e04::t_386fe98d520c5d 216,220
+  s_a5f125bde83e04::t_856782d0310053 54-56,73-77
+  s_a5f125bde83e04::t_e740e4fe4cd133 267-279
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_a5f125bde83e04::t_9f4e852de0f775 104-107
+  s_a5f125bde83e04::t_6ff20b6852134b 313-319
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_a5f125bde83e04::t_01be8609b20e56 321-322
+  s_a5f125bde83e04::t_217af8442322b4 152,188,191,213,216,221,224,227-320,323-330,345,348
+  s_a5f125bde83e04::t_debf8bcd94d3a2 153-154
+  s_a5f125bde83e04::t_425f873953fbe7 189-190,214-215,222-223,346-347,356-358
+  s_a5f125bde83e04::t_7bd9ed841fb618 42-47,62-64
+  s_a5f125bde83e04::t_4d2efa0375a0ae 155
+apps/backend/src/agentclaw/community/core/task/context_collab/services/method_lifecycle_service.py
+  s_a5f125bde83e04::t_f463aed9f2397a 166,172-173,191
+  s_a5f125bde83e04::t_fa46e69145101e 231-232
+  s_a5f125bde83e04::t_ef843e21f2ae30 1-165,167-171,174-190,192-230,233-269,271-770
+  s_a5f125bde83e04::t_1db2ffe4cf60fb 270
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_a5f125bde83e04::t_debf8bcd94d3a2 222-224
+  s_a5f125bde83e04::t_4b25085e4c329b 46-48,221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd80aa2b1b3049179f4be4f6ac1090bd0858b4a9",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
