@@ -54,14 +54,18 @@ def embedding_identity(config, embedding):
     return f"{model}/{embedding.dimension}"
 
 
-def storage(context):
+def storage(context, *, index_config=None):
     registry, config = context.registry, context.config
     supplied = registry.get("tc_storage_factory")
     if supplied is not None:
-        return supplied()
+        return (
+            supplied() if index_config is None else supplied(index_config=index_config)
+        )
     repository = registry.get("tc_catalog_repository")
     index = registry.get("tc_index")
     if repository is not None and index is not None:
+        if index_config is not None:
+            raise ValueError("selected generations require a TC storage factory")
         return repository, index
     environment = config.get(
         "environment", "local" if context.mode != "runtime" else "prod"
@@ -149,9 +153,13 @@ def storage(context):
         )
     embedding_key = embedding_identity(config, embedding)
     key = configuration_index_key(embedding_key, FILTER_FIELDS, TcDocumentConverter())
+    if index_config is not None:
+        key = index_config.index_key
     index = QdrantRetrievalIndex(
         path=index_path,
-        dimension=embedding.dimension,
+        dimension=index_config.embedding_dimension
+        if index_config
+        else embedding.dimension,
         collection_name=f"{collection_prefix}_{key}",
         connection=connection,
     )

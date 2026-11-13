@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
@@ -55,6 +55,8 @@ def create_tc_app(context, *, search_router=None):
 
         stop = asyncio.Event()
         task = None
+        build_task = None
+        models = ExitStack()
         runtime = None
         index = None
         await startup.initialize()
@@ -69,17 +71,55 @@ def create_tc_app(context, *, search_router=None):
             if model_factory is not None:
                 model_factory()
             repository, index = storage(context)
+            from search_core.core.index_build_runner import IndexBuildRunner
+
+            from app.tc.index_builds import TcIndexBuildService, requested_version
+
+            embedding = registry.require("embedding_provider")
+            embedding_key = embedding_identity(context.config, embedding)
+            profile_gateway = _create_profile_gateway()
+            builds = TcIndexBuildService(
+                repository,
+                index,
+                embedding,
+                embedding_key,
+                profile_gateway=profile_gateway,
+            )
+            selection = requested_version(context)
+            index_config = None
+            if selection.active_index not in {"", "default"}:
+                index_config = builds.select(selection.active_index)
+                selected_embedding = models.enter_context(
+                    builds.embedding_factory(
+                        index_config.embedding_model, index_config.embedding_dimension
+                    )
+                )
+                # The legacy collection stays intact; close only this client's handles.
+                selected_repository, selected_index = storage(
+                    context, index_config=index_config
+                )
+                index.close()
+                repository, index = selected_repository, selected_index
+                embedding, embedding_key = (
+                    selected_embedding,
+                    index_config.embedding_key,
+                )
+            registry.register("tc_index_builds", builds)
+            build_runner = IndexBuildRunner(builds)
+            registry.register("tc_index_build_runner", build_runner)
             catalog = TcCatalog(repository)
             runtime = TcSearch(
                 catalog,
                 index,
-                registry.require("embedding_provider"),
+                embedding,
                 registry.require("reranker_provider"),
-                embedding_key=embedding_identity(
-                    context.config, registry.require("embedding_provider")
-                ),
+                embedding_key=embedding_key,
                 instance_id=context.config.get("instance_id", "tc"),
-                profile_gateway=_create_profile_gateway(),
+                profile_gateway=profile_gateway,
+                index_config=index_config,
+            )
+            app.state.active_index = (
+                index_config.build_id if index_config else "default"
             )
             registry.register("tc_card_catalog", catalog)
             registry.register("tc_card_search", runtime)
@@ -99,17 +139,21 @@ def create_tc_app(context, *, search_router=None):
             dependencies.set_profile_source(source)
             await asyncio.to_thread(runtime.updates.run_once)
             task = asyncio.create_task(runtime.updates.run(stop))
+            build_task = asyncio.create_task(build_runner.run(stop))
             yield
         finally:
             stop.set()
             if task is not None:
                 await task
+            if build_task is not None:
+                await build_task
             if runtime is not None:
                 await asyncio.to_thread(
                     runtime.pool.shutdown, wait=True, cancel_futures=True
                 )
             if index is not None:
                 await asyncio.to_thread(index.close)
+            models.close()
             temporary = registry.get("tc_temporary_directory")
             if temporary is not None:
                 temporary.cleanup()

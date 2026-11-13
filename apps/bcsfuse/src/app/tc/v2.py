@@ -2,13 +2,15 @@
 
 from fastapi import APIRouter, Request
 from search_core.adapters.http.catalog_cards import create_card_router
+from search_core.adapters.http.index_builds import create_index_build_router
 from search_core.adapters.http.routes import create_search_router
+from search_core.api.cards import UNSET_MAPPING
 from search_core.api.models import SearchResult, VerifiedIdentity
 from search_core.application.search import CatalogSearchApplication
 from search_core.core.card_management import merge_fields
 
 from app.tc.auth import require_oss_auth
-from app.tc.catalog import FILTER_FIELDS, TcCatalog
+from app.tc.catalog import TcCatalog
 from app.tc.routes import config_response, mutate
 
 
@@ -26,7 +28,16 @@ class CardOperations:
     def __init__(self, app):
         self.app = app
 
-    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
+    def upsert(
+        self,
+        agent_id,
+        fields,
+        resource_type,
+        search_config,
+        *,
+        labels=None,
+        document_mapping=UNSET_MAPPING,
+    ):
         catalog, runtime = services(self.app)
         current = catalog.get(agent_id)
         if resource_type not in (None, "agent"):
@@ -82,6 +93,7 @@ class CardOperations:
                 resource_type,
                 search_config,
                 labels=labels,
+                document_mapping=document_mapping,
             )
 
     def remove(self, agent_id):
@@ -111,20 +123,73 @@ class NewRetrieval:
             request.query, request.limit, filters=filters, legacy_defaults=False
         )
 
+    async def execute(self, command, identity):
+        runtime = services(self.app)[1]
+        search = CatalogSearchApplication(
+            self,
+            filter_fields=runtime.filter_fields
+            | {"worker_id", "profile_key", "resource_type"},
+            request_timeout=35,
+        )
+        return await search.execute(command, identity)
+
+
+class BuildOperations:
+    def __init__(self, app):
+        self.app = app
+
+    def create(self, *args, **kwargs):
+        return self.app.state.context.registry.require("tc_index_builds").create(
+            *args, **kwargs
+        )
+
+    def status(self, build_id):
+        return self.app.state.context.registry.require("tc_index_builds").status(
+            build_id
+        )
+
+    def trigger(self, build_id):
+        self.app.state.context.registry.require("tc_index_build_runner").trigger(
+            build_id
+        )
+
 
 def include_v2(app, *, search_router=None):
-    app.include_router(create_card_router(CardOperations(app), authenticate))
-    search = CatalogSearchApplication(
-        NewRetrieval(app),
-        filter_fields=FILTER_FIELDS | {"worker_id", "profile_key", "resource_type"},
-        request_timeout=35,
+    app.include_router(
+        create_card_router(
+            CardOperations(app), authenticate, allow_document_mapping=True
+        )
     )
+    builds = BuildOperations(app)
+    app.include_router(
+        create_index_build_router(
+            builds,
+            authenticate,
+            trigger=builds.trigger,
+            allow_document_mapping=True,
+        )
+    )
+    search = NewRetrieval(app)
     app.include_router(
         search_router
         if search_router is not None
         else create_search_router(search, authenticate, timeout_seconds=35)
     )
     router = APIRouter(prefix="/api/v2/workers")
+
+    @app.get("/api/v2/index-version")
+    async def index_version(request: Request):
+        from app.tc.index_builds import requested_version
+
+        require_oss_auth(request)
+        runtime = services(app)[1]
+        requested = requested_version(app.state.context).active_index or "default"
+        return {
+            "active_index": app.state.active_index,
+            "index_key": runtime.updates.index_key,
+            "requested_index": requested,
+            "restart_required": requested != app.state.active_index,
+        }
 
     @router.get("/{worker_id}/config")
     async def read_config(worker_id: str, request: Request):
