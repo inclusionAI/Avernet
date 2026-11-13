@@ -1,0 +1,35 @@
+apps/bcsfuse/packages/search-core/src/search_core/api/filters.py
+  s_20c3b110241190::t_3f743467292e15 1-26
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_20c3b110241190::t_f61536293b43f2 12,45-47,203,213-215,220
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_20c3b110241190::t_6d6f8c05ef3241 17,190
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/retrieval.py
+  s_20c3b110241190::t_639c753d260479 13-14
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_20c3b110241190::t_e9fd54068bd4bb 17,165,173
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant.py
+  s_20c3b110241190::t_c99baf1cbd661b 14-16,23,25,30-34,339
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_filters.py
+  s_20c3b110241190::t_bcc9bd0f059418 1-23
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_20c3b110241190::t_061e77e16d2986 7,112
+apps/bcsfuse/packages/search-core/tests/test_native_keyword.py
+  s_20c3b110241190::t_2026d5d52d0b55 86,130-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7765f4a1115143cfa58bacce21bc0a4bc37ec3d3",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

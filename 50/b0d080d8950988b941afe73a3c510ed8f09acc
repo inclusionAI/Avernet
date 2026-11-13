@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_e940335c721679::t_109d8fa9f8a43c 83-86,135,144-147,191-194
+apps/backend/tests/community/core/devices/services/test_device_context_resolver.py
+  s_e940335c721679::t_c15489411db8dc 314-354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50b0d080d8950988b941afe73a3c510ed8f09acc",
+  "prompts": {},
+  "sessions": {
+    "s_e940335c721679": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-2b47-7ba1-b9ee-9b314464130d",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

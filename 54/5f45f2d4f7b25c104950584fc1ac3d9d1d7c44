@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/session_resources/service.py
+  s_c7770ebd3d04bc::t_af2d580216b4d2 21,202
+apps/backend/tests/community/core/session_resources/test_service.py
+  s_c7770ebd3d04bc::t_895e6ccc6e8bd8 688-708
+  s_c7770ebd3d04bc::t_c9d78e04000508 12,124-137
+  s_c7770ebd3d04bc::t_df5ae41935465f 138-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "545f45f2d4f7b25c104950584fc1ac3d9d1d7c44",
+  "prompts": {},
+  "sessions": {
+    "s_c7770ebd3d04bc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-8f02-7d91-ada2-281b7063f921",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

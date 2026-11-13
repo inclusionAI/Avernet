@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3ad1282b7770d4::t_7591c2d4772b03 246-252,256
+apps/backend/tests/community/core/skill_center/services/test_skill_set_service.py
+  s_3ad1282b7770d4::t_f554ffb2153073 719-720,722-725,732,735-757
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e35e68ddc9c4c0a49de7c513ebc7fbe3f2bc9216",
+  "prompts": {},
+  "sessions": {
+    "s_3ad1282b7770d4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a120-e4f0-7651-9cd2-3215108634cd",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

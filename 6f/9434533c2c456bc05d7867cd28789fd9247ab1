@@ -1,0 +1,32 @@
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/tasks.md
+  s_a5600e99ae94e6::t_ddbbe4c992e25d 10
+  s_a5600e99ae94e6::t_8638dc75a5ac13 9
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/validation.md
+  s_a5600e99ae94e6::t_8638dc75a5ac13 38-45
+tools/a2a-json-tool/test/cli.test.js
+  s_a5600e99ae94e6::t_ddbbe4c992e25d 23-24
+tools/a2a-json-tool/README.md
+  s_a5600e99ae94e6::t_8638dc75a5ac13 108,114-117,129,131
+tools/a2a-json-tool/cli.mjs
+  s_a5600e99ae94e6::t_a4138ebab8940f 5,17-19,35
+tools/a2a-json-tool/package.json
+  s_a5600e99ae94e6::t_89807023d7bf59 8
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/spec.md
+  s_a5600e99ae94e6::t_56267955823223 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f9434533c2c456bc05d7867cd28789fd9247ab1",
+  "prompts": {},
+  "sessions": {
+    "s_a5600e99ae94e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca8b-71af-7751-8713-438bf41cca27",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "胡笳 <hujia.ly@alibaba-inc.com>"
+    }
+  }
+}

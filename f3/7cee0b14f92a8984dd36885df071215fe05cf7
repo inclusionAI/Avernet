@@ -1,0 +1,35 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_411d81a93f7af6 112-116
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_61a907d9e4e611 13,43,291-299
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_3e1fdbda192013 44,710-719
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_873ba06c44ac2b 222,593-594
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_case_run.py
+  s_cecdc98e721f4b::t_e1b9e060973de6 1-834
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_contract.py
+  s_cecdc98e721f4b::t_5a37932db4a6fa 1-396
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_profile.py
+  s_cecdc98e721f4b::t_03bbd1a6d14873 1-218
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_transport.py
+  s_cecdc98e721f4b::t_11cb0a63d1882c 1-221
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_cli_case_run.py
+  s_cecdc98e721f4b::t_df13bb2ae2cf17 1-452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f37cee0b14f92a8984dd36885df071215fe05cf7",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

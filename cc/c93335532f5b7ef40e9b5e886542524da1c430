@@ -1,0 +1,18 @@
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  h_7ecb107b24dd7d 16-19
+apps/bcs/crates/bootstrap/bcs/src/message_flow_metrics.rs
+  h_7ecb107b24dd7d 177-190
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  h_7ecb107b24dd7d 187-227,460-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ccc93335532f5b7ef40e9b5e886542524da1c430",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

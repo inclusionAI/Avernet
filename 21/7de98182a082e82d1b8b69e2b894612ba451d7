@@ -1,0 +1,32 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  h_43af82e14600e4 1-14
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  h_43af82e14600e4 28-35
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version.test.ts
+  h_43af82e14600e4 205-245
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  h_43af82e14600e4 2,49,55,58,66,88-101
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-version-git-read.test.ts
+  h_43af82e14600e4 1-357
+apps/evolverun/clawweb/public/modules/workflow/server/services/clawflows-git-client.ts
+  h_43af82e14600e4 14,138-147,150-151,180-182,188,195-206,213-214
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-git-env.ts
+  h_43af82e14600e4 1-10
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-git-read.ts
+  h_43af82e14600e4 1-65
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-observability.ts
+  h_43af82e14600e4 1-22
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  h_43af82e14600e4 6-8,19,21-25,27-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "217de98182a082e82d1b8b69e2b894612ba451d7",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

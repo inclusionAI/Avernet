@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/ChatPanel.css
+  h_059e888e5e4e82 3-4
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/index.tsx
+  h_059e888e5e4e82 2,27,169
+apps/frontend-nextgen/test/pages/Workspace/components/GroupChatPane/GroupChatPaneSidePanelWiring.test.tsx
+  h_059e888e5e4e82 3-4,9,53,55,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f778f23a5a742ac4232a6ca602957f264137b5f",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

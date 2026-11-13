@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/scripts/ci/run-tests.test.mjs
+  s_3e00dbd7a8d426::t_b89c2a50e4d5c4 48-75
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  s_3e00dbd7a8d426::t_b89c2a50e4d5c4 35,56,58,62-65,67,69-70
+apps/evolverun/clawweb/scripts/ci/test-reports.mjs
+  s_3e00dbd7a8d426::t_b89c2a50e4d5c4 24-28,30
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-pack-security.test.ts
+  s_3e00dbd7a8d426::t_b89c2a50e4d5c4 36,55,61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b470dec81977f0727fd588357701066a72ba4d33",
+  "prompts": {},
+  "sessions": {
+    "s_3e00dbd7a8d426": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19b98-6c89-77c0-8873-dac3801884dc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

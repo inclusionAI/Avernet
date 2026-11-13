@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_backlog.py
+  s_cecdc98e721f4b::t_02f061850a4c44 1-996
+apps/bcs/scripts/e2e-runner/dept-scope-friend-ext-migration-contract.json
+  s_cecdc98e721f4b::t_b263b54aad2db3 1-793
+apps/bcs/scripts/e2e-runner/tc-friend-auth-sync-migration-contract.json
+  s_cecdc98e721f4b::t_c5fa6871053ca7 1-578
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_backlog_contracts.py
+  s_cecdc98e721f4b::t_bfbcd13f921742 1-305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e6f85d035f5342b976f104f3ca35e55577bddae",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

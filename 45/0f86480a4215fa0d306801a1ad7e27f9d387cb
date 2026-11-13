@@ -1,0 +1,27 @@
+apps/backend/specs/caller-asc-owner-refresh/001-spec-output.md
+  s_bb98e2f10840b6::t_9320e9c854efaa 9
+apps/backend/specs/caller-asc-owner-refresh/002-code-report.md
+  s_bb98e2f10840b6::t_5518d84b49b03d 51-54
+apps/backend/src/agentclaw/community/core/repository/implementations/devices/device.py
+  s_bb98e2f10840b6::t_8bb7ca6c0a2cdd 383,394
+apps/backend/src/agentclaw/community/core/repository/protocols/devices.py
+  s_bb98e2f10840b6::t_e0c0a780bef9e3 241
+apps/backend/tests/community/repository/devices/test_device_repository_unified.py
+  s_bb98e2f10840b6::t_0a7e11b68c4987 2570,2582,2602-2616
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "450f86480a4215fa0d306801a1ad7e27f9d387cb",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
