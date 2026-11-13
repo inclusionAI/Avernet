@@ -193,9 +193,46 @@ pub struct GroupContextGetResponse {
     pub items: Vec<GroupContextGetItem>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SharedGroupContextItem {
+    pub name: String,
+    pub scope_level: ScopeLevel,
+    pub scope: String,
+    pub content: String,
+    pub creator: String,
+    pub gmt_modified: GroupContextTime,
+}
+
+pub struct ListSharedGroupContexts {
+    pub group_id: String,
+    pub session_id: Option<String>,
+    pub actor_ids: Vec<String>,
+}
+
 #[async_trait]
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
+
+    async fn shared_info(
+        &self,
+        _group_id: &str,
+        _session_id: Option<&str>,
+        _view_bot_id: Option<&str>,
+        _caller: &super::AuthenticatedCaller,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        Err(ApplicationError::internal("shared information authorization unavailable"))
+    }
+
+    async fn list_shared_contexts(
+        &self,
+        _query: ListSharedGroupContexts,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        Err(ApplicationError::internal("shared information query unavailable"))
+    }
+
+    async fn can_manage_presets(&self, _group_id: &str, _actor: &str) -> Result<bool, ApplicationError> {
+        Ok(false)
+    }
 
     async fn list_presets(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
         Err(ApplicationError::internal("presets unavailable"))

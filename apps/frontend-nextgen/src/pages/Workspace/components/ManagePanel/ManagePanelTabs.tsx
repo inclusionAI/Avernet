@@ -4,6 +4,7 @@ import { cn } from '@/utils/cn';
 export interface ManagePanelTabOption<T extends string> {
   value: T;
   label: string;
+  count?: number;
 }
 
 export interface ManagePanelTabsProps<T extends string> {
@@ -33,6 +34,9 @@ export function ManagePanelTabs<T extends string>({ value, options, onChange }: 
             )}
           >
             {option.label}
+            {option.count !== undefined && (
+              <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums text-muted-foreground">{option.count}</span>
+            )}
             {active && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" aria-hidden />}
           </Button>
         );

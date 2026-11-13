@@ -92,12 +92,8 @@ impl ProcessManager {
         extra_config: Option<serde_json::Value>,
     ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
 
-        // Build BCS binary path
-        let bcs_bin = std::env::current_exe()?
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("bcs"))
-            .ok_or("Could not find bcs binary")?;
+        // Cargo resolves the server artifact for this integration test's target directory.
+        let bcs_bin = env!("CARGO_BIN_EXE_bcs");
 
         // Create configs directory with bcs-config.json
         // -c flag specifies the directory containing bcs-config.json
@@ -134,7 +130,7 @@ impl ProcessManager {
         let config_file = configs_dir.join("bcs-config.json");
         std::fs::write(&config_file, serde_json::to_string_pretty(&config_content)?)?;
 
-        let mut cmd = Command::new(&bcs_bin);
+        let mut cmd = Command::new(bcs_bin);
         cmd.arg("-c").arg(&configs_dir)
             .env("BCS_DATA_DIR", data_dir)
             .env(

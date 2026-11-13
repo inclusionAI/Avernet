@@ -175,6 +175,26 @@ impl GroupContextRepo for MemoryGroupContextRepo {
             .collect())
     }
 
+    async fn list_active_for_shared_info(
+        &self,
+        group_id: &str,
+        session_id: Option<&str>,
+    ) -> StoreResult<Vec<GroupContextEntry>> {
+        use bcs_domain::ScopeLevel;
+
+        let round_prefix = session_id.map(|id| format!("{id}:"));
+        let state = self.state.read().await;
+        Ok(state.rows.iter().filter(|entry| {
+            !entry.is_superseded && match entry.scope_level {
+                ScopeLevel::Group => entry.scope == group_id,
+                ScopeLevel::Session => session_id == Some(entry.scope.as_str()),
+                ScopeLevel::Round => round_prefix.as_deref()
+                    .and_then(|prefix| entry.scope.strip_prefix(prefix))
+                    .is_some_and(|round| !round.is_empty()),
+            }
+        }).cloned().collect())
+    }
+
     async fn list_versions(&self, context_id: &str) -> StoreResult<Vec<GroupContextEntry>> {
         Ok(self
             .state

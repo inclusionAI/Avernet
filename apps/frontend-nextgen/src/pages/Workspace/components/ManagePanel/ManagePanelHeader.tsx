@@ -5,12 +5,13 @@ export interface ManagePanelHeaderProps {
   title: string;
   description?: string;
   subtitle?: string;
-  statusLabel: '可管理' | '可查看';
+  statusLabel?: '可管理' | '可查看';
   onClose: () => void;
+  closeLabel?: string;
 }
 
 /** 群/会话管理右侧栏头部：沿用 PRD 侧边栏的装饰与状态徽标样式；固定 h-16 与会话区顶栏平齐。 */
-export function ManagePanelHeader({ title, description, subtitle, statusLabel, onClose }: ManagePanelHeaderProps) {
+export function ManagePanelHeader({ title, description, subtitle, statusLabel, onClose, closeLabel = '关闭管理面板' }: ManagePanelHeaderProps) {
   return (
     <div className="relative flex h-16 items-center overflow-hidden border-b border-divider px-4">
       <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
@@ -19,12 +20,12 @@ export function ManagePanelHeader({ title, description, subtitle, statusLabel, o
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="m-0 text-base font-semibold text-foreground">{title}</h3>
-            <Badge tone={statusLabel === '可管理' ? 'success' : 'neutral'}>{statusLabel}</Badge>
+            {statusLabel && <Badge tone={statusLabel === '可管理' ? 'success' : 'neutral'}>{statusLabel}</Badge>}
           </div>
           {description ? <p className="m-0 mt-0.5 text-xs leading-5 text-muted-foreground">{description}</p> : null}
           {subtitle ? <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p> : null}
         </div>
-        <IconButton label="关闭管理面板" icon={<X className="h-4 w-4" />} size="sm" variant="ghost" onClick={onClose} />
+        <IconButton label={closeLabel} icon={<X className="h-4 w-4" />} size="sm" variant="ghost" onClick={onClose} />
       </div>
     </div>
   );

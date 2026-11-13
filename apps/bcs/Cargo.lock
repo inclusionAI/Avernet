@@ -795,6 +795,7 @@ dependencies = [
  "bcs-storage-api",
  "bcs-test-support",
  "bytes",
+ "futures",
  "hex",
  "serde_json",
  "sha2",

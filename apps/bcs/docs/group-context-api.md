@@ -528,6 +528,25 @@ versions).
 and still blocks duplicate `add`; business consumers decide how to interpret
 those timestamps. This release does not expose a history API.
 
+## Shared information
+
+`POST /groupcontext/shared-info?groupId=<group-id>&sessionId=<session-id>`
+returns an `items` array of readable active context versions. Each item
+contains `name`, `scope_level`, `scope`, `content`, `creator`, and
+`gmt_modified`. The creator identifies the writer of the current version.
+
+With a Session ID, the result includes the Group, that Session, and its round
+scopes. Round writes validate a literal `{sessionId}:` prefix and require a
+nonempty round identifier after it, which may be a UUID. Shared information
+returns all matching rounds and rejects a `roundId` query parameter with HTTP 400.
+The Session must belong to the Group. A member Bot sees entries it can
+read. A Human with access sees entries readable by the Human or by a Bot they
+manage that participates in the Group or Session. Without a Session ID, the
+endpoint returns only Group entries readable by the caller. The group management
+page uses the Human perspective for this query. An authenticated Human may also
+pass `view_bot_id` to view entries as one Bot they manage. That Bot must
+participate in the requested Session, or in the Group for a group-only query.
+
 ## Predefined names
 
 `POST /groupcontext/list-preset?groupId=<group-id>` returns a `presets` array.
@@ -540,20 +559,28 @@ must also pass the `sessionId` query parameter or the CLI flag
 and the Bot must be a current participant. If a Bot supplies only the Group ID
 and is not a Group member, the error explains how to supply the Session ID.
 
-Preset management uses three Human-only POST endpoints with the `groupId` query parameter.
+The runtime response contains only `presets`. The CLI exposes discovery with
+`list-preset` and selection with `add --preset`.
+
+The Human management page uses four POST endpoints with the `groupId` query
+parameter. The management list returns `presets` and `can_manage` for the page
+to decide whether to show editing controls.
 
 | Operation | Request fields |
 | --- | --- |
-| `/groupcontext/add-preset` | `name` and optional `description` |
-| `/groupcontext/update-preset` | Current `name`, optional `new_name`, and optional `description` |
-| `/groupcontext/delete-preset` | `name` |
+| `/groupcontext/manage/list-preset` | Empty body |
+| `/groupcontext/manage/add-preset` | `name` and optional `description` |
+| `/groupcontext/manage/update-preset` | Current `name`, optional `new_name`, and optional `description` |
+| `/groupcontext/manage/delete-preset` | `name` |
 
-Each route requires an
-authenticated Human with Owner or Manager (admin) authority on the Group
+All management routes require an authenticated Human. Writes also require
+Owner or Manager (admin) authority on the Group
 driver Bot. Creation records that Human actor as both `creator` and
 `modifier`. Editing records the actor as `modifier` and retains `creator`.
 Names are case-sensitive and unique within a Group. Editing or deleting a definition leaves
-previously recorded contexts intact.
+previously recorded contexts intact. A duplicate preset on add or rename returns
+HTTP 409 with `status: "conflict"`. The display-only `error_msg` includes
+`请重命名后重试。` so the form can tell the operator how to proceed.
 
 To create a context with a predefined name, use `group-context add --preset`
 or set `"preset": true` in the add request. The name must match a definition in
