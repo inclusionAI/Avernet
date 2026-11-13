@@ -19,6 +19,20 @@ cargo llvm-cov clean --workspace
 cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
+# Spawn-based integration tests (bootstrap/bcs/tests/integration_http_api,
+# e2e_bot_authority) execute the bootstrap package's NON-TEST bin product at
+# <target-dir>/debug/bcs. `cargo nextest list` builds the test binaries but
+# has reported the bin unit up-to-date on runners whose restored rust-cache
+# excluded workspace artifacts (cache-workspace-crates: false): fingerprints
+# fresh, product file gone. Every spawn then dies with ENOENT and the
+# bootstrap runtime lines fall out of coverage (2026-11-13 CI incident: 8
+# spawn failures + overall line coverage 85.17% vs the required 87%). Assert
+# the product exists and force a rebuild when the cache state lied.
+if ! test -x "$CARGO_TARGET_DIR/debug/bcs"; then
+  echo "coverage build: $CARGO_TARGET_DIR/debug/bcs missing after nextest build; forcing rebuild" >&2
+  touch crates/bootstrap/bcs/src/main.rs
+  cargo build -p bcs --bin bcs
+fi
 set +e
 cargo nextest run --cargo-metadata testresult/cargo-metadata.json \
   --binaries-metadata testresult/test-binaries.json --config-file "$config" \

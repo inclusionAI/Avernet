@@ -110,11 +110,15 @@ struct Fixture {
 async fn fixture() -> Fixture {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let repo = Arc::new(MemoryMessageRepo::new().with_environment(resolve_env()));
-    let service = Arc::new(ManagedMessageDelivery::new(repo.clone()));
     // The prod shape under test: a live policy with every flow disabled.
     // DeliveryPolicy::default() is exactly that (flow_enabled all false,
-    // defaults Off, no per-bot entries).
+    // defaults Off, no per-bot entries). The service carries the SAME
+    // live policy as flow.delivery_policy — mirroring production
+    // (message_delivery_wiring composes with_policy(live)) — so the
+    // admit_batch policy gate actually runs; a policy-less service skips
+    // the gate entirely and would not prove the fix.
     let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+    let service = Arc::new(ManagedMessageDelivery::new(repo.clone()).with_policy(live.clone()));
     let handoff = Arc::new(HumanCallerDeliveryHandoff::new(8));
     let group = support.group.get("group-1").await.unwrap();
 
