@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/caller_identity/expiry_runtime_updater.py
+  s_bb98e2f10840b6::t_199100b6ed9180 29-30
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_1b479f90822c6b 62-63,70,157,161,177,180,314-315,319
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "367cf8b2c2652e5d99ecef7fe96f9eb5136e6937",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
