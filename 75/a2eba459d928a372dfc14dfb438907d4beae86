@@ -1,0 +1,24 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_cc764cf71f40e9::t_dd285993c070fa 1693
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_build_artifact_only.py
+  s_cc764cf71f40e9::t_2a2e299100b204 497-524
+apps/backend/tests/community/core/service_bot/services/test_baas_service_exec_command.py
+  s_cc764cf71f40e9::t_2a2e299100b204 195-202,204-208
+  s_cc764cf71f40e9::t_9550dd8012b669 168,173,177-178,203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75a2eba459d928a372dfc14dfb438907d4beae86",
+  "prompts": {},
+  "sessions": {
+    "s_cc764cf71f40e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d58c-8ba8-79f1-ba05-aefef1195b51",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

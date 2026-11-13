@@ -1,0 +1,62 @@
+apps/backend/tests/community/core/service_bot/services/test_baas_service_exec_command.py
+  s_cc764cf71f40e9::t_ccaec8838bb836 166-182,186-187,189
+  s_cc764cf71f40e9::t_7e43253648b7ed 183-185,188,190-192
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/ext_state.py
+  s_cc764cf71f40e9::t_9b9158f689244c 65-70
+apps/backend/src/agentclaw/community/api/baas_service.py
+  s_cc764cf71f40e9::t_622c723f6eaa8a 123
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_cc764cf71f40e9::t_f97ddf2aba96bd 104-108
+  s_cc764cf71f40e9::t_f45ee4fdc1176a 80-81
+  s_cc764cf71f40e9::t_917f2844dc3be7 19,195,210,221,227
+  s_cc764cf71f40e9::t_ff7843e043c76f 182-183,185
+  s_cc764cf71f40e9::t_496d251f492c53 198-201,203-208
+  s_cc764cf71f40e9::t_a9ef3bd448dedb 112-114,178,181,187-188,197,228-229,232,461-462,465
+  s_cc764cf71f40e9::t_53a078a662b9d6 34,161-168,170-177,190-192,196,209,211,213-214,216-220,222-223,225-226,233,235
+  s_cc764cf71f40e9::t_36dabc1005df6f 184,189,193,202,224
+  s_cc764cf71f40e9::t_3d2ab4f511457d 20,75-79,82-102,109-111,160,169,399-403
+  s_cc764cf71f40e9::t_4909d9e1950192 179,186,212,234,239,262,408
+  s_cc764cf71f40e9::t_6151073a022b85 194,215
+  s_cc764cf71f40e9::t_dc90afefc4f8fe 230-231
+  s_cc764cf71f40e9::t_649a7f8b5177d0 398,404-407
+  s_cc764cf71f40e9::t_e1b561c1362a82 35,180,463-464,482-497
+  s_cc764cf71f40e9::t_e23aec9d40e577 103
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_build_artifact_only.py
+  s_cc764cf71f40e9::t_8cabeacd0ac00c 279,281,398,400-422
+  s_cc764cf71f40e9::t_f79032e7521c72 393,423-424,427-437,441,444-449
+  s_cc764cf71f40e9::t_0a8eb60ffd6115 338-350
+  s_cc764cf71f40e9::t_d5cd49c60cdab1 242,244,254-255,257,259-260,266,276,278,387,389-392,394-395,397,475-496
+  s_cc764cf71f40e9::t_f9651553253a17 426,451-474
+  s_cc764cf71f40e9::t_6151073a022b85 301
+  s_cc764cf71f40e9::t_23dc59fcb1d951 305-316,318-320
+  s_cc764cf71f40e9::t_803ced7e4e6b2c 277,321-337,399,439
+  s_cc764cf71f40e9::t_d886f9a084ed99 280,351-357,359,366-368,370-385
+  s_cc764cf71f40e9::t_b2763a6090d5ed 258,282-300,302-304
+  s_cc764cf71f40e9::t_e1b561c1362a82 317
+  s_cc764cf71f40e9::t_d6339acc484c88 248,252,270,274,358,360-365,369
+  s_cc764cf71f40e9::t_f722a21436f50a 241,243,245-247,249-251,253,256,261-265,267-269,271-273,275,386,388,396,425,438,440,442-443,450
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_cc764cf71f40e9::t_803ced7e4e6b2c 314
+  s_cc764cf71f40e9::t_41fbeddc6ccc2a 315-320
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_cc764cf71f40e9::t_d3d8adec33caa8 1681-1682
+  s_cc764cf71f40e9::t_afa7af4ef9ed56 1638,1694-1695,1706-1707
+  s_cc764cf71f40e9::t_4909d9e1950192 1691-1692
+  s_cc764cf71f40e9::t_99e1cdd100b1a7 1690,1693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "58b20c74f3cc810166b1bb83f3415e1e071c8d36",
+  "prompts": {},
+  "sessions": {
+    "s_cc764cf71f40e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d58c-8ba8-79f1-ba05-aefef1195b51",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
