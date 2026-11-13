@@ -62,13 +62,36 @@ describe("monitoring automatic recovery", () => {
 
   it.each([
     { decision: "PASS" }, { decision: "UNRESOLVED" },
-    { handlerName: "COMPLETED" }, { handlerName: null }, { humanIntervention: true },
+    { handlerName: "COMPLETED" }, { handlerName: null },
+    { decision: "PASS", handlerName: "COMPLETED", tcFaultLabel: null, confidence: null },
+    { tcFaultLabel: "TC.FAKE.CODE" },
     { tcFaultLabel: null }, { schemaVersion: DIAGNOSIS_VERSION }, { schemaVersion: DIAGNOSIS_V3_VERSION },
   ])("does not trigger for an ineligible diagnostic %j", async patch => {
     const { config, service, trigger } = setup();
     await trigger.trigger({ ...event, ...patch } as DiagnosisEvent);
     expect(config.findByKey).not.toHaveBeenCalled();
     expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { decision: "PASS", handlerName: "COMPLETED" },
+    { decision: "PASS", handlerName: "COMPLETED", humanIntervention: true },
+    { decision: "PASS", tcFaultLabel: null, confidence: null },
+    { decision: "PASS", tcFaultLabel: null, confidence: null, humanIntervention: true },
+    { humanIntervention: true },
+  ])("passes newly eligible diagnostics through the real recovery request parser %j", async patch => {
+    const { config, service, trigger } = setup();
+    const eligible = { ...event, ...patch } as DiagnosisEvent;
+    await trigger.trigger(eligible);
+    expect(service.create).toHaveBeenCalledTimes(1);
+    expect(service.create.mock.calls[0][0].tc_fault_label).toBe(eligible.tcFaultLabel);
+    const first = service.create.mock.calls[0];
+    await trigger.trigger(eligible);
+    expect(service.create.mock.calls[1]).toEqual(first); // Stable downstream idempotency input.
+    config.findByKey.mockResolvedValueOnce({ enabled: 1, config_json: '{"allowed_bots":[]}' });
+    await trigger.trigger(eligible);
+    await trigger.trigger({ ...eligible, runtimeIdentity: null });
+    expect(service.create).toHaveBeenCalledTimes(2); // No bypass of allowlist or identity.
   });
 
   it("requires the exact Bot, Owner and environment and reloads the saved configuration", async () => {

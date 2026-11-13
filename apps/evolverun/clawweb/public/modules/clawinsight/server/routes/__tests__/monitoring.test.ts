@@ -421,7 +421,25 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
   it.each([
     { humanIntervention: true },
     { decision: "PASS", handlerName: "COMPLETED" },
+    { decision: "PASS", handlerName: "COMPLETED", humanIntervention: true },
     { decision: "PASS", tcFaultLabel: null, confidence: null },
+    { decision: "PASS", tcFaultLabel: null, confidence: null, humanIntervention: true },
+  ])("creates one durable recovery task for eligible v3 policy labels: %j", async patch => {
+    const { input, tasks, agent } = await automaticRecovery();
+    const value = { ...input, ...patch };
+    expect((await post(value)).status).toBe(201);
+    expect((await post(value)).body.duplicate).toBe(true);
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    expect(await tasks.find(rows[0].task_id)).toMatchObject({
+      request: { event_id: value.eventId, tc_fault_label: value.tcFaultLabel },
+    });
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    { decision: "PASS", handlerName: "COMPLETED", tcFaultLabel: null, confidence: null },
+    { decision: "PASS", handlerName: "COMPLETED", tcFaultLabel: null, confidence: null, humanIntervention: true },
     { schemaVersion: "claw-monitoring/diagnosis-event/v3" },
   ])("stores valid ineligible reports without creating recovery: %j", async patch => {
     const { input, agent } = await automaticRecovery();
