@@ -61,6 +61,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
     catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/:taskId/effect-recheck", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try {
+      const result = await tasks().startEffectRecheck(String(req.params.taskId), req.body?.request_id, await actor(req));
+      res.set("Cache-Control", "no-store").status(202).json(result);
+    } catch (error) { next(error); }
+  });
   router.post("/monitoring/session-recoveries/:taskId/terminate", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().terminate(String(req.params.taskId), await actor(req), req.body?.reason)); }
     catch (error) { next(error); }

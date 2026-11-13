@@ -6,7 +6,8 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { cronJobId } from "./session-identity.js";
-import { effectResumeAction, effectResumeDispatchExpired, EFFECT_RESUME_LIMIT, EFFECT_RESUME_WINDOW_MS, recoveryEffectWait } from "./effect-resume.js";
+import { effectResumeAction, effectResumeDispatchExpired, recoveryEffectWait } from "./effect-resume.js";
+import { definitiveEffect, recheckError, recheckUnavailable, validateEffectRecheckJudgment } from "./effect-recheck.js";
 import { recoveryMessagePending } from "./result.js";
 import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
 import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation } from "./owner-cooperation.js";
@@ -15,7 +16,7 @@ import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigS
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore, RecoveryOwnerHandoffContent, RecoveryEffectResumeConfig, RecoveryMaintenanceTask } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEffectRecheckAck, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore, RecoveryOwnerHandoffContent, RecoveryEffectResumeConfig, RecoveryMaintenanceTask } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 const CRON_WAIT_MS = 5 * 60 * 1000;
@@ -32,7 +33,9 @@ function sameRecoveryRequest(stored: RecoveryRequest, incoming: RecoveryRequest)
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
   release(task: RecoveryStoredTask): Promise<void>;
+  startEffectRecheck?(task: RecoveryStoredTask, requestId: string): Promise<RecoveryEffectRecheckAck>;
   terminate(task: RecoveryStoredTask): Promise<RecoveryTermination>;
+  cancelEffectRecheck?(task: RecoveryStoredTask): Promise<void>;
   listExecutions(taskId: string): Promise<RecoveryExecutionView[]>;
   effectResumeJobEnded?(jobId: string): Promise<boolean>;
 }
@@ -131,9 +134,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private async start(task: RecoveryStoredTask): Promise<void> {
     task = await this.required(task.taskId);
     if (task.status !== "running" || !this.ownsTask(task)) return;
-    if (effectResumeDispatchExpired(task, this.now()) && (!task.execution || task.execution.state === "ended")) {
-      await this.closeEffectWait(task, true);
-      return;
+    if (task.effectResumeSlot && task.effectResumeSlot.lastExecutionNo === undefined) {
+      const policy = await this.deps.tasks.effectResumeConfig?.(this.deps.controlPlaneEnvironment) ?? null;
+      if (effectResumeDispatchExpired(task, this.now(), policy) && (!task.execution || task.execution.state === "ended")) {
+        await this.closeEffectWait(task, policy, true);
+        return;
+      }
     }
     try { await this.deps.agent.start(task); }
     catch (error) {
@@ -282,20 +288,78 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async resume(taskId: string): Promise<void> {
     const previous = await this.required(taskId);
-    const task = await this.mutate(taskId, previous.version, value => this.resumeEffectObservation(value));
+    if (!this.ownsTask(previous)) this.fail(409, "任务不属于当前控制面环境");
+    let recheck: RecoveryStoredTask | undefined;
+    const task = await this.mutate(taskId, previous.version, value => {
+      if (definitiveEffect(value.judgment?.effect) && value.timeline.some(event => event.payload.effect_recheck_outcome === value.judgment?.effect)) {
+        this.fail(409, "该任务的效果已补验");
+      }
+      recheck = value.execution?.effectRecheck && value.execution.state !== "ended" ? value : undefined;
+      const next = this.resumeEffectObservation(value);
+      if (!recheck) return next;
+      next.execution = { ...value.execution!, state: "ended", invalidatedAt: Math.floor(this.now() / 1000) };
+      next.timeline.push(this.event("execution", "service", "在线续接已接管，停止补验", { execution_id: value.execution!.executionId,
+        effect_recheck_outcome: "superseded", reason: "online_task" }));
+      return next;
+    });
+    if (recheck) void this.deps.agent.cancelEffectRecheck?.(recheck).catch(error => logRepairEvent("session-recovery",
+      "session_recovery_execution", "recheck_stop_failed", { taskId, ...repairLogError(error) }));
     await this.deps.agent.start(task);
   }
 
   private resumeEffectObservation(task: RecoveryStoredTask, automatic = false): RecoveryStoredTask {
     const wait = recoveryEffectWait(task);
     const next = resumeRecoveryObservation(task);
-    if (!automatic) return { ...task, ...next, effectWait: wait,
-      timeline: [...task.timeline, this.event("resumed", "service", "恢复原观察阶段", {})] };
+    if (!automatic) return { ...task, ...next, effectWait: wait, timeline: [...task.timeline, this.event("resumed", "service", "恢复原观察阶段", {})] };
     if (!wait) this.fail(409, "无法确认本次效果等待的时间");
     const resumes = wait.resumes + 1;
     return { ...task, ...next, effectWait: { ...wait, resumes },
       effectResumeSlot: { firstExecutionNo: (task.executionNo ?? 0) + 1 },
       timeline: [...task.timeline, this.event("resumed", "service", "自动续接原观察阶段", { automatic: true, attempt: resumes })] };
+  }
+
+  async startEffectRecheck(taskId: string, requestId: unknown, actor: RecoveryActor): Promise<RecoveryEffectRecheckAck> {
+    if (typeof requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId) || containsSecret(requestId)) {
+      throw new SessionRecoveryError(422, "invalid_effect_recheck", "需要稳定的 request_id");
+    }
+    const task = await this.required(taskId);
+    this.owner(task, actor);
+    if (!this.ownsTask(task)) recheckError("wrong_control_plane");
+    if (!this.deps.agent.startEffectRecheck) recheckError("recheck_unavailable", 503);
+    return this.deps.agent.startEffectRecheck(task, requestId);
+  }
+
+  async finishEffectRecheck(taskId: string, executionId: string, judgment: RecoveryJudgment, freshEvidence: ReadonlySet<string>): Promise<void> {
+    const environment = this.deps.controlPlaneEnvironment;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const task = await this.required(taskId);
+      if (task.timeline.some(event => event.payload.execution_id === executionId && event.payload.effect_recheck_outcome)) {
+        if (task.execution?.executionId === executionId) await this.deps.agent.release(task);
+        return;
+      }
+      if (!this.ownsTask(task) || task.execution?.executionId !== executionId || !task.execution.effectRecheck
+        || task.execution.state === "ended" || task.execution.leaseExpiresAt <= Math.floor(this.now() / 1000)) recheckError("recheck_execution_changed");
+      const policy = await this.deps.tasks.effectResumeConfig!(environment);
+      const reason = recheckUnavailable(task, policy, this.now(), executionId);
+      const reported = await this.deps.tasks.latestDiagnosisEffect!(task);
+      if (!reported) recheckError("diagnosis_missing");
+      const superseded = reason || definitiveEffect(task.judgment?.effect) || definitiveEffect(reported.effect)
+        || task.pending_results.some(result => definitiveEffect(result.effect));
+      if (!superseded) validateEffectRecheckJudgment(task, judgment, freshEvidence);
+      const saved = await this.deps.tasks.update(taskId, task.version, value => {
+        const publish = !superseded && definitiveEffect(judgment.effect);
+        const next = { ...value, version: value.version + 1, ...(publish ? { judgment } : {}),
+          execution: { ...value.execution!, state: "ended" as const, invalidatedAt: Math.floor(this.now() / 1000) } };
+        next.timeline.push(this.event("execution", "agent", "只读效果补验已结束", { execution_id: executionId,
+          effect_recheck_outcome: superseded ? "superseded" : judgment.effect,
+          ...(superseded ? { reason: reason || "effect_already_known" } : { summary: judgment.summary, evidence_ids: judgment.evidence_ids }),
+          ...(publish ? { result_version: next.version } : {}) }));
+        if (publish) next.pending_results = [...value.pending_results, { ...recoveryTaskResult(next), result_text: judgment.summary }];
+        return next;
+      }, { environment, config: policy, recheck: { register: false, diagnosisVersion: reported.version } });
+      if (saved) return;
+    }
+    recheckError("recheck_conflict");
   }
 
   async requestOwner(taskId: string, version: number, input: import("./task-contracts.js").RecoveryOwnerRequestInput & { executionId: string; reportSummary?: string }): Promise<void> {
@@ -341,11 +405,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       && (task.simulation || !await this.deps.canReadAsBotCollaborator?.(actor.userId, task.request.target))) {
       this.fail(403, "权限不足，请联系任务 Owner 开启分享");
     }
-    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus: _intervention,
-      interventionAuditComplete: _auditCoverage, effectWait: _effectWait, effectResumeSlot: _effectSlot, trajectoryIndexReads: _indexReads, ...view } = task;
+    const { pending_results: _pending, execution: _execution, authorizationScopeDigest: _scope, aisExecution: _ais, interventionStatus, interventionAuditComplete: _auditCoverage, effectWait, effectResumeSlot, trajectoryIndexReads: _indexReads, ...view } = task;
     const executions = await this.deps.agent.listExecutions(taskId);
     return { ...view, pending_results: [], shared: task.shared === true, canOperate, canManageShare: canOperate,
-      executions, ...(task.status === "canceled" ? { termination: executions.at(-1)?.termination ?? { status: "stop_pending" as const, aisJobId: executions.at(-1)?.jobId ?? null } } : {}) };
+      ...(canOperate ? { effectRecheckFacts: { interventionStatus, effectWait, hasResumeReservation: Boolean(effectResumeSlot),
+        executionActive: Boolean(task.execution && task.execution.state !== "ended") } } : {}),
+      executions, ...(task.status === "canceled" ? { termination: this.taskTermination(executions) } : {}) };
+  }
+  private taskTermination(executions: RecoveryExecutionView[]): RecoveryTermination {
+    const latest = executions.findLast(execution => !execution.effectRecheckRequestId);
+    return latest?.termination ?? { status: "stop_pending", aisJobId: latest?.jobId ?? null };
   }
   async setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView> {
     if (typeof shared !== "boolean") this.fail(422, "shared 必须为布尔值");
@@ -358,13 +427,18 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const previous = await this.required(taskId); this.owner(previous, actor);
     if (!this.ownsTask(previous)) this.fail(409, "请在任务所属的 ClawWeb 环境停止任务");
     if (typeof reason !== "string" || !reason.trim() || reason.length > 500 || containsSecret(reason)) this.fail(422, "停止原因格式无效");
+    if (previous.status === "canceled" && previous.execution?.effectRecheck) {
+      const view = await this.detail(taskId, actor);
+      return { ...view, termination: this.taskTermination(view.executions) };
+    }
     let task = previous;
     if (previous.status !== "canceled") {
       try {
-        task = await this.mutate(taskId, previous.version, value => ({ ...value, ...terminateRecoveryTask(value),
+        task = await this.mutate(taskId, previous.version, value => {
+          return { ...value, ...terminateRecoveryTask(value),
           timeline: [...value.timeline, this.event("termination", actor.isAdmin ? "service" : "owner",
             `${actor.isAdmin ? "管理员" : "Owner"}停止本次自愈：${reason.trim()}`, { actor_id: actor.userId, actor_role: actor.isAdmin ? "admin" : "owner",
-              reason: reason.trim(), phase: value.phase, execution_id: value.execution?.executionId })] }));
+              reason: reason.trim(), phase: value.phase, execution_id: value.execution?.executionId })] }; });
         this.notifyGroup(task, "result");
       } catch (error) {
         if (!(error instanceof SessionRecoveryError) || error.status !== 409) throw error;
@@ -527,7 +601,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     let cursor = "";
     for (;;) {
       let batch: Array<RecoveryStoredTask | RecoveryMaintenanceTask>;
-      try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor, environment, Boolean(config)) ?? []; }
+      try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor, environment, true) ?? []; }
       catch (error) {
         logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
           ...repairLogError(error) });
@@ -538,9 +612,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       cursor = task.taskId;
       try {
         if (!this.ownsTask(task)) continue;
+        if (task.effectResumeSlot) slots.push(task);
         if (config) {
-          if (task.effectResumeSlot) slots.push(task);
-          const action = effectResumeAction(task, this.now());
+          const action = effectResumeAction(task, this.now(), config);
           if (action) {
             const candidates = action === "close" ? close : resume;
             candidates.push(task);
@@ -578,10 +652,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
     // Keep the scan and its existing startup/retry work ahead of effect resumption.
     for (const task of pendingStarts) this.startEffectObservation(task);
-    if (config) await this.maintainEffectWait(config, slots, close, resume);
+    await this.maintainEffectWait(config ?? null, slots, close, resume);
   }
 
-  private async maintainEffectWait(config: RecoveryEffectResumeConfig,
+  private async maintainEffectWait(policy: RecoveryEffectResumeConfig | null,
     slots: Array<RecoveryStoredTask | RecoveryMaintenanceTask>,
     close: Array<RecoveryStoredTask | RecoveryMaintenanceTask>,
     resume: Array<RecoveryStoredTask | RecoveryMaintenanceTask>): Promise<void> {
@@ -593,11 +667,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           jobId => this.deps.agent.effectResumeJobEnded?.(jobId) ?? Promise.resolve(false))) occupied--;
       });
     }
+    if (!policy) return;
+    let config: RecoveryEffectResumeConfig = policy;
     for (const candidate of close.slice(0, config.concurrency)) {
       await this.effectMaintenance(candidate.taskId, async () => {
         const task = await this.required(candidate.taskId);
         const wait = recoveryEffectWait(task);
-        if (wait && this.ownsTask(task) && effectResumeAction({ ...task, effectWait: wait }, this.now()) === "close") await this.closeEffectWait(task);
+        if (wait && this.ownsTask(task) && effectResumeAction({ ...task, effectWait: wait }, this.now(), config) === "close") await this.closeEffectWait(task, config);
       });
     }
     let remainingCloses = Math.max(0, config.concurrency - close.length);
@@ -608,13 +684,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         const wait = recoveryEffectWait(task);
         if (!wait || !this.ownsTask(task) || task.simulation || task.level === "debug"
           || (task.judgment && task.judgment.effect !== "unknown")) return;
-        const action = effectResumeAction({ ...task, effectWait: wait }, this.now());
+        const action = effectResumeAction({ ...task, effectWait: wait }, this.now(), config);
         if (action === "close" && remainingCloses > 0) {
-          await this.closeEffectWait(task);
+          await this.closeEffectWait(task, config);
           remainingCloses--;
         } else if (action === "resume" && (!task.execution || task.execution.state === "ended")) {
           const updated = await this.deps.tasks.update(task.taskId, task.version, value => {
-            if (effectResumeAction({ ...value, effectWait: wait }, this.now()) !== "resume") {
+            if (effectResumeAction({ ...value, effectWait: wait }, this.now(), config) !== "resume") {
               this.fail(409, "等待效果的续接条件已变化");
             }
             return this.resumeEffectObservation({ ...value, effectWait: wait }, true);
@@ -628,16 +704,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
   }
 
-  private async closeEffectWait(task: RecoveryStoredTask, expiredBeforeDispatch = false): Promise<void> {
+  private async closeEffectWait(task: RecoveryStoredTask, config: RecoveryEffectResumeConfig | null, expiredBeforeDispatch = false): Promise<void> {
     const updated = await this.mutate(task.taskId, task.version, value => {
       const wait = recoveryEffectWait(value);
-      const expired = wait && this.now() >= wait.firstAt + EFFECT_RESUME_WINDOW_MS;
       const ready = expiredBeforeDispatch
-        ? value.status === "running" && effectResumeDispatchExpired(value, this.now())
+        ? value.status === "running" && effectResumeDispatchExpired(value, this.now(), config)
           && (!value.execution || value.execution.state === "ended")
-        : wait && effectResumeAction({ ...value, effectWait: wait }, this.now()) === "close";
+        : wait && config && !value.effectResumeSlot && effectResumeAction({ ...value, effectWait: wait }, this.now(), config) === "close";
       if (!ready || (value.judgment && value.judgment.effect !== "unknown")) this.fail(409, "等待效果的收口条件已变化");
-      const reason = expired ? "已到自动续接的 24 小时期限" : `已完成 ${EFFECT_RESUME_LIMIT} 次自动续接`;
+      const reason = !config ? "自动续接已停用" : `已到自动续接的时间或次数上限（${config.windowSeconds} 秒、${config.maxResumes} 次）`;
       const summary = `${reason}，仍缺少确认恢复的证据，本次自愈已结束。`;
       const judgment: RecoveryJudgment = { delivery: "unconfirmed", response: "unknown", evidence_ids: [], ...value.judgment,
         effect: "unknown", summary: value.judgment?.summary ? `${value.judgment.summary}\n\n${summary}` : summary };
@@ -732,8 +807,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
     const summary = state === "sent" ? "Owner 待办卡片已同步" : state === "disabled" ? "卡片通知未启用，请在任务页处理"
       : failedBeforeDispatch ? "卡片请求未发出" : "卡片发送结果未确认，请在任务页处理";
-    await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", summary,
-      { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` });
+    const receipt = { ...this.event("notification", "service", summary,
+      { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` };
+    const recorded = await this.deps.tasks.appendNotification(task.taskId, receipt);
+    if (recorded && !updateOnly && state === "sent") this.notifyGroup(task, "owner_card_sent", receipt);
     if (["sent", "disabled"].includes(state) || attempts.length === 2) await this.settleOwnerCard(task.taskId, stateKey);
     // A slow old send must not leave a newer revision/terminal state overwritten.
     const latest = await this.required(task.taskId);
@@ -742,11 +819,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       else logRepairEvent("session-recovery", "session_recovery_notification", "owner_card_state_changed", { taskId: task.taskId });
     }
   }
-  private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
+  private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"], source?: RecoveryTimelineEvent): void {
     if (task.simulation) return;
-    const event = kind === "result" && task.completionReason === "owner_handoff"
+    const event = source ?? (kind === "result" && task.completionReason === "owner_handoff"
       ? task.timeline.findLast(item => item.kind === "termination" && item.payload.completion_reason === "owner_handoff")
-      : task.timeline.at(-1);
+      : task.timeline.at(-1));
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
     catch (error) {
