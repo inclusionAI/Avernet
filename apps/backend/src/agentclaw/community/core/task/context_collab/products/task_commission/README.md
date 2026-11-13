@@ -190,9 +190,20 @@ generation and auto-submits only after successful execution; a failure case
 checks that no result is submitted. Open handles participation/admission; result
 submission is L4 Work. This is not a live Bot, gateway or artifact-upload test.
 
+The journey fixture temporarily wraps selected real calls to print
+`[commission-flow][module/directory]` entries, returns and resulting statuses.
+It covers L6 profile preparation, L5 admission, mock outbound delivery,
+authenticated HTTP ingress, G1/G4 checks and repository snapshot writes.
+These wrappers preserve real execution and are removed after each test; they
+add no production stdout and do not dump credentials or request bodies.
+
 Run from `apps/backend/`:
 
 ```sh
+# Follow the successful user journey live (-s disables pytest stdout capture).
+DEPLOY_PROFILE=test .venv/bin/python -m pytest -s -q \
+  tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py::test_end_to_end_commission_flow
+
 DEPLOY_PROFILE=test .venv/bin/python -m pytest \
   tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py \
   tests/community/core/task/context_collab/test_l6_runtime_contract.py -q
