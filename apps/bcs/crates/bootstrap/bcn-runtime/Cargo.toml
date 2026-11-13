@@ -1,0 +1,41 @@
+[package]
+name = "bcn-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sha2.workspace = true
+bcs-service-api.workspace = true
+bcs-domain.workspace = true
+uuid.workspace = true
+bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
+bcn-runtime-model.workspace = true
+bcn-runtime-api.workspace = true
+bcn-runtime-app.workspace = true
+bcn-runtime-storage-api.workspace = true
+bcn-runtime-store.workspace = true
+bcn-storage-memory.workspace = true
+bcn-session-runner.workspace = true
+bcn-agent-connectors.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+a2a = { package = "a2a-lf", version = "=0.4.2" }
+
+bcs-a2a-http.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+futures.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+bcs-bot-store.workspace = true
+bcs-group-store.workspace = true
+bcs-collaboration-store.workspace = true
+bcs-judge.workspace = true
+bcs-llm-api.workspace = true
+axum.workspace = true

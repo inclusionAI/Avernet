@@ -318,6 +318,170 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bcn-agent-connectors"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcs-a2a-http",
+ "bcs-network-tracing",
+ "bcs-protocol",
+ "futures",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bcn-api-http"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "bcn-runtime",
+ "bcn-runtime-api",
+ "bcn-runtime-app",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-domain",
+ "chrono",
+ "futures",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "bcn-runtime"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "bcn-agent-connectors",
+ "bcn-runtime-api",
+ "bcn-runtime-app",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-a2a-http",
+ "bcs-bot-store",
+ "bcs-collaboration-store",
+ "bcs-domain",
+ "bcs-group-store",
+ "bcs-judge",
+ "bcs-llm-api",
+ "bcs-network-tracing",
+ "bcs-service-api",
+ "futures",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bcn-runtime-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "futures",
+ "tokio",
+]
+
+[[package]]
+name = "bcn-runtime-app"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-runtime-store",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-domain",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "bcn-runtime-model"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-domain",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bcn-runtime-storage-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "futures",
+]
+
+[[package]]
+name = "bcn-runtime-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "bcn-session-runner",
+ "bcn-storage-memory",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "bcn-session-runner"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcs-domain",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "bcn-storage-memory"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
+ "tokio",
+]
+
+[[package]]
 name = "bcs"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -2443,6 +2607,9 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcn-runtime-api",
+ "bcn-runtime-model",
+ "bcn-runtime-storage-api",
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",

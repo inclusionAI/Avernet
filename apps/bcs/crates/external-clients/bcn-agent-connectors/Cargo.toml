@@ -1,0 +1,28 @@
+[package]
+name = "bcn-agent-connectors"
+description = "Target-bound HTTP agent connectors for the neutral BCN runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcn-runtime-api.workspace = true
+bcn-runtime-model.workspace = true
+bcs-a2a-http.workspace = true
+bcs-protocol.workspace = true
+bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
+a2a = { package = "a2a-lf", version = "=0.4.2" }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

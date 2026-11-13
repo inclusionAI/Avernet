@@ -271,3 +271,5 @@ pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
 
     server.run_with_listener(listener).await
 }
+
+pub use server::management::{management_resources,ManagementResources};

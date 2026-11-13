@@ -1,0 +1,14 @@
+[package]
+name = "bcn-runtime-storage-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+bcn-runtime-model.workspace = true
+
+[lints]
+workspace = true

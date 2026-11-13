@@ -1,5 +1,16 @@
 [workspace]
 members = [
+    "crates/adapters/http/bcn-api-http",
+    "crates/bootstrap/bcn-runtime",
+    "crates/external-clients/bcn-agent-connectors",
+    "crates/application/bcn-runtime-app",
+    "crates/services/bcn-runtime-store",
+    "crates/services/bcn-session-runner",
+    "crates/contracts/bcn-runtime-model",
+    "crates/service-api/bcn-runtime-api",
+    "crates/plugin-api/bcn-runtime-storage-api",
+    "crates/plugins/bcn-storage-memory",
+
     "crates/plugin-api/bcs-a2a-binding-api",
     "crates/plugin-api/bcs-tracing-api",
     "crates/auxiliary/bcs-network-tracing",
@@ -144,6 +155,17 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcn-api-http = { path = "crates/adapters/http/bcn-api-http" }
+bcn-runtime = { path = "crates/bootstrap/bcn-runtime" }
+bcn-agent-connectors = { path = "crates/external-clients/bcn-agent-connectors" }
+bcn-runtime-app = { path = "crates/application/bcn-runtime-app" }
+bcn-runtime-store = { path = "crates/services/bcn-runtime-store" }
+bcn-session-runner = { path = "crates/services/bcn-session-runner" }
+bcn-runtime-model = { path = "crates/contracts/bcn-runtime-model" }
+bcn-runtime-api = { path = "crates/service-api/bcn-runtime-api" }
+bcn-runtime-storage-api = { path = "crates/plugin-api/bcn-runtime-storage-api" }
+bcn-storage-memory = { path = "crates/plugins/bcn-storage-memory" }
+
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
