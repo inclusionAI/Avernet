@@ -2666,3 +2666,40 @@ async def test_a_local_skill_replacement_never_touches_the_mcp_half():
     )
     assert scope.claimed_mcp == frozenset()
     assert scope.released_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_directory_upload_preserves_path_rejection_reason():
+    service = _service(_Filesystem())
+    with pytest.raises(LocalSkillInvalidPackageError) as caught:
+        await service.upload_local_skill_files(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            files=[("../SKILL.md", b"invalid")],
+        )
+    assert caught.value.reason == "unsafe_file_path"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_directory", [True, False])
+async def test_upload_preserves_size_limit_reason(monkeypatch, as_directory):
+    from agentclaw.community.core.skill_center import skill_package as package_module
+    from agentclaw.community.core.skill_center.errors import LocalSkillTooLargeError
+
+    service = _service(_Filesystem())
+    if as_directory:
+        monkeypatch.setattr(package_module, "MAX_FILE_BYTES", 2)
+        call = service.upload_local_skill_files(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            files=[("SKILL.md", b"large")],
+        )
+        expected = "file_too_large"
+    else:
+        monkeypatch.setattr(package_module, "MAX_COMPRESSED_BYTES", 2)
+        call = service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+        expected = "compressed_too_large"
+    with pytest.raises(LocalSkillTooLargeError) as caught:
+        await call
+    assert caught.value.reason == expected

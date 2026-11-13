@@ -4,11 +4,12 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { ObjectStore } from "../../services/object-storage/oss-object-store.js";
-import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
+import type { RecoveryEffectResumeConfig, RecoveryEffectResumeSlot, RecoveryMaintenanceTask, RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
 import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
 import { sessionReadCoverage } from "../../services/repair/session-recovery/session-read-coverage.js";
+import { trajectoryIndexReads } from "../../services/repair/session-recovery/bootstrap-evidence.js";
 
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
 export type RecoveryArtifactStore = Required<Pick<ObjectStore, "getObject" | "putObject">>;
@@ -37,11 +38,68 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       await tx.exec("UPDATE ce_steps SET output_json = ?, status = 'running' WHERE step_id = ?", [JSON.stringify(report), stepId]);
     });
   }
-  async listForMaintenance(limit: number, afterTaskId = ""): Promise<RecoveryStoredTask[]> {
+  async listForMaintenance(limit: number, afterTaskId = "", environment?: AgentControlPlaneEnvironment,
+    includeEffectResumeSlots = false): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>> {
     this.limit(limit);
-    const rows = await this.db.query<{ task_id: string }>(
-      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND (status IN ('pending','running','waiting_owner','waiting_effect') OR config_json LIKE ?) ORDER BY task_id ASC LIMIT ?", [afterTaskId, '%"ownerCardSyncPending":true%', limit]);
-    return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
+    const slots = includeEffectResumeSlots ? " OR config_json LIKE ?" : "";
+    const rows = await this.db.query<{ task_id: string; config_json: string }>(
+      `SELECT task_id, config_json FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ?
+       AND (status IN ('pending','running','waiting_owner','waiting_effect') OR config_json LIKE ?${slots}) ORDER BY task_id ASC LIMIT ?`,
+      [afterTaskId, '%"ownerCardSyncPending":true%', ...(includeEffectResumeSlots ? ['%"effectResumeSlot":%'] : []), limit]);
+    return Promise.all(rows.map(row => {
+      const state = JSON.parse(row.config_json);
+      if (!environment || (resolveTaskControlPlaneEnvironment(state) === environment
+        && (state.status === "running" || state.ownerRequest))) return this.hydrate(this.db, row.config_json);
+      const { status, phase, controlPlaneEnvironment, publicBaseUrl, observationDeadlineAt, effectWait, effectResumeSlot } = state;
+      return { compact: true as const, taskId: row.task_id, status, phase, controlPlaneEnvironment, publicBaseUrl, observationDeadlineAt, effectWait, effectResumeSlot };
+    }));
+  }
+
+  async effectResumeConfig(environment: AgentControlPlaneEnvironment, db = this.db, lock = false): Promise<RecoveryEffectResumeConfig | null> {
+    const key = `session_recovery_effect_resume_${environment}`;
+    const suffix = lock && db.dbType !== "sqlite" ? " FOR UPDATE" : "";
+    const [row] = await db.query<{ id: number; version: number; config_json: string; enabled: number }>(
+      `SELECT id, version, config_json, enabled FROM ce_app_config WHERE config_key = ?${suffix}`, [key]);
+    if (!row?.enabled) return null;
+    const concurrency = JSON.parse(row.config_json)?.concurrency;
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 10) throw new Error("Invalid session recovery effect resume concurrency");
+    return { id: row.id, version: row.version, concurrency };
+  }
+
+  async claimEffectResumeDispatch(stepId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      `UPDATE ce_steps SET status = 'dispatching', gmt_modified = ?
+       WHERE step_id = ? AND step_type = 'agent_execution' AND status = 'created'
+       AND EXISTS (SELECT 1 FROM ce_tasks WHERE ce_tasks.task_id = ce_steps.task_id AND ce_tasks.status = 'running')`,
+      [this.db.dialect.now(), stepId],
+    );
+    return result.affectedRows === 1;
+  }
+
+  async settleEffectResumeSlot(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean> {
+    if (slot.lastExecutionNo === undefined) return false;
+    const steps = await this.db.query<{ status: string; error_code: string | null; bot_run_id: string | null; bot_response_json: string | null }>(
+      "SELECT status, error_code, bot_run_id, bot_response_json FROM ce_steps WHERE task_id = ? AND step_type = 'agent_execution' AND step_no BETWEEN ? AND ?",
+      [taskId, -slot.lastExecutionNo, -slot.firstExecutionNo]);
+    for (const step of steps) {
+      if (step.status === "succeeded" || step.status === "failed") continue;
+      if (step.status !== "canceled") return false;
+      if (step.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH") continue;
+      const cancellation = JSON.parse(step.bot_response_json ?? "{}").evolve_cancel?.status;
+      if (cancellation === "remote_stopped") continue;
+      if (cancellation !== "remote_stop_failed" || !step.bot_run_id || !await jobEnded(step.bot_run_id)) return false;
+    }
+    return this.db.transaction(async tx => {
+      const raw = await this.lock(tx, taskId);
+      if (!raw) return false;
+      const state = JSON.parse(raw);
+      const current = state.effectResumeSlot as RecoveryEffectResumeSlot | undefined;
+      if (current?.firstExecutionNo !== slot.firstExecutionNo || current.lastExecutionNo !== slot.lastExecutionNo) return false;
+      // Scheduler bookkeeping only. A concurrent business update reads the same locked row.
+      delete state.effectResumeSlot;
+      await tx.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(state), taskId]);
+      return true;
+    });
   }
   async listForReporting(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }> {
     this.limit(limit);
@@ -70,9 +128,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     }
     return { tasks: result, nextTaskId: rows.length === limit ? rows[rows.length - 1].task_id : "" };
   }
-  async find(taskId: string): Promise<RecoveryStoredTask | null> {
+  async find(taskId: string, options: { forBootstrap?: boolean } = {}): Promise<RecoveryStoredTask | null> {
     const row = await this.tasks.findTask(taskId);
-    return row?.task_type === "session_recovery" ? this.hydrate(this.db, row.config_json) : null;
+    return row?.task_type === "session_recovery" ? this.hydrate(this.db, row.config_json, options.forBootstrap) : null;
   }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]> {
@@ -80,8 +138,14 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND remark = ? AND (? = 1 OR user_id = ? OR JSON_EXTRACT(config_json, '$.shared') = true) ORDER BY id DESC LIMIT 100", [this.eventRemark(eventId), isAdmin ? 1 : 0, ownerId]);
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
-  async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null> {
+  async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
+    effectResumeClaim?: { environment: AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null> {
     return this.db.transaction(async tx => {
+      if (effectResumeClaim) {
+        const current = await this.effectResumeConfig(effectResumeClaim.environment, tx, true);
+        const expected = effectResumeClaim.config;
+        if (!current || current.id !== expected.id || current.version !== expected.version || current.concurrency !== expected.concurrency) return null;
+      }
       const raw = await this.lock(tx, taskId);
       if (!raw) return null;
       const current = await this.hydrate(tx, raw);
@@ -106,6 +170,8 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       deliveries.sort((a, b) => a.resultVersion - b.resultVersion);
       await this.savePhase(tx, updated, details, fresh, added);
       await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details, deliveries, stored.stoppedResultDelivery), updated.status, nowForDb(tx.dbType), taskId]);
+      // Another dispatcher that scanned before this claim must discard its older slot count.
+      if (effectResumeClaim) await tx.exec("UPDATE ce_app_config SET version = version + 1 WHERE id = ?", [effectResumeClaim.config.id]);
       return updated;
     });
   }
@@ -186,7 +252,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = [], stoppedResultDelivery: StoppedResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, plan, delivery: _delivery, judgment: _judgment, ownerRequest, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, trajectoryIndexReads: _indexReads, plan, delivery: _delivery, judgment: _judgment, ownerRequest, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery,
       ...(ownerRequest ? { ownerRequest: { requestId: ownerRequest.requestId, revision: ownerRequest.revision, status: ownerRequest.status, reason: ownerRequest.reason, resumePhase: ownerRequest.resumePhase, createdAtMs: ownerRequest.createdAtMs } } : {}),
       ...(stoppedResultDelivery.length ? { stoppedResultDelivery } : {}), plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
@@ -209,7 +275,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       [JSON.stringify(report), value.judgment?.summary ?? value.plan?.summary ?? null, status, nowForDb(tx.dbType), stepId]);
     await tx.exec("UPDATE ce_steps SET status = 'succeeded' WHERE task_id = ? AND step_no > 0 AND step_no < ? AND status NOT IN ('succeeded','failed','canceled')", [value.taskId, stepNo]);
   }
-  private async hydrate(db: IDatabase, raw: string): Promise<RecoveryStoredTask> {
+  private async hydrate(db: IDatabase, raw: string, forBootstrap = false): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
     if (value.artifactStorage !== 2) return { ...value, interventionStatus: undefined, interventionAuditComplete: undefined };
     const { artifactStorage: _storage, detailsRef, resultDelivery, stoppedResultDelivery, ...state } = value;
@@ -241,6 +307,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     }
     const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery, task.timeline);
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
+    if (forBootstrap) task.trajectoryIndexReads = trajectoryIndexReads(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);

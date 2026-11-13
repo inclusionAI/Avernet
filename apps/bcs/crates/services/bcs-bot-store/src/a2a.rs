@@ -177,7 +177,7 @@ impl DbA2aBotStore {
             Some(DbTransactionStepResult::Rows(rows)) if rows.len()==1=>{
                 let committed=decode(&rows[0])?;
                 if let Some(registry)=self.registry.as_ref().and_then(std::sync::Weak::upgrade) {
-                    registry.invalidate_card_metadata(&self.env,&record.bot_uuid).await;
+                    registry.invalidate_registry_metadata(&self.env,&record.bot_uuid).await;
                 }
                 Ok(Some(committed))
             },

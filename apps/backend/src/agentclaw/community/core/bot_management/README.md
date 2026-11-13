@@ -12,6 +12,12 @@ metadata lookup, without changing their source PK or published stage bindings.
 
 Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
+Bot avatar writes accept a URL or data URL of at most 24 KiB in UTF-8. The
+merged `ext` must also fit the 65,535-byte portable TEXT limit after the Bot
+repository's JSON serialization. Oversized avatar writes fail before mutation;
+existing values remain readable. These limits avoid sending a value that the
+Bot or collaboration profile stores cannot persist.
+
 ## Context Boundary
 
 ```yaml

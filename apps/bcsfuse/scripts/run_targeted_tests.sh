@@ -16,7 +16,6 @@ case "${1:---isolated}" in
       packages/search-core/tests \
       tests/contract/test_tc_catalog.py \
       tests/contract/test_tc_same_instance_migration.py \
-      tests/contract/test_tc_legacy_transactions.py \
       tests/contract/test_tc_sync_contract.py \
       tests/contract/test_tc_http_compat.py \
       tests/contract/test_tc_fuse_modes.py \

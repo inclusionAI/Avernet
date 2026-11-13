@@ -151,17 +151,61 @@ impl BcsServer {
             config.bots_base_dir.clone(),
         ));
         let friend_store: Arc<FriendCore> =
-            Arc::new(FriendCore::with_repo(friend_repo).with_relation(
+            Arc::new(FriendCore::with_repo(friend_repo.clone()).with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             ));
-        let friend_request_repo = Arc::new(MemoryFriendRequestRepo::with_data_dir(
-            config.bots_base_dir.clone(),
+        // Edge-permission stores for the in-memory path. The in-memory server
+        // runs the same `DbConnectService` as the durable paths, over
+        // process-local repo ports, so the legacy `/friends/*` facade and the
+        // edge connect endpoints share one source of truth. These stores are
+        // intentionally not file-backed (see `bcs_edge_permission_store::memory`).
+        //
+        // TODO(dima-2026110600120400669): this path holds TWO independent
+        // permission-profile sources — onboarding/runtime reads the shared
+        // `memory_profile_port` (`bot_repo`) while connect reads the separate
+        // `MemoryPermissionProfileStore` below. They drift as soon as a profile
+        // is written through one of them; unify them on a single store before
+        // the connect profile writes become authoritative.
+        let edge_profiles = Arc::new(
+            bcs_edge_permission_store::memory::MemoryPermissionProfileStore::new(),
+        );
+        let edge_grants = Arc::new(bcs_edge_permission_store::memory::MemoryEdgeGrantStore::new(
+            edge_profiles.clone(),
         ));
-        let friend_request_store: Arc<FriendRequestCore> = Arc::new(FriendRequestCore::with_repo(
-            friend_request_repo,
-            friend_store.clone(),
-            bot_registry.clone(),
-        ));
+        let permission_requests =
+            Arc::new(bcs_edge_permission_store::memory::MemoryPermissionRequestStore::new());
+        let bot_actor_config = Arc::new(
+            bcs_edge_permission_store::memory::MemoryBotActorConfigStore::new(
+                bot_registry.clone(),
+            ),
+        );
+        // Edge→legacy reverse sync (coexistence): mirrors edge connect
+        // friendships into `bcs_friendships` because the collaboration group
+        // gate still reads the legacy store, exactly as the durable path does.
+        let friendship_writeback: Arc<dyn bcs_service_api::port::FriendshipWritebackPort> =
+            Arc::new(bcs_friend::FriendshipWritebackService::new(
+                friend_repo.clone(),
+                relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
+            ));
+        let connect_service: Arc<dyn bcs_service_api::application::ConnectService> = Arc::new(
+            bcs_edge_permission::DbConnectService::new(
+                edge_grants,
+                edge_profiles,
+                permission_requests,
+                bot_actor_config,
+                user_directory.clone(),
+                Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+                Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
+                // Same env the in-memory registry stamps on registrations
+                // (`RegisteredBot.env`, defaulting to `resolve_env()`).
+                crate::env::resolve_env(),
+            )
+            .with_friendship_writeback(Some(friendship_writeback))
+            // Friend-request notifications follow the CURRENT authority
+            // owner, not the historical `created_by` fact.
+            .with_bot_authority_port(Some(bot_authority_repo.clone()))
+            .with_collaboration_registry(bot_registry.clone()),
+        );
 
         let invite_code_service =
             build_invite_code_service(&config, None, None, invite_token_secret.clone());
@@ -214,6 +258,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(provider_request_url_guard)
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
@@ -383,7 +428,6 @@ impl BcsServer {
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             friend_store.clone(),
-            friend_request_store.clone(),
             relation_store.clone(),
             provider_control_plane.clone(),
             None,
@@ -400,6 +444,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             memory_profile_port,
+            connect_service.clone(),
             bot_authority.hook.clone(),
             session_authorization_core.clone(),
         );
@@ -532,7 +577,7 @@ impl BcsServer {
             sessions.clone(),
             friend_store.clone(),
             use_cases.candidate_search.clone(),
-            friend_request_store,
+            use_cases.friend_use_cases.clone(),
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
@@ -548,7 +593,10 @@ impl BcsServer {
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
             principal_verifier.clone(),
-            Arc::new(bcs_test_support::NoopConnectService),
+            // The V1 friendship surface shares the in-memory connect store with
+            // the legacy `/friends/*` routes: an unfriend here must revoke the
+            // same edges those routes and `GET .../friendships` read.
+            connect_service.clone(),
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
@@ -619,6 +667,7 @@ impl BcsServer {
                 )),
                 sessions.clone(),
                 session_repo.clone(),
+                bot_authority.hook.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
@@ -713,7 +762,7 @@ impl BcsServer {
             auth_session_identity,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
-            connect_service: Arc::new(bcs_test_support::NoopConnectService),
+            connect_service,
             admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
         });
 

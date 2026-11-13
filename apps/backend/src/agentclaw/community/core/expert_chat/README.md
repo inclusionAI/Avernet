@@ -50,6 +50,10 @@ before device work. Caller instances remain subject-owned. Personal friends keep
 draft-only addressing. Read-only files and explicit friend IAM use the same
 stage/owned-session boundary. This does not add friend upload/delete privileges.
 
+The legacy expert-chat get and connect session HTTP endpoints translate an
+unavailable online publication to the existing unpublished error (4001).
+OpenAPI stage addressing retains its own not-live response contract.
+
 The OpenAPI friend-session read routes (list/favorites/detail/messages and file
 reads) separate the session subject (`f_user_id`) from the authenticated actor
 (`user_id`). The subject continues to select the Backend-owned session index;

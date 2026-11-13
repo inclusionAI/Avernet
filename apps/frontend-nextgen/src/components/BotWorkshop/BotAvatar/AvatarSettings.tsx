@@ -4,6 +4,7 @@ import { Spin } from '@/components/ui/Spin';
 import { appExtension } from '@/extensions';
 import { useBotAvatar } from '@/hooks/useBotAvatar';
 import { Suspense, useCallback, useState } from 'react';
+import type { AvatarProcessingStatus } from './AvatarEditor';
 
 export function AvatarSettings({
   botId,
@@ -11,6 +12,7 @@ export function AvatarSettings({
   trigger,
   onStagedChange,
   onOverlayOpenChange,
+  onProcessingChange,
 }: {
   botId: string;
   editable: boolean;
@@ -20,6 +22,7 @@ export function AvatarSettings({
   onStagedChange?: (url: string | undefined) => void;
   /** 编辑器宿主浮层（上传/AIGC）开合上报；宿主用于抑制外层 Dialog 的外点关闭连坐。 */
   onOverlayOpenChange?: (open: boolean) => void;
+  onProcessingChange?: (status: AvatarProcessingStatus) => void;
 }) {
   const avatar = useBotAvatar(botId);
   const Editor = appExtension.avatarEditor;
@@ -33,7 +36,7 @@ export function AvatarSettings({
     [onOverlayOpenChange],
   );
   return (
-    <Popover>
+    <Popover onOpenChange={(open) => { if (!open) onProcessingChange?.('idle'); }}>
       <PopoverTrigger asChild>
         {trigger ?? (
           <Button variant="outline" size="sm">
@@ -68,6 +71,7 @@ export function AvatarSettings({
             seed={botId}
             disabled={!editable || avatar.loading}
             onOverlayOpenChange={reportOverlayOpen}
+            onProcessingChange={onProcessingChange}
           />
         </Suspense>
         <p className="m-0 text-[11px] text-muted-foreground">修改仅本地暂存，点击弹窗的「保存修改」后生效</p>

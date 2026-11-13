@@ -71,6 +71,7 @@ pub(super) async fn send_provider_request(
         provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
         ProviderStatusPolicy::RequireSuccess,
+        false,
     )
     .await
 }
@@ -82,6 +83,7 @@ pub(super) async fn send_provider_delivery_request(
     body: &ProviderWebhookRequest,
     accept_sse: bool,
     provider_bypass_headers: &[(String, String)],
+    preproduction_caller_token_diagnostics: bool,
 ) -> ServiceResult<reqwest::Response> {
     send_provider_request_with_policy(
         client,
@@ -92,6 +94,7 @@ pub(super) async fn send_provider_delivery_request(
         provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
         ProviderStatusPolicy::ReturnExplicitRejection,
+        preproduction_caller_token_diagnostics,
     )
     .await
 }
@@ -125,6 +128,7 @@ pub(super) async fn send_provider_request_with_policy(
     provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
     status_policy: ProviderStatusPolicy,
+    preproduction_caller_token_diagnostics: bool,
 ) -> ServiceResult<reqwest::Response> {
     bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
@@ -229,6 +233,9 @@ pub(super) async fn send_provider_request_with_policy(
     let request = request.json(body).build().map_err(|_| ServiceError::DeliveryNotSent {
         code: "provider_request_build_failed", retryable: false,
     })?;
+    if preproduction_caller_token_diagnostics {
+        caller_token_diagnostics::log_caller_token(body, &message_id);
+    }
     let send = request_client.execute_traced(request);
     let response_result =
         if let Some(response_header_timeout) = client_policy.response_header_timeout {

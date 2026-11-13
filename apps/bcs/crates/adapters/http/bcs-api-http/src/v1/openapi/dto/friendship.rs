@@ -1,6 +1,7 @@
 use bcs_service_api::application::v1::{
     AuthenticatedCaller, CreateBotFriendRequest, FriendRequestDirection, FriendRequestStatus,
 };
+use bcs_service_api::application::RequestAuthHeaders;
 use serde::Deserialize;
 
 fn default_limit() -> u64 {
@@ -19,11 +20,13 @@ impl CreateFriendRequestRequest {
         self,
         caller: AuthenticatedCaller,
         bot_uuid: String,
+        request_auth: Option<RequestAuthHeaders>,
     ) -> CreateBotFriendRequest {
         CreateBotFriendRequest {
             caller,
             bot_uuid,
             to_bot_uuid: self.to_bot_uuid,
+            request_auth,
         }
     }
 }

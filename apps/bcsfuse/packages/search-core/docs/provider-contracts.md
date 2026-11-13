@@ -166,3 +166,30 @@ The catalog HTTP composition requests it only for `/ready?include_counts=true`,
 passing the effective instance index key through its bounded probe executor. Default readiness checks remain unchanged.
 Provider conformance is exercised by `tests/test_qdrant_modes.py`; HTTP behavior
 and normal readiness under count failures by `tests/test_public_catalog.py`.
+
+### Card change discovery
+
+`CardChangeSource.iter_changes(checkpoint, batch_size)` returns lightweight
+`(ID/revision page, upper_checkpoint)` pairs including soft deletions. Pages are
+keyset ordered by `(gmt_modify, agent_id)` within an environment. The first
+nonempty query captures database time as the fixed upper bound for every page;
+no application clock or OFFSET is used. An empty scan retains its checkpoint.
+Consumers commit the upper checkpoint only after the whole iterator succeeds.
+Equal timestamps are replayed inclusively and deduplicated by revision.
+
+The SQL provider requires `(environment, gmt_modify, agent_id)` indexing. SQLite
+initialization adds it; hosts provision the equivalent production index before
+rollout. Preparation-only writes must retain `gmt_modify`. Every replica keeps
+unfinished revisions independently of the cursor and retries with 5–60 second
+backoff. New revisions reset backoff. Successful publication remains pending until
+local index application succeeds. Restart discovers durable Cards from zero.
+
+Full Card and Doc version checks default to 10 minutes, with stable instance-ID
+hash offsets across the entire period. Startup restoration runs immediately.
+Checks are serialized, read at most 1000 version records per SQL page and pause
+10 ms between pages; full vectors are fetched only for stale groups. Failed
+checks retry on the next ordinary poll. Each completed check schedules the next
+future slot, never catches up missed slots. A DRM period change takes effect
+without creating another worker. Late transactions behind a timestamp cursor
+are repaired by these checks; incremental polling alone is not a strict delivery
+latency guarantee. Tests: `test_card_incremental.py` and `test_catalog_startup.py`.

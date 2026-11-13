@@ -42,6 +42,27 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
+  it("dispatches TE assessment after persisting the diagnostic trace ID", async () => {
+    const { service, records, agent, deps } = setup();
+    deps.resolveTarget = async () => recoveryTargetSnapshot({
+      environment: "prod", ownerId: "owner", botId: "default", provider: "baas",
+      bindingId: "binding", deviceId: "device", activeEngine: "teclaw",
+    });
+    const { task_id } = await service.create({ ...request, trace_id: "fault-trace",
+      target: { ...request.target, engine: "TE" } }, actor);
+    await flush();
+    expect(records.get(task_id)?.request.trace_id).toBe("fault-trace");
+    expect(agent.start).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a replay of a task saved before diagnostic evidence hints were persisted", async () => {
+    const { service, agent } = setup();
+    const created = await service.create(request, actor);
+    expect(await service.create({ ...request, trace_id: "fault-trace", fault_at_ms: 1792107675000 }, actor)).toEqual(created);
+    await flush();
+    expect(agent.start).toHaveBeenCalledOnce();
+  });
+
   it.each(["none", "unknown", "performed", "accepted", "unknown_delivery", "missing_read"] as const)(
     "closes an assessment as unnecessary only with verified evidence and no possible intervention (%s)", async scenario => {
       const { service, records, agent } = setup();
@@ -189,17 +210,15 @@ describe("self-healing task orchestration", () => {
     await expect(service.finishForOwnerHandoff(task_id, task.version, { summary: "Owner说好了，已恢复仅剩建议", evidence_ids: ["old"], executionId: "exec", effect: "recovered" })).rejects.toMatchObject({ status: 409 });
     expect(records.get(task_id)?.status).toBe("running");
   });
-  it("passes the frozen Bot and target environment to Owner notification policy without recording a disabled send", async () => {
+  it("waits for Owner approval without sending a one-way plan DM", async () => {
     const { service, records, notifier } = setup();
-    notifier.notify.mockResolvedValue(false);
     const ack = await service.create(request, actor); await flush();
     const task = records.get(ack.task_id)!;
     task.phase = "plan";
     task.level = "approval";
     await service.plan(task.taskId, task.version, { summary: "需要 Owner 开通权限", basis: "已核实权限受限", scope: "目标服务权限",
       verification: "权限恢复后核查原任务", actions: [], owner_cooperation: [{ request: "申请服务权限", basis: "服务明确拒绝访问" }] });
-    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: "需要 Owner 开通权限" });
+    expect(notifier.notify).not.toHaveBeenCalled();
     const saved = records.get(task.taskId)!;
     expect(saved.status).toBe("waiting_owner");
     expect(saved.timeline.some(event => event.kind === "notification")).toBe(false);

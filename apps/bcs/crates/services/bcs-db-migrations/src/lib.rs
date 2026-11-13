@@ -160,6 +160,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 41, name: "group_agent_cards" },
     SqliteMigration { version: 42, name: "auth_session_version" },
     SqliteMigration { version: 43, name: "delivery_session_lookup" },
+    SqliteMigration { version: 44, name: "group_context_preset" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -559,6 +560,23 @@ async fn apply_sqlite_migration_body(
             .await?;
             Ok(())
         }
+        44 => {
+            let columns = sqlite_table_columns(db, "bcs_group_contexts").await?;
+            for (index, sql) in include_str!(
+                "../../../../migrations/sqlite/044_group_context_preset.sql"
+            )
+            .split(';')
+            .map(str::trim)
+            .filter(|sql| !sql.is_empty())
+            .enumerate()
+            {
+                if index == 0 && columns.iter().any(|column| column == "created_from_preset") {
+                    continue;
+                }
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -702,3 +720,7 @@ mod a2a_tests;
 #[cfg(test)]
 #[path = "migrations/group_card_tests.rs"]
 mod group_card_tests;
+
+#[cfg(test)]
+#[path = "migrations/friend_cutover_tests.rs"]
+mod friend_cutover_tests;

@@ -1,5 +1,7 @@
 """Single-point reads must use the durable ID key without scanning vectors."""
 
+from tests.qdrant_support import server_options
+
 import json
 import pickle
 from unittest.mock import MagicMock
@@ -53,7 +55,12 @@ def test_sqlite_consumer_reads_only_requested_point(monkeypatch, tmp_path):
         raise AssertionError("get(id) must not load the entire vector table")
 
     monkeypatch.setattr(backend, "load_all", forbid_full_scan)
-    store = QdrantMySQLVectorStore(dimension=2, qdrant_path=str(tmp_path / "qdrant"), persistence_backend=backend)
+    store = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "qdrant")),
+        dimension=2,
+        qdrant_path=str(tmp_path / "qdrant"),
+        persistence_backend=backend,
+    )
     try:
         assert store.get(target.id) == target
         assert store.get("missing") is None
@@ -64,7 +71,11 @@ def test_sqlite_consumer_reads_only_requested_point(monkeypatch, tmp_path):
 def test_mysql_consumer_preserves_decode_failure(monkeypatch, tmp_path):
     backend, _, _ = mysql_backend(("bad", b"invalid", "{}"))
     monkeypatch.setattr(backend, "load_all", lambda: pytest.fail("unexpected full scan"))
-    store = QdrantMySQLVectorStore(qdrant_path=str(tmp_path / "qdrant"), persistence_backend=backend)
+    store = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "qdrant")),
+        qdrant_path=str(tmp_path / "qdrant"),
+        persistence_backend=backend,
+    )
     try:
         with pytest.raises(RuntimeError, match="Failed to decode persisted vector bad"):
             store.get("bad")
@@ -79,7 +90,11 @@ def test_legacy_provider_keeps_existing_get_fallback(tmp_path):
         def load_all(self):
             return [point]
 
-    store = QdrantMySQLVectorStore(qdrant_path=str(tmp_path / "qdrant"), persistence_backend=LegacyBackend())
+    store = QdrantMySQLVectorStore(
+        **server_options(str(tmp_path / "qdrant")),
+        qdrant_path=str(tmp_path / "qdrant"),
+        persistence_backend=LegacyBackend(),
+    )
     try:
         assert store.get("legacy") == point
         assert store.get("missing") is None

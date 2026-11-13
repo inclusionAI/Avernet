@@ -84,6 +84,7 @@ impl RecordingVisibilitySyncPort {
 #[derive(Default)]
 struct RecordingInternalBotAttributesService {
     patches: tokio::sync::Mutex<Vec<PatchBotInternalAttributes>>,
+    next_patch_result: tokio::sync::Mutex<Option<Result<BotInternalAttributes, ApplicationError>>>,
 }
 
 #[async_trait]
@@ -113,6 +114,9 @@ impl InternalBotAttributesService for RecordingInternalBotAttributesService {
                 .unwrap_or(FriendCheckInStrategy::Approval),
         };
         self.patches.lock().await.push(command);
+        if let Some(result) = self.next_patch_result.lock().await.take() {
+            return result;
+        }
         Ok(attributes)
     }
 }

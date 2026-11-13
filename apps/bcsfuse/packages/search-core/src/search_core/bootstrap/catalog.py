@@ -29,6 +29,7 @@ from search_core.catalog.updates import CardUpdates
 from search_core.config.index_sync import IndexSyncControl
 from search_core.config.search import DEFAULT_SEARCH, SearchSettings
 from search_core.core.execution import DeadlineExecutor
+from search_core.core.index_build_runner import IndexBuildRunner
 from search_core.core.index_builds import IndexBuildService
 from search_core.core.observation import events
 from search_core.core.retrieval import HybridRetrievalService
@@ -97,7 +98,7 @@ def create_catalog_search_app(
         for name, timeout in {
             "embedding": settings.embedding_timeout,
             "vector": settings.index_timeout,
-            "keyword": settings.index_timeout,
+            "keyword": settings.keyword_timeout,
             "reranker": settings.reranker_timeout,
             "probe": 2 * settings.index_timeout,
             "card_metadata": settings.index_timeout,
@@ -133,14 +134,16 @@ def create_catalog_search_app(
                 await asyncio.to_thread(caches.log_stats)
         await asyncio.to_thread(events.flush, force=True)
 
+    build_runner = IndexBuildRunner(index_builds) if index_builds is not None else None
+
     @asynccontextmanager
     async def lifespan(app):
         stop = asyncio.Event()
         task = asyncio.create_task(updates.run(stop))
         log_task = asyncio.create_task(flush_events(stop))
         build_task = (
-            asyncio.create_task(index_builds.run(stop, poll_seconds))
-            if index_builds is not None
+            asyncio.create_task(build_runner.run(stop))
+            if build_runner is not None
             else None
         )
         try:
@@ -185,6 +188,7 @@ def create_catalog_search_app(
             )
         execution = dict(calls)
         for name, timeout in (
+            ("keyword", policy.keyword_timeout_ms / 1000),
             ("embedding", policy.embedding_timeout_ms / 1000),
             ("reranker", policy.reranker_timeout_ms / 1000),
         ):
@@ -251,6 +255,7 @@ def create_catalog_search_app(
                 "vector_enabled": True,
                 "rerank_enabled": True,
             },
+            keyword_timeout_ms=settings.keyword_timeout * 1000,
             embedding_timeout_ms=settings.embedding_timeout * 1000,
             reranker_timeout_ms=settings.reranker_timeout * 1000,
         ),
@@ -274,8 +279,12 @@ def create_catalog_search_app(
     app.state.index_key = updates.index_key
     app.state.active_index = active_index
     app.include_router(create_card_router(updates, authorize_operator))
-    if index_builds is not None:
-        app.include_router(create_index_build_router(index_builds, authorize_operator))
+    if index_builds is not None and build_runner is not None:
+        app.include_router(
+            create_index_build_router(
+                index_builds, authorize_operator, trigger=build_runner.trigger
+            )
+        )
 
     def check_index(switches):
         filters = {"source_id": ("__catalog_readiness_probe__",)}

@@ -24,9 +24,17 @@ Read only the sources relevant to the boundary being changed.
 | BCS | [BCS guide](apps/bcs/README.md), `apps/bcs/AGENTS.md`, `apps/bcs/CLAUDE.md`, then the closest crate `CONTEXT.md` |
 | BCSFuse | [BCSFuse guide](apps/bcsfuse/README.md), its existing document index, flow and diagnostic navigation |
 | Frontend | `apps/frontend/AGENTS.md` and the affected API/UI contract |
+| Gateway | [Gateway guide](apps/gateway/README.md) — teamclawgw community edition, open-source gateway skeleton (DI/SPI plugin pattern). |
+| Proxy | [Proxy guide](apps/proxy/README.md) — sandboxproxy-community, standalone reverse proxy delegating client traffic to Aliyun ACK pods. |
+| Frontend nextgen | [Nextgen README](apps/frontend-nextgen/README.md) and [CLAUDE.md](apps/frontend-nextgen/CLAUDE.md) — open-core export from TeamClaw; boundary rules in root `CLAUDE.md`. |
+| Evolverun / AgentEvolve | [Agent evolve doc](docs/agent-evolve.md) — historical `clawweb-*` names retained in paths; `apps/evolverun` has no README/AGENTS.md yet. |
 
 Add a module-level `CONTEXT.md` only when that module has stable vocabulary
 that is not already defined here. Add it to this map in the same change.
+
+## 开发工具
+
+- [JSON → A2A 1.0](tools/a2a-json-tool/README.md)：本地转换、字段映射与网页测试。
 
 ## Knowledge framework
 

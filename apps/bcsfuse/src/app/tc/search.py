@@ -9,7 +9,6 @@ from search_core.application.cache import CachedEmbedding, CachedRetrieval, Sear
 from search_core.application.catalog_retrieval import CatalogRetrieval
 from search_core.application.emergency import SearchCachePolicy
 from search_core.catalog.cards import is_label_filter
-from search_core.catalog.updates import CardUpdates
 from search_core.core.execution import DeadlineExecutor
 from search_core.core.retrieval import HybridRetrievalService
 
@@ -20,6 +19,7 @@ from app.domain.models.candidate_recommendation import (
 from app.domain.models.context_fragment import ContextFragment
 from app.domain.models.retrieval_mode import RetrievalMode
 from app.domain.models.worker_profile import WorkerProfile, WorkerProfileScanResult
+from app.tc.card_profiles import TcCardUpdates, current_profile_summary
 from app.tc.catalog import FILTER_FIELDS, TcDocumentConverter, matches_row
 
 
@@ -37,11 +37,9 @@ class TcSearch:
         *,
         embedding_key,
         instance_id,
-        updates=None,
-        retrieval_index=None,
+        profile_gateway=None,
     ):
         self.catalog, self.index, self.reranker = catalog, index, reranker
-        self.storage_kind = "legacy" if updates is not None else "card"
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tc-search")
         self.caches = SearchCaches(
             result_entries=1024,
@@ -59,23 +57,17 @@ class TcSearch:
         self.embedding = CachedEmbedding(
             embedding, embedding_cache, embedding_key, singleflight_enabled=False
         )
-        self.updates = (
-            updates
-            if updates is not None
-            else CardUpdates(
-                catalog.repository,
-                embedding,
-                index,
-                embedding_key=embedding_key,
-                instance_id=instance_id,
-                filter_fields=FILTER_FIELDS,
-                document_converter=TcDocumentConverter(),
-                on_change=self.caches.changing,
-            )
+        self.updates = TcCardUpdates(
+            catalog.repository,
+            embedding,
+            index,
+            embedding_key=embedding_key,
+            instance_id=instance_id,
+            filter_fields=FILTER_FIELDS,
+            document_converter=TcDocumentConverter(),
+            on_change=self.caches.changing,
+            profile_gateway=profile_gateway,
         )
-        if updates is not None:
-            updates.on_change = self.caches.changing
-        self.retrieval_index = retrieval_index if retrieval_index is not None else index
         self.execution = {
             name: DeadlineExecutor(self.pool, name=name, timeout_seconds=timeout)
             for name, timeout in (
@@ -132,7 +124,7 @@ class TcSearch:
 
             selected_reranker = get_reranker(reranker_model)
         pipeline = HybridRetrievalService(
-            index=self.retrieval_index,
+            index=self.index,
             embedding=self.embedding,
             reranker=selected_reranker if rerank else None,
             group_by_source=True,
@@ -194,7 +186,9 @@ class TcSearch:
             worker_id=row.card.agent_id,
             score=score,
             reasons=reasons or [],
-            short_profile=(data.get("description") or "")[:120],
+            short_profile=(
+                current_profile_summary(row) or data.get("description") or ""
+            )[:120],
             trust_level=data.get("trust_level", "guarded"),
             is_supplement=supplement,
         )
@@ -267,7 +261,7 @@ class TcSearch:
             selected_candidates=len(candidates),
             metadata={
                 "min_score_compat_mode": "deprecated_ignored",
-                "candidate_source": f"tc_{self.storage_kind}",
+                "candidate_source": "tc_card",
             },
         )
 

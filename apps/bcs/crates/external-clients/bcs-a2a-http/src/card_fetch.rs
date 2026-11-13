@@ -22,7 +22,7 @@ fn rejected(reason: &str) -> ServiceError {
         "size limit exceeded"=>(Code::CardTooLarge,"SIZE_LIMIT_EXCEEDED"),
         "fetch timeout"|"validation timeout"=>(Code::CardFetchTimeout,"TIMEOUT"),
         "fetch failed"|"incomplete body"|"HTTP response rejected"=>(Code::CardFetchFailed,"FETCH_FAILED"),
-        "address rejected"|"TLS required outside loopback"|"invalid address"=>(Code::CardAddressRejected,"ADDRESS_REJECTED"),
+        "address rejected"|"invalid address"=>(Code::CardAddressRejected,"ADDRESS_REJECTED"),
         "HTTP client unavailable"=>(Code::ServiceUnavailable,"CLIENT_UNAVAILABLE"),
         _=>(Code::InvalidCard,"INVALID_DECLARATION"),
     };
@@ -105,7 +105,7 @@ impl A2aCardPort for HttpA2aCardFetcher {
                         CardError::AddressRejected=>Code::CardAddressRejected,CardError::InvalidShape=>Code::InvalidCard};
                     ServiceError::from(ManagementError::new(code,"agent_card","UNSUPPORTED_DECLARATION"))
                 })?;
-            // Includes DNS and TLS checks for the selected interface, without
+            // Includes DNS and outbound policy checks for the selected interface, without
             // submitting a task or forwarding credentials to the Card host.
             let binding = if card.interface.protocol_binding == "CUSTOM" { A2aBinding::Custom } else if card.interface.protocol_binding == "GRPC" { A2aBinding::Grpc }
                 else { guarded_client(&self.guard, &card.interface.url).await?; if card.interface.protocol_binding=="JSONRPC" {A2aBinding::JsonRpc} else {A2aBinding::HttpJson} };

@@ -6,6 +6,7 @@ import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), fetchJson: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
 vi.mock('../../api/hooks', () => ({
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
   useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),

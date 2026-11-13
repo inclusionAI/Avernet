@@ -39,3 +39,6 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-05-split-large-rust-files](2026-11-05-split-large-rust-files/)
 - [2026-11-06-provider-initial-managers](2026-11-06-provider-initial-managers/)
 - [20260724-mock-model-server-mvp](20260724-mock-model-server-mvp/)
+
+- [2026-11-11-edge-friend-cutover](2026-11-11-edge-friend-cutover/spec.md)
+- [2026-11-11-legacy-friend-cutover-fixes](2026-11-11-legacy-friend-cutover-fixes/spec.md)

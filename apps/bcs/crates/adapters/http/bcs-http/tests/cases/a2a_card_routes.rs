@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>> }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
@@ -32,7 +32,7 @@ impl A2aBotManagementService for Management {
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.visibility.lock().unwrap().push(command.visibility.as_str().into());
-        assert_eq!(command.owners,Some(vec!["owner".into()]));
+        self.owners.lock().unwrap().push(command.owners);
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
@@ -215,6 +215,9 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
             if let Some(token)=token {request=request.header("authorization",format!("Bearer {token}"));}
             let response=app.clone().oneshot(request.body(if method=="GET" {Body::empty()} else {Body::from(body.to_string())}).unwrap()).await.unwrap();
             assert_eq!(response.status(),match token {None=>StatusCode::UNAUTHORIZED,Some("wrong")=>StatusCode::FORBIDDEN,_=>expected});
+            if token==Some("test-admin") && method=="POST" && expected==StatusCode::CREATED {
+                assert_eq!(response.headers()["location"],format!("{path}/bot/agent-card"));
+            }
             let bytes=to_bytes(response.into_body(),8192).await.unwrap();
             let value:Value=serde_json::from_slice(&bytes).unwrap();
             assert!(!String::from_utf8_lossy(&bytes).contains("private-"));
@@ -229,8 +232,12 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
 
 #[tokio::test]
 async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
+    assert_resource_paths("").await;
+}
+
+async fn assert_resource_paths(prefix: &str) {
     let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(Arc::new(Management::default())).build_for_test()));
-    let req=|method:&str,path:&str,body:Value| Request::builder().method(method).uri(path)
+    let req=|method:&str,path:&str,body:Value| Request::builder().method(method).uri(format!("{prefix}{path}"))
         .header("authorization","Bearer test-admin").header("content-type","application/json")
         .body(if body.is_null() {Body::empty()} else {Body::from(body.to_string())}).unwrap();
     let missing_ref=app.clone().oneshot(req("POST","/a2a/agents",json!({"owners":["owner"],"agent_card":{}}))).await.unwrap();
@@ -238,8 +245,8 @@ async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
     let response=app.clone().oneshot(req("POST","/a2a/agents",json!({"provider_bot_ref":"remote","owners":["owner"],"agent_card":{}}))).await.unwrap();
     assert_eq!(response.status(),StatusCode::CREATED);
     let location=response.headers()["location"].to_str().unwrap().to_owned();
-    assert_eq!(location,"/a2a/agents/bot/agent-card");
-    assert_eq!(app.clone().oneshot(req("GET",&location,Value::Null)).await.unwrap().status(),StatusCode::OK);
+    assert_eq!(location,format!("{prefix}/a2a/agents/bot/agent-card"));
+    assert_eq!(app.clone().oneshot(req("GET",location.strip_prefix(prefix).unwrap(),Value::Null)).await.unwrap().status(),StatusCode::OK);
     let response=app.clone().oneshot(req("GET","/a2a/agents?provider_bot_ref=001Ab",Value::Null)).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
     let value:Value=serde_json::from_slice(&to_bytes(response.into_body(),8192).await.unwrap()).unwrap();
@@ -257,6 +264,21 @@ async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
     for path in ["/a2a/agent-card?agent_name=x", "/a2a/agents/bot/versions"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn registration_translates_omitted_null_and_empty_owners() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for owners in [None,Some(Value::Null),Some(json!([])),Some(json!(["owner"]))] {
+        let mut body=json!({"provider_bot_ref":"remote","agent_card":{}});
+        if let Some(value)=owners {body["owners"]=value;}
+        let response=app.clone().oneshot(Request::builder().method("POST").uri("/a2a/agents")
+            .header("authorization","Bearer test-admin").header("content-type","application/json")
+            .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::CREATED);
+    }
+    assert_eq!(*management.owners.lock().unwrap(),vec![None,None,Some(vec![]),Some(vec!["owner".into()])]);
 }
 
 #[tokio::test]
@@ -310,4 +332,15 @@ async fn public_errors_are_structured_including_parser_and_method_failures() {
         .body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(response.status(),StatusCode::UNAUTHORIZED);
     assert_eq!(response.headers()["www-authenticate"],"Bearer");
+}
+
+#[tokio::test]
+async fn versioned_a2a_routes_are_not_owned_by_legacy_adapter() {
+    let app=build_router(HttpAppState::new(Services::builder().build_for_test()));
+    for path in ["/agents", "/agents/bot/agent-card", "/agents/bot/agent-card:refresh",
+        "/providers/orders/bots", "/providers/orders/bots/remote/chat-async", "/chat/runs/run", "/chat/runs/run/cancel"] {
+        let response=app.clone().oneshot(Request::builder().uri(format!("/api/v1/collaboration/a2a{path}"))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::NOT_FOUND);
+    }
 }

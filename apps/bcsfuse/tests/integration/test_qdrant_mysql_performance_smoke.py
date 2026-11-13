@@ -32,6 +32,8 @@ Security constraints:
 - Do not commit dump files
 """
 
+from tests.qdrant_support import server_connection
+
 import os
 import sys
 import pytest
@@ -85,6 +87,7 @@ class TestQdrantMySQLPerformanceSmoke:
         )
 
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name=qdrant_config["collection"],
             qdrant_path=qdrant_config["path"],
             dimension=qdrant_config["dimension"],

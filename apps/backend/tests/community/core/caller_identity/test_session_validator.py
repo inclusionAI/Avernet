@@ -11,7 +11,7 @@ from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
 def _validator(provider="teclaw"):
     bindings = MagicMock()
     bindings.get_by_id.return_value = SimpleNamespace(device_provider=provider)
-    return CallerSessionValidator(binding_repository=bindings, runtime_bindings=MagicMock(), chat_repository=MagicMock())
+    return CallerSessionValidator(binding_repository=bindings, runtime_bindings=MagicMock())
 
 
 def _request(key="original-session"):

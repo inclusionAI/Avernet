@@ -36,18 +36,14 @@ async function create(level = "approval", patch = {}) {
 }
 const inspect = (task: RecoveryStoredTask, key = "read-1") => agent.sessionRead(task, { clientRequestId: key, purpose: "观察原会话实际执行" });
 it.each([
-  ["permission", false, false, false], ["permission", false, true, false], ["permission", true, false, false], ["permission", true, true, false],
-  ["permission", false, false, true], ["permission", false, true, true], ["permission", true, false, true], ["permission", true, true, true],
-  ["configuration", false, false, true], ["configuration", true, true, false],
-] as const)("extends %s feedback into one fresh continuation (initial delivery: %s, NAS: %s, restart: %s)", async (reason, hadInitial, useNas, restart) => {
+  [false, false, false], [false, true, false], [true, false, false], [true, true, false],
+  [false, false, true], [false, true, true], [true, false, true], [true, true, true],
+])("extends Owner feedback into one fresh continuation (initial delivery: %s, NAS: %s, restart: %s)", async (hadInitial, useNas, restart) => {
   const first = hadInitial ? await toObserve(await create()) : await create();
-  expect(await agent.bootstrap(first)).toMatchObject({ ownerCooperationProtocol: "session-recovery-owner/v1",
-    ownerCooperationReasons: ["permission", "configuration"] });
+  expect((await agent.bootstrap(first)).ownerCooperationProtocol).toBe("session-recovery-owner/v1");
   const oldDelivery = first.delivery;
   const evidence = await inspect(first);
-  const summary = reason === "configuration" ? "审批路由缺接收目标，本轮跳过分发" : "服务权限需Owner申请";
-  const instructions = reason === "configuration" ? "请在管理平台补齐当前审批路由；回读路由并查分发状态" : "请申请服务权限后点击已处理";
-  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary, evidence_ids: [evidence.evidenceId], owner_request: { reason, instructions } });
+  await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary: "服务权限需Owner申请", evidence_ids: [evidence.evidenceId], owner_request: { reason: "permission", instructions: "请申请服务权限后点击已处理" } });
   let saved = await current(first.taskId);
   expect(saved.status).toBe("waiting_owner"); expect(saved.pending_results).toEqual([]);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(hadInitial ? 1 : 0);
@@ -57,12 +53,9 @@ it.each([
   await service.confirmOwner(saved.taskId, requestId, actor);
   await vi.waitFor(async () => expect((await current(saved.taskId)).executionNo).toBe(restart ? 2 : 1));
   saved = await current(saved.taskId);
-  expect(saved).toMatchObject({ phase: "assess", requiresFreshObservation: true, ownerRequest: { reason, status: "confirmed" } });
-  if (reason === "configuration" && !hadInitial) expect(saved.interventionStatus).toBe("none");
   await expect(agent.report(saved, { phase: "assess", kind: "owner_handoff", summary: "仅根据Owner反馈宣称恢复", effect: "recovered", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
   await expect(agent.report(saved, { phase: "assess", kind: "blocked", reason: "user_continued", summary: "仅根据旧记录宣称用户续聊", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  const body = { clientRequestId: "continue-1", purpose: "Owner 反馈后的续接", message: reason === "configuration"
-    ? "请核验路由和分发状态，仅继续未分发的步骤。" : "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
+  const body = { clientRequestId: "continue-1", purpose: "权限反馈后的续接", message: "Owner已处理权限，请重新核验失败的读取后继续原任务。" };
   // Old calls are either replayed in the same execution or rejected across executions.
   if (restart) await expect(inspect(saved)).rejects.toMatchObject({ name: "AgentToolCallIdempotencyConflictError" });
   else expect((await inspect(saved)).toolCallId).toBe(evidence.toolCallId);
@@ -95,22 +88,6 @@ it.each([
   await agent.report(saved, { kind: "assessment", phase: "assess", decision: "message", summary: "已按反馈续接，继续观察实际执行", evidence_ids: [resumed.evidenceId] });
   expect((await current(saved.taskId)).phase).toBe("observe");
   expect((await current(saved.taskId)).timeline.filter(event => event.kind === "owner_decision" && event.payload.owner_request_id === requestId)).toHaveLength(1);
-});
-
-it("observes an already accepted recovery message before opening a configuration request", async () => {
-  const task = await create();
-  const read = await inspect(task);
-  const sent = await agent.retryMessage(await current(task.taskId), { clientRequestId: "initial-advice",
-    purpose: "核对当前分发配置", message: "请核对分发目标后继续原步骤。" });
-  const handoff = { kind: "owner_handoff", summary: "分发目标尚未配置", evidence_ids: [read.evidenceId],
-    owner_request: { reason: "configuration", instructions: "请补齐分发目标，随后回查路由和分发状态" } };
-  await expect(agent.report(await current(task.taskId), { ...handoff, phase: "assess" })).rejects.toMatchObject({ status: 422 });
-  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
-    summary: "已发送指引，观察实际效果", evidence_ids: [sent.evidenceId] });
-  await agent.report(await current(task.taskId), { ...handoff, phase: "observe" });
-  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", phase: "observe",
-    ownerRequest: { reason: "configuration", status: "pending" } });
 });
 
 it("keeps terminal tasks with unfinished card synchronization in maintenance after a restart", async () => {
@@ -281,7 +258,7 @@ it("does not accept model-only target loss or an ordinary HTTP 404 as destroyed-
 });
 
 
-it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner and ends a handbook-directed handoff in %s without a plan or continuation", async phase => {
+it.each(["assess", "observe", "plan", "verify"] as const)("ends a handbook-directed handoff in %s without an Owner DM or continuation", async phase => {
   let task = phase === "observe" ? await toObserve(await create()) : await create();
   if (["plan", "verify"].includes(phase)) task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase, version: value.version + 1 })))!;
   const read = await inspect(task, "handoff-evidence"); task = await current(task.taskId);
@@ -290,9 +267,8 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", phase, completionReason: "owner_handoff", plan: null,
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
-  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-    taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect: "not_recovered", summary });
-  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  expect(notifier.notify).not.toHaveBeenCalled();
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result")).toBe(false);
   const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
   expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
     kind: "termination", summary, payload: { completion_reason: "owner_handoff" },
@@ -304,7 +280,7 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   await service.maintenance();
   expect(submissions).toHaveLength(1);
   await expect(agent.report(task, { kind: "owner_handoff", phase, summary, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(notifier.notify).not.toHaveBeenCalled();
 });
 
 it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered", "unknown"].map(effect => ({ phase, effect }))))(
@@ -320,8 +296,7 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered
     expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", phase, plan: null,
       ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" },
       judgment: { effect, summary, delivery: "unconfirmed", response: "none", evidence_ids: [read.evidenceId] } });
-    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, sessionKey: task.request.session_key, kind: "result", effect, summary });
+    expect(notifier.notify).not.toHaveBeenCalled();
     expect(runtime.sendMessage).not.toHaveBeenCalled();
     expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
     await service.reportResults();
@@ -384,18 +359,6 @@ it.each(["not_intervened", "invalid", null, 1])("rejects invalid handoff effect 
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 
-it.each(["disabled", "failed"])("ends without claiming Owner notification when the channel is %s", async state => {
-  let task = await create(); const read = await inspect(task); task = await current(task.taskId);
-  if (state === "disabled") notifier.notify.mockResolvedValue(false);
-  else notifier.notify.mockRejectedValue(new Error("notification unavailable"));
-  await agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "已核实 MCP 服务权限不足，请 Owner 在能力集中申请权限。", evidence_ids: [read.evidenceId] });
-  task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", execution: { state: "ended" } });
-  expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === true)).toBe(false);
-  if (state === "failed") expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === false)).toBe(true);
-  await service.maintenance(); expect(submissions).toHaveLength(1);
-});
-
 it("requires saved scene evidence and never notifies from Debug or an in-progress apply", async () => {
   let task = await create();
   await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "仅有诊断推测", evidence_ids: [] })).rejects.toMatchObject({ status: 422 });
@@ -413,7 +376,7 @@ it("accepts an older package's permission report through the generic Owner hando
   let task = await create(); const read = await inspect(task); task = await current(task.taskId);
   await agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "服务明确要求当前身份授权，请 Owner 申请后继续。", evidence_ids: [read.evidenceId] });
   expect(await current(task.taskId)).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "not_recovered" } });
-  expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(notifier.notify).not.toHaveBeenCalled();
 });
 
 it("rejects a stale Owner handoff without notifying or ending the replacement execution", async () => {
@@ -492,21 +455,37 @@ function useNativeOwnerCards() {
   return sender;
 }
 
-it("delivers all three material requirements while retaining the complete report and ending ordinary handoff", async () => {
+it("does not dispatch or confirm a stored Owner request with an unsupported reason", async () => {
+  const sender = useNativeOwnerCards();
+  const task = await create();
+  const requestId = "unsupported-request";
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, status: "waiting_owner",
+    ownerRequest: { requestId, revision: 1, status: "pending", reason: "unsupported" as "permission",
+      summary: "处理事项", instructions: "处理阻塞", evidence_ids: [], resumePhase: "assess", createdAtMs: now } }));
+
+  await service.maintenance();
+  await flush();
+  await expect(service.confirmOwner(task.taskId, requestId, actor)).rejects.toMatchObject({ status: 409 });
+  const saved = await current(task.taskId);
+  expect(saved.status).toBe("waiting_owner");
+  expect(saved.timeline.some(event => event.kind === "notification" || event.kind === "owner_decision")).toBe(false);
+  expect(sender.sendCard).not.toHaveBeenCalled();
+  expect(sender.updateCard).not.toHaveBeenCalled();
+});
+
+it("retains the full handoff report and material requirements without sending a DingTalk DM", async () => {
   const sender = useNativeOwnerCards();
   let task = await create(); const read = await inspect(task, "materials-brief"); task = await current(task.taskId);
   const report = "## 调查与核实\n" + "原Bot已核实材料缺失，正确等待用户补充；现场和证据均已检查。\n".repeat(50);
   const handoff = { summary: "抽奖活动权益评审缺少必要材料，当前等待补充。", instructions: "请回原会话补充：\n1. 活动页面文案；\n2. 权益实际发放规则；\n3. 图1（领取路径截图）。" };
   await agent.report(task, { kind: "owner_handoff", phase: "assess", effect: "unknown", summary: report, handoff, evidence_ids: [read.evidenceId] });
-  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "unknown", summary: report }, execution: { state: "ended" } });
   expect(saved.ownerRequest).toBeUndefined();
   expect(saved.timeline.findLast(event => event.kind === "termination")).toMatchObject({ summary: report, payload: { handoff } });
-  expect(card.cardParamMap).toMatchObject({ summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false" });
-  expect(card.cardParamMap.instructions).toContain("3. 图1");
-  expect(card.cardParamMap.summary).not.toContain("恢复情况尚未确认");
-  expect(card).not.toHaveProperty("callbackRouteKey"); expect(card.cardParamMap).not.toHaveProperty("config");
-  expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(sender.sendCard).toHaveBeenCalledOnce();
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+  expect(sender.sendCard).not.toHaveBeenCalled();
 });
 
 it("uses the same Owner brief for permission handling and preserves its full investigation in the waiting timeline", async () => {

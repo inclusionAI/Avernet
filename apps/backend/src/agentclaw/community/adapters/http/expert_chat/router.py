@@ -39,6 +39,7 @@ from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
 from agentclaw.community.core.access.admin_scopes import super_admin
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.di import Injected
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -186,6 +187,13 @@ async def get_chat_session(
     except BotNotPublishedError as e:
         logger.warning(f"[expert_chats.get_chat_session] Bot not published: {e}")
         return ApiResponse(success=False, message=str(e), error_code=4001)
+
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.get_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(success=False, message="Bot未发布或发布版本不可用", error_code=4001)
 
     except ChatPermissionError as e:
         logger.warning("[expert_chats.get_chat_session] Permission denied: %s", e)
@@ -400,6 +408,14 @@ async def connect_chat_session(
     except BotNotPublishedError as error:
         return ApiResponse(
             success=False, message=str(error), error_code=4001
+        )
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.connect_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(
+            success=False, message="Bot未发布或发布版本不可用", error_code=4001
         )
     except ChatPermissionError as error:
         return ApiResponse(

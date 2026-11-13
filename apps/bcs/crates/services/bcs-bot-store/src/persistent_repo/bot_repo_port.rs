@@ -101,6 +101,9 @@ impl BotRepoPort for PersistentBotRepo {
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
         info!(bot_id = %bot_id, name = ?capabilities.name, "update_capabilities: replacing capabilities",);
+        let publication_guard = self
+            .begin_privacy_publication(&resolve_env(), bot_id)
+            .await;
         let session_token: Option<String> = {
             let bots = self.bots.read().await;
             bots.get(bot_id).and_then(|b| b.session_token.clone())
@@ -133,8 +136,10 @@ impl BotRepoPort for PersistentBotRepo {
         };
 
         if updated_in_memory || exists_in_db {
+            publication_guard.complete();
             Ok(())
         } else {
+            publication_guard.fail();
             Err(ServiceError::BotNotFound(bot_id.to_string()))
         }
     }
@@ -417,11 +422,13 @@ impl BotRepoPort for PersistentBotRepo {
         };
 
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| active_bot_ids.contains(&b.bot_uuid))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn list_all_bots(&self) -> Vec<RegisteredBot> {
@@ -541,7 +548,7 @@ impl BotRepoPort for PersistentBotRepo {
         let bots = self.bots.read().await;
         let query_lower = query.to_lowercase();
 
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| {
                 b.capabilities
@@ -569,34 +576,42 @@ impl BotRepoPort for PersistentBotRepo {
                     || b.bot_uuid.to_lowercase().contains(&query_lower)
             })
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_skills(&self, skills: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| skills.iter().all(|s| b.has_skill(s)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_domains(&self, domains: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| domains.iter().all(|d| b.has_domain(d)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn find_by_scopes(&self, scopes: &[&str]) -> Vec<RegisteredBot> {
         let bots = self.bots.read().await;
-        bots.values()
+        let candidates = bots.values()
             .filter(|b| !b.is_expired())
             .filter(|b| scopes.iter().all(|s| b.has_scope(s)))
             .map(|b| b.to_registered_bot())
-            .collect()
+            .collect();
+        drop(bots);
+        self.refresh_invalidated_metadata(candidates).await
     }
 
     async fn list_bots_by_name_and_cooperatable_with(
@@ -660,6 +675,9 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
+        let publication_guard = self
+            .begin_privacy_publication(&resolve_env(), bot_id)
+            .await;
         // Sync binding channel index
         self.sync_binding_channel_index(bot_id, caps).await;
 
@@ -684,9 +702,11 @@ impl BotRepoPort for PersistentBotRepo {
             existing.capabilities.skills = caps.skills.clone();
             existing.capabilities.scopes = caps.scopes.clone();
             existing.capabilities.binding_channels = caps.binding_channels.clone();
-            if !caps.visibility.is_empty() {
-                existing.capabilities.visibility = caps.visibility.clone();
-            }
+            existing.capabilities.visibility = if caps.visibility.is_empty() {
+                "private".to_string()
+            } else {
+                caps.visibility.clone()
+            };
             if caps.agent_code.is_some() {
                 existing.capabilities.agent_code = caps.agent_code.clone();
             }
@@ -694,7 +714,8 @@ impl BotRepoPort for PersistentBotRepo {
                 existing.capabilities.agent_token = caps.agent_token.clone();
             }
         }
-
+        drop(bots);
+        publication_guard.complete();
         Ok(())
     }
 
@@ -723,6 +744,9 @@ impl BotRepoPort for PersistentBotRepo {
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
         let env = resolve_env();
+        let publication_guard = self
+            .begin_privacy_publication(&env, bot_id)
+            .await;
         let visibility_value = if visibility.is_empty() {
             "private"
         } else {
@@ -753,6 +777,7 @@ impl BotRepoPort for PersistentBotRepo {
         }
 
         info!(bot_uuid = %bot_id, visibility = %visibility_value, "update_visibility: updated");
+        publication_guard.complete();
         Ok(())
     }
 

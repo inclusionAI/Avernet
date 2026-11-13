@@ -175,41 +175,14 @@ impl BcsServer {
             bot_registry.clone(),
         );
 
-        // Create DB-backed legacy friend repositories. The FriendCore service is
-        // built after edge-permission wiring so legacy friendship mutations can
-        // dual-write both coexistence paths.
-        let (friend_repo, friend_request_repo): (
-            Arc<dyn bcs_service_api::FriendRepoPort>,
-            Arc<dyn bcs_service_api::FriendRequestRepoPort>,
-        ) = {
-            info!(
-                db_plugin = %db_kind,
-                "Initializing DB-backed friend storage with relation and edge-permission dual-write"
-            );
-            let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
-                DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend store wiring",
-                        provider
-                    )
-                }
-            };
-            let friend_request_repo: Arc<dyn bcs_service_api::FriendRequestRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => {
-                    Arc::new(DbFriendRequestStore::sqlite(db_plugin.clone()))
-                }
-                DbPluginKind::Mysql => Arc::new(DbFriendRequestStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend request store wiring",
-                        provider
-                    )
-                }
-            };
-
-            (friend_repo, friend_request_repo)
+        // Retain only the friendship mirror required by collaboration consumers.
+        // Friend requests are exclusively owned by permission_requests.
+        let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
+            DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
+            DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
+            DbPluginKind::External(provider) => {
+                panic!("external database plugin '{}' has no friend store wiring", provider)
+            }
         };
 
         // Edge-permission stores + services (T16): real DB-backed impls back
@@ -319,6 +292,14 @@ impl BcsServer {
                 friend_repo.clone(),
                 relation_svc.clone(),
             ));
+        // The SAME authority repo instance feeds the authority Core build
+        // below and the connect service's current-owner notification reads.
+        let bot_authority_repo = crate::bot_authority_wiring::db_authority_repo(
+            db_plugin.clone(),
+            &db_kind,
+            &bot_authority_env,
+            config.bot_authority.legacy_created_by_fallback,
+        );
         let connect_service_impl = Arc::new(
             bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),
@@ -331,6 +312,9 @@ impl BcsServer {
                 edge_permission_env,
             )
             .with_friendship_writeback(Some(friendship_writeback))
+            // Friend-request notifications follow the CURRENT authority
+            // owner, not the historical `created_by` fact.
+            .with_bot_authority_port(Some(bot_authority_repo.clone()))
             .with_collaboration_registry(bot_registry.clone()),
         );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
@@ -346,12 +330,6 @@ impl BcsServer {
                 .with_relation(relation_svc.clone())
                 .with_edge_permission_sync(edge_permission_friend_sync),
         );
-        let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
-            Arc::new(FriendRequestCore::with_repo(
-                friend_request_repo,
-                friend_svc.clone(),
-                bot_registry.clone(),
-            ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
             Arc::new(bcs_edge_permission::DbAdmissionService::new(
                 edge_grant_store.clone(),
@@ -385,6 +363,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
@@ -490,12 +469,7 @@ impl BcsServer {
             invite_token_secret.clone(),
         );
         let bot_authority = crate::bot_authority_wiring::build(
-            crate::bot_authority_wiring::db_authority_repo(
-                db_plugin.clone(),
-                &db_kind,
-                &bot_authority_env,
-                config.bot_authority.legacy_created_by_fallback,
-            ),
+            bot_authority_repo,
             &config,
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
@@ -620,7 +594,6 @@ impl BcsServer {
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             friend_svc.clone(),
-            friend_request_svc.clone(),
             relation_svc.clone(),
             provider_control_plane.clone(),
             Some(edge_grant_store.clone()),
@@ -637,6 +610,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             profile_store.clone(),
+            connect_service.clone(),
             bot_authority.hook.clone(),
             session_authorization_core.clone(),
         );
@@ -805,7 +779,7 @@ impl BcsServer {
             sessions.clone(),
             friend_svc.clone(),
             use_cases.candidate_search.clone(),
-            friend_request_svc,
+            use_cases.friend_use_cases.clone(),
             relation_svc.clone(),
             session_management.clone(),
             session_launch.clone(),
@@ -892,6 +866,7 @@ impl BcsServer {
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service = super::infrastructure_helpers::group_context_service(
             db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+            bot_authority.hook.clone(),
         );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())

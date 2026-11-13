@@ -1,6 +1,7 @@
 """Authenticated creation/retry and status; activation belongs to startup config."""
 
 import asyncio
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -51,7 +52,10 @@ def response(row):
 
 
 def create_index_build_router(
-    service: IndexBuildManagement, authorize_operator: Authenticator
+    service: IndexBuildManagement,
+    authorize_operator: Authenticator,
+    *,
+    trigger: Callable[[str], None] | None = None,
 ):
     router = APIRouter(prefix="/api/v2/index-builds", tags=["index-builds"])
 
@@ -74,6 +78,8 @@ def create_index_build_router(
                 body.embedding_dimension,
                 filter_fields=body.filter_fields,
             )
+            if trigger is not None and row.status in {"pending", "running"}:
+                trigger(build_id)
             return response(row)
         except IndexBuildConflict as error:
             raise HTTPException(

@@ -167,7 +167,7 @@ async fn unbound_legacy_delete_retries_catalog_cleanup_after_transient_failure()
 async fn register_provider(ctx: &TestContext) -> (String, String) {
     let registered = ctx
         .management
-        .register_provider(RegisterProviderCommand {
+        .register_provider(RegisterProviderCommand { a2a: None,
                 collaboration_scope: None,
             slug: None,
             name: "Provider".to_string(),

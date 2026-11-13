@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..artifacts.session_source import source_session_key
+
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -102,6 +104,7 @@ def _source_case(
         "query": diagnosis.query,
         "context": {
             "source_session_id": diagnosis.session.session_id,
+            "source_session_key": source_session_key(diagnosis.session),
             "session_path": diagnosis.session.path,
             "source_file": diagnosis.session.path,
             "original_query": diagnosis.original_query,

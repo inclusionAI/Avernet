@@ -163,6 +163,13 @@ user_config:
   # NOTE: masa_agent_eval (evaluation service) endpoint is environment-specific —
   # carried by the corp env overlays; config.py default is neutral (localhost).
 
+  # NOTE: clawweb (the task_nav bot_config kind's workflow-permission clone
+  # target) host is environment-specific — carried by the corp env overlays
+  # (prod / pre / simulator-internal clawweb service); config.py default is
+  # neutral (empty), and singlebox has no clawweb so it stays empty there too
+  # (the task_nav handler is fire-and-log: an empty host surfaces as one logged
+  # POST failure, never an apply abort).
+
   # 桌面 Bot 周期性健康检查（DesktopBotLifecycle）
   # 行为说明：
   #   - apply_owner_whitelist 为空 → 所有 owner 仅打日志，不会真改 DB（安全默认）

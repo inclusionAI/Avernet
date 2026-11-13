@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 
 use crate::ServiceResult;
-use crate::types::bot_authority::{BotAccessRelation, BotRoleQuery};
+use crate::types::bot_authority::{BotAccessRelation, BotOwnershipView, BotRoleQuery};
 
 #[async_trait]
 pub trait BotAuthorityPort: Send + Sync {
@@ -37,4 +37,15 @@ pub trait BotAuthorityPort: Send + Sync {
 
     /// Deny unless `user_id` holds the owner or manager role.
     async fn require_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<()>;
+
+    /// Batch owner read for display projections (e.g. bot candidate
+    /// pages): same length and order as `bot_ids`, per-item `None`
+    /// where no owner projects (absent/deleted/version-0 without the
+    /// legacy shim). Corrupt owner state and storage failures error
+    /// the batch instead of degrading to `None`. Implementations
+    /// batch into bounded collection queries, never per-bot loops.
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>>;
 }

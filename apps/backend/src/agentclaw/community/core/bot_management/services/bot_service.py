@@ -19,6 +19,7 @@ from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHE
 
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
+from agentclaw.community.core.bot_management.avatar import validate_avatar_storage
 from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -1500,6 +1501,9 @@ class BotService(BotServiceProtocol):
             - First bot (user has no bots): uses nick_name (花名) as default
             - Non-first bot: uses bot_id as default if bot_name not provided
         """
+        if ext is not None and "avatar_url" in ext:
+            validate_avatar_storage(ext)
+
         # ===== 入参校验：bot_name 合法性（空/字符/长度） =====
         # 兼容老调用：bot_name 允许 None — None 时跳过显式校验，由 _resolve_bot_name
         # 走默认命名规则；只有传了非 None 才严格校验。
@@ -3251,6 +3255,8 @@ class BotService(BotServiceProtocol):
                 except json.JSONDecodeError:
                     existing_ext = {}
             merged_ext = {**existing_ext, **ext}
+            if "avatar_url" in ext:
+                validate_avatar_storage(merged_ext)
             update_data["ext"] = merged_ext
 
         # Update template configuration if provided

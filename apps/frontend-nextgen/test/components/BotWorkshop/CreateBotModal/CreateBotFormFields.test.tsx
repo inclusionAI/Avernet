@@ -5,9 +5,12 @@ import { CreateBotFormFields } from '@/components/BotWorkshop/CreateBotModal/Cre
 import type { BotCreateInput } from '@/services/botWorkshop';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { prepareAvatar } from '@/components/BotWorkshop/BotAvatar/prepareAvatar';
 import React from 'react';
 import { afterEach } from '@jest/globals';
+
+jest.mock('@/components/BotWorkshop/BotAvatar/prepareAvatar', () => ({ prepareAvatar: jest.fn() }));
 
 afterEach(() => {
   extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
@@ -83,6 +86,22 @@ test('普通引擎不受 AgentCoding 阻塞错误影响', () => {
   renderFields({ ...aicodingInput, engine: 'openclaw', agentCoding: undefined }, '重复仓库');
 
   expect(screen.getByRole('button', { name: '创建云端 Bot' })).toBeEnabled();
+});
+
+test('头像处理期间及失败后禁止提交，重新选头像后恢复', async () => {
+  extendCapabilities({
+    getBotEngineOptions: () => ({ status: 'available', value: [{ value: 'openclaw', label: 'OpenClaw' }] }),
+  });
+  let reject!: (error: Error) => void;
+  (prepareAvatar as jest.Mock).mockReturnValue(new Promise((_resolve, rejectPromise) => { reject = rejectPromise; }));
+  renderFields({ ...aicodingInput, engine: 'openclaw', agentCoding: undefined });
+  const submit = screen.getByRole('button', { name: '创建云端 Bot' });
+  fireEvent.change(screen.getByLabelText('上传 Bot 头像'), { target: { files: [new File(['x'], 'x.png', { type: 'image/png' })] } });
+  expect(submit).toBeDisabled();
+  await act(async () => { reject(new Error('bad image')); });
+  expect(submit).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '选择头像 1' }));
+  expect(submit).toBeEnabled();
 });
 test('Bot 名称修正后清理旧的提交错误，不再遮挡 AgentCoding 校验提示', async () => {
   extendCapabilities({

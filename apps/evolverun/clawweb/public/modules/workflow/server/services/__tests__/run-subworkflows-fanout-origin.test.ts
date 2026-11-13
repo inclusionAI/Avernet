@@ -21,7 +21,7 @@ const read = () => service.readGroup(actor, 'parent', 'group', { groupExecutionI
 describe('trusted-engine fanoutOrigin correlation with SQLite', () => {
   beforeEach(() => {
     raw = new Database(':memory:');
-    raw.exec(`CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT COLLATE NOCASE UNIQUE, workflow_id TEXT,
+    raw.exec(`CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '', id INTEGER PRIMARY KEY, flow_id TEXT COLLATE NOCASE UNIQUE, workflow_id TEXT,
       workflow_title TEXT, origin_bot_id TEXT, status TEXT, state_json TEXT, input_json TEXT, result_json TEXT, params_json TEXT,
       node_count INTEGER, succeeded_count INTEGER, failed_count INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
       started_at INTEGER, completed_at INTEGER, triggered_by TEXT, current_phase TEXT, workflow_version INTEGER,

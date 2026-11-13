@@ -206,6 +206,12 @@ user_config:
   masa_agent_eval:
     base_url: "http://127.0.0.1:9999"
 
+  # Clawweb host — singlebox runs no clawweb, so the task_nav clone target
+  # stays empty: the handler is fire-and-log (one logged POST failure, no apply
+  # abort). corp env overlays / simulator set the real host.
+  clawweb:
+    base_url: ""
+
   # ── DingTalk 通用配置（与 BCS bcs-config-*.toml [[dingtalk_accounts]] 对齐） ──
   # singlebox 用 AI coding 应用凭证联调钉钉发送
   # 机器人名称：TeamClaw个人机器人

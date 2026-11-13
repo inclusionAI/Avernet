@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { migrations } from '@avernet/clawweb-shared/server/schema';
+import { flowRunMarkersDdl } from '@avernet/clawweb-shared/server/schema-flow-run-markers';
 
 const createdAt = new Date().toISOString();
 const deadlineAt = new Date(Date.now() + 3_600_000).toISOString();
@@ -11,6 +12,7 @@ export function fixture() {
   for (const sql of migrations.find(m => m.version === 2)!.sql) {
     if (/CREATE TABLE IF NOT EXISTS flow_runs|CREATE.*INDEX.*ON flow_runs/.test(sql)) raw.exec(sql);
   }
+  for (const sql of flowRunMarkersDdl) raw.exec(db.dialect.renderDdl(sql));
   for (const sql of migrations.find(m => m.version === 5)!.sql) raw.exec(sql);
   for (const sql of migrations.find(m => m.version === 73)!.sql) raw.exec(sql);
   raw.exec('ALTER TABLE workflow_specs ADD COLUMN version INTEGER');

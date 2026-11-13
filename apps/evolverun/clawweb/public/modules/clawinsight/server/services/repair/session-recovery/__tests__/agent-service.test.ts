@@ -42,9 +42,31 @@ beforeEach(async () => {
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
 it.each([
-  { change: { runtimeIdentity: { stage: "online", version: "V8" } }, detail: "发布版本：V7 → V8" },
+  { engine: "OC", activeEngine: "openclaw", provider: "baas" },
+  { engine: "CC", activeEngine: "claude_code", provider: "baas" },
+  { engine: "TE", activeEngine: "teclaw", provider: "teclaw" },
+])("sends initial $engine guidance to the original session after a version-only release change", async ({ engine, activeEngine, provider }) => {
+  target = { ...target, provider, activeEngine, botType: "service", runtimeIdentity: { stage: "online", version: "V7" } };
+  const ack = await service.create({ ...request, target: { ...request.target, engine } }, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const frozen = (await tasks.find(ack.task_id))!;
+  target = { ...target, runtimeIdentity: { stage: "online", version: "V8" } };
+  vi.mocked(runtime.sendMessage).mockResolvedValue({ status: "accepted", platformMessageId: "message-1" });
+
+  const result = await agent.retryMessage(frozen, { clientRequestId: "version-change", purpose: "继续原任务", message: "请核实已有结果后继续" });
+
+  expect(result).toMatchObject({ status: "succeeded", result: { status: "accepted", initial_message: true } });
+  expect(runtime.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    target: expect.objectContaining(target), expectedEngine: activeEngine,
+    sessionKey: request.session_key, deliveryKey: request.delivery_key,
+  }));
+  expect((await tasks.find(ack.task_id))?.runtimeTarget).toEqual(frozen.runtimeTarget);
+});
+
+it.each([
   { change: { bindingId: "binding-new" }, detail: "运行绑定：binding → binding-new" },
   { change: { deviceId: "device-new" }, detail: "运行设备：fixture → device-new" },
+  { change: { runtimeIdentity: { stage: "online", version: "V8" }, bindingId: "binding-new" }, detail: "运行绑定：binding → binding-new" },
 ])("records the actual target change and an unsent receipt without weakening the guard: $detail", async ({ change, detail }) => {
   target = { ...target, provider: "teclaw", activeEngine: "teclaw", botType: "service", runtimeIdentity: { stage: "online", version: "V7" } };
   const ack = await service.create({ ...request, target: { ...request.target, engine: "TE" } }, actor);
@@ -79,6 +101,59 @@ it("provides cumulative read ranges and gaps without rereading the Bot or changi
   expect(raw).not.toContain("sessionReadCoverage");
 });
 
+it("compacts only bootstrap index excerpts, preserving audit, evidence references and persistence", async () => {
+  const ack = await service.create(request, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const result = { source: "trajectory", read_scope: "traces", coverage: "uploaded_records_only",
+    traces: [{ traceId: "original", name: "original task ".repeat(200), event_summary: { count: 1 } }],
+    offset: 0, next_offset: null };
+  const read = vi.fn().mockResolvedValue(result);
+  (agent as any).deps.trajectory = { read };
+  const receipts = [];
+  for (let i = 0; i < 3; i++) receipts.push(await agent.trajectoryRead((await tasks.find(ack.task_id))!, {
+    clientRequestId: `index-${i}`, purpose: "observe", offset: 0,
+  }));
+  const task = (await tasks.find(ack.task_id))!;
+  const ticket = JSON.parse(vi.mocked(ais.execute).mock.calls[0][1]["${clawevolve_params}"]).input.credentials.executionTicket;
+  expect(task).not.toHaveProperty("trajectoryIndexReads");
+  const queries = vi.spyOn(db, "query"); queries.mockClear();
+  expect(await agent.verify(task.taskId, task.execution!.executionId, ticket, true)).not.toHaveProperty("trajectoryIndexReads");
+  const normalReadQueries = queries.mock.calls.length; queries.mockClear();
+  const saved = await agent.verify(task.taskId, task.execution!.executionId, ticket, true, true), before = structuredClone(saved);
+  expect(saved.trajectoryIndexReads).toHaveLength(3);
+  expect(queries).toHaveBeenCalledTimes(normalReadQueries); queries.mockClear();
+  const bootstrap = await agent.bootstrap(saved);
+  expect(queries).not.toHaveBeenCalled();
+  expect(bootstrap.task).not.toHaveProperty("trajectoryIndexReads");
+  expect(bootstrap.task.evidence.map(item => item.evidence_id)).toEqual(saved.evidence.map(item => item.evidence_id));
+  const first = bootstrap.task.evidence.find(item => item.tool_call_id === receipts[0].toolCallId)!;
+  for (const receipt of receipts.slice(1)) {
+    const item = bootstrap.task.evidence.find(item => item.tool_call_id === receipt.toolCallId)!;
+    expect(item.excerpt).toContain(`same_content_as=${first.evidence_id};`);
+    expect(item.excerpt).toContain(`recorded_at_ms=${(receipt.result as any).recorded_at_ms};`);
+    expect(item.excerpt).toContain(`tool_call_get(toolCallId=${receipt.toolCallId})`);
+    expect((await agent.toolGet(saved, item.tool_call_id)).result).toEqual(receipt.result);
+  }
+  expect(saved).toEqual(before);
+  expect((await service.detail(saved.taskId, actor)).evidence).toEqual(saved.evidence);
+  expect(await service.detail(saved.taskId, actor)).not.toHaveProperty("trajectoryIndexReads");
+  // Referencing a compacted receipt must still pass the unchanged evidence validator.
+  await agent.report(saved, { kind: "assessment", phase: "assess", decision: "observe",
+    summary: "Check actual progress", evidence_ids: [receipts[2].evidenceId] });
+  const reloaded = (await tasks.find(saved.taskId, { forBootstrap: true }))!;
+  expect(reloaded.evidence).toEqual(saved.evidence);
+  expect((await agent.bootstrap(reloaded)).task.evidence).toEqual(bootstrap.task.evidence);
+  const raw = (await db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ?", [saved.taskId]))[0].config_json;
+  expect(raw).not.toContain("trajectoryIndexReads"); expect(raw).not.toContain("same_content_as");
+  await tasks.update(reloaded.taskId, reloaded.version, value => {
+    expect(value).not.toHaveProperty("trajectoryIndexReads");
+    return { ...value, version: value.version + 1 };
+  });
+  expect((await tasks.listForMaintenance(200)).every(value => !Object.hasOwn(value, "trajectoryIndexReads"))).toBe(true);
+  expect(await tasks.find(saved.taskId)).not.toHaveProperty("trajectoryIndexReads");
+  expect(read).toHaveBeenCalledTimes(3); expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
 it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override on initial and resumed dispatches (%s)", async tc_fault_label => {
   const output = vi.mocked(logRepairEvent).mockClear();
   const ack = await service.create({ ...request, tc_fault_label }, actor);
@@ -104,6 +179,47 @@ it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override 
   expect(events.filter(event => event.event === "dispatched")).toEqual([1, 2].map(attempt => expect.objectContaining({
     taskId: ack.task_id, executionId: expect.any(String), jobId: `job-${attempt}`, attempt, environment: "pre" })));
   expect(JSON.stringify(events)).not.toContain("executionTicket");
+});
+
+it.each(["observe", "verify", "assess"] as const)("releases a waiting %s execution and resumes without using a failure retry", async phase => {
+  const { task_id } = await service.create({ ...request,
+    ...(phase === "assess" ? { session_key: "agent:main:cron:daily:run:original" } : {}) }, actor);
+  await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
+  const initial = (await tasks.find(task_id))!;
+  const now = Date.now(), waiting = phase === "assess" ? { cronWait: { startedAt: now, deadlineAt: now + 300000 } }
+    : { observationDeadlineAt: now + 3600000 };
+  const task = (await tasks.update(task_id, initial.version, value => ({ ...value, phase, ...waiting, version: value.version + 1 })))!;
+  const previousId = task.execution!.executionId;
+  const repo = new EvolveRepository(db), step = (await repo.findStep(task.aisExecution!.stepId))!;
+
+  await agent.report(task, { kind: "release", phase });
+  const released = (await tasks.find(task_id))!;
+  expect(released).toMatchObject({ status: "running", phase, ...waiting, execution: { executionId: previousId, state: "ended" } });
+  expect(released.executionRetry).toBeUndefined();
+
+  await service.maintenance();
+  await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step, report: { status: "failed", retryable: true } });
+  const resumed = (await tasks.find(task_id))!;
+  expect(resumed).toMatchObject({ status: "running", phase, ...waiting, execution: { jobId: "job-2" } });
+  expect(resumed.execution!.executionId).not.toBe(previousId);
+  expect(resumed.executionRetry).toBeUndefined();
+  expect(ais.execute).toHaveBeenCalledTimes(2);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("rejects active release outside a waiting phase and when the phase changed before saving", async () => {
+  const { task_id } = await service.create(request, actor);
+  await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
+  const initial = (await tasks.find(task_id))!;
+  await expect(agent.report(initial, { kind: "release", phase: "assess" })).rejects.toMatchObject({ status: 409 });
+  const observing = (await tasks.update(task_id, initial.version, value => ({ ...value, phase: "observe", version: value.version + 1 })))!;
+  await tasks.update(task_id, observing.version, value => ({ ...value, phase: "verify", version: value.version + 1 }));
+
+  await expect(agent.report(observing, { kind: "release", phase: "observe" })).rejects.toMatchObject({ status: 409 });
+  const current = (await tasks.find(task_id))!;
+  expect(current.execution).toEqual(initial.execution);
+  expect(current.executionRetry).toBeUndefined();
+  expect(ais.execute).toHaveBeenCalledOnce();
 });
 
 it("counts an AIS failure once after committing its terminal task state despite repeated callbacks", async () => {

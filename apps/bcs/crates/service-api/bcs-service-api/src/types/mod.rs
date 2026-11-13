@@ -22,6 +22,20 @@ pub use agent_registration::*;
 pub use error::{ServiceError, ServiceResult};
 pub use event::*;
 
+/// One current Group row and its optional stored Card template, read together.
+/// A missing template is valid for Chat/DM and historical unbackfilled Groups.
+/// Stores project current label/context into the template's display fields while
+/// preserving interfaces, skills and extensions; reads never persist a backfill.
+#[derive(Debug, Clone)]
+pub struct GroupCardSnapshot {
+    pub group_id: String,
+    pub group_kind: GroupKind,
+    pub group_strategy: GroupStrategy,
+    pub visibility: String,
+    pub record_status: String,
+    pub card_template: Option<serde_json::Value>,
+}
+
 /// Mutable fields exposed by the BCN OpenAPI v1 Group PATCH operation.
 ///
 /// Each `None` means "leave the stored value unchanged". Keeping this patch

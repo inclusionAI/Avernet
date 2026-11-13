@@ -127,6 +127,23 @@ def create_router():
     @router.post("/recommend")
     async def recommend(payload: BotRecommendationRequest, request: Request):
         _, runtime = dependencies(request)
+        filters = payload.filters or {}
+        availability = filters.get("availability")
+        # The TC catalog's human view sends all Bot-facing visibility values.
+        user_view = (
+            filters.keys() == {"runtime_state", "availability"}
+            and filters["runtime_state"] == ["online"]
+            and isinstance(availability, list)
+            and len(availability) == 3
+            and all(
+                value in availability for value in ("private", "protected", "public")
+            )
+        )
+        if user_view:
+            filters = {
+                "labels.user_visibility": ["public", "protected"],
+                "lifecycle_state": ["active"],
+            }
         question = payload.question
         if payload.group_id:
             from app.tc.group_context import rewrite_with_group_context
@@ -138,7 +155,8 @@ def create_router():
             runtime,
             question,
             payload.topK,
-            filters=payload.filters,
+            filters=filters,
+            legacy_defaults=not user_view,
             rerank=payload.enable_rerank,
             expand_factor=payload.expand_factor,
             reranker_model=payload.reranker_model,
@@ -159,7 +177,7 @@ def create_router():
                     "min_score_compat_mode": "deprecated_ignored",
                     "min_score_stage": "none",
                     "enable_rerank": payload.enable_rerank,
-                    "candidate_source": f"tc_{runtime.storage_kind}",
+                    "candidate_source": "tc_card",
                     "status": result.status,
                     "reasons": list(result.reasons),
                     "score_sources": [i.score_source for i in result.items],

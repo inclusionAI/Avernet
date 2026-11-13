@@ -8,6 +8,8 @@ export type RecoveryRequest = {
   target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE"; runtime_identity?: BotRuntimeIdentity };
   session_key: string;
   session_id?: string;
+  trace_id?: string;
+  fault_at_ms?: number;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;
@@ -56,7 +58,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
   readonly handleAisStatus: AisStatusHandler;
-  verify(taskId: string, executionId: string, ticket: string, control?: boolean): Promise<RecoveryStoredTask>;
+  verify(taskId: string, executionId: string, ticket: string, control?: boolean, forBootstrap?: boolean): Promise<RecoveryStoredTask>;
   bootstrap(task: RecoveryStoredTask): Promise<unknown>;
   heartbeat(task: RecoveryStoredTask, sessionId?: string): Promise<unknown>;
   sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;

@@ -29,6 +29,7 @@ impl HttpProviderTransport {
                 .expect("build provider sse client"),
             url_guard,
             chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+            preproduction_caller_token_diagnostics: false,
             event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
             interactions: std::sync::RwLock::new(None),
@@ -39,6 +40,14 @@ impl HttpProviderTransport {
     /// provide an explicit `params.timeout_ms`.
     pub fn with_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.chat_run_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Temporary plaintext caller-token diagnostics, only for a preproduction
+    /// environment supplied by the composition root. All other values disable
+    /// them; constructors default to disabled. No process environment is read here.
+    pub fn with_caller_token_diagnostic_environment(mut self, environment: &str) -> Self {
+        self.preproduction_caller_token_diagnostics = matches!(environment, "pre" | "prepub");
         self
     }
 
@@ -270,6 +279,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                 &body,
                 wants_sse,
                 &cmd.provider_bypass_headers,
+                self.preproduction_caller_token_diagnostics,
             )
             .await
             {
@@ -472,6 +482,7 @@ impl BotDeliveryPort for HttpProviderTransport {
             &body,
             false,
             &cmd.provider_bypass_headers,
+            self.preproduction_caller_token_diagnostics,
         )
         .await;
         let elapsed_ms = started.elapsed().as_millis();

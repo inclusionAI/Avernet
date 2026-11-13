@@ -99,7 +99,8 @@ Projection updates must be committed only after event ingestion succeeds.
 The module implements Card validation/fetch, SDK event projection and the
 production `BotDeliveryPort`. `HttpA2aCardFetcher` implements `A2aCardPort`: bounded
 public JSON fetch, no redirects/proxy/credentials, configured DNS/IP policy pinned
-per attempt, TLS outside explicitly permitted loopback, and explicit rejection
+per attempt, HTTP/HTTPS under the shared domain URL policy (including non-loopback
+HTTP on trusted networks; private addresses still require deployment approval), and explicit rejection
 of unsupported no-cache/no-store declarations. Required extensions are injected
 by composition; unsupported capabilities never silently downgrade.
 

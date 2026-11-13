@@ -276,7 +276,7 @@ describe('BCS-only 冷启动（运行时 PUBLIC_BOT_BACKEND_ENABLED=false）', (
     expect(outsideBcsPaths).toEqual([]);
     expect(callCount('/openapi/v1/bots', 'GET')).toBe(0);
     expect(callCount('/openapi/v1/bots/metadata/queries', 'POST')).toBe(0);
-    
+
     expect(callCount('/openapi/v1/bots/spaces/personal/initialize', 'POST')).toBe(0);
     expect(unreadPullCount()).toBe(0);
 

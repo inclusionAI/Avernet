@@ -1,7 +1,7 @@
 """TC v2 always binds the new Card/Doc service, independently of v1 storage."""
 
 from fastapi import APIRouter, Request
-from search_core.adapters.http.cards import create_card_router
+from search_core.adapters.http.catalog_cards import create_card_router
 from search_core.adapters.http.routes import create_search_router
 from search_core.api.models import SearchResult, VerifiedIdentity
 from search_core.application.search import CatalogSearchApplication
@@ -75,7 +75,7 @@ class CardOperations:
         if not data.get("name"):
             raise ValueError("TC Card name is required")
         TcCatalog.validate(data)
-        with runtime.caches.changing():
+        with runtime.caches.changing((agent_id,)):
             return runtime.updates.upsert(
                 agent_id,
                 data if not current and legacy_worker else fields,
@@ -86,7 +86,7 @@ class CardOperations:
 
     def remove(self, agent_id):
         _catalog, runtime = services(self.app)
-        with runtime.caches.changing():
+        with runtime.caches.changing((agent_id,)):
             runtime.updates.remove(agent_id)
 
     def read(self, agent_id):
@@ -94,6 +94,9 @@ class CardOperations:
 
     def status(self, agent_id):
         return services(self.app)[1].updates.status(agent_id)
+
+    def rebuild(self, agent_id, index_key):
+        return services(self.app)[1].updates.rebuild(agent_id, index_key)
 
 
 class NewRetrieval:

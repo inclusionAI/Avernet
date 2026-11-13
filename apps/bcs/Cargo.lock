@@ -711,6 +711,7 @@ dependencies = [
  "chrono",
  "serde_json",
  "tokio",
+ "tracing",
  "ulid",
 ]
 
@@ -1463,6 +1464,7 @@ dependencies = [
  "bcs-edge-permission-store",
  "bcs-friend",
  "bcs-group-store",
+ "bcs-relation",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",
@@ -1478,6 +1480,7 @@ name = "bcs-edge-permission-store"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-bot",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
@@ -2235,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

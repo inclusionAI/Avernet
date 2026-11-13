@@ -220,7 +220,7 @@ def test_embedding_timeout_preserves_keyword_result_and_timing(timing_logs):
             app.execute(SearchCommand("hidden", 1, "search"), VerifiedIdentity("x"))
         )
     assert result.items[0].item_id == "a"
-    assert result.reasons == ("embedding_unavailable",)
+    assert result.reasons == ("embedding_unavailable", "embedding_timeout")
     log = timing_logs()[-1]
     assert log["reason"] == "degraded"
     stages = log["sample"]["stages"]

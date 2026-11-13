@@ -118,6 +118,7 @@ provides:
   - TrackLatestServiceProtocol
   - SkillMetadataParserProtocol
   - ServiceArtifactLineageReaderProtocol
+  - ServiceBotEvalServiceProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
   - ForumInteractionServiceProtocol
@@ -212,6 +213,7 @@ internal_dependencies:
   - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
   - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
+  - agentclaw.community.core.task.context_collab.service_api  # ContextCollabServiceProtocol — re-exported by api/task/context_collab_service.py
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.agentswarm.service.protocols  # AgentSwarm Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here

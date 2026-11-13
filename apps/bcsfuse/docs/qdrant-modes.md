@@ -2,7 +2,7 @@
 
 | Deployment | Default | Durable records | Index ownership |
 | --- | --- | --- | --- |
-| Direct local `dev` / `dev_smoke` | Local | SQLite | One process, one local path |
+| Direct `dev`, `dev_smoke`, `test`, and Singlebox | Server | SQLite | One collection pair per SQLite path and index configuration |
 | Public `runtime` | Server | MySQL | One application instance owns a collection pair |
 | Public Docker / Compose | Server | SQLite in the smoke example; MySQL for runtime | Compose starts a separate Qdrant container |
 
@@ -13,13 +13,18 @@ contracts are unchanged by the Qdrant selection.
 ## Configuration
 
 Configuration is read at application composition, not inside the search algorithms.
-Local development needs no Qdrant service. To test the Server path locally:
+Native multilingual BM25 requires Qdrant Server 1.20 or later. Start it before BCSFuse or Singlebox.
+The default endpoint is `http://127.0.0.1:6333`:
 
 ```bash
-# Start an official Qdrant v1.20.0 service first, then run from apps/bcsfuse:
-QDRANT_MODE=server QDRANT_URL=http://127.0.0.1:6333 \
-  BCSFUSE_PROVIDER_MODE=dev_smoke python main.py
+docker run --rm -d --name singlebox-qdrant \
+  -p 127.0.0.1:6333:6333 -p 127.0.0.1:6334:6334 qdrant/qdrant:v1.20.0
+curl -fsS http://127.0.0.1:6333/readyz
 ```
+
+An existing or native Qdrant Server works as well. For a custom endpoint, set
+`QDRANT_URL` and `QDRANT_GRPC_PORT` in the BCSFuse runtime env file when using Singlebox.
+Singlebox Coverage starts its own disposable Qdrant on the CI runner.
 
 For the complete public smoke stack, run from the repository root:
 
@@ -34,17 +39,15 @@ these volumes contain records you need to keep.
 
 | Setting | Default / meaning |
 | --- | --- |
-| `QDRANT_MODE` | `local` for direct dev; `server` for runtime and Docker |
-| `QDRANT_URL` | Required in Server mode; HTTP(S) URL, no embedded credentials |
+| `QDRANT_MODE` | `server`; TC rejects `local` |
+| `QDRANT_URL` | `http://127.0.0.1:6333` for direct startup; HTTP(S), no embedded credentials |
 | `QDRANT_PREFER_GRPC` | `true`; use `false` to compare REST transport |
 | `QDRANT_GRPC_PORT` | `6334` |
 | `QDRANT_TIMEOUT_SECONDS` | `10`; finite positive transport timeout |
 | `QDRANT_API_KEY` | Optional external Server authentication; supply as a secret |
-| `QDRANT_LOCAL_PATH` | Local mode only |
 
 Common package callers pass `QdrantConnection` explicitly. Application adapters
-own environment/config loading. The same candidate filtering and sparse token
-weights are used in Local, REST and gRPC modes. Generic search has no implicit
+own environment/config loading. Candidate filtering and native BM25 are shared between REST and gRPC. Generic search has no implicit
 Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
 
 ## Startup, updates and failure handling

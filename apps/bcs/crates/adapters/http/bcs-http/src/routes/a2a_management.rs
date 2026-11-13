@@ -260,7 +260,7 @@ async fn execute(
         .and_then(|v|v.split(';').next()).is_some_and(|v|v.trim().eq_ignore_ascii_case("application/json")) {
         return Err(error(Code::UnsupportedMediaType,"","JSON_REQUIRED"));
     }
-    if parts.uri.path() == "/a2a/agents" {
+    if bot_id.is_none() {
         let input: Registration = body(&bytes)?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -296,7 +296,8 @@ async fn execute(
 
 pub async fn handle(State(state): State<HttpAppState>, target: Result<Path<Target>, axum::extract::rejection::PathRejection>, request: Request) -> Response {
     let id = uuid::Uuid::new_v4().to_string();
-    let collection = request.uri().path() == "/a2a/agents";
+    let collection_path = request.uri().path().to_owned();
+    let collection = collection_path.ends_with("/a2a/agents");
     let target = if collection { Ok(None) } else { target.map(|Path(target)|Some(target.bot_id)) };
     let allowed = if collection {
         "GET, POST"
@@ -320,7 +321,7 @@ pub async fn handle(State(state): State<HttpAppState>, target: Result<Path<Targe
             Ok((status, card)) => {
                 let location = if let (StatusCode::CREATED, ManagementView::Card(card)) = (status, &card) {
                     Some(format!(
-                        "/a2a/agents/{}/agent-card",
+                        "{collection_path}/{}/agent-card",
                         url::form_urlencoded::byte_serialize(card.bot_id.as_bytes())
                             .collect::<String>()
                     ))

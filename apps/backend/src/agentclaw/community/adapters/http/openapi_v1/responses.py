@@ -55,6 +55,7 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
@@ -76,6 +77,12 @@ from agentclaw.community.api.bot_config_manifest_service import (
 )
 from agentclaw.community.api.apply_run_service import (
     ApplyInProgressError,
+)
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -541,6 +548,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LockNotHeldError: (404, "Not found"),
     LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
+    AvatarTooLargeError: (400, "Avatar does not fit in Bot metadata"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
     BotQuotaExceededError: (409, "Bot quota exceeded for this Space"),
@@ -847,6 +855,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
     TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
+    # BBS context collaboration protocol (spec 2026-11-09 §6). Leaf rows for
+    # every error the service/repository raises at the three delivery routes.
+    # The ENVELOPE_ERRORS table has no rows for the ``ValidationError`` /
+    # ``NotFound`` / ``Conflict`` bases these subclass, and the app-level
+    # ``_DOMAIN_ERROR_STATUS_MAP`` matches on exact type — a subclass would
+    # otherwise fall through to the 500 catch-all. Fixed messages per the
+    # table rule: no caller data, no internal ids.
+    ContextCollabNotFoundError: (404, "Not found"),
+    ContextCollabVersionConflict: (409, "Context version conflict"),
+    ContextCollabValidationError: (422, "Invalid context collab request"),
+    ContextCollabParentEventError: (422, "Parent event not found"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable

@@ -21,6 +21,8 @@ If MySQL/Qdrant env unavailable, test must skip clearly:
 SKIPPED_MYSQL_ENV_UNAVAILABLE or SKIPPED_QDRANT_ENV_UNAVAILABLE
 """
 
+from tests.qdrant_support import server_connection
+
 import os
 import sys
 import pytest
@@ -82,6 +84,7 @@ class TestMySQLBackupRestoreE2E:
         )
 
         store = QdrantMySQLVectorStore(
+            connection=server_connection(),
             collection_name=qdrant_config["collection"],
             qdrant_path=qdrant_config["path"],
             dimension=qdrant_config["dimension"],
@@ -392,6 +395,7 @@ class TestMySQLBackupRestoreE2E:
 
                 # Recreate store
                 restored_store = QdrantMySQLVectorStore(
+                    connection=server_connection(),
                     collection_name=qdrant_config["collection"],
                     qdrant_path=restored_qdrant_path,
                     dimension=qdrant_config["dimension"],
@@ -493,7 +497,9 @@ class TestMySQLBackupRestoreE2E:
                 from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
                     QdrantMySQLVectorStore,
                 )
+
                 restored_store = QdrantMySQLVectorStore(
+                    connection=server_connection(),
                     collection_name=qdrant_config["collection"],
                     qdrant_path=restored_qdrant_path,
                     dimension=qdrant_config["dimension"],

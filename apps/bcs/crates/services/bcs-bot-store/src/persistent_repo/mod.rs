@@ -4,12 +4,12 @@
 //! crate docs for the two-layer (process memory + DB) architecture.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 #[cfg(test)]
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{Mutex, RwLock, oneshot};
 use tracing::{info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
@@ -55,6 +55,12 @@ mod heartbeat_tests;
 #[path = "../controllable.rs"]
 mod controllable;
 
+#[derive(Default)]
+struct RegistryMetadataState {
+    permanent: std::collections::HashSet<(String, String)>,
+    in_flight: std::collections::HashSet<(String, String)>,
+}
+
 /// Persistent bot repository backed by a DB plugin.
 ///
 /// Process memory holds WebSocket connections and heartbeat timestamps;
@@ -67,6 +73,8 @@ pub struct PersistentBotRepo {
     /// this field directly (same-shaped discipline as the
     /// persistent-repo siblings' internal access).
     pub(crate) bots: RwLock<HashMap<String, RegisteredBotInner>>,
+    /// Per-Bot serialization for DB visibility writes and cache publication.
+    privacy_publications: StdMutex<HashMap<(String, String), Arc<Mutex<()>>>>,
     /// Token to bot_uuid mapping (hot cache for auth).
     token_to_bot: RwLock<HashMap<String, String>>,
     /// Channel binding index: (channel, binding_key) -> bot_uuid.
@@ -75,8 +83,8 @@ pub struct PersistentBotRepo {
     /// and server-owned coordination profile.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
 
-    /// Card-renamed Bots read durable metadata; live connections stay in memory.
-    registry_metadata_bypass: RwLock<std::collections::HashSet<(String, String)>>,
+    /// Atomic permanent/in-flight metadata state for cache reads.
+    registry_metadata: StdMutex<RegistryMetadataState>,
 
     // Layer 2: Database
     /// DB plugin for persistent storage.
@@ -97,6 +105,54 @@ pub struct PersistentBotRepo {
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
 }
 
+/// Holds one Bot's publication lock from before its DB write through cache
+/// publication. Failure or cancellation permanently bypasses cached metadata.
+pub(crate) struct PrivacyPublicationGuard<'a> {
+    repo: &'a PersistentBotRepo,
+    key: (String, String),
+    _publication: tokio::sync::OwnedMutexGuard<()>,
+    active: bool,
+}
+
+impl PrivacyPublicationGuard<'_> {
+    pub(crate) fn complete(mut self) {
+        self.repo
+            .registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned")
+            .in_flight
+            .remove(&self.key);
+        self.active = false;
+    }
+
+    pub(crate) fn fail(mut self) {
+        let mut state = self
+            .repo
+            .registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned");
+        state.permanent.insert(self.key.clone());
+        state.in_flight.remove(&self.key);
+        drop(state);
+        self.active = false;
+    }
+}
+
+impl Drop for PrivacyPublicationGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let mut state = self
+            .repo
+            .registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned");
+        state.permanent.insert(self.key.clone());
+        state.in_flight.remove(&self.key);
+    }
+}
+
 impl PersistentBotRepo {
     /// Create a DB-backed repository using the MySQL dialect.
     pub fn new(db: Arc<dyn DbPlugin>) -> Self {
@@ -110,11 +166,12 @@ impl PersistentBotRepo {
     ) -> Self {
         Self {
             bots: RwLock::new(HashMap::new()),
+            privacy_publications: StdMutex::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             binding_channel_index: Arc::new(RwLock::new(HashMap::new())),
             bot_info_overrides: RwLock::new(HashMap::new()),
             db,
-            registry_metadata_bypass: RwLock::new(Default::default()),
+            registry_metadata: StdMutex::new(Default::default()),
             flavor,
             caller_config_cache: crate::caller_config_cache::CallerConfigCache::new(
                 crate::caller_config_cache::POSITIVE_TTL,
@@ -124,12 +181,54 @@ impl PersistentBotRepo {
         }
     }
 
-    pub(crate) async fn invalidate_card_metadata(&self, env: &str, bot_id: &str) {
-        self.registry_metadata_bypass.write().await.insert((env.into(), bot_id.into()));
+    pub(crate) fn privacy_publication(
+        &self,
+        env: &str,
+        bot_id: &str,
+    ) -> Arc<Mutex<()>> {
+        self.privacy_publications
+            .lock()
+            .expect("privacy publication map poisoned")
+            .entry((env.into(), bot_id.into()))
+            .or_default()
+            .clone()
+    }
+
+    pub(crate) async fn invalidate_registry_metadata(&self, env: &str, bot_id: &str) {
+        self.registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned")
+            .permanent
+            .insert((env.into(), bot_id.into()));
+    }
+
+    pub(crate) async fn begin_privacy_publication(
+        &self,
+        env: &str,
+        bot_id: &str,
+    ) -> PrivacyPublicationGuard<'_> {
+        let publication = self.privacy_publication(env, bot_id).lock_owned().await;
+        let key = (env.into(), bot_id.into());
+        self.registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned")
+            .in_flight
+            .insert(key.clone());
+        PrivacyPublicationGuard {
+            repo: self,
+            key,
+            _publication: publication,
+            active: true,
+        }
     }
 
     async fn use_cached_metadata(&self, bot_id: &str) -> bool {
-        !self.registry_metadata_bypass.read().await.contains(&(resolve_env(), bot_id.into()))
+        let key = (resolve_env(), bot_id.into());
+        let state = self
+            .registry_metadata
+            .lock()
+            .expect("registry metadata state poisoned");
+        !state.permanent.contains(&key) && !state.in_flight.contains(&key)
     }
 
     async fn db_query(&self, sql: &str, params: Vec<Value>) -> bcs_db_api::DbResult<Vec<DbRow>> {

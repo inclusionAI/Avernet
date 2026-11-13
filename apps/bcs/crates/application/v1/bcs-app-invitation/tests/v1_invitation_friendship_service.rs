@@ -2,8 +2,13 @@
 //!
 //! Exercises both `InvitationService` and `FriendshipService` impls against the
 //! real in-memory store stack (GroupCore / BotCore / SessionManagementService
-//! / FriendCore / FriendRequestCore / RelationCore), mirroring the sibling
-//! `bcs-app-group` / `bcs-app-session` test harnesses.
+//! / FriendCore / RelationCore), mirroring the sibling `bcs-app-group` /
+//! `bcs-app-session` test harnesses. The `FriendshipService` cases inject the
+//! shared `FakeFriendService` / `FakeConnectService` fakes (see
+//! `tests/support`) because the facade is converged onto the legacy
+//! `FriendService` use-case surface.
+
+mod support;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +19,7 @@ use bcs_bot_store::MemoryBotRepo;
 use bcs_domain::{
     invite_token_encode, InviteTargetType, InviteTokenPayload,
 };
-use bcs_friend::{FriendCore, FriendRequestCore};
+use bcs_friend::FriendCore;
 use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
@@ -34,9 +39,9 @@ use bcs_service_api::{
     GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantRole, SessionKind,
 };
 use bcs_service_api::{
-    FriendRequest as DomainFriendRequest, FriendRequestCoreService,
-    FriendRequestDirection as DomainFriendRequestDirection,
-    FriendRequestStatus as DomainFriendRequestStatus, ServiceError, ServiceResult,
+    FriendRequest as DomainFriendRequest,
+    FriendRequestDirection as DomainFriendRequestDirection, RequestAuthHeaders, ServiceError,
+    ServiceResult,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -45,6 +50,7 @@ use bcs_test_support::NoopSystemMessageService;
 use bcs_app_invitation::{
     InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl,
 };
+use support::{FakeConnectService, FakeFriendService, FriendCall};
 
 const SECRET: &[u8] = b"test-invite-secret-32-bytes-long!!";
 
@@ -56,6 +62,8 @@ struct Fixture {
     sessions: Arc<SessionManagementServiceImpl>,
     invite: Arc<dyn InviteService>,
     authority_repo: Arc<MemoryBotRepo>,
+    legacy_friend: Arc<FakeFriendService>,
+    connect: Arc<FakeConnectService>,
 }
 
 impl Fixture {
@@ -65,10 +73,6 @@ impl Fixture {
         let bots = Arc::new(BotCore::memory());
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
-        let friend_requests = Arc::new(FriendRequestCore::memory(
-            friends.clone(),
-            bots.clone(),
-        ));
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             session_repo.clone(),
@@ -97,9 +101,11 @@ impl Fixture {
                 ),
             ),
         });
+        let legacy_friend = Arc::new(FakeFriendService::new());
+        let connect = Arc::new(FakeConnectService::new().with_legacy_source(legacy_friend.clone()));
         let service = InvitationFriendshipServiceImpl::new(
             friends.clone(),
-            friend_requests.clone(),
+            legacy_friend.clone(),
             groups.clone(),
             sessions.clone(),
             bots.clone(),
@@ -111,7 +117,8 @@ impl Fixture {
         )
         .with_bot_authority_hook(
             bcs_test_support::authority_hook_for(authority_repo.clone()),
-        );
+        )
+        .with_friend_connection_service(connect.clone());
         Self {
             service,
             groups,
@@ -120,43 +127,13 @@ impl Fixture {
             sessions,
             invite,
             authority_repo,
+            legacy_friend,
+            connect,
         }
-    }
-
-    /// Build a V1 facade backed by the fixture's cores but substituting a
-    /// custom `FriendRequestCoreService`. Used to exercise failure-propagation
-    /// paths (e.g. a store whose `try_list_requests` errors) without touching
-    /// the legacy default fixture wiring.
-    fn build_service(
-        &self,
-        friend_requests: Arc<dyn FriendRequestCoreService>,
-    ) -> InvitationFriendshipServiceImpl {
-        InvitationFriendshipServiceImpl::new(
-            self.friends.clone(),
-            friend_requests,
-            self.groups.clone(),
-            self.sessions.clone(),
-            self.bots.clone(),
-            self.invite.clone(),
-            SECRET.to_vec(),
-            InvitationFriendshipServiceConfig {
-                default_ttl_seconds: 3600,
-            },
-        )
-        .with_bot_authority_hook(
-            bcs_test_support::authority_hook_for(self.authority_repo.clone()),
-        )
     }
 
     async fn add_bot(&self, bot_uuid: &str) {
         self.add_bot_with_visibility(bot_uuid, "public").await;
-    }
-
-    /// Register a bot with `protected` visibility so friend requests targeting
-    /// it stay `Pending` (the core auto-accepts only when the target is
-    /// `public`).
-    async fn add_protected_bot(&self, bot_uuid: &str) {
-        self.add_bot_with_visibility(bot_uuid, "protected").await;
     }
 
     async fn add_bot_with_visibility(&self, bot_uuid: &str, visibility: &str) {
@@ -371,61 +348,6 @@ impl Fixture {
 
 fn assert_code(error: ApplicationError, expected: &str) {
     assert_eq!(error.code(), expected);
-}
-
-// ---------------------------------------------------------------------------
-// Stub [`FriendRequestCoreService`] whose `try_list_requests` always errors,
-// used to assert the V1 facade propagates persistence failures as
-// `ApplicationError::Internal` (HTTP 500) instead of a 200 empty page.
-// ---------------------------------------------------------------------------
-
-struct FailingListFriendRequestCore;
-
-#[async_trait]
-impl FriendRequestCoreService for FailingListFriendRequestCore {
-    async fn create_request(
-        &self,
-        _from_bot: &str,
-        _to_bot: &str,
-    ) -> ServiceResult<DomainFriendRequest> {
-        Err(ServiceError::InternalError("not configured".into()))
-    }
-
-    async fn accept_request(&self, _request_id: &str) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn reject_request(&self, _request_id: &str) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn get_request(&self, request_id: &str) -> ServiceResult<DomainFriendRequest> {
-        Err(ServiceError::FriendRequestNotFound(request_id.to_string()))
-    }
-
-    async fn list_requests(
-        &self,
-        _bot_id: &str,
-        _direction: DomainFriendRequestDirection,
-        _status_filter: Option<DomainFriendRequestStatus>,
-    ) -> Vec<DomainFriendRequest> {
-        Vec::new()
-    }
-
-    async fn try_list_requests(
-        &self,
-        _bot_id: &str,
-        _direction: DomainFriendRequestDirection,
-        _status_filter: Option<DomainFriendRequestStatus>,
-    ) -> ServiceResult<Vec<DomainFriendRequest>> {
-        Err(ServiceError::InternalError(
-            "simulated friend-request list failure".into(),
-        ))
-    }
-
-    async fn cancel_pending_requests(&self, _bot_id: &str) -> ServiceResult<usize> {
-        Ok(0)
-    }
 }
 
 // ── InvitationService ─────────────────────────────────────────────────
@@ -1271,14 +1193,14 @@ async fn list_friendships_does_not_use_authenticated_bot_owner_as_human() {
 }
 
 #[tokio::test]
-async fn remove_friendship_is_idempotent() {
+async fn delete_bot_friendship_uses_connect_revoke() {
+    // The V1 delete path is the connect `revoke_friend` call: `deleted` is
+    // "the connect revoke returned edge ids", not a legacy friendships-row
+    // delete.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.add_bot("bot-b").await;
-    fx.friends
-        .add_friendship("bot-a", "bot-b")
-        .await
-        .expect("add friendship");
+    fx.connect.add_friendship("bot-a", "bot-b");
 
     let first = fx
         .service
@@ -1288,7 +1210,7 @@ async fn remove_friendship_is_idempotent() {
             friend_bot_uuid: "bot-b".to_string(),
         })
         .await
-        .expect("remove friendship");
+        .expect("revoke friendship");
     assert!(first.deleted);
 
     let second = fx
@@ -1299,15 +1221,72 @@ async fn remove_friendship_is_idempotent() {
             friend_bot_uuid: "bot-b".to_string(),
         })
         .await
-        .expect("remove again");
-    assert!(!second.deleted);
+        .expect("revoke again");
+    assert!(!second.deleted, "the connect revoke returned no edge ids");
+
+    assert_eq!(
+        fx.connect.revoke_calls(),
+        vec![
+            ("bot-a".to_string(), "bot-b".to_string()),
+            ("bot-a".to_string(), "bot-b".to_string()),
+        ],
+    );
 }
 
 #[tokio::test]
-async fn create_friend_request_bot_self() {
+async fn delete_bot_friendship_allows_either_endpoint() {
+    // The contract allows either endpoint of the friendship to initiate the
+    // delete: bot-a (not manageable by staff-2) is the primary bot_uuid, so
+    // the facade falls back to the friend endpoint bot-b.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-c").await;
+    fx.add_bot("bot-b").await;
+    fx.connect.add_friendship("bot-a", "bot-b");
+
+    let deleted = fx
+        .service
+        .delete_bot_friendship(DeleteBotFriendship {
+            caller: Fixture::bot_principal("bot-b"),
+            bot_uuid: "bot-a".to_string(),
+            friend_bot_uuid: "bot-b".to_string(),
+        })
+        .await
+        .expect("the friend endpoint may manage the pair");
+    assert!(deleted.deleted);
+    assert_eq!(
+        fx.connect.revoke_calls(),
+        vec![("bot-a".to_string(), "bot-b".to_string())],
+    );
+}
+
+#[tokio::test]
+async fn delete_bot_friendship_rejects_unmanaged_endpoints() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+    fx.add_bot("bot-x").await;
+
+    let error = fx
+        .service
+        .delete_bot_friendship(DeleteBotFriendship {
+            caller: Fixture::bot_principal("bot-x"),
+            bot_uuid: "bot-a".to_string(),
+            friend_bot_uuid: "bot-b".to_string(),
+        })
+        .await
+        .expect_err("neither endpoint is manageable");
+    assert_eq!(error.code(), "forbidden");
+    assert!(
+        fx.connect.revoke_calls().is_empty(),
+        "the control leg must run before the connect revoke",
+    );
+}
+
+#[tokio::test]
+async fn create_friend_request_forwards_facade_command_and_projects_result() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-c").await;
 
     let request = fx
         .service
@@ -1315,21 +1294,32 @@ async fn create_friend_request_bot_self() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
 
+    assert_eq!(request.request_id, "req-1");
     assert_eq!(request.from_bot_uuid, "bot-a");
     assert_eq!(request.to_bot_uuid, "bot-c");
     assert_eq!(request.status, FriendRequestStatus::Pending);
-    assert!(request.request_id.len() > 0);
-    let _ = request.message; // optional field present (None)
+    assert_eq!(request.message, None);
+    assert!(request.created_at > 0);
+    // The legacy facade is called with the path Bot as the caller.
+    assert_eq!(
+        fx.legacy_friend.calls(),
+        vec![FriendCall::Create {
+            caller_actor_id: "bot-a".to_string(),
+            to_bot: "bot-c".to_string(),
+        }],
+    );
 }
 
 #[tokio::test]
 async fn create_friend_request_cannot_add_self() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
+    fx.legacy_friend.fail_create_with(ServiceError::CannotAddSelf);
 
     let error = fx
         .service
@@ -1337,6 +1327,7 @@ async fn create_friend_request_cannot_add_self() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-a".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("cannot add self");
@@ -1348,16 +1339,13 @@ async fn create_friend_request_cannot_add_self() {
 async fn create_friend_request_duplicate_is_conflict() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-c").await;
-
-    fx.service
-        .create_bot_friend_request(CreateBotFriendRequest {
-            caller: Fixture::bot_principal("bot-a"),
-            bot_uuid: "bot-a".to_string(),
-            to_bot_uuid: "bot-c".to_string(),
-        })
-        .await
-        .expect("first request");
+    fx.add_bot("bot-c").await;
+    fx.legacy_friend
+        .fail_create_with(ServiceError::PendingRequestExists {
+            request_id: "req-existing".to_string(),
+            from_bot: Some("bot-a".to_string()),
+            to_bot: Some("bot-c".to_string()),
+        });
 
     let error = fx
         .service
@@ -1365,10 +1353,15 @@ async fn create_friend_request_duplicate_is_conflict() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
         })
         .await
-        .expect_err("duplicate conflict");
+        .expect_err("duplicate pending request");
 
+    assert!(
+        matches!(error, ApplicationError::Conflict { .. }),
+        "expected Conflict, got {error:?}",
+    );
     assert_code(error, "friend_request_already_exists");
 }
 
@@ -1376,6 +1369,8 @@ async fn create_friend_request_duplicate_is_conflict() {
 async fn create_friend_request_unknown_target_is_not_found() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
+    fx.legacy_friend
+        .fail_create_with(ServiceError::BotNotFound("bot-ghost".to_string()));
 
     let error = fx
         .service
@@ -1383,39 +1378,139 @@ async fn create_friend_request_unknown_target_is_not_found() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-ghost".to_string(),
+            request_auth: None,
         })
         .await
         .expect_err("unknown target bot");
 
+    assert!(
+        matches!(error, ApplicationError::NotFound { .. }),
+        "expected NotFound, got {error:?}",
+    );
     assert_code(error, "bot_not_found");
+}
+
+#[tokio::test]
+async fn create_friend_request_hidden_target_is_forbidden() {
+    // A hidden target is an authorization failure, not an unknown target: the
+    // connect service reports `BotHidden` and the V1 mapping must surface 403.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.legacy_friend
+        .fail_create_with(ServiceError::BotHidden("bot-b".to_string()));
+
+    let error = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("hidden target is forbidden");
+
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_code(error, "forbidden");
+}
+
+#[tokio::test]
+async fn create_maps_private_bot_cannot_collaborate_to_forbidden() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-c").await;
+    fx.legacy_friend
+        .fail_create_with(ServiceError::PrivateBotCannotCollaborate);
+
+    let error = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("private caller cannot collaborate");
+
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(
+        error.to_string(),
+        format!("forbidden: {}", ServiceError::PrivateBotCannotCollaborate),
+    );
+}
+
+#[tokio::test]
+async fn create_maps_facade_forbidden_to_forbidden() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-c").await;
+    fx.legacy_friend
+        .forbid_create("target refuses friend requests");
+
+    let error = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-c".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("facade-level Forbidden");
+
+    assert!(matches!(error, ApplicationError::Forbidden(_)));
+    assert_code(error, "forbidden");
 }
 
 #[tokio::test]
 async fn list_friend_requests_direction_filter_and_sort() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-b").await;
-    fx.add_protected_bot("bot-c").await;
+    fx.add_bot("bot-b").await;
+    fx.add_bot("bot-c").await;
 
-    fx.service
-        .create_bot_friend_request(CreateBotFriendRequest {
-            caller: Fixture::bot_principal("bot-a"),
-            bot_uuid: "bot-a".to_string(),
-            to_bot_uuid: "bot-b".to_string(),
-        })
-        .await
-        .expect("a -> b");
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    fx.service
-        .create_bot_friend_request(CreateBotFriendRequest {
-            caller: Fixture::bot_principal("bot-a"),
-            bot_uuid: "bot-a".to_string(),
-            to_bot_uuid: "bot-c".to_string(),
-        })
-        .await
-        .expect("a -> c");
+    // The legacy facade returns repo order (unsorted); the V1 projection must
+    // sort `created_at` DESC with a `request_id` ASC tie-breaker.
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "req-old".to_string(),
+        from_bot: "bot-a".to_string(),
+        to_bot: "bot-b".to_string(),
+        status: FriendRequestStatus::Pending,
+        created_at: 100,
+        updated_at: 100,
+    });
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "req-new".to_string(),
+        from_bot: "bot-a".to_string(),
+        to_bot: "bot-c".to_string(),
+        status: FriendRequestStatus::Accepted,
+        created_at: 300,
+        updated_at: 300,
+    });
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "req-mid".to_string(),
+        from_bot: "bot-a".to_string(),
+        to_bot: "bot-b".to_string(),
+        status: FriendRequestStatus::Pending,
+        created_at: 200,
+        updated_at: 200,
+    });
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "req-tie".to_string(),
+        from_bot: "bot-a".to_string(),
+        to_bot: "bot-c".to_string(),
+        status: FriendRequestStatus::Pending,
+        created_at: 300,
+        updated_at: 300,
+    });
 
-    // bot-a's sent: two requests, newest first (bot-c before bot-b).
     let sent = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
@@ -1428,16 +1523,38 @@ async fn list_friend_requests_direction_filter_and_sort() {
         })
         .await
         .expect("list sent");
-    assert_eq!(sent.total, 2);
-    assert_eq!(sent.items[0].to_bot_uuid, "bot-c");
-    assert_eq!(sent.items[1].to_bot_uuid, "bot-b");
 
-    // bot-b's received: one request.
+    assert_eq!(sent.total, 4);
+    let ids: Vec<&str> = sent.items.iter().map(|r| r.request_id.as_str()).collect();
+    // created_at DESC; request_id ASC on the created_at tie.
+    assert_eq!(ids, vec!["req-new", "req-tie", "req-mid", "req-old"]);
+    // `accepted` stays the V1 word for the connect `approved` state.
+    assert_eq!(sent.items[0].status, FriendRequestStatus::Accepted);
+    assert_eq!(sent.items[1].status, FriendRequestStatus::Pending);
+
+    // Status filter and direction are forwarded to the legacy facade.
+    let accepted = fx
+        .service
+        .list_bot_friend_requests(ListBotFriendRequests {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            direction: FriendRequestDirection::Sent,
+            status: Some(FriendRequestStatus::Accepted),
+            offset: 0,
+            limit: 100,
+        })
+        .await
+        .expect("list accepted");
+    assert_eq!(accepted.total, 1);
+    assert_eq!(accepted.items[0].request_id, "req-new");
+    assert_eq!(accepted.items[0].status, FriendRequestStatus::Accepted);
+
+    // Received lists the inbox of the queried Bot.
     let received = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
-            caller: Fixture::bot_principal("bot-b"),
-            bot_uuid: "bot-b".to_string(),
+            caller: Fixture::bot_principal("bot-c"),
+            bot_uuid: "bot-c".to_string(),
             direction: FriendRequestDirection::Received,
             status: None,
             offset: 0,
@@ -1445,10 +1562,15 @@ async fn list_friend_requests_direction_filter_and_sort() {
         })
         .await
         .expect("list received");
-    assert_eq!(received.total, 1);
-    assert_eq!(received.items[0].from_bot_uuid, "bot-a");
+    assert_eq!(received.total, 2);
+    assert!(
+        received
+            .items
+            .iter()
+            .all(|request| request.from_bot_uuid == "bot-a"),
+    );
 
-    // Pagination: first page of size 1 returns only the newest.
+    // offset/limit slice the sorted list.
     let paged = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
@@ -1456,29 +1578,70 @@ async fn list_friend_requests_direction_filter_and_sort() {
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
             status: None,
-            offset: 0,
-            limit: 1,
+            offset: 1,
+            limit: 2,
         })
         .await
-        .expect("list sent paged");
-    assert_eq!(paged.total, 2);
-    assert_eq!(paged.items.len(), 1);
-    assert_eq!(paged.items[0].to_bot_uuid, "bot-c");
+        .expect("list paged");
+    assert_eq!(paged.total, 4);
+    let ids: Vec<&str> = paged.items.iter().map(|r| r.request_id.as_str()).collect();
+    // Sorted order is [req-new, req-tie, req-mid, req-old]; offset 1 skips the
+    // newest row.
+    assert_eq!(ids, vec!["req-tie", "req-mid"]);
+
+    // The facade forwarded the exact caller/direction/status, not defaults.
+    let lists: Vec<(String, DomainFriendRequestDirection, Option<FriendRequestStatus>)> = fx
+        .legacy_friend
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            FriendCall::List {
+                caller_actor_id,
+                direction,
+                status,
+            } => Some((caller_actor_id, direction, status)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        lists,
+        vec![
+            (
+                "bot-a".to_string(),
+                DomainFriendRequestDirection::Sent,
+                None,
+            ),
+            (
+                "bot-a".to_string(),
+                DomainFriendRequestDirection::Sent,
+                Some(FriendRequestStatus::Accepted),
+            ),
+            (
+                "bot-c".to_string(),
+                DomainFriendRequestDirection::Received,
+                None,
+            ),
+            (
+                "bot-a".to_string(),
+                DomainFriendRequestDirection::Sent,
+                None,
+            ),
+        ],
+    );
 }
 
 #[tokio::test]
-async fn list_bot_friend_requests_propagates_repo_failure_as_internal() {
-    // When the friend-request store's `try_list_requests` fails, the V1 facade
-    // must surface the failure as `ApplicationError::Internal` (HTTP 500)
-    // rather than masking it as an empty 200 page (the legacy `list_requests`
-    // swallowing behavior).
+async fn list_bot_friend_requests_propagates_facade_failure_as_internal() {
+    // A legacy list failure must surface as `ApplicationError::Internal`
+    // (HTTP 500), never as a silently-empty 200 page.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
+    fx.legacy_friend.fail_list_with(ServiceError::InternalError(
+        "simulated friend-request list failure".into(),
+    ));
 
-    let failing: Arc<dyn FriendRequestCoreService> = Arc::new(FailingListFriendRequestCore);
-    let service = fx.build_service(failing);
-
-    let error = service
+    let error = fx
+        .service
         .list_bot_friend_requests(ListBotFriendRequests {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
@@ -1488,7 +1651,7 @@ async fn list_bot_friend_requests_propagates_repo_failure_as_internal() {
             limit: 10,
         })
         .await
-        .expect_err("list must propagate repo failure");
+        .expect_err("list must propagate the facade failure");
     assert!(
         matches!(error, ApplicationError::Internal(_)),
         "expected ApplicationError::Internal, got {error:?}",
@@ -1500,7 +1663,7 @@ async fn list_bot_friend_requests_propagates_repo_failure_as_internal() {
 async fn accept_friend_request_receiver_ok() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-b").await;
+    fx.add_bot("bot-b").await;
 
     let created = fx
         .service
@@ -1508,6 +1671,7 @@ async fn accept_friend_request_receiver_ok() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1517,19 +1681,90 @@ async fn accept_friend_request_receiver_ok() {
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("receiver accepts");
 
-    assert_eq!(accepted.status, FriendRequestStatus::Accepted);
     assert_eq!(accepted.request_id, created.request_id);
+    assert_eq!(accepted.from_bot_uuid, "bot-a");
+    assert_eq!(accepted.to_bot_uuid, "bot-b");
+    assert_eq!(accepted.status, FriendRequestStatus::Accepted);
+    assert_eq!(accepted.created_at, created.created_at);
+    assert!(
+        accepted.updated_at > created.created_at,
+        "the decision stamps updated_at",
+    );
+
+    // The decision is forwarded with the resolved receiver as the caller.
+    assert!(
+        fx.legacy_friend.calls().contains(&FriendCall::Accept {
+            caller_actor_id: "bot-b".to_string(),
+            request_id: created.request_id.clone(),
+            request_to_bot: Some("bot-b".to_string()),
+        }),
+        "calls: {:?}",
+        fx.legacy_friend.calls(),
+    );
+    assert_eq!(
+        fx.legacy_friend.status_of(&created.request_id),
+        Some(FriendRequestStatus::Accepted),
+    );
+}
+
+#[tokio::test]
+async fn accept_friend_request_decided_read_failure_is_internal() {
+    // The decision itself succeeds, but the connect-store read-back of the
+    // decided row fails: per `decided_friend_request` this is a server
+    // inconsistency, so the caller gets an internal error, never a 404 — and
+    // the decision must NOT be rolled back.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    let created = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("create request");
+    fx.connect
+        .fail_get_with(ServiceError::InternalError("connect store read is down".into()));
+
+    let error = fx
+        .service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: created.request_id.clone(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("unreadable decided request must surface as an internal error");
+    assert_code(error, "internal_error");
+    assert!(
+        matches!(
+            fx.legacy_friend.calls().last(),
+            Some(FriendCall::Accept { .. })
+        ),
+        "calls: {:?}",
+        fx.legacy_friend.calls(),
+    );
+    assert_eq!(
+        fx.legacy_friend.status_of(&created.request_id),
+        Some(FriendRequestStatus::Accepted),
+        "the decision already landed even though the read-back failed",
+    );
 }
 
 #[tokio::test]
 async fn accept_friend_request_non_receiver_forbidden() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-b").await;
+    fx.add_bot("bot-b").await;
     fx.add_bot("bot-c").await;
 
     let created = fx
@@ -1538,6 +1773,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1546,19 +1782,31 @@ async fn accept_friend_request_non_receiver_forbidden() {
         .service
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-c"),
-            request_id: created.request_id,
+            request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect_err("non-receiver forbidden");
 
     assert!(matches!(error, ApplicationError::Forbidden(_)));
+    // The control leg runs before the mutation: nothing was decided.
+    assert!(
+        !fx.legacy_friend
+            .calls()
+            .iter()
+            .any(|call| matches!(call, FriendCall::Accept { .. })),
+    );
+    assert_eq!(
+        fx.legacy_friend.status_of(&created.request_id),
+        Some(FriendRequestStatus::Pending),
+    );
 }
 
 #[tokio::test]
 async fn accept_friend_request_cannot_accept_rejected() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-b").await;
+    fx.add_bot("bot-b").await;
 
     let created = fx
         .service
@@ -1566,6 +1814,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1574,6 +1823,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("reject first");
@@ -1582,19 +1832,50 @@ async fn accept_friend_request_cannot_accept_rejected() {
         .service
         .accept_friend_request(AcceptFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
-            request_id: created.request_id,
+            request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
-        .expect_err("cannot accept rejected");
+        .expect_err("cannot accept a rejected request");
 
+    assert!(
+        matches!(error, ApplicationError::Conflict { .. }),
+        "expected Conflict, got {error:?}",
+    );
     assert_code(error, "conflict");
+    assert_eq!(
+        fx.legacy_friend.status_of(&created.request_id),
+        Some(FriendRequestStatus::Rejected),
+    );
+}
+
+#[tokio::test]
+async fn accept_friend_request_unknown_id_is_not_found() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-b").await;
+
+    let error = fx
+        .service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: "req-missing".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect_err("unknown request id");
+
+    assert!(
+        matches!(error, ApplicationError::NotFound { .. }),
+        "expected NotFound, got {error:?}",
+    );
+    assert_code(error, "friend_request_not_found");
 }
 
 #[tokio::test]
 async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_protected_bot("bot-b").await;
+    fx.add_bot("bot-b").await;
 
     let created = fx
         .service
@@ -1602,6 +1883,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
             caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
         })
         .await
         .expect("create request");
@@ -1612,6 +1894,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-a"),
             request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect_err("sender cannot reject");
@@ -1621,11 +1904,22 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
         .service
         .reject_friend_request(RejectFriendRequest {
             caller: Fixture::bot_principal("bot-b"),
-            request_id: created.request_id,
+            request_id: created.request_id.clone(),
+            request_auth: None,
         })
         .await
         .expect("receiver rejects");
+    assert_eq!(rejected.request_id, created.request_id);
     assert_eq!(rejected.status, FriendRequestStatus::Rejected);
+    assert!(
+        fx.legacy_friend.calls().contains(&FriendCall::Reject {
+            caller_actor_id: "bot-b".to_string(),
+            request_id: created.request_id.clone(),
+            request_to_bot: Some("bot-b".to_string()),
+        }),
+        "calls: {:?}",
+        fx.legacy_friend.calls(),
+    );
 }
 
 #[tokio::test]
@@ -1636,6 +1930,7 @@ async fn friendship_page_shape_is_identity_projected() {
     fx.add_bot("bot-a").await;
     fx.add_bot("bot-b").await;
     fx.friends.add_friendship("bot-a", "bot-b").await.unwrap();
+    fx.connect.add_friendship("bot-a", "bot-b");
 
     let page: Page<Friendship> = fx
         .service
@@ -1652,7 +1947,7 @@ async fn friendship_page_shape_is_identity_projected() {
     assert_eq!(page.items[0].friend_bot_uuid, "bot-b");
     assert!(page.items[0].created_at > 0);
 
-    // DeleteResult + FriendRequest are reachable and shaped as expected.
+    // DeleteResult is reachable and shaped as expected.
     let del = fx
         .service
         .delete_bot_friendship(DeleteBotFriendship {
@@ -1681,12 +1976,12 @@ struct FriendListConnect {
 
 #[async_trait]
 impl bcs_service_api::application::connect::ConnectService for FriendListConnect {
-    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
-    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
+    async fn approve(&self, _: &str, _: &str, _: Option<RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { unreachable!() }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { unreachable!() }
     async fn get_request(&self, _: &str) -> ServiceResult<bcs_domain::edge_permission::PermissionRequest> { unreachable!() }
-    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn list_requests(&self, _: &str, _: bcs_service_api::application::connect::RequestDirection, _: Option<bcs_domain::edge_permission::RequestStatus>, _: u32, _: u32) -> ServiceResult<bcs_service_api::application::connect::RequestsPage> { unreachable!() }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
         panic!("V1 must not fetch the full friend list")
@@ -1766,4 +2061,126 @@ async fn friend_connections_propagate_read_errors_and_count_overflow() {
         }).await.unwrap_err();
         assert_eq!(error.code(), "internal_error");
     }
+}
+
+/// F2: the V1 friendship commands forward the caller's inbound principal to
+/// the legacy `FriendService` facade (and from there to the connect use case),
+/// so downstream owner notifications authenticate as the acting human. It is
+/// transport context only — the wire contract is unchanged.
+#[tokio::test]
+async fn friendship_commands_forward_the_inbound_request_auth() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    let create_auth = RequestAuthHeaders {
+        authorization: Some("Bearer user-token".to_string()),
+        cookie: Some("session=abc".to_string()),
+        forwarded_headers: vec![(
+            "x-avernet-principal".to_string(),
+            "principal-token".to_string(),
+        )],
+    };
+    let created = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: Some(create_auth.clone()),
+        })
+        .await
+        .expect("create request");
+
+    let accept_auth = RequestAuthHeaders {
+        authorization: Some("Bearer owner-token".to_string()),
+        cookie: None,
+        forwarded_headers: Vec::new(),
+    };
+    fx.service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: created.request_id.clone(),
+            request_auth: Some(accept_auth.clone()),
+        })
+        .await
+        .expect("receiver accepts");
+
+    let second = fx
+        .service
+        .create_bot_friend_request(CreateBotFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            to_bot_uuid: "bot-b".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("second create request");
+    let reject_auth = RequestAuthHeaders {
+        authorization: Some("Bearer another-owner-token".to_string()),
+        cookie: None,
+        forwarded_headers: Vec::new(),
+    };
+    fx.service
+        .reject_friend_request(RejectFriendRequest {
+            caller: Fixture::bot_principal("bot-b"),
+            request_id: second.request_id.clone(),
+            request_auth: Some(reject_auth.clone()),
+        })
+        .await
+        .expect("receiver rejects");
+
+    assert_eq!(
+        fx.legacy_friend.request_auths(),
+        vec![
+            ("create", Some(create_auth)),
+            ("accept", Some(accept_auth)),
+            ("create", None),
+            ("reject", Some(reject_auth)),
+        ],
+        "the V1 commands must forward request_auth verbatim to the facade"
+    );
+}
+
+/// F4 regression: deciding a Bot↔Bot reverse pending row (from/to flipped,
+/// `created_by == from_id` false) is legal and the mutation already happened.
+/// The V1 response must come from the connect store, not from the legacy
+/// facade listing — that listing drops the reverse row and used to turn a
+/// successful decision into a 500.
+#[tokio::test]
+async fn accept_reverse_row_returns_decided_request_without_facade_listing() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    // The reverse row of a Bot↔Bot connect: B→A, created by A.
+    fx.legacy_friend.seed(DomainFriendRequest {
+        id: "reverse-1".to_string(),
+        from_bot: "bot-b".to_string(),
+        to_bot: "bot-a".to_string(),
+        status: FriendRequestStatus::Pending,
+        created_at: 900,
+        updated_at: 900,
+    });
+    fx.legacy_friend.hide_from_listing("reverse-1");
+
+    let accepted = fx
+        .service
+        .accept_friend_request(AcceptFriendRequest {
+            caller: Fixture::bot_principal("bot-a"),
+            request_id: "reverse-1".to_string(),
+            request_auth: None,
+        })
+        .await
+        .expect("deciding the reverse row must not fail after the mutation");
+
+    assert_eq!(accepted.request_id, "reverse-1");
+    assert_eq!(accepted.from_bot_uuid, "bot-b");
+    assert_eq!(accepted.to_bot_uuid, "bot-a");
+    assert_eq!(accepted.status, FriendRequestStatus::Accepted);
+    assert_eq!(accepted.created_at, 900);
+    assert!(
+        accepted.updated_at > accepted.created_at,
+        "the decision stamps updated_at"
+    );
 }

@@ -90,6 +90,40 @@ async fn inline_card_uses_the_same_validation_without_fetching_or_executing() {
 }
 
 #[tokio::test]
+async fn non_loopback_http_interfaces_follow_outbound_network_policy() {
+    use bcs_a2a_http::card_fetch::guarded_client;
+    use bcs_service_api::types::a2a_bot::{http_interface_address_allowed, select_a2a_interface};
+    for binding in ["HTTP+JSON", "JSONRPC"] {
+        for scheme in ["http", "https"] {
+            for (address, private) in [("1.1.1.1", false), ("10.0.0.1", true)] {
+                let url = format!("{scheme}://{address}:9000/a2a");
+                let mut raw: serde_json::Value = serde_json::from_str(&card()).unwrap();
+                raw["supportedInterfaces"][0]["url"] = json!(url);
+                raw["supportedInterfaces"][0]["protocolBinding"] = json!(binding);
+                for block_private in [false, true] {
+                    let guard = OutboundUrlGuard::new(block_private, false);
+                    let fetcher = HttpA2aCardFetcher::new(guard.clone(), vec![]);
+                    let admitted = fetcher.validate(raw.clone(), false).await;
+                    let derived = select_a2a_interface(&raw, |_, url|
+                        http_interface_address_allowed(url) && guard.validate_configured_http_url(url).is_ok());
+                    // Client construction checks addresses but makes no request.
+                    let client = guarded_client(&guard, &url).await;
+                    let allowed = !(private && block_private);
+                    assert_eq!(admitted.is_ok(), allowed, "{url}, block_private={block_private}");
+                    assert_eq!(derived.is_ok(), allowed);
+                    assert_eq!(client.is_ok(), allowed);
+                    if allowed {
+                        let admitted = admitted.unwrap();
+                        assert_eq!(admitted.interface, derived.unwrap());
+                        assert_eq!(admitted.raw, raw);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn explicit_registration_accepts_cache_control_and_jsonrpc_interfaces() {
     let mut raw:serde_json::Value=serde_json::from_str(&card()).unwrap();
     raw["supportedInterfaces"][0]["protocolBinding"]=json!("JSONRPC");

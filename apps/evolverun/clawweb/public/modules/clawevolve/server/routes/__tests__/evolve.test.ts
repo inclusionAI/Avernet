@@ -4189,6 +4189,22 @@ describe("ClawEvolve step protocol", () => {
     expect(String(result.body.error)).toContain("尚未产生 Bench");
   });
 
+  it("preserves optional diagnosis source session identity through report and detail", async () => {
+    const { body } = await createDiagnosis();
+    const step = (body.steps as Array<{ stepId: string }>)[0];
+    const output = diagnoseOutput() as unknown as { cases: { items: Array<Record<string, unknown>> } };
+    Object.assign(output.cases.items[0], {
+      sourceSessionId: "historical-source-id",
+      sourceSessionKey: "agent:main:session:historical-source:user:example",
+    });
+    const result = await callback(String(body.task_id), step.stepId, { status: "succeeded", output });
+    expect(result.response.status).toBe(200);
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/${String(body.task_id)}`);
+    expect(response.status).toBe(200);
+    const task = await response.json() as { steps: Array<{ stepId: string; output: unknown }> };
+    expect(task.steps.find((item) => item.stepId === step.stepId)?.output).toEqual(output);
+  });
+
   it("rejects Bench run references from Diagnose output", async () => {
     const { body } = await createDiagnosis();
     const step = (body.steps as Array<{ stepId: string }>)[0];

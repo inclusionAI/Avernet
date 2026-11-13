@@ -24,7 +24,7 @@ use super::*;
         );
     }
     #[tokio::test]
-    async fn human_bot_connect_does_not_writeback() {
+    async fn human_bot_connect_writebacks_for_legacy_reader() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:api", "public", "public", "OPEN", "online", Some("85020")).await;
         let recorder = Arc::new(RecordingWriteback::default());
@@ -36,9 +36,10 @@ use super::*;
             .expect("human connect");
 
         assert_eq!(result.status, ConnectStatus::Approved);
-        assert!(
-            recorder.calls().is_empty(),
-            "Human→Bot edges are out of writeback scope"
+        assert_eq!(
+            recorder.calls(),
+            vec!["add:human_1:x:api".to_string()],
+            "Human→Bot decisions must reach the legacy relation reader"
         );
     }
     #[tokio::test]

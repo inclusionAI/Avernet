@@ -1,3 +1,4 @@
+import { effectResumeDispatchExpired } from "./effect-resume.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { logRepairEvent, repairLogError } from "../common/logging.js";
 import { simulationReadTools, type RecoverySimulationAssessment } from "./simulation.js";
@@ -20,6 +21,8 @@ import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-sha
 import { SessionRecoveryError } from "./errors.js";
 import { parseOwnerHandoffContent } from "./validation.js";
 import { RecoverySessionReader } from "./session-reader.js";
+import { redactSessionReadEvidence } from "./session-argument-evidence.js";
+import { bootstrapEvidence } from "./bootstrap-evidence.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
@@ -27,17 +30,24 @@ import { hasAssessmentDelivery, ownerContinuationState } from "./owner-cooperati
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import { RECOVERY_OWNER_REQUEST_REASONS, type RecoveryAssessment, type RecoveryStoredTask, type RecoveryTaskStore, type RecoveryJudgment, type RecoveryPlan } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
   return { ...redactEvidenceValue(body) as Record<string, unknown>,
     requestDigest: createHash("sha256").update(comparableRequestPayload(body)).digest("hex") };
 }
-export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
+function recoveryTargetFingerprint(target: ResolvedBotTarget, ignorePublishVersion = false): string {
+  const runtimeIdentity = ignorePublishVersion && target.runtimeIdentity
+    ? { ...target.runtimeIdentity, version: undefined }
+    : target.runtimeIdentity;
   const identity = [target.environment, target.ownerId, target.botId, target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null];
-  if (target.deviceUuid || target.runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(target.runtimeIdentity ?? null));
-  const fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  if (target.deviceUuid || runtimeIdentity) identity.push(target.deviceUuid ?? null, target.providerDeviceId ?? null, JSON.stringify(runtimeIdentity ?? null));
+  return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
+export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
+  const fingerprint = recoveryTargetFingerprint(target);
   return { version: 1, fingerprint, reason: "task_created", target: { ...target, environment: target.environment as "pre" | "prod",
     botType: target.botType === "service" ? "service" : "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
 }
@@ -118,9 +128,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       throw error;
     }
     const beforeDispatch = await this.required(task.taskId);
+    const autoResume = Boolean(task.effectResumeSlot && task.effectResumeSlot.lastExecutionNo === undefined);
     if (beforeDispatch.status === "canceled") {
-      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id); return;
+      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id, autoResume);
+      return;
     }
+    if (effectResumeDispatchExpired(beforeDispatch, this.now())) {
+      await this.release(beforeDispatch);
+      await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", retryable: false, errorCode: "EFFECT_RESUME_DISPATCH_EXPIRED",
+        expectedStep: { status: "created", output_json: null } });
+      return;
+    }
+    // Persist the dispatch boundary so a restart followed by cancellation can distinguish an unstarted Step.
+    if (autoResume && !await this.deps.tasks.claimEffectResumeDispatch?.(contract.stepId)) return;
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
         ...(task.simulation ? { simulation: true } : {}),
@@ -156,25 +176,36 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId, task.request.target.entity_id);
     else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId, task.request.target.entity_id);
   }
-  async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
+  async release(input: RecoveryStoredTask, requestedByAgent = false): Promise<void> {
     const task = await this.required(input.taskId);
     const owner = resolveTaskControlPlaneEnvironment(task);
     if (owner && owner !== this.deps.controlPlaneEnvironment) return;
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
     await this.save(task, value => {
-      if (onlyWaitingOwner && value.status !== "waiting_owner") fail(409, "Owner 已确认，请继续当前任务");
+      if (requestedByAgent) {
+        const canRelease = value.status === "waiting_owner" || (value.status === "running"
+          && (value.phase === "observe" || value.phase === "verify" || (value.phase === "assess" && value.cronWait)));
+        if (!canRelease || value.status !== input.status || value.phase !== input.phase) {
+          fail(409, "任务阶段或等待状态已变化，请刷新任务后继续");
+        }
+      }
       return { ...value, execution: this.executions.end(value.execution!),
         timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] };
     }, task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
   }
+  async effectResumeJobEnded(jobId: string): Promise<boolean> {
+    const remote = await this.deps.ais.getJobStatusDetail(jobId);
+    return remote.status !== "running" && remote.rawStatus !== "notfound";
+  }
   async listExecutions(taskId: string): Promise<RecoveryExecutionView[]> {
     const steps = await this.deps.repo.listSteps(taskId);
     return steps.filter(step => step.step_type === "agent_execution").flatMap(step => {
       const executionId = JSON.parse(step.ext_json ?? "{}").executionId;
       if (typeof executionId !== "string") return [];
-      const cancellation = JSON.parse(step.bot_response_json ?? "{}").evolve_cancel;
+      const cancellation = step.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH" ? { status: "remote_stopped" as const }
+        : JSON.parse(step.bot_response_json ?? "{}").evolve_cancel;
       return [{ executionId, attempt: -step.step_no, status: step.status, jobId: step.bot_run_id,
         jobUrl: step.bot_run_id ? this.deps.ais.jobUrl?.(step.bot_run_id) ?? null : null,
         ...(cancellation?.status === "remote_stopped" || cancellation?.status === "remote_stop_failed"
@@ -190,7 +221,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const stepId = task.aisExecution?.stepId;
     const step = stepId ? await this.deps.repo.findStep(stepId) : null;
     const jobId = task.execution?.jobId ?? step?.bot_run_id ?? null;
-    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId, task.request.target.entity_id) : { status: "stop_pending" as const, aisJobId: null };
+    const slot = task.effectResumeSlot;
+    const isAutoResumeStep = Boolean(slot && step && -step.step_no >= slot.firstExecutionNo && -step.step_no <= (slot.lastExecutionNo ?? Infinity));
+    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId, task.request.target.entity_id, isAutoResumeStep)
+      : { status: "stop_pending" as const, aisJobId: null };
     // Retain interrupted writes as unknown; cancellation never claims to roll back a dispatched operation.
     for (;;) {
       const calls = await this.deps.audit.listActiveToolCalls(task.taskId, 500);
@@ -211,12 +245,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return termination;
   }
-  private async stopTerminatedExecution(stepId: string, jobId: string | null, userId: string): Promise<RecoveryTermination> {
+  private async stopTerminatedExecution(stepId: string, jobId: string | null, userId: string, autoResume = false): Promise<RecoveryTermination> {
     const step = await this.deps.repo.findStep(stepId);
+    if (step?.error_code === "RECOVERY_TERMINATED_BEFORE_DISPATCH") return { status: "remote_stopped", aisJobId: null };
     if (step && !["succeeded", "failed", "canceled"].includes(step.status)) {
-      await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
-        errorCode: "RECOVERY_TERMINATED_BY_USER", errorMessage: "用户停止本次自愈任务",
-        expectedStep: { status: step.status, output_json: step.output_json } });
+      const beforeDispatch = autoResume && step.status === "created" && !jobId && !step.bot_run_id;
+      const canceled = await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
+        errorCode: beforeDispatch ? "RECOVERY_TERMINATED_BEFORE_DISPATCH" : "RECOVERY_TERMINATED_BY_USER",
+        errorMessage: "用户停止本次自愈任务", expectedStep: { status: step.status, output_json: step.output_json } });
+      if (canceled && beforeDispatch) return { status: "remote_stopped", aisJobId: null };
     }
     if (!jobId) return { status: "stop_pending", aisJobId: null };
     let status: "remote_stopped" | "remote_stop_failed" = "remote_stopped";
@@ -256,8 +293,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return calls.length < 500; // Continue settling a larger ledger on the next maintenance pass.
   }
-  async verify(taskId: string, executionId: string, ticket: string, control = false): Promise<RecoveryStoredTask> {
-    const task = await this.required(taskId);
+  async verify(taskId: string, executionId: string, ticket: string, control = false, forBootstrap = false): Promise<RecoveryStoredTask> {
+    const task = await this.required(taskId, forBootstrap);
     if (!control && task.status === "canceled") fail(409, "任务已停止");
     if (!task.execution || task.execution.executionId !== executionId) fail(401, "执行身份已失效");
     try {
@@ -269,7 +306,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, sessionReadCoverage, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
       && typeof (event.payload.result as Record<string, unknown> | undefined)?.initial_message === "boolean");
@@ -281,9 +318,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         sessionReadCoverage: boundedSessionReadCoverage(sessionReadCoverage ?? []),
         timeline: timeline.map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id,
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
-        evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
+        evidence: bootstrapEvidence(business.evidence, trajectoryIndexReads),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerCooperationReasons: RECOVERY_OWNER_REQUEST_REASONS, ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -344,7 +381,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         ? message.content.filter((part: { type?: string; text?: string }) => part?.type === "text" && typeof part.text === "string").map((part: { text: string }) => part.text).join("\n") : "";
       return content.includes(marker) ? [{ message_id: record.id ?? record.uuid ?? null, line_no: item.line_no, text: content }] : [];
     });
-    return redactEvidenceValue({ ...evidence, delivery: matches[0] ?? null, delivery_confirmed: matches.length > 0, delivery_matches: matches }) as Record<string, unknown>;
+    return redactSessionReadEvidence({ ...evidence, delivery: matches[0] ?? null, delivery_confirmed: matches.length > 0, delivery_matches: matches }, task.request.target.engine === "CC");
   }
   async trajectoryRead(task: RecoveryStoredTask, body: Record<string, unknown>) {
     if (!this.deps.trajectory) fail(503, "轨迹读取未配置");
@@ -365,13 +402,24 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const call = sent ? await this.deps.audit.findToolCall(String(sent.payload.tool_call_id)) : null;
       const receipt = call?.taskId === task.taskId && call.toolName === "retry_message" ? call.result as Record<string, unknown> : undefined;
       const startedAt = receipt?.dry_run !== true && typeof receipt?.started_at_ms === "number" ? receipt.started_at_ms : undefined;
+      const sentMessage = task.request.target.engine === "TE" && typeof receipt?.message === "string" ? receipt.message : undefined;
+      const diagnosisTraceId = task.simulation ? undefined : task.request.trace_id;
+      const notBeforeMs = startedAt ?? (diagnosisTraceId ? task.timeline.find(event => event.kind === "created")?.at_ms : undefined);
+      const ocAssessmentEvidence = !task.simulation && task.phase === "assess"
+        && task.request.target.engine === "OC" && startedAt === undefined;
+      const faultAtMs = ocAssessmentEvidence && body.trace_id === undefined ? task.request.fault_at_ms : undefined;
       const result = await this.deps.trajectory!.read({ target: task.runtimeTarget?.target ?? this.logicalTarget(task),
         sessionKey: task.request.session_key, offset: Number(offset), limit: Number(limit), traceId: body.trace_id as string | undefined, maxBytes: 128 * 1024,
         observationId: body.observation_id as string | undefined, field: body.field as "input" | "output" | undefined,
         contentOffset: body.content_offset as number | undefined, contentLimit: body.content_limit as number | undefined,
+        ...(ocAssessmentEvidence ? { ocAssessmentEvidence } : {}),
+        ...(faultAtMs === undefined ? {} : { faultAtMs }),
         ...(task.simulation ? { until: { atMs: task.simulation.cutoffAtMs, traceId: task.simulation.cutoffNode.traceId,
           observationId: task.simulation.cutoffNode.observationId, sessionId: this.originalSessionId(task) } } : {}),
-        ...(!task.simulation && startedAt !== undefined ? { messageMarker: `[会话自愈：${deliveryKey}]\n`, notBeforeMs: startedAt } : {}) });
+        ...(!task.simulation && startedAt !== undefined ? {
+          messageMarker: `[会话自愈：${deliveryKey}]\n`, ...(sentMessage !== undefined ? { sentMessage } : {}),
+        } : {}),
+        ...(!task.simulation && notBeforeMs !== undefined ? { notBeforeMs } : {}) });
       if (Buffer.byteLength(JSON.stringify(result), "utf8") > 128 * 1024) {
         throw new SessionRecoveryError(422, "recovery_trajectory_page_too_large", "轨迹页过大，请缩小读取范围；正文使用 field 和 content_offset 分段读取");
       }
@@ -379,7 +427,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
-      return { ...result, delivery_key: this.latestDeliveryKey(task) };
+      return { ...result, delivery_key: this.latestDeliveryKey(task), ...(diagnosisTraceId ? { diagnosis_trace_id: diagnosisTraceId } : {}) };
     });
   }
   async inspect(task: RecoveryStoredTask, body: Record<string, unknown>) {
@@ -464,7 +512,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
-      if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, messageTargetChange(task.runtimeTarget!.target, currentTarget));
+      const frozen = task.runtimeTarget!;
+      let deliveryTarget: ResolvedBotTarget = frozen.target;
+      if (recoveryTargetFingerprint(currentTarget) !== frozen.fingerprint) {
+        const versionChanged = currentTarget.runtimeIdentity?.version !== frozen.target.runtimeIdentity?.version;
+        if (!initial || task.phase !== "assess" || task.request.target.runtime_identity?.version || !versionChanged
+          || recoveryTargetFingerprint(currentTarget, true) !== recoveryTargetFingerprint(frozen.target, true)) {
+          fail(409, messageTargetChange(frozen.target, currentTarget));
+        }
+        deliveryTarget = { ...frozen.target, runtimeIdentity: currentTarget.runtimeIdentity };
+      }
       const cronId = task.request.target.engine === "OC" ? cronJobId(task.request.session_key) : undefined;
       if (cronId) {
         const state = await new BotEngineOperations(this.deps.runtime).execute(task.runtimeTarget!.target, { method: "GET", path: "/api/cron/running" }, false)
@@ -487,7 +544,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const startedAt = this.now();
       const message = `${marker}\n${body.message}`;
       markDispatched();
-      const receipt = await this.deps.runtime.sendMessage({ target: task.runtimeTarget!.target, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
+      const receipt = await this.deps.runtime.sendMessage({ target: deliveryTarget, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
         deliveryKey: key, messageMarker: marker, message }).catch(() => ({ status: "unknown" as const }));
       return { ...receipt, session_key: deliverySessionKey, delivery_key: key, message, initial_message: initial,
         ...(ownerRequest ? { owner_request_id: ownerRequest.requestId } : {}), started_at_ms: startedAt, finished_at_ms: this.now() };
@@ -564,7 +621,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");
         if (handoff && request.instructions !== undefined && request.instructions !== handoff.instructions) fail(422, "Owner 处理事项有冲突，请统一使用 handoff.instructions");
-        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as typeof RECOVERY_OWNER_REQUEST_REASONS[number], instructions: handoff?.instructions ?? request.instructions as string,
+        await this.deps.business().requestOwner(task.taskId, task.version, { reason: request.reason as "permission", instructions: handoff?.instructions ?? request.instructions as string,
           summary: handoff?.summary ?? body.summary as string, ...(handoff ? { reportSummary: body.summary as string } : {}), evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
         return { ok: true };
       }
@@ -764,7 +821,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const source = task.timeline.find(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.session_id);
     return source ? String((source.payload.result as Record<string, unknown>).session_id) : undefined;
   }
-  private async required(id: string) { const task = await this.deps.tasks.find(id); if (!task) fail(404, "自愈任务不存在"); return task; }
+  private async required(id: string, forBootstrap = false) {
+    const task = await this.deps.tasks.find(id, { forBootstrap });
+    if (!task) fail(404, "自愈任务不存在"); return task;
+  }
   private async save(task: RecoveryStoredTask, change: (value: RecoveryStoredTask) => RecoveryStoredTask, executionId?: string) {
     for (let attempt = 0; attempt < 5; attempt++) {
       if (executionId && task.execution?.executionId !== executionId) return task;

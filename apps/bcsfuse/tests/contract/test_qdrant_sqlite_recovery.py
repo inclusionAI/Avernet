@@ -1,5 +1,7 @@
 """Local Qdrant keeps durable records, keyword policy and explicit write errors."""
 
+from tests.qdrant_support import server_options
+
 import pytest
 
 from app.domain.models.vector_point import VectorPoint
@@ -10,7 +12,7 @@ from app.infra.public.vectorstores.qdrant_sqlite_vector_store import (
 
 def test_restart_recovers_dense_keyword_and_worker_state(tmp_path):
     path = str(tmp_path / "vectors.sqlite")
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    store = QdrantSQLiteVectorStore(**server_options(path), dimension=2, db_path=path)
     store.upsert(
         [
             VectorPoint(
@@ -35,7 +37,7 @@ def test_restart_recovers_dense_keyword_and_worker_state(tmp_path):
     )
     assert store.update_payload_by_worker("a", {"runtime_state": "offline"}) == 1
     store.close()
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    store = QdrantSQLiteVectorStore(**server_options(path), dimension=2, db_path=path)
     try:
         assert [
             h.id for h in store.text_search("支付", 2, {"runtime_state": "online"})
@@ -49,7 +51,11 @@ def test_restart_recovers_dense_keyword_and_worker_state(tmp_path):
 
 
 def test_failed_durable_write_does_not_update_index(tmp_path, monkeypatch):
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=str(tmp_path / "db"))
+    store = QdrantSQLiteVectorStore(
+        **server_options(str(tmp_path / "db")),
+        dimension=2,
+        db_path=str(tmp_path / "db"),
+    )
 
     def fail(*args):
         raise RuntimeError("write failed")
@@ -67,7 +73,7 @@ def test_failed_index_write_is_reported_and_recovered_from_sqlite(
     tmp_path, monkeypatch
 ):
     path = str(tmp_path / "db")
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    store = QdrantSQLiteVectorStore(**server_options(path), dimension=2, db_path=path)
 
     def fail(*args, **kwargs):
         raise RuntimeError("index failed")
@@ -79,7 +85,9 @@ def test_failed_index_write_is_reported_and_recovered_from_sqlite(
         )
     assert store.get("a") is not None
     store.close()
-    restored = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    restored = QdrantSQLiteVectorStore(
+        **server_options(path), dimension=2, db_path=path
+    )
     try:
         assert restored.search([1.0, 0.0], 1)[0].id == "a"
         assert restored.text_search("支付", 1)[0].id == "a"
@@ -89,7 +97,7 @@ def test_failed_index_write_is_reported_and_recovered_from_sqlite(
 
 def test_delete_profile_removes_all_owned_fragments_and_survives_restart(tmp_path):
     path = str(tmp_path / "db")
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    store = QdrantSQLiteVectorStore(**server_options(path), dimension=2, db_path=path)
     records = [
         ("w", "p", "full"),
         ("w", "p", "skills:1"),
@@ -115,7 +123,9 @@ def test_delete_profile_removes_all_owned_fragments_and_survives_restart(tmp_pat
         }
     finally:
         store.close()
-    restored = QdrantSQLiteVectorStore(dimension=2, db_path=path)
+    restored = QdrantSQLiteVectorStore(
+        **server_options(path), dimension=2, db_path=path
+    )
     try:
         assert set(restored.get_vector_ids()) == {"w:other:full", "w:nested:p:full"}
     finally:
@@ -125,7 +135,11 @@ def test_delete_profile_removes_all_owned_fragments_and_survives_restart(tmp_pat
 def test_corrupt_snapshot_fails_before_modifying_current_data(tmp_path):
     import sqlite3
 
-    store = QdrantSQLiteVectorStore(dimension=2, db_path=str(tmp_path / "live.db"))
+    store = QdrantSQLiteVectorStore(
+        **server_options(str(tmp_path / "live.db")),
+        dimension=2,
+        db_path=str(tmp_path / "live.db"),
+    )
     try:
         store.upsert(
             [VectorPoint(id="keep", vector=[1.0, 0.0], payload={"content": "支付"})]
@@ -145,7 +159,9 @@ def test_empty_file_is_not_an_empty_snapshot_and_self_backup_is_rejected(tmp_pat
     import sqlite3
 
     store = QdrantSQLiteVectorStore(
-        dimension=2, db_path=str(tmp_path / "vector_embeddings.sqlite")
+        **server_options(str(tmp_path / "vector_embeddings.sqlite")),
+        dimension=2,
+        db_path=str(tmp_path / "vector_embeddings.sqlite"),
     )
     try:
         store.upsert([VectorPoint(id="keep", vector=[1.0, 0.0])])

@@ -32,6 +32,12 @@ jobs:
     name: Singlebox coverage
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 6333:6333
+          - 6334:6334
     env:
       CI: "true"
       OCB_SKIP_GIT_HOOKS: "1"
@@ -42,6 +48,9 @@ jobs:
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
+      QDRANT_MODE: server
+      QDRANT_URL: http://127.0.0.1:6333
+      QDRANT_GRPC_PORT: "6334"
       # PR: compare against the checked-out merge commit's exact base tree.
       # push compares the pushed range; manual dispatch compares against dev.
       SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.event_name == 'push' && github.event.before || 'origin/dev') }}
@@ -96,13 +105,17 @@ jobs:
             apps/backend \
             apps/baas \
             apps/bcs \
+            apps/bcsfuse \
             engine/adapter \
             apps/frontend \
             .github/workflows/singlebox-coverage.yml > "$changed_file_list"; then
             echo "Unable to diff singlebox change range ${base_ref}..${GITHUB_SHA}" >&2
             exit 1
           fi
-          mapfile -d '' -t files < "$changed_file_list"
+          files=()
+          while IFS= read -r -d '' file; do
+            files+=("$file")
+          done < "$changed_file_list"
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -200,24 +213,6 @@ jobs:
           npm install -g openclaw@2026.6.1
           openclaw --version || true
 
-      - name: Cache Cargo registry and git
-        if: steps.changes.outputs.skip != 'true'
-        uses: actions/cache@v4
-        with:
-          # Registry/git fetch only. NOT apps/bcs/target: the instrumented
-          # build under target/cov-e2e/llvm-cov-target is force-rebuilt every
-          # run (BCS_COVERAGE_FORCE_REBUILD=1) so coverage always reflects
-          # the pushed source; caching those artifacts would risk stale
-          # coverage across commits.
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-singlebox-${{ hashFiles('apps/bcs/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-singlebox-
-            ${{ runner.os }}-cargo-e2e-
-            ${{ runner.os }}-cargo-
-
       - name: Cache instrumented BCS target
         if: steps.changes.outputs.skip != 'true'
         uses: Swatinem/rust-cache@v2
@@ -264,10 +259,16 @@ jobs:
         run: |
           uv run --project apps/backend python -m pytest -q \
             singlebox/ci/tests/test_singlebox_companion_coverage.py \
+            singlebox/ci/tests/test_singlebox_coverage_workflow.py \
             singlebox/ci/tests/test_singlebox_e2e_phases.py \
             singlebox/ci/tests/test_singlebox_parallel_pipeline.py \
             singlebox/ci/tests/test_singlebox_acceptance_orchestration.py \
-            singlebox/ci/tests/test_merge_junit_reports.py
+            singlebox/ci/tests/test_merge_junit_reports.py \
+            singlebox/ci/tests/test_bcs_panel_asset.py
+
+      - name: Wait for Qdrant
+        if: steps.changes.outputs.skip != 'true'
+        run: curl --retry 20 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:6333/readyz
 
       - name: Run singlebox coverage
         if: steps.changes.outputs.skip != 'true'
@@ -318,4 +319,5 @@ jobs:
             apps/bcs/target/cov-e2e/endpoint_coverage.txt
             apps/bcs/target/cov-e2e/cli_command_coverage.txt
             singlebox/.dependencies/coverage/singlebox/reports/phase-timings.tsv
+            !**/node_modules/**
           if-no-files-found: ignore

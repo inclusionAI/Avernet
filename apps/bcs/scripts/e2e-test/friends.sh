@@ -14,9 +14,11 @@ E2E_TESTS_FRIENDS=(
 # Tests
 # ============================================================================
 
-# Public bot: friend request is auto-accepted — just verify they become friends.
+# Public bot: friend requests are pending-by-default (edge-permission connect
+# convergence, dima 2026110600120400669) — the target accepts the request and
+# the friendship then appears on the legacy friend list.
 test_friend_auto_accept_public() {
-    info "Friends: add public bot as friend (auto-accept)"
+    info "Friends: add public bot as friend (request then accept)"
     # 研发 should be public (default visibility from singlebox 5bots_profile)
     api_post "/friends/request" "{\"from_bot\":\"$BOT_CEO_UUID\",\"to_bot\":\"$BOT_ENG_UUID\"}"
     if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "201" ]; then
@@ -27,6 +29,20 @@ test_friend_auto_accept_public() {
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    # Accept the pending request on the target side. Idempotent: a replayed
+    # "Already friends" response carries no request id, so there is nothing
+    # to accept; a replayed "already pending" response echoes the existing
+    # pending id, which the accept below settles.
+    local request_id
+    request_id=$(echo "$RESPONSE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print((d.get('data') or {}).get('id', ''))
+" 2>/dev/null || true)
+    if [ -n "$request_id" ] && [ "$request_id" != "None" ]; then
+        api_post "/friends/requests/$request_id/accept" '{}'
+        assert_eq "accept friend request returns 200" "$HTTP_STATUS" "200"
+    fi
     # Verify they are friends
     api_get "/bots/$BOT_CEO_UUID/friends"
     assert_eq "list CEO friends returns 200" "$HTTP_STATUS" "200"
@@ -165,8 +181,9 @@ test_friend_flow_via_cli() {
         skip_case "no PM token for accept step"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return 77
     fi
 
-    # 1) CEO requests friendship with PM (idempotent if already friends; standalone
-    #    auto-accepts). 'request' subcommand prints "Friend request sent ...".
+    # 1) CEO requests friendship with PM (idempotent if already friends).
+    #    Pending-by-default: the request stays pending until PM accepts.
+    #    'request' subcommand prints "Friend request sent ...".
     bcs_cli CEO friend request --bot-uuid "$BOT_PM_UUID" >/dev/null 2>&1 \
         || warn "friend request returned $BCS_CLI_EXIT (may already exist)"
 
@@ -177,9 +194,12 @@ test_friend_flow_via_cli() {
         fail "friend requests did not return a request list"
         TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
     fi
-    # Extract a request id to drive accept: "(id: <uuid>)".
+    # Extract the PENDING CEO→PM request id to drive accept: "(id: <uuid>)".
+    # Older decided rows may share the inbox (decision/list timestamps collide
+    # at second precision), so anchor on the pending row — accepting a settled
+    # row is an idempotent no-op that would leave the pending request open.
     local rid
-    rid="$(printf '%s' "$BCS_CLI_STDOUT" | grep -oE '\(id: [a-f0-9-]+\)' | head -1 | sed 's/(id: //;s/)//')"
+    rid="$(printf '%s' "$BCS_CLI_STDOUT" | grep -E "${BOT_CEO_UUID} → ${BOT_PM_UUID} \[pending\]" | grep -oE '\(id: [a-f0-9-]+\)' | head -1 | sed 's/(id: //;s/)//')"
 
     # 3) PM accepts the request (covers 'accept'). Accept is idempotent — accepting
     #    an already-accepted request still returns "✓ Friend request accepted".
@@ -191,7 +211,7 @@ test_friend_flow_via_cli() {
     fi
 
     # 4) CEO lists friends (covers 'list'). Primary assertion: PM is in CEO's
-    #    friend list (standalone auto-accepts, so the friendship exists).
+    #    friend list (PM accepted the pending request above).
     bcs_cli CEO friend list >/dev/null 2>&1 || true
     if _cli_contains "$BCS_CLI_STDOUT" "$BOT_PM_UUID"; then
         pass "friend flow via CLI ok (request/requests/accept/list)"

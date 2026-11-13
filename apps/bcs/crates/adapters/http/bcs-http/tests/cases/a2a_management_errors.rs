@@ -635,6 +635,10 @@ impl bcs_service_api::A2aChatRunService for Runs {
 
 #[tokio::test]
 async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fields() {
+    assert_named_chat_and_run_routes("").await;
+}
+
+async fn assert_named_chat_and_run_routes(prefix: &str) {
     use bcs_service_api::{BotCapabilities, BotRegistryCoreService};
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(bcs_bot::BotCore::with_base_dir(dir.path().to_path_buf()));
@@ -657,10 +661,10 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
             .a2a_chat_runs(Arc::new(Runs))
             .build_for_test(),
     ));
-    let path = "/a2a/providers/orders/bots/remote/chat-async";
+    let path = format!("{prefix}/a2a/providers/orders/bots/remote/chat-async");
     let response = app
         .clone()
-        .oneshot(request("POST", path, r#"{"message":"hello"}"#))
+        .oneshot(request("POST", &path, r#"{"message":"hello"}"#))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -675,7 +679,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
         .clone()
         .oneshot(request(
             "GET",
-            &format!("/a2a/chat/runs/{run}?since_version=3"),
+            &format!("{prefix}/a2a/chat/runs/{run}?since_version=3"),
             Body::empty(),
         ))
         .await
@@ -696,7 +700,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
         .clone()
         .oneshot(request(
             "POST",
-            &format!("/a2a/chat/runs/{run}/cancel"),
+            &format!("{prefix}/a2a/chat/runs/{run}/cancel"),
             Body::empty(),
         ))
         .await
@@ -708,7 +712,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
     assert_eq!(result["version"], 5);
     assert!(!result.to_string().contains(PRIVATE));
     let response = app
-        .oneshot(request("POST", path, r#"{"message":"reject"}"#))
+        .oneshot(request("POST", &path, r#"{"message":"reject"}"#))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);

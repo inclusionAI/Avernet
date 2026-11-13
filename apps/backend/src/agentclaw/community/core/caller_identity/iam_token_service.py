@@ -129,7 +129,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
                 return CallerIamTokenOutcome(iam_token=iam_token)
 
-            if context.shared_teclaw_runtime and stage is CallerIdentityStage.ONLINE:
+            if context.shared_teclaw_runtime:
                 return await self._refresh_shared_teclaw(
                     iam_token=iam_token, caller_user_id=identity.staffId,
                     bot_id=bot_id, owner_id=context.owner_id, entity_id=context.entity_id,
@@ -245,9 +245,6 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         except RuntimeBindingResolutionError:
             logger.warning("caller_shared_target_rejected fields=%s reason=target_unavailable", fields)
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from None
-        if target.source is not RuntimeBindingSource.SERVICE_ONLINE:
-            logger.warning("caller_shared_target_rejected fields=%s reason=unexpected_source", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
         fields.update(binding_id=target.binding_id, source=target.source.value)
         logger.info("caller_shared_target_selected fields=%s", fields)
         validation = dict(
@@ -260,22 +257,12 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             iam_token=iam_token, caller_user_id=caller_user_id,
             bot_id=bot_id, owner_user_id=owner_id, token_provider=self._token_provider,
         )
-        try:
-            current = await asyncio.to_thread(self._runtime_bindings.resolve, request)
-        except RuntimeBindingResolutionError:
-            logger.warning("caller_shared_target_rejected fields=%s reason=target_unavailable_after_exchange", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND) from None
-        # COSEC: never install a credential into a publication selected after signing.
-        if current != target:
-            logger.warning("caller_shared_target_rejected fields=%s reason=target_changed", fields)
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-        await asyncio.to_thread(self._session_validator.validate_owned_shared_session, **validation)
-        logger.info("caller_shared_target_fenced fields=%s", fields)
         await self._exchange_target(
             iam_token=iam_token, caller_user_id=caller_user_id, bot_id=bot_id,
             owner_id=owner_id, stage=stage, publish_id=publish_id, entity_id=entity_id,
             binding_id=target.binding_id, is_test_exchange=False,
-            caller_token=caller_token, session_key=session_key,
+            caller_token=caller_token,
+            session_key=session_key,
         )
         logger.info("caller_shared_target_refresh_succeeded fields=%s", fields)
         return CallerIamTokenOutcome(iam_token=iam_token)

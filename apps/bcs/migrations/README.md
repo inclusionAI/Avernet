@@ -111,6 +111,55 @@ The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
 added after the baseline as `002_xxx.sql`, `003_xxx.sql`, and so on.
 
+## Legacy friend request cutover
+
+The friend HTTP compatibility facade and V1 routes use the same edge-permission
+ConnectService. Friend membership comes from active default-profile grants in
+`edge_grants`; request reads and decisions use `permission_requests`. There is
+no legacy-table fallback and no automatic friendship/request ETL at startup.
+Legacy-only friendships do not appear in these lists; existing edge friendships
+and new-store request history are unchanged.
+
+Legacy `bcs_friend_requests` rows are left untouched but are no longer visible
+or actionable. Old pending request IDs return not-found on lookup/accept/reject;
+users must send new requests. An old pending row does not block a fresh request
+between the same actors. Old notifications/links must not be advertised as
+resumable requests after cutover.
+
+This switch requires **no additional schema migration or field widening** on
+the existing chain (MySQL through 045; SQLite through 043). The requester
+confirmed the existing env/creator/decider lengths suffice and explicitly
+confirmed the PR's proposed MySQL 046 / SQLite 044 had not been executed on
+retained databases, authorizing their removal. Only those two PR migrations
+are withdrawn; earlier bodies, names and checksums remain unchanged. There is
+no startup scan requiring legacy request coverage.
+
+Rollout order:
+
+1. Stop/drain every old friend-request writer before switching the instances.
+2. Deploy the new binary on the existing current schema. No feature flag,
+   additional cutover SQL or manual legacy ETL is required.
+3. Verify old request IDs fail, new requests can be created/decided, and both
+   route families list the same edge-owned relationships.
+4. Do not roll back to an old request writer without a separate reconciliation
+   plan: it could expose abandoned old pending requests and miss new decisions.
+
+If a retained database unexpectedly already records either withdrawn migration,
+stop and review a database-specific recovery plan; do not erase history, reuse
+records or automatically narrow columns. Disposable draft/test databases may be
+rebuilt. This source change executes no cleanup against any existing database.
+
+The remaining collaboration consumers still use friendship/relation mirrors;
+Connect continues its existing reverse writeback for those consumers, not as a
+list source or a way to resume legacy requests. Retiring every legacy consumer
+is outside this cutover.
+
+Evidence: `crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs`
+checks unchanged history and no request import; the real SQLite bootstrap/HTTP
+case in `crates/bootstrap/bcs/tests/integration_friend_cutover.rs` covers old
+requests, new decisions, mirror-independent lists, revocation and restart.
+See the [change specification](../specs/2026-11-11-edge-friend-cutover/spec.md).
+
 ## Bot authority generated columns (MySQL/OceanBase 036)
 
 The explicitly requested OceanBase compatibility correction keeps
@@ -710,3 +759,14 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
 - **Re-login after restore.** Rolling forward or back invalidates
   pre-upgrade sid-less sessions in both directions; after restoring the
   fixed writers + `[api.auth]`, users re-login through the new chain.
+
+## Group Context presets
+
+SQLite `044_group_context_preset.sql` and MySQL/OceanBase
+`mysql/046_group_context_preset.sql` add the Group preset definitions and the
+`created_from_preset` flag on context versions. Existing contexts read as `false`.
+Apply remote DDL before starting the new server. SQLite applies its migration
+during startup.
+
+The preset table uses an auto-increment primary key, a unique Group/name pair,
+and creation and modification timestamps.

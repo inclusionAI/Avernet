@@ -32,6 +32,7 @@ pub mod lifecycle;
 mod managers;
 mod ownership_sync;
 mod reads;
+mod reads_ownerships;
 mod transfers;
 mod transfers_support;
 
@@ -41,8 +42,8 @@ use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_service_api::{ServiceError, ServiceResult};
 use tracing::warn;
 
-/// Authority read/write granularity: at most this many ids may be
-/// bound into one collection statement.
+/// Authority read/write granularity: at most this many distinct identities
+/// per collection statement (an indexed prefilter may bind each ID twice).
 pub(super) const CHUNK: usize = 128;
 
 /// DB-backed authority Store (bot-authority plan Task 1).

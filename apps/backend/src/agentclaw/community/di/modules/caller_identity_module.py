@@ -40,7 +40,6 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
-from agentclaw.community.core.repository.protocols.chat import ExpertChatRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
 from agentclaw.community.core.caller_identity.iam_token_service import (
@@ -140,11 +139,9 @@ class CallerIdentityModule(Module):
     def caller_session_validator(
         self, binding_repository: DeviceBindingRepository,
         runtime_bindings: RuntimeBindingResolutionService,
-        chat_repository: ExpertChatRepository,
     ) -> CallerSessionValidator:
         return CallerSessionValidator(
             binding_repository=binding_repository, runtime_bindings=runtime_bindings,
-            chat_repository=chat_repository,
         )
 
     @singleton

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.qdrant_support import server_connection
+
 from dataclasses import dataclass, field
 from threading import Event, Thread
 from uuid import uuid4
@@ -92,6 +94,7 @@ def _point(point_id: str, content: str, *, worker_id: str = "worker-1") -> Vecto
 
 def _store(backend: FakePersistenceBackend, tmp_path) -> QdrantMySQLVectorStore:
     return QdrantMySQLVectorStore(
+        connection=server_connection(),
         collection_name=f"durable-vector-test-{uuid4().hex}",
         qdrant_path=str(tmp_path / "qdrant"),
         dimension=3,

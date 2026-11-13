@@ -33,6 +33,9 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         created_by: "human_1".into(),
         decided_by: None,
         decided_at: None,
+        // DB-managed on insert; conformance only reads the DB-projected values.
+        created_at: 0,
+        updated_at: 0,
     };
     repo.insert(req).await.expect("insert request");
 
@@ -48,27 +51,27 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
 
     // list_inbox — visible without filter, filterable by status.
     assert_eq!(
-        repo.list_inbox("bot_1", env, None).await.len(),
+        repo.list_inbox("bot_1", env, None).await.expect("request listing").len(),
         1,
         "inbox has the one pending request"
     );
     assert_eq!(
         repo.list_inbox("bot_1", env, Some(RequestStatus::Pending))
-            .await
+            .await.expect("request listing")
             .len(),
         1,
         "inbox filter Pending matches"
     );
     assert_eq!(
         repo.list_inbox("bot_1", env, Some(RequestStatus::Approved))
-            .await
+            .await.expect("request listing")
             .len(),
         0,
         "inbox filter Approved matches nothing yet"
     );
     // Inbox isolation: a different recipient sees nothing.
     assert!(
-        repo.list_inbox("bot_other", env, None).await.is_empty(),
+        repo.list_inbox("bot_other", env, None).await.expect("request listing").is_empty(),
         "inbox is per recipient"
     );
 

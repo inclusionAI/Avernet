@@ -97,6 +97,11 @@ environment. Supported values and validation live in `di/profile.py`.
 YAML files live under `src/agentclaw/community/configs/`, not a module-root
 `configs/` directory. Do not resurrect mode selection in domain services.
 
+`boot.py` sets `AGENTCLAW_CONFIG_PATH` before router imports to the first
+`configs/application.yaml` found under the working directory, then the source
+tree. OpenClaw reads that path during import, so this bootstrap must stay ahead
+of the router imports.
+
 `agentclaw` is a PEP 420 namespace. An enterprise superproject supplies a separate
 `agentclaw.corp` source root and registers implementations at its composition
 root. Public code must remain importable without that package or private SDKs.
@@ -147,6 +152,17 @@ DEPLOY_PROFILE=test uv run --no-sync pytest tests/community/architecture -q
 # Full Backend CI, including its coverage gate and reports
 bash scripts/ci_test.sh
 ```
+
+GitHub runs this same gate in
+[`backend-unit-tests.yml`](../../.github/workflows/backend-unit-tests.yml) as the
+stable `Backend unit tests` job. That dedicated workflow watches only Backend
+sources (`apps/backend/`), the Legacy Skill entrypoint
+(`singlebox/ci/legacy_skill_compatibility.sh`) and its own workflow file. It has
+no `on.paths` filter: for every matching `pull_request`/`push` event the
+workflow and its `Backend unit tests` job are created, the detection step runs,
+and only the setup/test/upload steps are skipped when no Backend-relevant path
+changed. In that case the detection job reports success, so a BCS-only edit to
+the shared `unit-tests.yml` does not run full Backend tests.
 
 For a changed HTTP interface, run the existing fast gate before review/PR:
 

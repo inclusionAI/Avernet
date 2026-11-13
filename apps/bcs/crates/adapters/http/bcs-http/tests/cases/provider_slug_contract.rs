@@ -54,6 +54,40 @@ async fn register(app: &App, slug: Value, mode: &str, version: &str) -> Value {
 }
 
 #[tokio::test]
+async fn a2a_default_owner_create_patch_readback_and_permissions() {
+    let app=app();
+    let (status,created)=request(&app,"POST","/providers",None,json!({
+        "name":"Default owner", "slug":"owner-config", "auth":{"mode":"static_bearer"},
+        "protocol_version":"2.0", "a2a":{"default_owner":"410025"}
+    })).await;
+    assert_eq!(status,StatusCode::OK,"{created}");
+    let path=format!("/providers/{}",created["provider_id"].as_str().unwrap());
+    let token=created["provider_admin_token"].as_str().unwrap();
+    let read=request(&app,"GET",&path,Some(token),Value::Null).await;
+    assert_eq!(read.0,StatusCode::OK);assert_eq!(read.1["a2a"]["default_owner"],"410025");
+    for body in [json!({"name":"Renamed"}),json!({"a2a":{}})] {
+        assert_eq!(request(&app,"PATCH",&path,Some(token),body).await.0,StatusCode::OK);
+        assert_eq!(request(&app,"GET",&path,Some(token),Value::Null).await.1["a2a"]["default_owner"],"410025");
+    }
+    for owner in [json!(""),json!(" 1"),json!("human_1"),json!("1\n2"),json!("x".repeat(129)),json!(42)] {
+        assert!(!request(&app,"PATCH",&path,Some(token),json!({"name":"Must not commit","a2a":{"default_owner":owner}})).await.0.is_success());
+        let (_,info)=request(&app,"GET",&path,Some(token),Value::Null).await;
+        assert_eq!(info["name"],"Renamed");assert_eq!(info["a2a"]["default_owner"],"410025");
+    }
+    assert!(!request(&app,"PATCH",&path,Some("wrong-token"),json!({"a2a":{"default_owner":"999"}})).await.0.is_success());
+    for owner in [json!("420031"),Value::Null] {
+        assert_eq!(request(&app,"PATCH",&path,Some(token),json!({"a2a":{"default_owner":owner}})).await.0,StatusCode::OK);
+        let (_,info)=request(&app,"GET",&path,Some(token),Value::Null).await;
+        assert_eq!(info["a2a"]["default_owner"],owner);assert_eq!(info["protocol_version"],"2.0");
+    }
+    let (_,public)=request(&app,"GET","/providers/by-slug/owner-config",None,Value::Null).await;
+    assert!(public.get("a2a").is_none());
+    let (status,_)=request(&app,"POST","/providers",None,json!({"name":"Invalid", "slug":"invalid-owner", "auth":{"mode":"static_bearer"},"a2a":{"default_owner":""}})).await;
+    assert!(!status.is_success());
+    assert_eq!(request(&app,"GET","/providers/by-slug/invalid-owner",None,Value::Null).await.0,StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn public_slug_lookup_returns_only_basic_info_for_all_auth_modes() {
     let app = app();
     for (slug, mode, version) in [("coding-one", "static_bearer", "1.0"),

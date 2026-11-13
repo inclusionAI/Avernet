@@ -33,7 +33,7 @@ impl Fixture {
             registry.clone()).with_bot_provider_repo(metadata));
         let relation = Arc::new(RelationCore::new());
         let management = ProviderManagement::new(core.clone(), core.clone(), registry.clone(), relation.clone());
-        let provider = management.register_provider(RegisterProviderCommand {
+        let provider = management.register_provider(RegisterProviderCommand { a2a: None,
             name: "Provider".into(), webhook_url: Some("https://provider.example.com/webhook".into()),
             auth_mode: ProviderAuthMode::StaticBearer, created_by: "alice".into(),
             caller_capabilities: None, collaboration_scope: None, slug: None, admin_callback_url: None,

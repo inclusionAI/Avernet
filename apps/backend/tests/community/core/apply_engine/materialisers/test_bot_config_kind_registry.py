@@ -59,15 +59,15 @@ def test_registry_returns_a_registered_handler():
 
 def test_registry_falls_back_to_the_noop_refusal_for_an_unregistered_kind():
     registry = BotConfigKindRegistry({})
-    handler = registry.resolve("task_nav")
+    handler = registry.resolve("no_such_kind")
     assert isinstance(handler, NoopBotConfigSyncHandler)
-    assert handler.kind == "task_nav"
+    assert handler.kind == "no_such_kind"
     outcome = handler.sync_kind(
         ctx=_ctx(), entries=[{"name": "x"}], is_empty=False,
     )
     assert outcome.ok is False
     assert outcome.entries[0][1] == "failed"
-    assert "task_nav" in outcome.entries[0][2]
+    assert "no_such_kind" in outcome.entries[0][2]
 
 
 def test_render_screen_handler_builds_rows_and_translates_the_service_result():

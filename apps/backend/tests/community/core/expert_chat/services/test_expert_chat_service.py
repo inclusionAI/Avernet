@@ -1,6 +1,9 @@
 """Tests for ExpertChatService."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call, patch
+from types import SimpleNamespace
+
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
 from agentclaw.community.core.expert_chat.errors import (
@@ -94,6 +97,30 @@ DEVICE_CONN = {
     "engine_type": "openclaw",
     "type": "local",  # 'local' or 'remote', comes from device service
 }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["no_success", "no_binding"])
+@pytest.mark.parametrize("operation", ["get", "connect"])
+async def test_unpublished_service_sessions_stop_before_device_work(
+    mock_repository, mock_bot_repo, mock_device_provider, missing, operation,
+):
+    svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+    bot = {**ACTIVE_BOT, "id": 17, "entity_id": "owner1", "bot_type": "service"}
+    mock_bot_repo.get_by_id_and_owner.return_value = bot
+    mock_repository.list_chat_bots.return_value = [{"bot_id": "bot1", "owner_id": "owner1"}]
+    mock_repository.get_owned_session.return_value = {"session_key": "s1"}
+    svc._publish_repository.list_by_source_bot.return_value = (
+        [] if missing == "no_success" else [SimpleNamespace(id=1, status="success", ext={"binding": {}})]
+    )
+    with pytest.raises(EngineStageNotLiveError):
+        if operation == "get":
+            await svc.get_chat_session("owner1", "bot1", "owner1")
+        else:
+            await svc.connect_chat_session("owner1", "bot1", "owner1", "s1")
+    svc._resolver.resolve_for_binding.assert_not_called()
+    svc._instance_service.get_caller_connection.assert_not_awaited()
+    mock_repository.save_session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

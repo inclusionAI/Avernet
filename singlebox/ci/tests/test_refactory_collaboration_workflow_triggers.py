@@ -4,6 +4,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TARGET_BRANCH = "dev_refactory_collaboration"
 WORKFLOW_PATHS = (
     REPO_ROOT / ".github/workflows/unit-tests.yml",
+    REPO_ROOT / ".github/workflows/backend-unit-tests.yml",
     REPO_ROOT / ".github/workflows/singlebox-coverage.yml",
     REPO_ROOT / ".github/workflows/architecture-checks.yml",
 )

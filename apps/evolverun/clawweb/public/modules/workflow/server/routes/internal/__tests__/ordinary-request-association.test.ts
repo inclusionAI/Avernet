@@ -18,7 +18,7 @@ const start = { type: 'ordinary-run-request.register.v1', flow_id: 'child', work
   ordinary_parent_flow_id: 'parent', params_json: '{"private":"secret"}', input_json: '{"n":1}', origin_bot_id: 'bot:owner' };
 async function fixture() {
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
-  raw.exec(`CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT NOT NULL, workflow_title TEXT,
+  raw.exec(`CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '', id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT NOT NULL, workflow_title TEXT,
     status TEXT NOT NULL, state_json TEXT, params_json TEXT, input_json TEXT, node_count INTEGER, triggered_by TEXT,
     identity_key TEXT, current_phase TEXT, started_at INTEGER, credentials_json TEXT, origin_session_key TEXT,
     origin_session_id TEXT, origin_bot_id TEXT, user_id TEXT, plugin_version TEXT, engine TEXT, workflow_version INTEGER,

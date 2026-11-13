@@ -1,54 +1,41 @@
 # TC 同实例读写切换与数据迁移
 
-> 2026-11-05：代码及本地同实例验证已完成，未部署或迁移线上数据。部署前仍须核对实际表结构、权限、模型与数据清单。
-
 ## 同一服务内的接口绑定
 
-同一套新部署的 TC 服务，在同一个服务地址提供旧 API 与新 `/api/v2` API。
-旧接口原路径和格式保持；新接口不是另一个实例的独立地址。
+TC 在同一个服务地址提供 V1 和 V2。V1 的查询、推荐、Fuse、资料和状态更新与 V2 共用
+Card/Doc 后端及索引更新任务。V1 继续使用原路径和返回格式。融合历史沿用原存储。
 
-| 接口 | 切换前 | 配置修改并重启后 |
-| --- | --- | --- |
-| 旧 search/recommend/Fuse 和资料/配置/状态读取 | 旧表及旧索引 | 新表及新索引 |
-| 旧 sync/online/offline/availability/config/DELETE 等更新 | 只更新旧表及旧索引 | 只更新新表及新索引 |
-| 新 API 的读取、查询和写入 | 只使用新表及新索引 | 仍只使用新表及新索引 |
+浏览器直连 TC 时，跨域来源由 `tc.cors_allowed_origins` 配置（完整的 Origin）。已有的
+`CORS_ALLOWED_ORIGINS` 环境变量仍可提供逗号分隔的正则表达式。
 
-TC 专属启动配置为 `BCSFUSE_TC_V1_STORAGE=legacy|card`，默认 legacy，修改后重启生效。
-它一次选择旧接口整套数据、状态、配置和索引后端。新 API 不读取此配置。
-不接受仅切索引的旧配置作为别名，不做混合优先读取、缺失回查、自动搬迁或双写。
-card 模式两套 API 共用一套新服务和索引加工任务，不再初始化旧资料/状态/向量仓储；融合历史仍使用原权威存储。配置非法或目标失败不能自动回退。
+旧后端源码归档在 [archive/legacy-tc](../archive/legacy-tc/)。
+迁移期的双后端方案见 [原迁移设计](../../specs/2026-11-04-tc-bcsfuse-card-migration/spec.md)。
 
 ## 新接口与正式导入入口
 
 复用现有公共 `/api/v2/agent-cards/{id}` 的 PUT/GET/DELETE 和 index-status，显式绑定 TC 新服务。
+单卡重建使用 `POST /api/v2/agent-cards/{id}/rebuild`，请求体为 `{"index_key":"<当前 Card 的 index-status 返回值>"}`。
+接口发布该 Card 的新 Doc，Qdrant 由现有索引同步更新。Card 资料和版本保持原值。
+TC 与支付宝共用 Qdrant Server 原生 BM25：名称和正文使用 multilingual 分词，名称三字符片段由 Whoosh 标准分词器生成，单独使用 BM25 评分，取最佳字段分数，不追加自定义权重。TC 不再追加名称前缀或查询侧同义词；Card 的 `domains` 仍作为明确提供的资料参与检索。关键词和向量继续并行召回，再走已有 RRF/可选精排。Python Local 不支持这套分词，明确报错；本地开发使用 Qdrant Server >=1.20。
+关键词与向量继续并行召回，RRF 合并后按配置精排。名称与片段信息不修改 embedding 或 rerank 输入。
+已有 Doc 缺少独立 `name` 字段，需要用已有重建能力重新生成 Doc 并等待本地索引应用。可以沿用当前 `index_key`，但仅重启或重放旧 Doc 不会补齐名称；只有重建过的 Card 获得完整的新能力。不要把局部重建当作全量生效。
 `/api/v2/search`、`/api/v2/recommend` 固定查询 TC 新索引。
 TC 仅补 GET/PUT `/api/v2/workers/{id}/config`，沿用已有配置请求/响应并固定保存新配置。
 状态和 availability 通过新 Card 字段更新，不复制整套 v2 sync/online/Fuse 路由。
 
-正式迁移脚本读取权威旧资料，构造规范 Card 后调用新 API；切换前不能用旧 sync 导入新表。
+正式迁移脚本读取权威旧资料，构造规范 Card 后调用新 API。
 Card 返回 202 只表示源资料提交，须继续核对 index-status、新查询和完整计数。
 现有 `migrate_tc_cards.py --url` 复用相同字段转换，经 v2 串行导入并等待当前版本索引完成。
 启动时从 `/ready.environment` 核对目标环境；请求或加工失败即停止并返回脱敏的部分结果。
-配置版本属于各自仓储，不能把旧 GET 的 version 当作新表版本重放；工具使用新表当前版本写配置。
+导入历史配置时，工具使用目标 Card 当前版本写配置。
 
-## 部署、追平与切换
+## 部署和验收
 
-1. 核对两仓配套版本、旧表及 TC 新表结构/权限、环境与索引隔离。迁移时沿用已验证的模型/维度，
-   不同时做模型换代。默认 legacy 部署同一新版本服务。
-2. 用同一地址验证旧接口实际读写旧表、新接口实际读写新表，包含相同 Worker ID 的资料/配置/状态隔离。
-   旧接口业务继续工作，新 API 准备新数据；旧接口成功不能拿新 Doc 就绪冒充旧写入成功。
-3. 分页、幂等调用新 API 导入与核对。迁移清单内旧表仍为权威，新 API 用于同步导入，
-   避免另一业务写方同时修改这些对象；新 API 独有记录不按旧表清单删除。
-4. 短暂停止两套 API 的业务写入，只允许迁移脚本写新表；排空旧后台写任务。
-   确定性重读、重放，核对资料、当前 Profile 标识、画像归档、配置、状态、删除和新索引。
-5. 将旧接口后端配置改成 card 并重启同一服务。地址和路径不变，旧查询与旧更新一起改用新服务，
-   新 API 保持原绑定。核对每个实例实际配置及旧 search/recommend/Fuse、写入冒烟后恢复业务写入。
+1. 配套发布 Avernet 公共代码和 OCB 内部宿主，核对 TC Card/Doc 表权限和现有索引代次。
+2. 检查 `/ready` 的环境、`v1_storage=card`、`card_ready=true` 和 `index_key`。
+3. 回归 V1 search、recommend、Fuse 和写入，通过 V2 回查写入的 Card 和索引状态。
 
-`/ready` 需报告实际加载的旧接口后端和相关索引准备状态；不能把进程存活、空索引就绪或单次 sync
-成功当作全量迁移完成。旧接口后端 card 下，撤去旧 Worker/Profile/运行状态/向量表的访问后两套 API 仍必须正常工作。
-融合历史可能与旧资料处在同一物理库，不能把其访问一起撤掉。
-新业务写入发生后，回退须停写并反向补齐旧表/旧索引，再改配置重启；不能只把开关拨回去。
-融合历史沿用原权威存储，不因切换清空。zbcsfuse 代码、配置、表和集合不随 TC 切换改变。
+如果需要恢复旧表后端，先停写并把 Card 侧新增和变更反向补齐到旧表及旧索引，再用支持旧后端的版本部署。
 
 ## 导入工具
 
@@ -112,17 +99,15 @@ SQLite 新文件权限为 `0600`。原始 CSV、补充 JSONL、归档和本地�
 部署支持标签的版本前，在 TC 原数据源的 `bcsfuse_agent_cards` 增加 `labels JSON NULL`；
 不切换到 zbcsfuse 数据源，Doc 表继续使用已有的 `filters` 列。
 
-- legacy 模式的旧接口仍只更新旧表；V2 标签始终只影响新 Card/Doc。
-- card 模式的旧 sync/availability 将明确提交的 `availability` 与 `labels.visibility`
+- V1 sync/availability 将明确提交的 `availability` 与 `labels.visibility`
   在同一次 Card 写入中保存。稀疏 sync、不涉及可见性的更新保留已有标签。
 - V2 修改 `labels.visibility` 后，旧单查、批查、候选过滤和 Fuse 的 Worker 读取使用同一可见性。
   原生 Card 无需补入 `availability` 字段；已导入的 Worker Card 若含此字段，则一并更新。
   同次请求明确提交两个冲突值时返回 400，不写入。
-- `user_visibility` 独立保留原始三态。旧 online/offline 仅更新旧运行状态，既不生成也不覆盖
+- `user_visibility` 独立保留原始三态。V1 online/offline 仅更新运行状态，既不生成也不覆盖
   用户标签；V2 标签更新也不把用户可见性当作连接在线状态。V1 原在线过滤保持，V2 仅按显式条件筛选。
 - TC 构建器版本升级为 `tc-description-v2`，使已有 Doc 的兼容可见性过滤也能正确重建。
   部署后新 TC 索引代次由现有同步链路生成，验收前等待新 Card/Doc 索引就绪；无须重新导入 Card。
-  legacy 旧索引以及 zbcsfuse 的索引和构建规则不变。
 
 ## 可选权威资料 JSONL
 
@@ -160,11 +145,3 @@ SHA-256 按排序键、UTF-8、`ensure_ascii=False` 的行对象 JSON 计算；�
 权威资料补齐和安全审计格式；不要把本地 SQLite 写入能力当作现成的线上接口迁移能力。
 Doc 和索引由服务在新链路中加工，脚本核对发布状态后再执行最终追平。
 回退须覆盖新业务接收的资料、配置、状态和删除，不能仅回滚镜像或配置。
-
-## 旧模式恢复边界
-
-旧 SQL 的 Worker/Profile/运行状态变更共用一次事务；索引发布前校验当前 Worker 版本，
-生产 SQL 使用短期行锁把版本校验与发布串行，Embedding 计算不持该锁。
-原仓储格式不变，恢复标记仅在本适配写入过的当前 Profile 元数据内保存。
-已有无标记历史向量启动直接沿用；缺向量、孤儿向量或受管对象版本不一致才修复旧索引，
-不从旧表自动生成新 Card。SQLite 为单实例开发后端，跨实例事务与行锁须在真实 ZDAS/MySQL 验收。

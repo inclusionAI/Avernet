@@ -69,9 +69,20 @@ Module gates are selected from the committed files in the resulting diff:
 | `apps/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `engine/adapter/` | Engine SAST, unit tests, and changed-line coverage |
 | `apps/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
+| `apps/bcsfuse/` | Unified singlebox coverage with BCS user-story E2E |
 | `apps/frontend/` | Frontend CI |
 | `apps/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
+
+GitHub's `Backend unit tests` check runs from
+`.github/workflows/backend-unit-tests.yml`; the shared `unit-tests.yml` no longer
+owns a Backend job. The dedicated workflow has no `on.paths` filter: every
+matching `pull_request`/`push` event creates the workflow and its
+`Backend unit tests` job, the change-detection step always runs, and only the
+setup/test/upload steps are skipped when no Backend-relevant path changed; the
+detection job then reports success. BCS-only edits to the shared workflow
+therefore do not run full Backend tests, while Backend workflow edits still run
+the unchanged gate.
 
 The hook only checks committed changes in the pushed ref. Uncommitted working
 tree changes are outside the natural boundary of a pre-push hook.
@@ -89,6 +100,12 @@ included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
 and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
 then run `verify_singlebox_coverage_artifacts.py` against the generated report
 directory so local pushes and GitHub PRs enforce the same artifact baseline.
+
+The GitHub workflow starts `qdrant/qdrant:v1.20.0` on ports 6333/6334 and exports
+`QDRANT_MODE=server`, `QDRANT_URL` and `QDRANT_GRPC_PORT`; native multilingual
+BM25 does not support Qdrant Python Local. Before running the same entrypoint
+locally, provide an equivalent Server and those connection settings. The workflow
+also treats `apps/bcsfuse` changes as Singlebox-relevant.
 
 The BCS unit-test CI gate requires a 100% pass rate and overall line coverage
 strictly above 87%. Changed-line coverage must be strictly above 85% when
@@ -113,6 +130,30 @@ coverage reports, plus the copied BCS reports under `bcs/`. GitHub's
 `singlebox-coverage-artifacts` artifact uploads that same directory. The
 artifact verifier must run against this report directory after the coverage
 runner, so local pre-push and PR CI enforce the same result.
+
+Backend and BaaS coverage combines run concurrently with the independent BCS
+aggregate. `python_backend_report` and `python_baas_report` are the actual
+per-component report durations. `python_coverage_reports` instead measures the
+overlap-to-join window, from the first combine launch through the last join, so
+it covers essentially `max(Python, BCS)` and is not pure Python producer time.
+`bcs_coverage_report` is the independent BCS aggregate duration. None of these
+rows should be summed as serial wall-clock time. Before either combine starts,
+live Python writers must receive the pre-stop USR1 save (it is mandatory for
+BaaS, which has no SIGTERM coverage handler) and `python_services_stop` must
+finish, because `coverage combine` deletes the raw `.coverage*` inputs those
+writers produce at exit.
+
+`singlebox-coverage.yml` owns Cargo caching through `Swatinem/rust-cache` only;
+the separate `actions/cache` entry for `~/.cargo/registry` and `~/.cargo/git` is
+gone. `rust-cache` retains registry indexes/archives and git databases, but it
+re-materializes `registry/src` and git checkouts, so it is not a byte-for-byte
+superset of the removed cache. Workspace crates stay excluded
+(`cache-workspace-crates: false`) because they are the source under test.
+Coverage profiles are not reused across instrumentation changes: `RUSTFLAGS`,
+`CARGO_PROFILE_` and `CARGO_INCREMENTAL` participate in the cache key, and
+`singlebox_coverage.sh` deletes `.profraw` files before each run, so
+instrumentation/profile changes force a rebuild and stale profiles are not
+restored.
 
 When adding a module, add meaningful live acceptance stories, declare the
 complete Core/Router/Plugin denominators in

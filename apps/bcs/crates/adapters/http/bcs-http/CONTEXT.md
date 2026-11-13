@@ -139,6 +139,14 @@ saved source. Both extract a Provider-admin Bearer and call
 service. Memory-only test servers may omit this durable capability and return
 503 explicitly. Neither route submits a probe task or exposes credential values.
 
+Versioned A2A registration and Card management are owned by `bcs-api-http` at
+`/api/v1/collaboration/a2a/` and is not mounted in this adapter. Legacy root
+`/a2a/...` paths retain their bare success objects and v0.1 error shape.
+Chat and run controls remain on the legacy root routes.
+Both management adapters reuse the same application capabilities and Provider-admin credentials;
+V1 wraps results in its standard envelope through a dedicated application facade.
+Remote AgentCard interface URLs and persistence are unchanged.
+
 Public AgentCard management uses POST `/a2a/agents`, GET/PUT
 `/a2a/agents/{bot_id}/agent-card` and POST `.../agent-card:refresh`. Location
 uses the ID resource. PUT accepts complete Card source and/or visibility, without
@@ -164,3 +172,28 @@ mode from the configured OAuth public base URL scheme. The legacy
 `cookie_secure` override controls session cookies only; it cannot downgrade
 an HTTPS challenge or turn an HTTP challenge into a Secure `__Host-` cookie.
 Application cookie instructions and response shapes are unchanged.
+
+## Provider attribute visibility propagation
+
+Successful Provider attributes PATCH requests containing `visibility`,
+`friend_check_in_strategy` or `friend_ext` dispatch the existing visibility sync
+using the application's returned `attributes.visibility`, not the request value.
+The application/store owns normalization; HTTP never reads pending approval
+sub-blocks to derive permissions. A whole-object friend_ext replacement can change
+active scope even when submitted as approval metadata, so it also triggers sync.
+User-visibility-only writes, rejected requests and failed application writes do
+not dispatch it.
+
+Each newly covered successful request adds one existing Bot detail lookup (which
+may use registry cache; it is not necessarily a DB query) and one asynchronous
+sync dispatch. Unchanged visibility can produce an extra idempotent sync. BCSFuse
+V1 keeps its existing bounded availability-update retry and missing-worker fallback;
+V2 keeps the existing committed catalog-change publication instead. No new scan,
+policy pre-read, local persistence write, retry mechanism or bootstrap wiring is added.
+
+Regression coverage lives in `suite_providers` / Provider attributes tests, with
+service-controlled normalized results that differ from the requested visibility,
+strategy/scope-only restrictions, pending metadata, and failed writes. The existing
+OpenAPI v1 owner/manager PATCH path lacks the independent BCSFuse V1 visibility
+sync; that separate propagation gap is recorded here but intentionally not changed
+by this Provider-only fix.

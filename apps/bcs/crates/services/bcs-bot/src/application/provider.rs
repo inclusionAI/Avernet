@@ -327,7 +327,7 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<RegisterProviderOutcome> {
         let registered = self
             .provider_core
-            .register_provider_with_policy(
+            .register_provider_with_a2a(
                 command.name,
                 command.webhook_url,
                 command.auth_mode,
@@ -338,6 +338,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.admin_callback_url,
                 command.collaboration_scope,
                 command.caller_capabilities,
+                command.a2a,
             )
             .await?;
         Ok(RegisterProviderOutcome {
@@ -372,7 +373,7 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<ProviderRecord> {
         self
             .provider_core
-            .update_provider_with_policy(
+            .update_provider_with_a2a(
                 &command.provider_id,
                 &command.provider_admin_token,
                 &command.authenticated_staff_id,
@@ -385,6 +386,7 @@ impl ProviderManagementService for ProviderManagement {
                 command.admin_callback_url,
                 command.collaboration_scope,
                 command.caller_capabilities,
+                command.a2a,
             )
             .await
     }

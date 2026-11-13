@@ -123,8 +123,9 @@ pub struct BcsServerState {
     pub admin_invocation_runs: Arc<AdminInvocationStore>,
 
     /// Edge-permission ConnectService (real DB-backed impl in the production
-    /// path; Noop in the in-memory/dev path). Injected into the HTTP adapter
-    /// `HttpAppState` for the `/friends/*` connect endpoints.
+    /// path; the real impl over in-memory repo ports in the in-memory/dev
+    /// path). Injected into the HTTP adapter `HttpAppState` for the
+    /// `/friends/*` connect endpoints.
     pub connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
 
     /// Edge-permission AdmissionService (real DB-backed impl in the production
@@ -324,6 +325,7 @@ impl Default for BcsServerState {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
@@ -631,6 +633,17 @@ impl Default for BcsServerState {
             false,
         )
         .expect("default Eventing configuration must initialize");
+        // This test-utils composition root has no durable connect store (the
+        // V1 friend-connection entries use `NoopConnectService`), so the V1
+        // friendship facade keeps the legacy friend use case as its backend
+        // rather than layering the connect-backed facade over a noop connect.
+        let legacy_friend: Arc<dyn bcs_service_api::FriendService> =
+            Arc::new(bcs_friend::Friend::new(
+                bot_registry.clone(),
+                friend_store.clone(),
+                friend_request_store,
+                relation_store.clone(),
+            ));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             card_changes.clone(),
@@ -641,7 +654,7 @@ impl Default for BcsServerState {
             sessions.clone(),
             friend_store.clone(),
             candidate_search.openapi_v1,
-            friend_request_store,
+            legacy_friend,
             relation_store.clone(),
             session_management.clone(),
             session_launch.clone(),
@@ -711,6 +724,7 @@ impl Default for BcsServerState {
                 )),
                 sessions.clone(),
                 session_repo.clone(),
+                bot_authority.hook.clone(),
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())

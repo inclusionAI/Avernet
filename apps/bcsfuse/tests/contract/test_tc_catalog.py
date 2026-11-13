@@ -1,21 +1,19 @@
 """TC v1 consumers over one durable Card and the public retrieval pipeline."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.bootstrap.app_factory import create_bcsfuse_app
 from app.bootstrap.application_context import ApplicationContext
 from app.bootstrap.opensource import build_opensource_provider_registry
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "test")
     monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "tc.sqlite3"))
     monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "qdrant"))
-    monkeypatch.setenv("QDRANT_MODE", "local")
+    monkeypatch.setenv("QDRANT_MODE", "server")
     registry = build_opensource_provider_registry("test")
     app = create_bcsfuse_app(
         ApplicationContext(
@@ -40,6 +38,70 @@ def sync(client, worker="bot:owner", **changes):
     response = client.post(f"/v1/workers/{worker}/sync", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_tc_status_exposes_shared_doc_and_actual_keyword_details(runtime):
+    client, registry = runtime
+    sync(client, name="aliuct值班助手", description="查询事件")
+    registry.require("tc_card_search").updates.run_once()
+    response = client.get("/api/v2/agent-cards/bot:owner/index-status")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["documents"]
+    assert body["doc_version"] == body["indexed_doc_version"]
+    assert body["qdrant"]["status"] == "ok"
+    assert body["qdrant"]["vector_documents"]
+    keyword = body["qdrant"]["keyword_documents"][0]
+    assert keyword["name"] == "aliuct值班助手"
+    assert keyword["text"] == keyword["search_text"]
+    assert "uct" in keyword["name_grams"].split()
+
+
+def test_sqlite_catalogs_isolate_qdrant_and_reuse_collections_after_restart(
+    tmp_path, monkeypatch, qdrant_test_client
+):
+    if qdrant_test_client is None:
+        pytest.skip("Set QDRANT_TEST_URL to run against an isolated Qdrant Server")
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("QDRANT_MODE", "server")
+
+    def client_for(path):
+        monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(path))
+        registry = build_opensource_provider_registry("dev_smoke")
+        app = create_bcsfuse_app(
+            ApplicationContext(
+                mode="dev_smoke", startup_profile="opensource", registry=registry
+            )
+        )
+        return TestClient(app, headers={"Authorization": "Bearer test-token"})
+
+    def assert_indexed(client, worker):
+        response = client.get(f"/api/v2/agent-cards/{worker}/index-status")
+        assert response.status_code == 200, response.text
+        status = response.json()
+        assert status["doc_ready"]
+        assert status["qdrant"]["keyword_documents"]
+        assert status["qdrant"]["vector_documents"]
+
+    first_path = tmp_path / "first.sqlite"
+    with client_for(first_path) as first:
+        sync(first, "first")
+        assert_indexed(first, "first")
+        with client_for(tmp_path / "second.sqlite") as second:
+            assert_indexed(first, "first")
+            sync(second, "second")
+            assert_indexed(second, "second")
+
+    collections = {
+        entry.name for entry in qdrant_test_client.get_collections().collections
+    }
+    alias = tmp_path / "alias.sqlite"
+    alias.symlink_to(first_path)
+    with client_for(alias) as restarted:
+        assert_indexed(restarted, "first")
+        assert {
+            entry.name for entry in qdrant_test_client.get_collections().collections
+        } == collections
 
 
 def test_sync_writes_one_card_and_never_imports_md_or_synthetic_capabilities(runtime):
@@ -234,38 +296,3 @@ def test_legacy_identity_is_resolved_for_fuse_without_md(runtime):
         source.scan_for_workers(["bot:owner:legacy"]).profiles[0].staff_id
         == "bot:owner"
     )
-
-
-def test_explicit_card_backend_ignores_removed_index_source_setting(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
-    monkeypatch.setenv("WORKER_REGISTRY_SQLITE_DB_PATH", str(tmp_path / "new.sqlite"))
-    monkeypatch.setenv("QDRANT_LOCAL_PATH", str(tmp_path / "new-qdrant"))
-    monkeypatch.setenv("BCSFUSE_TC_INDEX_SOURCE", "legacy")
-    monkeypatch.setenv("BCSFUSE_TC_V1_STORAGE", "card")
-    registry = build_opensource_provider_registry("test")
-
-    def old_storage():
-        raise AssertionError("new deployment must never open the old storage")
-
-    registry.register("tc_legacy_storage_factory", old_storage)
-    app = create_bcsfuse_app(
-        ApplicationContext(mode="test", startup_profile="opensource", registry=registry)
-    )
-    with TestClient(app, headers={"Authorization": "Bearer test-token"}) as client:
-        response = client.post(
-            "/v1/workers/new:owner/sync",
-            json={
-                "name": "New database worker",
-                "description": "Database recovery",
-                "runtime_state": "online",
-                "availability": "public",
-                "profile": {},
-            },
-        )
-        assert response.status_code == 200, response.text
-        result = client.post("/v1/search", json={"query": "Database recovery"})
-        assert result.status_code == 200, result.text
-        assert result.json()["results"][0]["worker_id"] == "new:owner"
-        assert registry.require("tc_catalog_repository").get("new:owner") is not None

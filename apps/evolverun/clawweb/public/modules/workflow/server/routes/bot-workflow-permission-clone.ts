@@ -18,7 +18,7 @@
  *   3. host-injected `resolveBotOwner` lookup (e.g. ac_bots)
  *
  * Reads do not filter env (shared across environments, like the rest of the
- * permission repository); writes go through upsert and stamp the current env.
+ * permission repository); writes go through atomic grant union and stamp the current env.
  */
 import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
@@ -230,7 +230,7 @@ export function createBotWorkflowPermissionCloneRouter(deps: CloneRouterDeps): R
         continue;
       }
 
-      const row = await deps.botPermRepo.upsert({
+      const row = await deps.botPermRepo.mergeGrants({
         bot_id: target.botId,
         bot_owner_id: target.ownerId,
         workflow_id: workflowId,

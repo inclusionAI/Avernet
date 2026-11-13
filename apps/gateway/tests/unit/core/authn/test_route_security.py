@@ -27,6 +27,28 @@ def test_shipped_config_defers_internal_bot_self_authentication_to_bcs() -> None
         assert security.resolve(method, sibling)
 
 
+@pytest.mark.parametrize(
+    "method, suffix",
+    [
+        ("POST", "/agents"),
+        ("GET", "/agents"),
+        ("GET", "/agents/bot/agent-card"),
+        ("PUT", "/agents/bot/agent-card"),
+        ("POST", "/agents/bot/agent-card:refresh"),
+        ("POST", "/providers/orders/bots"),
+        ("POST", "/providers/orders/bots/remote/chat-async"),
+        ("GET", "/chat/runs/run"),
+        ("POST", "/chat/runs/run/cancel"),
+    ],
+)
+def test_shipped_config_defers_a2a_credentials_to_bcs(method: str, suffix: str) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    assert security.resolve(method, "/api/v1/collaboration/a2a" + suffix) == {}
+    assert security.resolve(method, "/api/v1/collaboration/a2a-other" + suffix)
+    assert security.resolve(method, "/openapi/v1/collaboration/a2a" + suffix)
+
+
 def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     """Both identities optional on the wide rule, and both *declared*.
 

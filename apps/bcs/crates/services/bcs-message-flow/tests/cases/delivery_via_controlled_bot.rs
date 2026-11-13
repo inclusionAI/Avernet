@@ -279,6 +279,13 @@ impl BotAuthorityPort for CountingAuthority {
     async fn require_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
         self.inner.require_manage(user_id, bot_id).await
     }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<types::bot_authority::BotOwnershipView>>> {
+        self.inner.ownerships_for(bot_ids).await
+    }
 }
 
 /// THE user-reported regression, in both creation identities:

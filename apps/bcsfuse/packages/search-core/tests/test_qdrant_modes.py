@@ -1,4 +1,4 @@
-"""Run the same retrieval contract against Local, Server HTTP and Server gRPC."""
+"""Run the same native retrieval contract against Server HTTP and gRPC."""
 
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -12,21 +12,17 @@ from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.qdrant_index import QdrantRetrievalIndex
 
 
-@pytest.fixture(params=["local", "http", "grpc"])
+@pytest.fixture(params=["http", "grpc"])
 def index(request, tmp_path):
     mode = request.param
     url = os.getenv("QDRANT_TEST_URL", "")
-    if mode != "local" and not url:
+    if not url:
         pytest.skip("Set QDRANT_TEST_URL to run the real Server contract")
-    connection = (
-        QdrantConnection()
-        if mode == "local"
-        else QdrantConnection(
-            mode="server",
-            url=url,
-            prefer_grpc=mode == "grpc",
-            grpc_port=int(os.getenv("QDRANT_TEST_GRPC_PORT", "6334")),
-        )
+    connection = QdrantConnection(
+        mode="server",
+        url=url,
+        prefer_grpc=mode == "grpc",
+        grpc_port=int(os.getenv("QDRANT_TEST_GRPC_PORT", "6334")),
     )
     instance = QdrantRetrievalIndex(
         path=str(tmp_path),
@@ -35,9 +31,10 @@ def index(request, tmp_path):
         connection=connection,
     )
     yield instance
-    if mode != "local":
-        instance._dense._client.delete_collection(instance._dense.collection_name)
-        instance._keyword._client.delete_collection(instance._keyword.collection_name)
+    instance._dense._ensure_client()
+    instance._keyword._ensure_client()
+    instance._dense._client.delete_collection(instance._dense.collection_name)
+    instance._keyword._client.delete_collection(instance._keyword.collection_name)
     instance.close()
 
 
@@ -113,8 +110,6 @@ def test_inspection_reads_actual_source_points_and_excludes_other_cards(index):
 
 
 def test_server_queries_do_not_serialize(index, monkeypatch):
-    if index.connection.mode != "server":
-        pytest.skip("Local intentionally serializes access")
     rendezvous = Barrier(2)
 
     def query(*args, **kwargs):
@@ -124,7 +119,7 @@ def test_server_queries_do_not_serialize(index, monkeypatch):
     monkeypatch.setattr(index._dense, "search", query)
     with ThreadPoolExecutor(2) as pool:
         futures = [
-            pool.submit(index.vector_search, [1.0, 0.0], 1, {}, None) for _ in range(2)
+            pool.submit(index.vector_search, [1.0, 0.0], 1, {}) for _ in range(2)
         ]
         assert [f.result() for f in futures] == [[], []]
 
@@ -153,8 +148,6 @@ def test_server_connection_failure_does_not_fall_back(tmp_path):
 
 
 def test_server_retains_both_collections_and_rejects_dimension_change(index, tmp_path):
-    if index.connection.mode != "server":
-        pytest.skip("Server persists both collections")
     index.upsert(
         [VectorPoint(id="a", vector=[1.0, 0.0], payload={"content": "支付助手"})]
     )
@@ -245,3 +238,58 @@ def test_version_counts_include_wrong_and_missing_keys_in_both_collections(index
     counts = index.point_counts("v2")
     assert counts["vector_mismatched_points"] == 2
     assert counts["keyword_mismatched_points"] == 1
+
+
+def test_name_fragments_share_filter_and_update_contract(index):
+    index.upsert(
+        [
+            VectorPoint(
+                id="private",
+                vector=[1.0, 0.0],
+                payload={
+                    "name": "Grafana",
+                    "team": "private",
+                    "search_text": "Grafana",
+                },
+            ),
+            VectorPoint(
+                id="exact",
+                vector=[1.0, 0.0],
+                payload={
+                    "name": "Grafana",
+                    "team": "public",
+                    "search_text": "Grafana",
+                },
+            ),
+            VectorPoint(
+                id="partial",
+                vector=[1.0, 0.0],
+                payload={
+                    "name": "MyGrafana监控",
+                    "team": "public",
+                    "search_text": "监控运行状态",
+                },
+            ),
+        ]
+    )
+    assert [
+        h.id for h in index.keyword_search("grafana", 2, {"team": ("public",)})
+    ] == ["exact", "partial"]
+    assert [
+        h.id for h in index.keyword_search("grafana", 1, {"team": ("public",)})
+    ] == ["exact"]
+    index.upsert(
+        [
+            VectorPoint(
+                id="partial",
+                vector=[1.0, 0.0],
+                payload={
+                    "name": "天气助手",
+                    "team": "public",
+                    "search_text": "天气预报",
+                },
+            )
+        ]
+    )
+    index.delete(["exact"])
+    assert index.keyword_search("grafana", 5, {"team": ("public",)}) == []

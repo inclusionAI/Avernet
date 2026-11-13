@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -26,9 +25,9 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
     _git(repository, "config", "user.name", "CI Test")
     _git(repository, "config", "user.email", "ci-test@example.com")
 
-    dispatcher = repository / "singlebox/ci/pre_push.sh"
+    dispatcher = repository / "devops/hook/pre_push.sh"
     dispatcher.parent.mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "singlebox/ci/pre_push.sh", dispatcher)
+    shutil.copy2(REPO_ROOT / "devops/hook/pre_push.sh", dispatcher)
     dispatcher.chmod(0o755)
 
     baseline = repository / "README.md"
@@ -54,8 +53,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         ],
         cwd=repository,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
@@ -66,6 +64,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
 
     base = _git(repository, "rev-parse", "HEAD")
     reporter = repository / "singlebox/ci/singlebox_coverage_report.py"
+    reporter.parent.mkdir(parents=True)
     reporter.write_text("# report change\n", encoding="utf-8")
     _git(repository, "add", ".")
     _git(repository, "commit", "-m", "change coverage reporter")
@@ -74,8 +73,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         [str(dispatcher), "--base", base, "--head", "HEAD", "--dry-run"],
         cwd=repository,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
@@ -95,11 +93,30 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         [str(dispatcher), "--base", base, "--head", "HEAD", "--dry-run"],
         cwd=repository,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
 
     assert "deepseek-harness-channel-bcn install --ignore-scripts --no-package-lock" in result.stdout
     assert "deepseek-harness-channel-bcn run ci" in result.stdout
+
+    base = _git(repository, "rev-parse", "HEAD")
+    bcsfuse = repository / "apps/bcsfuse/providers.py"
+    bcsfuse.parent.mkdir(parents=True)
+    bcsfuse.write_text("# BCSFuse change\n", encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "change BCSFuse")
+
+    result = subprocess.run(
+        [str(dispatcher), "--base", base, "--head", "HEAD", "--dry-run"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
+    )
+
+    assert "singlebox/ci/singlebox_coverage.sh" in result.stdout
+    assert "singlebox/ci/verify_singlebox_coverage_artifacts.py" in result.stdout
+    assert "apps/bcs/scripts/ci_test.sh" not in result.stdout

@@ -604,6 +604,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             return Ok(None);
         }
 
+        let derive_visibility = crate::control_plane_visibility::should_normalize(&patch);
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
@@ -624,9 +625,19 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             assignments.push("name = CASE WHEN agent_card IS NULL THEN ? ELSE name END".to_string());
             params.push(Value::from(name));
         }
-        if let Some(visibility) = patch.visibility.as_deref() {
-            assignments.push("visibility = ?".to_string());
-            params.push(Value::from(visibility));
+        let mut publication_guard = if derive_visibility {
+            Some(self.begin_privacy_publication(env, bot_id).await)
+        } else {
+            None
+        };
+        if derive_visibility {
+            // Normalization uses the live row plus this patch in ONE UPDATE.
+            // Keep visibility before friend_ext for MySQL SET evaluation:
+            // scope_transition must read the pre-update live friend_ext.
+            let (assignment, visibility_params) =
+                crate::control_plane_visibility::sql_assignment(&patch, self.flavor);
+            assignments.push(assignment);
+            params.extend(visibility_params);
         }
         if let Some(status) = patch.status {
             assignments.push("status = ?".to_string());
@@ -650,12 +661,21 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         if let Some(friend_ext) = patch.friend_ext.as_ref() {
             assignments.push("friend_ext = json_extract(?, '$')".to_string());
             params.push(Value::from(serde_json::to_string(friend_ext)?));
+        } else if crate::control_plane_visibility::clears_agent_scope(&patch) {
+            // Clear only active agent scope on the live JSON object. Do not
+            // replay a pre-read object over concurrent sibling/approval changes.
+            assignments.push(format!(
+                "friend_ext = JSON_SET(COALESCE(friend_ext, '{{}}'), '$.{}', JSON_ARRAY())",
+                crate::control_plane_visibility::AGENT_SCOPE_KEY,
+            ));
         }
         if let Some(friend_check_in_strategy) = patch.friend_check_in_strategy {
             assignments.push("friend_check_in_strategy = ?".to_string());
             params.push(Value::from(serialized_string_value(
                 &friend_check_in_strategy,
             )?));
+        } else if crate::control_plane_visibility::opens_check_in_for_legacy_all_visible(&patch) {
+            assignments.push("friend_check_in_strategy = 'OPEN'".to_string());
         }
         if patch.descriptor.is_some() {
             let mut json_updates = Vec::new();
@@ -693,16 +713,38 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .db_execute_affected(&sql, params)
             .await
             .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        if affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
+        if !derive_visibility && affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
             return Ok(None);
         }
 
-        if let Some(bot) = self.bots.write().await.get_mut(bot_id) {
+        // SQL may have kept a concurrently changed visibility. Read the actual
+        // result under the dedicated privacy publication guard, never the old
+        // snapshot or an assumed public value. The global registry lock is only
+        // taken after this DB read, for the final cache publication.
+        let derived_record = if derive_visibility {
+            match self.get_control_plane(bot_id, env).await {
+                Ok(Some(record)) => Some(record),
+                Ok(None) => {
+                    publication_guard.take().expect("privacy guard").fail();
+                    return Ok(None);
+                }
+                Err(error) => {
+                    // The UPDATE already committed. Never serve a stale public
+                    // cache entry after a failed read-back of a restriction.
+                    publication_guard.take().expect("privacy guard").fail();
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        let mut bots = self.bots.write().await;
+        if let Some(bot) = bots.get_mut(bot_id) {
             if let Some(name) = patch.name {
                 bot.capabilities.name = Some(name);
             }
-            if let Some(visibility) = patch.visibility {
-                bot.capabilities.visibility = visibility;
+            if let Some(record) = &derived_record {
+                bot.capabilities.visibility = record.visibility.clone();
             }
             if let Some(status) = patch.status {
                 bot.status = status;
@@ -723,7 +765,13 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             }
         }
 
-        self.get_control_plane(bot_id, env).await
+        drop(bots);
+        if derive_visibility {
+            publication_guard.take().expect("privacy guard").complete();
+            Ok(derived_record)
+        } else {
+            self.get_control_plane(bot_id, env).await
+        }
     }
 
     // ── Per-Bot caller configuration (spec §10.7.2/§15.96) ─────────────

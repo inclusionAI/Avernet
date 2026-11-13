@@ -1,16 +1,17 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response, Router } from "express";
 import type { BotWorkflowPermissionRepository, BotWorkflowPermissionRow } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createBotWorkflowPermissionCloneRouter, type CloneRouterDeps } from "../bot-workflow-permission-clone.js";
 
 const listRowsForBot = vi.fn();
 const listOwnerLevelRows = vi.fn();
+const mergeGrants = vi.fn();
 const upsert = vi.fn();
 const resolveBotOwner = vi.fn();
 
 function makeRepo(): BotWorkflowPermissionRepository {
-  return { listRowsForBot, listOwnerLevelRows, upsert } as unknown as BotWorkflowPermissionRepository;
+  return { listRowsForBot, listOwnerLevelRows, mergeGrants, upsert } as unknown as BotWorkflowPermissionRepository;
 }
 
 function makeDeps(overrides: Partial<CloneRouterDeps> = {}): CloneRouterDeps {
@@ -56,6 +57,11 @@ function stubReads(sourceRows: BotWorkflowPermissionRow[], targetRows: BotWorkfl
 
 beforeEach(() => {
   vi.resetAllMocks();
+  upsert.mockRejectedValue(new Error("Clone must not use the administrative replacement upsert"));
+});
+
+afterEach(() => {
+  expect(upsert).not.toHaveBeenCalled();
 });
 
 describe("POST / (bot workflow permission clone)", () => {
@@ -121,7 +127,7 @@ describe("POST / (bot workflow permission clone)", () => {
     });
     expect(listRowsForBot).toHaveBeenCalledTimes(1);
     expect(listRowsForBot).toHaveBeenCalledWith("src-owner", "src-bot");
-    expect(upsert).not.toHaveBeenCalled();
+    expect(mergeGrants).not.toHaveBeenCalled();
   });
 
   it("clones exact rows and resolves identity through the owner lookup", async () => {
@@ -130,7 +136,7 @@ describe("POST / (bot workflow permission clone)", () => {
       [row("w1", [1, 1, 1]), row("w2", [1, 1, 0])],
       [],
     );
-    upsert.mockImplementation(async (data: { workflow_id: string; can_view: number; can_execute: number; can_edit: number }) =>
+    mergeGrants.mockImplementation(async (data: { workflow_id: string; can_view: number; can_execute: number; can_edit: number }) =>
       row(data.workflow_id, [data.can_view, data.can_execute, data.can_edit], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
@@ -146,12 +152,12 @@ describe("POST / (bot workflow permission clone)", () => {
     });
     expect(result.body.source_resolved).toMatchObject({ bot_id: "src-bot", owner_id: "src-owner", source: "directory" });
     expect(result.body.target_resolved).toMatchObject({ bot_id: "tgt-bot", owner_id: "tgt-owner", source: "directory" });
-    expect(upsert).toHaveBeenCalledTimes(2);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mergeGrants).toHaveBeenCalledTimes(2);
+    expect(mergeGrants).toHaveBeenCalledWith(expect.objectContaining({
       bot_id: "tgt-bot", bot_owner_id: "tgt-owner", workflow_id: "w1",
       can_view: 1, can_execute: 1, can_edit: 1,
     }));
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mergeGrants).toHaveBeenCalledWith(expect.objectContaining({
       bot_id: "tgt-bot", bot_owner_id: "tgt-owner", workflow_id: "w2",
       can_view: 1, can_execute: 1, can_edit: 0,
     }));
@@ -160,7 +166,7 @@ describe("POST / (bot workflow permission clone)", () => {
   it("resolves the compound BaaS form bot_id:owner", async () => {
     listRowsForBot.mockImplementation(async (ownerId: string, botId: string) =>
       ownerId === "355215" && botId === "default" ? [row("w1", [1, 0, 0], "default", "355215")] : []);
-    upsert.mockResolvedValue(row("w1", [1, 0, 0], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w1", [1, 0, 0], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "default:355215", target_bot_id: "20260923_2kya0jax:103892" });
@@ -174,7 +180,7 @@ describe("POST / (bot workflow permission clone)", () => {
   it("explicit owner param wins over the compound suffix", async () => {
     listRowsForBot.mockImplementation(async (ownerId: string, botId: string) =>
       ownerId === "real-owner" && botId === "src-bot" ? [row("w1", [1, 0, 0], "src-bot", "real-owner")] : []);
-    upsert.mockResolvedValue(row("w1", [1, 0, 0], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w1", [1, 0, 0], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "src-bot:not-this-owner", source_owner_id: "real-owner",
@@ -191,7 +197,7 @@ describe("POST / (bot workflow permission clone)", () => {
       { ...row("w2", [1, 1, 0], null, "src-owner"), bot_id: null },
       { ...row("w3", [1, 0, 0], "*", "src-owner") },
     ]);
-    upsert.mockImplementation(async (data: { workflow_id: string }) =>
+    mergeGrants.mockImplementation(async (data: { workflow_id: string }) =>
       row(data.workflow_id, [1, 1, 1], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
@@ -201,12 +207,12 @@ describe("POST / (bot workflow permission clone)", () => {
     expect(result.status).toBe(200);
     expect(listOwnerLevelRows).toHaveBeenCalledWith("src-owner");
     expect(result.body).toMatchObject({ granted: 3, source_effective_total: 3 });
-    expect(upsert).toHaveBeenCalledTimes(3);
+    expect(mergeGrants).toHaveBeenCalledTimes(3);
   });
 
   it("does not read owner-level rows under the default scope", async () => {
     stubReads([row("w1", [1, 1, 1])], []);
-    upsert.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
 
     await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "src-bot", source_owner_id: "src-owner",
@@ -226,7 +232,7 @@ describe("POST / (bot workflow permission clone)", () => {
         target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" });
 
     expect(result.status).toBe(200);
-    expect(upsert).not.toHaveBeenCalled();
+    expect(mergeGrants).not.toHaveBeenCalled();
     expect(result.body).toMatchObject({
       outcome: "already_covered",
       message: "Clone complete: target bot already covers 1 workflow: w1",
@@ -240,7 +246,7 @@ describe("POST / (bot workflow permission clone)", () => {
       [row("w1", [1, 1, 0]), row("w2", [1, 1, 1])],
       [row("w1", [1, 1, 1], "tgt-bot", "tgt-owner")],
     );
-    upsert.mockResolvedValue(row("w2", [1, 1, 1], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w2", [1, 1, 1], "tgt-bot", "tgt-owner"));
 
     const body = {
       source_bot_id: "src-bot", source_owner_id: "src-owner",
@@ -262,8 +268,8 @@ describe("POST / (bot workflow permission clone)", () => {
       message: "Would copy 1 workflow: w2; skipped 1 already-covered workflow: w1",
       granted: 1,
     });
-    expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: "w2" }));
+    expect(mergeGrants).toHaveBeenCalledTimes(1);
+    expect(mergeGrants).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: "w2" }));
   });
 
   it("upgrades a weaker existing target row instead of skipping it", async () => {
@@ -271,14 +277,14 @@ describe("POST / (bot workflow permission clone)", () => {
       [row("w1", [1, 1, 1])],
       [row("w1", [1, 0, 0], "tgt-bot", "tgt-owner")],
     );
-    upsert.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "src-bot", source_owner_id: "src-owner",
         target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" });
 
     expect(result.status).toBe(200);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mergeGrants).toHaveBeenCalledWith(expect.objectContaining({
       workflow_id: "w1", can_view: 1, can_execute: 1, can_edit: 1,
     }));
     expect(result.body).toMatchObject({ granted: 1 });
@@ -298,7 +304,7 @@ describe("POST / (bot workflow permission clone)", () => {
       message: "Would copy 2 workflows: w1, w2",
       granted: 2,
     });
-    expect(upsert).not.toHaveBeenCalled();
+    expect(mergeGrants).not.toHaveBeenCalled();
     expect(result.body.rows).toEqual([
       { workflow_id: "w1", can_view: 1, can_execute: 1, can_edit: 1 },
       { workflow_id: "w2", can_view: 1, can_execute: 0, can_edit: 0 },
@@ -310,17 +316,59 @@ describe("POST / (bot workflow permission clone)", () => {
       row("w1", [1, 1, 0]),
       { ...row("w1", [0, 0, 1]) },
     ], []);
-    upsert.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
+    mergeGrants.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
 
     const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
       { source_bot_id: "src-bot", source_owner_id: "src-owner",
         target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" });
 
     expect(result.status).toBe(200);
-    expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mergeGrants).toHaveBeenCalledTimes(1);
+    expect(mergeGrants).toHaveBeenCalledWith(expect.objectContaining({
       workflow_id: "w1", can_view: 1, can_execute: 1, can_edit: 1,
     }));
     expect(result.body).toMatchObject({ granted: 1, source_effective_total: 1 });
   });
+
+  it("returns the persisted atomic union without changing the response contract", async () => {
+    stubReads([row("w1", [1, 0, 0])], []);
+    // A concurrent writer may have granted execute/edit after the target read.
+    mergeGrants.mockResolvedValue(row("w1", [1, 1, 1], "tgt-bot", "tgt-owner"));
+
+    const result = await request(createBotWorkflowPermissionCloneRouter(makeDeps()),
+      { source_bot_id: "src-bot", source_owner_id: "src-owner",
+        target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" });
+
+    expect(mergeGrants).toHaveBeenCalledExactlyOnceWith({
+      bot_id: "tgt-bot", bot_owner_id: "tgt-owner", workflow_id: "w1",
+      can_view: 1, can_execute: 0, can_edit: 0,
+    });
+    expect(result).toEqual({
+      status: 200,
+      body: {
+        success: true,
+        outcome: "granted",
+        message: "Copied 1 workflow: w1",
+        dry_run: false,
+        granted: 1,
+        rows: [{ workflow_id: "w1", can_view: 1, can_execute: 1, can_edit: 1 }],
+        skipped: [],
+        source_effective_total: 1,
+        source_resolved: { bot_id: "src-bot", owner_id: "src-owner", source: "param" },
+        target_resolved: { bot_id: "tgt-bot", owner_id: "tgt-owner", source: "param" },
+      },
+    });
+  });
+
+  it("propagates an atomic merge failure instead of reporting a successful clone", async () => {
+    stubReads([row("w1", [1, 0, 0])], []);
+    const failure = new Error("Permission write failed");
+    mergeGrants.mockRejectedValue(failure);
+
+    await expect(request(createBotWorkflowPermissionCloneRouter(makeDeps()),
+      { source_bot_id: "src-bot", source_owner_id: "src-owner",
+        target_bot_id: "tgt-bot", target_owner_id: "tgt-owner" })).rejects.toBe(failure);
+    expect(mergeGrants).toHaveBeenCalledTimes(1);
+  });
+
 });

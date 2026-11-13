@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
+from agentclaw.community.core.bot_management.avatar import validate_avatar_storage
 from agentclaw.community.core.bot_management.creation_source import bind_creation_source
 from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_context import (
@@ -219,6 +220,8 @@ def _prepare_create(
     bot_service: BotService,
 ) -> BotCreateSpec:
     """Apply shared creation policy before any external or persistence effects."""
+    if spec.avatar_url is not None:
+        validate_avatar_storage({"avatar_url": spec.avatar_url})
     _reject_mixed_create_sources(spec)
 
     # Fold legacy internal-engine values before the strategy gates: the

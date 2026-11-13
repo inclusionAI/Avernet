@@ -116,6 +116,9 @@
       "retry_count": 3,
       "timeout": 30
     },
+    "clawweb": {
+      "base_url": ""
+    },
     "codefuse_token": {
       "master_key_secret": "other_manual_agentclaw_codefuse_token_key"
     },

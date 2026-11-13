@@ -70,6 +70,9 @@ class EmergencyPolicy(BaseModel):
     max_results: int = Field(default=20, strict=True, ge=1, le=100)
     retrieval: RetrievalSwitches
     embedding_timeout_ms: float = Field(strict=True, gt=0, le=4000, allow_inf_nan=False)
+    keyword_timeout_ms: float = Field(
+        default=500, strict=True, gt=0, le=4000, allow_inf_nan=False
+    )
     embedding_singleflight_enabled: StrictBool = True
     reranker_timeout_ms: float = Field(strict=True, gt=0, le=4000, allow_inf_nan=False)
     cache: SearchCachePolicy = Field(default_factory=SearchCachePolicy)
@@ -95,6 +98,7 @@ class EmergencyControl:
         *,
         build_variants: Callable | None = None,
     ):
+        self._default_keyword_timeout_ms = defaults.keyword_timeout_ms
         self._build = build
         self._build_variants = build_variants
         self._lock = Lock()  # SDK callbacks may arrive outside the event loop.
@@ -139,6 +143,11 @@ class EmergencyControl:
                 if isinstance(raw, str)
                 else EmergencyPolicy.model_validate(raw)
             )
+            # Legacy DRM payloads use the host's startup keyword deadline.
+            if "keyword_timeout_ms" not in policy.model_fields_set:
+                policy = policy.model_copy(
+                    update={"keyword_timeout_ms": self._default_keyword_timeout_ms}
+                )
             # Zero remains a local startup option, never a DRM bypass.
             if policy.max_inflight_requests == 0:
                 raise ValueError("DRM cannot disable admission")
