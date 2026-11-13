@@ -22,7 +22,18 @@ cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
 # bins can be absent even when the test binaries exist, which fails the
 # integration_http_api / e2e_bot_authority spawn suites with ENOENT. Build the
 # bins of the packages whose tests spawn them so every run is deterministic.
-cargo build --locked -p bcs -p bcs-cli --bins
+# Resolve the package list dynamically: reusing this script in synthetic fixture
+# workspaces (singlebox/ci/tests) must not reference packages that do not exist.
+spawn_pkgs="$(python3 -c '
+import json
+names = {p["name"] for p in json.load(open("testresult/cargo-metadata.json"))["packages"]}
+print(" ".join(f"-p {n}" for n in ("bcs", "bcs-cli") if n in names))
+')"
+if [ -n "$spawn_pkgs" ]; then
+  # Intentional word splitting: the variable holds repeated "-p <name>" pairs.
+  # shellcheck disable=SC2086
+  cargo build --locked $spawn_pkgs --bins
+fi
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
 set +e
