@@ -284,6 +284,7 @@ Provider-admin registration, scoped registration and runtime target resolution.
 It does not disable Provider management authentication or satisfy a Card that
 requires Bearer, OAuth or another unsupported scheme.
 
+
 ## Network tracing scope
 
 Composition excludes exact matched routes for health/metrics, manifest/assets,
@@ -297,3 +298,14 @@ Logging owns the selected-event metadata fast path and bounded, reusable text
 scratch buffer. Formatting still runs before asynchronous output; see
 [request and operation observations](../../../docs/observability/request-operation-logging.md#semantics-and-cost)
 for allocation, reentrancy and retention limits.
+## Shared catalog queue for embedding hosts
+
+`BcsServerExtensions::with_shared_card_changes` prepares an optional Fuse V2
+queue for an embedding host. The host can inject its CatalogChangePort view into
+independently assembled A2A cores and pass the same extensions to
+`run_with_resolved_config_and_extensions`. Public bootstrap injects that queue
+into its REST/Agent/Group producers and registers the existing single Fuse worker.
+Explicit queue injection with disabled or V1 integration is rejected. The default
+startup entry retains configuration-selected construction. Hosts own wiring only,
+not a second synchronization implementation.
+

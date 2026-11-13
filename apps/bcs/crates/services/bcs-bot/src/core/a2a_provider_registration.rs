@@ -14,12 +14,28 @@ use super::{ids::{new_bot_uuid, new_session_token}, provider_core::parse_downlin
 pub struct A2aProviderRegistrationCore {
     providers: Arc<dyn ProviderCoreService>,
     bots: Arc<dyn BotProviderRepoPort>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl A2aProviderRegistrationCore {
     pub fn new(providers: Arc<dyn ProviderCoreService>, bots: Arc<dyn BotProviderRepoPort>) -> Self {
-        Self { providers, bots }
+        Self { providers, bots, catalog_changes: None }
     }
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+}
+
+// Deliberately log only identifiers already available at the commit boundary.
+// The identity-only queue does not propagate these fields into detached work.
+pub(super) fn log_catalog_change(mutation: &'static str, bot: &str, provider: &str, reference: &str, revision: u64) {
+    let bounded = |value: &str| value.chars().filter(|c| !c.is_control()).take(256).collect::<String>();
+    tracing::info!(target: "bcs_observation", event = "agent_card.catalog_change_requested",
+        mutation, bot_id = %bounded(bot), provider_id = %bounded(provider),
+        provider_bot_ref = %bounded(reference), revision,
+        request_id = %bcs_observability::CurrentRequestId,
+        "AgentCard committed; requesting catalog synchronization");
 }
 
 fn invalid(message: &str) -> ServiceError {
@@ -75,6 +91,10 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         // No network calls or locks span this transaction. The existing composite
         // fences concurrent duplicates and includes the real Provider audit actor.
         self.bots.create_provider_admin_a2a_bot_with_ownership(bot, capabilities.clone(), owner, &token, initialization, snapshot).await?;
+        if let Some(port) = &self.catalog_changes {
+            log_catalog_change("register", &bot_uuid, provider_id, reference, 1);
+            port.agent_changed(&bot_uuid);
+        }
         let now = u64::try_from(card.registered_at_ms).map_err(|_|invalid("invalid registration time"))?;
         Ok(A2aProviderRegistrationResult { binding: ProviderBotBinding {bot_uuid, provider_id:provider_id.into(),
             provider_bot_ref:reference.clone(), webhook_url:None, disabled:false, created_at:now, updated_at:now},

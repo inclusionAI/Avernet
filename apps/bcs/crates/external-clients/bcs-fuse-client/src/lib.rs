@@ -5,6 +5,7 @@
 
 pub mod client;
 pub mod cards;
+mod card_observation;
 pub mod types;
 
 pub use bcs_config_api::{BcsFuseApiVersion, BcsFuseConfig};
