@@ -1,0 +1,23 @@
+docs/designs/bcn-distributed/assets/02-deployment-overview.svg
+  s_ae779de10e764a::t_8da5a4db310499 1-145
+docs/designs/bcn-distributed/README.md
+  s_ae779de10e764a::t_839f89a5a7360c 55-57
+docs/designs/bcn-distributed/bcn-distributed-design.md
+  s_ae779de10e764a::t_8bf9f7f02e5ca1 55-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4efab9a9679a41e2d4354675c50fdd455ba4043a",
+  "prompts": {},
+  "sessions": {
+    "s_ae779de10e764a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19844-2a00-7a03-ac17-a1a451636220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

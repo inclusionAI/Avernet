@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/modules/archive/src/components/__tests__/Editor.test.tsx
+  s_e5fe7887606dbc::t_2afafb423ca582 143,152
+  s_e5fe7887606dbc::t_316d1cf8187cfd 155-159,164
+  s_e5fe7887606dbc::t_358870838a4045 1-2,8,11-16,25-27,29-31,33-35,41-45,50,53,55-57,59-60,87-88,91-92,94-95,98,100-104,107,109-110,115-116,119-120,122-125,136,144,147-149,151,160,163,165-176,257,260-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4dbc078eb8f5c4f3b68a78aa2067c67a2ee8aa10",
+  "prompts": {},
+  "sessions": {
+    "s_e5fe7887606dbc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18779-f34c-7630-915e-ac48ab641058",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

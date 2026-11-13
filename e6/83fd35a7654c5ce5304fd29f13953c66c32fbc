@@ -1,0 +1,16 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime/openclaw_adapter.py
+  h_b601d8706f5d44 669-673
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/tests/test_openclaw_adapter.py
+  h_b601d8706f5d44 10,1183-1190,1212,1223,1235-1236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e683fd35a7654c5ce5304fd29f13953c66c32fbc",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

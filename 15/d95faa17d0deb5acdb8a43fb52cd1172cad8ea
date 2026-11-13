@@ -1,0 +1,27 @@
+src/ecb/ecb/infrastructure/task_benchmark/odc_client.py
+  s_7517e37f6fcee5::t_c43436fa232f97 567
+src/ecb/tests/application/task_benchmark/test_online_persistence.py
+  s_7517e37f6fcee5::t_41724da28406c8 190-215
+  s_7517e37f6fcee5::t_ab2a11ae956e55 189
+src/ecb/ecb/application/task_benchmark/online_service.py
+  s_7517e37f6fcee5::t_c43436fa232f97 7768
+src/ecb/tests/infrastructure/task_benchmark/test_odc_client.py
+  s_7517e37f6fcee5::t_41724da28406c8 176-191
+  s_7517e37f6fcee5::t_82cd756896e327 175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15d95faa17d0deb5acdb8a43fb52cd1172cad8ea",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

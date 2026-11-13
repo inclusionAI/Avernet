@@ -1,0 +1,32 @@
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_9cc530a04f0436::t_74dce061c13a9c 18-19
+CONTEXT-MAP.md
+  s_9cc530a04f0436::t_74dce061c13a9c 19
+apps/backend/README.md
+  s_9cc530a04f0436::t_74dce061c13a9c 29
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  s_9cc530a04f0436::t_74dce061c13a9c 23-24
+apps/backend/docs/arch/engine-capabilities.md
+  s_9cc530a04f0436::t_74dce061c13a9c 1-24,27-74
+  s_9cc530a04f0436::t_edac4297afccbe 25-26
+autocoding/skills/teamclaw-plan/references/project-context.md
+  s_9cc530a04f0436::t_74dce061c13a9c 13-14
+apps/backend/docs/arch/README.md
+  s_9cc530a04f0436::t_74dce061c13a9c 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6c8751a8b01f8fc9212ce7b5e630151e7c3403fe",
+  "prompts": {},
+  "sessions": {
+    "s_9cc530a04f0436": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cbb6-600d-7911-853a-f044bc1358d8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

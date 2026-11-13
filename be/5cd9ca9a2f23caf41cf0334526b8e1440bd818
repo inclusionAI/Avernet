@@ -1,0 +1,34 @@
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_3d4e7c1aeff3aa 105-108,112,117,120
+  s_47ed8e91e4b8af::t_53797ed917ac49 109-111,113-116,118-119
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_3d4e7c1aeff3aa 31-33,36-37,40,42,44
+  s_47ed8e91e4b8af::t_53797ed917ac49 34-35,38-39,41,43
+  s_47ed8e91e4b8af::t_cede024b9054b2 3
+AGENTS.md
+  s_47ed8e91e4b8af::t_a0d90fb9ac7976 1,3-4,6,8-10,12,14,16-28
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_3b91482001cc24 18
+docs/agents/git-workflow.md
+  s_47ed8e91e4b8af::t_5875a8214ac80f 1-88
+docs/agents/internal-access.md
+  s_47ed8e91e4b8af::t_413e66160dc06b 1-19
+docs/agents/runtime-ownership.md
+  s_47ed8e91e4b8af::t_be59587397680f 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "be5cd9ca9a2f23caf41cf0334526b8e1440bd818",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
