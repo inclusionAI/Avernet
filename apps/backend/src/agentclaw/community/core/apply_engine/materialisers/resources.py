@@ -71,7 +71,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.content_store import decode_tree_bytes
-from agentclaw.community.core.content_store.errors import ContentStoreError
+from agentclaw.community.core.content_store.errors import ContentStoreError, ContentStoreFault
 from agentclaw.community.core.apply_engine.outcomes import (
     EntryOutcome,
     EntryResult,
@@ -188,7 +188,7 @@ class ResourcesMaterialiser(Materialiser):
             path = entry.path
             try:
                 data = await asyncio.to_thread(self._content.read, _stored(entry).digest)
-            except ContentStoreError as exc:
+            except (ContentStoreError, ContentStoreFault) as exc:
                 failures.append(ResolveFailure(path, f"the resource's bytes are not in the store: {exc}"))
                 continue
             if isinstance(entry, DesiredResourceTree):

@@ -60,6 +60,9 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
         ActivationPort,
     )
     from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        BotConfigKindRegistry,
+    )
     from agentclaw.community.core.ports.identity_file_port import (
         IdentityFilePort,
     )
@@ -390,6 +393,7 @@ def build_materialisers(
     cli_tool_service: CliToolService,
     shared_skills: SharedSkillPort,
     file_sync: BotFileSyncPort | None = None,
+    bot_config: "BotConfigKindRegistry | None" = None,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services::
 
@@ -473,6 +477,18 @@ def build_materialisers(
     # declares no ``bot_file_sync`` never reaches it.
     if file_sync is not None:
         materialisers.append(BotFileSyncMaterialiser(file_sync))
+    # BOT_CONFIG is registered only when the composition root bound a kind
+    # registry — ``None`` (an older deployment or a test rig that exercises no
+    # bot copy) leaves the construct unregistered, the same
+    # expected-no-materialiser state ``ENGINE_CONFIG`` keeps: a bot that
+    # declares no ``bot_config`` never reaches it, and one that does gets the
+    # orchestrator's readable no-materialiser refusal rather than an
+    # ``ImportError`` at apply time.
+    if bot_config is not None:
+        from agentclaw.community.core.apply_engine.materialisers.bot_config import (
+            BotConfigMaterialiser,
+        )
+        materialisers.append(BotConfigMaterialiser(bot_config))
     return {m.construct: m for m in materialisers}
 
 

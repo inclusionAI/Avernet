@@ -57,7 +57,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 
 配置不存在、`enabled = 0` 或名单为空时，诊断正常落库和 ACK，不自动创建任务。每次符合触发条件的上报重新读取配置，修改后即时影响后续自动创建；已创建任务按原流程继续。配置读取失败、启用记录的格式无效或自愈服务暂不可用返回 `503`，不会默认放行。
 
-自动请求使用诊断的 `eventId / tcFaultLabel / botId / entityId / env / engine / sessionKey`；存在物理 `sessionId` 时，作为可选的 `session_id` 一并保存。`diagnosis` 按“业务诊断＋系统诊断”保留原文本并校验总长，不静默截断。投递键固定为 `monitoring-<SHA-256(eventId)>`。不发送当前实时诊断未提供的 `error_location`，不发送 `execution_level`，沿用自愈服务默认 `approval`。无合法自愈输入时保存诊断、记录跳过原因并正常 ACK；自愈服务明确拒绝请求时返回不可重试的现有监控错误。
+自动请求使用诊断的 `eventId / tcFaultLabel / botId / entityId / env / engine / sessionKey`；存在物理 `sessionId` 或有效的故障轮次 `traceId` 时，分别保存为可选的 `session_id` 和 `trace_id`。`diagnosis` 按“业务诊断＋系统诊断”保留原文本并校验总长，不静默截断。投递键固定为 `monitoring-<SHA-256(eventId)>`。不发送当前实时诊断未提供的 `error_location`，不发送 `execution_level`，沿用自愈服务默认 `approval`。无合法自愈输入时保存诊断、记录跳过原因并正常 ACK；自愈服务明确拒绝请求时返回不可重试的现有监控错误。
 
 需要自动创建的诊断，只有自愈任务持久化成功后才确认上报；不等待 Agent 执行或最终效果。任务保存失败返回 `503`，复用诊断发送端原有持久队列与退避重试。重复诊断也执行同一触发检查；诊断内容冲突先返回 `409`，不会创建自愈任务。固定投递键复用已有任务，响应丢失、重启或并发上报不创建第二个任务。
 
@@ -93,6 +93,8 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 | `target.engine` | 是 | 支持 `OC`、`CC`、`TE`。OC／CC 优先读 NAS，失败时经受控 Shell 读会话文件；TE 只通过 AIVision／TCLog 轨迹调查原会话、验证触达和恢复效果，不调用会话 API，不使用 Shell。各引擎的实际修复效果需真实现场验收。 |
 | `session_key` | 是 | 发生故障、需要继续的原会话键；不是会话名称或 `session_id`。 |
 | `session_id` | 否 | 上游确认的物理会话 ID，只允许字母、数字、下划线和连字符。用于固定原会话文件，不替代 `session_key`。OpenClaw Cron 键若包含 `:run:<id>`，两者必须一致。 |
+| `trace_id` | 否 | 上游诊断所指的故障轮次 ID，支持 1–128 位字母、数字、下划线或连字符。TE 初评据此查找故障轮次。 |
+| `fault_at_ms` | 否 | 原故障时间（正整数 Unix 毫秒）。OC 自动触发沿用上报的 `occurredAt`，用于初评列表补查。 |
 | `delivery_key` | 是 | 本次尝试的唯一投递键。同一次请求重试复用，新尝试换新键。 |
 | `diagnosis` | 是 | 脱敏诊断摘要，最多 8000 字符。 |
 | `error_location` | 否 | 错误的具体位置，例如消息 ID、文件行号或工具调用位置。供 Agent 读取原故障证据。 |
@@ -210,6 +212,8 @@ CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一
 
 重试过程只记录任务时间线，不逐次回传上游。重试成功后继续原流程；预算耗尽或 Base 明确回报不可重试时，结束任务并回传 `failed + unknown`，`result_text` 保留脱敏失败原因、作业编号（已取得时）及重试情况。方案执行失败、Agent 明确回报受阻仍按原业务流程结束，不自动增加修复方案。等待 Owner、等待效果或已结束任务不会因 AIS 退出而变为失败；外部停止未过期的作业不自动重建。
 
+Agent 临近 Base 截止时可在 `waiting_owner`、运行中的 `observe / verify`，或已有 Cron 等待窗口的 `assess` 回报 `release`。控制面核对当前执行、状态和阶段，只结束该 execution，保留业务等待窗口，不计入失败重试。仍在运行的任务按原阶段续接；观察窗口到期时按等待效果流程收口。
+
 ## 继续等待效果的任务
 
 `POST /api/insight/v1/internal/monitoring/session-recoveries/:taskId/continue`
@@ -220,9 +224,9 @@ CW 控制面负责 AIS 派发、启动与执行中断后的有限恢复。同一
 
 任务入口：`/insight?module=monitoring&recoveryTaskId=<task_id>`。
 
-页面查询、分享设置、决策和人工标注使用现有用户登录身份。默认仅任务 Owner 或管理员可查看；Owner 或管理员可开启分享，开启后其他登录用户可通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
+页面查询、分享设置、决策和人工标注使用现有用户登录身份。任务 Owner 或管理员可查看。Host 接入 Bot 协作者校验时，当前协作者也可通过链接只读查看对应真实 Bot 的自愈详情及工具证据，按任务的 Bot ID、Owner 和目标环境核对权限。Owner 或管理员可开启分享，让其他登录用户通过任务链接只读查看方案、时间线、效果和工具调用证据。方案确认、配合事项确认、人工标注和修改分享设置仍仅允许 Owner 或管理员。Agent 原始会话日志下载沿用现有日志接口的 Owner／管理员权限。
 
-分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。关闭分享后，共享访客的详情和证据读取立即返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
+分享开关沿用自进化的 `ce_tasks.config_json.shared`，未设置视为关闭，不新增表或迁移。详情响应的 `shared / canOperate / canManageShare` 表达当前分享状态及当前用户的操作权限。公开分享或 Bot 协作者权限撤销后，已无其他访问授权的用户读取详情或证据时返回 `403`。分享设置不推进任务阶段、不重新执行 Agent、不触发上游结果回传。
 
 详情的 `executions` 从现有 `agent_execution` Step 只读生成，按执行次数升序返回 `executionId / attempt / status / jobId / jobUrl`，不包含执行票据或归档上传地址。`jobUrl` 由 Host 的现有 AIS 服务生成；未取得作业编号或 Host 未提供链接时相应字段为 `null`。页面以时间线事件的 `payload.execution_id` 关联具体执行，在该条记录旁展示对应 AIS 作业链接；派发失败未取得编号时明确展示，不指向其他轮次的作业。读取不补写历史事件，也不改变任务状态或回传结果。
 
@@ -324,9 +328,11 @@ Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢�
 
 登录态 `POST /monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm` 接受 `{ "feedback": "可省略，最多4,000字符，不含凭据" }`，返回 `{"ok":true}`。Owner或管理员沿现有资源权限确认，服务核对当前待办和CW控制面，先持久化再异步启动。重复确认幂等；旧卡、终止任务和其他环境不可重新激活。此接口不调用方案decide、不授予环境操作、不提交业务确认。
 
-反馈后重新assess，但保留历史计划、动作和原阶段。必须先成功读取最新原会话／轨迹，NAS说明不代替这一读取；否则不允许续接消息、阶段判断或恢复结论。原任务已被用户接手时沿原协议让路。需要续接时每个requestId只有一条固定身份消息；重复请求和新execution复用该身份，原初始delivery保持原样。原阶段为verify时，新评估后的观察回到verify，不开启第二套Plan。缺项未齐时刷新现场后提交剩余事项，递增requestId/revision并更新同一张卡。
+反馈后重新assess，但保留历史计划、动作和原阶段。必须先成功重新读取原会话／轨迹。OC／CC 沿用 NAS 优先、不可用时回退受控读取的路径；两种成功读取均解除重新核验标记，不按读取来源额外限制。读取失败或重放反馈前的旧工具回执不解除标记，仿真历史边界不变。原任务已被用户接手时沿原协议让路。需要续接时每个requestId只有一条固定身份消息；重复请求和新execution复用该身份，原初始delivery保持原样。原阶段为verify时，新评估后的观察回到verify，不开启第二套Plan。缺项未齐时刷新现场后提交剩余事项，递增requestId/revision并更新同一张卡。
 
 等待期间由现有wrapper轮询；临近Base期限仅释放execution并保存上下文。反馈可在活执行继续，也可启动新的execution恢复同一Task。原执行票据、CAS启动互斥和未知写入核实保持有效。CW重启后maintenance恢复已保存、尚未启动的确认任务。
+
+续接消息的投递身份绑定本次 Owner 待办，工具请求号标识单次发送尝试。发送前失败后可用新的工具请求号重试，已有进行中、通道已受理或结果未知的尝试时返回原回执。评估提交 `decision=message` 需有当前待办已受理或结果未知的投递回执；原任务已自行推进时提交 `decision=observe`。
 
 Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
@@ -334,7 +340,7 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 { "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } }, "bot_overrides": [] }
 ```
 
-保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试，首次创建后只更新固定outTrackId，不重建未知卡。未知创建之后的成功更新不独立证明Owner已收到卡片。
+保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 

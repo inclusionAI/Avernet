@@ -176,6 +176,23 @@ async def test_write_file_raises_on_http_error():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "body", "classified"), [
+    (403, b'{"detail":{"code":"filesystem_read_only"}}', True),
+    (403, b'{"detail":"Forbidden"}', False),
+    (403, b'invalid json', False),
+    (500, b'{"detail":{"code":"filesystem_read_only"}}', False),
+    (403, b'{"detail":{"code":"filesystem_read_only","extra":true}}', False),
+])
+async def test_write_file_classifies_only_the_explicit_read_only_verdict(status, body, classified):
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
+    response = httpx.Response(status, content=body, request=httpx.Request("POST", "http://fake/"))
+    fs = BaasDeviceFileSystem(transport=_make_transport(response=response), conn_info=_conn_info(), path_mapper=lambda p: p)
+    with pytest.raises(DeviceFileSystemReadOnlyError if classified else httpx.HTTPStatusError):
+        await fs.write_file("/foo", b"")
+
+
+@pytest.mark.asyncio
 async def test_delete_tree_calls_transport_post():
     from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
     transport = _make_transport()

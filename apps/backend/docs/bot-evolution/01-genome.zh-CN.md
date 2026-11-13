@@ -1175,14 +1175,15 @@ Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增�
 manifest 应用流水线已经为其获取的所有内容保留了平台自己的持久副本
 （`core/content_store/`，作为 Manifest 的 W11 构建，#3064 起独立为组件）：
 
-- **字节**存放在一个内容寻址的 blob 目录中，
-  `<root>/blobs/<hex[:2]>/<hex64>`，只原子地写入一次，并在读取时校验哈希。一个目录
+- **字节**存放在一个内容寻址的 blob 存储中，只写入一次，并在读取时校验哈希：默认是部署的
+  对象存储，键为 `content-store/blobs/<hex[:2]>/<hex64>`，所有后端实例共享。一个目录
   （技能或目录资源）是一个 blob：其文件的 `acm-tree-v1` 编码（`canonical_tree_bytes`），
   它是确定性的、未压缩的，并且可以解码回各个文件。因此编辑目录中的一个文件会为整棵树
   存储一个新的 blob；每个文件一个 blob 可以避免这一点，这是已记录的后续工作（待定决策
-  G-1，对 v1 已关闭）。根目录为
-  `user_config.bot_config_manifest.content_store_dir`（默认
-  `./data/manifest_content`；部署时将其指向共享卷）。
+  G-1，对 v1 已关闭）。运行哪种 blob 存储由部署的 profile 装配决定：默认是对象存储；
+  test 与 singlebox 两个 profile 的对象存储是测试替身，它们绑定
+  `user_config.bot_config_manifest.content_store_dir` 下的本地目录树
+  `<root>/blobs/<hex[:2]>/<hex64>`。
 - **来源**存放在 `ac_manifest_content` 中，这是一个仅追加的存储事件日志（Bot、
   来源 URL、凭据*名称*、应用）。该表不保存字节。
 - **保留策略**在 v1 中是无条件的：不删除、不清扫、无 TTL。

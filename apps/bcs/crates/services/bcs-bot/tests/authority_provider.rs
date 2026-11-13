@@ -154,7 +154,7 @@ fn test_context() -> TestContext {
 async fn register_provider(ctx: &TestContext) -> (String, String) {
     let registered = ctx
         .management
-        .register_provider(RegisterProviderCommand {
+        .register_provider(RegisterProviderCommand { a2a: None,
             caller_capabilities: None,
             collaboration_scope: None,
             slug: None,

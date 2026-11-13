@@ -20,10 +20,11 @@ import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import { Loader2, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
+import { ConversationSessionStatus } from './ConversationSessionStatus';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
@@ -71,18 +72,13 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
-      {/* Bot 正在回复中(#2990 还原,2026-10-26 适配 52px 行几何):仅命中行渲染,
-          标题左侧缩进区(40-54px,标题起点 60px)绝对定位旋转指示,不占 flex 流,
-          标题起点不随 loading 出现跳动;只读行不渲染。 */}
-      {!readOnly && replyingSessionId === session.sessionId && (
-        <span
-          role="status"
-          aria-label="Bot 正在回复"
-          className="absolute left-[40px] top-1/2 z-10 -translate-y-1/2"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
-        </span>
-      )}
+      {/* 会话左侧活动状态槽：标题始终使用固定缩进，因此状态出现/消失不会造成位移；
+          仅在收到 AIXCoding 有效状态或普通 Bot 正在回复时渲染图标，空闲/未知状态留空。 */}
+      <ConversationSessionStatus
+        botId={session.botId}
+        sessionId={session.sessionId}
+        showReplying={!readOnly && replyingSessionId === session.sessionId}
+      />
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}

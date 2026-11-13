@@ -24,6 +24,8 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
+from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
@@ -96,6 +98,19 @@ from agentclaw.community.core.task.task_center.intake_target_resolver import (
 )
 from agentclaw.community.core.task.repository.task_intake_repository import (
     TaskIntakeRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+    StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.service_api import (
+    ContextCollabServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
@@ -282,6 +297,20 @@ class TaskModule(Module):
         )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
+        # Context collab(BBS context collaboration protocol):service 协议绑定到
+        # 实现,repo 协议由 TaskPersistenceModule 绑定(轻量 injector 未装时取
+        # 不到即报错,与其余 repo 依赖同语义)。authorizer 协议必须显式绑定:
+        # python-injector 对带默认值的注解参数同样注入,``ContextCollabService.
+        # __init__`` 的 StructuralContextCollabAuthorizer 默认实例在 DI 构造
+        # 路径不生效;P2 策略授权器经 profile 模块覆写同一协议键即可替换。
+        binder.bind(
+            ContextCollabAuthorizerProtocol,
+            to=StructuralContextCollabAuthorizer,
+            scope=singleton,
+        )
+        binder.bind(
+            ContextCollabServiceProtocol, to=ContextCollabService, scope=singleton
+        )
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -666,6 +695,12 @@ class TaskModule(Module):
             )
             bot = None
         return TaskClaimGrantService(bot=bot)
+
+    @singleton
+    @provider
+    @inject
+    def task_panel_manifest_service(self, config: SystemConfigServiceProtocol) -> TaskPanelManifestServiceProtocol:
+        return TaskPanelManifestService(config)
 
     @singleton
     @provider

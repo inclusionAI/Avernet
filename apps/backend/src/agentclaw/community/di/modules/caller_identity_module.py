@@ -140,7 +140,9 @@ class CallerIdentityModule(Module):
         self, binding_repository: DeviceBindingRepository,
         runtime_bindings: RuntimeBindingResolutionService,
     ) -> CallerSessionValidator:
-        return CallerSessionValidator(binding_repository=binding_repository, runtime_bindings=runtime_bindings)
+        return CallerSessionValidator(
+            binding_repository=binding_repository, runtime_bindings=runtime_bindings,
+        )
 
     @singleton
     @provider

@@ -5,6 +5,7 @@ import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
 import type { ConversationComposerProps } from './conversationComposer';
+import type { UserMessagePresenter } from './userMessagePresentation';
 
 export interface BotEditorPanelContext {
   botId: string;
@@ -110,6 +111,11 @@ export interface TaskSessionJumpTarget {
 export interface ReleaseNotesData {
   version?: string;
   date?: string;
+  /**
+   * 发布标识（可选）：内源实现为 version + date + 内容指纹的组合 stamp，用于精确感知
+   * 「内容更新但标识未改」的配置单变更；未提供时消费方回退以 date 为标识比对已读。
+   */
+  stamp?: string;
   userReadmeHtml?: string;
   releaseNoteHtml?: string;
 }
@@ -117,12 +123,13 @@ export interface ReleaseNotesData {
 /**
  * 版本发布说明能力。Open Core 返回 null（不支持）；internal overlay 提供实现：
  * - load()：拉雨燕配置，失败/空返回 null（UI 降级「暂无内容」）
- * - markSeen(date)：用户打开 Modal 后写入 localStorage 记录已读日期，清除菜单红点
+ * - markSeen(stamp)：用户「主动关闭」Modal（按钮/ESC/遮罩统一收口）后写入 localStorage
+ *   记录已读标识，清除菜单红点（2026-11-10 已读语义拍板：打开不写已读）
  */
 export interface ReleaseNotesCapability {
   load(): Promise<ReleaseNotesData | null>;
-  markSeen(date: string): void;
-  /** 读取用户已读版本发布说明的日期记录；null=未读（菜单显示红点）。 */
+  markSeen(stamp: string): void;
+  /** 读取用户已读版本发布说明的标识记录；null=未读（菜单显示红点）。 */
   getSeenDate(): string | null;
 }
 
@@ -255,8 +262,11 @@ export interface ProductBrand {
    * 页头品牌视觉组件（接收 className 控制尺寸）。
    * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
    * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
+   * markOnly：仅渲染图形 mark、不渲染字标——收起态 rail（w-14 容器宽度低于
+   * compact 锁版预算）等图标位使用；带字标锁版的形态必须消费该语义，
+   * 否则字标被容器挤压 truncate 成省略号残迹。
    */
-  Logo: ComponentType<{ className?: string; compact?: boolean }>;
+  Logo: ComponentType<{ className?: string; compact?: boolean; markOnly?: boolean }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
@@ -354,6 +364,8 @@ export interface ConversationInstanceScopeBot {
   realBotId: string;
   /** Bot 类型('service' 触发实例范围链路)。 */
   botType?: string;
+  /** 引擎枚举；实例能力须跳过不支持容器查询的引擎（如 TEClaw）。 */
+  engine?: string;
   /** 好友 Bot 不支持实例选择(后端既有约束,f_user_id 场景不限定实例)。 */
   isFriendBot?: boolean;
 }
@@ -376,6 +388,8 @@ export interface ConversationInstanceScopeState {
  * 不包含 TeamClaw URL、内部应用地址或部署信息。
  */
 export interface CodingBotConversationHostProps {
+  /** Host sidebar identity (may be compound); optional for older/custom hosts. */
+  conversationBotId?: string;
   /**
    * AIXCoding runtime Bot ID. This is the head of TeamClaw's compound view ID
    * (`realBotId`); callers must not pass the URL identity `bot.botId`.
@@ -448,6 +462,11 @@ export type CodingBotSessionActionResult =
  */
 export interface CodingBotConversationHost {
   Stage: ComponentType<CodingBotConversationHostProps>;
+  /**
+   * 内部会话的可见性策略。Open Core 不注入时列表保留全部会话；
+   * TeamClaw 内部部署用它隐藏内部系统生成的 Coding 会话，不影响其他 Bot。
+   */
+  isSessionHidden?: (session: { title?: unknown }) => boolean;
   /**
    * 页面在识别出 Coding Bot、但目标 Session 详情尚未就绪时，可先触发宿主
    * 定向预载微应用入口资产。该函数必须幂等且不要求返回 Promise；Open Core
@@ -633,6 +652,8 @@ export interface AppCapabilities {
   getBotEditorPanels: () => CapabilityResult<BotEditorPanelExtension[]>;
   /** Optional single-Bot composer decorator; public default is absent. */
   getConversationComposer: () => CapabilityResult<ComponentType<ConversationComposerProps> | null>;
+  /** Optional synchronous, zero-I/O user-message display projection; public default is pass-through. */
+  getUserMessagePresentation: () => CapabilityResult<UserMessagePresenter | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
@@ -720,6 +741,16 @@ export interface AppCapabilities {
    * 同步签名，组件不得按部署环境自行判断（collab-permission-entry-migration §10）。
    */
   getGeneralConfigPublishApprovalEnabled: () => CapabilityResult<boolean>;
+  /**
+   * 可选 Backend 增强（BCS 独立好友发现）是否启用：身份 engine/botType 补充、公开 Bot 的
+   * metadata 服务发布过滤与 Human 建聊跳转共用本开关；壳层
+   * `getShellVisibility().value.notificationBell` 从同一决策派生（关闭时铃铛不挂载，
+   * 未读轮询随挂载自然停止）。默认全栈未显式关闭时为 true；
+   * 运行时 `window.AVERNET_RUNTIME_CONFIG.PUBLIC_BOT_BACKEND_ENABLED === false`
+   * （由部署 profile 写入，布尔值）或编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false
+   * 时为 false，运行时显式设置优先。同步签名，不发请求。
+   */
+  getPublicBotBackendEnabled: () => boolean;
   /**
    * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`

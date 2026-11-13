@@ -1,7 +1,7 @@
 use axum::Router;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Extension, Json, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
@@ -15,6 +15,11 @@ use crate::v1::common::{
 use crate::v1::openapi::dto::friendship::{
     CreateFriendRequestRequest, ListFriendRequestsQuery, ListFriendshipsQuery,
 };
+// The v1 friendship surface forwards the caller's credential exactly like the
+// sibling friend-connection routes, so the work-order notification can
+// authenticate as the acting human. It is transport context only: no DTO,
+// route or status-code shape changes.
+use super::friend_connection::request_auth_headers;
 
 pub fn router() -> Router<ApiState> {
     Router::new()
@@ -95,13 +100,18 @@ async fn create_bot_friend_request(
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
+    headers: HeaderMap,
     body: Result<Json<CreateFriendRequestRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(bot_uuid) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .create_bot_friend_request(body.into_command(caller, bot_uuid))
+        .create_bot_friend_request(body.into_command(
+            caller,
+            bot_uuid,
+            Some(request_auth_headers(&headers)),
+        ))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -144,6 +154,7 @@ async fn accept_friend_request(
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
+    headers: HeaderMap,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
@@ -152,6 +163,7 @@ async fn accept_friend_request(
         .accept_friend_request(AcceptFriendRequest {
             caller,
             request_id: request_id_path,
+            request_auth: Some(request_auth_headers(&headers)),
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
@@ -167,6 +179,7 @@ async fn reject_friend_request(
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
+    headers: HeaderMap,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
@@ -175,6 +188,7 @@ async fn reject_friend_request(
         .reject_friend_request(RejectFriendRequest {
             caller,
             request_id: request_id_path,
+            request_auth: Some(request_auth_headers(&headers)),
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

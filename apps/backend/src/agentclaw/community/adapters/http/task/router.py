@@ -30,12 +30,14 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
+    TaskStopRequestDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
     graph_to_dto, op_result_to_dto,
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.manifest_routes import router as manifest_api_router
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
     router as artifact_object_file_router,
@@ -97,6 +99,7 @@ router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
+router.include_router(manifest_api_router)
 router.include_router(task_read_api_router)
 router.include_router(task_config_router)
 router.include_router(artifact_api_router)
@@ -415,6 +418,34 @@ async def report_callback(
         return envelope(report_result_to_dto(result).model_dump(), request)
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
+
+@router.post(
+    "/{task_id}/stop",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def stop_task(
+    task_id: str,
+    request: Request,
+    body: TaskStopRequestDTO = Body(default=None),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """Manual stop one task graph into CANCELLED."""
+    result = await service.stop_task(
+        task_id,
+        reason=body.reason if body is not None else "manual_stop",
+        operator=body.operator if body is not None else "manual_stop",
+    )
+    return envelope(
+        {
+            "task_id": result.task_id,
+            "status": result.status.value,
+            "stopped_nodes": result.stopped_nodes,
+            "reason": result.reason,
+            "operator": result.operator,
+        },
+        request,
+    )
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
 @envelope_errors

@@ -1,0 +1,3 @@
+# App knowledge templates
+
+Use the shared [app](../../../../../docs/agents/templates/app.md), [domain](../../../../../docs/agents/templates/domain.md), [flow](../../../../../docs/agents/templates/flow.md), [diagnostic](../../../../../docs/agents/templates/diagnostic.md), [spec](../../../../../docs/agents/templates/spec.md) and [ADR](../../../../../docs/agents/templates/adr.md) templates with this app's [knowledge standard](../knowledge-standard.md). Adapt them to the owning app and cite its source, contracts and tests. Keep existing authoritative formats and paths; do not duplicate the shared templates here.

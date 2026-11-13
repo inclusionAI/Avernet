@@ -212,6 +212,7 @@ impl PersistentBotRepo {
         bot_id: &str,
         owner_user_id: &str,
         mutation: &AuthorityMutation,
+        initial_managers: &[String],
     ) -> ServiceResult<BotOwnershipView> {
         let env = bcs_config::resolve_env_str();
         if owner_user_id.trim().is_empty()
@@ -224,10 +225,6 @@ impl PersistentBotRepo {
         }
         ownership::validate_mutation(mutation)?;
         let owner_actor = ownership::owner_actor_id(owner_user_id);
-        let (audit_kind, audit_actor): (&str, String) = (
-            mutation.actor.kind().as_str(),
-            mutation.actor.actor_id(),
-        );
         let lock_suffix = match self.flavor {
             DbSqlFlavor::Mysql => " FOR UPDATE",
             DbSqlFlavor::Sqlite => "",
@@ -425,14 +422,8 @@ impl PersistentBotRepo {
             // the real initiating actor of the mutation; tokens
             // never enter audit rows.
             steps.push(DbTransactionStep::ExecuteChecked {
-                statement: lifecycle::initialize_audit_statement(
-                    &env,
-                    bot_id,
-                    &mutation.mutation_id,
-                    audit_kind,
-                    &audit_actor,
-                    &owner_actor,
-                    1,
+                statement: crate::ownership_managers::audit_statement(
+                    &env, bot_id, mutation, &owner_actor, initial_managers,
                 ),
                 expected_affected_rows: 1,
             });
@@ -444,6 +435,9 @@ impl PersistentBotRepo {
                 ),
             ));
             let audit_guard = steps.len() - 1;
+
+            crate::ownership_managers::append_steps(&mut steps, self.flavor, &env,
+                bot_id, initial_managers, 0);
 
             // 5: final guard consumption — a failed guard has
             // no row to bind and the transaction rolls back.

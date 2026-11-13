@@ -61,11 +61,11 @@ export function useBotAdvancedConfig(
     getFile,
     saveFile,
     createChannel: (input: BotChannelInput) =>
-      act(() => botAdvancedConfigService.createChannel(botId!, input), '渠道已绑定'),
+      act(() => botAdvancedConfigService.createChannel(botId!, input, ownerId), '渠道已绑定'),
     updateChannel: (id: number, input: BotChannelInput) =>
-      act(() => botAdvancedConfigService.updateChannel(botId!, id, input), '渠道配置已更新'),
+      act(() => botAdvancedConfigService.updateChannel(botId!, id, input, ownerId), '渠道配置已更新'),
     toggleChannel: (channel: BotChannel) =>
-      act(() => botAdvancedConfigService.setChannelStatus(botId!, channel), '渠道状态已更新'),
-    deleteChannel: (id: number) => act(() => botAdvancedConfigService.deleteChannel(botId!, id), '渠道已删除'),
+      act(() => botAdvancedConfigService.setChannelStatus(botId!, channel, ownerId), '渠道状态已更新'),
+    deleteChannel: (id: number) => act(() => botAdvancedConfigService.deleteChannel(botId!, id, ownerId), '渠道已删除'),
   };
 }

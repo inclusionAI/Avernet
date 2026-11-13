@@ -41,6 +41,10 @@ from agentclaw.community.core.agentswarm.runtime.worker import (
     AgentSwarmWorker,
 )
 from agentclaw.community.core.agentswarm.service import AgentSwarmService
+from agentclaw.community.core.agentswarm.service.protocols import (
+    BotAuthorizationSource,
+)
+from injector import singleton
 from agentclaw.community.plugin_api.agentswarm.llm import LLMProvider
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugins.local.auth import LocalAuth
@@ -140,12 +144,19 @@ def _post(path: str, payload: str | dict,
         return exc.code, json.loads(exc.read().decode())
 
 
+#: The Bot every submit in this module names as its identity source.
+IDENTITY_SOURCE = "identity-source-bot"
+
+
 def _submit_body(goal: str = "wire goal",
                  idem: str | None = None) -> dict:
     body = {
         "tenant": TENANT,
         "goal": goal,
         "agents": [{"name": "a1", "role": "work"}],
+        # Required by the submit contract: every run's Bot agents inherit an
+        # existing Bot's identity instead of waiting for approval.
+        "identity_bot_id": IDENTITY_SOURCE,
     }
     if idem:
         body["idempotency_key"] = idem
@@ -168,6 +179,25 @@ def wire():
     )
     injector.binder.bind(LLMProvider, to=_KindScriptLLM())
     injector.binder.bind(AuthPlugin, to=_TenantCarryingAuth())
+
+    class _AnySourceSeam:
+        """Accepts the named source so this module tests the wire, not the
+        passport lookup; the real seam's refusal is covered by the service
+        tests."""
+
+        def identity_source(self, *, owner_id: str, bot_id: str) -> str | None:
+            return "agent-code" if bot_id == IDENTITY_SOURCE else None
+
+        def authorization(self, *, owner_id: str, bot_id: str):
+            return None
+
+    # The service composes its seam eagerly, so re-provide the service with the
+    # permissive seam rather than trying to override the binding later.
+    from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
+
+    svc = injector.get(AgentSwarmService)
+    svc._authorization_source = _AnySourceSeam()
+    injector.binder.bind(AgentSwarmService, to=svc, scope=singleton)
 
     previous = app.state.injector
     app.state.injector = injector

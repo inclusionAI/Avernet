@@ -1,5 +1,5 @@
 import type { IdentityView } from '@/domain/collaboration';
-import { parseWorkspaceRoute, serializeWorkspaceRoute } from '@/domain/workspaceRoute';
+import { parseWorkspaceRoute, serializeWorkspaceRoutePreserving } from '@/domain/workspaceRoute';
 import { sessionService } from '@/services/workspace/sessionService';
 import { applyResolvedGroupSession, hydrateWorkspaceRoute } from '@/services/workspace/workspaceRouteService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -65,7 +65,7 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   // 群聊 Store → URL 投影（对话页投影走 useConversationUrlSync）。
   useEffect(() => {
     if (!urlHydrated || view !== 'group') return;
-    const next = serializeWorkspaceRoute({
+    const next = serializeWorkspaceRoutePreserving(window.location.search, {
       currentIdentityId: activeIdentityId,
       groupId: selectedGroupId,
       sessionId: selectedSessionId,

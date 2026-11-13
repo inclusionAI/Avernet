@@ -9,13 +9,14 @@ import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInsta
 import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
-import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
+import { ServiceBotEvalGateBlockedModal } from '@/components/BotWorkshop/ServiceBotEvaluation/ServiceBotEvalGateBlockedModal';
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
+import { useServiceBotEvalMenuVisibility } from '@/hooks/useServiceBotEvalMenuVisibility';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
@@ -24,6 +25,7 @@ import React, { useEffect, useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
+  const evalMenuBots = useServiceBotEvalMenuVisibility(workshop.items, workshop.currentUserId);
   // 对话菜单落地参数(2026-11-05):?create=cloud 默认唤起云端创建;?keyword=Bot 名称按名称
   // 过滤定位该 Bot(Bot 行「跳转至 Bot 管理」前置入口传入)。挂载一次性消费并清参,避免刷新/回退重复触发。
   useEffect(() => {
@@ -35,7 +37,7 @@ const BotWorkshopPage: React.FC = () => {
     if (keyword || createCloud) history.replace('/bot-workshop');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载一次性消费,workshop 方法每渲染重建不进依赖。
   }, []);
-  const [publicationBot, setPublicationBot] = useState<BotDomain>();
+  const [evalGateModalBot, setEvalGateModalBot] = useState<BotDomain>();
   const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const [basicInfoBot, setBasicInfoBot] = useState<BotDomain>();
   const [containerBot, setContainerBot] = useState<BotDomain>();
@@ -58,6 +60,18 @@ const BotWorkshopPage: React.FC = () => {
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
     else setBasicInfoBot(bot);
   };
+  const openEvaluation = (bot: BotDomain, tab?: 'simple_cert_submit' | 'eval_history') => {
+    const version = bot.publicationVersion ?? bot.liveVersion ?? 'latest';
+    const params = new URLSearchParams();
+    if (bot.ownerId) params.set('owner_id', bot.ownerId);
+    if (tab) params.set('tab', tab);
+    const query = params.toString();
+    history.push(
+      `/bot-workshop/evaluation/${encodeURIComponent(bot.id)}/versions/${encodeURIComponent(String(version))}` +
+        (query ? `?${query}` : ''),
+    );
+  };
+  const openEvaluationHistory = (bot: BotDomain) => openEvaluation(bot, 'eval_history');
   return (
     <main className="app-scrollbar h-full overflow-y-auto bg-page-canvas">
       <div className="w-full p-5 sm:p-6">
@@ -130,7 +144,7 @@ const BotWorkshopPage: React.FC = () => {
                 <>
                   <div data-testid="bot-workshop-table" className="overflow-hidden rounded-[10px] bg-card">
                     <BotTable
-                      bots={workshop.items}
+                      bots={evalMenuBots}
                       onView={handleView}
                       onEdit={(bot) =>
                         workshop.canEnterDetail(bot) ? workshop.openDetail(bot, 'edit') : setBasicInfoBot(bot)
@@ -157,7 +171,10 @@ const BotWorkshopPage: React.FC = () => {
                         getGeneralConfigAvailability(bot, workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
-                      onManagePublication={setPublicationBot}
+                      onPublicationChanged={() => workshop.retry({ silent: true })}
+                      onPublicationGateBlocked={setEvalGateModalBot}
+                      onOpenEvaluation={openEvaluation}
+                      onOpenEvalHistory={openEvaluationHistory}
                       onAction={workshop.runAction}
                       onCopy={workshop.openCopy}
                       getCopyAvailability={workshop.getCopyAvailability}
@@ -200,6 +217,7 @@ const BotWorkshopPage: React.FC = () => {
           sourceBot={workshop.copyBot}
           spaces={copySourceSpaces}
           copying={workshop.copying}
+          awaitingDetail={workshop.awaitingDetail}
           authorization={workshop.copyAuthorization}
           onClose={workshop.closeCopy}
           onSubmit={workshop.submitCopy}
@@ -223,13 +241,13 @@ const BotWorkshopPage: React.FC = () => {
           onEditorRequestPolicyChange={workshop.updateEditorRequestPolicy}
           onRequestAccess={workshop.requestAccess}
         />
-        <ServicePublicationDrawer
-          bot={publicationBot}
-          onClose={() => {
-            setPublicationBot(undefined);
-            void workshop.retry({ silent: true });
+        <ServiceBotEvalGateBlockedModal
+          open={Boolean(evalGateModalBot)}
+          onClose={() => setEvalGateModalBot(undefined)}
+          onGoEvaluation={() => {
+            if (evalGateModalBot) openEvaluation(evalGateModalBot);
+            setEvalGateModalBot(undefined);
           }}
-          onChanged={workshop.retry}
         />
         {generalConfigBot ? (
           <BotGeneralConfigDialog bot={generalConfigBot} onClose={() => setGeneralConfigBot(undefined)} />

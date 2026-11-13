@@ -1,6 +1,6 @@
 # Bot ownership sync operations
 
-This extends [manager sync operations](bot-manager-sync-operations.md) with the
+This extends [manager sync operations](flows/bot-manager-sync.md) with the
 explicit Backend → BCS Owner channel. See the
 [ownership specification](../specs/2026-11-01-bcs-ownership-sync/spec.md) and
 [Core boundary](../src/agentclaw/community/core/bot_management/ownership_sync/README.md).
@@ -186,7 +186,7 @@ page = repair.request_page(avernet_tenant=tenant, env=env, after_pk=cursor, limi
 ```
 
 Use the same bounded paging/drain pattern as
-[manager maintenance bootstrap](bot-manager-sync-operations.md#5-manual-resync),
+[manager maintenance bootstrap](flows/bot-manager-sync.md#5-manual-resync),
 but resolve `OwnershipSyncRepairService`, not `ManagerSyncRepairService`.
 Do not shut down the application's shared lifecycle from such a callback.
 For a **standalone** process, the linked full bootstrap is mandatory: detect and

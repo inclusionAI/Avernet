@@ -50,6 +50,10 @@ before device work. Caller instances remain subject-owned. Personal friends keep
 draft-only addressing. Read-only files and explicit friend IAM use the same
 stage/owned-session boundary. This does not add friend upload/delete privileges.
 
+The legacy expert-chat get and connect session HTTP endpoints translate an
+unavailable online publication to the existing unpublished error (4001).
+OpenAPI stage addressing retains its own not-live response contract.
+
 The OpenAPI friend-session read routes (list/favorites/detail/messages and file
 reads) separate the session subject (`f_user_id`) from the authenticated actor
 (`user_id`). The subject continues to select the Backend-owned session index;
@@ -77,3 +81,14 @@ collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
 existing access policies.
+
+### Teclaw service chat runtime
+
+Teclaw service Bots, including Caller-identity Bots, create and use sessions on
+an existing successful online publication binding. Engine strategy capability
+`requires_caller_chat_instance` disables independent Caller runtime provisioning
+for Teclaw; other engines retain their existing allocation and polling behavior.
+Authorization precedes runtime selection. Backend-owned session indexes remain
+scoped to the session user, while adapter session creation and subsequent
+connection preparation use the same published runtime. No draft fallback or new
+container is introduced by creating a session.

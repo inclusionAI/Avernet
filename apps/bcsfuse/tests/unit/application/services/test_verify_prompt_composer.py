@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import pytest
 
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_response import LLMResponse
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_response import LLMResponse
 
-from src.application.services.verify_prompt_composer import VerifyPromptComposer
-from src.domain.models.verify_dto import CapabilityProbes, DimensionProbe, VerifyData
-from src.domain.models.worker import Capability, CapabilityLevel
+from app.application.services.verify_prompt_composer import VerifyPromptComposer
+from app.domain.models.verify_dto import CapabilityProbes, DimensionProbe, VerifyData
+from app.domain.models.worker import Capability, CapabilityLevel
 
 
 class FakeLLMGateway:

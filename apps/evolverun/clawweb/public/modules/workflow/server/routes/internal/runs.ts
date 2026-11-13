@@ -1,5 +1,7 @@
+import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
 import { RepairBatchError } from '../../contracts/repair-batch.js';
+import { parseParentRelation, ParentRelationError } from '../../services/parent-related-run-registration.js';
 /**
  * Internal API routes for flow_runs — write and read operations for ClawMind.
  */
@@ -48,7 +50,7 @@ export function createInternalRunsRouter(
   ordinaryAuth?: OrdinaryRequestAuth,
 ): Router {
   const router = Router();
-  router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null));
+  router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null, flowRunRepo?.runLogs ?? null));
 
   const ready = () => !!flowRunRepo && !!ordinaryAuth && typeof ordinaryAuth.authenticate === "function"
     && typeof ordinaryAuth.authorize === "function";
@@ -129,7 +131,7 @@ export function createInternalRunsRouter(
       const requestBody = ordinary ? envelope.run : envelope;
       const normalizedBody = ordinary ? { ...requestBody, type: envelope.type, ordinary_request_key: envelope.ordinary_request_key,
         ordinary_parent_flow_id: envelope.ordinary_parent_flow_id } : requestBody;
-      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = requestBody as {
+      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, parent_relation } = requestBody as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
@@ -151,6 +153,9 @@ export function createInternalRunsRouter(
         engine?: string;
         workflow_version?: number | null;
         workflow_deploy_number?: number | null;
+        env?: unknown;
+        tag?: unknown;
+        parent_relation?: unknown;
       };
 
       if (!flow_id || !workflow_id || !status) {
@@ -192,7 +197,9 @@ export function createInternalRunsRouter(
         }
       }
 
+      const markers = normalizeFlowRunMarkers({ env, tag });
       const run = {
+        ...markers,
         flowId: flow_id,
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
@@ -215,9 +222,38 @@ export function createInternalRunsRouter(
         workflowVersion: workflow_version ?? null,
         workflowDeployNumber: workflow_deploy_number ?? null,
       };
+      const hasParentRelation = Object.hasOwn(requestBody, 'parent_relation');
+      const relation = hasParentRelation ? parseParentRelation(parent_relation) : undefined;
+      if (hasParentRelation && !relation) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: 'Invalid parent_relation' });
+        return;
+      }
+      if (ordinary && relation) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: 'parent_relation is only supported on the trusted engine run route' });
+        return;
+      }
+      if (relation && Object.keys(req.query).length !== 0) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: 'parent_relation requests do not accept query parameters' });
+        return;
+      }
       if (ordinary) {
         const data = await flowRunRepo.ordinaryRequests.create(normalizedBody, run, principal!, ordinaryAuth!);
         res.status(data.created ? 201 : 200).json({ success: true, data });
+        return;
+      }
+      if (relation) {
+        const registered = await flowRunRepo.registerParentRelatedRun(req.body as Record<string, unknown>, run, relation);
+        let row;
+        try {
+          row = await flowRunRepo.findFullByFlowId(flow_id);
+        } catch {
+          // Registration is transactional and idempotent; an uncertain readback
+          // must be retried by the caller, never reported as a generic 500.
+          throw new ParentRelationError(503, 'Registered flow run could not be read back');
+        }
+        if (!row) throw new ParentRelationError(503, 'Registered flow run could not be read back');
+        apiLog("WRITE", "/runs", { status: registered.created ? 201 : 200, flow_id, workflow_id, status_field: status, parentRelation: true });
+        res.status(registered.created ? 201 : 200).json({ success: true, data: { ...row, parent_relation: registered.relation } });
         return;
       }
       const registered = await flowRunRepo.insertForRequest(req.body, run);
@@ -231,7 +267,11 @@ export function createInternalRunsRouter(
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
       res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
+      if (error instanceof FlowRunMarkerError) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: error.message }); return;
+      }
       if (ordinary) { respondError(res, error); return; }
+      if (error instanceof ParentRelationError) { res.status(error.status).json({ success: false, error: error.status === 409 ? 'Conflict' : error.status === 400 ? 'Bad Request' : 'Service Unavailable' }); return; }
       if (error instanceof RepairBatchError) { res.status(409).json({ success: false, error: error.message, code: error.code }); return; }
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("WRITE", "/runs", { status: 500, error: "Run insert rejected" });

@@ -5,6 +5,7 @@
 
 pub mod application;
 pub mod bot_authority_contract;
+mod bot_authority_contract_ownerships;
 pub mod bot_authority_core;
 pub mod bot_authority_service;
 pub mod bot_mine_contract;
@@ -27,4 +28,5 @@ pub mod provider_slug;
 pub mod bot_self;
 pub mod agent_bots;
 pub mod group_human_notify;
+pub mod group_card;
 pub mod a2a_bot;

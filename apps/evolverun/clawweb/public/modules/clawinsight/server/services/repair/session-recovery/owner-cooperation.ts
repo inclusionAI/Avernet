@@ -1,10 +1,29 @@
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { validateRecoveryEvidenceReferences } from "./task-state.js";
-import type { RecoveryOwnerRequestInput, RecoveryTaskState } from "./task-contracts.js";
+import type { RecoveryOwnerRequestInput, RecoveryStoredTask, RecoveryTaskState } from "./task-contracts.js";
 
 function fail(status: number, message: string): never {
   throw new SessionRecoveryError(status, "recovery_owner_request_conflict", message);
+}
+
+/** Only an active or possibly delivered attempt reserves this feedback's message. */
+export function ownerContinuationState(requestId: string, attempt: { request?: unknown; result?: unknown; status?: unknown }) {
+  const request = attempt.request as { owner_request_id?: unknown } | undefined;
+  const receipt = attempt.result as { owner_request_id?: unknown; status?: unknown } | undefined;
+  if ((request?.owner_request_id ?? receipt?.owner_request_id) !== requestId) return;
+  if (attempt.status === "pending" || attempt.status === "executing" || attempt.status === "unknown") return attempt.status;
+  if (attempt.status === "succeeded" && receipt?.status === "accepted") return "accepted";
+}
+
+export function hasAssessmentDelivery(task: Pick<RecoveryStoredTask, "ownerRequest" | "delivery" | "timeline">): boolean {
+  const ownerRequest = task.ownerRequest;
+  if (ownerRequest?.status !== "confirmed") return task.delivery?.delivery.status === "accepted" || task.delivery?.delivery.status === "unknown";
+  return task.timeline.some(event => {
+    if (event.kind !== "operation") return false;
+    const state = ownerContinuationState(ownerRequest.requestId, event.payload);
+    return state === "accepted" || state === "unknown";
+  });
 }
 
 /** Permission handling is separate from the one environment Plan. */
@@ -26,7 +45,7 @@ export function requestOwnerCooperation(state: RecoveryTaskState, input: Recover
 /** Caller authenticates and authorizes the actor/environment before invoking this transition. */
 export function confirmOwnerRequest(state: RecoveryTaskState, requestId: string, userId: string, feedback: string, now: number): RecoveryTaskState {
   const request = state.ownerRequest;
-  if (!request || request.requestId !== requestId || !["waiting_owner", "running", "waiting_effect"].includes(state.status)) fail(409, "处理事项已结束或更新，请查看当前任务");
+  if (request?.reason !== "permission" || request.requestId !== requestId || !["waiting_owner", "running", "waiting_effect"].includes(state.status)) fail(409, "处理事项已结束或更新，请查看当前任务");
   // Gateway retries acknowledge the original durable receipt; never dispatch another execution.
   if (request.status === "confirmed") return state;
   if (state.status !== "waiting_owner") fail(409, "任务当前未等待此处理事项");

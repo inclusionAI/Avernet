@@ -68,7 +68,7 @@ cp "$TEST_ROOT/releases/${url##*/}" "$output"
                               env=self.env, text=True, capture_output=True)
 
     def test_workflow_downloads_prebuilt_tools_instead_of_compiling(self) -> None:
-        job = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  backend:', 1)[0]
+        job = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  engine:', 1)[0]
         self.assertIn('run: bash scripts/install_cargo_test_tools.sh', job)
         self.assertNotIn('cargo install cargo-nextest --locked', job)
 

@@ -8,6 +8,8 @@ export type RecoveryRequest = {
   target: { bot_id: string; entity_id: string; env: "pre" | "prod"; engine: "OC" | "CC" | "TE"; runtime_identity?: BotRuntimeIdentity };
   session_key: string;
   session_id?: string;
+  trace_id?: string;
+  fault_at_ms?: number;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;
@@ -31,7 +33,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   createSimulations(body: unknown, actor: RecoveryActor): Promise<{ batch_id: string; items: Array<RecoveryAcknowledgment & { task_id: string }> }>;
   assessSimulation(taskId: string, version: number, input: import("./simulation.js").RecoverySimulationAssessment, finalSummary?: unknown): Promise<void>;
   create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }>;
-  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"]; completion_reason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required" }>>;
+  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"]; completion_reason?: RecoveryStoredTask["completionReason"] }>>;
   detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView>;
   setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView>;
   terminate(taskId: string, actor: RecoveryActor, reason?: unknown): Promise<RecoveryTaskView & { termination: RecoveryTermination }>;
@@ -56,7 +58,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
   readonly handleAisStatus: AisStatusHandler;
-  verify(taskId: string, executionId: string, ticket: string, control?: boolean): Promise<RecoveryStoredTask>;
+  verify(taskId: string, executionId: string, ticket: string, control?: boolean, forBootstrap?: boolean): Promise<RecoveryStoredTask>;
   bootstrap(task: RecoveryStoredTask): Promise<unknown>;
   heartbeat(task: RecoveryStoredTask, sessionId?: string): Promise<unknown>;
   sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;

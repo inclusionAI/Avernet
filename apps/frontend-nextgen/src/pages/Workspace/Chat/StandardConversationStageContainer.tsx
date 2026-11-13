@@ -108,6 +108,7 @@ export function StandardConversationStageContainer({
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
   const headerPanels = useChatHeaderPanels({
+    bot,
     historyReady: botChat.historyReady,
     session: interactiveModel.selectedSession,
     userId,
@@ -127,6 +128,8 @@ export function StandardConversationStageContainer({
     if (interactiveModel.fileFeature.fileDrawerOpen) interactiveModel.fileFeature.closeFileDrawer();
     else {
       headerPanels.closePanel();
+      // 副屏让位：副屏为 AppShell 悬浮层，展开时整条覆盖右缘面板让位区（chat-header-panels 互斥）。
+      headerPanels.dismissSidePaneForPanels();
       interactiveModel.fileFeature.openFileDrawer();
     }
   };

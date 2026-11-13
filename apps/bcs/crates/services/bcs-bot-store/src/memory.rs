@@ -23,6 +23,10 @@ mod controllable;
 // the SQL Store's suite.
 #[path = "memory_authority.rs"]
 pub mod authority;
+/// Batched owner projection mirror of the SQL
+/// `reads_ownerships.rs` spine (`ownerships_for`).
+#[path = "memory_ownerships_batch.rs"]
+pub(crate) mod ownerships_batch;
 /// Memory ownership sync command (2026-10-29 design §5.1).
 #[path = "memory_ownership_sync.rs"]
 pub mod ownership_sync;

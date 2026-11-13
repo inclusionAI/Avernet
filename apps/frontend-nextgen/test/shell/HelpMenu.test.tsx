@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import type { HelpLink, ReleaseNotesCapability, ReleaseNotesData } from '@/capabilities';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 let mockLinks: HelpLink[] = [];
 let mockReleaseCapability: ReleaseNotesCapability | null = null;
@@ -15,11 +15,14 @@ jest.mock('@/capabilities', () => ({
 }));
 
 const { HelpMenu } = require('@/shell/HelpMenu') as typeof import('@/shell/HelpMenu');
+// useReleaseNotes 状态为模块级单例（releaseNotesStore），测试间需复位隔离
+const { useReleaseNotesStore } = require('@/stores/releaseNotesStore') as typeof import('@/stores/releaseNotesStore');
 
 describe('HelpMenu', () => {
   beforeEach(() => {
     mockLinks = [];
     mockReleaseCapability = null;
+    act(() => useReleaseNotesStore.getState().reset());
   });
 
   it('Open Core（links=[] + release unsupported）: 仍渲染问号 trigger', () => {
@@ -48,7 +51,7 @@ describe('HelpMenu', () => {
     expect(screen.getByText('产品获取')).toBeTruthy();
   });
 
-  it('Internal 新 ReleaseNotes → 主动打开 Modal 并立即标记已读', async () => {
+  it('Internal 新 ReleaseNotes → 自动弹 Modal；打开不写已读，主动关闭才标记已读', async () => {
     const data: ReleaseNotesData = {
       version: '1.1',
       date: '2026-09-05',
@@ -64,6 +67,13 @@ describe('HelpMenu', () => {
     render(<HelpMenu />);
 
     expect(await screen.findByText('版本发布说明')).toBeTruthy();
+    // 新发布自动弹出 Modal（富文本内容渲染出来）
+    expect(await screen.findByText('new release')).toBeTruthy();
+    // 打开动作本身不写已读（2026-11-10 已读语义：用户主动关闭才视为已读）
+    expect(markSeen).not.toHaveBeenCalled();
+
+    // 用户点击 Modal「关闭」按钮（统一 close 收口）→ 标记已读
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     await waitFor(() => expect(markSeen).toHaveBeenCalledWith('2026-09-05'));
   });
 });

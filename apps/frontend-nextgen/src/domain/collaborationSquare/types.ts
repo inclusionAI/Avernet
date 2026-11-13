@@ -87,24 +87,31 @@ export type CollaborationSquareErrorCode =
   | 'unknown';
 
 export interface PublicBotSearchQuery {
+  /** 名称子串过滤（BCS candidates 的 name 参数）。 */
   search?: string;
-  page?: number;
+  /** BCS 原始 offset（上一展示页返回的 nextOffset），普通 1-based page 语义弃用。 */
+  offset?: number;
   pageSize?: number;
-  /** Catalog 检索的当前身份（read-time viewer）；下发给 bot-catalog 的 viewer_actor_type。 */
+  /** Catalog 检索的当前身份（read-time viewer）；Human 下发 BCS 时映射为 human_<user-id> Actor。 */
   viewerActorType?: BotCatalogViewer['viewerActorType'];
-  /** Catalog 检索的当前身份 id；下发给 bot-catalog 的 viewer_actor_id。 */
+  /** Catalog 检索的当前身份 id；下发给 BCS 的视角 actor。 */
   viewerActorId?: string;
 }
 
 export interface PublicBotDiscoveryQuery {
   keyword: string;
-  topK?: number;
-  minScore?: number;
-  /** 仅 Human 视角使用；Bot 视角由 Gateway 省略。 */
-  runtimeState?: 'online';
-  /** 智能发现同样以当前身份作为 viewer 过滤可见 Bot。 */
+  /** 智能发现仍以当前身份作为 viewer 过滤可见 Bot（语义契约见 BCS candidates/search）。 */
   viewerActorType?: BotCatalogViewer['viewerActorType'];
   viewerActorId?: string;
+}
+
+/** BCS 候选搜索（candidates/search）的结果模式：语义命中 / 名称回退 / 空关键词本地短路。 */
+export type PublicBotSearchResultMode = 'semantic' | 'name_fallback' | 'empty_query';
+
+/** 智能搜索的返回结构：items 之外必须独立携带 search_mode（空结果也不能丢模式）。 */
+export interface PublicBotDiscoveryResult {
+  items: PublicBot[];
+  searchMode: PublicBotSearchResultMode;
 }
 
 export interface PublicGroupSearchQuery {
@@ -129,12 +136,25 @@ export interface PublicBot {
   description: string;
   capabilities: string[];
   relationshipStatus: BotRelationshipStatus;
-  /** entity_id 与登录用户 ID 一致时，表示目标 Bot 归登录用户管理。 */
+  /** Owner 与登录用户 ID 一致：BCS 候选使用 owner_user_id，匹配的 Backend metadata owner_id 优先。 */
   isOwnedByLoggedInUser?: boolean;
-  /** 智能搜索 Discovery 响应的推荐理由简述（recommendation.short_profile），名称搜索无此字段。 */
+  /**
+   * 智能搜索命中返回的语义相关度（BCS candidates/search 的 score，仅 semantic 命中携带）。
+   * 与 shortProfile 一同经共用 metadata 过滤与关系回填原样保留。
+   */
+  score?: number;
+  /**
+   * 智能搜索 Discovery 响应的推荐理由简述（recommendation.short_profile），名称搜索无此字段。
+   */
   shortProfile?: string;
   /** Bot 生命周期状态（Catalog DTO status；'ACTIVE' 表示可用，缺失时按可用处理）。老版分享链接落地反查用它做可用性兜底。 */
   status?: string;
+  /**
+   * BCS 原始 Bot 状态（候选 DTO 的 status，online|hidden）。
+   * 独立于 Backend Catalog 生命周期 `status`：BCS mapper 只写本字段、不伪造 `ACTIVE`；
+   * 旧分享链接守卫优先按本字段判断可用性，只有没有 BCS 状态的旧 Catalog 项才回落 `status`。
+   */
+  bcsStatus?: 'online' | 'hidden';
   /**
    * 公开受众类型（由 BCS visibility / user_visibility 两维独立设置派生）：
    * 'user' = 仅对用户公开，'bot' = 仅对 Bot 公开；两类均公开或字段缺失时无值。
@@ -146,6 +166,31 @@ export interface PublicBot {
 /** Return the stable identity used to isolate friend-request state for a public Bot card. */
 export function getPublicBotTargetId(bot: Pick<PublicBot, 'id' | 'friendRequestBotId'>): string {
   return bot.friendRequestBotId?.trim() || bot.id;
+}
+
+/**
+ * 旧分享链接落地反查后的「目标可发起申请」判定（bcs-standalone-friend-discovery）。
+ * 只用于旧链接守卫，不作为发现列表过滤条件（普通列表不额外排除 hidden Bot）：
+ * - BCS 候选项（携带独立 bcsStatus）只看 BCS 原始状态，online 才可用；
+ * - 只有没有 BCS 状态的旧 Catalog 项沿用原生命周期判定（缺失按可用、仅 ACTIVE 可用）。
+ */
+export function isPublicBotShareTargetAvailable(bot: PublicBot): boolean {
+  if (bot.bcsStatus !== undefined) return bot.bcsStatus === 'online';
+  return !bot.status || bot.status === 'ACTIVE';
+}
+
+/**
+ * BCS 原始游标语义的公开 Bot 展示页（bcs-standalone-friend-discovery）。
+ * - items：经可选 Backend metadata 过滤后的当前展示页候选；
+ * - nextOffset：下一页应续读的 BCS 原始 offset——预读的第 pageSize+1 条合格记录位置，
+ *   不按过滤后的数组下标计算，不能由未过滤的 BCS total 推导；
+ * - hasMore：预读记录是否存在（是否有下一条合格 Bot）。
+ * Group/Task 列表不迁移，继续使用 CollaborationSquarePage<T>。
+ */
+export interface BotCandidatePage {
+  items: PublicBot[];
+  nextOffset: number;
+  hasMore: boolean;
 }
 
 export type PublicBotPrimaryAction =
@@ -160,6 +205,12 @@ export interface PublicBotPrimaryActionInput {
   targetActorId: string;
   relationshipStatus: BotRelationshipStatus;
   isOwnedByLoggedInUser?: boolean;
+  /**
+   * Backend 可选增强开关（bcs-standalone-friend-discovery Task 4）：关闭时 Human 不再提供
+   * 「开始对话」建聊入口——open_human_bot_conversation 一律转为已是好友（friendship_established），
+   * 禁止所有 Backend 私聊请求；不传沿用默认（开启）语义，保持既有调用方不变。
+   */
+  backendChatEnabled?: boolean;
 }
 
 /** 当前工作身份决定公开 Bot 主操作；Bot 身份不得进入登录用户私聊。 */
@@ -168,9 +219,14 @@ export function resolvePublicBotPrimaryAction({
   targetActorId,
   relationshipStatus,
   isOwnedByLoggedInUser,
+  backendChatEnabled,
 }: PublicBotPrimaryActionInput): PublicBotPrimaryAction {
   if (activeActor.type === 'bot' && activeActor.id.trim() === targetActorId.trim()) return 'self_target';
   if (relationshipStatus === 'applying') return 'applying';
+  if (activeActor.type === 'human' && backendChatEnabled === false) {
+    // BCS-only 等无 Backend 增强：Human 的会话入口改为「已是好友」，不发起 Backend 私聊。
+    return relationshipStatus === 'friend' || isOwnedByLoggedInUser ? 'friendship_established' : 'request_friendship';
+  }
   if (relationshipStatus === 'friend') {
     return activeActor.type === 'human' ? 'open_human_bot_conversation' : 'friendship_established';
   }
@@ -210,6 +266,8 @@ export interface PublicGroupMembersDetail {
 
 export interface PublicGroupMember {
   id: string;
+  /** 群详情 participants 的头像；缺省时 Bot 使用 id 作为固定种子，与 Bot 管理一致。 */
+  avatarUrl?: string | null;
   displayName: string;
   type: PublicMemberType;
   role: string;
@@ -279,6 +337,8 @@ export interface BotCatalogViewModel {
   hasMore: boolean;
   loadingMore: boolean;
   loadMoreError: string | null;
+  /** 智能搜索（BCS candidates/search）的结果模式：name_fallback 时面板/搜索栏展示「名称匹配」。 */
+  searchResultMode?: PublicBotSearchResultMode | null;
   setQuery: (query: string) => void;
   setMode: (mode: BotSearchMode) => void;
   reload: () => void;

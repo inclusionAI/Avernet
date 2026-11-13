@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import errno
 import time
 from typing import NoReturn
 
@@ -104,7 +105,21 @@ def _map_fs_error(e: Exception) -> NoReturn:
     raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/upload", response_model=ApiResponse)
+@router.post(
+    "/upload",
+    response_model=ApiResponse,
+    responses={403: {
+        "description": "Permission denied or the target filesystem is read-only.",
+        "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"detail": {"oneOf": [
+                {"type": "string"},
+                {"type": "object", "properties": {"code": {"type": "string", "enum": ["filesystem_read_only"]}}, "required": ["code"], "additionalProperties": False},
+            ]}},
+            "required": ["detail"],
+        }}},
+    }},
+)
 async def upload_file(
     file: UploadFile = File(...),
     target_path: str = Form(...),
@@ -113,11 +128,19 @@ async def upload_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
     try:
-        content = await file.read()
-        plugin = _file_plugin()
-        result = await plugin.upload(target_path, content)
-    except Exception as e:  # noqa: BLE001 — mapped to HTTP via helper
-        _map_fs_error(e)
+        try:
+            content = await file.read()
+            plugin = _file_plugin()
+        except Exception as e:  # noqa: BLE001 — mapped to HTTP via helper
+            _map_fs_error(e)
+        try:
+            result = await plugin.upload(target_path, content)
+        except OSError as e:
+            if e.errno == errno.EROFS:
+                raise HTTPException(status_code=403, detail={"code": "filesystem_read_only"}) from e
+            _map_fs_error(e)
+        except Exception as e:  # noqa: BLE001 — mapped to HTTP via helper
+            _map_fs_error(e)
     finally:
         await file.close()
 

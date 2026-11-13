@@ -6,10 +6,10 @@ SQLiteFusedProfileStore 单元测试
 
 import pytest
 from unittest.mock import patch
-from src.infra.adapters.sqlite_fused_profile_store import SQLiteFusedProfileStore
-from src.domain.exceptions import DuplicateFusionException, FusionNotFoundException
-from src.domain.models.profile_fusion import FusedProfileRecord
-from src.domain.models.profile_fusion import ConversationTurn, ConversationStats
+from app.infra.adapters.sqlite_fused_profile_store import SQLiteFusedProfileStore
+from app.domain.exceptions import DuplicateFusionException, FusionNotFoundException
+from app.domain.models.profile_fusion import FusedProfileRecord
+from app.domain.models.profile_fusion import ConversationTurn, ConversationStats
 
 
 class TestSQLiteFusedProfileStore:
@@ -549,7 +549,7 @@ class TestEnvIsolation:
 
     def test_find_by_key_no_env_filter(self, store):
         """find_by_key 不按 env 过滤，fusion_id 全局唯一"""
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             record = FusedProfileRecord(
                 fusion_id="fusion-no-env-filter",
                 fusion_mode="bot_profile_fuse",
@@ -559,14 +559,14 @@ class TestEnvIsolation:
             store.save(record)
 
         # 即使当前环境是 prod，也能通过 fusion_id 找到 env=pre 的记录
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             found = store.find_by_key("fusion-no-env-filter")
             assert found is not None
             assert found.env == "pre"
 
     def test_count_isolated_by_env(self, store):
         """count 按环境隔离——列表查询加 env 过滤"""
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             store.save(FusedProfileRecord(
                 fusion_id="fusion-prod-001", fusion_mode="bot_profile_fuse",
                 env="prod", participant_ids="wrk_1",
@@ -580,15 +580,15 @@ class TestEnvIsolation:
         )
         store._conn.commit()
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             assert store.count() == 1
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
             assert store.count() == 1
 
     def test_find_by_group_isolated_by_env(self, store):
         """find_by_group 按环境隔离——列表查询加 env 过滤"""
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             store.save(FusedProfileRecord(
                 fusion_id="fusion-prod-grp", fusion_mode="bot_profile_fuse",
                 env="prod", participant_ids="wrk_1", group_id="grp-shared",
@@ -601,19 +601,19 @@ class TestEnvIsolation:
         )
         store._conn.commit()
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             records = store.find_by_group("grp-shared")
             assert len(records) == 1
             assert records[0].env == "prod"
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
             records = store.find_by_group("grp-shared")
             assert len(records) == 1
             assert records[0].env == "pre"
 
     def test_find_by_participant_isolated_by_env(self, store):
         """find_by_participant 按环境隔离——列表查询加 env 过滤"""
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             store.save(FusedProfileRecord(
                 fusion_id="fusion-prod-part", fusion_mode="bot_profile_fuse",
                 env="prod", participant_ids="wrk_shared",
@@ -626,12 +626,12 @@ class TestEnvIsolation:
         )
         store._conn.commit()
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="prod"):
             records = store.find_by_participant("wrk_shared")
             assert len(records) == 1
             assert records[0].env == "prod"
 
-        with patch("src.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
+        with patch("app.infra.adapters.sqlite_fused_profile_store.get_fusion_env", return_value="pre"):
             records = store.find_by_participant("wrk_shared")
             assert len(records) == 1
             assert records[0].env == "pre"

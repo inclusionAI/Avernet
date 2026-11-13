@@ -53,11 +53,10 @@ pub fn select_a2a_interface(
 }
 
 /// Shared lexical policy used both at Card admission and route derivation.
-/// DNS pinning remains the outbound adapter's responsibility on every attempt.
+/// HTTP and HTTPS are supported; network policy and DNS pinning remain the
+/// outbound adapter's responsibility on every attempt.
 pub fn http_interface_address_allowed(raw:&str)->bool {
     let Ok(url)=url::Url::parse(raw) else {return false;};
     if raw!=raw.trim() || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {return false;}
-    let Some(host)=url.host_str() else {return false;};
-    url.scheme()=="https" || (url.scheme()=="http" && (host=="localhost" || host=="[::1]"
-        || host.parse::<std::net::IpAddr>().is_ok_and(|ip|ip.is_loopback())))
+    url.host_str().is_some() && matches!(url.scheme(), "http" | "https")
 }

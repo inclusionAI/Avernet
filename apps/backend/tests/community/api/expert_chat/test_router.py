@@ -1,5 +1,6 @@
 """Tests for ExpertChat API router."""
 import logging
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
+
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -382,6 +385,83 @@ class TestRemoveChatBot:
         }
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("get_chat_session", "/api/v1/expert-chats/test_bot/test_owner/session", None),
+        ("connect_chat_session", "/api/v1/expert-chats/test_bot/test_owner/sessions/connect", {"session_key": "session:test"}),
+    ],
+)
+def test_unpublished_online_session_is_a_business_failure(client_with_mock, method, path, body):
+    client, service = client_with_mock
+    getattr(service, method).side_effect = EngineStageNotLiveError("private detail")
+    with patch("agentclaw.community.adapters.http.expert_chat.router.logger") as log:
+        response = client.post(path, json=body) if body else client.post(path)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["success"] is False
+    assert result["error_code"] == 4001
+    assert result["message"] == "Bot未发布或发布版本不可用"
+    assert not result.get("data")
+    assert "private detail" not in response.text
+    log.warning.assert_called_once_with(
+        f"[expert_chats.{method}] Online publication unavailable: bot=%s owner=%s",
+        "test_bot", "test_owner",
+    )
+    log.error.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["get", "connect"])
+@pytest.mark.parametrize("case", ["unpublished", "no_binding", "unowned", "unauthorized", "bad_ext"])
+def test_real_service_session_guards_and_publication_mapping(operation, case):
+    from agentclaw.community.adapters.http.expert_chat import router
+    from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+    from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+    from tests.community.bot_address_fakes import support_legacy_locator
+
+    repo = MagicMock()
+    repo.list_chat_bots.return_value = [{"bot_id": "b1", "owner_id": "owner"}]
+    repo.get_owned_session.return_value = None if case == "unowned" else {"session_key": "s1"}
+    bots = support_legacy_locator(MagicMock())
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17, "bot_id": "b1", "owner_id": "owner", "entity_id": "owner",
+        "status": "ACTIVE", "bot_type": "service", "binding_id": 123,
+    }
+    resolver = MagicMock()
+    collaborator = MagicMock()
+    collaborator.check_collaborator_permission.return_value = {"has_permission": case != "unauthorized"}
+    publishes = MagicMock()
+    publishes.list_by_source_bot.return_value = {
+        "bad_ext": [SimpleNamespace(id=1, status="success", ext="invalid json")],
+        "no_binding": [SimpleNamespace(id=1, status="success", ext={"binding": {}})],
+    }.get(case, [])
+    service = ExpertChatService(
+        repository=repo, bot_repo=bots, device_provider=MagicMock(),
+        baas_service=MagicMock(), resolver=resolver, collaborator_service=collaborator,
+        transport=MagicMock(), instance_service=MagicMock(), publish_repository=publishes,
+    )
+
+    class BindService(Module):
+        def configure(self, binder):
+            binder.bind(ExpertChatServiceProtocol, to=service)
+
+    app = FastAPI()
+    app.include_router(router)
+    attach_injector(app, Injector([BindService()]))
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(staffId="friend")
+    with TestClient(app) as client:
+        path = "/api/v1/expert-chats/b1/owner"
+        response = (client.post(path + "/session") if operation == "get" else
+                    client.post(path + "/sessions/connect", json={"session_key": "s1"}))
+
+    expected = 403 if case == "unauthorized" else 404 if case == "unowned" and operation == "connect" else 5999 if case == "bad_ext" else 4001
+    assert response.json()["error_code"] == expected
+    if case == "unauthorized" or (case == "unowned" and operation == "connect"):
+        publishes.list_by_source_bot.assert_not_called()
+    resolver.resolve_for_binding.assert_not_called()
+    repo.save_session.assert_not_called()
+
+
 class TestGetChatSession:
     """Tests for POST /api/v1/expert-chats/{bot_id}/{owner_id}/session endpoint."""
 
@@ -691,3 +771,51 @@ class TestMultiChatSessions:
 
         assert response.status_code == 200
         assert response.json()["error_code"] == expected_code
+
+
+def test_teclaw_session_http_uses_real_service_without_provisioning(client_with_mock):
+    """Exercise the HTTP adapter and real session orchestration together."""
+    from types import SimpleNamespace
+
+    client, api_service = client_with_mock
+    repository = MagicMock()
+    repository.list_chat_bots.return_value = [{"bot_id": "test_bot", "owner_id": "test_owner"}]
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {
+        "id": 42, "bot_id": "test_bot", "owner_id": "test_owner", "status": "ACTIVE",
+        "binding_id": 123, "bot_type": "service", "call_type": "caller",
+        "active_engine": "teclaw", "public": "1",
+    }
+    bots.get_by_id_and_owner.return_value["entity_id"] = "test_owner"
+    bots.list_matches_by_legacy_locator.return_value = [bots.get_by_id_and_owner.return_value]
+    publishes = MagicMock()
+    publishes.list_by_source_bot.return_value = [
+        SimpleNamespace(id=7, status="success", ext={"binding": {"online": 987}})
+    ]
+    resolver = MagicMock()
+    resolver.resolve_for_binding.return_value = SimpleNamespace(
+        provider="teclaw", conn_info={"engine_type": "teclaw", "use_proxy": True}
+    )
+    instances = MagicMock()
+    instances.get_caller_connection = AsyncMock(side_effect=AssertionError("must not provision"))
+    transport = MagicMock()
+    transport.invoke = AsyncMock(side_effect=[
+        {"data": {"id": "session-new"}}, {"data": [{"id": "agent:main:session-new"}]},
+    ])
+    real_service = ExpertChatService(
+        repository=repository, bot_repo=bots, device_provider=MagicMock(),
+        baas_service=MagicMock(), resolver=resolver, collaborator_service=MagicMock(),
+        transport=transport, instance_service=instances, publish_repository=publishes,
+    )
+    api_service.create_chat_session = real_service.create_chat_session
+    response = client.post("/api/v1/expert-chats/test_bot/test_owner/sessions")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["data"]["session_key"] == "agent:main:session-new"
+    assert not payload["data"].get("need_poll", False)
+    instances.get_caller_connection.assert_not_awaited()
+    resolver.resolve_for_binding.assert_called_once_with(987, "test_user", bot_id="test_bot")
+    repository.add_owned_session.assert_called_once_with(
+        "test_user", "test_bot", "test_owner", "agent:main:session-new"
+    )

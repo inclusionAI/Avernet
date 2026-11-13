@@ -35,7 +35,7 @@ it.each([150, 151] as const)('rejects real SQLite v%s incompatible schema and re
     else peer.exec('ALTER TABLE flow_runs DROP COLUMN ordinary_run_marker; ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker TEXT');
     const { db } = await initDatabase();
     expect(db.dbType).toBe('sqlite');
-    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 151 }]);
+    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
     expect(await db.query('SELECT request_key_hash, child_workflow_id FROM ordinary_run_requests')).toEqual([{ request_key_hash: 'key', child_workflow_id: 'workflow' }]);
     expect(await db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
   } finally {

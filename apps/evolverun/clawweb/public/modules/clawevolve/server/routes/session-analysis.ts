@@ -436,12 +436,23 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
     if (view.status === "completed" && uploaded.report && cfg.artifactUploadMode === "broker") {
       reportMarkdown = (await uploadStore.getObject(cfg.artifacts.report.objectKey)).content.toString("utf8");
     }
-    if (view.status === "completed" && isSingleSessionMode(cfg.mode) && uploaded.raw
-      && cfg.artifactUploadMode === "broker" && cfg.artifacts.raw.objectKey.endsWith(".jsonl")
-      && (!cfg.aisBase || Number((uploaded.raw as Record<string, unknown>).size) <= 2 * 1024 * 1024)) {
-      preview = sessionPreview((await uploadStore.getObject(cfg.artifacts.raw.objectKey)).content);
+    let sessionPreviewUnavailableReason: string | null = null;
+    if (view.status === "completed" && isSingleSessionMode(cfg.mode)) {
+      if (cfg.artifactUploadMode !== "broker") {
+        sessionPreviewUnavailableReason = "本任务未启用会话文件上传，无法在线预览。";
+      } else if (!uploaded.raw) {
+        sessionPreviewUnavailableReason = uploaded.trajectory
+          ? "本任务仅提供运行轨迹，暂无原始 Session 预览；可下载运行轨迹查看。"
+          : "本任务未提供原始 Session 文件，暂无会话预览。";
+      } else if (!cfg.artifacts.raw?.objectKey.endsWith(".jsonl")) {
+        sessionPreviewUnavailableReason = "当前 Session 文件格式不支持在线预览，请下载查看。";
+      } else if (cfg.aisBase && !(Number((uploaded.raw as Record<string, unknown>).size) <= 2 * 1024 * 1024)) {
+        sessionPreviewUnavailableReason = "Session 文件超过在线预览上限（2 MiB），或文件大小信息不可用，请下载查看。";
+      } else {
+        preview = sessionPreview((await uploadStore.getObject(cfg.artifacts.raw.objectKey)).content);
+      }
     }
-    res.json({ ...view, botName, reportMarkdown, sessionPreview: preview, artifacts: Object.keys(uploaded) }); }));
+    res.json({ ...view, botName, reportMarkdown, sessionPreview: preview, sessionPreviewUnavailableReason, artifacts: Object.keys(uploaded) }); }));
   router.post("/:id/retry", asyncHandler(async (req, res) => { if (!repo) return res.status(503).json({ error: "任务数据库不可用" }); const userId = actor(req); const task = await repo.findTask(param(req.params.id));
     if (!userId) return res.status(401).json({ error: "未识别当前用户" });
     if (!task || (task.created_by !== userId && !req.isClawEvolveAdmin) || !["session_analysis", "session_export"].includes(task.task_type)) return res.status(404).json({ error: "任务不存在" });

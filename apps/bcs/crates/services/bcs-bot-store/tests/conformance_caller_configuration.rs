@@ -323,6 +323,143 @@ async fn broken_caller_data_is_an_error_never_disabled() {
         .is_err());
 }
 
+/// A legacy writer double-encoded `bot_info`: the column holds a JSON
+/// *string* whose text is the JSON object (§10.7.2 bounded compatibility).
+/// The sync read unwraps exactly once, the sync write heals the row back
+/// into a plain object (sibling fields preserved, wrapped text gone), and
+/// the projected `$.caller` read keeps answering "never configured" from a
+/// missing path until the row heals.
+#[tokio::test]
+async fn double_encoded_bot_info_is_unwrapped_once_and_healed_by_the_sync_write() {
+    let (repo, db) = fixture().await;
+    seed_bot(db.as_ref(), "wrapped", plain_bot_info()).await;
+    let wrapped = serde_json::to_string(&plain_bot_info().to_string()).expect("wrap once");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = 'wrapped'",
+        vec![Value::from(wrapped)],
+    ))
+    .await
+    .expect("wrap bot_info");
+
+    // Projected read (the admission-path semantics): `$.caller` inside a
+    // string root is a missing path, so the bot still reads "never
+    // configured", not an error.
+    let config = repo
+        .get_caller_configuration("wrapped", "dev")
+        .await
+        .expect("read")
+        .expect("bot exists");
+    assert_eq!(config, BotCallerConfiguration { snapshot: None });
+
+    // The sync applies over the unwrapped inner object...
+    let outcome = repo
+        .sync_caller_configuration("wrapped", "dev", snapshot(6, true))
+        .await
+        .expect("sync")
+        .expect("target");
+    assert!(matches!(outcome, CallerConfigurationSync::Applied { .. }));
+
+    // ...and the write heals the row: plain object root, sibling fields
+    // kept, no leftover wrapped text.
+    let rows = db
+        .query(DbStatement::new(
+            "SELECT bot_info FROM bcs_bots WHERE bot_uuid = 'wrapped' AND env = 'dev'",
+        ))
+        .await
+        .expect("raw read");
+    let raw: String = bcs_db_api::db_get_column(&rows[0], "bot_info").expect("bot_info present");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("healed row parses");
+    assert!(value.is_object(), "healed root must be an object");
+    assert_eq!(value["summary"], "existing summary");
+    assert_eq!(value["scopes"][0], "workspace");
+    assert_eq!(value["caller"]["source_revision"], 6);
+    assert_eq!(
+        repo.get_caller_configuration("wrapped", "dev")
+            .await
+            .expect("read")
+            .expect("bot")
+            .snapshot,
+        Some(snapshot(6, true))
+    );
+}
+
+/// The bounded unwrap never generalizes: a twice-encoded string, a string
+/// whose inner text is not an object, a plain non-object root, and a
+/// wrapped `caller: null` all stay fail-closed storage errors — the sync
+/// refuses and leaves the row byte-identical, never partially healed.
+#[tokio::test]
+async fn deeper_or_non_object_encoding_stays_a_closed_error() {
+    let (repo, db) = fixture().await;
+
+    // String wrapping a string wrapping the object: only one layer unwraps.
+    seed_bot(db.as_ref(), "twice", plain_bot_info()).await;
+    let double = serde_json::to_string(
+        &serde_json::to_string(&plain_bot_info().to_string()).expect("wrap once"),
+    )
+    .expect("wrap twice");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = 'twice'",
+        vec![Value::from(double.clone())],
+    ))
+    .await
+    .expect("wrap twice");
+
+    // String wrapping a JSON array.
+    seed_bot(db.as_ref(), "wrapped-array", plain_bot_info()).await;
+    let wrapped_array = serde_json::to_string(&json!([1, 2]).to_string()).expect("wrap array");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = 'wrapped-array'",
+        vec![Value::from(wrapped_array.clone())],
+    ))
+    .await
+    .expect("wrap array");
+
+    // Plain array root, no encoding at all.
+    seed_bot(db.as_ref(), "plain-array", plain_bot_info()).await;
+    db.execute(DbStatement::new(
+        "UPDATE bcs_bots SET bot_info = '[1, 2]' WHERE bot_uuid = 'plain-array'",
+    ))
+    .await
+    .expect("plain array");
+
+    // Double-encoded but the inner object carries the frozen `caller: null`
+    // — the unwrap must not soften the caller payload contract.
+    let wrapped_null_caller =
+        serde_json::to_string(&json!({ "summary": "x", "caller": null }).to_string())
+            .expect("wrap null caller");
+    seed_bot(db.as_ref(), "wrapped-null-caller", plain_bot_info()).await;
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET bot_info = ? WHERE bot_uuid = 'wrapped-null-caller'",
+        vec![Value::from(wrapped_null_caller.clone())],
+    ))
+    .await
+    .expect("wrap null caller");
+
+    for (id, original) in [
+        ("twice", double),
+        ("wrapped-array", wrapped_array),
+        ("plain-array", "[1, 2]".to_string()),
+        ("wrapped-null-caller", wrapped_null_caller),
+    ] {
+        assert!(
+            repo.sync_caller_configuration(id, "dev", snapshot(2, true))
+                .await
+                .is_err(),
+            "{id} must stay a closed storage error"
+        );
+        let rows = db
+            .query(DbStatement::with_params(
+                "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = 'dev'",
+                vec![Value::from(id.to_string())],
+            ))
+            .await
+            .expect("raw read");
+        let raw: String =
+            bcs_db_api::db_get_column(&rows[0], "bot_info").expect("bot_info present");
+        assert_eq!(raw, original, "{id}: refused sync must leave the row untouched");
+    }
+}
+
 /// Fake plugin: reads yield a bot row without a caller object, while the
 /// conditional update affects zero rows (simulating a lost CAS race).
 struct ContendedDb;

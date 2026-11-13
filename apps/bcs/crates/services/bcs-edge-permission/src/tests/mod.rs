@@ -19,7 +19,7 @@ use bcs_service_api::port::{
 };
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::port::repo::{
-    BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
+    BotActorConfigRepoPort, BotAuthorityRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
 use bcs_service_api::{EdgePermissionFriendSyncService, ServiceError, ServiceResult};
@@ -378,6 +378,8 @@ mod department_exemption;
 mod notifications;
 
 mod connect_lifecycle;
+
+mod connect_friend_service;
 
 mod admission;
 

@@ -93,6 +93,11 @@ _ALLOWLIST: dict[str, str] = {
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer inherited from origin/dev.",
+    "adapters/http/openapi_v1/responses.py":
+        "~1012 lines — shared error-envelope table + response builders, inherited at 995 lines "
+        "from origin/dev (REL20261110 re-import); the context-collab error rows in this PR push it "
+        "past the cap. Extracting the ~520-line ENVELOPE_ERRORS table into its own module is the "
+        "follow-up cleanup, kept out of this feature PR to keep its diff scoped.",
 }
 
 

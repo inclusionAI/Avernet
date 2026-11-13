@@ -14,6 +14,8 @@
     pytest tests/integration/test_real_llm_embedding.py -v --tb=short
 """
 
+from tests.qdrant_support import server_options
+
 import os
 import time
 
@@ -100,8 +102,8 @@ class TestRealEmbedding:
 
     def test_embedding_provider_connection(self, ensure_service_running):
         """测试 Embedding Provider 连接"""
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-        from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.providers.real_provider import RealEmbeddingProvider
 
         settings = EmbeddingSettings()
 
@@ -120,8 +122,8 @@ class TestRealEmbedding:
 
     def test_embedding_batch(self, ensure_service_running):
         """测试批量 Embedding"""
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-        from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.providers.real_provider import RealEmbeddingProvider
 
         settings = EmbeddingSettings()
 
@@ -240,10 +242,10 @@ class TestVectorStoreWithRealEmbedding:
         import tempfile
         from pathlib import Path
 
-        from src.domain.models.vector_point import VectorPoint
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-        from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
-        from src.infra.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+        from app.domain.models.vector_point import VectorPoint
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.providers.real_provider import RealEmbeddingProvider
+        from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
         settings = EmbeddingSettings()
 
@@ -256,7 +258,8 @@ class TestVectorStoreWithRealEmbedding:
             db_path = Path(tmpdir) / "test_vector.db"
 
             # 创建 store
-            store = FaissSqliteVectorStore(
+            store = QdrantSQLiteVectorStore(
+                **server_options(str(db_path)),
                 dimension=settings.dimension,
                 db_path=str(db_path),
                 auto_load=False,
@@ -286,7 +289,8 @@ class TestVectorStoreWithRealEmbedding:
             assert store.size() == 3
 
             # 创建新实例加载持久化数据
-            store2 = FaissSqliteVectorStore(
+            store2 = QdrantSQLiteVectorStore(
+                **server_options(str(db_path)),
                 dimension=settings.dimension,
                 db_path=str(db_path),
                 auto_load=True,

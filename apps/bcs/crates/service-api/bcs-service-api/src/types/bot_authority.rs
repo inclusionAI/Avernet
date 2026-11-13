@@ -115,6 +115,8 @@ pub struct AuthorityMutation {
 /// Trusted initialization payload for a Bot's ownership
 /// (spec §10: owner + version in the same transaction).
 pub struct OwnershipInitialization {
+    /// Provider-only creation snapshot; never a manager synchronization command.
+    pub initial_manager_user_ids: Vec<String>,
     pub owner_user_id: String,
     pub mutation: AuthorityMutation,
 }
@@ -459,11 +461,12 @@ pub enum TransferOutcome {
     },
 }
 
-/// Maximum ids bound into one bounded collection query.
+/// Maximum distinct identities in one bounded collection query.
 ///
 /// `roles_for` results must never be assembled by calling the single
 /// `role` read per input; implementations read owners and target edges
-/// in chunks of at most this many ids per statement.
+/// in chunks of at most this many identities per statement. An indexed
+/// prefilter and byte-exact residual may bind the same identity twice.
 pub const AUTHORITY_QUERY_CHUNK: usize = 128;
 
 /// Default page limit for manager/transfer list queries.
@@ -541,3 +544,7 @@ mod tests {
         assert!(!replay.changed);
     }
 }
+
+#[path = "provider_authority_initialization.rs"]
+mod provider_initialization;
+pub use provider_initialization::{normalize_provider_owners, validate_initial_managers};

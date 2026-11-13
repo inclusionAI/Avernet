@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.task.task_harness.harness import (
+from agentclaw.community.core.task.task_harness.timeout_policy import (
     effective_pending_timeout_ms,
     effective_sla_threshold_ms,
 )

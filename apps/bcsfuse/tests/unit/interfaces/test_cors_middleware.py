@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from src.interfaces.api.cors_middleware import RegexCORSMiddleware
+from app.adapters.http.cors_middleware import RegexCORSMiddleware
 
 
 def test_legacy_star_origin_pattern_allows_any_origin() -> None:

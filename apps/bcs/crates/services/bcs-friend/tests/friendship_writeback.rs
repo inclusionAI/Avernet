@@ -234,3 +234,15 @@ impl RelationCoreService for FailingRelationCoreService {
         Err(relation_unavailable())
     }
 }
+
+#[tokio::test]
+async fn human_relation_failure_propagates_even_when_retry_has_no_repo_row() {
+    let repo = Arc::new(MemoryFriendRepo::new());
+    let service = FriendshipWritebackService::new(repo.clone(), Arc::new(FailingRelationCoreService));
+    assert!(service.add_friendship("human_1", "bot_b:2").await.is_err());
+    assert!(repo.are_friends("human_1", "bot_b:2").await.unwrap());
+    assert!(service.remove_friendship("human_1", "bot_b:2").await.is_err());
+    assert!(!repo.are_friends("human_1", "bot_b:2").await.unwrap());
+    // The missing repo row must not skip retrying relation cleanup.
+    assert!(service.remove_friendship("human_1", "bot_b:2").await.is_err());
+}

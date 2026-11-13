@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, TypeVar
+from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, Sequence, TypeVar
 
 from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
@@ -36,6 +36,7 @@ from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 __all__ = [
     "CenterSkillByName",
     "Declaration",
+    "DesiredBotConfig",
     "DesiredBotFileSync",
     "DesiredCliTool",
     "DesiredEngineConfig",
@@ -302,6 +303,13 @@ class DesiredBotFileSync:
 
     #: The source bot whose workspace is synced onto this one.
     source_bot_id: str
+    #: The source bot's owner. A ``bot_id`` is not globally unique (the reserved
+    #: ``default`` bot has a row per account, and a shared / template id can
+    #: collide across owners), so the sync reads the source row by
+    #: ``(bot_id, owner_id)`` rather than by ``bot_id`` alone — a wrong owner
+    #: would converge the wrong account's workspace. Carried off the manifest's
+    #: ``protocol: bot`` source ``owner_id`` field.
+    source_owner_id: str
     #: Workspace-relative root, trailing slash (a directory tree). A literal
     #: constant the copy serializer writes; the sync resolves the host paths.
     path: str
@@ -449,6 +457,26 @@ class DesiredEngineConfig:
 
 
 @dataclass(frozen=True)
+class DesiredBotConfig:
+    """The ``bot_config`` mapping: per-kind configuration the bot carries.
+
+    A mapping-valued Category like ``DesiredEngineConfig`` — one entry holds the
+    whole ``bot_config`` mapping, keyed by sync kind (``render_screen``,
+    a future ``task_nav``, …) with each value that kind's entry list. The
+    ``BotConfigMaterialiser`` resolves the whole mapping, dispatching each kind
+    to a registered handler; the entry itself is untyped here (``Any``) because
+    each kind's entry shape is the handler's own, not the engine's — the same
+    reason the orchestration never inspects ``value``.
+    """
+
+    config: Mapping[str, Sequence[Any]]
+    identity: ClassVar[str] = Category.BOT_CONFIG.value
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType({k: tuple(v) for k, v in self.config.items()}))
+
+
+@dataclass(frozen=True)
 class DesiredState:
     """What a bot should hold, per construct; ``None`` = not declared."""
 
@@ -460,6 +488,7 @@ class DesiredState:
     engine_config: Declaration[DesiredEngineConfig] | None = None
     cli_tools: Declaration[DesiredCliTool] | None = None
     bot_file_sync: Declaration[DesiredBotFileSync] | None = None
+    bot_config: Declaration[DesiredBotConfig] | None = None
 
     EMPTY: ClassVar[DesiredState]
 
@@ -500,6 +529,7 @@ _FIELD_BY_CONSTRUCT: dict[Construct, str] = {
     Category.ENGINE_CONFIG: "engine_config",
     Category.CLI_TOOLS: "cli_tools",
     Section.BOT_FILE_SYNC: "bot_file_sync",
+    Category.BOT_CONFIG: "bot_config",
 }
 
 DesiredState.EMPTY = DesiredState()

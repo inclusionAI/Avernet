@@ -347,3 +347,5 @@ fn caller_transition(
 mod queue;
 #[path = "delivery_runtime/lifecycle.rs"]
 mod lifecycle;
+#[path = "delivery_runtime/isolation.rs"]
+mod isolation;

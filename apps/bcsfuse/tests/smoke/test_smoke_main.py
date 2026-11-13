@@ -22,42 +22,42 @@ class TestLayerImports:
 
     def test_domain_layer_importable(self):
         """验证 domain 层可导入"""
-        from src import domain
+        from app import domain
         assert domain is not None
 
     def test_domain_models_importable(self):
         """验证领域模型可导入"""
-        from src.domain import models
+        from app.domain import models
         assert models is not None
 
     def test_domain_exceptions_importable(self):
         """验证领域异常可导入"""
-        from src.domain import exceptions
+        from app.domain import exceptions
         assert exceptions is not None
 
     def test_application_layer_importable(self):
         """验证 application 层可导入"""
-        from src import application
+        from app import application
         assert application is not None
 
     def test_infra_layer_importable(self):
         """验证 infra 层可导入"""
-        from src import infra
+        from app import infra
         assert infra is not None
 
     def test_interfaces_layer_importable(self):
         """验证 interfaces 层可导入"""
-        from src import interfaces
-        assert interfaces is not None
+        from app import adapters
+        assert adapters is not None
 
     def test_adapters_layer_importable(self):
         """验证 adapters 层可导入"""
-        from src.domain.services import adapters
+        from app.domain.services import adapters
         assert adapters is not None
 
     def test_openclaw_adapter_contract_importable(self):
         """验证共享 OpenClaw 契约可导入，不依赖旧的空骨架包。"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
         assert OpenClawAdapter is not None
 
 
@@ -116,35 +116,35 @@ class TestCoreModelImports:
 
     def test_worker_model_importable(self):
         """验证 Worker 模型可导入"""
-        from src.domain.models import Worker
+        from app.domain.models import Worker
         assert Worker is not None
 
     def test_task_spec_model_importable(self):
         """验证 TaskSpec 模型可导入"""
-        from src.domain.models import TaskSpec
+        from app.domain.models import TaskSpec
         assert TaskSpec is not None
 
     def test_plan_draft_model_importable(self):
         """验证 PlanDraft 模型可导入"""
-        from src.domain.models import PlanDraft
+        from app.domain.models import PlanDraft
         assert PlanDraft is not None
 
     def test_candidate_bundle_model_importable(self):
         """验证 CandidateBundle 模型可导入"""
-        from src.domain.models import CandidateBundle
+        from app.domain.models import CandidateBundle
         assert CandidateBundle is not None
 
     def test_team_spec_model_importable(self):
         """验证 TeamSpec 模型可导入"""
-        from src.domain.models import TeamSpec
+        from app.domain.models import TeamSpec
         assert TeamSpec is not None
 
     def test_workspace_model_importable(self):
         """验证 Workspace 模型可导入"""
-        from src.domain.models import Workspace
+        from app.domain.models import Workspace
         assert Workspace is not None
 
     def test_execution_packet_model_importable(self):
         """验证 ExecutionPacket 模型可导入"""
-        from src.domain.models import ExecutionPacket
+        from app.domain.models import ExecutionPacket
         assert ExecutionPacket is not None

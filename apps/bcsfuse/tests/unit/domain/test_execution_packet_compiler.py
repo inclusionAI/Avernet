@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.services.execution_packet_compiler import ExecutionPacketCompiler
+from app.domain.services.execution_packet_compiler import ExecutionPacketCompiler
 
 
 # =============================================================================
@@ -48,7 +48,7 @@ class TestExecutionPacketCompilerImplementation:
 
     def test_implementation_satisfies_protocol(self):
         """测试实现满足协议"""
-        from src.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
+        from app.infra.compilers.baseline_execution_packet_compiler import BaselineExecutionPacketCompiler
 
         compiler = BaselineExecutionPacketCompiler()
 

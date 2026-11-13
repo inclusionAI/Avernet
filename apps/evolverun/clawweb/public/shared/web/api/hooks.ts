@@ -26,6 +26,39 @@ export function useFlowRuns(params?: {
   })
 }
 
+export function useWorkflowCloneCandidates(enabled = true) {
+  return useQuery({
+    queryKey: ['workflow-clone-candidates'],
+    queryFn: () => api.workflows.listCloneCandidates(),
+    enabled,
+  })
+}
+
+export function useWorkflowClonePreview(sourceWorkflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['workflow-clone-preview', sourceWorkflowId],
+    queryFn: () => api.workflows.clonePreview(sourceWorkflowId),
+    enabled: enabled && !!sourceWorkflowId,
+    staleTime: 0,
+  })
+}
+
+export function useCloneWorkflow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.workflows.clone,
+    retry: false,
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-clone-candidates'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.targetWorkflowId] })
+      void queryClient.invalidateQueries({ queryKey: ['editor-workflow-document', variables.targetWorkflowId] })
+      void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })
+    },
+  })
+}
+
 export function useWorkflowTypes(botOwnerId?: string, botId?: string, status?: string) {
   return useQuery({
     queryKey: ['workflow-types', botOwnerId, botId, status],

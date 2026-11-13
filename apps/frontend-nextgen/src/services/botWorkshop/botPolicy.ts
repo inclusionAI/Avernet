@@ -17,12 +17,35 @@ function canValidateServiceBot(bot: BotDomain): boolean {
 }
 
 /**
- * 进入编辑/查询详情页必须是 Owner 或后端明确授予 edit 的协作者。
+ * 进入配置详情页必须是 Owner，或由后端明确授予 view_config/edit 的协作者。
  * 单独的 view action 只允许查看列表基础信息，不能触发详情页的子资源请求。
  */
 export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boolean {
   if (!currentUserId) return false;
-  return bot.ownerId === currentUserId || bot.actions.includes('edit') || canValidateServiceBot(bot);
+  return (
+    bot.ownerId === currentUserId ||
+    bot.actions.includes('view_config') ||
+    bot.actions.includes('edit') ||
+    canValidateServiceBot(bot)
+  );
+}
+
+/**
+ * 服务 Bot 历史评测记录入口只对具有编辑权限的当前用户开放。
+ *
+ * Draft 卡片由生命周期动作直接给出 EDIT；在线发布卡片出于权限最小化不一定
+ * 暴露 EDIT，但显式协作者会持有 VIEW_CONFIG 站位。Owner 以 owner_id 判定。
+ */
+export function canOpenServiceBotEvalHistory(
+  bot: BotDomain,
+  currentUserId?: string,
+): boolean {
+  if (!currentUserId || bot.serviceMode !== 'service') return false;
+  return (
+    bot.ownerId === currentUserId ||
+    bot.actions.includes('edit') ||
+    bot.actions.includes('view_config')
+  );
 }
 
 /**
@@ -187,10 +210,26 @@ export function getInventoryActionAvailability(bot: BotDomain, action: BotInvent
   };
 }
 
-export function getBotCollaborationMode(bot: BotDomain, isOwner: boolean): 'authorize' | 'request' | undefined {
+export type BotCollaborationMode = 'authorize' | 'request';
+
+export function getBotCollaborationMode(
+  bot: BotDomain,
+  isOwner: boolean,
+): BotCollaborationMode | undefined {
+  if (bot.serviceMode === 'non-service' && !bot.runtime.isAgentCodingBot) return undefined;
   if (bot.spaceKind !== 'team') return undefined;
   if (isOwner) return 'authorize';
-  return bot.actions.includes('edit') ? undefined : 'request';
+
+  // VIEW_CONFIG grants read-only configuration access, but the inventory
+  // backend emits it only for an explicit service-Bot collaborator. Treat it
+  // as collaboration standing (not edit capability). Approved collaborators
+  // may also be identified by lifecycle/management actions such as EDIT,
+  // RESTART_PUBLISH or OFFLINE. Ordinary Space members are reduced to VIEW/CHAT.
+  // Do not infer standing from disabledActions: denied operations are returned
+  // there for ordinary members as well.
+  const nonStandingActions = new Set(['view', 'chat']);
+  const hasCollaborationStanding = bot.actions.some((action) => !nonStandingActions.has(action));
+  return hasCollaborationStanding ? undefined : 'request';
 }
 
 /**

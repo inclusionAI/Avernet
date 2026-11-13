@@ -22,7 +22,7 @@ use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotDetailResult, BotUseCaseError,
     CreateFriendRequestCommand, FriendRequest, FriendRequestDecisionCommand,
     FriendRequestDirection, FriendRequestStatus, FriendService, FriendUseCaseError,
-    ListFriendRequestsCommand, ListFriendsCommand, ServiceError,
+    ListFriendRequestsCommand, ListFriendsCommand, RequestAuthHeaders, ServiceError,
     application::friends::FriendListEntry, port::bot_authority::BotAuthorityPort,
 };
 use bcs_services_container::Services;
@@ -36,8 +36,12 @@ const STAFF: &str = "327325";
 
 struct RecordingFriends {
     receiver: String,
+    /// When set, `create_friend_request` reports the target as hidden.
+    hidden_target: Mutex<Option<String>>,
     calls: Mutex<Vec<(&'static str, String)>>,
     list_commands: Mutex<Vec<ListFriendRequestsCommand>>,
+    /// Inbound auth context each mutating command forwarded, in call order.
+    request_auths: Mutex<Vec<(&'static str, Option<RequestAuthHeaders>)>>,
 }
 
 impl RecordingFriends {
@@ -52,7 +56,15 @@ impl FriendService for RecordingFriends {
         &self,
         command: CreateFriendRequestCommand,
     ) -> Result<FriendRequest, FriendUseCaseError> {
+        let hidden_target = self.hidden_target.lock().await.clone();
         self.record("create", command.caller_actor_id.clone()).await;
+        self.request_auths
+            .lock()
+            .await
+            .push(("create", command.request_auth.clone()));
+        if let Some(target) = hidden_target {
+            return Err(FriendUseCaseError::Service(ServiceError::BotHidden(target)));
+        }
         Ok(FriendRequest {
             id: "request-1".to_string(),
             from_bot: command.caller_actor_id,
@@ -81,6 +93,10 @@ impl FriendService for RecordingFriends {
             command.request_to_bot.as_deref(),
             Some(self.receiver.as_str())
         );
+        self.request_auths
+            .lock()
+            .await
+            .push(("accept", command.request_auth));
         self.record("accept", command.caller_actor_id).await;
         Ok(())
     }
@@ -93,6 +109,10 @@ impl FriendService for RecordingFriends {
             command.request_to_bot.as_deref(),
             Some(self.receiver.as_str())
         );
+        self.request_auths
+            .lock()
+            .await
+            .push(("reject", command.request_auth));
         self.record("reject", command.caller_actor_id).await;
         Ok(())
     }
@@ -151,8 +171,10 @@ fn fixture_with_query(
 ) -> Fixture {
     let friends = Arc::new(RecordingFriends {
         receiver: actor_id.to_string(),
+        hidden_target: Mutex::new(None),
         calls: Mutex::new(Vec::new()),
         list_commands: Mutex::new(Vec::new()),
+        request_auths: Mutex::new(Vec::new()),
     });
     let mut services = Services::noop();
     services.bot_query = Arc::new(query);
@@ -391,6 +413,27 @@ async fn received_bot_requests_follow_live_owner_and_manager_authority() {
 }
 
 #[tokio::test]
+async fn hidden_target_friend_request_maps_to_forbidden() {
+    let fixture = fixture(
+        HUMAN,
+        ActorKind::Human,
+        Some(STAFF),
+        bcs_test_support::failing_authority_hook(),
+    );
+    *fixture.friends.hidden_target.lock().await = Some("b1".to_string());
+    let response = send(&fixture.app, Method::POST, "/friends/request", HUMAN).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a hidden target must surface as 403, not an internal error"
+    );
+    assert_eq!(
+        fixture.friends.calls.lock().await.as_slice(),
+        &[("create", HUMAN.to_string())]
+    );
+}
+
+#[tokio::test]
 async fn bot_authority_lookup_failure_remains_an_internal_error() {
     let fixture = fixture(
         "owned-bot",
@@ -403,4 +446,71 @@ async fn bot_authority_lookup_failure_remains_an_internal_error() {
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert!(fixture.friends.calls.lock().await.is_empty());
+}
+
+/// The legacy friend routes forward the caller's inbound principal so the
+/// downstream owner notification / friend-auth-sync call can authenticate as
+/// the acting human. Transport-only context: status codes and bodies are
+/// unchanged.
+#[tokio::test]
+async fn legacy_friend_routes_forward_the_inbound_principal() {
+    let fixture = fixture(
+        HUMAN,
+        ActorKind::Human,
+        Some(STAFF),
+        bcs_test_support::failing_authority_hook(),
+    );
+
+    for (method, uri, expected, operation) in [
+        (Method::POST, "/friends/request".to_string(), StatusCode::CREATED, "create"),
+        (
+            Method::POST,
+            "/friends/requests/request-1/accept".to_string(),
+            StatusCode::OK,
+            "accept",
+        ),
+        (
+            Method::POST,
+            "/friends/requests/request-1/reject".to_string(),
+            StatusCode::OK,
+            "reject",
+        ),
+    ] {
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(&uri)
+                    .header("content-type", "application/json")
+                    .header("x-avernet-principal", "principal-token")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "from_bot": HUMAN,
+                            "to_bot": "target-bot",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "{uri}");
+
+        let captured = fixture.friends.request_auths.lock().await.clone();
+        let (recorded_operation, request_auth) = captured
+            .last()
+            .unwrap_or_else(|| panic!("{uri} must forward into the friend service"));
+        assert_eq!(*recorded_operation, operation);
+        let forwarded = request_auth
+            .as_ref()
+            .unwrap_or_else(|| panic!("{uri} must forward the inbound auth context"))
+            .forwarded_headers
+            .clone();
+        assert!(
+            forwarded.contains(&("x-avernet-principal".to_string(), "principal-token".to_string())),
+            "{uri} must forward the inbound principal: {forwarded:?}"
+        );
+    }
 }

@@ -292,6 +292,21 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_metadata_locator_candidates(
+        self, pairs: List[tuple[str, str]],
+    ) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+        """At most two live candidates per metadata pair, this tenant/env.
+
+        At most 100 distinct pairs; empty input returns {}. Owner/entity
+        matches (marked by private bool ``_metadata_locator_match``, using
+        database comparison semantics) take precedence over bare-ID candidates;
+        default never falls back to bare ID. The consumer must reject ambiguity and validate any
+        retained BCN reference before accepting a nonmatching locator.
+        This is a display lookup, not an authorization grant.
+        """
+        ...
+
+    @abstractmethod
     def list_bots_by_owner_bot_pairs(
         self,
         pairs: List[tuple[str, str]],
@@ -299,6 +314,18 @@ class BotRepository(Protocol):
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List live Bots matching exact ``(bot_id, owner_id)`` pairs."""
+        ...
+
+    @abstractmethod
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """Stage-enriched first ``len(pairs)`` matches, without COUNT.
+
+        Same tenant/env/deletion scope and newest-first ordering as
+        list_bots_by_owner_bot_pairs(page=1, page_size=len(pairs)). At most
+        100 input pairs; empty input returns []. This grants no permissions.
+        """
         ...
 
     @abstractmethod
@@ -385,6 +412,7 @@ class BotRepository(Protocol):
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         """Count bots by owner_id.
 
@@ -397,6 +425,9 @@ class BotRepository(Protocol):
                 Used to exclude desktop bots from cloud bot limits.
             exclude_active_engine: Optional case-insensitive engine exclusion for
                 quota checks. NULL engines still count. Default counts all engines.
+            exclude_identity_inheriting: If provided, exclude bots that inherit
+                another bot's identity. Those hold no passport of their own, so
+                they consume no identity slot.
         """
         ...
 
@@ -435,6 +466,16 @@ class BotRepository(Protocol):
     @abstractmethod
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         """Check if a bot with specific bot_id exists for the owner."""
+        ...
+
+    @abstractmethod
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Guards deletion of an identity Bot: while any live Bot depends on its
+        passport, deleting the source would strand them with no identity and no
+        way to be re-pointed. Soft-deleted Bots are not counted.
+        """
         ...
 
     @abstractmethod

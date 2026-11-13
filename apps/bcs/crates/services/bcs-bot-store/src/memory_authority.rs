@@ -347,6 +347,14 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         })
     }
 
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>> {
+        // The batch spine lives in `memory_ownerships_batch.rs`
+        // (mirrors the SQL reads_ownerships split).
+        self.memory_ownership_projection(bot_ids).await
+    }
     async fn managers(&self, query: ManagerListQuery) -> ServiceResult<ManagerPage> {
         check_page_bounds(query.offset, query.limit)?;
         let env = resolve_env();
@@ -570,6 +578,18 @@ impl MemoryBotRepo {
     /// the fixture surface, not an application API.
     pub fn authority_state(&self) -> &RwLock<MemoryAuthorityState> {
         &self.authority
+    }
+
+    /// Fixture surface (same role as [`Self::authority_state`]):
+    /// the control-plane audit entries (`created_at`,
+    /// `updated_at` per row) so ordering-sensitive list
+    /// tests pin deterministic timestamps. Production
+    /// facets keep owning every write; fixtures only tune
+    /// what they seeded.
+    pub fn control_plane_audit_state(
+        &self,
+    ) -> &RwLock<HashMap<String, (u64, u64)>> {
+        &self.control_plane_audit
     }
 
     /// Fixture surface (same role as [`Self::authority_state`]):

@@ -155,6 +155,32 @@ async fn availability_is_bounded_scope_local_and_retains_invalid_a2a_markers() {
     assert!(store.availability_many(&vec!["bot".into(); 257]).await.is_err());
 }
 
+#[tokio::test]
+async fn source_key_lookup_is_exact_bounded_and_propagates_read_failures() {
+    use std::sync::atomic::{AtomicBool,AtomicUsize,Ordering};
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+    let inner=database().await;
+    let setup=DbA2aBotStore::sqlite(inner.clone(),"test".into());
+    let mut value=record();
+    value.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    setup.compare_and_set(&value,0).await.unwrap();
+    let db=Arc::new(CountedDb {inner:inner.clone(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap(),Some(value.clone()));
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    for source in ["001ab","1Ab","001Ab' OR 1=1 --"] {
+        assert!(store.get_by_provider_ref("provider",source).await.unwrap().is_none());
+        assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    }
+    assert!(store.get_by_provider_ref("other-provider","remote").await.unwrap().is_none());
+    assert!(DbA2aBotStore::sqlite(db.clone(),"other".into()).get_by_provider_ref("provider","remote").await.unwrap().is_none());
+    // Corrupt legacy duplicates must fail rather than choosing an arbitrary identity.
+    inner.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_revision) VALUES ('duplicate','test','provider','remote','gateway',?,1)",vec![value.agent_card.to_string().into()])).await.unwrap();
+    assert!(store.get_by_provider_ref("provider","remote").await.is_err());
+    db.fail.store(true,Ordering::SeqCst);
+    assert!(store.get_by_provider_ref("provider","remote").await.is_err());
+}
+
 struct CountedDb {
     inner:Arc<LocalSqliteDbPlugin>,
     queries:std::sync::atomic::AtomicUsize,
@@ -199,38 +225,19 @@ async fn refresh_and_availability_have_one_bounded_query_even_on_failure() {
 }
 
 #[tokio::test]
-async fn name_change_releases_old_name_and_soft_deletion_releases_current_name() {
+async fn repeated_names_do_not_merge_or_block_card_updates() {
     let db=database().await;
     let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
     let first=store.replace(&record()).await.unwrap();
-    assert_eq!(store.get_by_name("provider","Agent").await.unwrap(),Some(first.clone()));
-    let mut renamed=first.clone();renamed.agent_card["name"]=json!("订单助手");
-    renamed.agent_card_url=None;
-    let renamed=store.replace(&renamed).await.unwrap();
-    assert!(store.get_by_name("provider","Agent").await.unwrap().is_none());
-    assert_eq!(store.get_by_name("provider","订单助手").await.unwrap(),Some(renamed.clone()));
-    assert!(store.get_by_name("other-provider","订单助手").await.unwrap().is_none());
-    let rows=db.query(DbStatement::new("SELECT name,JSON_EXTRACT(bot_info,'$.name') AS info_name FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
-    assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("订单助手"));
-    assert_eq!(rows[0].get_string("info_name").unwrap().as_deref(),Some("订单助手"));
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode) VALUES ('second','test','provider','second','gateway')")).await.unwrap();
-    let mut competing=record();competing.bot_uuid="second".into();competing.provider_bot_ref="second".into();
-    competing.agent_card["name"]=json!("订单助手");
-    assert!(matches!(store.replace(&competing).await,Err(bcs_service_api::ServiceError::A2aManagement(error)) if error.code==bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::BotNameConflict));
-    assert!(store.get("second").await.unwrap().is_none());
-    assert_eq!(store.get("bot").await.unwrap(),Some(renamed.clone()));
-    competing.agent_card["name"]=json!("Agent");
-    let second=store.replace(&competing).await.unwrap();
-    assert_eq!(store.get_by_name("provider","Agent").await.unwrap(),Some(second.clone()));
-    let mut conflict=second.clone();conflict.agent_card["name"]=json!("订单助手");
-    assert!(matches!(store.replace(&conflict).await,Err(bcs_service_api::ServiceError::A2aManagement(error)) if error.code==bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::BotNameConflict));
-    assert_eq!(store.get("second").await.unwrap(),Some(second));
-    assert_eq!(store.get("bot").await.unwrap(),Some(renamed));
-    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
-    assert!(store.get_by_name("provider","订单助手").await.unwrap().is_none());
-    let reused=store.replace(&conflict).await.unwrap();
-    assert_eq!(store.get_by_name("provider","订单助手").await.unwrap(),Some(reused));
-
+    let mut second=record();second.bot_uuid="second".into();second.provider_bot_ref="second".into();
+    let second=store.replace(&second).await.unwrap();
+    assert_eq!(first.agent_card["name"],second.agent_card["name"]);
+    assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap().unwrap().bot_uuid,"bot");
+    assert_eq!(store.get_by_provider_ref("provider","second").await.unwrap().unwrap().bot_uuid,"second");
+    let mut next=first;next.agent_card["description"]=json!("updated");
+    store.replace(&next).await.unwrap();
+    assert_eq!(store.get("second").await.unwrap().unwrap(),second);
 }
 
 #[tokio::test]
@@ -258,25 +265,45 @@ async fn existing_duplicate_names_are_reported_as_conflicts() {
 }
 
 #[tokio::test]
-async fn source_identity_constraints_apply_to_direct_store_writes_and_are_scoped() {
-    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::{SOURCE_AGENT_EXTENSION,ManagementCode as Code}};
+async fn first_card_attachment_rejects_invalid_source_without_mutating_bot() {
+    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION};
     let db=database().await;
     let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
-    let mut first=record();
-    first.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001Ab","party":"first_party"}}]});
-    assert!(store.compare_and_set(&first,0).await.unwrap());
-    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode) VALUES ('second','test','provider','second','gateway'),('foreign','test','other-provider','foreign','gateway')")).await.unwrap();
-    let mut second=first.clone();second.bot_uuid="second".into();second.provider_bot_ref="second".into();second.agent_card["name"]=json!("Second");
-    assert!(matches!(store.compare_and_set(&second,0).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentConflict));
-    assert!(store.get("second").await.unwrap().is_none());
-    let mut foreign=second.clone();foreign.bot_uuid="foreign".into();foreign.provider_id="other-provider".into();foreign.provider_bot_ref="foreign".into();
-    assert!(store.compare_and_set(&foreign,0).await.unwrap());
-    for replacement in [json!([]),json!([{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"001ab"}}])] {
-        let mut changed=first.clone();changed.agent_card["name"]=json!("Must not rename");changed.agent_card["capabilities"]["extensions"]=replacement;
-        assert!(matches!(store.replace(&changed).await,Err(ServiceError::A2aManagement(error)) if error.code==Code::SourceAgentChangeNotAllowed));
-        assert_eq!(store.get("bot").await.unwrap().unwrap(),first);
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Original' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    let v1=SOURCE_AGENT_EXTENSION.replace("v2.md","v1.md");
+    for extension in [
+        json!({"uri":v1,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"invalid_party"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":null}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":""}}),
+    ] {
+        let mut incoming=record();
+        incoming.agent_card["capabilities"]=json!({"extensions":[extension]});
+        assert!(store.get("bot").await.unwrap().is_none());
+        assert!(matches!(store.compare_and_set(&incoming,0).await,Err(ServiceError::A2aManagement(_))));
+        assert!(matches!(store.replace(&incoming).await,Err(ServiceError::A2aManagement(_))));
+        assert!(store.get("bot").await.unwrap().is_none());
+        let rows=db.query(DbStatement::new("SELECT name,agent_card_revision FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+        assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("Original"));
+        assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(),Some(0));
     }
-    let mut updated=first.clone();updated.agent_card["capabilities"]["extensions"][0]["params"]["party"]=json!("third_party");
-    let updated=store.replace(&updated).await.unwrap();assert_eq!(updated.revision,2);
-    assert!(!store.compare_and_set(&first,0).await.unwrap());
+    let mut valid=record();
+    valid.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    assert!(store.compare_and_set(&valid,0).await.unwrap());
+    assert_eq!(store.get("bot").await.unwrap().unwrap().agent_card,valid.agent_card);
+}
+
+#[tokio::test]
+async fn source_classification_can_be_removed_without_affecting_provider_identity() {
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+    let db=database().await;let store=DbA2aBotStore::sqlite(db,"test".into());
+    let mut first=record();
+    first.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    let saved=store.replace(&first).await.unwrap();
+    let mut changed=saved.clone();changed.agent_card["capabilities"]["extensions"]=json!([]);
+    let next=store.replace(&changed).await.unwrap();
+    assert_eq!(next.provider_bot_ref,saved.provider_bot_ref);
+    assert_eq!(next.bot_uuid,saved.bot_uuid);
+    assert_eq!(next.agent_card["capabilities"]["extensions"],json!([]));
 }

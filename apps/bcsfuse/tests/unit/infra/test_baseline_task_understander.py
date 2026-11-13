@@ -31,14 +31,14 @@ class TestBaselineTaskUnderstanderBasics:
 
     def test_understander_importable(self):
         """测试 Understander 可导入"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
 
         assert BaselineTaskUnderstander is not None
 
     def test_understander_implements_protocol(self):
         """测试 Understander 实现 TaskUnderstander 协议"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.services.task_understander import TaskUnderstander
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.services.task_understander import TaskUnderstander
 
         understander = BaselineTaskUnderstander()
         assert isinstance(understander, TaskUnderstander)
@@ -49,8 +49,8 @@ class TestGoalExtraction:
 
     def test_extract_goal_from_simple_request(self):
         """测试从简单请求抽取 goal"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -65,8 +65,8 @@ class TestGoalExtraction:
 
     def test_extract_goal_from_complex_request(self):
         """测试从复杂请求抽取 goal"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -85,8 +85,8 @@ class TestDeliverablesExtraction:
 
     def test_extract_explicit_deliverables(self):
         """测试抽取显式交付物"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -101,8 +101,8 @@ class TestDeliverablesExtraction:
 
     def test_infer_deliverables_from_task_type(self):
         """测试从任务类型推断交付物"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -121,8 +121,8 @@ class TestConstraintsExtraction:
 
     def test_extract_explicit_constraints(self):
         """测试抽取显式约束"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -137,8 +137,8 @@ class TestConstraintsExtraction:
 
     def test_extract_time_constraints(self):
         """测试抽取时间约束"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -158,8 +158,8 @@ class TestSuccessCriteriaExtraction:
 
     def test_extract_explicit_criteria(self):
         """测试抽取显式成功标准"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -173,8 +173,8 @@ class TestSuccessCriteriaExtraction:
 
     def test_infer_criteria_from_deliverables(self):
         """测试从交付物推断成功标准"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -193,8 +193,8 @@ class TestRequiredCapabilities:
 
     def test_infer_capabilities_from_task_type(self):
         """测试从任务类型推断能力需求"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -209,8 +209,8 @@ class TestRequiredCapabilities:
 
     def test_infer_research_capabilities(self):
         """测试推断调研能力"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -229,9 +229,9 @@ class TestRiskLevelDetermination:
 
     def test_low_risk_for_simple_task(self):
         """测试简单任务为低风险"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_spec import RiskLevel
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_spec import RiskLevel
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -246,9 +246,9 @@ class TestRiskLevelDetermination:
 
     def test_high_risk_for_production_changes(self):
         """测试生产环境变更任务为高风险"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_spec import RiskLevel
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_spec import RiskLevel
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -263,9 +263,9 @@ class TestRiskLevelDetermination:
 
     def test_high_risk_for_external_access(self):
         """测试外部访问任务为高风险"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_spec import RiskLevel
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_spec import RiskLevel
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -284,8 +284,8 @@ class TestUnknownsIdentification:
 
     def test_identify_missing_scope(self):
         """测试识别缺失范围"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -303,8 +303,8 @@ class TestUnknownsIdentification:
 
     def test_well_defined_task_has_fewer_unknowns(self):
         """测试明确任务有较少 unknowns"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         vague_input = TaskUnderstandingInput(
@@ -328,8 +328,8 @@ class TestSubtasksDecomposition:
 
     def test_decompose_multi_step_task(self):
         """测试拆解多步骤任务"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -344,8 +344,8 @@ class TestSubtasksDecomposition:
 
     def test_decompose_explicit_steps(self):
         """测试拆解显式步骤"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -364,8 +364,8 @@ class TestAmbiguousInput:
 
     def test_ambiguous_request_produces_warnings(self):
         """测试模糊请求产生 warnings"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -380,8 +380,8 @@ class TestAmbiguousInput:
 
     def test_empty_like_request_is_handled(self):
         """测试空类请求被处理"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(
@@ -399,8 +399,8 @@ class TestContextUsage:
 
     def test_context_enriches_understanding(self):
         """测试上下文丰富理解"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_without_context = TaskUnderstandingInput(
@@ -421,8 +421,8 @@ class TestContextUsage:
 
     def test_known_constraints_are_included(self):
         """测试已知约束被包含"""
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         input_data = TaskUnderstandingInput(

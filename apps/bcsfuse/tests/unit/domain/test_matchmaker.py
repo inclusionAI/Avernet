@@ -12,7 +12,7 @@ import pytest
 
 from typing import Protocol, runtime_checkable
 
-from src.domain.services.matchmaker import Matchmaker
+from app.domain.services.matchmaker import Matchmaker
 
 
 # =============================================================================
@@ -55,7 +55,7 @@ class TestMatchmakerImplementation:
 
     def test_implementation_satisfies_protocol(self):
         """测试实现满足协议"""
-        from src.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
+        from app.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
 
         matchmaker = BaselineMatchmaker()
 

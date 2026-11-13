@@ -98,9 +98,9 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   const workerPath = "/internal/monitoring/session-recoveries/:taskId/executions/:executionId";
   const worker = () => { if (!supplied?.agent) throw new SessionRecoveryError(503, "recovery_not_ready", "自愈执行服务未配置"); return supplied.agent; };
-  const verifyWorker = (req: Request, control = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control);
+  const verifyWorker = (req: Request, control = false, forBootstrap = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control, forBootstrap);
   router.get(`${workerPath}/bootstrap`, async (req, res, next) => {
-    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true))); } catch (error) { next(error); }
+    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true, true))); } catch (error) { next(error); }
   });
   router.post(`${workerPath}/heartbeat`, json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.json(await worker().heartbeat(await verifyWorker(req, true), req.body?.ccSessionId)); } catch (error) { next(error); }

@@ -20,7 +20,7 @@ export function OwnerCooperation({ task, busy, onReload }: { task: SessionRecove
   const [error, setError] = useState('');
   const request = task.ownerRequest;
   useEffect(() => { setFeedback(''); }, [request?.requestId]);
-  if (!request) return null;
+  if (request?.reason !== 'permission') return null;
   const terminal = ['completed', 'failed', 'canceled'].includes(task.status);
   const pending = !terminal && task.status === 'waiting_owner' && request.status === 'pending';
   const status = terminal ? '配合处理已结束' : request.status === 'confirmed' ? '已反馈，正在核验' : '等待 Owner 配合';

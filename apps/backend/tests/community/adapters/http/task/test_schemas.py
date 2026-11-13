@@ -770,6 +770,46 @@ def test_relay_search_absent_viewer_keeps_default_scope(viewer):
 
 
 @pytest.mark.parametrize(
+    ("visibility", "expected"),
+    [
+        ("public", "public"),
+        ("protected", "protected"),
+        ("public,protected", "public,protected"),
+        (" public , protected ", "public,protected"),
+    ],
+)
+def test_relay_search_accepts_comma_delimited_visibility(visibility, expected):
+    parsed = TaskSearchRequestDTO.model_validate(
+        {
+            "query": "q",
+            "task_id": "t1",
+            "node_id": "n1",
+            "relay_token": "generation-1",
+            "viewer_actor_type": "bot",
+            "viewer_actor_id": "b:1",
+            "visibility": visibility,
+        }
+    )
+    assert parsed.visibility == expected
+
+
+@pytest.mark.parametrize("visibility", ["", "public, private", "admin", "public,admin"])
+def test_relay_search_rejects_invalid_visibility(visibility):
+    with pytest.raises(ValidationError):
+        TaskSearchRequestDTO.model_validate(
+            {
+                "query": "q",
+                "task_id": "t1",
+                "node_id": "n1",
+                "relay_token": "generation-1",
+                "viewer_actor_type": "bot",
+                "viewer_actor_id": "b:1",
+                "visibility": visibility,
+            }
+        )
+
+
+@pytest.mark.parametrize(
     "viewer",
     [
         {"viewer_actor_type": "bot"},

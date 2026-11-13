@@ -11,13 +11,13 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.expert_context_pack import ExpertContextPack
-from src.domain.models.llm_expert_perspective import LLMExpertPerspective
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.worker_profile import WorkerProfile
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.expert_context_pack import ExpertContextPack
+from app.domain.models.llm_expert_perspective import LLMExpertPerspective
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.worker_profile import WorkerProfile
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
 
 # =============================================================================
@@ -37,9 +37,9 @@ def mock_dependencies():
 @pytest.fixture
 def sample_profile():
     """创建示例 profile"""
-    from src.domain.models.context_fragment import ContextFragment, ContextKind
-    from src.domain.models.skill_profile import SkillProfile
-    from src.domain.models.worker_profile import ProfileType
+    from app.domain.models.context_fragment import ContextFragment, ContextKind
+    from app.domain.models.skill_profile import SkillProfile
+    from app.domain.models.worker_profile import ProfileType
 
     return WorkerProfile(
         staff_id="001",
@@ -74,7 +74,7 @@ def sample_profile():
 @pytest.fixture
 def sample_digest():
     """创建示例 digest（含足够的上下文信息）"""
-    from src.domain.models.context_fragment import ContextFragment, ContextKind
+    from app.domain.models.context_fragment import ContextFragment, ContextKind
 
     fragment = ContextFragment(
         kind=ContextKind.AGENT,
@@ -197,7 +197,7 @@ class TestG5ExpertEnhancerImplEnhance:
         retrieval.retrieve.return_value = Mock(results=[
             Mock(profile=sample_profile, total_score=0.9)
         ])
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
         preparation.prepare.return_value = WorkerContextDigest(
             profile_key="staff_001:default",
             mode=RetrievalMode.EXPERT_DIAGNOSIS,
@@ -511,7 +511,7 @@ class TestG5ExpertEnhancerImplExpertContextPack:
 
     def test_build_expert_context_pack(self):
         """测试构建 ExpertContextPack"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         # 使用 mock 依赖
         mock_gateway = Mock()
@@ -526,7 +526,7 @@ class TestG5ExpertEnhancerImplExpertContextPack:
             profile_source=mock_source,
         )
 
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -555,7 +555,7 @@ class TestG5ExpertEnhancerImplFallbackPerspective:
 
     def test_generate_fallback_perspective(self):
         """测试生成 fallback 视角"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         mock_gateway = Mock()
         mock_retrieval = Mock()
@@ -720,7 +720,7 @@ class TestG5ExpertEnhancerImplDomainInference:
     @pytest.fixture
     def enhancer(self):
         """创建 enhancer 实例"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         return G5ExpertEnhancerImpl(
             gateway=Mock(),
             retrieval_service=Mock(),
@@ -731,9 +731,9 @@ class TestG5ExpertEnhancerImplDomainInference:
     @pytest.fixture
     def profile_with_security_skills(self):
         """创建有 security 技能的 profile"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import ProfileType
 
         return WorkerProfile(
             staff_id="001",
@@ -760,9 +760,9 @@ class TestG5ExpertEnhancerImplDomainInference:
     @pytest.fixture
     def profile_with_legal_context(self):
         """创建有 legal context 的 profile"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import ProfileType
 
         return WorkerProfile(
             staff_id="002",
@@ -783,8 +783,8 @@ class TestG5ExpertEnhancerImplDomainInference:
     @pytest.fixture
     def profile_with_weak_signals(self):
         """创建弱信号的 profile（无明确领域）"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.worker_profile import ProfileType
 
         return WorkerProfile(
             staff_id="003",
@@ -814,9 +814,9 @@ class TestG5ExpertEnhancerImplDomainInference:
 
     def test_infer_domain_prefers_skills_over_weak_context(self, enhancer):
         """测试当 skills 更明确时优先使用 skills 推断"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import ProfileType
 
         # 技能说 database，context 说 general
         profile = WorkerProfile(
@@ -859,7 +859,7 @@ class TestG5ExpertEnhancerImplContextScoring:
     @pytest.fixture
     def enhancer(self):
         """创建 enhancer 实例"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         return G5ExpertEnhancerImpl(
             gateway=Mock(),
             retrieval_service=Mock(),
@@ -870,7 +870,7 @@ class TestG5ExpertEnhancerImplContextScoring:
     @pytest.fixture
     def sample_fragments(self):
         """创建示例 fragments"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
         return [
             ContextFragment(
                 kind=ContextKind.AGENT,
@@ -923,7 +923,7 @@ class TestG5ExpertEnhancerImplSkillScoring:
     @pytest.fixture
     def enhancer(self):
         """创建 enhancer 实例"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         return G5ExpertEnhancerImpl(
             gateway=Mock(),
             retrieval_service=Mock(),
@@ -934,7 +934,7 @@ class TestG5ExpertEnhancerImplSkillScoring:
     @pytest.fixture
     def sample_skills(self):
         """创建示例 skills"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
         return [
             SkillProfile(
                 name="Security",

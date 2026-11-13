@@ -1,6 +1,7 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
-import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
+import { DebugChatInput } from '@/components/BotWorkshop/Editor/DebugChatInput';
+import { DebugUserMessage } from '@/components/BotWorkshop/Editor/DebugUserMessage';
 import { DebugAssistantMessage, DebugThinkingReply } from '@/components/BotWorkshop/Editor/DebugChatMessage';
 import { BotModelSelector } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { Badge } from '@/components/ui/Badge';
@@ -11,13 +12,12 @@ import { Spin } from '@/components/ui/Spin';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
+import { useDebugChatClearContext } from '@/pages/Workspace/hooks/useDebugChatClearContext';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
-import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
-import { FileText, Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -33,24 +33,6 @@ export function shouldAppendThinking(messages: DebugMessageLike[], isRequesting:
 }
 
 export { getDebugMessageBlocks } from '@/components/BotWorkshop/Editor/DebugChatMessage';
-
-function DebugMessageContent({ content }: { content: string }) {
-  const parsed = parseDebugChatMessageContent(content);
-  return (
-    <div className="space-y-1.5">
-      {parsed.fileNames.map((name, index) => (
-        <span
-          key={`${name}-${index}`}
-          className="flex w-fit max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1 text-xs"
-        >
-          <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{name}</span>
-        </span>
-      ))}
-      {parsed.text ? <p className="m-0 whitespace-pre-wrap text-xs leading-5">{parsed.text}</p> : null}
-    </div>
-  );
-}
 
 export function DebugChatPanel({
   bot,
@@ -94,12 +76,12 @@ export function DebugChatPanel({
     [bot.ownerId, ownerId],
   );
   const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries, identityId);
+  const clearContext = useDebugChatClearContext(chatBot, identityId, session?.sessionId, debug.reloadHistory);
   const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
     setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
     setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
   }, []);
   const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
-  const capabilitySets = useBotCapabilitySets(chatBot, identityId);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -227,7 +209,7 @@ export function DebugChatPanel({
         ) : null}
       </div>
       <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-        {loading ? (
+        {loading || !identityId ? (
           <Spin tip="加载调试会话…" />
         ) : !session ? (
           <Empty compact title="暂无调试会话" description="新建会话后即可向当前 Bot 发送消息。" />
@@ -249,7 +231,7 @@ export function DebugChatPanel({
                   <div className="flex min-w-0 flex-col items-end">
                     <p className="m-0 text-xs font-medium">我</p>
                     <div className="mt-1 max-w-full rounded-2xl rounded-tr-[4px] bg-muted px-3 py-2">
-                      <DebugMessageContent content={message.content} />
+                      <DebugUserMessage content={message.content} />
                     </div>
                   </div>
                   <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs text-brand">我</div>
@@ -262,27 +244,27 @@ export function DebugChatPanel({
           </>
         )}
       </div>
-      <DebugChatComposer
-        runtimeStage={chatBot.runtimeStage}
-        key={session?.sessionId ?? 'no-session'}
-        botId={chatBot.realBotId}
-        sessionId={session?.sessionId ?? null}
-        userId={identityId}
-        ownerId={chatBot.ownerId}
-        isRequesting={debug.chat.isRequesting}
-        capabilitySets={capabilitySets}
-        modelSelector={
-          <BotModelSelector
-            models={botModels.models}
-            activeModelId={botModels.activeModelId}
-            loading={botModels.isLoadingModels}
-            disabled={!session}
-            onSelect={(modelId) => void botModels.selectModel(modelId)}
-          />
-        }
-        onSend={debug.send}
-        onStop={debug.stop}
-      />
+      {session && identityId ? (
+        <DebugChatInput
+          key={JSON.stringify([chatBot.realBotId, chatBot.ownerId, chatBot.engineOwnerId, identityId, chatBot.runtimeStage, session?.sessionId])}
+          bot={chatBot}
+          session={session}
+          userId={identityId}
+          isRequesting={debug.chat.isRequesting}
+          onClear={clearContext}
+          modelSelector={
+            <BotModelSelector
+              models={botModels.models}
+              activeModelId={botModels.activeModelId}
+              loading={botModels.isLoadingModels}
+              disabled={!session}
+              onSelect={(modelId) => void botModels.selectModel(modelId)}
+            />
+          }
+          onSend={debug.send}
+          onStop={debug.stop}
+        />
+      ) : null}
     </aside>
   );
 }

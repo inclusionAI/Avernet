@@ -5,6 +5,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 from agentclaw.community.utils.avernet_tenant import (
@@ -20,6 +21,11 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import (
+    BotAddressNotFoundError,
+    BotLookupAmbiguousError,
+)
 
 from .public_support import (
     logger,
@@ -29,6 +35,44 @@ from .public_support import (
 )
 
 class FriendCatalogActions:
+    def _resolve_friend_bot(self, bot_id: str, locator: str) -> Dict[str, Any]:
+        """Resolve historical friend locators without changing owner semantics."""
+        try:
+            context = BotAddressResolver(self._bot_repository).resolve(
+                bot_id=bot_id,
+                legacy_owner_id=locator,
+            )
+        except BotAddressNotFoundError as exc:
+            raise BotNotFoundError(
+                f"Bot not found: bot_id={bot_id}, owner_id={locator}"
+            ) from exc
+        except BotLookupAmbiguousError as exc:
+            raise BotPublicServiceError(str(exc)) from exc
+        return dict(context.bot)
+
+    def _find_existing_friend_record(
+        self,
+        *,
+        operator_id: str,
+        bot: Dict[str, Any],
+        request_locator: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Find canonical or historical friend rows without creating duplicates."""
+        locators = (
+            str(bot["entity_id"]),
+            request_locator,
+            str(bot["owner_id"]),
+        )
+        for locator in dict.fromkeys(locators):
+            record = self._bot_friend_repo.get_by_entity_ids(
+                requester_entity_id=operator_id,
+                target_entity_id=locator,
+                target_bot_id=str(bot["bot_id"]),
+            )
+            if record:
+                return record
+        return None
+
     def create_friend_request_approval(
         self, bot_id: str, owner_id: str, operator_id: str, operator_name: str,
         approval_context: Optional[Dict[str, str]] = None,
@@ -49,26 +93,25 @@ class FriendCatalogActions:
             BotPublicServiceError: If bot not found
         """
         logger.info(f"[create_friend_request_approval] Starting: bot_id={bot_id}, owner_id={owner_id}, operator_id={operator_id}")
-        bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise BotPublicServiceError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
+        bot = self._resolve_friend_bot(bot_id, owner_id)
+        target_entity_id = str(bot["entity_id"])
 
         # 获取bot的ext中的friend_approval配置，默认为0（不需要审批）
         bot_ext = bot.get("ext") or {}
         friend_approval = bot_ext.get("friend_approval", "0")
 
         # 先查询是否已存在好友关系
-        existing_record = self._bot_friend_repo.get_by_entity_ids(
-            requester_entity_id=operator_id,
-            target_entity_id=owner_id,
-            target_bot_id=bot_id
+        existing_record = self._find_existing_friend_record(
+            operator_id=operator_id,
+            bot=bot,
+            request_locator=owner_id,
         )
 
         # 构建好友申请数据
         friend_data = {
             "requester_entity_id": operator_id,
             "requester_name": operator_name,
-            "target_entity_id": owner_id,
+            "target_entity_id": target_entity_id,
             "target_name": bot.get("bot_name"),
             "target_bot_id": bot_id,
             "target_owner_name": bot.get("owner_name"),
@@ -283,12 +326,10 @@ class FriendCatalogActions:
                 f"bot_friend_id={bot_friend_id}"
             )
 
-        bot = self._bot_repository.get_by_id_and_owner(
-            bot_id,
-            friend_record.get("target_entity_id"),
+        bot = self._resolve_friend_bot(
+            str(bot_id),
+            str(friend_record.get("target_entity_id") or ""),
         )
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
 
         # 判断 Bot 当前是否为 RESTRICTED 模式，OPEN 模式不需要授权关系
         bot_ext = bot.get("ext") or {}
@@ -458,11 +499,11 @@ class FriendCatalogActions:
                 request_id,
             )
             raise BotCatalogSearchUnavailableError() from exc
-        _, backend_bots = self._bot_repository.list_bots_by_owner_bot_pairs(
+        join_started = perf_counter()
+        backend_bots = self._bot_repository.list_catalog_bots_by_owner_bot_pairs(
             [(address.bot_id, address.entity_id) for address in addresses],
-            page=1,
-            page_size=max(len(addresses), 1),
         )
+        join_done = perf_counter()
         bots_by_address = {
             address: bot
             for bot in backend_bots
@@ -545,7 +586,7 @@ class FriendCatalogActions:
         logger.info(
             "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
             "result_count=%s bcs_only_count=%s description_fallback_count=%s "
-            "entity_fallback_count=%s total=%s",
+            "entity_fallback_count=%s total=%s join_ms=%.1f projection_ms=%.1f",
             request_id,
             len(addresses),
             len(items),
@@ -553,6 +594,8 @@ class FriendCatalogActions:
             description_fallback_count,
             entity_fallback_count,
             total,
+            (join_done - join_started) * 1000,
+            (perf_counter() - join_done) * 1000,
         )
         return {"total": total, "items": items}
 
@@ -845,9 +888,7 @@ class FriendCatalogActions:
             bot_map = {}
             # ThreadPoolExecutor workers don't copy context vars; bind the
             # request tenant so these BotRepository reads stay tenant-scoped.
-            _get_bot = bind_current_avernet_tenant(
-                self._bot_repository.get_by_id_and_owner
-            )
+            _get_bot = bind_current_avernet_tenant(self._resolve_friend_bot)
             with ThreadPoolExecutor(max_workers=10) as executor:
                 future_to_key = {
                     executor.submit(_get_bot, bot_id, owner_id): (owner_id, bot_id)
@@ -903,9 +944,7 @@ class FriendCatalogActions:
             return None
 
         # 补充目标 Bot 的公开状态信息
-        bot = self._bot_repository.get_by_id_and_owner(target_bot_id, target_entity_id)
-        if not bot:
-            raise ValueError(f"Bot not found: bot_id={target_bot_id}, owner_id={target_entity_id}")
+        bot = self._resolve_friend_bot(target_bot_id, target_entity_id)
 
         try:
             bot_ext = bot.get("ext") or {}

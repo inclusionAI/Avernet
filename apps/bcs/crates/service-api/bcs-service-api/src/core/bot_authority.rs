@@ -51,6 +51,19 @@ pub trait BotAuthorityCoreService: Send + Sync {
     /// synthesized views.
     async fn ownership(&self, bot_id: &str) -> ServiceResult<BotOwnershipView>;
 
+    /// Batch owner read for display projections (e.g. bot candidate
+    /// pages). Same length and order as `bot_ids`; per-item `None`
+    /// where the bot cannot project an owner (absent, deleted, or
+    /// version-0 under the strict posture; the migration-window
+    /// legacy shim projects `created_by` instead). Corrupt owner
+    /// state and storage failures error the batch. Implementations
+    /// batch the reads into bounded collection queries — they never
+    /// call `ownership` once per input.
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>>;
+
     /// Paged manager list with the owner summary (default limit 50,
     /// hard max 100).
     async fn managers(&self, query: ManagerListQuery) -> ServiceResult<ManagerPage>;

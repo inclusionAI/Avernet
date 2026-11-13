@@ -12,7 +12,10 @@ import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
 
 const boundary = vi.hoisted(() => ({ parse: vi.fn((input: unknown) => input) }));
-vi.mock("../../repair/session-recovery/validation.js", () => ({ parseRequest: boundary.parse }));
+vi.mock("../../repair/session-recovery/validation.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../repair/session-recovery/validation.js")>(),
+  parseRequest: boundary.parse,
+}));
 const original = JSON.parse(readFileSync(join(process.cwd(), "server/fixtures/monitoring/alert.json"), "utf8"));
 const event = parseDiagnosis({ ...original, botId: "default", engine: "OC", env: "prod", handlerName: "NOT_COMPLETED", humanIntervention: false,
   schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity }, original.eventId);

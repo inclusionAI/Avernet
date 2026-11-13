@@ -1,6 +1,7 @@
 import { getCapabilities } from '@/capabilities';
 import { Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { Fragment } from 'react';
 import { navSectionLabels, type NavigationItem, type NavigationSection } from './navigation';
 import { SpaceSwitcher } from './SpaceSwitcher';
 
@@ -45,26 +46,30 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
         {sections.map((section, index) => {
           const sectionItems = items.filter((item) => item.section === section);
           return (
-            <div key={section} className="flex w-full flex-col items-center gap-2">
-              {index > 0 && <div aria-hidden className="my-1 w-8" />}
-              {/* 空间切换（icon 形态）位于 Bot 分组之上 */}
-              {section === 'bot' && showSpaceSwitcher && <SpaceSwitcher compact collapsed />}
-              {sectionItems.map((item) => {
-                const Icon = item.icon;
-                const active = activePath.startsWith(item.path);
-                return (
-                  <IconButton
-                    key={item.id}
-                    ariaLabel={item.label}
-                    data-guide-target={GUIDE_TARGET_BY_NAV_ID[item.id]}
-                    label={item.label}
-                    className={cn(active && 'bg-selected text-foreground')}
-                    icon={<Icon className="h-4 w-4" />}
-                    onClick={() => onNavigate(item.path)}
-                  />
-                );
-              })}
-            </div>
+            <Fragment key={section}>
+              {/* 分组间分割线（收起态专属）：协作组（实验）与 Bot 管理（bot 组）图标之间。
+                  分割线放分组容器外层、自带对称留白（my-2 上下各 8px，与顶部品牌簇-导航
+                  分割线的 py-2/pb-2 留白同刻度）——若挂进分组容器，容器 gap-2 只作用于
+                  分割线与下一项之间，会造成上下不对称间距。 */}
+              {index > 0 && <div aria-hidden className="my-2 h-px w-8 shrink-0 bg-divider" />}
+              <div className="flex w-full flex-col items-center gap-2">
+                {sectionItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = activePath.startsWith(item.path);
+                  return (
+                    <IconButton
+                      key={item.id}
+                      ariaLabel={item.label}
+                      data-guide-target={GUIDE_TARGET_BY_NAV_ID[item.id]}
+                      label={item.label}
+                      className={cn(active && 'bg-selected text-foreground')}
+                      icon={<Icon className="h-4 w-4" />}
+                      onClick={() => onNavigate(item.path)}
+                    />
+                  );
+                })}
+              </div>
+            </Fragment>
           );
         })}
       </div>

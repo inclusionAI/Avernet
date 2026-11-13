@@ -8,7 +8,8 @@ import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { cn } from '@/utils/cn';
 import type React from 'react';
-import AvatarEditor from '../BotAvatar/AvatarEditor';
+import { useState } from 'react';
+import AvatarEditor, { type AvatarProcessingStatus } from '../BotAvatar/AvatarEditor';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
 import { CreateBotEngineSelector } from './CreateBotEngineSelector';
 import { DesktopDeviceFields } from './DesktopDeviceFields';
@@ -19,6 +20,7 @@ interface CreateBotFormFieldsProps {
   spaces: BotCreateSpace[];
   creating: boolean;
   error?: string;
+  onErrorChange?: (error?: string) => void;
   agentCodingError?: string;
   agentCodingTemplates: AgentCodingTemplate[];
   agentCodingTemplatesLoading?: boolean;
@@ -39,6 +41,7 @@ export function CreateBotFormFields({
   spaces,
   creating,
   error,
+  onErrorChange,
   agentCodingError,
   agentCodingTemplates,
   agentCodingTemplatesLoading,
@@ -49,6 +52,7 @@ export function CreateBotFormFields({
   onCancel,
   onSubmit,
 }: CreateBotFormFieldsProps) {
+  const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
   const configuredEngines = useBotEngineOptions();
   const engineOptions =
     values.scenario === 'local'
@@ -113,7 +117,7 @@ export function CreateBotFormFields({
     ) : null;
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" onSubmit={(event) => { if (avatarStatus !== 'idle') event.preventDefault(); else onSubmit(event); }}>
       {isLocal ? <DesktopDeviceFields values={values} setValues={setValues} /> : null}
       <div className="space-y-4">
         <label className="block space-y-2 text-xs font-medium text-foreground">
@@ -128,7 +132,12 @@ export function CreateBotFormFields({
             maxLength={40}
             placeholder="例如：项目知识助手"
             className={inputFocusClass}
-            onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
+            onChange={(event) => {
+              // 名称修正后立即清理上一次提交遗留的名称错误，避免旧错误
+              // 持续置红名称输入框，也避免遮挡 AgentCoding 配置校验提示。
+              onErrorChange?.(undefined);
+              setValues((current) => ({ ...current, name: event.target.value }));
+            }}
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
           {nameHasInvalidCharacter ? (
@@ -154,6 +163,7 @@ export function CreateBotFormFields({
         <div className="space-y-2 text-xs font-medium text-foreground">
           <span className="block">Bot 头像</span>
           <AvatarEditor
+            onProcessingChange={setAvatarStatus}
             value={values.avatarUrl ?? ''}
             seed={values.name.trim() || 'new-bot'}
             disabled={creating}
@@ -234,7 +244,13 @@ export function CreateBotFormFields({
           </Button>
           <Button
             type="submit"
-            disabled={!hasEngineOptions || creating || (isLocal && !values.local?.mountPath)}
+            disabled={
+              !hasEngineOptions ||
+              Boolean(isAgentCoding && agentCodingError) ||
+              creating ||
+              avatarStatus !== 'idle' ||
+              (isLocal && !values.local?.mountPath)
+            }
             loading={creating}
           >
             {isLocal ? '创建本地 Bot' : '创建云端 Bot'}

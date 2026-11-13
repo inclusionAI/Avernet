@@ -13,7 +13,7 @@ export function unsupported(message: string): never {
 
 /** httpClient 上游探测到 ACE 未登录体时会抛 AceLoginRedirectError;协作域通用 error mapper 需将其映射为 unauthenticated,
  *  而非被兜底吞成 network(否则既有 {code:'unauthenticated'} 断言失守,且丢失登录态语义)。 */
-function isAceLoginRedirectError(error: unknown): error is AceLoginRedirectError {
+export function isAceLoginRedirectError(error: unknown): error is AceLoginRedirectError {
   return (
     error instanceof AceLoginRedirectError ||
     (typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AceLoginRedirectError')

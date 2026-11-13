@@ -15,13 +15,17 @@ If a proposal conflicts with an accepted ADR, name that conflict explicitly.
 Do not silently replace the decision; create a superseding ADR when the
 decision itself changes.
 
+The [repository knowledge layout](knowledge-standard.md) defines the small
+shared navigation, flow and diagnostic structure. It preserves the document
+roles and decision lifecycle below.
+
 ## Document roles
 
 | Artifact | Purpose | Location |
 | --- | --- | --- |
 | Context | Stable shared vocabulary and semantic boundaries | `CONTEXT.md`, or a mapped module `CONTEXT.md` |
 | ADR | A durable, hard-to-reverse decision and its rationale | `docs/adr/NNNN-<slug>.md` |
-| Spec | An implementation-ready contract and acceptance boundary | `src/<module>/specs/YYYY-MM-DD-<topic>/spec.md` |
+| Spec | An implementation-ready contract and acceptance boundary | the owning module’s existing `specs/YYYY-MM-DD-<topic>/spec.md` |
 | Plan | Ordered implementation slices, dependencies, and validation | beside its `spec.md` as `plan.md` |
 | Tasks | Independently executable work items derived from a plan | beside its `spec.md` as `tasks.md` |
 | Research | Evidence, code reading, experiments, or incident findings | `research.md` beside its consumer, or `docs/research/` |

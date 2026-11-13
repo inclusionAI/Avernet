@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.workspace_assembly_input import (
+from app.domain.models.workspace_assembly_input import (
     WorkspaceAssemblyInput,
     AssemblyHints,
 )
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
-from src.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
-from src.domain.models.worker import (
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel,
     Availability, TrustLevel,

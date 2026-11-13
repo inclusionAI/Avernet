@@ -435,6 +435,20 @@ _NO_USER_DIMENSION = {
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/by_session"),
+    # Context collab public surface (spec §6.1 openapi twin): the operator is
+    # the L2 accountability subject the delivery binds to the verified
+    # principal — admission is REFUSED, so the caller always names an end
+    # user, and the actor is reconciled server-side. No caller-supplied
+    # user_id dimension exists on the wire.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}/events",
+    ),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
+    ),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -643,7 +657,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The owner-scoped collaboration repair adds one path-addressed, user-scoped
 # operation; the non-user Bot overview stays path-addressed in the same total.
 # The relay-session task read is account-level and carries no bot_id parameter.
-_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 144}
+# Context collab (this change): the three operations under
+# /collaboration/task/context_collab address no bot, so "none" grows 144 -> 147.
+_BOT_ID_PLACEMENT = {"path": 226, "query": 1, "none": 147}
 
 
 
@@ -857,7 +873,9 @@ def test_the_pinned_number_of_operations_take_it():
     # The default-model read adds one Bot-addressed user-scoped operation.
     # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
-    assert len(taking) == 292
+    # The six service-Bot evaluation operations add six user-taking,
+    # path-addressed operations: 292 -> 298 / 220 -> 226.
+    assert len(taking) == 298
 
 
 def test_the_exempt_operations_take_none():

@@ -1,6 +1,29 @@
 use super::*;
 
     #[tokio::test]
+    async fn emit_skips_with_warn_when_recipients_empty() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // No owner (`created_by = NULL`) → no resolvable notification recipients.
+        seed_bot(&db, "x:ownerless", "protected", "protected", "APPROVAL", "online", None).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let res = svc
+            .create_connect("human_1", "x:ownerless", Some("hi".into()), None)
+            .await
+            .expect("a pending connect without owner recipients still succeeds");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        // The notification port must not be called when nobody owns the target.
+        // `emit_friend_connect_notification` logs a `warn!` (request ids +
+        // target bot id) instead of returning silently; that warning is for
+        // human log observation and is not asserted here.
+        assert!(
+            events.lock().await.is_empty(),
+            "no recipients → no notification is sent"
+        );
+    }
+
+    #[tokio::test]
     async fn pending_friend_request_emits_notification_to_target_owner() {
 
         let (eg, pp, rq, bc, db) = assemble().await;
@@ -113,6 +136,55 @@ use super::*;
         // Approver/recipient = the target bot's owner.
         assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
     }
+    /// Notification transport that always fails, standing in for a backend
+    /// work-order API rejection (for example a 401 from the intake endpoint).
+    struct FailingFriendConnectNotificationPort;
+
+    #[async_trait]
+    impl FriendConnectNotificationPort for FailingFriendConnectNotificationPort {
+        async fn notify(&self, _command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+            Err(ServiceError::InternalError(
+                "work-order notification rejected".to_string(),
+            ))
+        }
+    }
+
+    /// Spec §12.3: the adapter may degrade to a no-op on backend rejection —
+    /// the friend request itself must stay runnable. A notification failure
+    /// after the pending rows are written must not turn the create into a 500.
+    #[tokio::test]
+    async fn notification_port_failure_does_not_fail_create_connect() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:notify_fail", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingFriendConnectNotificationPort),
+        );
+        let res = svc
+            .create_connect("human_1", "x:notify_fail", Some("hi".into()), None)
+            .await
+            .expect("a notification failure must not fail the pending connect");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        assert!(
+            !res.request_ids.is_empty(),
+            "the pending request ids are still returned"
+        );
+        // The pending rows were written before the notification attempt and
+        // must survive its failure.
+        let pending = rq
+            .list_inbox("x:notify_fail", "dev", Some(RequestStatus::Pending))
+            .await.expect("request listing");
+        assert!(
+            pending
+                .iter()
+                .any(|request| request.request_id == res.request_ids[0]),
+            "pending row must survive the notification failure: {pending:?}"
+        );
+    }
+
     #[tokio::test]
     async fn pending_notification_is_not_duplicated_on_idempotent_create() {
         let (eg, pp, rq, bc, db) = assemble().await;
@@ -130,4 +202,83 @@ use super::*;
             .expect("idempotent pending");
         assert_eq!(first.request_ids, second.request_ids);
         assert_eq!(events.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_friend_request_notifies_current_authority_owner_after_transfer() {
+        // The approval notification must reach the CURRENT authority owner —
+        // not the historical `created_by` fact. Here the legacy creator is
+        // 85020 while the post-transfer authority state (ownership_version 2
+        // + the approved owner edge) names bob.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:moved", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET ownership_version = 2 WHERE bot_uuid = ?",
+            vec![DbValue::from("x:moved")],
+        ))
+        .await
+        .expect("bump ownership_version");
+        eg.insert_grant(EdgeGrant {
+            edge_id: 0,
+            env: "dev".to_string(),
+            from_id: "human_bob".to_string(),
+            to_id: "x:moved".to_string(),
+            grant_kind: GrantKind::Owner,
+            grant_ref_id: 0,
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::SameAsFrom,
+            originator_policy_data: None,
+        })
+        .await
+        .expect("seed current owner edge");
+        let authority: Arc<dyn BotAuthorityRepoPort> =
+            Arc::new(bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                db.clone(),
+                "dev".to_string(),
+            ));
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder))
+            .with_bot_authority_port(Some(authority));
+        let res = svc
+            .create_connect("human_1", "x:moved", Some("hi".into()), None)
+            .await
+            .expect("manual pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].recipient_user_ids,
+            vec!["bob".to_string()],
+            "the current authority owner receives the notification, \
+             not the historical creator 85020"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_friend_request_falls_back_to_created_by_when_ownership_uninitialized() {
+        // Legacy bots (ownership_version = 0) have no authority owner edge:
+        // the strict ownership read errors and the recipients degrade to the
+        // historical `created_by` so unmigrated bots keep their existing
+        // notification behavior.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:legacy", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let authority: Arc<dyn BotAuthorityRepoPort> =
+            Arc::new(bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                db.clone(),
+                "dev".to_string(),
+            ));
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder))
+            .with_bot_authority_port(Some(authority));
+        let res = svc
+            .create_connect("human_1", "x:legacy", None, None)
+            .await
+            .expect("manual pending");
+        assert_eq!(res.status, ConnectStatus::Pending);
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
     }

@@ -18,6 +18,10 @@ core/repository/
 ```
 
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
+read without COUNT, equivalent to the existing exact-pair first page including
+newest-first duplicate handling and stage metadata. It does not grant access;
+tenant, environment and deletion predicates remain identical to the paged read.
 `BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
 row. Its `steal` operation atomically inserts or replaces that row's holder and
 acquisition timestamps in one transaction. Both Bot and Session force-acquire
@@ -74,6 +78,29 @@ Collaborator queries use the existing `bot_pk`, including bulk lists. Their
 `owner_id` remains a historical snapshot. Device binding lookup accepts the same
 owner/entity locator and detects ambiguity even when one Bot has no binding.
 Neither repository operation grants caller permissions.
+
+### Metadata locator batching
+
+`BotRepository.list_metadata_locator_candidates` supplies at most two candidates
+per exact request pair in a single ORM SELECT, for at most 100 distinct pairs.
+An ORM-derived request table and window ranking put Owner/entity matches first;
+tenant, environment and soft-deletion scope apply before ranking. `default`
+candidates must match the locator. A private `_metadata_locator_match` boolean
+preserves database comparison semantics; it is not a public response field.
+Only `bot_management.bcn_metadata` consumes this additive repository contract.
+It rejects ambiguous matches and accepts bare-ID fallback only when the stored
+BCN reference exactly matches, as before. Other addressing consumers keep their
+existing queries. Larger internal metadata batches are split into groups of 100.
+
+The paged metadata read still owns COUNT, ordering, pagination and batched
+publication projection. With service Bots present, a batch of up to 100 pairs
+uses four SELECTs rather than one address query per pair plus the final reads.
+No cache, new index, schema or frontend change is required. The unified ORM
+implementation serves both SQLite and MySQL/OceanBase; deploy it with the
+additive repository contract and consumer. Tests compare the old addressing
+algorithm and count actual SQL in
+`tests/community/repository/bot/test_metadata_locators.py`; production latency
+and the target database execution plan still require environment validation.
 
 ## The contract is enforceable
 

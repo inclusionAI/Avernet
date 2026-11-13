@@ -44,7 +44,9 @@ def _ctx() -> ApplyContext:
 
 
 def _entry(path: str = "workspace/") -> DesiredBotFileSync:
-    return DesiredBotFileSync(source_bot_id="b_src", path=path, excludes=("secrets/",))
+    return DesiredBotFileSync(
+        source_bot_id="b_src", source_owner_id="o", path=path, excludes=("secrets/",)
+    )
 
 
 class _FakePort(BotFileSyncPort):
@@ -59,9 +61,10 @@ class _FakePort(BotFileSyncPort):
         self.excludes: tuple[str, ...] | None = None
         self.calls = 0
 
-    async def sync(self, *, target, source_bot_id, path, excludes) -> BotFileSyncResult:
+    async def sync(self, *, target, source_bot_id, source_owner_id, path, excludes) -> BotFileSyncResult:
         self.target = target
         self.source_bot_id = source_bot_id
+        self.source_owner_id = source_owner_id
         self.path = path
         self.excludes = excludes
         self.calls += 1
@@ -145,6 +148,33 @@ def test_write_a_raising_sync_keeps_a_composed_reason_never_the_raw_text() -> No
     # The raw exception text must not reach the apply report.
     assert entry.reason == "bot file sync failed"
     assert "/x" not in (entry.reason or "")
+
+
+def test_write_a_raising_sync_logs_the_traceback_so_partial_can_be_traced(monkeypatch) -> None:
+    """A raising sync surfaces as the catch-all ``"bot file sync failed"`` in
+    the report (no raw text); the traceback that names what actually failed
+    goes to the log under ``bot_file_sync.materialiser_failed``. Without it a
+    PARTIAL with no per-branch reason is untraceable — the port's own
+    resolve_build_plan / mkdir / rsync branches log inside, but an exception
+    raised before those (or by a port that does not) reaches only this catch."""
+    port = _FakePort(BotFileSyncResult(ok=True), raises=RuntimeError("transport down: /x"))
+    materialiser = BotFileSyncMaterialiser(port)
+    plan = _run(materialiser.plan(_ctx(), _run(materialiser.resolve(_ctx(), [_entry()])).intents))
+
+    logged: list[str] = []
+
+    class _SpyLogger:
+        def exception(self, msg, *args, **_):
+            logged.append(msg)
+
+    import agentclaw.community.core.apply_engine.materialisers.bot_file_sync as mod
+
+    monkeypatch.setattr(mod, "logger", _SpyLogger())
+
+    _run(materialiser.write(_ctx(), plan))
+
+    assert any("bot_file_sync.materialiser_failed" in m for m in logged)
+
 
 
 def test_an_empty_plan_writes_no_entries_and_calls_the_port_never() -> None:

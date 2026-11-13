@@ -214,13 +214,19 @@ it('打开添加 MCP 时只按需加载市场 MCP，不加载 Skill 候选接口
     data: { total: 1, items: [{ server_code: 'mcp.weather', name: '天气 MCP' }] },
   });
 
-  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', 'mcp', {
-    source: 'open-platform',
-    keyword: '天气',
-  });
+  const result = await botEditorService.loadCapabilityCandidates(
+    'bot-1',
+    '12',
+    'mcp',
+    {
+      source: 'open-platform',
+      keyword: '天气',
+    },
+    'owner-1',
+  );
 
   expect(result.availableMcps).toEqual([expect.objectContaining({ serverCode: 'mcp.weather' })]);
-  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
+  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(controller.searchMarketMcpServers).toHaveBeenCalledWith({ keyword: '天气', tenants: ['THIRD_PARTNER'] });
   expect(controller.listRepositorySkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
@@ -276,9 +282,10 @@ it('上传本地 Skill 目录后只返回我的 Skill，不立即绑定能力集
     data: { operation: 'created', skill: { skill_id: 'skill-local', name: '本地 Skill', active: true } },
   });
 
-  await expect(botEditorService.uploadSkillFolder('bot-1', [])).resolves.toEqual(
+  await expect(botEditorService.uploadSkillFolder('bot-1', [], 'owner-1')).resolves.toEqual(
     expect.objectContaining({ id: 'skill-local', source: 'local' }),
   );
+  expect(controller.uploadSkillFolder).toHaveBeenCalledWith('bot-1', [], 'owner-1');
   expect(controller.setSkillSetMcp).not.toHaveBeenCalled();
 });
 
@@ -298,7 +305,7 @@ it('MCP 权限通过后再绑定能力集', async () => {
   await botEditorService.setSkillSetMcp('bot-1', 'set-1', 'mcp.public', true);
 
   expect(controller.getMcpPermission).toHaveBeenCalledWith('mcp.public');
-  expect(controller.setSkillSetMcp).toHaveBeenCalledWith('bot-1', 'set-1', 'mcp.public', true);
+  expect(controller.setSkillSetMcp).toHaveBeenCalledWith('bot-1', 'set-1', 'mcp.public', true, undefined);
 });
 
 it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
@@ -426,10 +433,10 @@ it('新建能力集后立即启用', async () => {
     data: { id: 'set-1', name: '研发能力集', is_default: false, is_active: true },
   });
 
-  await botEditorService.createSkillSet('bot-1', '研发能力集');
+  await botEditorService.createSkillSet('bot-1', '研发能力集', 'owner-1');
 
-  expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' });
-  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true);
+  expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' }, 'owner-1');
+  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true, 'owner-1');
 });
 
 it('启停能力集按服务端 is_active 返回最终状态，业务失败不得视为成功', async () => {

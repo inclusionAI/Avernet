@@ -124,3 +124,12 @@ describe('devPanelCdnFixture', () => {
     expect(w.aixLibraryCdnMap.size).toBe(0);
   });
 });
+
+test('taskPanel 平台资产不接受 manifest/Bot 的 CDN 覆盖，清理通用配置不影响本地注册', () => {
+  clearCdnConfig();
+  storeManifestBundles([manifestBundle('taskPanel', 'https://untrusted.invalid/manifest.js')]);
+  storeCdnConfigs([botScreen('bot-1', 'taskPanel', 'https://untrusted.invalid/bot.js')]);
+  expect(hasLibraryCdn('taskPanel')).toBe(false);
+  expect(getLibraryCdn('taskPanel')).toBeUndefined();
+  clearCdnConfig(); expect(getLibraryCdn('taskPanel')).toBeUndefined();
+});

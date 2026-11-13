@@ -49,6 +49,7 @@ from agentclaw.community.core.repository.implementations.bot.mutations import (
     _JSON_FIELDS as _JSON_FIELDS,
 )
 from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
+from sqlalchemy.orm import Query, Session
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.repository.implementations.bot.device_provider import (
@@ -147,6 +148,7 @@ class BotRepository(
             bot_type=bot_data.get("bot_type", "personal"),
             template_type=bot_data.get("template_type"),
             space_id=bot_data.get("space_id"),
+            identity_bot_id=bot_data.get("identity_bot_id"),
         )
 
     # ── queries (env-scoped — adopt prod) ───────────────────────
@@ -496,6 +498,14 @@ class BotRepository(
             )
             return [b.to_dict() for b in bots]
 
+    def list_metadata_locator_candidates(
+        self, pairs: List[tuple[str, str]],
+    ) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+        from .metadata_locators import metadata_locator_candidates
+
+        with self._db.orm_session() as db:
+            return metadata_locator_candidates(db, pairs)
+
     def list_bots_by_owner_bot_pairs(
         self,
         pairs: List[tuple[str, str]],
@@ -506,19 +516,7 @@ class BotRepository(
         if not pairs:
             return 0, []
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                or_(
-                    *[
-                        and_(
-                            self.Model.bot_id == bot_id,
-                            self.Model.owner_id == owner_id,
-                        )
-                        for bot_id, owner_id in pairs
-                    ]
-                ),
-                self.Model.is_delete == 0,
-                self._env(),
-            )
+            query = self._owner_bot_pairs_query(db, pairs)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
@@ -529,6 +527,29 @@ class BotRepository(
             from .stage_catalog import attach_stage_metadata
 
             return total, attach_stage_metadata(db, bots)
+
+    def _owner_bot_pairs_query(self, db: Session, pairs: List[tuple[str, str]]) -> Query:
+        return db.query(self.Model).filter(
+            or_(*[and_(self.Model.bot_id == bot_id, self.Model.owner_id == owner_id)
+                  for bot_id, owner_id in pairs]),
+            self.Model.is_delete == 0, self._env(),
+        )
+
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """The bounded catalog join does not use the repository's COUNT."""
+        if len(pairs) > 100:
+            raise ValueError("catalog join accepts at most 100 pairs")
+        if not pairs:
+            return []
+        with self._db.orm_session() as db:
+            bots = self._owner_bot_pairs_query(db, pairs).order_by(
+                self.Model.gmt_create.desc(), self.Model.id.desc(),
+            ).limit(len(pairs)).all()
+            from .stage_catalog import attach_stage_metadata
+
+            return attach_stage_metadata(db, bots)
 
     def list_by_search(
         self,
@@ -634,6 +655,7 @@ class BotRepository(
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -641,6 +663,8 @@ class BotRepository(
                 self.Model.owner_id == owner_id,
                 self._env(),
             )
+            if exclude_identity_inheriting:
+                query = query.filter(self.Model.identity_bot_id.is_(None))
             if exclude_bot_type:
                 query = query.filter(self.Model.bot_type != exclude_bot_type)
             if exclude_active_engine:
@@ -652,6 +676,24 @@ class BotRepository(
                     )
                 )
             return query.count()
+
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Owner-scoped like every other Bot query. Soft-deleted rows do not count:
+        they no longer run, so the source's deletion cannot strand them.
+        """
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.Model)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self.Model.identity_bot_id == bot_id,
+                    self._env(),
+                )
+                .count()
+            )
 
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         with self._db.orm_session() as db:

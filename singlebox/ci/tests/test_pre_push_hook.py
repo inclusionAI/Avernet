@@ -504,6 +504,8 @@ class PrePushHookTest(unittest.TestCase):
 
     def test_agent_docs_define_the_pre_push_target_contract(self) -> None:
         agents = AGENTS_PATH.read_text(encoding="utf-8")
+        self.assertIn("(docs/agents/validation.md)", agents)
+        validation = (REPO_ROOT / "docs/agents/validation.md").read_text(encoding="utf-8")
         # The community submodule owns AGENTS.md; CLAUDE.md is a monorepo-level
         # doc that lives in the parent ocb checkout, not here. Assert it only
         # when the submodule carries its own copy.
@@ -521,7 +523,7 @@ class PrePushHookTest(unittest.TestCase):
             "apps/bcs/",
             "apps/frontend/",
         ):
-            self.assertIn(expected, agents)
+            self.assertIn(expected, validation)
         if CLAUDE_PATH.exists():
             for expected in (
                 "origin/dev",

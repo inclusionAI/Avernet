@@ -5,8 +5,8 @@ use bcs_domain::caller_identity::CallerIdentitySnapshot;
 pub use crate::port::repo::bot_control_plane::{BotCallerConfiguration, CallerConfigurationSync};
 
 use crate::types::{
-    BotCandidateReadQuery, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery,
+    BotCandidateReadQuery, BotCandidateReadRecord, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery,
     ControllableCandidateQuery, ControlledBotCandidate, ServiceResult,
 };
 
@@ -62,6 +62,30 @@ pub trait BotControlPlaneCoreService: Send + Sync {
             message: "BotControlPlaneCoreService::search_candidates is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    /// Search candidate records without Provider hydration.
+    ///
+    /// Authorized discovery uses this lightweight read to apply visibility and
+    /// edge policy. Concrete Core implementations must not hydrate Provider
+    /// metadata here; callers hydrate only the final displayed Bot IDs. The
+    /// default preserves compatibility for test doubles by projecting the
+    /// existing hydrated result.
+    async fn search_candidate_records(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        let (candidates, total) = self.search_candidates(query).await?;
+        Ok((
+            candidates
+                .into_iter()
+                .map(|candidate| BotCandidateReadRecord {
+                    bot: candidate.bot.record,
+                    is_friend: candidate.is_friend,
+                })
+                .collect(),
+            total,
+        ))
     }
 
     async fn list_by_creator(

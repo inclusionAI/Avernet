@@ -77,6 +77,7 @@ async fn bots_my_falls_back_to_legacy_creator_inside_the_window() {
             "alice",
             "initialized-token",
             OwnershipInitialization {
+                initial_manager_user_ids: Vec::new(),
                 owner_user_id: "alice".to_string(),
                 mutation: AuthorityMutation {
                     mutation_id: "window-init".to_string(),

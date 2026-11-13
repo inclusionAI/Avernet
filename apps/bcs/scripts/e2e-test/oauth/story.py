@@ -6,11 +6,13 @@ from pathlib import Path
 import tempfile
 from provider_stub import provider_stub
 from harness import Environment
+from candidate_discovery import candidate_discovery
 from config_cases import invalid_configs
 from regressions import (default_environment, rollback_modes,
                          unlisted_provider_does_not_block_gateway,
                          invite_code_issuance_requires_authorization)
 from flows import lifecycle, browser_binding, rejection_and_precedence, compatibility, concurrent_refresh, pending_capacity
+from friend_surface import friend_connect_surface
 
 
 def main():
@@ -35,6 +37,13 @@ def main():
                         browser_binding(env, base)
                         rejection_and_precedence(env, base)
                     result['scenarios'].append('mixed-' + ('memory' if memory else 'sqlite'))
+                # Friend-connect full link on the in-memory composition root:
+                # the only e2e runtime whose edge-permission stores are the
+                # in-memory implementations behind the real connect service.
+                config, data, base = env.config()
+                with env.server(config, data, base, memory=True):
+                    friend_connect_surface(env, base)
+                result['scenarios'].append('friend-connect-surface-memory')
                 compatibility(env)
                 result['scenarios'].append('compatibility-and-chain-selection')
                 unlisted_provider_does_not_block_gateway(env)
@@ -47,6 +56,8 @@ def main():
                 result['scenarios'].append('rollback-modes')
                 pending_capacity(env)
                 result['scenarios'].append('pending-capacity')
+                candidate_discovery(env)
+                result['scenarios'].append('standalone-candidate-discovery')
                 invalid_configs(env)
                 result['scenarios'].append('startup-validation')
                 result['checks'] = env.checks

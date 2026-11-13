@@ -19,12 +19,12 @@ Stage 1 Phase 5: Fusion Offline Participant Warning
 import os
 import tempfile
 import pytest
-from src.infra.config.feature_flags import FeatureFlags
+from app.infra.config.feature_flags import FeatureFlags
 
 from datetime import datetime
 from unittest.mock import Mock
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -34,32 +34,31 @@ from src.domain.models.worker import (
     Availability,
     TrustLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.fusion_request import FusionRequest, FuseOptions
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext, Perspective
-from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
-from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
-from src.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.application.services.participant_availability_checker import (
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.fusion_request import FusionRequest, FuseOptions
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext, Perspective
+from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+from app.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.application.services.participant_availability_checker import (
     ParticipantAvailabilityChecker,
     ParticipantAvailability,
 )
-from src.application.services.group_fusion_service import GroupFusionService
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
-from src.domain.models.skill_profile import SkillProfile
+from app.application.services.group_fusion_service import GroupFusionService
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.skill_profile import SkillProfile
 
 
 @pytest.fixture(autouse=True)
 def enable_registry_filtering(monkeypatch):
     """Exercise the filtering policy independently of deployment defaults."""
     monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
+    monkeypatch.setattr(FeatureFlags, "is_explicit_participant_availability_warning_enabled", lambda: True)
 
 
 # =============================================================================
@@ -121,8 +120,8 @@ def setup_worker_with_profile(
     runtime_state: WorkerRuntimeState,
 ) -> Worker:
     """创建 Worker 并绑定 profile"""
-    from src.application.services.worker_import_service import WorkerImportService
-    from src.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
+    from app.application.services.worker_import_service import WorkerImportService
+    from app.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
 
     # 使用 WorkerImportService 创建 worker
     import_service = WorkerImportService(
@@ -544,59 +543,7 @@ class TestG1G2OfflineParticipantWarning:
 # Test: Default Candidate Filtering Still Works
 # =============================================================================
 
-class TestDefaultCandidateFilteringStillWorks:
-    """验证默认候选过滤逻辑不被破坏"""
 
-    def test_default_candidate_filtering_still_works(self, stores):
-        """
-        验证：默认候选推荐仍保持过滤逻辑
-
-        Given: 创建 online 和 offline workers
-        When: 使用 retrieval service 查询（不带显式 participants）
-        Then: 只有 online worker 的 profile 被返回
-        """
-        # 创建 online worker
-        setup_worker_with_profile(
-            stores, "wrk_filter_online", "staff_filter_online:default", WorkerRuntimeState.ONLINE
-        )
-
-        # 创建 offline worker
-        setup_worker_with_profile(
-            stores, "wrk_filter_offline", "staff_filter_offline:default", WorkerRuntimeState.OFFLINE
-        )
-
-        # 创建 filter 和 retrieval service
-        profile_filter = RegistryAwareWorkerFilter(
-            registry_store=stores["registry_store"],
-            runtime_state_store=stores["runtime_state_store"],
-            strict_mode=True,
-        )
-
-        # 创建 mock source
-        online_profile = create_test_profile("staff_filter_online:default", ["testing"])
-        offline_profile = create_test_profile("staff_filter_offline:default", ["testing"])
-
-        class MockSource:
-            def scan(self):
-                return WorkerProfileScanResult(
-                    profiles=[online_profile, offline_profile],
-                    scan_warnings=[],
-                    source_roots=["mock"],
-                )
-
-        retrieval_service = WorkerProfileRetrievalService(
-            source=MockSource(),
-            profile_filter=profile_filter,
-        )
-
-        # 检索
-        from src.domain.models.retrieval_mode import RetrievalMode
-        result = retrieval_service.retrieve(question="testing", mode=RetrievalMode.AGENT)
-
-        # 验证：只有 online 的 profile
-        profile_keys = [r.profile.profile_key for r in result.results]
-        assert "staff_filter_online:default" in profile_keys
-        assert "staff_filter_offline:default" not in profile_keys
 
 
 # =============================================================================

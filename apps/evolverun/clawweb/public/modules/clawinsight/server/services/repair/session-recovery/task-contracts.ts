@@ -9,6 +9,8 @@ export type RecoveryLevel = "debug" | "approval" | "automatic";
 export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" | "completed" | "failed" | "canceled";
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
+export const RECOVERY_COMPLETION_REASONS = ["user_continued", "target_unavailable", "owner_handoff", "mcp_permission_required", "no_recovery_needed"] as const;
+export type RecoveryCompletionReason = typeof RECOVERY_COMPLETION_REASONS[number];
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
 /** Owner-facing business handoff, separate from the full investigation report. */
 export type RecoveryOwnerHandoffContent = { summary: string; instructions: string };
@@ -28,7 +30,7 @@ export type RecoveryOwnerRequest = RecoveryOwnerRequestInput & {
   feedback?: { userId: string; text: string; atMs: number };
 };
 export type RecoveryAssessment = {
-  decision: "message" | "environment" | "observe" | "wait_cron";
+  decision: "message" | "environment" | "observe" | "wait_cron" | "no_recovery_needed";
   summary: string;
   evidence_ids: string[];
 };
@@ -64,6 +66,15 @@ export type RecoveryTimelineEvent = {
   summary: string;
   payload: Record<string, unknown>;
 };
+export type RecoveryEffectWait = { firstAt: number; sinceAt: number; resumes: number };
+export type RecoveryEffectResumeSlot = { firstExecutionNo: number; lastExecutionNo?: number };
+export type RecoveryEffectResumeConfig = { id: number; version: number; concurrency: number };
+export type RecoveryMaintenanceTask = Pick<RecoveryTaskState,
+  "taskId" | "status" | "phase" | "controlPlaneEnvironment" | "observationDeadlineAt" | "effectWait" | "effectResumeSlot"> & {
+    compact: true;
+    publicBaseUrl?: string;
+  };
+
 export type RecoveryTaskState = {
   /** Present only for a frozen offline run; never grants live target access. */
   simulation?: import("./simulation.js").RecoverySimulation;
@@ -72,8 +83,8 @@ export type RecoveryTaskState = {
   request: RecoveryRequest;
   level: RecoveryLevel;
   status: RecoveryTaskStatus;
-  /** Normal completion after user continuation, Owner handoff, or confirmed target loss. The MCP reason is read-only legacy compatibility. */
-  completionReason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required";
+  /** Why assessment or recovery ended normally. The MCP reason is read-only legacy compatibility. */
+  completionReason?: RecoveryCompletionReason;
   phase: RecoveryPhase;
   version: number;
   /** Absent on legacy tasks; never inferred from the target Bot environment. */
@@ -81,6 +92,9 @@ export type RecoveryTaskState = {
   /** Absent on legacy tasks; only true enables read-only sharing. */
   shared?: boolean;
   observationDeadlineAt: number | null;
+  effectWait?: RecoveryEffectWait;
+  /** Holds a shared dispatch slot until the AIS steps in this round have settled. */
+  effectResumeSlot?: RecoveryEffectResumeSlot;
   /** Pre-intervention Cron observation; survives execution recovery, never extends itself. */
   cronWait?: { startedAt: number; deadlineAt: number };
   ownerDeadlineAt: number | null;
@@ -111,7 +125,7 @@ export type RecoveryTaskResult = {
   status: "waiting_effect" | "completed" | "failed" | "canceled";
   phase: RecoveryPhase;
   waiting_reason: "effect" | null;
-  completion_reason?: "user_continued" | "target_unavailable" | "owner_handoff" | "mcp_permission_required";
+  completion_reason?: RecoveryCompletionReason;
   effect: RecoveryEffect;
   /** Whether any intervention is confirmed; independent of business recovery. Omitted by legacy senders. */
   intervention_status?: RecoveryInterventionStatus;
@@ -123,6 +137,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Opt-in bootstrap-only audit references; absent from maintenance and mutation reads. */
+  trajectoryIndexReads?: import("./bootstrap-evidence.js").TrajectoryIndexRead[];
   /** Transient facts from the existing read audit; never a claim of full session coverage. */
   sessionReadCoverage?: import("./session-read-coverage.js").SessionReadCoverage[];
   /** Transient projection of the complete tool ledger; never persisted or supplied by the Agent. */
@@ -134,9 +150,13 @@ export type RecoveryStoredTask = RecoveryTaskState & {
 };
 export interface RecoveryTaskStore {
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
-  find(taskId: string): Promise<RecoveryStoredTask | null>;
+  find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;
-  update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask | null>;
+  update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
+    effectResumeClaim?: { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null>;
+  effectResumeConfig?(environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryEffectResumeConfig | null>;
+  claimEffectResumeDispatch?(stepId: string): Promise<boolean>;
+  settleEffectResumeSlot?(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean>;
   /** Append a notification fact atomically without changing the Agent's business-state version. */
   appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;
   /** Atomically reserve a due attempt. A stale worker must not send or settle another attempt. */
@@ -144,5 +164,6 @@ export interface RecoveryTaskStore {
   failResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
-  listForMaintenance?(limit: number, afterTaskId?: string): Promise<RecoveryStoredTask[]>;
+  listForMaintenance?(limit: number, afterTaskId?: string, environment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment,
+    includeEffectResumeSlots?: boolean): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>>;
 }

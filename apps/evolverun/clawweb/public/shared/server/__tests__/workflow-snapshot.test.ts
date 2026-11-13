@@ -3,7 +3,7 @@ import { repairReleaseMigrations } from '../schema-repair-release.js';
 import { workflowSnapshotColumnDdl } from '../schema-workflow-snapshot.js';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SqliteDatabase, runMigrations } from '../db.js';
+import { SqliteDatabase, runMigrations, type IDatabase } from '../db.js';
 import { WorkflowSnapshotRepository } from '../services/workflow-snapshot.js';
 import { workflowSnapshotKey } from '../contracts/workflow-snapshot.js';
 
@@ -44,6 +44,13 @@ describe('run workflow snapshots', () => {
     expect(JSON.parse(row.workflow_snapshot_json)).toMatchObject({status:'resolved',snapshot:{workflowVersion:39,deployNumber:34}});
     const exec=vi.spyOn(db,'exec'); exec.mockRejectedValueOnce(new Error('write denied'));
     await expect(snapshots.associateRun('deployed')).rejects.toThrow('write denied');
+  });
+  it('suppresses MySQL and SQLite missing association-column errors during registration', async () => {
+    const message = "ER_BAD_FIELD_ERROR: Unknown column: 'workflow_snapshot_json' in 'field list'";
+    const query = vi.fn().mockRejectedValue(new Error(message));
+    const db = { query } as unknown as IDatabase;
+    await expect(new WorkflowSnapshotRepository(db).associateRun('deployed')).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledTimes(1);
   });
   it('uses actual deployment 39/34 even when another deployment becomes active', async () => {
     const { db, snapshots } = await setup();

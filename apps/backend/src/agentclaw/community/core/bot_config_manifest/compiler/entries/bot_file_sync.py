@@ -70,7 +70,7 @@ def compile_bot_file_sync(
             failures.append(EntryFailure(path, refusal[1]))
             continue
         try:
-            source_bot_id = _resolve_bot_id(session, entry)
+            source_bot_id, source_owner_id = _resolve_bot_identity(session, entry)
         except EntryFetchError as exc:  # pragma: no cover - defensive
             # ``declared_protocol`` already gated this entry as a bot source,
             # and ``_resolve_bot_id`` re-reads the same raw the gate read. The
@@ -84,6 +84,7 @@ def compile_bot_file_sync(
         desired.append(
             DesiredBotFileSync(
                 source_bot_id=source_bot_id,
+                source_owner_id=source_owner_id,
                 path=path,
                 excludes=excludes,
             )
@@ -94,14 +95,18 @@ def compile_bot_file_sync(
     return Declaration(tuple(desired), failures=tuple(failures))
 
 
-def _resolve_bot_id(session: CompileSession, entry: Mapping[str, Any]) -> str:
-    """The ``bot_id`` of the bot source an entry references.
+def _resolve_bot_identity(session: CompileSession, entry: Mapping[str, Any]) -> tuple[str, str]:
+    """The ``(bot_id, owner_id)`` of the bot source an entry references.
 
     One road: a named ``from: <name>`` that points at a top-level
     ``protocol: bot`` source. An inline ``source: {protocol: bot, bot_id: …}``
     is parsed the same way. ``declared_protocol`` already verified the entry is
-    a bot source, so the parse here is the trusted re-read for the ``bot_id``
-    value — the same parser the schema and the resolver use, never a copy.
+    a bot source, so the parse here is the trusted re-read for the addressing
+    values — the same parser the schema and the resolver use, never a copy.
+
+    ``owner_id`` is part of a bot source's addressing (a ``bot_id`` is not
+    globally unique), carried to the sync so it reads the source row by
+    ``(bot_id, owner_id)`` and not by ``bot_id`` alone.
     """
     name = entry.get("from")
     if isinstance(name, str) and name:
@@ -113,10 +118,10 @@ def _resolve_bot_id(session: CompileSession, entry: Mapping[str, Any]) -> str:
     else:
         raw = entry.get("source")
     decl, violations = parse_source(raw)
-    if decl is None or decl.bot_id is None:  # pragma: no cover - defensive
+    if decl is None or decl.bot_id is None or decl.owner_id is None:  # pragma: no cover - defensive
         # The schema refuses this at PUT; reaching here means a document that
         # predates the rule or was stored by an older build. Surface it as an
         # entry failure rather than fetching.
-        reason = "; ".join(v.message for v in violations) or "a bot source must declare 'bot_id'"
+        reason = "; ".join(v.message for v in violations) or "a bot source must declare 'bot_id' and 'owner_id'"
         raise EntryFetchError(reason)
-    return decl.bot_id
+    return decl.bot_id, decl.owner_id

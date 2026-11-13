@@ -24,10 +24,10 @@ class TestPlanningFlowIntegration:
 
     def test_task_spec_to_plan_draft_flow(self):
         """测试从 TaskSpec 到 PlanDraft 的完整流程"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
 
         # 准备输入
         task_spec = TaskSpec(
@@ -92,10 +92,10 @@ class TestPlanningFlowIntegration:
 
     def test_high_risk_task_planning_flow(self):
         """测试高风险任务的规划流程"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.task_spec import TaskSpec, RiskLevel
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.task_spec import TaskSpec, RiskLevel
 
         # 准备高风险任务
         task_spec = TaskSpec(
@@ -129,10 +129,10 @@ class TestPlanningFlowIntegration:
 
     def test_vague_task_planning_flow(self):
         """测试模糊任务的规划流程"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.task_spec import TaskSpec, RiskLevel
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.task_spec import TaskSpec, RiskLevel
 
         # 准备模糊任务
         task_spec = TaskSpec(
@@ -169,11 +169,11 @@ class TestPlanningFlowIntegration:
 
     def test_planning_with_understanding_context(self):
         """测试带有理解上下文的规划流程"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
-        from src.domain.models.task_spec import TaskSpec, RiskLevel
-        from src.domain.models.task_understanding_result import UnderstandingWarning
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
+        from app.domain.models.task_spec import TaskSpec, RiskLevel
+        from app.domain.models.task_understanding_result import UnderstandingWarning
 
         # 准备输入
         task_spec = TaskSpec(
@@ -217,9 +217,9 @@ class TestPlanningFlowIntegration:
 
     def test_planning_result_can_be_summarized(self):
         """测试规划结果可以生成摘要"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         task_spec = get_multi_step_task_spec()
@@ -250,11 +250,11 @@ class TestPlanningFlowValidation:
     def test_plan_draft_conforms_to_schema(self):
         """测试 PlanDraft 符合 Schema"""
         import json
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
-        from src.infra.schema_loader import validate_with_store
+        from app.infra.schema_loader import validate_with_store
         import jsonschema
 
         task_spec = get_simple_design_task_spec()
@@ -275,9 +275,9 @@ class TestPlanningFlowValidation:
 
     def test_planning_preserves_task_relationship(self):
         """测试规划保持任务关联"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         task_spec = get_multi_step_task_spec()

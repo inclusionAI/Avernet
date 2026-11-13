@@ -43,6 +43,23 @@ describe("monitoring automatic recovery", () => {
     expect(request).not.toHaveProperty("execution_level");
   });
 
+  it("keeps the diagnostic trace ID distinct from the session identifiers", async () => {
+    const { service, trigger } = setup();
+    await trigger.trigger({ ...event, engine: "TE", traceId: "failing-turn" });
+    expect(service.create).toHaveBeenCalledWith(expect.objectContaining({
+      trace_id: "failing-turn", session_key: event.sessionKey, session_id: event.sessionId,
+    }), expect.any(Object));
+  });
+
+  it("passes the observed OpenClaw fault time even when the diagnostic has no trace ID", async () => {
+    const { service, trigger } = setup();
+    const occurredAt = "2026-10-14T23:41:15.000Z";
+    await trigger.trigger({ ...event, occurredAt });
+    const [request] = service.create.mock.calls[0];
+    expect(request.fault_at_ms).toBe(Date.parse(occurredAt));
+    expect(request).not.toHaveProperty("trace_id");
+  });
+
   it.each([
     { decision: "PASS" }, { decision: "UNRESOLVED" },
     { handlerName: "COMPLETED" }, { handlerName: null }, { humanIntervention: true },

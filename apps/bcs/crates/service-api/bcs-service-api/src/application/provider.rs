@@ -49,6 +49,7 @@ impl std::fmt::Debug for ProviderBotEventCredential {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderCommand {
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     pub name: String,
     pub slug: Option<String>,
     pub webhook_url: Option<String>,
@@ -74,6 +75,7 @@ pub struct RegisterProviderOutcome {
 
 #[derive(Debug, Clone)]
 pub struct UpdateProviderCommand {
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub authenticated_staff_id: String,
@@ -98,6 +100,8 @@ pub struct RegisterProviderBotCommand {
     pub provider_admin_token: String,
     pub name: String,
     pub summary: Option<String>,
+    /// Registration snapshot: first user is owner, remaining users are initial managers.
+    /// Requires 1..=101 raw user IDs; replay never synchronizes existing authority.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     pub domains: Vec<String>,

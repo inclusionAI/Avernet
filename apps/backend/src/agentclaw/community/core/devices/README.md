@@ -9,6 +9,12 @@ with no linked Bot retain their standalone entity-owner rule. Lookup failures
 deny access; the retained entity never grants former-Owner access to a linked
 private Bot. Public visibility and existing collaborator checks remain in place.
 
+For BaaS file writes, the device filesystem exposes `DeviceFileSystemReadOnlyError`
+only when the Engine upload response contains its explicit read-only marker. Other
+403 responses, older Engine 500 responses, and transport failures remain errors
+without being classified as read-only. This does not promise atomic writes or
+change the permissions of the underlying filesystem.
+
 ## Context Boundary
 
 ```yaml

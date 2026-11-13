@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit, urlencode, quote
 from provider_scope_story import Story
 from a2a_workbench import abort_task
 from a2a_management_cases import exercise as exercise_management
+from a2a_provider_config_cases import exercise as exercise_provider_config
 from a2a_rpc_peer import dispatch as dispatch_rpc, envelope as rpc_envelope
 
 TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
@@ -261,11 +262,26 @@ def visible_text(value):
 
 
 class A2aStory(Story):
-    def __init__(self, base, owner, peer):
+    def __init__(self, base, owner, peer, a2a_prefix="/a2a"):
         super().__init__(base, owner)
+        self.a2a_prefix = a2a_prefix
         self.peer = peer
         self.original_policy = None
         self.policy_revision = None
+
+    def request(self, method, path, body=None, **kwargs):
+        value = super().request(method, path, body, **kwargs)
+        if path.startswith("/api/v1/collaboration/a2a/"):
+            assert set(value) == {"code", "message", "data", "request_id"}
+            expected = kwargs.get("status", 200)
+            assert value["code"] == expected * 100
+            assert value["request_id"]
+            if expected >= 400:
+                assert "error_code" in value["data"]
+                # Existing rejection cases compare machine codes on both protocols.
+                return {"error": {"code": value["data"]["error_code"], "request_id": value["request_id"]}}
+            return value["data"]
+        return value
 
     def run(self):
         self.request("POST", "/me/ensure-human")
@@ -273,13 +289,14 @@ class A2aStory(Story):
         provider = self.request("POST", "/providers", {"slug": provider_name,
             "name": "A2A E2E " + uuid.uuid4().hex,
             "webhook_url": self.peer.base + "/legacy-webhook-must-not-be-used",
-            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0"})
+            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
+            "a2a": {"default_owner": self.owner}})
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
-        registered = self.request("POST", "/a2a/agents", {"owners": [self.owner],
+        registered = self.request("POST", self.a2a_prefix + "/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
-        assert set(registered) == {"provider_name", "agent_name", "bot_id", "agent_card_url", "agent_card"}
+        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card"}
         assert registered["agent_name"] == self.peer.card["name"]
         bot_id = registered["bot_id"]
         bindings = self.request("GET", prefix, token=admin)
@@ -289,17 +306,17 @@ class A2aStory(Story):
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] == self.peer.base + "/agent-card.json"
         assert record["revision"] == 1
-        names = {"agent_name": record["agent_card"]["name"]}
-        named = self.request("GET", "/a2a/agent-card?" + urlencode(names), token=admin)
+        card_path = self.a2a_prefix + "/agents/" + bot_id + "/agent-card"
+        named = self.request("GET", card_path, token=admin)
         assert named["agent_card"] == record["agent_card"]
-        assert not ({"provider_id", "bot_uuid", "provider_bot_ref", "revision"} & named.keys())
-        self.request("GET", "/a2a/agent-card?" + urlencode(names), token="wrong-admin", status=401)
+        assert not ({"provider_id", "bot_uuid", "revision"} & named.keys())
+        self.request("GET", card_path, token="wrong-admin", status=401)
         self.request("GET", control, status=401)
         card = self.request("GET", "/bots/" + bot_id + "/agent-card")
         assert card["skills"][0]["description"] == "Full skill description"
         assert card["skills"][0]["futureField"] == {"keep": True}
         assert not self.peer.requests, "Registration must not submit a probe task"
-        named_refresh = self.request("POST", "/a2a/agent-card/refresh", names, token=admin)
+        named_refresh = self.request("POST", card_path + ":refresh", {}, token=admin)
         assert named_refresh["agent_card"] == record["agent_card"]
         record = self.request("GET", control, token=admin)
         unchanged = self.request("POST", control + "/card:refresh", {}, token=admin)
@@ -311,11 +328,11 @@ class A2aStory(Story):
         revision = record["revision"]
         inline = copy.deepcopy(record["agent_card"])
         inline["description"] = "Inline replacement"
-        named = self.request("PUT", "/a2a/agent-card", {**names, "agent_card": inline}, token=admin)
+        named = self.request("PUT", card_path, {"agent_card": inline}, token=admin)
         assert named["agent_card"] == inline and named["agent_card_url"] is None
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] is None
-        missing_url = self.request("POST", "/a2a/agent-card/refresh", names, token=admin, status=409)
+        missing_url = self.request("POST", card_path + ":refresh", {}, token=admin, status=409)
         assert missing_url["error"]["code"] == "CARD_URL_REQUIRED"
         assert record["revision"] == revision + 1
         self.request("PUT", control, {"agent_card": inline, "expected_revision": revision}, token=admin, status=409)
@@ -433,19 +450,22 @@ class A2aStory(Story):
         self.request("PUT", control, {"agent_card": poll_card}, token=admin)
         self.poll_rounds(group, bot_id)
         self.named_rounds(provider, provider_name, poll_card)
+        exercise_provider_config(self, provider, poll_card)
         exercise_management(self, provider, poll_card)
         print(f"A2A story: {self.checks} live boundary assertions, thirteen stream and five polling deliveries passed")
 
     def named_rounds(self, provider, provider_name, card):
         card = copy.deepcopy(card)
         card["name"] = "订单助手-" + uuid.uuid4().hex[:8]
-        registration = self.request("POST", "/a2a/providers/" + provider_name + "/bots",
-            {"owners": [self.owner], "agent_card": card}, token=provider["provider_admin_token"], status=201)
+        reference = "story-" + uuid.uuid4().hex
+        registration_body = {"provider_bot_ref": reference, "owners": [self.owner], "agent_card": card}
+        admin = provider["provider_admin_token"]
+        registration = self.request("POST", self.a2a_prefix + "/providers/" + provider_name + "/bots",
+            registration_body, token=admin, status=201)
         assert registration["bot_name"] == card["name"]
-        assert not ({"provider_id", "bot_uuid", "provider_bot_ref"} & registration.keys())
-        # Native admin lookup is only for fixture cleanup; customer calls below use names/run_id.
-        found = self.request("GET", "/bots/search?" + urlencode({"q": card["name"]}))
-        bot_id = next(item["bot_uuid"] for item in found["items"] if item["agent_card"]["name"] == card["name"])
+        assert registration["provider_bot_ref"] == reference
+        assert not ({"provider_id", "bot_uuid"} & registration.keys())
+        bot_id = registration["bot_id"]
         bindings = self.request("GET", "/providers/" + provider["provider_id"] + "/bots", token=provider["provider_admin_token"])
         self.bots.append((provider, next(item for item in bindings["items"] if item["bot_uuid"] == bot_id)))
         # Production A2A requires the server queue for this Bot, including direct calls.
@@ -458,12 +478,12 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = "/a2a/providers/" + provider_name + "/bots/" + quote(card["name"], safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
-            assert accepted["bot_name"] == card["name"] and "bot_uuid" not in accepted
+            assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
             run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
@@ -593,11 +613,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--owner", required=True)
+    parser.add_argument("--a2a-prefix", default="/a2a",
+                        choices=("/a2a", "/api/v1/collaboration/a2a"))
     args = parser.parse_args()
     for binding in ("HTTP+JSON", "JSONRPC"):
         peer = Peer(binding)
         peer.start()
-        story = A2aStory(args.base_url, args.owner, peer)
+        story = A2aStory(args.base_url, args.owner, peer, args.a2a_prefix)
         try:
             story.run()
             with story.http.open(args.base_url + "/metrics", timeout=15) as response:

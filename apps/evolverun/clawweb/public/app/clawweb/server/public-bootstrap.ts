@@ -20,6 +20,8 @@ import { createSubworkflowObservabilityRouter } from "@avernet/workflow/server/r
 import { createSubworkflowAuthorizer } from "@avernet/workflow/server/routes/subworkflow-authorization";
 import { createPackVersionRouter } from "@avernet/workflow/server/routes/pack-version";
 import { createWorkflowUnifiedSaveRouter, unifiedSaveHostGuard } from "@avernet/workflow/server/routes/workflow-unified-save";
+import { createWorkflowCloneRouter } from "@avernet/workflow/server/routes/workflow-clone";
+import { WorkflowCloneService } from "@avernet/workflow/server/services/workflow-clone-service";
 import { WorkflowUnifiedSaveService, type WorkflowPackWriteAuthorization } from "@avernet/workflow/server/services/workflow-unified-save-service";
 import type { AuthorizeSnapshotDeploy } from "@avernet/workflow/server/services/auto-heal-deploy-service";
 import type { ClawFlowsGitConfig } from "@avernet/workflow/server/services/clawflows-git-client";
@@ -315,6 +317,13 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         readOperation: (requestId, workflowId, actorId) => readPackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
         reconcileOperation: (requestId, workflowId, actorId) => reconcilePackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
       }));
+      app.use("/api/workflows", createWorkflowCloneRouter(new WorkflowCloneService({
+        db,
+        workflowSpecRepo,
+        facadeRepo,
+        gitConfig: autoHealGitConfig,
+        gitAuthor: autoHealAuthor,
+      })));
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,

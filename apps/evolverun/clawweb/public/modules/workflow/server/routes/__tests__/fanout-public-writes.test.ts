@@ -17,7 +17,7 @@ afterEach(async () => { for (const close of cleanup.splice(0)) await close(); vi
 async function fixture(state: string | null) {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
-  raw.exec(`CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, workflow_title TEXT,
+  raw.exec(`CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '', id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, workflow_title TEXT,
     status TEXT, state_json TEXT, node_count INTEGER, succeeded_count INTEGER, failed_count INTEGER,
     total_duration_ms INTEGER, total_token_usage INTEGER, started_at INTEGER, completed_at INTEGER,
     triggered_by TEXT, identity_key TEXT, current_phase TEXT, origin_session_key TEXT, origin_session_id TEXT,

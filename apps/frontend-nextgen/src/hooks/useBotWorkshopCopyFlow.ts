@@ -1,9 +1,9 @@
-import type { BotCopyInput, BotDomain } from '@/services/botWorkshop';
+import type { BotCopyInput, BotCreateAuthorization, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
+import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 
 interface BotWorkshopCopyFlowOptions {
   /** 复制成功 / 授权走通后,刷新列表以让新 Bot 出现。 */
@@ -13,52 +13,74 @@ interface BotWorkshopCopyFlowOptions {
 }
 
 /**
- * 编排 Bot 复制:调 `copyBot` →
+ * 编排 Bot 复制:调 `copyBot` → 两条路径共用同一个 detail-wait 闸关窗。
  * - `issued`(success,无 AgentPass 授权):复制已提交,dst bot 由 create_job 异步创建,
  *   POST 200 时 detail 还查不到。**Modal 保持开启 + copying(busy 拦截关闭)**进入
  *   「复制后等待」:每 2s 轮询单 bot(dst 建好前 404,静默撤 toast 重试),dst 能查到才
  *   setCopying(false)+onClose()+load() 让新 Bot 落入当前页;60s 未出现则同兜底关窗 + 警告。
- * - `authorization_required`(auth_required,内源 frame url 走 AgentPass):**与创建 iframe
- *   url 完全同款** —— 复用 `useBotCreateAuthorization` 的 2s 轮询 dst bot 的 auth-status,
- *   「授权后等待」直到 ISSUED + bot 才结转 handleCopied → load()。
+ * - `authorization_required`(auth_required,内源 iframe url 走 AgentPass):**不走**
+ *   `useBotCreateAuthorization` 的 auth-status 轮询(copy dst 无 auth-status,轮询它无意义)。
+ *   AuthorizationPanel 只承载 iframe 授权页。**detail-wait 不在 submit 起** —— dst bot_id 暂存
+ *   ref,等 AgentPass 授权完成(iframe 内 Apply/License app postMessage `AGENT_LICENSE_CLOSE`)
+ *   才灌进 pendingIssuedBotId 起 detail-wait,避免 auth 前那段 404 轮询。CLOSE 时清掉
+ *   authorization 卸 iframe、维持 copying=true,让 CopyBotModal 的「复制中」罩(awaitingDetail)
+ *   接管持住;detail 可查才 setCopying(false)+onClose()+toast+load()。
  *
  * 源 Bot 的协作者/外部渠道/工具授权/密钥不继承。
  */
 export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOptions) {
   const [copying, setCopying] = useState(false);
-  const handleCopied = useCallback(
-    async (bot: BotDomain) => {
-      onClose();
-      toast.success(`${bot.name} 已复制`);
-      await load();
-    },
-    [load, onClose],
-  );
-  const handleAuthorizationTerminated = useCallback(
-    (status: string, message?: string) => {
-      onClose();
-      toast.error(message || `AgentPass 授权未完成(${status})`);
-    },
-    [onClose],
-  );
-  const authorization = useBotCreateAuthorization(handleCopied, handleAuthorizationTerminated);
+  // auth_required 路径的 iframe 授权视图(只展示,不轮询 auth-status)。
+  const [authorization, setAuthorization] = useState<
+    (BotCreateAuthorization & { message?: string; error?: string }) | undefined
+  >();
 
-  // issued(无需 AgentPass 授权)路径:POST 200 返回时 dst bot 由 create_job 异步创建,
-  // detail 此刻查不到。submitCopy 保持 Modal 开 + copying=true(busy 拦截关闭),这里
-  // 「复制后等待」:每 2s 轮询单 bot(dst 建好前 404,静默撤 toast 重试),dst 能查到才
-  // setCopying(false)+onClose()+load();60s 未出现则同兜底关窗 + 警告 + 刷新一次。
-  // (auth_required 路径的「授权后等待」由上方 useBotCreateAuthorization 轮询承担:
-  //  poll 到 ISSUED + bot 才结转 handleCopied → load(),此处不复用。)
+  // 「复制后等待」闸:poll detail(dst_bot_id) 直到可查。issued 与 auth_required 两路径共用。
+  // dst 由 create_job 异步创建,建好前 detail 会 404 —— httpClient 已把该 404 enqueue 进
+  // errorNotifyStore,这里按 toastKey 撤掉(观察者 drain 时跳过),不让它串成弹窗/扰乱页面,静默重试。
+  // 可查 → setAuthorization(undefined)+setCopying(false)+onClose()+toast+load();60s 未出现则同兜底。
   const [pendingIssuedBotId, setPendingIssuedBotId] = useState<string>();
+  // auth_required 路径:dst bot_id 暂存于此。submit 时不立刻起 detail-wait(避免 auth 前 404 轮询),
+  // 等 AgentPass 授权完成(AGENT_LICENSE_CLOSE)再把 ref 灌进 pendingIssuedBotId 起 detail-wait。
+  const pendingAuthBotIdRef = useRef<string>();
+  const pendingAvatarRef = useRef<string>();
+  const callbacksRef = useRef({ load, onClose });
+  callbacksRef.current = { load, onClose };
+
+  // AgentPass 授权页 postMessage 桥(主壳不替 nextgen 清 authorization,nextgen 自己接):
+  //   AGENT_LICENSE_CONFIRM = 授权提交成功(auth-done 信号,不改变状态)
+  //   AGENT_LICENSE_CLOSE   = 授权浮窗要关(倒计时关 / 用户关)= auth 完成。此时才起 detail-wait:
+  //                           把暂存的 dst bot_id 灌进 pendingIssuedBotId、清掉 authorization 卸 iframe、
+  //                           维持 copying=true,让 CopyBotModal「复制中」罩(awaitingDetail)接管持住,
+  //                           detail 可查才 setCopying(false)+onClose()+toast+load()。
+  // 仅在 auth 阶段(authorization 在)监听 —— CLOSE 只会在这段来;auth 前/后都不监听,避免串扰。
+  useEffect(() => {
+    if (!authorization) return;
+    const handler = (event: MessageEvent) => {
+      const type = event?.data?.type;
+      if (type === 'AGENT_LICENSE_CLOSE') {
+        const botId = pendingAuthBotIdRef.current;
+        if (!botId) return;
+        pendingAuthBotIdRef.current = undefined;
+        setAuthorization(undefined);
+        setCopying(true);
+        setPendingIssuedBotId(botId);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [authorization]);
+
   useEffect(() => {
     if (!pendingIssuedBotId) return;
     let active = true;
     let terminal = false;
+    // 自调度轮询:每轮 detail 结果返回后再等 5s 才发下一轮 —— 保证「等上次结果返回再请求」,
+    // 不重叠(setInterval 不等 async,慢网会并发);同时不留 `polling` 守卫也能杜绝双触发。
+    let pendingTimer: number | undefined;
     const poll = async () => {
-      if (terminal) return;
-      // 单 bot 定向轮询(不受工作台 keyword/分页过滤影响)。dst 由 create_job 异步创建,
-      // 建好前 detail 会 404 —— httpClient 已把该 404 enqueue 进 errorNotifyStore,这里
-      // 按 toastKey 撤掉(观察者 drain 时跳过),不让它串成弹窗/扰乱页面,静默重试。
+      if (terminal || !active) return;
+      // 单 bot 定向轮询(不受工作台 keyword/分页过滤影响)。
       let bot: BotDomain | undefined;
       try {
         bot = await botWorkshopService.detail(pendingIssuedBotId);
@@ -69,41 +91,70 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
       }
       if (!active || terminal) return;
       if (bot) {
+        const avatar = pendingAvatarRef.current;
+        let avatarFailed = false;
+        if (avatar) {
+          try {
+            await botAvatarService.save(pendingIssuedBotId, avatar);
+          } catch {
+            avatarFailed = true;
+          }
+        }
+        if (!active || terminal) return;
         terminal = true;
+        pendingAvatarRef.current = undefined;
         setPendingIssuedBotId(undefined);
+        setAuthorization(undefined);
         setCopying(false);
-        onClose();
-        toast.success(`${bot.name} 已创建`);
-        await load();
+        callbacksRef.current.onClose();
+        if (avatarFailed) toast.warning(`${bot.name} 已复制，但头像未保存，请在编辑中重试`);
+        else toast.success(`${bot.name} 已复制`);
+        await callbacksRef.current.load();
+        return;
       }
+      // 未查到(404):5s 后再发下一轮。
+      pendingTimer = window.setTimeout(poll, 5000);
     };
-    void poll();
-    const timer = window.setInterval(poll, 2000);
+    // 首轮 poll 延迟 5s:create_job 刚起跑(detail-wait 触发那一刻),dst bot 行尚未建好,
+    // 头几次必 404 —— 等 5s 再开始(然后每轮结果返回后 5s 发下一轮)。
+    const startDelay = window.setTimeout(() => {
+      void poll();
+    }, 5000);
     const timeout = window.setTimeout(() => {
       if (active && !terminal) {
         terminal = true;
+        pendingAvatarRef.current = undefined;
         setPendingIssuedBotId(undefined);
+        setAuthorization(undefined);
         setCopying(false);
-        onClose();
-        toast.warning('新 Bot 仍在创建中,请稍后刷新查看');
-        void load();
+        callbacksRef.current.onClose();
+        toast.warning('复制结果和头像状态尚未确认，请先刷新查看，避免重复复制');
+        void callbacksRef.current.load();
       }
     }, 60_000);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      window.clearTimeout(startDelay);
+      if (pendingTimer) window.clearTimeout(pendingTimer);
       window.clearTimeout(timeout);
     };
-  }, [pendingIssuedBotId, load, onClose]);
+  }, [pendingIssuedBotId]);
 
   const submitCopy = useCallback(
     async (input: BotCopyInput) => {
       setCopying(true);
+      pendingAvatarRef.current = input.avatarUrl;
       try {
         const result = await botWorkshopService.copyBot(input);
         if (result.type === 'authorization_required') {
-          authorization.beginAuthorization(result);
-          setCopying(false); // 授权面板自管 busy 状态
+          // 不走 auth-status 轮询(copy dst 无 auth-status)。AuthorizationPanel 只展示授权页;
+          // detail-wait **不在此起** —— dst bot_id 暂存 ref,等 AgentPass 授权完成
+          // (AGENT_LICENSE_CLOSE)才灌进 pendingIssuedBotId 起 detail-wait(避免 auth 前 404 轮询)。
+          // copying=true 维持 busy,iframe 全屏期间浮窗不可关;CLOSE 后切「复制中」罩(awaitingDetail)。
+          setAuthorization(result);
+          setCopying(true);
+          pendingAuthBotIdRef.current = result.botId;
+          toast.success('复制已提交,请在授权页完成授权');
           return;
         }
         // issued:dst bot 由 create_job 异步创建,POST 200 时 detail 还查不到。
@@ -112,18 +163,35 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
         toast.success('复制已提交,正在创建新 Bot');
         setPendingIssuedBotId(result.botId);
       } catch (error) {
+        pendingAvatarRef.current = undefined;
         setCopying(false);
+        // httpClient 已把默认提示 enqueue 进 errorNotifyStore(由顶层观察者兜底发一条),
+        // 此处 hook 自己再 toast.error 会重复(两条相同中文)。catch 内按 toastKey 撤掉默认那条,
+        // 只留 hook 的兜底文案;与 404 轮询的 cancel 同源范式。
+        if (error instanceof BackendRequestError && error.toastKey) {
+          useErrorNotifyStore.getState().cancel(error.toastKey);
+        }
         toast.error(error instanceof Error ? error.message : 'Bot 复制失败');
         throw error;
       }
     },
-    [authorization.beginAuthorization],
+    [],
   );
+
+  const cancelAuthorization = useCallback(() => {
+    pendingAvatarRef.current = undefined;
+    setAuthorization(undefined);
+    setPendingIssuedBotId(undefined);
+    setCopying(false);
+  }, []);
 
   return {
     copying,
-    authorization: authorization.authorization,
-    cancelAuthorization: authorization.cancelAuthorization,
+    // detail-wait 在跑(pendingIssuedBotId 已设)。区别于 copying(copyBot API in-flight 也真):
+    // 复制浮窗只在 awaitingDetail 时弹「正在等待新 Bot 创建」罩,提交后、auth 出来前那段不弹。
+    awaitingDetail: Boolean(pendingIssuedBotId),
+    authorization,
+    cancelAuthorization,
     submitCopy,
   };
 }

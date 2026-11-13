@@ -1,17 +1,17 @@
-// 通知中心完整视图：card 视图 tab + 分类 Segmented + 全部已读 + 列表（骨架/空态/错误）+ 分页 + 审批/通知详情 Drawer。
+// 通知中心：130px 纵向视图导航 + 分类筛选 + 无边框消息列表，保留审批和已读业务链路。
 // 视觉对齐 admin 视觉交互指南 §7.2/§7.4/§8。切视图/分类回第 1 页；详情用 typeLabel/statusLabel 本地化。
-import { Button, Card, Empty, Pagination, Skeleton } from '@/components/ui';
+import notificationEmpty from '@/assets/notification-center/empty.png';
+import { Button, Card, Pagination, Skeleton } from '@/components/ui';
 import type { WorkOrder, WorkOrderCategory, WorkOrderView } from '@/domain/admin/models';
 import { isSameWorkOrderItem, markNotificationReadInList } from '@/domain/admin/workOrderRead';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWorkOrders } from '@/hooks/useWorkOrders';
 import { useWorkOrderStore } from '@/stores/workOrderStore';
 import { extractFriendlyErrorMessage } from '@/utils/requestErrorHandler';
-import { CheckCircle } from 'lucide-react';
-import { useState } from 'react';
 import { useNavigate } from '@umijs/max';
+import { useState } from 'react';
 import { toast } from 'sonner';
-import { CardTabs, MiniSegmented } from '../Tabs';
+import { MiniSegmented } from '../Tabs';
 import { WorkOrderCard } from '../WorkOrderCard';
 import { WorkOrderDetailDrawer } from './WorkOrderDetailDrawer';
 
@@ -22,15 +22,14 @@ const VIEWS: { value: WorkOrderView; label: string }[] = [
 ];
 
 const CATEGORIES: { value: WorkOrderCategory; label: string }[] = [
-  { value: 'ALL', label: '全部' },
   { value: 'APPROVAL', label: '审批类' },
   { value: 'NOTIFICATION', label: '通知类' },
 ];
 
 const EMPTY_TEXT: Record<WorkOrderView, string> = {
-  pending_mine: '暂无待处理工单',
+  pending_mine: '暂无通知',
   initiated_mine: '暂无申请',
-  processed: '暂无已处理记录',
+  processed: '暂无通知',
 };
 
 export function WorkOrderTabs() {
@@ -64,6 +63,7 @@ export function WorkOrderTabs() {
     setMarkingAll(true);
     try {
       await markAllRead();
+      await fetchList();
     } finally {
       setMarkingAll(false);
     }
@@ -130,38 +130,29 @@ export function WorkOrderTabs() {
 
   const totalCount = total ?? 0;
 
-  const viewOptions = VIEWS.map((vw) => ({
-    value: vw.value,
-    label:
-      vw.value === 'pending_mine' && unreadCount > 0 ? (
-        <span className="inline-flex items-center gap-1.5">
-          {vw.label}
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-normal text-primary-foreground">
-            {unreadCount}
-          </span>
-        </span>
-      ) : (
-        vw.label
-      ),
-  }));
-
   return (
-    <div className="mx-auto max-w-[1200px]">
-      {/* card tab 头 */}
-      <CardTabs<WorkOrderView>
-        value={view}
-        options={viewOptions}
-        onChange={(v) => {
-          setView(v);
-          setPageNo(1);
-        }}
-        className="mb-3"
-      />
+    <div className="flex min-h-full flex-col gap-5 sm:flex-row">
+      <nav aria-label="通知视图" className="flex shrink-0 gap-0.5 sm:w-[130px] sm:flex-col">
+        {VIEWS.map((option) => (
+          <Button
+            key={option.value}
+            variant="ghost"
+            aria-current={view === option.value ? 'page' : undefined}
+            className={`h-8 justify-start rounded-md px-3 text-[13px] font-normal ${
+              view === option.value ? 'bg-muted text-foreground' : 'text-muted-foreground'
+            }`}
+            onClick={() => {
+              setView(option.value);
+              setPageNo(1);
+            }}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </nav>
 
-      {/* 内容面板：独立卡片，与上方 card tab 留 12px 间距，左右边缘与 tab 行对齐 */}
-      <Card className="overflow-hidden bg-card shadow-sm">
-        {/* 分类筛选 + 全部已读 */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4">
+      <section className="min-w-0 flex-1" aria-label="通知列表">
+        <div className="mb-3 flex min-h-8 flex-wrap items-center justify-between gap-3">
           <MiniSegmented<WorkOrderCategory>
             value={category}
             onChange={(c) => {
@@ -169,32 +160,35 @@ export function WorkOrderTabs() {
               setPageNo(1);
             }}
             options={CATEGORIES}
+            className="h-8 w-[132px] shrink-0 [&>button]:flex-1"
           />
-          {view === 'pending_mine' ? (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground">共 {unreadCount} 条未读通知</span>
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<CheckCircle size={14} />}
-                disabled={unreadCount === 0 || markingAll}
-                loading={markingAll}
-                onClick={() => void handleMarkAllRead()}
-              >
-                全部标记为已读
-              </Button>
-            </div>
-          ) : view === 'initiated_mine' ? (
-            <span className="text-xs text-muted-foreground">共 {totalCount} 条申请记录</span>
-          ) : view === 'processed' ? (
-            <span className="text-xs text-muted-foreground">共 {totalCount} 条已处理记录</span>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {view === 'pending_mine' ? (
+              <>
+                <span>
+                  当前筛选共 {totalCount} 条消息，待处理 {unreadCount} 条
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto p-0 text-xs font-normal hover:bg-transparent"
+                  disabled={unreadCount === 0 || markingAll}
+                  loading={markingAll}
+                  onClick={() => void handleMarkAllRead()}
+                >
+                  标记为全部已读
+                </Button>
+              </>
+            ) : (
+              <span>共 {totalCount} 条记录</span>
+            )}
+          </div>
         </div>
 
         {/* 列表 */}
         {/* 骨架行结构对齐真实 WorkOrderCard(无 Skeleton.ListItem 自带 p-3,loading↔loaded 不左跳) */}
         {loading ? (
-          <div className="px-5 pb-2">
+          <div>
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 border-b border-divider py-4 last:border-b-0">
                 <div className="flex-1 space-y-2">
@@ -213,29 +207,15 @@ export function WorkOrderTabs() {
             </Button>
           </Card>
         ) : items.length === 0 ? (
-          <div className="p-5 pt-0">
-            <Empty
-              title={EMPTY_TEXT[view]}
-              description="当前视图没有工单记录"
-              action={
-                category !== 'ALL' ? (
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={() => {
-                      setCategory('ALL');
-                      setPageNo(1);
-                    }}
-                  >
-                    清除筛选
-                  </Button>
-                ) : undefined
-              }
-            />
+          <div className="flex min-h-[440px] items-center justify-center sm:min-h-[calc(100dvh-180px)]" role="status">
+            <div className="flex flex-col items-center gap-6">
+              <img src={notificationEmpty} width={150} height={107} alt="" aria-hidden="true" />
+              <p className="m-0 text-sm text-muted-foreground">{EMPTY_TEXT[view]}</p>
+            </div>
           </div>
         ) : (
           <>
-            <div className="px-5 pb-2">
+            <div>
               {items.map((wo) => (
                 <WorkOrderCard
                   key={`${wo.itemId}-${wo.workOrderId}`}
@@ -247,7 +227,7 @@ export function WorkOrderTabs() {
               ))}
             </div>
             {/* 分页：接入统一 Pagination 组件（计数 + 上/下一页图标按钮，右对齐） */}
-            <div className="flex items-center justify-end border-t border-divider px-5 py-4">
+            <div className="flex items-center justify-end py-4">
               <Pagination
                 current={pageNo}
                 pageSize={pageSize}
@@ -258,7 +238,7 @@ export function WorkOrderTabs() {
             </div>
           </>
         )}
-      </Card>
+      </section>
 
       <WorkOrderDetailDrawer
         detail={detail}

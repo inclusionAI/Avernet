@@ -842,11 +842,17 @@ async fn p8_private_target_rejects_new_friend_request() {
 }
 
 // ============================================================================
-// P-9: private caller → public target → auto-accept friend request
+// P-9: private caller → public target → pending friend request until accepted
 // (AC-5a: caller=private no longer blocked from sending friend requests)
+//
+// Auto-accept was retired by the edge-permission connect convergence
+// (dima 2026110600120400669). A request against a public target no longer
+// auto-accepts: it goes "pending" under the target's friend_check_in_strategy
+// (default APPROVAL) and the target owner is notified, matching the
+// /collaboration/friend-connections semantic.
 // ============================================================================
 #[tokio::test]
-async fn p9_private_caller_friend_request_public_target_auto_accepts() {
+async fn p9_private_caller_friend_request_public_target_pending_until_accepted() {
     let bots_dir = create_temp_bots_dir();
     let (addr, _server_handle) = start_test_server(&bots_dir.path().to_path_buf()).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -869,22 +875,37 @@ async fn p9_private_caller_friend_request_public_target_auto_accepts() {
         .await
         .expect("set B public");
 
-    // A (private) sends friend request to B (public) → should auto-accept
+    // A (private) sends friend request to B (public) → allowed to send, stays pending
     let resp = client_a
         .send_friend_request(None, &bot_b.bot_id)
         .await
         .expect("P-9: private caller should be allowed to send friend request");
     assert!(resp.success, "P-9: friend request should succeed");
 
-    // Auto-accept: data may be absent when auto-accepted (empty request.id)
-    let resp_status = resp.data
-        .as_ref()
-        .and_then(|d| d["status"].as_str())
-        .unwrap_or("accepted");
+    // No auto-accept: public targets follow friend_check_in_strategy (default APPROVAL)
+    let resp_status = resp.data.as_ref().unwrap()["status"]
+        .as_str()
+        .unwrap_or("");
     assert_eq!(
-        resp_status, "accepted",
-        "P-9: public target should auto-accept"
+        resp_status, "pending",
+        "P-9: public target should yield pending, not auto-accept"
     );
+
+    let req_id = resp.data.as_ref().unwrap()["id"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        !req_id.is_empty(),
+        "P-9: pending request should carry a non-empty id"
+    );
+    let req_id = req_id.to_string();
+
+    // Friendship only exists after the target accepts
+    let accept = client_b
+        .accept_friend_request(&req_id)
+        .await
+        .expect("P-9: B should accept friend request");
+    assert!(accept.success, "P-9: accept should succeed");
 
     // Verify bidirectional friendship: A→B
     let friends_a = client_a
