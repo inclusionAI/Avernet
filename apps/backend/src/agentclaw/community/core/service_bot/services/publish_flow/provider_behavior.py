@@ -117,10 +117,10 @@ class ProviderBehavior(ABC):
     @abstractmethod
     def upgrade_recovers_not_live_bot(self) -> bool:
         """Whether an upgrade can revive a candidate BaaS bot that is no longer
-        live (``FAILED`` / ``STOPPED``). ``True`` when the provider's UPDATE
-        destroys and recreates the device in place; ``False`` when it cannot
-        rebuild a gone container, so the online deploy must retire the candidate
-        and release a fresh one instead."""
+        live after ``STOPPED``. ``True`` when the provider's UPDATE destroys
+        and recreates the device in place; ``False`` when it cannot rebuild a
+        gone container. ``FAILED`` retries always attempt UPDATE because failure
+        alone does not establish that the provider instance is gone."""
         ...
 
     @property
@@ -206,8 +206,8 @@ class TeclawProviderBehavior(ProviderBehavior):
     of them), so a build snapshots ``/workspace`` + identity files into OSS and
     embeds the refs;
     a teclaw upgrade has no startup callback, so the MCP outbound rule is refreshed
-    explicitly; its UPDATE cannot rebuild a gone container, so a not-live bot is
-    retired rather than upgraded; teclaw service bots do not support scale; and the
+    explicitly; its UPDATE cannot rebuild a stopped container, so STOPPED bots
+    are retired while FAILED retries reuse UPDATE; teclaw does not support scale; and the
     verify bot is kept (not destroyed) when online succeeds.
     """
 
@@ -322,9 +322,8 @@ class TeclawProviderBehavior(ProviderBehavior):
 
     @property
     def upgrade_recovers_not_live_bot(self) -> bool:
-        # A teclaw UPDATE cannot rebuild a gone container — it would just fail the
-        # publish and strand the record, so a not-live candidate is retired and
-        # replaced by a fresh first release.
+        # A teclaw UPDATE cannot rebuild a stopped container. This capability
+        # controls STOPPED recovery; FAILED retries still reuse UPDATE.
         return False
 
     @property
