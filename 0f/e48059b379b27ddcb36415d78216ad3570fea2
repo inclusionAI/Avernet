@@ -1,0 +1,94 @@
+AGENTS.md
+  s_47ed8e91e4b8af::t_b22926c5b8fad5 26
+apps/backend/docs/adr/README.md
+  s_47ed8e91e4b8af::t_c0607f9df2ad65 6-13
+apps/bcs-internal/docs/adr/README.md
+  s_47ed8e91e4b8af::t_c0607f9df2ad65 6-11
+autocoding/skills/teamclaw-clarify/references/applications/baas/index.md
+  s_47ed8e91e4b8af::t_3131002ab7d08b 1,3,5-8,10-21
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  s_47ed8e91e4b8af::t_3131002ab7d08b 53-55
+autocoding/skills/teamclaw-clarify/references/applications/bcsfuse/index.md
+  s_47ed8e91e4b8af::t_3131002ab7d08b 1,3,5-7,9-17
+apps/baas/docs/arch/README.md
+  s_47ed8e91e4b8af::t_c0607f9df2ad65 7-8
+  s_98f154f911d970::t_dc863a30d8e359 14-15
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_c0607f9df2ad65 3
+apps/bcsfuse/docs/adr/README.md
+  s_47ed8e91e4b8af::t_c0607f9df2ad65 6-11
+autocoding/skills/teamclaw-clarify/references/applications/backend/index.md
+  s_47ed8e91e4b8af::t_3131002ab7d08b 1,3,5-9,11-22
+autocoding/skills/teamclaw-clarify/references/applications/bcs/index.md
+  s_47ed8e91e4b8af::t_3131002ab7d08b 1,3,5-7,9-20
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_4677e081283f06 7
+apps/baas/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_8ceea062123c5c 1-40
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_c5f3aaa6817482 18-19
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_15b3d76dbb775f 14-15
+apps/baas/specs/README.md
+  s_47ed8e91e4b8af::t_f759d28e9185ea 8-13
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_b58811fc5af02c 7
+apps/backend/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_44c437dc33f60b 1-48
+apps/backend/docs/arch/README.md
+  s_47ed8e91e4b8af::t_7627e066cb6a16 12-13
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_8fbea799d213a2 16-17
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_e95e46c98c74f2 14-15
+apps/backend/specs/README.md
+  s_47ed8e91e4b8af::t_0fa2ccbb693595 12-68
+apps/bcs-internal/README.md
+  s_47ed8e91e4b8af::t_0d5f8283936b29 7
+apps/bcs-internal/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_17770568128ebb 1-52
+apps/bcs-internal/docs/arch/README.md
+  s_47ed8e91e4b8af::t_e579408e919e4d 12-13
+apps/bcs-internal/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_b65bcfbb215c62 18-19
+apps/bcs-internal/docs/flows/README.md
+  s_47ed8e91e4b8af::t_eb09dac21f81a6 14-15
+apps/bcs-internal/specs/README.md
+  s_47ed8e91e4b8af::t_50a0ca8eb60039 8-13
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_6eec1a9d654d49 7
+apps/bcsfuse/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_70225c8635ba48 1-115
+apps/bcsfuse/docs/arch/README.md
+  s_47ed8e91e4b8af::t_7f243ddac136af 12-13
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_4c1bc5c6b35288 18-19
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_ba30cdee39dfb4 15-16
+apps/bcsfuse/specs/README.md
+  s_47ed8e91e4b8af::t_d9422440494265 8-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fe48059b379b27ddcb36415d78216ad3570fea2",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    },
+    "s_98f154f911d970": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c11c-96ee-7040-8d8a-10da6bf18493",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillDetail.ts
+  s_edf46fcbab38c5::t_a99dcf568b33e5 33
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillEditor.ts
+  s_edf46fcbab38c5::t_aa96446c2df51e 114,117
+  s_edf46fcbab38c5::t_a99dcf568b33e5 41
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillFileEditor.tsx
+  s_edf46fcbab38c5::t_aa96446c2df51e 128-129
+apps/frontend-nextgen/test/internal/capability-workshop/useSkillCreate.test.ts
+  s_edf46fcbab38c5::t_5264929db74541 164-175
+  s_edf46fcbab38c5::t_aa96446c2df51e 195-196
+  s_edf46fcbab38c5::t_5675c5551491ca 176-194,197-198
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillCreate.ts
+  s_edf46fcbab38c5::t_a99dcf568b33e5 60
+  s_edf46fcbab38c5::t_b14329ba3fed55 73,86,102,147
+  s_edf46fcbab38c5::t_f09b11a0b10878 14,72,87,95-101,103-109,141-146,148-149
+apps/frontend-nextgen/src/internal/capability-workshop/types.ts
+  s_edf46fcbab38c5::t_aa96446c2df51e 150
+apps/frontend-nextgen/src/internal/capability-workshop/services/skillService.ts
+  s_edf46fcbab38c5::t_aa96446c2df51e 142,145-151,154-161,170,173-179,182
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillDetailDrawer.tsx
+  s_edf46fcbab38c5::t_a99dcf568b33e5 35
+  s_edf46fcbab38c5::t_aa96446c2df51e 320
+apps/frontend-nextgen/test/internal/capability-workshop/skillService.test.ts
+  s_edf46fcbab38c5::t_bea277eecbfe7b 443-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f2d181dd8e230e937492f54ea7d1f5b1381d45c",
+  "prompts": {},
+  "sessions": {
+    "s_edf46fcbab38c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c940-a59d-7633-a002-5161c102349e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

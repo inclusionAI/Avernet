@@ -1,0 +1,23 @@
+apps/evolverun/clawweb/internal/adapters/server/__tests__/bot-runtime-target.test.ts
+  s_9fc77bfda5cef2::t_769fda210fb437 171,173-175,177-178
+apps/evolverun/clawweb/internal/adapters/server/repositories/bot-directory.ts
+  s_9fc77bfda5cef2::t_769fda210fb437 214-215
+apps/evolverun/docs/session-recovery-integration.md
+  s_9fc77bfda5cef2::t_769fda210fb437 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7206e217cfa09ff618afc83f2aa489672edf6924",
+  "prompts": {},
+  "sessions": {
+    "s_9fc77bfda5cef2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c36b-16c9-7283-b0df-1cd3ad3e0e35",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

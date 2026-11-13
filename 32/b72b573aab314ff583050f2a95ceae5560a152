@@ -1,0 +1,30 @@
+src/ecb/docs/task_benchmark/TASK_MONITOR.md
+  s_10bf1e6587c582::t_389ac239f55b70 51,95-96
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_source.py
+  s_10bf1e6587c582::t_389ac239f55b70 78-80
+  s_10bf1e6587c582::t_c6b0d1494743d3 146-158
+src/ecb/ecb/configs/application.yaml
+  s_10bf1e6587c582::t_389ac239f55b70 142
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/source.py
+  s_10bf1e6587c582::t_389ac239f55b70 27
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/config.py
+  s_10bf1e6587c582::t_389ac239f55b70 27,82
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_config.py
+  s_10bf1e6587c582::t_389ac239f55b70 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32b72b573aab314ff583050f2a95ceae5560a152",
+  "prompts": {},
+  "sessions": {
+    "s_10bf1e6587c582": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cae1-4fcb-78d0-8da3-b8728836a6c9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
