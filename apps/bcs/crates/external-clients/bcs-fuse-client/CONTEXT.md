@@ -46,3 +46,14 @@ responses may use either the OSS `WORKER_NOT_FOUND` code or the internal
 
 - `cargo test --package bcs-fuse-client --manifest-path Cargo.toml`
 - `cargo check --package bcs-fuse-client --all-targets --manifest-path Cargo.toml`
+
+## Card write observations
+
+PUT/DELETE log `fuse.card.write_started`, `fuse.card.write_succeeded` and
+`fuse.card.write_failed` under `bcs_observation`. Success is logged only after
+HTTP status, JSON decoding and saved/deleted acknowledgment checks. Summaries
+allowlist resource ID, type, bounded name, skill count, visibility labels, status,
+duration and Fuse card_version. They exclude Card details, credentials, source
+URLs, raw errors and remote response bodies. Provider/ref and originating request
+IDs may be unavailable in detached work; no lookup or propagation is added to
+fill them. Existing operation-log and optional tracing contracts are unchanged.

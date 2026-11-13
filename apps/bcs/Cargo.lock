@@ -1593,6 +1593,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2435,6 +2436,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-a2a-bot",
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",
@@ -2449,6 +2451,8 @@ dependencies = [
  "bcs-domain",
  "bcs-edge-permission",
  "bcs-edge-permission-store",
+ "bcs-fuse-client",
+ "bcs-fusion",
  "bcs-human-notify-api",
  "bcs-jwt",
  "bcs-llm-api",

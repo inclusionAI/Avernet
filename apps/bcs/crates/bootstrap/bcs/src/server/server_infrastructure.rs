@@ -20,6 +20,7 @@ impl BcsServer {
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
+        let card_changes = super::catalog_wiring::select_card_changes(&config, extensions.card_changes.clone())?;
         let GatewayPrincipalAuthResources {
             group_session_secret_access,
             invite_token_secret,
@@ -75,9 +76,6 @@ impl BcsServer {
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
-        let card_changes = (config.bcsfuse.enabled
-            && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2)
-            .then(|| Arc::new(bcs_fusion::CardChangeQueue::default()));
         let bot_core_arc=super::a2a_wiring::build_bot_core(
             bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone(),
             card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>));
@@ -166,6 +164,7 @@ impl BcsServer {
         let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
             provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+            card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>),
         )?;
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),

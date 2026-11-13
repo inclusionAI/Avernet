@@ -234,3 +234,13 @@ deriving Open and clearing active agent scope while preserving other extension
 fields. Explicit visibility=public together with Open also clears scope;
 explicit non-Open strategies preserve it, and supplied friend_ext still wins. Core must not synthesize unconditional
 visibility from a pre-read. Catalog notification follows successful writes as before.
+
+## AgentCard catalog notifications
+
+A2aProviderRegistrationCore and A2aBotCore accept an optional CatalogChangePort.
+Registration, replace and successful Card CAS writes notify exactly once after
+commit. Failed writes do not notify; a subsequent response read failure does not
+undo a committed notification. The call site emits an allowlisted
+`agent_card.catalog_change_requested` observation (Bot/Provider/ref/revision and
+existing request ID). The port and queue still carry only resource identities;
+no tracing or transport context is required by Core.

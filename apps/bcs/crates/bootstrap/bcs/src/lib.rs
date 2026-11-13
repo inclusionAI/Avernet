@@ -115,7 +115,7 @@ pub use bcs_service_api::{
 
 // Re-export implementations
 pub use bcs_bot::BotCore;
-pub use bcs_fusion::LocalFusionService;
+pub use bcs_fusion::{LocalFusionService, CardChangeQueue};
 pub use bcs_group::GroupStore;
 pub use bcs_group_store::GroupBuilder;
 pub use bcs_routing::MessageRouter;
@@ -207,7 +207,14 @@ pub async fn run_with_config(mut config: BcsConfig) -> Result<()> {
     run_with_resolved_config(config).await
 }
 
-pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
+pub async fn run_with_resolved_config(config: BcsConfig) -> Result<()> {
+    run_with_resolved_config_and_extensions(config, BcsServerExtensions::default()).await
+}
+
+/// Embedding hosts may share catalog notifications with independently assembled adapters.
+pub async fn run_with_resolved_config_and_extensions(
+    mut config: BcsConfig, extensions: BcsServerExtensions,
+) -> Result<()> {
     config
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;
@@ -253,7 +260,8 @@ pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
         None
     };
     let group_logger = config.group_logger.take();
-    let server = BcsServer::new_with_storage(config).await?;
+    let infrastructure = InfrastructurePlugins::from_config(&config).await?;
+    let server = BcsServer::new_with_infrastructure(config, infrastructure, extensions).await?;
 
     if let Some(logger_cfg) = group_logger {
         if logger_cfg.enabled {

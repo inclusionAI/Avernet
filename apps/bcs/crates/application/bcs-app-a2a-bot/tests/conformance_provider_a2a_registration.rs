@@ -49,6 +49,10 @@ fn command() -> RegisterProviderBotCommand {
         avatar:AvatarChange::Keep}
 }
 async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
+    fixture_with_catalog(None).await
+}
+
+async fn fixture_with_catalog(port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
     let mut chain=registration_chain().await;
 
     chain.db.execute(DbStatement::with_params("UPDATE bcs_providers SET config=? WHERE provider_id='provider-a'",
@@ -62,8 +66,8 @@ async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aPr
     chain.registry_core=Arc::new(bcs_bot::BotCore::with_repo(chain.bot_repo.clone())
         .with_bot_provider_repo(chain.provider_repo.clone()).with_a2a_cards(cards.clone()));
     let providers=Arc::new(ProviderCore::new(chain.provider_repo.clone(),credentials,chain.provider_repo.clone(),chain.registry_core.clone()).with_a2a_anonymous(true));
-    let core=Arc::new(A2aBotCore::new(cards,chain.provider_repo.clone()));
-    let registration=Arc::new(A2aProviderRegistrationCore::new(providers.clone(),chain.provider_repo.clone()));
+    let core=Arc::new(A2aBotCore::new(cards,chain.provider_repo.clone()).with_catalog_changes(port.clone()));
+    let registration=Arc::new(A2aProviderRegistrationCore::new(providers.clone(),chain.provider_repo.clone()).with_catalog_changes(port));
     let fetcher=Arc::new(Fetcher {calls:AtomicUsize::new(0),fail:AtomicBool::new(false),providers:providers.clone(),revoke:AtomicBool::new(false),
         parallel:AtomicBool::new(false),barrier:tokio::sync::Barrier::new(2)});
     let service=A2aBotManagement::new(providers,core,fetcher.clone()).with_registration(registration.clone(),chain.registry_core.clone());
@@ -387,3 +391,6 @@ async fn provider_a2a_manager_failure_rolls_back_bot_card_binding_owner_and_huma
     assert!(service.register_provider_bot(c,"https://example.org/card.json".into(),1000).await.is_err());
     assert_empty(&chain).await;
 }
+
+#[path = "support/catalog_notifications.rs"]
+mod catalog_notifications;

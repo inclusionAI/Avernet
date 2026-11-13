@@ -183,10 +183,19 @@ impl std::fmt::Debug for BcsServerState {
 /// of the public plugin contracts without adding private SDKs to this crate.
 #[derive(Clone, Default)]
 pub struct BcsServerExtensions {
+    /// Shared with separately assembled adapters; public bootstrap owns its sole worker.
+    pub card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
     pub auth_plugin_factories: Vec<AuthPluginFactory>,
     pub llm_provider: Option<Arc<dyn LlmChatCompletionPort>>,
     pub user_directory_plugin: Option<Arc<dyn UserDirectoryPlugin>>,
     pub leader_election: Option<LeaderElectionRegistration>,
+}
+
+impl BcsServerExtensions {
+    /// Prepare one queue for both the public runtime and independently assembled adapters.
+    pub fn with_shared_card_changes(config: &BcsConfig) -> Self {
+        Self { card_changes: super::catalog_wiring::new_card_changes(config), ..Self::default() }
+    }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -859,4 +868,22 @@ impl BcsServerState {
 pub struct BcsServer {
     pub(super) config: BcsConfig,
     pub(super) state: Arc<BcsServerState>,
+}
+
+#[cfg(test)]
+mod card_change_extension_tests {
+    use super::*;
+
+    #[test]
+    fn shared_card_changes_extension_follows_v2_wiring() {
+        let mut config = crate::BcsConfig::default();
+        config.bcsfuse.enabled = false;
+        config.bcsfuse.api_version = bcs_fuse_client::BcsFuseApiVersion::V2;
+        let disabled = BcsServerExtensions::with_shared_card_changes(&config);
+        assert!(disabled.card_changes.is_none());
+
+        config.bcsfuse.enabled = true;
+        let enabled = BcsServerExtensions::with_shared_card_changes(&config);
+        assert!(enabled.card_changes.is_some());
+    }
 }
