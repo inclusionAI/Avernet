@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_64261436edbb0b::t_9c7cb1900dddeb 192-195,205-211
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_64261436edbb0b::t_1ba02ca151563f 267-272,278-285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f91d98cd560350c7f9255e4add3e63986cdafa57",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

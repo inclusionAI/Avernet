@@ -1,0 +1,41 @@
+apps/backend/src/agentclaw/community/adapters/http/system_config/router.py
+  s_2b26d456bc46f8::t_f6c4ee691c7124 106,158,194
+apps/backend/src/agentclaw/community/adapters/http/task/manifest_routes.py
+  s_2b26d456bc46f8::t_1713fb5a1b17c6 6,56
+apps/backend/src/agentclaw/community/api/system_config_service.py
+  s_2b26d456bc46f8::t_f6aacf6db27496 12
+apps/backend/src/agentclaw/community/core/task/task_panel/README.md
+  s_2b26d456bc46f8::t_6bf46dd9999e0c 4,15-16
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  s_2b26d456bc46f8::t_21e5fecc9805b6 78-79
+apps/backend/src/agentclaw/community/di/modules/system_config_module.py
+  s_2b26d456bc46f8::t_17355ad0652c11 26
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_2b26d456bc46f8::t_7dc1bbe34c4f5a 26,28
+apps/backend/tests/community/api/system_config/test_vuln_fix_router.py
+  s_2b26d456bc46f8::t_ce2f974e0f5ffe 28
+apps/backend/tests/community/core/task/task_panel/test_http.py
+  s_2b26d456bc46f8::t_7c9243bc333d30 1,13,40,78,81-83
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  s_2b26d456bc46f8::t_9060308adbb9bf 10
+apps/backend/tests/community/endpoints/test_task_panel_manifest.py
+  s_2b26d456bc46f8::t_6fe40c3022c579 42
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  s_2b26d456bc46f8::t_45ce6bbe068ec0 128,131,146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "261dfeeeba7d38df9aa1c7ccd31f075883e114e7",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
