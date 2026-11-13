@@ -43,4 +43,3 @@ class BcnAdapter:
         if not isinstance(data, dict):
             raise ValueError("Invalid Session response")
         return data
-

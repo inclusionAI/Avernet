@@ -181,4 +181,3 @@ class V1Tests(unittest.TestCase):
             with patch.object(team, 'prepare', return_value=(Path(d), {})), patch.object(team.processes, 'start'), patch('adapters.local.agents.wait_ready'), patch('adapters.local.agents.BcnAdapter', return_value=client):
                 team.command('start')
             self.assertEqual([c.args[0] for c in client.call.call_args_list], ['onboard', 'visibility', 'onboard', 'visibility'])
-

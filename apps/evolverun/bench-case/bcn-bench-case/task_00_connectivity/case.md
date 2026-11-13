@@ -91,4 +91,3 @@ def grade(transcript: list, workspace_path: str) -> dict:
 验证 Agent 启动/注册、建群、目标投递、Manager-worker 往返和正式完成。600 秒只是最长等待时间，完成后立即收卷。
 
 参考标准只保留在评测端；仅 Prompt 投递给被测群。运行时根据实际身份映射检查成员，不依赖显示名称中的临时后缀。
-
