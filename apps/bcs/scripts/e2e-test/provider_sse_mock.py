@@ -22,29 +22,14 @@ def write_reply(handler: BaseHTTPRequestHandler, run_id: str, reply: dict[str, s
         handler.wfile.write(("event: chat\ndata: " + json.dumps(event) + "\n\n").encode())
         handler.wfile.flush()
 
-    try:
-        if mode in ("eof", "read_error"):
-            return
-        if mode in ("oversized_frame", "oversized_buffer"):
-            # Bound memory to a small chunk. The consumer must reject a frame
-            # above its 8 MiB limit, with or without a terminating separator.
-            chunk = b"x" * 65536
-            for _ in range(128):
-                handler.wfile.write(chunk)
-            handler.wfile.write(b"x\n\n" if mode == "oversized_frame" else b"x")
-            handler.wfile.flush()
-            return
-        if mode == "lag_recovery":
-            # Timestamps trigger real lag edges without a long wall-clock wait.
-            # Two pairs also verify only the first pair is business-key tagged.
-            for seq in range(1, 5):
-                frame(seq, "delta", lag_ms=6000 if seq % 2 else 0)
-            frame(5, "final")
-            return
-        frame(1, "delta")
-        frame(2, "final")
-    except (BrokenPipeError, ConnectionResetError):
-        # Oversized/error streams can be rejected before the mock finishes.
-        # The live story checks BCS's terminal result rather than mock writes.
-        if mode not in ("oversized_frame", "oversized_buffer"):
-            raise
+    if mode in ("eof", "read_error"):
+        return
+    if mode == "lag_recovery":
+        # Timestamps trigger real lag edges without a long wall-clock wait.
+        # Two pairs also verify only the first pair is business-key tagged.
+        for seq in range(1, 5):
+            frame(seq, "delta", lag_ms=6000 if seq % 2 else 0)
+        frame(5, "final")
+        return
+    frame(1, "delta")
+    frame(2, "final")

@@ -34,6 +34,12 @@ impl Peer {
         params: T,
         metadata: &tonic_e2e::metadata::MetadataMap,
     ) -> Result<reqwest_e2e::Response, Status> {
+        let params = serde_json::to_value(params)
+            .map_err(|_| Status::internal("invalid fixture request"))?;
+        eprintln!(
+            "grpc_peer rpc={method} task_id={} phase=request",
+            params.get("id").and_then(Value::as_str).unwrap_or("-")
+        );
         let mut request = self.http.post(&self.upstream).header("a2a-version", "1.0");
         if let Some(extensions) = metadata.get("a2a-extensions") {
             request = request.header(
@@ -66,6 +72,15 @@ impl Peer {
             .json()
             .await
             .map_err(|_| Status::internal("invalid peer JSON"))?;
+        eprintln!(
+            "grpc_peer rpc={method} phase=response task_id={} state={}",
+            body.pointer("/result/id")
+                .and_then(Value::as_str)
+                .unwrap_or("-"),
+            body.pointer("/result/status/state")
+                .and_then(Value::as_str)
+                .unwrap_or("-")
+        );
         decode(body)
     }
 
@@ -78,8 +93,8 @@ impl Peer {
         let response = self.call(method, params, metadata).await?;
         let chunks = response.bytes_stream().boxed();
         Ok(futures::stream::try_unfold(
-            (chunks, Vec::<u8>::new()),
-            |(mut chunks, mut buffer)| async move {
+            (chunks, Vec::<u8>::new(), method.to_owned()),
+            |(mut chunks, mut buffer, method)| async move {
                 loop {
                     if let Some(end) = buffer.windows(2).position(|pair| pair == b"\n\n") {
                         let frame: Vec<_> = buffer.drain(..end + 2).collect();
@@ -96,9 +111,19 @@ impl Peer {
                         let body = serde_json::from_str(&data)
                             .map_err(|_| Status::internal("invalid peer event"))?;
                         let event: a2a::StreamResponse = decode(body)?;
+                        match &event {
+                            a2a::StreamResponse::Task(task) => eprintln!(
+                                "grpc_peer rpc={method} event=task task_id={} state={:?}", task.id, task.status.state),
+                            a2a::StreamResponse::ArtifactUpdate(update) => eprintln!(
+                                "grpc_peer rpc={method} event=artifact task_id={} append={} last_chunk={}",
+                                update.task_id, update.append.unwrap_or(false), update.last_chunk.unwrap_or(false)),
+                            a2a::StreamResponse::StatusUpdate(update) => eprintln!(
+                                "grpc_peer rpc={method} event=status task_id={} state={:?}", update.task_id, update.status.state),
+                            a2a::StreamResponse::Message(_) => eprintln!("grpc_peer rpc={method} event=message"),
+                        }
                         return Ok(Some((
                             pbconv::to_proto_stream_response(&event),
-                            (chunks, buffer),
+                            (chunks, buffer, method),
                         )));
                     }
                     match chunks.next().await {

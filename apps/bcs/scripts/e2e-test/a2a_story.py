@@ -262,12 +262,13 @@ def visible_text(value):
 
 
 class A2aStory(Story):
-    def __init__(self, base, owner, peer, a2a_prefix="/a2a"):
+    def __init__(self, base, owner, peer, a2a_prefix="/a2a", *, cancel_via_workbench=False):
         super().__init__(base, owner)
         self.a2a_prefix = a2a_prefix
         self.peer = peer
         self.original_policy = None
         self.policy_revision = None
+        self.cancel_via_workbench = cancel_via_workbench
 
     def request(self, method, path, body=None, **kwargs):
         value = super().request(method, path, body, **kwargs)
@@ -368,8 +369,11 @@ class A2aStory(Story):
         self.policy_revision = applied["version"]
         group = self.group(bot_id, [bot_id, "human_" + self.owner])
         session = self.request("POST", "/groups/" + group + "/sessions", {}, status=201)["session_id"]
+        # The gRPC journey exercises explicit public cancellation and all five
+        # RPCs. HTTP journeys retain the invalid-replacement cleanup regression.
+        second_cancel = "wait" if self.cancel_via_workbench else "replacement"
         for sequence, mode in enumerate(["stream", "stream", "message", "recover", "tools", "wait",
-                                         "stream", "replacement", "stream"], start=1):
+                                         "stream", second_cancel, "stream"], start=1):
             before = self.history(session)
             before_ids = {message["id"] for message in before}
             with self.peer.lock:
@@ -405,7 +409,7 @@ class A2aStory(Story):
                         break
                     time.sleep(0.05)
                 else:
-                    raise AssertionError("Exact remote Task was not canceled: " + mode)
+                    raise AssertionError(f"Exact remote Task was not canceled: mode={mode}, task_id={task_id}")
                 # The next real chat.send verifies that confirmed cleanup frees the queue slot.
                 continue
             expected = "A2A-ANSWER-" + str(sequence)

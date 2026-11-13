@@ -57,15 +57,19 @@ polling and cancellation assertions. BCS uses its normal gRPC client; neither
 the fixture nor the story calls that client or domain services directly.
 The story requires all five RPC methods to reach the peer, which also validates
 the deployment routing metadata. Both peer and BCS stop before aggregation.
+The gRPC journey uses explicit Workbench cancellation for both active tasks,
+then completes polling and named runs. HTTP stories continue to exercise the
+invalid-replacement automatic cleanup case.
 
 ```sh
 cargo build -p bcs --features test-utils --bin bcs-caller-e2e --bin bcs-a2a-grpc-peer
 python3 scripts/e2e-test/custom_binding_story.py --binary target/debug/bcs-caller-e2e \
-  --grpc-peer-binary target/debug/bcs-a2a-grpc-peer
+  --grpc-peer-binary target/debug/bcs-a2a-grpc-peer \
+  --diagnostics-dir target/cov-e2e/grpc-binding
 ```
 
 This gRPC invocation is separate from the custom-binding invocation; both feed
 the existing E2E profile pool. It does not merge unit-test profiles or change
 coverage thresholds or exclusions. See the
 [SSE story guidance](../../../../../scripts/e2e-test/README.md) for the shared
-Singlebox producer's additional fault journeys.
+Singlebox producer's additional fault journeys and retained gRPC diagnostics.

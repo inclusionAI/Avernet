@@ -11,8 +11,10 @@ def exercise(story, socket_client, group_id, session_id, lease) -> None:
     session_path = "/sessions/" + quote(session_id, safe="") + "/messages"
     # Each fault is followed by a healthy turn, proving that transport failure
     # releases the queue lane instead of leaving the next request Unknown.
-    modes = ("terminal", "eof", "terminal", "read_error", "terminal",
-             "oversized_frame", "terminal", "oversized_buffer", "terminal", "lag_recovery")
+    # Keep the live instrumented reader's input small. The 8 MiB boundary is
+    # covered by sse_loop_tests.rs; rescanning it across real socket chunks is
+    # prohibitively expensive in an unoptimized coverage build.
+    modes = ("terminal", "eof", "terminal", "read_error", "terminal", "lag_recovery")
     for mode in modes:
         marker = "protected SSE " + mode + " " + uuid.uuid4().hex
         frame_id = "sse-" + uuid.uuid4().hex
@@ -58,8 +60,7 @@ def exercise(story, socket_client, group_id, session_id, lease) -> None:
         # supplies its existing BCS_LOG path. No log mutation or synthetic hits.
         log_path = os.environ.get("BCS_LOG")
         if log_path:
-            reason = mode if mode not in ("oversized_frame", "oversized_buffer", "lag_recovery") else (
-                "terminal" if mode == "lag_recovery" else "oversized_frame")
+            reason = "terminal" if mode == "lag_recovery" else mode
             def summaries():
                 return [line for line in Path(log_path).read_text().splitlines()
                         if "event_code=\"sse.closed\"" in line and "run_id=" + ride["id"] + " " in line]

@@ -105,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "expected provider_bot_ref and reply text"})
                 return
             mode = config.get("mode", "terminal")
-            if mode not in ("terminal", "eof", "read_error", "oversized_frame", "oversized_buffer", "lag_recovery"):
+            if mode not in ("terminal", "eof", "read_error", "lag_recovery"):
                 self.send_json(400, {"error": "unsupported SSE reply mode"})
                 return
             with STATE.lock:

@@ -31,4 +31,5 @@ LLVM_PROFILE_FILE="$cov_runtime/custom-binding-%m-%p.profraw" \
 LLVM_PROFILE_FILE="$cov_runtime/grpc-binding-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/custom_binding_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e" \
-    --grpc-peer-binary "$cov_runtime/debug/bcs-a2a-grpc-peer"
+    --grpc-peer-binary "$cov_runtime/debug/bcs-a2a-grpc-peer" \
+    --diagnostics-dir "${BCS_E2E_DIAGNOSTICS_DIR:-$bcs_dir/target/cov-e2e/grpc-binding}"
