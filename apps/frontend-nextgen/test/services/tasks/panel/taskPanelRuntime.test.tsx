@@ -38,7 +38,7 @@ describe('one controller owns presented-card and recovery focus', () => {
     const unregister = runtime.registerTaskPanelPresentation(tab('shown'));
     c.adoptPresentedTask(tab('shown'));
     const openTab = jest.fn();
-    const panelRef = { current: { openTab } as any };
+    const panelRef = { current: { openTab, focusTab: jest.fn() } as any };
     const { rerender } = renderHook(({ ready }) => useSharedTaskPanelRecovery({
       enabled: ready, conversation: { sessionId: 's1', kind: 'bot' }, userId: 'viewer', history,
       panelRef,
@@ -47,7 +47,8 @@ describe('one controller owns presented-card and recovery focus', () => {
     await waitFor(() => expect(c.getSnapshot().conversation?.sessionId).toBe('s1'));
     await act(async () => Promise.resolve());
     expect(c.getSnapshot().activeTaskId).toBe('shown');
-    expect(openTab).not.toHaveBeenCalled();
+    expect(openTab).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-index-latest' }));
+    expect(panelRef.current.focusTab).toHaveBeenLastCalledWith('task-shown');
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('shown');
     unregister();
   });
@@ -121,7 +122,7 @@ describe('same-viewer relogin before React effects flush', () => {
   });
 
   it('rebinds recovery to a fresh controller without a userId prop change', async () => {
-    const panelRef = { current: { openTab: jest.fn() } as any };
+    const panelRef = { current: { openTab: jest.fn(), focusTab: jest.fn() } as any };
     renderHook(() => useSharedTaskPanelRecovery({ enabled: true, conversation: { sessionId: 's1', kind: 'bot' }, userId: 'viewer', history, panelRef }));
     await waitFor(() => expect(runtime.peekTaskPanelController()?.getSnapshot().activeTaskId).toBe('index-latest'));
     const previous = runtime.peekTaskPanelController();
@@ -138,7 +139,7 @@ describe('same-viewer relogin before React effects flush', () => {
 
 it('retries session initialization when the first asset/controller load failed', async () => {
   mockLoad.mockRejectedValueOnce(new Error('offline asset'));
-  const panelRef = { current: { openTab: jest.fn() } as any };
+  const panelRef = { current: { openTab: jest.fn(), focusTab: jest.fn() } as any };
   const { result } = renderHook(() => useSharedTaskPanelRecovery({ enabled: true, conversation: { sessionId: 's1', kind: 'bot' }, userId: 'viewer', history, panelRef }));
   await waitFor(() => expect(result.current.status).toBe('error'));
   await act(async () => { await result.current.continueRecovery(); });
@@ -154,7 +155,7 @@ it('historyReady false-to-true does not release a target handoff already accepte
   let finish!: (value: { status: 'ready' }) => void;
   const navigation = jest.spyOn(runtime.nextgenTaskPanelHost, 'navigate').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   c.nav('root').selectNode('node', { sessionId: 'child', kind: 'bot' });
-  const panelRef = { current: { openTab: jest.fn() } as any };
+  const panelRef = { current: { openTab: jest.fn(), focusTab: jest.fn() } as any };
   const { rerender } = renderHook(({ ready }) => useSharedTaskPanelRecovery({ enabled: ready, conversation: { sessionId: 'child', kind: 'bot' }, userId: 'viewer', history, panelRef }), { initialProps: { ready: false } });
   try {
     await waitFor(() => expect(c.getSnapshot().conversation?.sessionId).toBe('child'));
