@@ -1,0 +1,26 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  h_b601d8706f5d44 294-295
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/mcp_server.py
+  h_b601d8706f5d44 26,28,130-131
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  h_b601d8706f5d44 838,842,851,853,855-859
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/trace-argument-evidence.test.ts
+  h_b601d8706f5d44 1-81
+apps/evolverun/clawweb/internal/modules/tclog/server/services/aivision-session-trajectory.ts
+  h_b601d8706f5d44 33,43,59,78
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  h_b601d8706f5d44 7,87-89,127,131,190,198-201,213
+apps/evolverun/clawweb/internal/modules/tclog/server/services/trace-argument-evidence.ts
+  h_b601d8706f5d44 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "283053c448c17f578732b8de2ec6aa5b0f8cab28",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
