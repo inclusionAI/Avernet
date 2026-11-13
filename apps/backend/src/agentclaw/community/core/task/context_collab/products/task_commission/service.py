@@ -1,0 +1,608 @@
+"""任务代办产品编排(乙案:组合协议层,自持编不开通用北向合同)。
+
+依赖面(spec §3.1,架构测试执法)与公开讨论同矩阵;差异三处编排:
+- 发布:``method_kind=Open``(顶层单值,裁决 B)、
+  ``executor_ref=AgentRef("bot", assignee)``、
+  ``workflow_kind=task_commission_goal``;
+- Work 六动作:G1 授权后经共享 G4 产品合同校验时序与 typed executor
+  RoleBinding(通用 append 同样受约束),再由版本固定的 G4 机器裁决快照;
+  不维护产品私有时序表或第二套 Task 状态机;
+- 外 profile / collet 不存在一律 404(语义不漂别人的 Collet)。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from injector import inject
+
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    top_level_binding_id,
+)
+
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    VISIBILITY_PUBLIC,
+    ContextCollabAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
+    validate_product_event,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
+    validate_event_body,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
+    resolve_workflow_status,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    ContextSpec,
+    CurrentSnapshot,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+    creation_payload,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_spec,
+    product_definition,
+)
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profiles import (
+    ProductProfile,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
+    TASK_COMMISSION_PROFILE_REF,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    AppendEventRecordRequest,
+    ContextCollabRepositoryProtocol,
+    CreateContextRecordRequest,
+    EventAppendedRecord,
+    InitialEventDraft,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.views import (
+    DiscussionDetailBody,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.views import (
+    TaskCommissionDetailView,
+    TaskCommissionSummaryView,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    LoggingTaskDispatch,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    AssigneeAdmissionCommand,
+    DispatchedTaskInfo,
+    PublishTaskCommand,
+    TaskAdvanceCommand,
+    TaskExecutionReportCommand,
+    TaskCommissionCreatedView,
+    TaskAdvancedView,
+    TaskDispatchPort,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    _now,
+    current_axes,
+    project_created_context,
+)
+
+# 与通用创建路径逐字的初始事件形态。
+_CREATION_EVENT_KIND = "task.created"
+_CREATION_PRIMITIVE_TYPE = "Task"
+# 任务正文与 Work 控制事件的承载形态(裁决 F:一律 public;闭协作由 G1
+# 写路径把守而非可见性遮蔽)。
+_POSTED_EVENT_KIND = "user_interaction.posted"
+_MESSAGE_PRIMITIVE = "Message"
+
+
+def _required_content(value: str, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ContextCollabValidationError(
+            f"task {field_name} must be a non-empty string, got: {value!r}"
+        )
+    return value
+
+
+@dataclass(frozen=True)
+class _AdvanceIntent:
+    """G1 ``check_append`` 的 duck-typed 载体(不引 wire 合同类型)。"""
+
+    event_kind: str
+    primitive_type: str
+    actor_ref: object
+    parent_event: str | None
+    visibility: str
+    payload: dict
+
+
+class TaskCommissionService:
+    """任务代办九用例编排:发布 + Work 六动作(T2),读两例(T3)。"""
+
+    @inject
+    def __init__(
+        self,
+        collab_repo: ContextCollabRepositoryProtocol,
+        authorizer: ContextCollabAuthorizerProtocol,
+        method_store: MethodStoreProtocol,
+        method_ops_port: "TaskMethodOpsPort",
+        # 交付缝默认日志送达(P2 经 L1/A2A 换真实现);python-injector 对
+        # 带默认值参数同样注入,DI 显式绑定见 task_module(bbs authorizer
+        # 先例同款注释)。方法编排缝无产品内默认——缺口非合法域态,
+        # 发布必须驱动真方法生命周期。
+        dispatch_port: "TaskDispatchPort" = None,
+        *,
+        product_catalog: ProductCatalog,
+    ) -> None:
+        self._product_catalog = product_catalog
+        self._repo = collab_repo
+        self._authorizer = authorizer
+        self._method_store = method_store
+        self._method_ops_port = method_ops_port
+        self._dispatch_port = (
+            dispatch_port if dispatch_port is not None else LoggingTaskDispatch()
+        )
+
+    # ------------------------------------------------------------- 发布
+
+    def publish_task(
+        self, command: PublishTaskCommand, context: ActorContext
+    ) -> TaskCommissionCreatedView:
+        title = _required_content(command.title, "title")
+        body = _required_content(command.body, "body")
+        assignee = _required_content(command.assignee_agent_id, "assignee")
+        profile = self._product_catalog.get(
+            TASK_COMMISSION_PROFILE_REF.profile_id, TASK_COMMISSION_PROFILE_REF.version
+        )
+        publication = profile.require_publication()
+        spec = ContextSpec(
+            space=command.space,
+            principal_ref=context.actor,
+            method_kind=profile.composition.method_kind,
+            # 指定执行 bot:辅助执行者,不承担验收权(L6 先例)。
+            executor_ref=AgentRef(agent_type="bot", agent_id=assignee),
+            objective=title,
+            resource_refs=tuple(command.resource_refs),
+            product_kind=profile.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id,
+        )
+        spec = prepare_product_spec(
+            spec, self._product_catalog, selected_profile=profile.ref
+        )
+        self._authorizer.check_create(spec, context)
+
+        record = self._repo.create_context(
+            CreateContextRecordRequest(
+                context_spec=spec,
+                initial_event=InitialEventDraft(
+                    event_kind=_CREATION_EVENT_KIND,
+                    primitive_type=_CREATION_PRIMITIVE_TYPE,
+                    actor_ref=context.actor,
+                    payload=creation_payload(spec, title),
+                ),
+            )
+        )
+        # L5 顶层单值 MethodBinding 投影(Open 无 roster,store 失败如实上抛)。
+        binding = project_created_context(
+            self._method_store,
+            current_axes(),
+            record.collet.collet_id,
+            spec,
+            context,
+            now=_now(),
+            catalog=self._product_catalog,
+        )
+        # 发布即驱动真 Open 方法生命周期(spec §9 增量裁决,系统编排,
+        # 发布人 ActorContext):publish_opportunity → submit_application
+        # → screen → admit,指定执行 bot 至 ADMITTED。方法面失败如实
+        # 上抛(Collet 已持久不回滚——交付缝同款纪律);bot 仅在
+        # 生命周期完成后才被送达告知。
+        admission = self._method_ops_port.admit_designated_assignee(
+            AssigneeAdmissionCommand(
+                collab_context_id=record.collet.collet_id,
+                assignee_agent_id=assignee,
+                accountable_principal_id=context.actor.principal_id,
+                product_profile_ref=profile.ref,
+                method_binding_ref=binding.method_binding_id,
+            ),
+            context,
+        )
+        # The declared gate checks L5's receipt, not a second product state.
+        publication.require_dispatch_ready(admission.state)
+        appended = self._append_message(
+            command=None,
+            collet=record.collet,
+            spec=spec,
+            context=context,
+            expected_version=1,
+            content=body,
+        )
+        view = TaskCommissionCreatedView(
+            collet_id=record.collet.collet_id,
+            title=title,
+            body_event_id=appended.event.event_id,
+            status=record.current_snapshot.status
+            if record.current_snapshot is not None
+            else "created",
+            context_version=appended.collet.version,
+        )
+        # 发布成功后自动送达指定执行 bot(交付缝;失败如实上抛,任务已
+        # 持久不回滚——ACCS:送达不等于也不改写上层权威)。
+        self._dispatch_port.dispatch_task_info(
+            DispatchedTaskInfo(
+                collet_id=view.collet_id,
+                title=title,
+                body=body,
+                assignee_agent_id=assignee,
+                publisher_principal_id=context.actor.principal_id,
+                product_profile_ref=profile.ref,
+                method_binding_ref=binding.method_binding_id,
+                context_version=view.context_version,
+            )
+        )
+        return view
+
+    # ------------------------------------------------------- Work 六动作
+
+    def report_execution(
+        self, command: TaskExecutionReportCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        """Receive a Bot report; never accept an owner-controlled action here."""
+        if command.action not in {"start_task", "report_progress", "submit_task"}:
+            raise ContextCollabValidationError("unsupported executor report action")
+        if type(command.expected_version) is not int or command.expected_version < 1:
+            raise ContextCollabValidationError("expected_version must be positive")
+        return self._advance(command.action, command.task, context, report=command)
+
+    def start_task(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("start_task", command, context)
+
+    def report_progress(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("report_progress", command, context)
+
+    def submit_task(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("submit_task", command, context)
+
+    def accept_task(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("accept_task", command, context)
+
+    def reject_task(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("reject_task", command, context)
+
+    def cancel_task(
+        self, command: TaskAdvanceCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        return self._advance("cancel_task", command, context)
+
+    # ------------------------------------------------------------- 私有
+
+    def _advance(
+        self, action: str, command: TaskAdvanceCommand, context: ActorContext,
+        *, report: TaskExecutionReportCommand | None = None,
+    ) -> TaskAdvancedView:
+        record = self._repo.get_current_status(command.collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {command.collab_context_id!r} not found"
+            )
+        if record.context_spec.product_kind != ProductProfile.TASK_COMMISSION.value:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {command.collab_context_id!r} is not "
+                "a task commission"
+            )
+        profile = product_definition(record.context_spec, self._product_catalog)
+        if profile is None:
+            raise ContextCollabValidationError(
+                "task commission requires a product profile"
+            )
+        operation = profile.workflow.action(action)
+        event_kind = operation.event_kind
+        snapshot = record.current_snapshot
+        if snapshot is None:
+            # 外部部分行无可裁决状态;本产品创建路径恒有快照。
+            raise ContextCollabValidationError(
+                f"cannot advance task {command.collab_context_id!r}: "
+                "no snapshot to adjudicate"
+            )
+        payload: dict = {}
+        if command.note and "note" in operation.payload_fields:
+            payload["note"] = command.note
+        if command.percent is not None:
+            # percent 是既存协议词汇(快照投影 `_last_payload_percent` 读
+            # 同名键);仅 progress 动作携带,0-100 整数。
+            if (
+                isinstance(command.percent, bool)
+                or not isinstance(command.percent, int)
+                or not 0 <= command.percent <= 100
+            ):
+                raise ContextCollabValidationError(
+                    "task percent must be an integer in [0, 100], got: "
+                    f"{command.percent!r}"
+                )
+            if "percent" not in operation.payload_fields:
+                raise ContextCollabValidationError(
+                    "task percent is only reportable by report_progress"
+                )
+            payload["percent"] = command.percent
+        if "artifacts" in operation.payload_fields:
+            payload["artifacts"] = list(command.artifacts)
+
+        intent = _AdvanceIntent(
+            event_kind=event_kind,
+            primitive_type=operation.primitive_type,
+            actor_ref=context.actor,
+            parent_event=None,
+            visibility=VISIBILITY_PUBLIC,
+            payload=payload,
+        )
+        validate_event_body(
+            event_kind=intent.event_kind,
+            primitive_type=intent.primitive_type,
+            visibility=intent.visibility,
+            payload=intent.payload,
+        )
+        # G1 先于机器守卫(spec §5.2 权威管线,与通用服务同序):授权话术
+        # 不把 rule_id/守卫内幕泄露给本应最先拒掉的陌生 actor。
+        self._authorizer.check_append(
+            record.collet, record.context_spec, intent, context
+        )
+        if report is not None:
+            executor = record.context_spec.executor_ref
+            if (
+                executor is None
+                or context.actor.principal_type != "bot"
+                or context.actor.principal_type != executor.agent_type
+                or context.actor.principal_id != executor.agent_id
+            ):
+                raise ContextCollabValidationError("actor is not the designated executor")
+            if (
+                report.product_profile_ref != profile.ref
+                or report.method_binding_ref != top_level_binding_id(command.collab_context_id)
+            ):
+                raise ContextCollabValidationError("report context does not match task binding/profile")
+            ensure_expected_version(report.expected_version, record.collet.version)
+        validate_product_event(
+            catalog=self._product_catalog,
+            spec=record.context_spec,
+            snapshot=snapshot,
+            event_kind=event_kind,
+            primitive_type=intent.primitive_type,
+            visibility=intent.visibility,
+            payload=payload,
+            actor=context.actor,
+            events=record.events,
+        )
+        # 机器是唯一 status 裁决者:守卫 FAIL 在此响亮冒出(如无 artifacts
+        # 提交);快照推进非恒等(区别于公开讨论的 J' 恒等)。
+        machine_ref = profile.workflow.state_machine_ref
+        if machine_ref is None:
+            raise ContextCollabValidationError(
+                "task commission requires a workflow machine"
+            )
+        resolved = resolve_workflow_status(
+            workflow_kind=machine_ref.profile_id,
+            workflow_version=machine_ref.version,
+            executor_ref=record.context_spec.executor_ref,
+            snapshot=snapshot,
+            event_kind=event_kind,
+            payload=payload,
+            actor=context.actor,
+        )
+
+        def _advance_snapshot(
+            current: CurrentSnapshot | None,
+        ) -> CurrentSnapshot | None:
+            if current is None or resolved is None:
+                return current
+            if resolved == current.status:
+                return current
+            from dataclasses import replace
+
+            return replace(current, status=resolved)
+
+        if report is not None and report.deadline is not None:
+            if report.deadline.tzinfo is None or report.deadline <= datetime.now(timezone.utc):
+                raise ContextCollabValidationError("report deadline has expired")
+        appended = self._repo.append_event(
+            command.collab_context_id,
+            AppendEventRecordRequest(
+                expected_version=record.collet.version,
+                event_kind=event_kind,
+                primitive_type=operation.primitive_type,
+                actor_ref=context.actor,
+                parent_event=None,
+                visibility=VISIBILITY_PUBLIC,
+                payload=payload,
+                snapshot_updater=_advance_snapshot,
+            ),
+        )
+        final_status = (
+            appended.current_snapshot.status
+            if appended.current_snapshot is not None
+            else (resolved or snapshot.status)
+        )
+        return TaskAdvancedView(
+            collab_context_id=command.collab_context_id,
+            event_id=appended.event.event_id,
+            context_version=appended.collet.version,
+            status=final_status,
+        )
+
+    def _append_message(
+        self,
+        *,
+        command,
+        collet,
+        spec: ContextSpec,
+        context: ActorContext,
+        expected_version: int,
+        content: str,
+    ) -> EventAppendedRecord:
+        """任务正文(发布附件的描述 Message):principal 路径,G1 放行。"""
+        intent = _AdvanceIntent(
+            event_kind=_POSTED_EVENT_KIND,
+            primitive_type=_MESSAGE_PRIMITIVE,
+            actor_ref=context.actor,
+            parent_event=None,
+            visibility=VISIBILITY_PUBLIC,
+            payload={"content": content},
+        )
+        validate_event_body(
+            event_kind=intent.event_kind,
+            primitive_type=intent.primitive_type,
+            visibility=intent.visibility,
+            payload=intent.payload,
+        )
+        self._authorizer.check_append(collet, spec, intent, context)
+        return self._repo.append_event(
+            collet.collet_id,
+            AppendEventRecordRequest(
+                expected_version=expected_version,
+                event_kind=_POSTED_EVENT_KIND,
+                primitive_type=_MESSAGE_PRIMITIVE,
+                actor_ref=context.actor,
+                parent_event=None,
+                visibility=VISIBILITY_PUBLIC,
+                payload={"content": content},
+                snapshot_updater=lambda snapshot: snapshot,
+            ),
+        )
+
+    # ------------------------------------------------------------- 读(T3)
+
+    def list_tasks(self) -> list[TaskCommissionSummaryView]:
+        """Query.search/filter:按 product profile 列任务,gmt_create 倒序。"""
+        rows = self._repo.list_collets_by_product(ProductProfile.TASK_COMMISSION.value)
+        counts = self._repo.count_message_events(
+            [collet.collet_id for collet, _, _ in rows]
+        )
+        return [
+            TaskCommissionSummaryView(
+                collet_id=collet.collet_id,
+                title=spec.objective,
+                initiator_id=collet.initiator_ref.principal_id,
+                message_count=counts.get(collet.collet_id, 0),
+                created_at=gmt_create,
+            )
+            for collet, spec, gmt_create in rows
+        ]
+
+    def detail_task(self, collab_context_id: str) -> TaskCommissionDetailView:
+        """Query.project:标题/正文/机器状态/公开推进历史一次给齐。
+
+        title 读源合同沿公开讨论先例(初始事件 payload objective,
+        NULL-payload 外部行回退伴随 spec.objective,P3 撤列时移除);
+        events 只投影 public(裁决 F),Task 控制事件与发言事件同列。
+        """
+        record = self._repo.get_current_status(collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        if record.context_spec.product_kind != ProductProfile.TASK_COMMISSION.value:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} is not a task commission"
+            )
+        title = self._title_of(record)
+        messages = [
+            event
+            for event in record.events
+            if event.primitive_type == _MESSAGE_PRIMITIVE
+            and event.visibility == VISIBILITY_PUBLIC
+        ]
+        body_event = messages[0] if messages else None
+        body_view = (
+            DiscussionDetailBody(
+                event_id=body_event.event_id,
+                content=self._content_of(body_event),
+                author_id=self._principal_id(body_event.actor_ref),
+                occurred_at=body_event.occurred_at,
+            )
+            if body_event is not None
+            else None
+        )
+        events = [
+            {
+                "event_id": event.event_id,
+                "event_kind": event.event_kind,
+                "primitive_type": event.primitive_type
+                if event.primitive_type is not None
+                else "",
+                "actor_id": self._principal_id(event.actor_ref),
+                "occurred_at": event.occurred_at,
+                # 公开事件的 payload 随投影可查(percent/note/artifacts)。
+                "payload": event.payload if isinstance(event.payload, dict) else {},
+            }
+            for event in record.events
+            if event.visibility == VISIBILITY_PUBLIC
+        ]
+        return TaskCommissionDetailView(
+            collet_id=collab_context_id,
+            title=title,
+            status=(
+                record.current_snapshot.status
+                if record.current_snapshot is not None
+                else ""
+            ),
+            body=body_view,
+            events=events,
+        )
+
+    # ------------------------------------------------------- 读投影私有件
+
+    @staticmethod
+    def _title_of(record) -> str:
+        """title 新主=初始事件 payload 的 objective;NULL-payload 回退
+        伴随 ``context_spec.objective``(P3 撤列时移除)。"""
+        title = record.context_spec.objective
+        for event in record.events:
+            if event.event_kind == _CREATION_EVENT_KIND:
+                payload = event.payload
+                if isinstance(payload, dict):
+                    objective = payload.get("objective")
+                    if isinstance(objective, str) and objective.strip():
+                        title = objective
+                break
+        return title
+
+    @staticmethod
+    def _principal_id(ref) -> str:
+        """读投影作者标识;外部部分行(NULL actor 列)读为空串。"""
+        return ref.principal_id if ref is not None else ""
+
+    @staticmethod
+    def _content_of(event) -> str:
+        """读投影正文;payload NULL 的部分行读空串(读面容错,不 422)。"""
+        payload = event.payload
+        if isinstance(payload, dict):
+            content = payload.get("content")
+            if isinstance(content, str):
+                return content
+        return ""

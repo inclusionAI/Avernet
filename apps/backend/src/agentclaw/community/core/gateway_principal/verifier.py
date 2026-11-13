@@ -41,6 +41,8 @@ from agentclaw.community.core.gateway_principal.errors import (
 )
 from agentclaw.community.core.gateway_principal.models import (
     AppPrincipal,
+    BotPrincipal,
+    GatewayBot,
     GatewayPrincipal,
     GatewayUser,
     UserPrincipal,
@@ -347,6 +349,31 @@ def decode_principal_token(
         ) from exc
 
     return claims
+
+
+def verify_bot_principal_token(token: str, config: PrincipalVerifierConfig) -> GatewayBot:
+    """Verify a bot-only identity set for the bounded ACCS ingress.
+
+    Reuses signature/issuer/audience/expiry and tenant validation. This does NOT
+    widen verify_principal_token or turn a Bot into its human owner. Exactly one
+    Bot identity is required, with no additional user/app identities to confuse
+    attribution. The gateway's bot UUID is opaque; never strip owner qualifiers.
+    """
+    claims = decode_principal_token(token, config)
+    principals = _parse_principals(claims.get("principals"))
+    _reject_contradictory_tenant(principals)
+    if len(principals) != 1 or not isinstance(principals[0], BotPrincipal):
+        raise PrincipalVerificationError("expected exactly one Bot principal")
+    principal = principals[0]
+    bot = principal.bot
+    if (
+        not bot.bot_uuid.strip()
+        or not bot.owner_id.strip()
+        or not bot.tenant.strip()
+        or bot.tenant != principal.tenant
+    ):
+        raise PrincipalVerificationError("invalid Bot identity or tenant")
+    return bot
 
 
 def caller_from_claims(claims: Mapping[str, Any]) -> VerifiedCaller:

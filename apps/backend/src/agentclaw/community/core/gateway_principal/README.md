@@ -42,6 +42,7 @@ provides:
   - PrincipalSignerConfig
   - VerifiedCaller
   - verify_principal_token
+  - verify_bot_principal_token
   - decode_principal_token
   - caller_from_claims
   - resign_principal_token
@@ -115,3 +116,12 @@ not accept inbound principals or re-address user identity. The composition root
 resolves the existing shared key; the envelope is `iss=backend`, `aud=bcs`,
 `kid=bare`, with a 60-second lifetime and the authoritative Bot tenant. BCS
 still verifies the signature and requires a matching trusted-App action rule.
+
+**Added 2026-11-13 — bounded Bot ingress.** `verify_bot_principal_token` reuses
+the signature/issuer/audience/expiry and tenant checks but admits exactly one
+Bot, with nonblank UUID/owner/tenant and matching principal/nested Bot tenant.
+It returns the signed opaque Bot UUID, not its owner as a human caller. Only the
+[commission A2A ingress](../task/context_collab/products/task_commission/README.md)
+uses this bounded path. `verify_principal_token`, user/app admission and
+re-addressing behavior are unchanged: a Bot-only set still fails ordinary
+public API verification. Treat changing that separation as a security change.
