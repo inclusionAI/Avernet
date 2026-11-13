@@ -63,6 +63,8 @@ mod group_chat;
 mod persistent_send;
 #[path = "contract_message_flow/bot_event_callback.rs"]
 mod bot_event_callback;
+#[path = "contract_message_flow/legacy_flow.rs"]
+mod legacy_flow;
 #[path = "contract_message_flow/abort.rs"]
 mod abort;
 

@@ -1,6 +1,9 @@
 use std::{io::Write, sync::{Arc, Mutex}};
 use serde_json::Value;
 
+#[path = "../../../../test-support/legacy_log_capture.rs"]
+pub(crate) mod legacy;
+
 #[derive(Clone, Default)]
 struct Buffer(Arc<Mutex<Vec<u8>>>);
 impl Write for Buffer {

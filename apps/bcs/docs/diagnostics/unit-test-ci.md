@@ -48,6 +48,40 @@ The required pass rate is 100%. Overall line coverage must exceed 87%. Changed
 line coverage must exceed 85% when at least 51 instrumentable changed lines
 map to the report; smaller changes are report-only for that metric.
 
+## Repair coverage with focused local runs
+
+Use the failed run's Cobertura artifact to distinguish overall coverage from
+changed-line coverage before selecting scenarios. Read the implementation and
+existing tests, then assert observable results, state preservation on failures,
+or emitted diagnostic fields. The `coverage_` regression cases can be selected
+without executing the existing BCS inventory. For example, from `apps/bcs`:
+
+```bash
+export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+export CARGO_PROFILE_TEST_DEBUG=line-tables-only
+export CARGO_INCREMENTAL=0
+export CARGO_LLVM_COV_TARGET_DIR=target/focused-coverage
+cargo llvm-cov nextest --locked -p bcs-event-store --test memory_atomicity \
+  -E 'test(coverage_)' --retries 0 --no-report
+cargo llvm-cov report --cobertura --output-path testresult/focused-cobertura.xml
+```
+
+Keep the same target directory between focused runs to reuse instrumentation.
+Before collecting final evidence, archive the task's raw profiles and rerun only
+the added tests so failed debugging attempts cannot inflate the result. Compare
+positive local execution counts against zero-hit lines in the matching CI
+artifact, counting each normalized source path and line number once. Account
+for newly instrumentable lines when estimating the gate; a focused report's
+overall percentage is not the workspace aggregate. Leave aggregate validation
+to GitHub Actions rather than running the full BCS producer locally.
+
+The new MySQL protocol and admin migration regressions require
+`BCS_TEST_MYSQL_URL` in CI. Local runs without that variable return without
+exercising MySQL; they are not MySQL coverage evidence. Use a disposable contract
+database when selecting these tests. The admin regression refuses existing
+migration history before writing, removes its test tables afterward, and needs
+only privileges on that database, matching the CI service user's grants.
+
 ## Coverage contradicts a passing behavior assertion
 
 Check actual execution, profile collection and source mapping separately:
@@ -65,6 +99,11 @@ The `tracing/log` feature adds fallback forwarding into the legacy `log` facade.
 Its macro-generated fallback expressions can be reported as unhit on the same
 source lines whose native tracing fields were observed by a live subscriber.
 Keep production dependency features unchanged when repairing test coverage.
+The [legacy log capture helper](../../crates/test-support/legacy_log_capture.rs)
+reexecutes an exact regression test in a child process: once any tracing
+dispatcher has been installed, the fallback remains disabled in that process.
+The relevant test dependencies enable `tracing/log` to reproduce the CI feature
+set without changing production dependency declarations.
 The legacy `log` to tracing bridge is checked by the
 [bootstrap bridge test](../../crates/bootstrap/bcs/tests/log_facade_bridge.rs).
 For the intended logging behavior, see

@@ -85,4 +85,5 @@ bcs-user-directory-api = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

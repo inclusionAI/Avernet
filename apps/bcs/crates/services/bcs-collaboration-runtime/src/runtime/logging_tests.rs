@@ -2,6 +2,9 @@ use super::*;
 use std::{io::Write, sync::Mutex};
 use serde_json::json;
 
+#[path = "../../../../test-support/legacy_log_capture.rs"]
+mod legacy;
+
 #[derive(Clone, Default)]
 struct Buffer(Arc<Mutex<Vec<u8>>>);
 impl Write for Buffer {
@@ -35,6 +38,55 @@ fn correlation() -> StateMachineDeliveryCorrelation {
         assignee_bot_id: "assignee".into(), delivery_request_id: "delivery".into(),
         bot_delivery_run_id: Some("provider-run".into()),
     }
+}
+
+#[test]
+fn coverage_legacy_state_machine_logs_preserve_terminal_and_delivery_identity() {
+    legacy::isolated(|| {
+        let run = run();
+        let group = Group::new("group", "driver", Vec::new());
+        let correlation = correlation();
+        log_state_machine_node_dispatch(&group, &run, "node", 2, "assignee", "delivery", "你好");
+        for delivered in [true, false] {
+            log_state_machine_delivery_result(&group, &run, "node", 2, "assignee", "delivery",
+                None, delivered, (!delivered).then_some("offline"), (!delivered).then_some("send"));
+        }
+        for state in [ChatEventState::Delta, ChatEventState::Final, ChatEventState::Error, ChatEventState::Aborted] {
+            let cmd = HandleBotTerminalEventCommand {
+                bot_id: "assignee".into(), run_id: "provider-run".into(), event_type: "chat.event".into(),
+                state, bcs_session_id: Some("session".into()), event_payload: json!({"delta_text": "你好"}),
+            };
+            log_state_machine_bot_event(&run, &correlation, &cmd, 6);
+        }
+        log_state_machine_node_result(&run, &correlation, MessageLogStatus::Completed, Some("ok"), None, Some(6));
+        log_state_machine_node_result(&run, &correlation, MessageLogStatus::Failed, None, Some("invalid"), None);
+        log_state_machine_transition(&run, "node", "ok", &[], MessageLogStatus::Routed);
+        log_state_machine_run_complete(&run, 1, 6, "completed");
+        log_state_machine_run_failed(&run, "offline", "failed");
+        let node: StateMachineNodeRun = serde_json::from_value(json!({
+            "run_id": "machine-run", "node_id": "node", "status": "running", "attempt": 2
+        })).unwrap();
+        log_state_machine_timeout(&run, &node, 100, None, 10);
+        let rows = legacy::rows(MSG_LOG_TARGET);
+        assert_eq!(rows.len(), 13, "one legacy record per event: {rows:?}");
+        for (index, row) in rows.iter().enumerate() {
+            row.assert_field("state_machine_run_id", "machine-run");
+            row.assert_field("session_id", "session");
+            if index == 3 { assert!(!row.message.contains("log_class=")); }
+            else { row.assert_field("log_class", "business_key"); }
+        }
+        rows[0].assert_field("content", "你好");
+        rows[1].assert_field("to_bot_id", "assignee");
+        rows[1].assert_field("delivered", "true");
+        rows[2].assert_field("error", "offline");
+        assert_eq!(rows[2].level, tracing::log::Level::Warn);
+        rows[4].assert_field("bot_delivery_run_id", "provider-run");
+        rows[7].assert_field("run_id", "delivery");
+        rows[8].assert_field("error", "invalid");
+        rows[9].assert_field("next_node_count", "0");
+        rows[12].assert_field("run_id", "machine-run");
+        rows[12].assert_field("timeout_deadline_ms", "0");
+    });
 }
 
 #[test]

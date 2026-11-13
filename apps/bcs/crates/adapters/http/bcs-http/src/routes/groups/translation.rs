@@ -423,3 +423,7 @@ pub(crate) fn group_kind_filter(filter: GroupKindFilter) -> Option<GroupKind> {
 // ---------------------------------------------------------------
 // PATCH /groups/{id}/settings
 // ---------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "translation_tests.rs"]
+mod regression_tests;

@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "sse_legacy_tests.rs"]
+mod legacy_tests;
     use bcs_service_api::{
         BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
         GroupCallbackOutcome, InteractionFrontendEvent, InteractionRequestedOutcome,

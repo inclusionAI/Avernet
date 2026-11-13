@@ -4,6 +4,52 @@ use std::{io::Write, sync::{Arc, Mutex}};
 use tower::ServiceExt;
 use tracing::instrument::WithSubscriber;
 
+#[path = "../../../../test-support/legacy_log_capture.rs"]
+mod legacy;
+
+#[test]
+fn coverage_legacy_http_logs_distinguish_nonterminal_errors_and_cancellation() {
+    legacy::isolated(|| {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let app = Router::new().route("/delta", post(|| async {
+                let mut response = StatusCode::OK.into_response();
+                response.extensions_mut().insert(NonTerminalCallback);
+                response
+            })).route("/failed", post(|| async { StatusCode::BAD_REQUEST }))
+                .layer(middleware::from_fn(observe_request));
+            for (path, status) in [("/delta", StatusCode::OK), ("/failed", StatusCode::BAD_REQUEST)] {
+                let response = app.clone().oneshot(Request::post(path).header("x-request-id", "legacy-request")
+                    .body(Body::empty()).unwrap()).await.unwrap();
+                assert_eq!(response.status(), status);
+                assert_eq!(response.headers()["x-request-id"], "legacy-request");
+            }
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let notify = entered.clone();
+            let app = Router::new().route("/cancel", post(move || {
+                let notify = notify.clone();
+                async move { notify.notify_one(); std::future::pending::<StatusCode>().await }
+            })).layer(middleware::from_fn(observe_request));
+            let task = tokio::spawn(app.oneshot(Request::post("/cancel").header("x-request-id", "legacy-cancel")
+                .body(Body::empty()).unwrap()));
+            entered.notified().await;
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        });
+        let rows = legacy::rows("bcs_http_access");
+        let summaries: Vec<_> = rows.iter().filter(|row| row.message.contains("event_code=\"http.request.response_ready\"")).collect();
+        assert_eq!(summaries.len(), 2, "one summary for each completed response");
+        assert!(!summaries[0].message.contains("log_class="));
+        summaries[1].assert_field("log_class", "business_key");
+        summaries[1].assert_field("status", "400");
+        let cancelled: Vec<_> = rows.iter().filter(|row| row.message.contains("event_code=\"http.request.cancelled\"")).collect();
+        assert_eq!(cancelled.len(), 1);
+        cancelled[0].assert_field("log_class", "business_key");
+        cancelled[0].assert_field("request_id", "legacy-cancel");
+        cancelled[0].assert_field("outcome", "cancelled");
+        assert_eq!(cancelled[0].level, tracing::log::Level::Warn);
+    });
+}
+
 #[tokio::test]
 async fn nonterminal_success_is_not_selected_but_errors_and_terminal_are() {
     #[derive(Clone, Default)]

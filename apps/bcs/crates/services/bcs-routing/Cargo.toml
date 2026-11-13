@@ -31,6 +31,7 @@ bcs-security-gateway-api = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 bcs-test-support = { workspace = true }
 bcs-security-gateway-local = { workspace = true }
 tokio-test = "0.4"
