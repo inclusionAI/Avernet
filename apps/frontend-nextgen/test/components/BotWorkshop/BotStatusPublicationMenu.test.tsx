@@ -3,7 +3,7 @@ import { BotManagementRuntimeItems } from '@/components/BotWorkshop/BotCard/BotM
 import { BotStatusPublicationMenu } from '@/components/BotWorkshop/BotCard/BotStatusPublicationMenu';
 import type { ServicePublication } from '@/domain/botEditor';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { serviceBotEvalService } from '@/services/botWorkshop/serviceBotEvalService';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';

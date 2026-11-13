@@ -370,7 +370,7 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(html).toContain('部分组织免审批');
     expect(html).toContain('2 个免审批范围');
-    expect(html).toContain('>查看<');
+    expect(html).not.toContain('>查看<');
     expect(html).not.toContain('部分团队免审批');
   });
 

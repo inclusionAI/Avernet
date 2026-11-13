@@ -7,7 +7,7 @@ import type {
 } from '@/domain/collaborationSquare/types';
 import type { CollaborationSquareState } from '@/stores/collaborationSquareStore';
 import type { HumanIdentityStatus } from '@/hooks/useHumanIdentity';
-import { collaborationSquareBotService, collaborationSquareGroupService } from '@/services/collaborationSquare';
+import { collaborationSquareBotService, collaborationSquareGroupService } from '@/services/collaborationSquare/publicDiscoveryRuntime';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

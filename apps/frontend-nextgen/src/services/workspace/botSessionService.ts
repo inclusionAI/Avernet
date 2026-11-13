@@ -4,7 +4,6 @@ import type { BotModelBadge } from '@/capabilities';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
-import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import {
   listBots as listOwnedBotsApi,
   type OwnedBotDto,
@@ -29,6 +28,7 @@ import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenControl
 import { mapBotActionPermissions } from './botActionPermissionMapper';
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import type { DomainError, DomainResult } from './identityService';
+import { resolveUserId } from './resolveUserId';
 
 export interface ChatBotView {
   /** Runtime APIs address the owning user; team chat ownerId may be a record entity. */
@@ -105,14 +105,6 @@ export function splitBotId(botId: string): { realBotId: string; ownerId?: string
   const idx = botId.indexOf(':');
   if (idx < 0) return { realBotId: botId, ownerId: undefined };
   return { realBotId: botId.slice(0, idx), ownerId: botId.slice(idx + 1) };
-}
-
-/** user_id 规则:human 身份 id 含冒号取尾段,否则原值。 */
-/** mine 返回的 human 身份 bot_id 形如 "human_900003",工号取 "human_" 之后的部分;
- *  兼容旧的 "{head}:{staffNo}" 复合写法(取首个冒号之后)。结果只保留工号本身。
- *  导出供 botChatProvider 等同样调用 /openapi/v1/bots/* 的地方复用,避免漏归一化。 */
-export function resolveUserId(userId: string): string {
-  return resolveOpenApiUserId(userId);
 }
 
 /** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */

@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import type { FriendApprovalConfig } from '@/domain/collaborationPrivacy/types';
 
@@ -13,6 +14,8 @@ interface RequestListProps {
 
 export function RequestList({ config, disabled, disabledReason, onEdit, onViewScope }: RequestListProps) {
   const exemptScopeCount = config.exemptOrganizationPaths.length || config.exemptDepartmentNos?.length || 0;
+  const showScopeViewer =
+    config.mode === 'partial_exempt' && exemptScopeCount > 0 && getCapabilities().getOrganizationDirectoryEnabled().value;
   return (
     <section className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <div className="min-w-0 flex-1">
@@ -23,7 +26,7 @@ export function RequestList({ config, disabled, disabledReason, onEdit, onViewSc
         <p className="mt-1 text-xs text-muted-foreground">
           当前策略：{modeLabels[config.mode]}
           {config.mode === 'partial_exempt' ? ` · ${exemptScopeCount} 个免审批范围` : ''}
-          {config.mode === 'partial_exempt' && exemptScopeCount > 0 && (
+          {showScopeViewer && (
             <Button
               variant="ghost"
               size="sm"

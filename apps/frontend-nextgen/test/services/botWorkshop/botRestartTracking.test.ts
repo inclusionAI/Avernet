@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import type { BotDomain } from '@/domain/botWorkshop';
 import { getBot } from '@/services/backendApi/bots/botController';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import {
   CODING_RESTART_PIN_TTL_MS,
   applyRestartOutcome,

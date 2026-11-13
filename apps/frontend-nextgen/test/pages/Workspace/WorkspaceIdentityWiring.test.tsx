@@ -70,6 +70,8 @@ jest.mock('@/services/workspace/botSessionService', () => ({
     createSession: jest.fn(),
     toggleFavorite: jest.fn(),
   },
+}));
+jest.mock('@/services/workspace/resolveUserId', () => ({
   resolveUserId: (id: string) => id,
 }));
 

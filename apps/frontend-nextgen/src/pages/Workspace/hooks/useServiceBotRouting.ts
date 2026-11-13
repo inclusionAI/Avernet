@@ -4,11 +4,14 @@ import type {
   ServiceBotStage,
 } from '@/domain/collaboration/serviceBotRouting';
 import { areParticipantRoutesReady, attachParticipantStageTags } from '@/domain/collaboration/serviceBotRouting';
+import type { ServiceBotRoutingModel } from '@/extensions/contracts/groupRouting';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** 状态属于建群弹窗；移除、重选、关闭以及卸载均使旧查询失效。 */
-export function useServiceBotRouting(actorIds: string[], open: boolean) {
+// 返回面注解契约接口（contracts/groupRouting.ts，collab-form Task 17 源切片类型完备），
+// 使消费方/实现共享同一模型定义，签名漂移在 typecheck 阶段失配。
+export function useServiceBotRouting(actorIds: string[], open: boolean): ServiceBotRoutingModel {
   const [states, setStates] = useState<ParticipantRoutingStates>({});
   const statesRef = useRef<ParticipantRoutingStates>({});
   const requests = useRef(new Map<string, symbol>());

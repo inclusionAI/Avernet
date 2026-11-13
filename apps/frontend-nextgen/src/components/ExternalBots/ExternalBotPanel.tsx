@@ -8,7 +8,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useExternalBots } from '@/hooks/useExternalBots';
-import { externalBotToGeneralConfig, type ExternalBotDomain } from '@/services/botWorkshop/externalBotService';
+import { externalBotToGeneralConfig, type ExternalBotDomain } from '@/services/externalBots/externalBotService';
 import { PlugZap, RefreshCw, Search, Settings2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 

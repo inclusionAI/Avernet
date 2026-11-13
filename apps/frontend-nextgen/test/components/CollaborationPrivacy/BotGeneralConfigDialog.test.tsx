@@ -9,9 +9,9 @@ import {
 import {
   botCollaborationRepairService,
   type CollaborationRepairReport,
-} from '@/services/botWorkshop/botCollaborationRepairService';
-import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+} from '@/services/bots/botCollaborationRepairService';
+import { botPublishApprovalService } from '@/services/bots/botPublishApprovalService';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import '@testing-library/jest-dom';
@@ -23,7 +23,7 @@ jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 jest.mock('@tc-chat/adapters', () => ({}));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn() } }));
 // 网络边界 mock，Hook 与共享 Store 使用真实实现（AC-34 竞态集成用例）。
-jest.mock('@/services/botWorkshop/botCollaborationRepairService', () => ({
+jest.mock('@/services/bots/botCollaborationRepairService', () => ({
   botCollaborationRepairService: { repair: jest.fn(), pending: jest.fn() },
 }));
 // 风险动线网络边界与修复层同法：Hook/Store 走真实现，Controller 一律 mock。
@@ -121,8 +121,9 @@ beforeEach(() => {
     status: 'ready',
     identity: { userId: '900004', displayName: '真实用户', online: true },
   });
-  jest.spyOn(botEditorService, 'loadApproval').mockResolvedValue(false);
-  jest.spyOn(botEditorService, 'saveApproval').mockResolvedValue({ data: { should_approval: false } } as never);
+  // 发布审批链路真源为 services/bots/botPublishApprovalService（botEditorService 的审批方法已外迁）。
+  jest.spyOn(botPublishApprovalService, 'loadApproval').mockResolvedValue(false);
+  jest.spyOn(botPublishApprovalService, 'saveApproval').mockResolvedValue({ data: { should_approval: false } } as never);
   mockPending.mockReturnValue(undefined);
   mockRepair.mockResolvedValue(successReport);
 });
@@ -254,7 +255,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
   it('internal × 团队空间 Bot：发布审批读取真实配置并可持久化切换（AC-06/07）', async () => {
     mockCapabilities.mockReturnValue(internalCapabilities);
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
-    jest.mocked(botEditorService.loadApproval).mockResolvedValue(true);
+    jest.mocked(botPublishApprovalService.loadApproval).mockResolvedValue(true);
 
     render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
 
@@ -266,7 +267,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
 
     const approvalSwitch = await screen.findByRole('switch', { name: '关闭共同编辑者发布需 Owner 审批' });
     fireEvent.click(approvalSwitch);
-    await waitFor(() => expect(botEditorService.saveApproval).toHaveBeenCalledWith('bot-1', false, '900004'));
+    await waitFor(() => expect(botPublishApprovalService.saveApproval).toHaveBeenCalledWith('bot-1', false, '900004'));
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
   });
 
@@ -294,7 +295,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     expect(screen.getByText('个人 Bot 暂不支持协作者申请')).toBeInTheDocument();
     const approvalSwitch = screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' });
     expect(approvalSwitch).toBeDisabled();
-    expect(botEditorService.loadApproval).not.toHaveBeenCalled();
+    expect(botPublishApprovalService.loadApproval).not.toHaveBeenCalled();
   });
 
   it('Open Core × 团队空间 Bot：不渲染发布审批（SHAPE:INTERNAL，AC-06）', async () => {
@@ -359,7 +360,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     render(<BotGeneralConfigDialog bot={rowBot('team', { bot_type: 'service' })} onClose={jest.fn()} />);
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
-    expect(botEditorService.loadApproval).toHaveBeenCalledTimes(2);
+    expect(botPublishApprovalService.loadApproval).toHaveBeenCalledTimes(2);
   });
 });
 

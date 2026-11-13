@@ -1,8 +1,8 @@
+import type { BotDomain } from '@/domain/botWorkshop';
 import { listMyBots, type CollaborationBotDto } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { normalizeAvatarUrl } from '@/utils/avatarSource';
-import { mapBotDto } from './botMapper';
-import type { BotDomain } from './types';
 
 export interface ExternalBotDomain {
   id: string;

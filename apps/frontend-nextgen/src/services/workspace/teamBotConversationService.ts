@@ -2,8 +2,9 @@ import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
-import { resolveUserId, type ChatBotView } from './botSessionService';
+import type { ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
+import { resolveUserId } from './resolveUserId';
 
 const PAGE_SIZE = 100;
 

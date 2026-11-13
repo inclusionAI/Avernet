@@ -142,3 +142,15 @@ describe('collaboration friend connection controller', () => {
     });
   });
 });
+
+it.each([
+  ['accept', acceptFriendConnectionRequest], ['reject', rejectFriendConnectionRequest],
+] as const)('encodes opaque request id for %s and forwards cancellation', async (decision, execute) => {
+  backendRequest.mockResolvedValue({ code: 20000, data: {} });
+  const signal = new AbortController().signal;
+  await execute('request/a?b', signal);
+  expect(backendRequest).toHaveBeenCalledWith(
+    `/openapi/v1/collaboration/friend-connections/requests/request%2Fa%3Fb/${decision}`,
+    { method: 'POST', injectUserId: false, signal },
+  );
+});

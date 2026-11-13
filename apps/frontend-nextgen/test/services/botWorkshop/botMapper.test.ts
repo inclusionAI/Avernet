@@ -1,4 +1,4 @@
-import { mapBotDto, mapBotList } from '@/services/botWorkshop/botMapper';
+import { mapBotDto, mapBotList } from '@/services/bots/botMapper';
 
 describe('botMapper', () => {
   test('服务 Bot 详情仅返回 ACTIVE 且没有发布阶段时按草稿处理', () => {

@@ -95,3 +95,59 @@ docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>
 - Confirmation of whether admin space/work-order routes remain separate after the future Gateway consolidation.
 - Alipay App ID, callback registration, RSA keys and BCS JWT secret delivery.
 - Logging, metrics, alerting, rollout and rollback policy.
+
+## Collab form（协作群极简站）
+
+Build: `docker build --build-arg FRONTEND_FORM=collab -f apps/frontend-nextgen/Dockerfile .` (from the repository root, as the Dockerfile's build-context comment requires). Local equivalents: `npm run build:collab` / `npm run dev:collab`.
+
+This builds the collab form on the complete public source. The independent
+internal site uses the OCB nextgen `export:collab` output and its dedicated
+Dockerfile; the contract is specified in
+`specs/2026-11-03-collab-form/export-plan.md`. The public source — and the
+default Open product Singlebox serves — are not pruned by the export, and the
+legacy `apps/frontend` is not involved.
+
+The image shape matches the default form (same nginx template); only the page
+assembly differs: 协作群 (collaboration groups), 发现 (public Bots/groups only)
+and 外部 Bot (external bots) as the three top-level entries. The discovery
+assembly disables Backend enhancement and Human single-chat actions even if
+`PUBLIC_BOT_BACKEND_ENABLED` is enabled in runtime configuration. The required
+upstream environment variables are unchanged. After the collab form passes runtime network acceptance, the
+following upstreams may point at valid, resolvable local placeholders (e.g.
+`http://127.0.0.1:9`): `TASK_ENGINE_UPSTREAM`, `CLAWWEB_UPSTREAM`,
+`PRIVATE_CHAT_*_UPSTREAM`, `AIXCORE_UPSTREAM`, `TEAMCLAW_ADMIN_UPSTREAM`
+(collab disables space initialization through the capability layer and removes
+execute-based group creation through null slots; this is not a request-failure
+degradation). Do not use arbitrary unresolvable hostnames as placeholders —
+nginx may fail to start.
+
+### Collab-form validation boundaries (recorded 2026-11-04, export-plan Task 20)
+
+Which boundary is verified where, and who owns the remainder. "This repo" is
+Avernet; the internal export deliverable lives in OCB's
+`apps/frontend-nextgen`.
+
+| Boundary | Status / Evidence |
+| --- | --- |
+| Full public CI (Open form) | **VERIFIED in this repo** — `.github/workflows/frontend-nextgen.yml` gate set re-run at `53d9ea5f57`: `check:open-core`, `npm run ci` (typecheck, lint, jest incl. `check:collab-closure`, Open build), `build:collab`, a2a package job — all green; run record and numbers in `specs/2026-11-03-collab-form/spec.md` (Status). |
+| Full public Singlebox startup + smoke | **VERIFIED live** — `FRONTEND_VARIANT=nextgen FRONTEND_FORM=open singlebox.sh start all` rc=0; real login-cookie flow, group create/list over BCS, external-bot listing, open-only routes answered (`/bot-workshop`, BBS task list). Details: root `docs/singlebox-nextgen-local.md` (2026-11-04 record). |
+| Legacy independence | **VERIFIED** in a disposable checkout without `apps/frontend` — nextgen startup green there, legacy start fails loudly, both singlebox verity suites pass. |
+| Export fixtures (OCB `test:collab-export`) | **VERIFIED on this machine** — 28/28 graph/emit fixtures. |
+| Isolated install/typecheck/test/build in the exported tree | **VERIFIED via OCB `scripts/ci-collab-export.sh`** (export + output-tree-only `npm ci`/`typecheck`/`test`/`build` + failure-atomicity probes); asserted by the same gate on private CI. |
+| Docker image build/startup from the output root | **UNVERIFIED locally — no Docker CLI on the dev machine.** Owner: private deployment environment; exact steps in OCB `apps/frontend-nextgen/deploy/collab/README.md` (`docker build -f apps/frontend-nextgen/deploy/collab/Dockerfile .`). |
+| Image runtime smoke: health, deep-link fallback, private auth, retained collaboration/external-Bot flows, zero task/admin requests | **UNVERIFIED — requires the private stack.** Owner: private deployment environment against configured upstreams; checklist in OCB `deploy/collab/README.md`. Until it passes, the upstream-placeholder guidance above stays conditional. |
+| Collab-form browser smoke (dev server or image: exact three-entry sidebar, no search/bell, dialogs, WS push, criterion-8 request trace) | **UNVERIFIED — no browser automation in this run.** Owned by the same private deployment acceptance. |
+
+The exported output is an internal deliverable; none of the internal evidence
+above is produced by or published from this repository.
+
+
+### Discovery export update (2026-11-11)
+
+The public collab routes/closure now include public Bots and public groups; the
+expert and task routes remain excluded. Private overlays must inherit the public
+collab capabilities without re-enabling `getPublicBotBackendEnabled` or
+`getDiscoveryExpertsEnabled`, and artifact tests must expect three sidebar entries
+and two discovery tabs. Re-run the isolated export/typecheck/build gate and target
+stack browser smoke after updating the Avernet revision. Historical export
+validation above does not validate this expanded discovery artifact.

@@ -12,7 +12,7 @@ import type {
 } from '@/services/tasks/taskMapper';
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
-import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
+import { executeTaskService, resolveWorkflowCommand } from '@/services/tasks/taskService';
 import { botSkillService } from '@/services/workspace/botSkillService';
 import { splitBotId } from '@/services/workspace/botSessionService';
 import { useTaskStore } from '@/stores/taskStore';
@@ -37,29 +37,10 @@ export interface UseTaskExecutionOptions {
 
 export type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
 
-export interface UseTaskExecutionResult {
-  submitting: boolean;
-  error: string | null;
-  /** 当前 Bot/协作群 Driver Bot 是否已安装可用的 task-intake。 */
-  dynamicTaskEnabled: boolean;
-  dynamicTaskChecking: boolean;
-  lastTaskId: string | null;
-  workflows: WorkflowListItem[];
-  workflowsLoading: boolean;
-  /** 鼠标进入工作流菜单时按当前 Bot 懒加载工作流列表。 */
-  loadWorkflows: () => Promise<void>;
-  /** 受控选中态（可叠加胶囊）：workflow 按 workflowId 去重、动态任务全场至多一个（驱动输入区 chip 与发送拦截）。 */
-  selections: ComposerSelection[];
-  selectWorkflow: (w: WorkflowSelection) => void;
-  selectDynamic: () => void;
-  /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
-  removeSelection: (key: string) => void;
-  clearSelection: () => void;
-  /** 提交任务并打开副屏。form 校验不通过返回明确原因字符串，成功返回 task_id。 */
-  submit: (form: TaskComposerForm) => Promise<{ ok: true; taskId: string } | { ok: false; reason: string }>;
-  /** 不发请求，仅校验 form 并返回 disabledReason。 */
-  validate: (form: TaskComposerForm) => string | null;
-}
+// 编排结果契约已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备）：
+// collab 保留链（GroupChatComposer 等）不得 type-only 依赖本实现文件。历史导入面经此 re-export 兼容。
+import type { UseTaskExecutionResult } from '@/extensions/contracts/groupTasks';
+export type { UseTaskExecutionResult };
 
 export function useTaskExecution({
   panelRef,

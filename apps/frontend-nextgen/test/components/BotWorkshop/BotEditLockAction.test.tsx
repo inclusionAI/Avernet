@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { BotEditLockAction } from '@/components/BotWorkshop/BotCard/BotEditLockAction';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 

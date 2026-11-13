@@ -1,16 +1,35 @@
+import { taskNavigationAwareHandle, onTaskPanelTabClosed } from '@/services/tasks/panel/taskPanelHandleAdapter';
+import { peekTaskPanelController } from '@/services/tasks/panel/taskPanelRuntime';
 import { registerTaskPanel } from '@/services/tasks/panel/registerTaskPanel';
 import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
+import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
+import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
+import { useGroupTaskPanelBootstrap } from '@/hooks/useGroupTaskPanelBootstrap';
+import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
+import { ManagerWorkerTasks } from '@/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks';
+import { ServiceBotRoutingControl } from '@/pages/Workspace/components/Modals/ServiceBotRoutingControl';
+import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
+import { useServiceBotRouting } from '@/pages/Workspace/hooks/useServiceBotRouting';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
-import { ensureReactGlobal } from '@/services/workspace';
+import { buildTaskInstructions } from '@/services/tasks/taskMapper';
+import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
+import { createGroupViaExecute } from '@/services/workspace/groupExecuteService';
 import '@/services/workspace/chatBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
 import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
 import React, { type ComponentType } from 'react';
+import type { SessionTaskPanelTabHook, TaskPanelBootstrapHook } from './contracts/taskPanelBootstrap';
+import { registerExtensionSlots } from './slots';
+import type {
+  AppExtension,
+  GroupServiceBotRoutingExtension,
+  GroupTasksExtension,
+} from './contract';
 
 type SidePanelConfigureFn = (opts: { maxTabLabelLength?: number }) => void;
 
@@ -84,7 +103,42 @@ export function registerSidePanelWiring(): void {
   registerPanelContent('task-loop', TaskPanelAdapterWithUser);
 }
 
-export const appExtension = {
+
+// Open Core 槽位注册：任务栈/TC 选路的真实实现（组件经 slots.ts 解析，import 单侧无环）。
+// 四个槽位族全部经类型显式注解（contracts/*，collab-form Task 17 硬化）：实现签名漂移时在
+// 具名常量处 typecheck 失配，而非深嵌在 registerExtensionSlots 的整包字面量里难以定位。
+// collab 形态（Task 12）注册全 null 槽位，任务栈代码不进其 import graph 与产物。
+const openGroupTasksSlots: GroupTasksExtension = {
+  createGroupViaExecute,
+  useGroupTaskExecution,
+  ComposerCapabilitiesMenu,
+  buildTaskInstructions,
+  TaskLinkedSession,
+  ManagerWorkerTasks,
+};
+const openGroupServiceBotRoutingSlots: GroupServiceBotRoutingExtension = {
+  useServiceBotRouting,
+  ServiceBotRoutingControl,
+};
+// 共享任务 controller 已接管会话导航，不再挂载旧全局观察者；保留 null 槽位兼容装配契约。
+const openTaskSessionNavigationObserver = null;
+const openTaskPanelBootstrap: TaskPanelBootstrapHook = useGroupTaskPanelBootstrap;
+const openSessionTaskPanelTab: SessionTaskPanelTabHook = useSessionTaskPanelTab;
+registerExtensionSlots({
+  groupTasks: openGroupTasksSlots,
+  groupServiceBotRouting: openGroupServiceBotRoutingSlots,
+  taskSessionNavigationObserver: openTaskSessionNavigationObserver,
+  taskPanelBootstrap: openTaskPanelBootstrap,
+  sessionTaskPanelTab: openSessionTaskPanelTab,
+  taskPanelHost: {
+    Adapter: TaskPanelAdapter,
+    wrapHandle: taskNavigationAwareHandle,
+    onTabClosed: onTaskPanelTabClosed,
+    leaveConversation: () => peekTaskPanelController()?.leaveConversation(),
+  },
+});
+
+export const appExtension: AppExtension = {
   avatarEditor: React.lazy(() => import('@/components/BotWorkshop/BotAvatar/AvatarEditor')),
   capabilities: defaultCapabilities,
 };

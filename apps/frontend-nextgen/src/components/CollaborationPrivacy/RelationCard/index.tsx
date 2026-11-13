@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { PendingPublication, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
@@ -42,6 +43,7 @@ export function RelationCard({
   onViewScope,
   riskStatus,
 }: RelationCardProps) {
+  const showScopeViewer = config.scope === 'restricted' && getCapabilities().getOrganizationDirectoryEnabled().value;
   const riskBadge =
     !pending && riskStatus ? (
       <Badge tone={riskStatus.kind === 'approving' ? 'warning' : 'primary'}>
@@ -80,7 +82,7 @@ export function RelationCard({
         <p className="mt-1 text-xs text-muted-foreground">
           当前可见性：{visibilityScopeLabels[config.scope]}
           {config.scope === 'restricted' ? ` · ${config.organizationPaths.length} 个组织范围` : ''}
-          {config.scope === 'restricted' && (
+          {showScopeViewer && (
             <Button
               variant="ghost"
               size="sm"

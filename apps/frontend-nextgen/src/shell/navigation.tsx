@@ -88,20 +88,29 @@ export const navigationItems: NavigationItem[] = [
 ];
 
 /**
- * 合并 Open Core 基线 navigationItems 与 internal overlay 注入的额外导航项。
+ * 合并形态化导航基线（`getPrimaryNavigationItems`；Open Core/internal 默认 null → navigationItems）
+ * 与 internal overlay 注入的额外导航项。
  * 合并策略：internal 项按自身 `section` 追加到同名分组末尾（internal overlay 的能力工坊/能力市场
  * 携带 `section: 'bot'`，落 Bot 分组），flat 序恒为 collab → bot。
- * Open Core 形态下 capability 返回 []，结果 = Open Core 基线项。
+ * 基线语义：显式空数组 [] 是**合法**覆盖（truthy，与 null 严格区分）=「空基线」——侧栏无基线项，
+ * internal 注入项仍照常追加；null = 沿用模块基线数组（Open/internal 默认，行为零变化）；
+ * status ≠ 'available' 与 null 同义，回退模块基线。
  *
  * split-admin-space-ticket-pages：【管理后台】基线项退役，getShellVisibility().adminEntry 形态
- * 过滤随之移除（getShellVisibility 剩 spaceSwitcher / notificationBell；管理域形态开关归 getAdminSections）。
+ * 过滤随之移除（getShellVisibility 剩 spaceSwitcher / notificationBell / globalSearch，全为形态级
+ * 壳层入口；管理域形态开关归 getAdminSections）。
  * 见 openspec refactor-global-nav-shell / split-admin-space-ticket-pages。
  */
 export function getMergedNavigationItems(): NavigationItem[] {
+  // 形态化基线：capability 默认返回 null → 模块基线数组（Open/internal 现状）；
+  // collab 装配覆盖为三项极简导航。显式 [] 为合法「空基线」覆盖（truthy，区别于 null），
+  // internal 注入项仍按 section 追加；status 非 available 时与 null 同义（回退模块基线）。
+  const primary = getCapabilities().getPrimaryNavigationItems();
+  const baseline = primary.status === 'available' && primary.value ? primary.value : navigationItems;
   const internal = getCapabilities().getInternalNavigationItems();
   const grouped: Record<NavigationSection, NavigationItem[]> = {
-    collab: navigationItems.filter((item) => item.section === 'collab'),
-    bot: navigationItems.filter((item) => item.section === 'bot'),
+    collab: baseline.filter((item) => item.section === 'collab'),
+    bot: baseline.filter((item) => item.section === 'bot'),
   };
   if (internal.status === 'available' && internal.value.length) {
     // 未知 section 剔除（防御性收口：契约变更期的录入错误不进侧栏）。

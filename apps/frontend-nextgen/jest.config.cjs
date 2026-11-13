@@ -52,6 +52,16 @@ const transformIgnorePatterns = [
 
 const testMatch = ['<rootDir>/test/**/*.(test|spec|e2e).(ts|tsx|js|jsx)'];
 
+// 形态槽位默认注册（组件经 getExtensionSlots() 解析）：因 jest.mock 缓存污染，
+// setup 不能整体预加载 empty.ts 的真实 UI 组件图（见 test/setup/registerExtensionSlots.ts 头注释）。
+// resizeObserverMock 为纯 jsdom polyfill（Radix use-size），与槽位注册互无依赖；
+// 两项需同时存在于单子项 setup（dev 合并时误配为后者覆盖前者）。
+// jest 的 projects 配置不继承根级字段，project 内需重复引用（与 testMatch/transform 同理）。
+const setupFiles = [
+  '<rootDir>/test/mocks/resizeObserverMock.js',
+  '<rootDir>/test/setup/registerExtensionSlots.ts',
+];
+
 module.exports = {
   testEnvironment: 'node',
   testEnvironmentOptions: {},
@@ -62,6 +72,7 @@ module.exports = {
   // Radix UI 的 Popper/Select/Popover/Tooltip 在 jsdom 下异步渲染较慢，
   // 默认 5000ms 超时不足，统一设为 30000ms 避免环境性超时。
   testTimeout: 30000,
+  setupFiles,
   // 标记 `@jest-environment` docblock生效；test 目录中带 `/** @jest-environment jsdom */` 的测试自动使用 jsdom
   projects: [
     {
@@ -71,8 +82,8 @@ module.exports = {
       transform,
       moduleNameMapper,
       transformIgnorePatterns,
-      setupFiles: ['<rootDir>/test/mocks/resizeObserverMock.js'],
       testTimeout: 30000,
+      setupFiles,
     },
   ],
 };

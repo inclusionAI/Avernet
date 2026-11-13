@@ -15,10 +15,10 @@ import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
   resolveChatRuntimeStage,
-  resolveUserId,
   withFriendBotRequestParams,
   type ChatBotView,
 } from './botSessionService';
+import { resolveUserId } from './resolveUserId';
 
 export interface BotChatRequest {
   content: string;

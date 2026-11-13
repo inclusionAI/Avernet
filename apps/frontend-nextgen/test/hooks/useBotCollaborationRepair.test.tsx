@@ -1,12 +1,12 @@
 /** @jest-environment jsdom */
 import { useBotCollaborationRepair } from '@/hooks/useBotCollaborationRepair';
-import { botCollaborationRepairService } from '@/services/botWorkshop/botCollaborationRepairService';
-import type { CollaborationRepairReport } from '@/services/botWorkshop/botCollaborationRepairService';
+import { botCollaborationRepairService } from '@/services/bots/botCollaborationRepairService';
+import type { CollaborationRepairReport } from '@/services/bots/botCollaborationRepairService';
 import { safeReportError } from '@/utils/errorToast';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
 
-jest.mock('@/services/botWorkshop/botCollaborationRepairService', () => ({
+jest.mock('@/services/bots/botCollaborationRepairService', () => ({
   botCollaborationRepairService: { repair: jest.fn(), pending: jest.fn() },
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn() } }));

@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { CollaborationRepairRow } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog/CollaborationRepairRow';
-import type { CollaborationRepairReport } from '@/services/botWorkshop/botCollaborationRepairService';
+import type { CollaborationRepairReport } from '@/services/bots/botCollaborationRepairService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { toast } from 'sonner';

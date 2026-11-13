@@ -4,7 +4,7 @@ import BotPrimaryActionsCell from '@/components/BotWorkshop/BotCard/BotPrimaryAc
 import BotStatusCell from '@/components/BotWorkshop/BotCard/BotStatusCell';
 import { useBotWorkshopActions } from '@/hooks/useBotWorkshopActions';
 import { botManagementActionService } from '@/services/botWorkshop/botManagementActionService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import '@testing-library/jest-dom';

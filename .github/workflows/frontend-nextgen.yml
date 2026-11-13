@@ -75,6 +75,9 @@ jobs:
       - name: Run frontend CI
         run: npm run ci
 
+      - name: Build collab form
+        run: npm run build:collab
+
   a2a-chat-client:
     name: Shared a2a-chat-client package checks
     runs-on: ubuntu-latest

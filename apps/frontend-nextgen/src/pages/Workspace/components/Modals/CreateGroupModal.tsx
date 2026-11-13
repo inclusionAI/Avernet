@@ -1,5 +1,6 @@
 import { Modal, ModalContent } from '@/components/ui/Modal';
 import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
+import { getExtensionSlots } from '@/extensions/slots';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { cn } from '@/utils/cn';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -8,7 +9,6 @@ import { useCollaborationTemplates } from '../../hooks/useCollaborationTemplates
 import { useCreateGroup } from '../../hooks/useCreateGroup';
 import { useGroupCollaborationPicker } from '../../hooks/useGroupCollaborationPicker';
 import { useParticipantBinding } from '../../hooks/useParticipantBinding';
-import { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
 import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
@@ -21,6 +21,7 @@ import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
+import { useResolvedServiceBotRouting } from './serviceBotRoutingSlots';
 import { useGoalAutoSelect } from './useGoalAutoSelect';
 
 export type { CreateGroupModalProps } from './CreateGroupModal.types';
@@ -77,7 +78,7 @@ export function CreateGroupModal({
   const allBotName = (botId: string) => allAvailableBots.find((b) => b.id === botId)?.name ?? botId;
   const boundBotIds = Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean)));
   const participantBotIds = kind === 'task_dag' ? boundBotIds : botUuids;
-  const routing = useServiceBotRouting(participantBotIds, open);
+  const routing = useResolvedServiceBotRouting(participantBotIds, open);
   const activeRoleBotId = binding.participantBindings[binding.activeParticipantKey] ?? '';
   const boundBotOptions = boundBotIds.map(
     (id) => allAvailableBots.find((bot) => bot.id === id) ?? { id, name: allBotName(id) },
@@ -144,7 +145,9 @@ export function CreateGroupModal({
     kind === 'task_dag' ? Object.values(binding.participantBindings).some(Boolean) : botUuids.length > 0;
   const hasLeader = kind === 'task_dag' ? true : kind === 'free_chat' ? Boolean(driverBotId) : Boolean(managerBotId);
   const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag && routing.ready;
-  const viaExecute = kind === 'task_dag' && enableTaskExecute;
+  const taskExecuteAvailable = Boolean(getExtensionSlots().groupTasks?.createGroupViaExecute);
+  const effectiveTaskExecute = taskExecuteAvailable && enableTaskExecute;
+  const viaExecute = kind === 'task_dag' && effectiveTaskExecute;
   const humanNotifySlot = viaExecute ? null : <CreateGroupHumanNotifyMode {...humanNotify} />;
   const bindingSlot: ReactNode = (
     <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding}
@@ -200,7 +203,7 @@ export function CreateGroupModal({
         context: context.trim() || undefined,
         participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
       },
-      { viaExecute: enableTaskExecute },
+      { viaExecute: effectiveTaskExecute },
     );
     if (res.ok) onCreated(res.data);
   };
@@ -225,23 +228,20 @@ export function CreateGroupModal({
             )}
           >
             <GroupConfigFields
-              kind={kind}
-              name={name}
-              context={context}
-              driverBotId={driverBotId}
-              managerBotId={managerBotId}
+              kind={kind} name={name} context={context}
+              driverBotId={driverBotId} managerBotId={managerBotId}
               deliveryPolicy={deliveryPolicy}
               definitionYaml={definitionYaml}
               yamlValidated={kind === 'task_dag' && binding.yamlValidation.isValidated}
               leaderOptions={leaderOptions}
               supportsStateMachine={supportsStateMachine}
-              viaExecute={enableTaskExecute}
+              allowTaskExecute={taskExecuteAvailable}
+              viaExecute={effectiveTaskExecute}
               onViaExecuteChange={(value) => {
                 clearError();
                 setEnableTaskExecute(value);
               }}
-              templateSlot={templateSlot}
-              bindingSlot={bindingSlot}
+              templateSlot={templateSlot} bindingSlot={bindingSlot}
               humanNotifySlot={humanNotifySlot}
               onKindChange={switchKind}
               onNameChange={setField(setName)}

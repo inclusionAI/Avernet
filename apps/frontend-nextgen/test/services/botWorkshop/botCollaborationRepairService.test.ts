@@ -1,7 +1,7 @@
 import { repairBotCollaboration } from '@/services/backendApi/bots/botCollaborationRepairController';
 import type { BackendApiEnvelope } from '@/services/backendApi/types';
-import { botCollaborationRepairService } from '@/services/botWorkshop/botCollaborationRepairService';
-import { parseCollaborationRepairReport } from '@/services/botWorkshop/collaborationRepairReport';
+import { botCollaborationRepairService } from '@/services/bots/botCollaborationRepairService';
+import { parseCollaborationRepairReport } from '@/services/bots/collaborationRepairReport';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botCollaborationRepairController');

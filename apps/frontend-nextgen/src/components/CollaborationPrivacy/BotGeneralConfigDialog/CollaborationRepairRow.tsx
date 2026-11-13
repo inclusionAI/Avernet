@@ -6,7 +6,7 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { useBotCollaborationRepair } from '@/hooks/useBotCollaborationRepair';
-import type { CollaborationRepairReport } from '@/services/botWorkshop/botCollaborationRepairService';
+import type { CollaborationRepairReport } from '@/services/bots/botCollaborationRepairService';
 
 type ReportItem = CollaborationRepairReport['items'][number];
 // 报告分项固定三项（backend 不再下发 caller_config）。

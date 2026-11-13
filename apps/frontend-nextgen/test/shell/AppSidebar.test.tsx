@@ -58,6 +58,9 @@ jest.mock('@/shell/HelpMenu', () => ({
 
 // 先注册所有 mock，再加载会间接导入 @umijs/max 的侧栏模块。
 const { AppSidebar } = require('@/shell/AppSidebar') as typeof import('@/shell/AppSidebar');
+// 同一模块注册表条目（AppSidebar 内的 './GlobalSearch' 解析到同一 exports 对象），
+// 供下方 globalSearch=false 用例 spy GlobalSearchDialog 的挂载调用。
+const GlobalSearchModule = require('@/shell/GlobalSearch') as typeof import('@/shell/GlobalSearch');
 
 const renderSidebar = (props: Partial<Parameters<typeof AppSidebar>[0]> = {}) =>
   render(
@@ -195,7 +198,7 @@ it('internal overlay：空间切换器以 compact 形态挂在 Bot 分组标题�
   extendCapabilities({
     getShellVisibility: () => ({
       status: 'available',
-      value: { spaceSwitcher: true, notificationBell: true },
+      value: { spaceSwitcher: true, notificationBell: true, globalSearch: true },
     }),
   });
   const view = renderSidebar();
@@ -235,9 +238,38 @@ it('notificationBell=false 形态：通知中心入口不渲染', () => {
   extendCapabilities({
     getShellVisibility: () => ({
       status: 'available',
-      value: { spaceSwitcher: false, notificationBell: false },
+      value: { spaceSwitcher: false, notificationBell: false, globalSearch: true },
     }),
   });
   renderSidebar();
   expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
+});
+
+// globalSearch 门控三处独立（展开钮 / 折叠钮 / GlobalSearchDialog 挂载），拆掉任何一处都必须有测试变红：
+// - 两形态渲染均断言「搜索」钮不存在，且通知中心仍在（正控：确认侧栏整体已渲染、非全军覆没）；
+// - GlobalSearchDialog 关闭态本身渲染 null（其内部 `if (!open) return null`），DOM 断言无从区分
+//   「挂载但关闭」与「未挂载」，故直接 spy 模块导出的组件挂载调用——删除弹窗挂载门时
+//   组件以 open=false 挂载，spy 被调用 → 本用例失败而非安静通过。
+it('globalSearch=false 形态：两形态搜索钮与搜索弹窗均不渲染挂载', () => {
+  const dialogSpy = jest
+    .spyOn(GlobalSearchModule, 'GlobalSearchDialog')
+    .mockReturnValue(<div data-testid="global-search-dialog-mounted" />);
+  extendCapabilities({
+    getShellVisibility: () => ({
+      status: 'available',
+      value: { spaceSwitcher: false, notificationBell: true, globalSearch: false },
+    }),
+  });
+  // 展开态：品牌行搜索钮不渲染，通知中心正控在场
+  const expanded = renderSidebar();
+  expect(expanded.queryByRole('button', { name: '搜索' })).not.toBeInTheDocument();
+  expect(expanded.getByTestId('notification-bell')).toBeInTheDocument();
+  expect(dialogSpy).not.toHaveBeenCalled();
+  expanded.unmount();
+  // 折叠态：图标列搜索钮同样不渲染（独立于展开态的门）
+  renderSidebar({ collapsed: true });
+  expect(screen.queryByRole('button', { name: '搜索' })).not.toBeInTheDocument();
+  expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
+  expect(dialogSpy).not.toHaveBeenCalled();
+  dialogSpy.mockRestore();
 });

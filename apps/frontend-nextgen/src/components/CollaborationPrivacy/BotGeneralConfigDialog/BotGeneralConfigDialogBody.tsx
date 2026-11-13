@@ -30,7 +30,8 @@ import { useBotCollaborationRepair } from '@/hooks/useBotCollaborationRepair';
 import { useBotPublishApproval } from '@/hooks/useBotPublishApproval';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import type { UseHumanIdentityResult } from '@/hooks/useHumanIdentity';
-import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
+// BotDomain 与公开设置可用性策略均取 Domain 真源（collab 闭包禁入 services/botWorkshop/*）。
+import { getGeneralConfigAvailability, type BotDomain } from '@/domain/botWorkshop';
 import { Copy, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 
 export interface BotGeneralConfigDialogProps {

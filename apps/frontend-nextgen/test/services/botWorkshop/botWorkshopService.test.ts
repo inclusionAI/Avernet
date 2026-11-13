@@ -3,7 +3,7 @@ import { createBot, getBot, listBotInventory, pollBotAuthStatus, restartBot } fr
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
 import { afterEach, describe, expect, test } from '@jest/globals';
 

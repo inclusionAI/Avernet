@@ -1,5 +1,5 @@
-import { botCollaborationRepairService as service } from '@/services/botWorkshop/botCollaborationRepairService';
-import type { CollaborationRepairReport } from '@/services/botWorkshop/botCollaborationRepairService';
+import { botCollaborationRepairService as service } from '@/services/bots/botCollaborationRepairService';
+import type { CollaborationRepairReport } from '@/services/bots/botCollaborationRepairService';
 import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';

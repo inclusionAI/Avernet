@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { useBotChats } from '@/hooks/useBotChats';
 import { botChatService } from '@/services/botWorkshop/botChatService';
-import { identityService } from '@/services/workspace';
+import { identityService } from '@/services/workspace/identityService';
 import { useBotChatStore } from '@/stores/botChatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -21,9 +21,13 @@ jest.mock('@/services/botWorkshop/botChatService', () => ({
   },
 }));
 jest.mock('sonner', () => ({ toast: { error: jest.fn(), warning: jest.fn() } }));
-jest.mock('@/services/workspace', () => ({
+jest.mock('@/services/workspace/identityService', () => ({
   identityService: { loadIdentities: jest.fn() },
+}));
+jest.mock('@/services/workspace/testUser', () => ({
   isTestUserIdentity: jest.fn(() => false),
+}));
+jest.mock('@/services/workspace/resolveUserId', () => ({
   resolveUserId: jest.fn((value: string) => value),
 }));
 

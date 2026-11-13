@@ -3,7 +3,7 @@ import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { toBotCreateRequest } from '@/services/botWorkshop/botCreatePolicy';
 import { resolveAfterCreateActions, runAfterCreateActions } from '@/services/botWorkshop/agentCodingAfterCreateService';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import {
   createExpertBot,
   classifyExpertSubmissionFailure,

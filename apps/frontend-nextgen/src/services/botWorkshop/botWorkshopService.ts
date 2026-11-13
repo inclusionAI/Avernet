@@ -26,7 +26,7 @@ import { agentCodingTemplateService, type AgentCodingTemplate } from './agentCod
 import { botAvatarService } from './botAvatarService';
 import { personalCreateSpace, toBotCreateRequest, validateBotCreate } from './botCreatePolicy';
 import { botEditorService } from './botEditorService';
-import { mapBotDto, mapBotList } from './botMapper';
+import { mapBotDto, mapBotList } from '@/services/bots/botMapper';
 import type { BotRestartResponse } from './botRestartTracking';
 import { localBotService } from './localBotService';
 import type {

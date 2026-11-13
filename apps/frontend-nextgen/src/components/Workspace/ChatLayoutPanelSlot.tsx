@@ -27,7 +27,8 @@ import {
 } from '@/services/tasks/taskConversationNavigation';
 import { persistPanelWidthPercent, TASK_PANEL_INITIAL_WIDTH } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import { taskNavigationAwareHandle, onTaskPanelTabClosed } from '@/services/tasks/panel/taskPanelHandleAdapter';
+import { getExtensionSlots } from '@/extensions/slots';
+
 import type { PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { PanelRegistryContext } from '@tc-chat/ui/es/ChatLayout/context';
@@ -43,6 +44,10 @@ import {
   useRef,
   useState,
 } from 'react';
+
+function taskNavigationAwareHandle(handle: PanelHandle): PanelHandle {
+  return getExtensionSlots().taskPanelHost?.wrapHandle(handle) ?? handle;
+}
 
 /** Root cloneElement 注入的内部 props（公开类型未声明，运行时存在）。 */
 type ChatLayoutPanelInjectedProps = {
@@ -96,7 +101,7 @@ export const ChatLayoutPanelSlot = forwardRef<PanelHandle, ChatLayoutPanelSlotPr
     [rootIsOpenChange, onOpenStateChange],
   );
   const handleTabClose = useCallback<NonNullable<ChatLayoutPanelProps['onTabClose']>>((id) => {
-    onTaskPanelTabClosed(id);
+    getExtensionSlots().taskPanelHost?.onTabClosed(id);
     injected.onTabClose?.(id);
   }, [injected.onTabClose]);
   // containerWidth 尚未由 SDK ResizeObserver 测得时，SDK 会忽略 active tab 的

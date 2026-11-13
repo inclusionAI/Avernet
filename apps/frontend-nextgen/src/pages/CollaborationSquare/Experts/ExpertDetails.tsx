@@ -1,4 +1,3 @@
-import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +6,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useExpertDetails } from '@/hooks/useExpertDetails';
 import { initSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import { ArrowLeft, Bot, FileText, Plug, RefreshCw } from 'lucide-react';
 import MarkdownIt from 'markdown-it';
 import { useEffect, useState } from 'react';

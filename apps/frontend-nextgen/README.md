@@ -119,3 +119,69 @@ its platform archives/installer pass release gates; then update all pinned links
 Closing the registration guide reloads the external Bot list and reachability.
 OpenClaw setup separates Bot type selection from terminal installation versus
 sending onboarding instructions to the Bot.
+
+## General configuration service capabilities
+
+BCN-only `collab` does not use the organization directory or the engine asset
+catalog. These dependencies are controlled independently of login identity and
+user-profile presentation:
+
+| Capability | Open Core | collab | Full internal overlay |
+| --- | --- | --- | --- |
+| `getOrganizationDirectoryEnabled` | false | false | true |
+| `getCollaborationBotEngineLabelEnabled` | true | false | true |
+
+When the directory is unavailable, general configuration resolves the current
+user from the authenticated identity and makes no organization user, department
+hydration, synchronization, or department search requests. Department names
+already included in Bot DTOs remain in the domain model. Organization-restricted
+visibility and historical organization-scope viewer actions are hidden; existing
+restricted configurations can be replaced by either supported visibility value.
+Friend approval retains the existing two-option collab policy. Disabling engine
+enrichment skips `/openapi/v1/bots` in both general configuration and shell identity
+initialization, without discarding an engine/provider already
+included in the collaboration Bot response. Capabilities are read at request
+time, after extension registration, including when refreshing configuration.
+
+## Collab public discovery
+
+`FRONTEND_FORM=collab` (or `npm run build:collab`) retains three sidebar entries:
+协作群, 发现, 外部 Bot. Discovery defaults to `/collaboration-square/bots` and
+also exposes `/collaboration-square/groups`; experts and task pages remain absent.
+
+The collab assembly fixes `getPublicBotBackendEnabled()` to `false` and
+`getDiscoveryExpertsEnabled().value` to `false`. Deployment runtime configuration
+cannot re-enable Backend metadata/profile enhancement or Human single-chat entry.
+Human cards for existing friends and managed Bots have no conversation button;
+accepted friendships update their state without opening a private session.
+Public groups retain member inspection and BCS session creation, navigating to
+`/workspace/collaboration`. Open defaults retain their existing expert and chat
+behavior.
+
+See `specs/2026-11-11-collab-discovery/` for scope and validation. The closure guard
+allows only the two explicit discovery page files and rejects the legacy
+full/task shell, hook, adapter and BBS transport. OCB export/overlay tests must
+consume this public assembly and update their navigation expectations; private
+artifact/image verification must be run separately in that repository.
+
+### Shared task-panel isolation
+
+Open registers the shared task asset through the `taskPanelHost` extension slot:
+trusted rendering of historical task UMD declarations, SDK handle/tab lifecycle,
+and stale-conversation cleanup. Collab registers `null`, keeps generic BCS UMD
+panels, and rejects historical task declarations without loading their CDN URLs.
+The closure guard rejects the new `services/tasks/panel/` runtime as well as the
+legacy task tree. Open group recovery uses a slot-owned history reader and exposes
+incomplete/error retry state; collab uses idle recovery without task requests.
+The pure slot contract remains independent of the standalone task asset so a
+collab source slice can still typecheck after that asset is omitted.
+
+### Collab friend requests
+
+The public Bot header adds **好友申请** after the identity picker only in collab
+(`getCollabFriendRequestsEnabled`: default false, collab true). The modal loads
+sent/received pending requests for the selected identity, batches BCS `bots/query`
+for Bot names/avatars, and allows accepting/rejecting received requests. It does
+not use the Backend message center or open private chat. See the
+[friend-request flow, contracts and failure behavior](docs/collab-friend-requests.md)
+and [change spec](specs/2026-11-11-collab-friend-requests/spec.md).

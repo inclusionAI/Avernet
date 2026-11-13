@@ -1,6 +1,6 @@
 import type { GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
-import { resolveUserId } from '@/services/workspace/botSessionService';
+import { resolveUserId } from '@/services/workspace/resolveUserId';
 import { useMemo } from 'react';
 
 export function useGroupTaskComposerContext(

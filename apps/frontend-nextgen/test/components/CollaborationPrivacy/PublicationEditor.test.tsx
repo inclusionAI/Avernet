@@ -9,8 +9,10 @@ import { history } from '@umijs/max';
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 
 let mockRestrictedPublicationScopeEnabled = true;
+let mockOrganizationDirectoryEnabled = true;
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
+    getOrganizationDirectoryEnabled: () => ({ status: 'available', value: mockOrganizationDirectoryEnabled }),
     getRestrictedPublicationScopeEnabled: () => ({ status: 'available', value: mockRestrictedPublicationScopeEnabled }),
   }),
 }));
@@ -27,6 +29,7 @@ const addedEntry: OrganizationSearchEntry = {
 describe('PublicationEditor', () => {
   beforeEach(() => {
     mockRestrictedPublicationScopeEnabled = true;
+    mockOrganizationDirectoryEnabled = true;
   });
 
   afterEach(() => {
@@ -91,6 +94,42 @@ describe('PublicationEditor', () => {
     expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
   });
 
+  it.each(['user', 'bot'] as const)(
+    '目录不可用时 %s 外部 Bot 仅有两种可见性，并可替换历史限定范围',
+    async (audience) => {
+      mockOrganizationDirectoryEnabled = false;
+      const onSearch = jest.fn(async () => []);
+      const onSubmit = jest.fn();
+      render(
+        <PublicationEditor
+          open
+          audience={audience}
+          isExternalBot
+          initialConfig={{
+            scope: 'restricted',
+            organizationPaths: [existingEntry.path],
+            organizationEntries: [existingEntry],
+          }}
+          onSearch={onSearch}
+          onClose={jest.fn()}
+          onSubmit={onSubmit}
+        />,
+      );
+      expect(screen.getAllByRole('radio')).toHaveLength(2);
+      expect(screen.queryByRole('radio', { name: /限定组织可申请/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /不可见/ })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByText(/已下线/)).toBeInTheDocument();
+      expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('radio', { name: /全部可见/ }));
+      fireEvent.click(screen.getByRole('button', { name: '保存' }));
+      expect(onSubmit).toHaveBeenCalledWith(
+        { scope: 'all', organizationPaths: [], organizationEntries: [] },
+        undefined,
+      );
+      expect(onSearch).not.toHaveBeenCalled();
+    },
+  );
+
   it('restores configured departments and submits their codes with original department names', async () => {
     jest.useFakeTimers();
     const onSubmit = jest.fn();
@@ -139,7 +178,7 @@ describe('PublicationEditor', () => {
     );
   });
 
-  it('外部 Bot 始终提供限定组织可申请，按保存语义提交组织完整名称', async () => {
+  it('目录可用时外部 Bot 提供限定组织可申请，按保存语义提交组织完整名称', async () => {
     // TC Open Core 会隐藏受限选项，但外部 Bot 合同必须提供限定组织可申请（PATCH 直改）。
     mockRestrictedPublicationScopeEnabled = false;
     jest.useFakeTimers();
@@ -186,7 +225,7 @@ describe('PublicationEditor', () => {
     );
   });
 
-  it('外部 Bot 已配置的名称范围回显不因能力开关降级为不可见', () => {
+  it('目录可用时外部 Bot 名称范围不因 TC 审批开关降级为不可见', () => {
     mockRestrictedPublicationScopeEnabled = false;
     render(
       <PublicationEditor

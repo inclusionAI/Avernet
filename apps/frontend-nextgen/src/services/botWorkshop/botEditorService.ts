@@ -399,10 +399,4 @@ export const botEditorService = {
     const response = await botEditorController.getEngineDefaultConfig(botId, ownerId);
     return dataOr(response.data?.config, {}) as BotEngineConfig;
   },
-  async loadApproval(botId: string, ownerId?: string) {
-    const response = await botEditorController.getApprovalConfig(botId, ownerId);
-    return Boolean(response.data?.should_approval);
-  },
-  saveApproval: (botId: string, enabled: boolean, ownerId?: string) =>
-    botEditorController.updateApprovalConfig(botId, enabled, ownerId),
 };

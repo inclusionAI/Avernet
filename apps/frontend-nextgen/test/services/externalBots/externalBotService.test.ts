@@ -1,6 +1,6 @@
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
-import { externalBotService } from '@/services/botWorkshop/externalBotService';
+import { externalBotService } from '@/services/externalBots/externalBotService';
 
 jest.mock('@/services/backendApi/bots/botController', () => ({ listBots: jest.fn() }));
 jest.mock('@/services/backendApi/collaboration/collaborationBotController', () => ({ listMyBots: jest.fn() }));

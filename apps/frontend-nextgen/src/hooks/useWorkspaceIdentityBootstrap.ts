@@ -1,4 +1,5 @@
-import { ENABLE_TEST_USER, TEST_USER_IDENTITY, TEST_USER_IDENTITY_ID, workspaceService } from '@/services/workspace';
+import { ENABLE_TEST_USER, TEST_USER_IDENTITY, TEST_USER_IDENTITY_ID } from '@/services/workspace/testUser';
+import { workspaceService } from '@/services/workspace/workspaceService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useEffect } from 'react';

@@ -1,7 +1,7 @@
-import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
-import { SafeHtml } from '@/components/Common/RichContent';
 import { Button } from '@/components/ui/Button';
 import type { JsonObject } from '@/domain/evolution/types';
+import { SafeHtml } from '@/shared/html/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import { history, useParams } from '@umijs/max';
 import { ArrowUpRight } from 'lucide-react';
 import MarkdownIt from 'markdown-it';

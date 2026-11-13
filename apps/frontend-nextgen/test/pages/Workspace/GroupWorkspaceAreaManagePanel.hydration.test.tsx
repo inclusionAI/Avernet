@@ -7,6 +7,10 @@
  * - 显式空详情标记为已加载，不无限重拉；
  * - 面板关闭时新列表不触发任何详情补拉（头像预算 AC-02）。
  */
+// GroupWorkspaceArea 经下方 require 加载（在 jest.mock 之后求值）：届时 useGroupChatHeaderPanels
+// 在模块作用域解析 bootstrap/taskTab 槽位——helper 必须在其之前注册真实 Open 槽位，
+// 否则命中全局 setup 的抛错占位（见 test/helpers/registerOpenTaskPanelBootstrapSlot 头注释）。
+import '../../helpers/registerOpenTaskPanelBootstrapSlot';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';

@@ -10,7 +10,7 @@ import {
   type PublicBot,
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
-import { CollaborationSquareError, collaborationSquareBotService } from '@/services/collaborationSquare';
+import { CollaborationSquareError, collaborationSquareBotService } from '@/services/collaborationSquare/publicDiscoveryRuntime';
 import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
 import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';

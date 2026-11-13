@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 

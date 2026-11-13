@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
-import { loadBcsGroupDetail, loadBcsGroupSessions } from '@/services/workspace/groupExecuteService';
+// 2026-11 collab-form Task 7A:loadBcsGroupDetail / loadBcsGroupSessions 自 groupExecuteService
+// 拆至 groupBcsReadService（execute 建群器与 BCS 只读链路解耦），本套改引新模块。
+import { loadBcsGroupDetail, loadBcsGroupSessions } from '@/services/workspace/groupBcsReadService';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
@@ -27,7 +29,7 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
-describe('groupExecuteService ACE 旁路守护', () => {
+describe('groupBcsReadService ACE 旁路守护', () => {
   it('loadBcsGroupSessions ACE body → 登记跳转并返回空成功', async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonOk(aceBody));
 

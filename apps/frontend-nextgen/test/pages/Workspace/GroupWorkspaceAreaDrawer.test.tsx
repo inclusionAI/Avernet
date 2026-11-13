@@ -175,6 +175,14 @@ jest.mock('@/components/ui', () => {
   };
 });
 
+// 槽位真实装配必须先于下方 require('@/pages/Workspace/GroupWorkspaceArea') 触发的 hook 模块求值
+// （useGroupChatHeaderPanels 在模块作用域解析 taskPanelBootstrap 槽位，一次性绑定）。
+// 注意不能提升为顶部静态 import：bootstrap 链（useSessionTaskPanelBootstrap → capabilities →
+// stores/workspaceStore）会在此首次触发本套件的 workspaceStore mock 工厂，而该工厂
+// 在工厂期即读取 mockUseWorkspaceStore 的值——import 阶段该 var 尚未初始化（babel 降级后无 TDZ，
+// 会静默注册出 undefined 实现并永久缓存）；置于文件体内则 mockUseWorkspaceStore 已就绪。
+require('../../helpers/registerOpenTaskPanelBootstrapSlot');
+
 const { GroupWorkspaceArea } =
   require('@/pages/Workspace/GroupWorkspaceArea') as typeof import('@/pages/Workspace/GroupWorkspaceArea');
 

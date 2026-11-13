@@ -1,23 +1,14 @@
 import { notifyError } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { generateBotAvatarBatch } from '@/services/botWorkshop/botAvatarGenerator';
+import type { AvatarEditorProps } from '@/extensions/contracts/avatar';
 import { ImageUp, RefreshCw } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
-export interface BotAvatarEditorProps {
-  value: string;
-  onChange: (url: string) => void;
-  seed: string;
-  disabled?: boolean;
-  /** 宿主自带上传入口时隐藏基础「上传图片」按钮，避免出现双上传入口。 */
-  hideUpload?: boolean;
-  /** 追加到动作行的额外按钮（如内部形态的 AI 生成头像），与「换一批/上传图片」同行同规格展示。 */
-  extraActions?: React.ReactNode;
-  /** 编辑器宿主浮层（上传/AIGC 等）开合上报；宿主据此抑制外层 Popover/Dialog 的外点关闭连坐。 */
-  onOverlayOpenChange?: (open: boolean) => void;
-}
-export default function AvatarEditor({ value, onChange, seed, disabled, hideUpload, extraActions }: BotAvatarEditorProps) {
+// props 契约已上移至 src/extensions/contracts/avatar.ts（collab-form Task 17 源切片类型完备），
+// 本文件反向 import 契约注解，签名漂移在 typecheck 阶段失配。
+export default function AvatarEditor({ value, onChange, seed, disabled, hideUpload, extraActions }: AvatarEditorProps) {
   const [batch, setBatch] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const variants = useMemo(() => generateBotAvatarBatch(seed, batch), [seed, batch]);

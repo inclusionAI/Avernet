@@ -1,3 +1,4 @@
+import type { TaskLinkedSessionProps } from '@/extensions/contracts/groupTasks';
 import { TaskPanelAssetBoundary } from './TaskPanelAssetBoundary';
 import type { TaskNodeView } from '@avernet-assets/task-panel';
 import type { TaskLinkedSessionTarget } from '@/stores/taskSidePanelStore';
@@ -16,15 +17,8 @@ function isGroupSession(target: TaskLinkedSessionTarget): boolean {
  * GroupSessionView 负责读取目标会话；底部输入框创建独立、绑定目标 session 的 Provider，
  * 避免复用宿主原会话的发送回调而把消息误投到切换前的会话。
  */
-export function TaskLinkedSession({
-  target,
-  userId,
-  onClose,
-}: {
-  target: TaskLinkedSessionTarget;
-  userId?: string;
-  onClose: () => void;
-}) {
+// props 契约已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备）。
+export function TaskLinkedSession({ target, userId, onClose }: TaskLinkedSessionProps) {
   const group = isGroupSession(target);
   const executor = group ? null : target.botId ?? null;
   const [refreshVersion, setRefreshVersion] = useState(0);

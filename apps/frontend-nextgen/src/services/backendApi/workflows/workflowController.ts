@@ -7,12 +7,10 @@
  */
 import { backendRequest } from '../httpClient';
 
-export interface WorkflowListItem {
-  workflowId: string;
-  title: string;
-  packId: string | null;
-  updatedAt: number;
-}
+// WorkflowListItem 契约已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备：
+// 槽位编排结果不得依赖本任务栈控制器），此处保留下沉 re-export 兼容既有 taskService/taskEscort 导入面。
+import type { WorkflowListItem } from '@/extensions/contracts/groupTasks';
+export type { WorkflowListItem };
 
 export interface WorkflowSpec {
   id: string;

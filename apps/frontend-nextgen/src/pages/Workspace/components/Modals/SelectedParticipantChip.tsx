@@ -2,9 +2,16 @@ import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { SERVICE_BOT_STAGE_OPTIONS } from '@/domain/collaboration/serviceBotRouting';
+import type { ServiceBotRoutingModel } from '@/extensions/contracts/groupRouting';
+import { getExtensionSlots } from '@/extensions/slots';
 import { X } from 'lucide-react';
-import type { useServiceBotRouting } from '../../hooks/useServiceBotRouting';
-import { ServiceBotRoutingControl } from './ServiceBotRoutingControl';
+
+// 选路控件槽位（collab 形态 null：chip 不渲染 segmented 选路控件）。
+// 模块图不变量（见 src/extensions/slots.ts）：本文件解析的是「求值时刻」的注册表，不得被
+// src/extensions 装配图静态引达（否则会捕获全 null 默认槽位，静默丢弃 Open 选路控件）。
+// routing 的类型经槽位契约供给（collab-form Task 17 源切片类型完备）：useServiceBotRouting
+// hooks 文件属 pages 裁剪面，保留链不得 type-only 依赖它（运行时守卫擦除此类边，源切片则会漏文件）。
+const RoutingControl = getExtensionSlots().groupServiceBotRouting?.ServiceBotRoutingControl;
 
 export function SelectedParticipantChip({
   bot,
@@ -12,7 +19,7 @@ export function SelectedParticipantChip({
   onRemove,
 }: {
   bot: { id: string; name: string; avatarUrl?: string };
-  routing?: ReturnType<typeof useServiceBotRouting>;
+  routing?: ServiceBotRoutingModel;
   onRemove?: () => void;
 }) {
   const state = routing?.states[bot.id];
@@ -40,7 +47,7 @@ export function SelectedParticipantChip({
           <TooltipContent>{bot.name}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
-      {routing && <ServiceBotRoutingControl actorId={bot.id} botName={bot.name} routing={routing} />}
+      {routing && RoutingControl ? <RoutingControl actorId={bot.id} botName={bot.name} routing={routing} /> : null}
       {onRemove && (
         <Button
           variant="ghost"

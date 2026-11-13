@@ -4,6 +4,7 @@ import { CollaborationGroupLaunchObserver } from '@/components/CollaborationGrou
 import { InviteCodeBindingModal } from '@/components/InviteCodeBindingModal';
 import { Toaster } from '@/components/ui/sonner';
 import { appExtension, registerSidePanelWiring } from '@/extensions';
+import { getExtensionSlots } from '@/extensions/slots';
 import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
 import { useGatewayLoginRedirect } from '@/hooks/useGatewayLoginRedirect';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
@@ -72,12 +73,15 @@ function ErrorNotifyObserver() {
 }
 
 export function rootContainer(container: React.ReactNode) {
+  // 任务会话联动观察者经槽位装配：collab 形态为 null（无任务栈），Open/internal 为真实观察者。
+  const TaskObserver = getExtensionSlots().taskSessionNavigationObserver;
   return React.createElement(
     React.Fragment,
     null,
     container,
     React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
+    TaskObserver ? React.createElement(TaskObserver) : null,
     React.createElement(CollaborationGroupLaunchObserver),
     React.createElement(ExternalLoginPromptModal),
     React.createElement(InviteCodeBindingModal),

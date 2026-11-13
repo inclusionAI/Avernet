@@ -6,7 +6,7 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -27,9 +27,6 @@ jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
   agentCodingTemplateService: {
     list: jest.fn(),
   },
-  supportsServiceBot: jest.fn(() => false),
-  getBcnCapability: jest.fn(),
-  getServiceBotCapability: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {

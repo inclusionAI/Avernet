@@ -124,7 +124,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       }),
       getShellVisibility: () => ({
         status: 'available',
-        value: { spaceSwitcher: true, notificationBell: true },
+        value: { spaceSwitcher: true, notificationBell: true, globalSearch: true },
       }),
     });
 

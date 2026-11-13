@@ -2,10 +2,7 @@ import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdent
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import {
-  getCollaborationBotConversationUrl,
-  getCollaborationGroupConversationUrl,
-} from '@/utils/collaborationSquare';
+import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import { Bot, Terminal } from 'lucide-react';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
@@ -250,6 +247,9 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core 默认不暴露内部侧栏导航项（能力工坊/能力市场），符合 open-core-export-plan §5.2
   // 「导航中的内部入口」按开源模式分隔的强约束。internal overlay 经 extensions/internal.ts 覆盖注入。
   getInternalNavigationItems: () => ({ status: 'available', value: [] }),
+  // Open Core 默认 null = 沿用 shell/navigation 基线导航数组（不 import 该模块，避免依赖环）；
+  // collab 形态经 src/extensions/collab.ts 覆盖为三项。
+  getPrimaryNavigationItems: () => ({ status: 'available', value: null }),
   // Open Core 默认不收录内部 route meta（/capability-workshop/*、/market/* 已从 routeMetaList 剥离）。
   getInternalRouteMetas: () => ({ status: 'available', value: [] }),
   // Open Core 引擎可选清单：OpenClaw + 原生 Claude Code 直建入口（阿里云部署依赖原生 claude_code
@@ -339,6 +339,10 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
+  // 组织目录是独立数据面，不由身份展示偏好决定；内部全量形态显式开启。
+  getOrganizationDirectoryEnabled: (): CapabilityResult<boolean> => ({ status: 'available', value: false }),
+  // 引擎目录只用于标签补充；BCN-only collab 在装配根关闭该可选依赖。
+  getCollaborationBotEngineLabelEnabled: (): CapabilityResult<boolean> => ({ status: 'available', value: true }),
   // Open Core（外部部署）不提供组织目录限制公开能力；两个公开 audience 仅保留“不公开/全部公开”。
   getRestrictedPublicationScopeEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
@@ -354,17 +358,24 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
-  // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true），
-  // 不展示侧栏空间切换器（spaceSwitcher=false）；空间数据链路（initSpaceContext / 默认个人空间）
-  // 与此开关无关，不受本默认值影响。internal overlay 覆盖为两项全 true（extensions/internal.ts）。
+  // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true）与
+  // 侧栏品牌区搜索入口（globalSearch=true），不展示侧栏空间切换器（spaceSwitcher=false）；
+  // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
+  // internal overlay 覆盖为三项全 true（extensions/internal.ts）。
   // BCS-only 部署形态经同一 publicBotBackendEnabled() 决策隐藏铃铛：Backend 可选增强关闭时
   // 铃铛不挂载，未读轮询随 AppSidebar 条件挂载自然停止（不在 notification service 捕获 404 伪装禁用）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getPublicBotBackendEnabled: publicBotBackendEnabled,
+  getDiscoveryExpertsEnabled: () => ({ status: 'available', value: true }),
+  getCollabFriendRequestsEnabled: () => ({ status: 'available', value: false }),
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled() },
+    value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled(), globalSearch: true },
   }),
+  // Open Core 空间上下文双初始化（挂载 ensurePersonalSpaceOnAppEntry + Bot 分组 initSpaceContext）
+  // 默认开启（现状行为零变化）；collab 装配（src/extensions/collab.ts）覆盖为 false，
+  // 两条链路在请求发起前整体短路。与 spaceSwitcher 可见性开关正交（见 AppShell 消费用例）。
+  getSpaceContextInitializationEnabled: () => ({ status: 'available', value: true }),
   // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【通知中心】
   // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。
   // internal overlay 覆盖为 { spaces:true, workOrders:true }（extensions/internal.ts），内部形态两 Tab 均在。

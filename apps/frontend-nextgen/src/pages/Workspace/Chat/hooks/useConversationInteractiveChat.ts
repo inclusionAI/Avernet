@@ -16,7 +16,7 @@ import {
 } from '@/pages/Workspace/hooks/useBotSessionFilesFeature';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
-import { resolveUserId } from '@/services/workspace/botSessionService';
+import { resolveUserId } from '@/services/workspace/resolveUserId';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatBridge, PanelAction, PanelHandle, ResourceReference } from '@tc-chat/core';

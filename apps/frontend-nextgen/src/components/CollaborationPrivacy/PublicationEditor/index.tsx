@@ -82,8 +82,9 @@ export function PublicationEditor({
   onSubmit,
 }: PublicationEditorProps) {
   const restrictedScopeEnabled = getCapabilities().getRestrictedPublicationScopeEnabled().value;
-  // 外部 Bot 的限定组织可申请来自用户合同，与 TC 的能力开关解耦，不放宽 TC 默认形态。
-  const scopeSelectionEnabled = restrictedScopeEnabled || isExternalBot;
+  // 外部 Bot 可绕过 TC 公开审批能力，但仍依赖组织目录；BCN-only 不展示组织编辑入口。
+  const organizationDirectoryEnabled = getCapabilities().getOrganizationDirectoryEnabled().value;
+  const scopeSelectionEnabled = organizationDirectoryEnabled && (restrictedScopeEnabled || isExternalBot);
   const [scope, setScope] = useState<PublicScope>(() =>
     !scopeSelectionEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope,
   );

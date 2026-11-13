@@ -2,15 +2,25 @@ import tailwindcss from '@tailwindcss/postcss';
 import { defineConfig } from '@umijs/max';
 import path from 'path';
 import { a2aClientBuildDefault } from './a2aBuildDefault';
-import { routes } from './routes';
+import { routes as openRoutes } from './routes';
+import { routes as collabRoutes } from './routes.collab';
+
+// 装配形态开关：open（默认，Open Core 全量）/ collab（协作群极简站）。
+// 仅切换路由表（产物页面集）与 @/extensions 装配别名；业务组件内不出现形态分支。
+const frontendForm = process.env.FRONTEND_FORM === 'collab' ? 'collab' : 'open';
 
 const bcsEndpointPre = process.env.BCS_ENDPOINT_PRE || 'http://127.0.0.1:21000';
 const bcsEndpointProd = process.env.BCS_ENDPOINT_PROD || 'http://127.0.0.1:21000';
 
 export default defineConfig({
-  routes,
+  routes: frontendForm === 'collab' ? collabRoutes : openRoutes,
   alias: {
-    '@/extensions': path.resolve(__dirname, '../src/extensions/empty'),
+    // 精确匹配键：非 `$` alias 键在 webpack/enhanced-resolve 里是前缀匹配——不带 `$` 时
+    // `@/extensions/slots` 等子路径会被改写为 `<assembly>/slots` 而解析失败（jest 不受影响）。
+    '@/extensions$': path.resolve(
+      __dirname,
+      frontendForm === 'collab' ? '../src/extensions/collab' : '../src/extensions/empty',
+    ),
     // 公共 A2A 聊天客户端包（packages/a2a-chat-client，src 源直连——TS-source 包，
     // jsx-ts-tsx 规则无 exclude 照转译；不经 node_modules 故不入 MFSU 预构建）。
     '@avernet/a2a-chat-client':

@@ -40,9 +40,11 @@ import { useEffect, useRef, useState } from 'react';
 /** 功能开关。clawweb 内部环境 /api/workflows 已实测可用（restore-design-chat-page-b2-b3 design.md D4 回填），开闸。 */
 const WORKFLOW_TASK_ENABLED = true;
 
-import type { ComposerCapabilitiesMenuProps } from './composerCapabilitiesMenuTypes';
+// props 契约已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备），
+// 本实现反向 import 契约注解，签名漂移在 typecheck 阶段失配；历史导入面维持 re-export。
+import type { ComposerCapabilitiesMenuProps } from '@/extensions/contracts/groupTasks';
 
-export type { ComposerCapabilitiesMenuProps } from './composerCapabilitiesMenuTypes';
+export type { ComposerCapabilitiesMenuProps } from '@/extensions/contracts/groupTasks';
 
 
 /** 菜单主体：上传文件/任务/工作流任务/Agent Compute 并列单行；工作流行 hover 延迟展开右侧子面板。 */

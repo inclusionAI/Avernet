@@ -372,14 +372,6 @@ it('协作者加载编辑配置时为非敏感 Bot 子资源透传 owner', async
   expect(controller.getApprovalConfig).not.toHaveBeenCalled();
 });
 
-it('发布审批由通用配置按需加载并透传 owner', async () => {
-  controller.getApprovalConfig.mockResolvedValue({ data: { should_approval: true } });
-
-  await expect(botEditorService.loadApproval('bot-1', 'owner-1')).resolves.toBe(true);
-
-  expect(controller.getApprovalConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
-});
-
 it('引擎配置仅通过独立方法按需加载并透传 owner', async () => {
   controller.getEngineConfig.mockResolvedValue({ data: { token: 'sensitive' } });
 

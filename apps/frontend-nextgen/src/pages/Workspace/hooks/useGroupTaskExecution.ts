@@ -1,23 +1,16 @@
-import type { GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
 import { useTaskExecution } from '@/hooks/useTaskExecution';
-import type { PanelHandle } from '@tc-chat/core';
-import type { RefObject } from 'react';
+import type {
+  GroupTaskExecutionOptions,
+  UseTaskExecutionResult,
+} from '@/extensions/contracts/groupTasks';
 import { useGroupTaskComposerContext } from './useGroupTaskComposerContext';
 
-interface GroupTaskExecutionOptions {
-  group: GroupView | null;
-  session: SessionView | null;
-  activeIdentity?: IdentityView | null;
-  panelRef: RefObject<PanelHandle>;
-  submitPanelMessage: (content: string) => void;
-  submitTaskExecutionMessage: (content: string, holderId: string) => void;
-  appendAssistantMessage: (content: string) => void;
-  streamAssistantMessage?: (content: string) => Promise<void>;
-}
+// 入参/返回契约（GroupTaskExecutionOptions / UseTaskExecutionResult）已上移至
+// src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备），本实现反向注解契约。
 
 /** 统一装配协作群的两个任务 execute 入口，确保 relay 共用定向 holder 出口。 */
-export function useGroupTaskExecution(options: GroupTaskExecutionOptions) {
+export function useGroupTaskExecution(options: GroupTaskExecutionOptions): UseTaskExecutionResult {
   const context = useGroupTaskComposerContext(options.group, options.session, options.activeIdentity);
   const execution = useTaskExecution({
     panelRef: options.panelRef,

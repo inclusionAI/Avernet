@@ -1,7 +1,7 @@
-import { SafeHtml } from '@/components/Common/RichContent';
 import { Badge, Button } from '@/components/ui';
 import type { SessionFilePreviewState } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { formatFileSize } from '@/services/workspace/sessionFileUtils';
+import { SafeHtml } from '@/shared/html/SafeHtml';
 import { ArrowLeft, Download, FileText, FolderOpen, Reply, Share2 } from 'lucide-react';
 import { isMarkdownFile, renderSessionFileMarkdown } from './sessionFileMarkdown';
 /** 预览面板所需的最小文件字段（群聊 / 单聊共用）。 */

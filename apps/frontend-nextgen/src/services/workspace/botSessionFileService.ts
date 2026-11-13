@@ -20,9 +20,9 @@ import {
 import type { BotSessionFileView } from '@/stores/botSessionFileStore';
 import { fetchExternalDownloadUrl } from './botSessionFileDownload';
 import { directUpload, type UploadIntentView } from './botSessionFileUpload';
-import { resolveUserId } from './botSessionService';
 import { resolveGroupGatewayOrigin } from './groupChatProviderHelpers';
 import type { DomainError, DomainResult } from './identityService';
+import { resolveUserId } from './resolveUserId';
 import { isAllowedFileExt } from './sessionFileUtils';
 export { isLargeBotSessionFile } from './botSessionFileDownload';
 export type { UploadIntentView } from './botSessionFileUpload';

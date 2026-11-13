@@ -1,6 +1,6 @@
 import { notifyError } from '@/components/ui/notify';
 import type { PublicGroup, SquareResource } from '@/domain/collaborationSquare/types';
-import { CollaborationSquareError, collaborationSquareGroupService } from '@/services/collaborationSquare';
+import { CollaborationSquareError, collaborationSquareGroupService } from '@/services/collaborationSquare/publicDiscoveryRuntime';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
 import { useCallback, useEffect, useRef } from 'react';

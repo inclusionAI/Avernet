@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { BotDomain } from '@/domain/botWorkshop';
 import { BotBasicInfoDialog } from '@/components/BotWorkshop/BotBasicInfoDialog';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 
 const mockAvatarSave = jest.fn(async (id: string, value: string) => `${value}?saved=${id}&mock`);
 

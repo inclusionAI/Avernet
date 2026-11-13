@@ -1,11 +1,11 @@
-import { SafeHtml } from '@/components/Common/RichContent';
-import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import { Button } from '@/components/ui';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import { useBotCapabilityDetail } from '@/hooks/useBotCapabilityDetail';
 import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
+import { SafeHtml } from '@/shared/html/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import { FileText } from 'lucide-react';
 import MarkdownIt from 'markdown-it';
 import { useMemo } from 'react';

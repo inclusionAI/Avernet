@@ -15,6 +15,11 @@ export interface FriendConnectionRequestDto {
   from_actor: FriendConnectionActor;
   to_actor: FriendConnectionActor;
   status: FriendConnectionRequestStatus;
+  created_by: FriendConnectionActor;
+  edge_id?: number;
+  decided_by?: FriendConnectionActor;
+  decided_at?: number;
+  decision_reason?: string;
   message?: string;
   created_at?: number | string;
   updated_at?: number | string;
@@ -68,10 +73,10 @@ export interface DeleteFriendConnectionBody {
 
 export const COLLABORATION_FRIEND_CONNECTION_ENDPOINTS = {
   requests: '/openapi/v1/collaboration/friend-connections/requests',
-  request: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${requestId}`,
-  accept: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${requestId}/accept`,
-  reject: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${requestId}/reject`,
-  cancel: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${requestId}/cancel`,
+  request: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${encodeURIComponent(requestId)}`,
+  accept: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${encodeURIComponent(requestId)}/accept`,
+  reject: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${encodeURIComponent(requestId)}/reject`,
+  cancel: (requestId: string) => `/openapi/v1/collaboration/friend-connections/requests/${encodeURIComponent(requestId)}/cancel`,
   connections: '/openapi/v1/collaboration/friend-connections',
 };
 

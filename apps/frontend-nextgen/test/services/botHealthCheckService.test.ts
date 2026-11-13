@@ -3,7 +3,7 @@ import {
   resolveBotHealthActionAvailability,
   toHealthCheckTarget,
 } from '@/services/botHealthCheck/botHealthCheckService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 
 describe('botHealthCheckService', () => {
   test('only Openclaw bots expose health check action', () => {

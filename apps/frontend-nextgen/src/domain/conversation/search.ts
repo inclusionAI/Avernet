@@ -26,6 +26,24 @@ export interface SessionMessageSearchResult {
   createdAt: number | null;
 }
 
+/**
+ * 会话历史搜索面板模型（chat-header-panels：历史消息面板的搜索/筛选/结果装配）。
+ *
+ * 原定义在 chat 侧 useChatHeaderPanels（pages 裁剪面）；collab-form Task 17 上移至本纯模型家——
+ * collab 保留链（useGroupChatHeaderPanels / GroupHistorySidebar / SessionHistorySearchPanel）
+ * 与 chat 侧经同一来源消费，源切片裁掉 pages/Workspace/Chat 后仍可独立 typecheck。
+ * 装配方负责 query 状态与本地过滤（searchSessionMessages），本类型只是消费面契约。
+ */
+export interface UseSessionHistorySearchModel {
+  query: SessionMessageSearchQuery;
+  setKeyword: (keyword: string) => void;
+  setSender: (sender: SessionMessageSearchQuery['sender']) => void;
+  setTodayOnly: (todayOnly: boolean) => void;
+  /** 本地降级态指示：面板据此明示「仅已载入消息」。 */
+  source: 'local';
+  results: SessionMessageSearchResult[];
+}
+
 function isSameDay(timestamp: number, now: number): boolean {
   const a = new Date(timestamp);
   const b = new Date(now);

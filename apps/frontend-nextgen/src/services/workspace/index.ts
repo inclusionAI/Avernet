@@ -1,5 +1,5 @@
-export * from './botChatProvider';
-export * from './botSessionService';
+// 单聊树 re-export（botChatProvider/botSessionService）已移除（collab-form plan：barrel tightening）。
+// 新增消费方一律按精确模块路径导入；单聊组件从 botChatProvider/botSessionService 直接引用。
 export { ensureReactGlobal } from './ensureReactGlobal';
 export * from './identityService';
 export {

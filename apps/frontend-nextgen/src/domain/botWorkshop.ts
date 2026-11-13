@@ -341,3 +341,23 @@ export interface BotActionAvailability {
 }
 
 export type { BotHarnessContext } from './botHealthCheck';
+
+/**
+ * 公开设置菜单项可用性（collab-permission-entry-migration AC-02/AC-03）：
+ * 仅 Bot Owner 可变更公开设置；他人持编辑锁时同样禁用。
+ * 服务 Bot 在发布到线上（lifecycle==='running'）之前不可变更公开设置：未发布的服务 Bot
+ * 尚不可被其他对象使用，开放公开设置会暴露一个不可用的 Bot。个人 Bot / 桌面 Bot 不受此约束。
+ * TODO：团队空间下「Owner 非当前用户但已获操作权限」的 Bot 是否放开，待对应模块决策后修订（Spec 2026-09-24 AC-02 登记）。
+ */
+export function getGeneralConfigAvailability(
+  bot: BotDomain,
+  isOwner: boolean,
+  lockedByOther: boolean,
+): { enabled: boolean; disabledReason?: string } {
+  if (!isOwner) return { enabled: false, disabledReason: '仅 Bot Owner 可变更公开设置' };
+  if (bot.serviceMode === 'service' && bot.lifecycle !== 'running') {
+    return { enabled: false, disabledReason: '服务 Bot 未发布前暂不可变更公开设置' };
+  }
+  if (lockedByOther) return { enabled: false, disabledReason: '该 Bot 正被他人编辑，请先抢锁' };
+  return { enabled: true };
+}

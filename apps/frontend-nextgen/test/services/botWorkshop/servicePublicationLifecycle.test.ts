@@ -1,5 +1,5 @@
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
-import { resolveBotLifecycle, resolveServiceEngineLifecycle } from '@/services/botWorkshop/botLifecycleResolver';
+import { mapBotDto } from '@/services/bots/botMapper';
+import { resolveBotLifecycle, resolveServiceEngineLifecycle } from '@/services/bots/botLifecycleResolver';
 import { getBotEntryAvailability, getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
 
 describe('服务 Bot 发布记录与草稿实例状态隔离', () => {

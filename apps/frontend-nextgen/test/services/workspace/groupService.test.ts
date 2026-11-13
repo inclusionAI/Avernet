@@ -3,7 +3,7 @@ import * as groupController from '@/services/backendApi/collaboration/collaborat
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { groupService } from '@/services/workspace/groupService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // auto-mock（不带 factory），避免 hoisted factory 内引用 jest.fn() 触发 @jest/globals 的 TDZ。
 // sessionController 同样被 mock 以隔离 listGroupSessions（loadGroupDetail 路径用），本批断言不直接断言其调用。

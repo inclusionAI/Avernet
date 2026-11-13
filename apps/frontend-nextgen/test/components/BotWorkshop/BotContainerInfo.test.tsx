@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { botContainerService } from '@/services/botWorkshop/botContainerService';
 import '@testing-library/jest-dom';
 import { render, screen, waitFor } from '@testing-library/react';

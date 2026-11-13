@@ -7,21 +7,13 @@
  */
 import type {
   SessionMessageSearchQuery,
-  SessionMessageSearchResult,
+  UseSessionHistorySearchModel,
 } from '@/services/workspace/conversationSearchService';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage } from '@tc-chat/core';
 import { useMemo, useRef, useState } from 'react';
 
-export interface UseSessionHistorySearchModel {
-  query: SessionMessageSearchQuery;
-  setKeyword: (keyword: string) => void;
-  setSender: (sender: SessionMessageSearchQuery['sender']) => void;
-  setTodayOnly: (todayOnly: boolean) => void;
-  /** 本地降级态指示：面板据此明示「仅已载入消息」。 */
-  source: 'local';
-  results: SessionMessageSearchResult[];
-}
+export type { UseSessionHistorySearchModel } from '@/services/workspace/conversationSearchService';
 
 export function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: number): UseSessionHistorySearchModel {
   const [keyword, setKeyword] = useState('');

@@ -1,6 +1,6 @@
+import { getCapabilities } from '@/capabilities';
 import type { IdentityView } from '@/domain/collaboration';
 import { normalizeOpenApiUserId } from '@/domain/userIdentity';
-import { getCapabilities } from '@/capabilities';
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
@@ -169,7 +169,8 @@ async function enrichBotMetadata<T extends { id: string; kind: string; engine?: 
   if (!getCapabilities().getPublicBotBackendEnabled()) return items;
 
   const hasBots = items.some((item) => item.kind === 'bot');
-  if (!hasBots) return items;
+  // BCN-only 身份列表仅消费 mine；避免壳层初始化绕过通用配置的 engine 目录能力。
+  if (!hasBots || !getCapabilities().getCollaborationBotEngineLabelEnabled().value) return items;
 
   try {
     const response = await listBots({

@@ -1,5 +1,5 @@
 // DTO ⇄ Domain 映射（管理后台）。纯函数，无副作用。
-// 参考实现：src/services/botWorkshop/botMapper.ts 的 mapBotDto / mapBotList。
+// 参考实现：src/services/bots/botMapper.ts 的 mapBotDto / mapBotList。
 // 分页响应统一按通用 BackendApiPage<T> 读取（page.items/total/page/pageSize/hasMore）。
 
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';

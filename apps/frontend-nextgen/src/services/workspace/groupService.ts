@@ -7,6 +7,7 @@ import type {
   IdentityView,
   ParticipantView,
 } from '@/domain/collaboration';
+import { getExtensionSlots } from '@/extensions/slots';
 import {
   createGroup as createGroupApi,
   deleteGroup,
@@ -15,13 +16,12 @@ import {
   updateGroup,
 } from '@/services/backendApi/collaboration/collaborationGroupController';
 import { listGroupSessions } from '@/services/backendApi/collaboration/sessionController';
-import { buildCreateGroupBody, type CreateGroupInput } from './groupCreateRequest';
 import {
-  createGroupViaExecute as execCreateGroupViaExecute,
   loadBcsGroupDetail as execLoadBcsGroupDetail,
   loadGroupDetailOrBcs as execLoadGroupDetailOrBcs,
   loadGroupSessionsOrBcs as execLoadGroupSessionsOrBcs,
-} from './groupExecuteService';
+} from './groupBcsReadService';
+import { buildCreateGroupBody, type CreateGroupInput } from './groupCreateRequest';
 import type { DomainError, DomainResult } from './identityService';
 import {
   isHumanMentionNotifyMode,
@@ -177,7 +177,7 @@ export const groupService = {
   },
 
   /** 选中群详情统一入口：本地 BCS 群(execute 建群) 走 loadBcsGroupDetail，预发群走 loadGroupDetail。
-   *  实现下沉 groupExecuteService（依赖注入通用 loadGroupDetail 规避循环依赖）。供 hook 选中补拉调用。 */
+   *  实现下沉 groupBcsReadService（依赖注入通用 loadGroupDetail 规避循环依赖）。供 hook 选中补拉调用。 */
   loadGroupDetailOrBcs(groupId: string, viewBotId?: string): Promise<DomainResult<GroupView>> {
     return execLoadGroupDetailOrBcs(groupId, viewBotId, (id, vid) => this.loadGroupDetail(id, vid));
   },
@@ -203,7 +203,7 @@ export const groupService = {
     );
   },
 
-  /** 本地 BCS 群详情（execute 建群返回的群）：实现下沉 groupExecuteService。 */
+  /** 本地 BCS 群详情（execute 建群返回的群）：实现下沉 groupBcsReadService。 */
   loadBcsGroupDetail(groupId: string): Promise<DomainResult<GroupView>> {
     return execLoadBcsGroupDetail(groupId);
   },
@@ -300,11 +300,20 @@ export const groupService = {
     }
   },
 
-  /** 走 task execute 创建自定义协作群(state_machine)：实现下沉 groupExecuteService（依赖注入
-   *  回落 createGroup 规避循环依赖）。开关见 useCreateGroup 的 GROUP_CREATE_VIA_EXECUTE；
-   *  开关 false 时不被触发，自定义协作群走 createGroup 默认链路。 */
+  /** 走 task execute 创建自定义协作群(state_machine)：经扩展槽位 groupTasks.createGroupViaExecute 委派
+   *  真实执行器（实现 groupExecuteService.createGroupViaExecute，装配见 src/extensions/empty.ts；
+   *  回落 createGroup 经参数注入，规避循环依赖）。槽位 null（collab 形态）下不静默改走普通建群、
+   *  不触任务引擎，而是返回 GROUP_EXECUTE_UNAVAILABLE。开关见 useCreateGroup 的
+   *  GROUP_CREATE_VIA_EXECUTE；开关 false 时不被触发，自定义协作群走 createGroup 默认链路。 */
   createGroupViaExecute(input: CreateGroupInput, ownerUserId: string): Promise<DomainResult<GroupView>> {
-    return execCreateGroupViaExecute(input, ownerUserId, (i) => this.createGroup(i));
+    const execute = getExtensionSlots().groupTasks?.createGroupViaExecute;
+    if (!execute) {
+      return Promise.resolve({
+        ok: false,
+        error: toDomainError('GROUP_EXECUTE_UNAVAILABLE', '当前站点不支持以任务执行方式创建协作群。'),
+      });
+    }
+    return execute(input, ownerUserId, (value) => this.createGroup(value));
   },
 
   async updateGroup(

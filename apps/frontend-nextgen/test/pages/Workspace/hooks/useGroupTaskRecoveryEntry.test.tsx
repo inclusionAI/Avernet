@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import '../../../helpers/registerOpenTaskPanelBootstrapSlot';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook } from '@testing-library/react';
 import { useGroupChatHeaderPanels } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';

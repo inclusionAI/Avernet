@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 槽位真实装配必须先于 CreateGroupModal 模块求值（modal 在模块作用域经 serviceBotRoutingSlots 解析选路槽位）：import 按声明序求值。
+import '../../../../helpers/registerOpenGroupServiceBotRoutingSlots';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import { queryIsServiceBot } from '@/services/workspace/botClassificationService';
@@ -344,6 +346,8 @@ it('任务执行建群隐藏通知来源且不提交该字段', async () => {
   renderModal({ activeIdentity: botIdentity });
   await selectLeader('@Human 通知来源', /^不通知$/);
   fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  // Open 形态（jest 全局 setup 注册非空 groupTasks 槽位）勾选框在位，可进入 execute 链路。
+  expect(screen.getByRole('checkbox', { name: '是否以任务执行' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '@Human 通知来源' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: [assistant]' } });
   fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));

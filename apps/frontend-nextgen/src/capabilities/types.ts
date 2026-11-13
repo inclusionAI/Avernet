@@ -287,12 +287,15 @@ export interface PersonalSpaceInitOptions {
  * 壳层入口形态级可见性（见 `getShellVisibility` capability）。
  * - `spaceSwitcher`：侧栏管理区域底部的空间切换器（隐藏不影响 initSpaceContext 空间数据链路）
  * - `notificationBell`：页头右上角通知中心（未读轮询随组件不挂载自然停止）
+ * - `globalSearch`：侧栏品牌区搜索入口（隐藏时 GlobalSearchDialog 不挂载；
+ *   collab 形态隐藏，避免搜索结果深链到该形态不存在的页面）
  * 注：原 `adminEntry` 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages：
  * 管理域拆分至 /space-admin、/ticket-center 独立路由，不占导航位；形态开关归 getAdminSections）。
  */
 export interface ShellVisibility {
   spaceSwitcher: boolean;
   notificationBell: boolean;
+  globalSearch: boolean;
 }
 
 /**
@@ -629,6 +632,13 @@ export interface AppCapabilities {
    */
   getInternalNavigationItems: () => CapabilityResult<NavigationItem[]>;
   /**
+   * 产品一级导航基线的形态开关（collab-form）。
+   * 返回 null = 使用 `src/shell/navigation.tsx` 的 Open Core 基线数组（Open/internal 默认，行为零变化）；
+   * collab 装配（`src/extensions/collab.ts`）覆盖为「协作群 + 发现 + 外部 Bot」三项。
+   * internal overlay 的注入项仍经 `getInternalNavigationItems` 按 section 追加，与本基线正交。
+   */
+  getPrimaryNavigationItems: () => CapabilityResult<NavigationItem[] | null>;
+  /**
    * 内部专属 route meta 列表（Open Core 不应收录的内部路由元数据）。
    * Open Core 默认 `[]`（与 `routeMetaList` 已剥离内部项一致）；
    * internal overlay 注入 `/capability-workshop/*`、`/market/*` 等内部路由 meta，
@@ -725,6 +735,10 @@ export interface AppCapabilities {
    * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。
    */
   getGroupAdvancedConfigEnabled: () => CapabilityResult<boolean>;
+  /** 组织目录数据面（用户部门、部门范围回显和搜索）。Open Core/collab 默认关闭，internal 全量开启。 */
+  getOrganizationDirectoryEnabled: () => CapabilityResult<boolean>;
+  /** 协作 Bot 列表是否通过引擎资产目录补充 engine 标签。Open Core/internal 开启，BCN-only collab 关闭。 */
+  getCollaborationBotEngineLabelEnabled: () => CapabilityResult<boolean>;
   /**
    * Bot 可见性编辑器是否提供“限定组织可申请”。Open Core 默认关闭；internal overlay 保持开启。
    * 同步签名，两个 audience 共用，组件不得按部署环境自行判断。
@@ -751,14 +765,29 @@ export interface AppCapabilities {
    * 时为 false，运行时显式设置优先。同步签名，不发请求。
    */
   getPublicBotBackendEnabled: () => boolean;
+  /** 发现页专家 Tab 可见性；Open/internal 默认开启，collab 关闭且不注册专家路由。 */
+  getDiscoveryExpertsEnabled: () => CapabilityResult<boolean>;
+  /** 公开 Bot 页头好友申请入口；仅 collab 开启，Open 消息中心保持原状。 */
+  getCollabFriendRequestsEnabled: () => CapabilityResult<boolean>;
   /**
-   * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
-   * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`
-   * （defaultCapabilities：展示通知中心，不展示侧栏空间切换器）；
+   * 壳层入口可见性（空间切换器 / 通知中心 / 搜索入口，见 `ShellVisibility`）。
+   * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`、`globalSearch=true`
+   * （defaultCapabilities：展示通知中心与搜索入口，不展示侧栏空间切换器）；
    * internal overlay 经 `src/extensions/internal.ts` 覆盖为全 true——内部形态渲染结果与改造前一致。
    * 同步签名，不发请求。消费方（SidebarNavList / AppSidebar）不得以 `if (isInternal)` 替代。
    */
   getShellVisibility: () => CapabilityResult<ShellVisibility>;
+  /**
+   * 空间上下文初始化总开关（collab-form）：壳层两条独立的空间数据链路——挂载即
+   * `ensurePersonalSpaceOnAppEntry`（人空间初始化）与进入 Bot 分组 `initSpaceContext`
+   * （空间清单还原）——统一经本开关收口，消费方（AppShell）在请求发起前整体短路。
+   * Open Core 默认 true（现状行为零变化，internal overlay 未覆盖则继承）；collab 装配
+   * （src/extensions/collab.ts）覆盖为 false——极简形态无空间管理面，首次进入与
+   * Bot 分组路由均不得调用 spaces 接口（吞错降级不算数：HTTP 层可能已挂起错误 toast）。
+   * 与 `getShellVisibility().spaceSwitcher` 正交：隐藏切换器不影响本开关（默认
+   * spaceSwitcher=false 下两条初始化仍触发）。同步签名，不发请求。
+   */
+  getSpaceContextInitializationEnabled: () => CapabilityResult<boolean>;
   /**
    * 管理后台页内分区（Tab）可见性（空间管理 / 通知中心，见 `AdminSections`）。
    * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后仅暴露通知中心，

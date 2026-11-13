@@ -2,7 +2,7 @@
 import { TEST_USER_IDENTITY_ID } from '@/domain/collaboration/availableViews';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { TEST_SUPPORT_TARGET } from '@/hooks/useWorkspace.constants';
-import { TEST_USER_SUPPORT_TARGET_ID } from '@/services/workspace';
+import { TEST_USER_SUPPORT_TARGET_ID } from '@/services/workspace/testUser';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';

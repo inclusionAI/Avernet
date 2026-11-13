@@ -1,7 +1,8 @@
-// Markdown 渲染后的 HTML 经通用 RichContent 净化；
+// markdown-it 为直接依赖（package.json），渲染＋DOMPurify 白名单净化管线与 src/shared/html
+// sanitizeHtml 头注释同口径（MarkdownCell 同款 import 先例）；
 // html:false 禁止内联 HTML（XSS 安全），breaks 换行转 <br>，linkify 自动链接。
-import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import { getFileExt } from '@/services/workspace/sessionFileUtils';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import MarkdownIt from 'markdown-it';
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true });

@@ -7,7 +7,7 @@ import {
   pollLocalAuthorization,
   type LocalBotCreateRequest,
 } from '@/services/backendApi/bots/localBotController';
-import { mapBotDto } from './botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import type { BotCreateAuthorizationPollResult, BotCreateInput, BotCreateResult } from './types';
 
 export interface DesktopDevice {

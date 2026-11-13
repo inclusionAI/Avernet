@@ -1,7 +1,7 @@
 import { createSpace, listSpaceMembers, listSpaces } from '@/services/backendApi/admin/spaceController';
 import { botCollaborationController } from '@/services/backendApi/bots/botCollaborationController';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 
 jest.mock('@/services/backendApi/bots/botEditorController', () => ({
   botEditorController: { stealEditLock: jest.fn() },

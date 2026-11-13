@@ -34,6 +34,8 @@ export interface GroupConfigFieldsProps {
   humanNotifySlot?: ReactNode;
   leaderOptions: GroupLeaderOption[];
   supportsStateMachine: boolean;
+  /** 是否展示「是否以任务执行」勾选框（槽位 null 形态传 false 隐藏）;缺省 true 保持既有调用方行为。 */
+  allowTaskExecute?: boolean;
   /** 是否以任务执行(走 task execute 建群链路):仅 自定义协作(task_dag) 出现的勾选框值。 */
   viaExecute: boolean;
   onViaExecuteChange: (viaExecute: boolean) => void;
@@ -66,6 +68,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     humanNotifySlot,
     leaderOptions,
     supportsStateMachine,
+    allowTaskExecute = true,
     viaExecute,
     onViaExecuteChange,
     onKindChange,
@@ -159,7 +162,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             })(),
           )}
         </div>
-        {kind === 'task_dag' && (
+        {kind === 'task_dag' && allowTaskExecute && (
           <div className="mt-3 flex items-center gap-2">
             <Checkbox
               id="create-group-via-execute"

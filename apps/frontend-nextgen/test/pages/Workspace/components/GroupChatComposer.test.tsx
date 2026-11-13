@@ -1,11 +1,19 @@
 /** @jest-environment jsdom */
+// Open 装配真实任务槽位必须在「composer import 之上」（ES import 按声明序求值）：GroupChatComposer
+// 在模块作用域一次性绑定槽位常量，jest 全局 setup 只注册零行为占位，本行先经 in-file 通道注册
+// 真实 groupTasks（ComposerCapabilitiesMenu + buildTaskInstructions），下面的静态 import 才把
+// 真实实现绑进 composer。collab 空槽位形态（槽位常量绑定 null）由 GroupChatComposerCollabSlots
+// 套件在独立文件（独立模块注册表）内覆盖，避免 resetModules 双 React 实例纠缠。
+import '../../../helpers/registerOpenGroupTaskSlots';
 import type { SessionView } from '@/domain/collaboration';
+import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
 import { GroupChatComposer } from '@/pages/Workspace/components/GroupChatPane/GroupChatComposer';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 
 const mockInsertFileChips = jest.fn();
@@ -26,6 +34,8 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
           imageUpload?: { enabled?: boolean };
           onPasteFile?: (files: File[]) => void;
           onSubmit?: (content: string, context: { mentions: Array<{ id: string; name: string }> }) => void;
+          /** 真实 Sender 会渲染 toolbar.left 装配区；桩同步渲染，供 composer 工具栏接线断言。 */
+          toolbar?: { left?: React.ReactNode };
         },
         ref: React.Ref<unknown>,
       ) => {
@@ -50,6 +60,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
             data-image-upload={_props.imageUpload?.enabled ? 'enabled' : 'disabled'}
             data-placeholder={_props.placeholder}
           >
+            <div data-testid="sender-toolbar">{_props.toolbar?.left}</div>
             <button type="button" onClick={_props.fileChip?.onPick}>上传文件</button>
             <button
               type="button"
@@ -113,12 +124,8 @@ jest.mock('@/pages/Workspace/components/GroupChatPane/UploadFilesModal', () => (
 jest.mock('@/pages/Workspace/components/GroupChatPane/mentionHelpers', () => ({
   expandMentionIds: () => [],
 }));
-jest.mock('@/components/ui', () => ({
-  Badge: () => null,
-  IconButton: ({ label, onClick }: { label: string; onClick?: () => void }) => (
-    <button type="button" aria-label={label} onClick={onClick} />
-  ),
-}));
+// 不 mock @/components/ui：真实能力菜单（经槽位解析）与 AttachmentMenu 依赖真实
+// Button/Popover/Tooltip 原语，jsdom 下 Radix 交互可径直驱动（见 TaskComposerMenu 套件先例）。
 
 const session: SessionView = {
   sessionId: 's1',
@@ -131,6 +138,28 @@ const session: SessionView = {
   createdAt: 0,
   favorite: false,
 };
+
+/** 任务执行装配夹具（结构与 useTaskExecution 返回值对齐；测试只消费受控选中态/回调）。 */
+function executionFixture(overrides: Partial<UseTaskExecutionResult> = {}): UseTaskExecutionResult {
+  return {
+    submitting: false,
+    error: null,
+    lastTaskId: null,
+    workflows: [],
+    workflowsLoading: false,
+    loadWorkflows: jest.fn().mockResolvedValue(undefined),
+    selections: [],
+    selectWorkflow: jest.fn(),
+    selectDynamic: jest.fn(),
+    dynamicTaskEnabled: true,
+    dynamicTaskChecking: false,
+    removeSelection: jest.fn(),
+    clearSelection: jest.fn(),
+    submit: jest.fn(),
+    validate: jest.fn(() => null),
+    ...overrides,
+  };
+}
 
 describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', () => {
   beforeEach(() => {
@@ -301,5 +330,63 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     );
     // 群聊输入框仅支持 @ 提及成员，占位不得宣传 /file /link /skill 指令（那是单聊 ChatPanel 的能力）。
     expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息... (将以您的用户身份发送到群内)');
+  });
+});
+
+describe('GroupChatComposer — Open 装配真实任务槽位（能力菜单 + 任务发送拦截）', () => {
+  beforeEach(() => {
+    mockInsertFileChips.mockClear();
+    mockAddFiles.mockClear();
+  });
+
+  it('经槽位渲染真实能力菜单：任务/工作流任务在列，选中任务回调 selectDynamic', async () => {
+    const user = userEvent.setup();
+    const execution = executionFixture();
+    render(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        onSend={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+        execution={execution}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '添加附件' }));
+    // 菜单行在 Radix portal（role=dialog）内；fileChip 桩也有同名「上传文件」按钮，须按气泡作用域查询。
+    const menu = await screen.findByRole('dialog');
+    expect(within(menu).getByRole('button', { name: '上传文件' })).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '任务' })).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: '工作流任务' })).toBeInTheDocument();
+
+    await user.click(within(menu).getByRole('button', { name: '任务' }));
+    expect(execution.selectDynamic).toHaveBeenCalledTimes(1);
+  });
+
+  it('任务胶囊选中态提交：经真实 buildTaskInstructions 逐胶囊生成指令消息，并拦截普通发送', () => {
+    const onSend = jest.fn();
+    const onDraftChange = jest.fn();
+    const execution = executionFixture({ selections: [{ kind: 'dynamic' }] });
+    render(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        onSend={onSend}
+        draft=""
+        onDraftChange={onDraftChange}
+        execution={execution}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sender-submit'));
+
+    // 真实槽位 payload（registerOpenGroupTaskSlots）现行「/skill/task-intake」指令形态（taskMapper 真源）。
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith('/skill/task-intake 追问内容', [], undefined);
+    expect(execution.clearSelection).toHaveBeenCalledTimes(1);
+    expect(onDraftChange).toHaveBeenCalledWith('');
   });
 });

@@ -1,7 +1,7 @@
+import { getCapabilities } from '@/capabilities';
 import { Drawer, DrawerContent, DrawerTitle, IconButton } from '@/components/ui';
 import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
 import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
-import { getCapabilities } from '@/capabilities';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
@@ -56,6 +56,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 被形态开关隐藏（spaceSwitcher=false）时 Bot 页面对 spaceContextStore 的消费；
   // 切换器自身的挂载/打开触发由 SpaceSwitcher 承担（幂等+并发单飞，同帧不重复请求）。
   const activeSection = activeItem?.section;
+  // 形态级总开关（getSpaceContextInitializationEnabled，collab-form）：下面两条独立的空间初始化
+  // 链路在此收口。Open 默认 true（行为零变化）；collab 装配覆盖为 false：无人空间管理面，
+  // 两条链路在请求发起前整体短路（隐藏 spaceSwitcher 不足；吞错降级不算数——HTTP 层可能已挂起
+  // 错误 toast）。auth/identity 初始化不经本开关，保持不变。
+  const initializeSpaces = getCapabilities().getSpaceContextInitializationEnabled().value;
   // 任务副屏的保活 lease 只覆盖「源会话 → 导航目标会话」这一次 handoff。
   // 如果路由实际离开目标（退出会话页/普通路由切换），必须通知持久副屏宿主强制关闭；
   // 否则旧任务 tab 会跨路由悬挂，并在后续会话里把别的会话任务继续展示出来。
@@ -71,8 +76,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [taskRouteKey]);
   useEffect(() => {
-    if (activeSection === 'bot') void initSpaceContext();
-  }, [activeSection]);
+    if (initializeSpaces && activeSection === 'bot') void initSpaceContext();
+  }, [activeSection, initializeSpaces]);
   // 视口回到桌面（≥lg）时收起一级导航抽屉，避免抽屉压住重新出现的内流侧栏。
   useEffect(() => {
     if (isDesktop || hideNavigation) setMobileNavOpen(false);
@@ -85,9 +90,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   // 挂载（进入项目）即初始化一次个人空间：不等进 Bot 分组，幂等单飞、失败静默（详见 useSpaceContext）。
+  // 同经 initializeSpaces 门控：开关 false 的形态在请求发起前整体短路（collab-form）。
   useEffect(() => {
-    void ensurePersonalSpaceOnAppEntry();
-  }, []);
+    if (initializeSpaces) void ensurePersonalSpaceOnAppEntry();
+  }, [initializeSpaces]);
 
   // 挂载即刷新协作身份列表。initWorkspace 会在成功后写回 workspaceStore.identities 与 activeIdentity，
   // 避免只在 getHumanIdentity 能力已 ready（如 external auth / internal cookie）时跳过身份列表落 store。

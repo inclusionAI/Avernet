@@ -32,6 +32,9 @@ export function AvatarSettings({
     },
     [onOverlayOpenChange],
   );
+  // collab 形态无 BotWorkshop，avatarEditor 槽位为 null：整块不渲染（头像按钮/编辑器/保存按钮）。
+  // guard 须在全部 hooks 之后（hooks 顺序规则），槽位在装配期定型、渲染期不翻转。
+  if (!Editor) return null;
   return (
     <Popover>
       <PopoverTrigger asChild>

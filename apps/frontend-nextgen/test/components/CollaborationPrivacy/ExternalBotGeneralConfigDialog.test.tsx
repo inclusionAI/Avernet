@@ -4,7 +4,7 @@ import { applyExternalViewScopeToBot } from '@/domain/collaborationPrivacy/exter
 import type { CollaborationBot } from '@/domain/collaborationPrivacy/types';
 import * as identityModule from '@/hooks/useHumanIdentity';
 import type { CollaborationBotDto } from '@/services/backendApi';
-import { externalBotToGeneralConfig } from '@/services/botWorkshop/externalBotService';
+import { externalBotToGeneralConfig } from '@/services/externalBots/externalBotService';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { mapBotDtoToDomain } from '@/services/collaborationPrivacy/mappers';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
@@ -14,6 +14,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
+    getOrganizationDirectoryEnabled: () => ({ value: true }),
     getGeneralConfigPublishApprovalEnabled: () => ({ value: false }),
     getRestrictedPublicationScopeEnabled: () => ({ value: false }),
     getPublicBotBackendEnabled: () => true,
@@ -119,7 +120,7 @@ it('外部 Bot 修改可见性时按保存语义提交并直接生效，不渲�
   fireEvent.click(screen.getByRole('button', { name: '修改可见性' }));
   expect(await screen.findByRole('button', { name: '保存' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '提交审批' })).not.toBeInTheDocument();
-  // 能力开关关闭也不隐藏限定组织可申请（外部合同）。
+  // TC 审批选项关闭不影响外部合同；组织目录在本用例中可用。
   expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toBeInTheDocument();
   // 已保存的名称范围原样回显，可直接再编辑。
   expect(screen.getByText('蚂蚁集团-CRO线-大安全技术部')).toBeInTheDocument();

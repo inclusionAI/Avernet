@@ -6,9 +6,9 @@
  * 副屏呈现（对话区随面板让宽、无蒙层抽屉，与 chat 页历史消息同形）。
  * 默认宽度、拖宽范围和宽度记忆与其余聊天右侧面板共用。
  */
-import { ChatHeaderRightPanel } from '@/pages/Workspace/Chat/components/ChatHeaderRightPanel';
+import { ChatHeaderRightPanel } from '@/pages/Workspace/components/WorkspaceHeaderRightPanel';
 import { SessionHistorySearchPanel } from '@/pages/Workspace/Chat/components/SessionHistorySearchPanel';
-import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
+import type { UseSessionHistorySearchModel } from '@/services/workspace/conversationSearchService';
 
 export interface GroupHistorySidebarProps {
   /** 展开态；false → 宽度收 0 + 内容退出可交互，容器保持挂载形成展开/收起过渡。 */

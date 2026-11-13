@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
-import { SafeHtml, sanitizeMarkdownHtml, sanitizeRichHtml } from '@/components/Common/RichContent';
+import { sanitizeMarkdownHtml, sanitizeRichHtml } from '@/shared/html/sanitizeHtml';
+import { SafeHtml } from '@/shared/html/SafeHtml';
 import { describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { render, screen } from '@testing-library/react';

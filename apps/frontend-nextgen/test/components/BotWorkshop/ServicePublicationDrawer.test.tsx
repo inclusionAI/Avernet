@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
 import { useServicePublications } from '@/hooks/useServicePublications';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 

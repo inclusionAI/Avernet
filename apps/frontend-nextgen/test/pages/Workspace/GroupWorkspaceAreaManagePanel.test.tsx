@@ -5,6 +5,9 @@
  * 面板保持打开时切换选中群，必须为新群重新拉取群详情（reloadSelectedGroup），
  * 否则「群成员管理」card 因 participants 为空 + participantCount>0 永远显示「加载中…」。
  */
+// 槽位真实装配必须先于 GroupWorkspaceArea 模块求值（useGroupChatHeaderPanels 在模块作用域解析槽位）：
+// import 按声明序求值，require 于文件体执行、必然晚于本行。
+import '../../helpers/registerOpenTaskPanelBootstrapSlot';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';

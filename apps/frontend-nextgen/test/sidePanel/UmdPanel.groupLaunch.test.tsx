@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import '../helpers/registerOpenTaskPanelHostSlot';
 import { UmdPanel } from '@/services/bcs/UmdPanel';
 import { resolveUmdComponent } from '@/services/bcs/resolveUmdModule';
 import { useCollaborationGroupLaunchStore } from '@/stores/collaborationGroupLaunchStore';
