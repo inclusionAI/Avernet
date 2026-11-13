@@ -53,6 +53,8 @@ from agentclaw.community.core.agentswarm.service.protocols import (
     AgentAuthorizationState, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     GlobalRunLimitExceeded, IdentitySourceInvalid, IdentitySourceRequired,
     QueueDepthExceeded, TenantRunLimitExceeded,
+    IDENTITY_SOURCE_NO_PASSPORT, IDENTITY_SOURCE_NOT_OWNED,
+    IDENTITY_SOURCE_UNVERIFIED,
 )
 from agentclaw.community.core.agentswarm.repository.audit.impl import AgentSwarmAuditWriter, AuditAction
 from agentclaw.community.di import Injected
@@ -230,11 +232,15 @@ async def submit_run(
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
                action=AuditAction.SUBMIT_REJECTED, reason="identity_source_missing")
         raise
-    except IdentitySourceInvalid:
+    except IdentitySourceInvalid as exc:
         # Well-formed request naming a source it may not use: 422, matching
-        # what create-with-manifest answers for the same condition.
+        # what create-with-manifest answers for the same condition. The
+        # reason distinguishes a Bot the caller cannot use from a passport
+        # that could not be looked up, so an audit reader can tell an outage
+        # apart from a caller mistake.
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
-               action=AuditAction.SUBMIT_REJECTED, reason="identity_source_invalid")
+               action=AuditAction.SUBMIT_REJECTED,
+               reason=f"identity_source_invalid_{exc.reason or 'unknown'}")
         raise
     _audit(audit_writer, tenant=tenant, actor=user.staffId,
            action=AuditAction.SUBMIT_ACCEPTED, run_id=run_id)
@@ -425,7 +431,35 @@ def _identity_source_required_handler(
 def _identity_source_invalid_handler(
     request: Request, exc: IdentitySourceInvalid
 ) -> JSONResponse:
-    return JSONResponse(status_code=422, content={"error": str(exc)})
+    return JSONResponse(
+        status_code=422,
+        content={"error": _identity_source_message(exc)},
+    )
+
+
+def _identity_source_message(exc: IdentitySourceInvalid) -> str:
+    """What the caller should do about this refused source.
+
+    The three cases need different actions, so the text differs: a Bot of
+    someone else's, a Bot with no issued passport, or a passport that could
+    not be looked up. The unverified case must never claim the Bot has no
+    passport -- it says only that the source could not be checked.
+    """
+    fallback = {
+        IDENTITY_SOURCE_NOT_OWNED: (
+            f"identity_bot_id {exc.bot_id!r} is not a Bot owned by the caller"
+        ),
+        IDENTITY_SOURCE_NO_PASSPORT: (
+            f"identity_bot_id {exc.bot_id!r} holds no issued passport; issue "
+            "a passport for it or name another Bot"
+        ),
+        IDENTITY_SOURCE_UNVERIFIED: (
+            f"identity_bot_id {exc.bot_id!r} could not be verified; retry"
+        ),
+    }.get(exc.reason, (
+        f"identity_bot_id {exc.bot_id!r} is not a usable identity source"
+    ))
+    return exc.message or fallback
 
 
 def register_exception_handlers(app: FastAPI) -> FastAPI:

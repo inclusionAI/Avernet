@@ -29,8 +29,10 @@ from typing import Any
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.agentswarm.domain.models import BotState
+from agentclaw.community.core.agentswarm.identity_rule import resolve_agent_code
 from agentclaw.community.core.agentswarm.service.protocols import (
-    BotAuthorizationDescriptor,
+    BotAuthorizationDescriptor, IdentitySourceRefusal,
+    IDENTITY_SOURCE_NOT_OWNED, IDENTITY_SOURCE_UNVERIFIED,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
@@ -68,15 +70,28 @@ class ManifestBotAuthorizationSource:
         self._passport = passport_plugin
         self._bot_repo = bot_repo
 
-    def identity_source(self, *, owner_id: str, bot_id: str) -> str | None:
+    def identity_source(
+        self, *, owner_id: str, bot_id: str,
+    ) -> str | IdentitySourceRefusal:
         """The agent code of a Bot the run's owner may inherit from.
 
-        Same rule create-with-manifest enforces: the Bot must exist for this
-        owner and carry an issued passport with a non-empty agent code.
+        Same rule create-with-manifest enforces. Ownership is settled from the
+        Bot row first; the passport decision itself is
+        :func:`core.agentswarm.identity_rule.resolve_agent_code`, shared with the
+        creation boundary and authorization completion so the three cannot
+        disagree: the Bot row's cached ``ext.passport`` answers where it can (a
+        ``PENDING`` status refuses without asking anyone), and the passport
+        provider is the fallback for older Bots that predate that copy. Every
+        miss names which case it was, so the caller's refusal can say what to do
+        rather than blame the Bot for a lookup that never ran.
         """
         if self._bot_repo is None:
             logger.warning("[agentswarm] identity_source: no bot repository bound")
-            return None
+            return IdentitySourceRefusal(
+                IDENTITY_SOURCE_UNVERIFIED,
+                "the identity source could not be verified because this "
+                "deployment has no Bot repository bound",
+            )
         bot = self._bot_repo.get_by_id_and_owner(
             (bot_id or "").strip(), (owner_id or "").strip()
         )
@@ -85,12 +100,17 @@ class ManifestBotAuthorizationSource:
                 "[agentswarm] identity_source: no Bot %r for owner %r",
                 bot_id, owner_id,
             )
-            return None
+            return IdentitySourceRefusal(
+                IDENTITY_SOURCE_NOT_OWNED,
+                f"identity source {bot_id!r} is not a Bot owned by the caller",
+            )
         passport = (bot.get("ext") or {}).get("passport") or {}
-        code = str(passport.get("agent_code") or "").strip()
-        if not code or passport.get("status") == "PENDING":
-            return None
-        return code
+        return resolve_agent_code(
+            passport=passport,
+            passport_plugin=self._passport,
+            bot_id=(bot_id or "").strip(),
+            owner_id=(owner_id or "").strip(),
+        )
 
     def authorization(
         self, *, owner_id: str, bot_id: str,
