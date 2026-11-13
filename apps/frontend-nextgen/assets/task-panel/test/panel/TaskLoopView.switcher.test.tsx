@@ -11,6 +11,7 @@ async function mount(rows = [row('t1'), row('t2')], sessionId = 'shared') {
   const host = makeHost(rows);
   const controller = createTaskPanelController(host); controllers.push(controller);
   await controller.enterConversation({ sessionId, kind: 'bot' }, tab('t1'));
+  vi.mocked(host.present).mockClear(); // Assertions below observe browsing, not initial sibling-tab recovery.
   const view = render(<TaskLoopView host={host} controller={controller} taskId="t1" apiBaseUrl="" />);
   await act(async () => {});
   return { ...view, host, controller };

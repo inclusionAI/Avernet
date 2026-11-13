@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore, useRef, useCallback } from 'react';
 import type { PanelHandle } from '@tc-chat/core';
 import { configureTaskPanelSession, getTaskPanelController, getPresentedTaskForConversation, peekTaskPanelController, getTaskPanelRuntimeGeneration, subscribeTaskPanelRuntime, releaseTaskPanelSession } from '@/services/tasks/panel/taskPanelRuntime';
-import type { TaskPanelController } from '@avernet-assets/task-panel';
+import { restoreOrderedTaskPanelTabs } from '@/services/tasks/panel/taskPanelHandleAdapter';
+import type { TaskPanelDeclaration, TaskPanelController } from '@avernet-assets/task-panel';
 import type { ConversationRef, HistoryReader, RecoveryState } from '@avernet-assets/task-panel';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 /** Adapter lifecycle only; source selection, paging and arbitration belong to the shared controller. */
@@ -25,19 +26,43 @@ export function useSharedTaskPanelRecovery(options: {
     if (!options.conversation || !options.userId || !options.history) return;
     // Bind an existing task handoff even while visible history is still loading.
     if (options.enabled === false && !peekTaskPanelController()) return;
-    let live = true; let presentation = 0; let activeController: TaskPanelController | undefined;
+    let live = true; let activeController: TaskPanelController | undefined;
     const ref = options.conversation;
     const history = options.history;
+    const pendingTabs = new Map<string, TaskPanelDeclaration>();
+    let restoring = false;
     const bindSession = () => configureTaskPanelSession(ref, { history, present: (tab, source) => {
       if (!live) return;
-      const revision = ++presentation;
-      const isCurrent = () => live && revision === presentation && activeController?.getSnapshot().activeTaskId === tab.params.taskId;
+      if (source === 'recovery') {
+        pendingTabs.set(tab.params.taskId, tab);
+        if (restoring) return;
+        restoring = true;
+        void (async () => {
+          // Coalesce the controller's synchronous recovery batch before SDK rendering.
+          await Promise.resolve();
+          const isCurrent = () => live && activeController === peekTaskPanelController() &&
+            activeController?.getSnapshot().conversation?.sessionId === ref.sessionId;
+          while (isCurrent() && !options.panelRef.current) await new Promise(resolve => { setTimeout(resolve, 100); });
+          if (!isCurrent() || !options.panelRef.current || !activeController) return;
+          const snapshot = activeController.getSnapshot();
+          const tabs = snapshot.orderedTaskIds.map(id => pendingTabs.get(id)).filter((value): value is TaskPanelDeclaration => Boolean(value));
+          const selected = getPresentedTaskForConversation(ref);
+          restoreOrderedTaskPanelTabs(options.panelRef.current, tabs, snapshot.activeTaskId ? `task-${snapshot.activeTaskId}` : null, Boolean(selected));
+          pendingTabs.clear(); restoring = false;
+        })();
+        return;
+      }
+      const isCurrent = () => live && activeController === peekTaskPanelController() &&
+        activeController?.getSnapshot().conversation?.sessionId === ref.sessionId &&
+        activeController.getSnapshot().associatedTaskIds.includes(tab.params.taskId);
       void (async () => {
         while (isCurrent() && !options.panelRef.current) await new Promise(resolve => { setTimeout(resolve, 100); });
         if (!isCurrent() || !options.panelRef.current) return;
         const state = useTaskSidePanelStore.getState();
         if (source === 'explicit') state.markTaskPanelOpenIntent(tab.params.taskId);
         options.panelRef.current.openTab(tab);
+        const activeId = activeController?.getSnapshot().activeTaskId;
+        if (activeId) options.panelRef.current.focusTab(`task-${activeId}`);
         state.consumeTaskPanelOpenIntent(tab.params.taskId);
       })();
     } });

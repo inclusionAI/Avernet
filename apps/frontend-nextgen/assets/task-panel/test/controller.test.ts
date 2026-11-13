@@ -148,11 +148,13 @@ describe('SDK binding and identity lifecycle', () => {
   const tab = (id: string) => ({ id: `task-${id}`, type: 'taskPanel.TaskLoopView', title: '任务', params: { taskId: id }, closable: true });
   it('adopts a mounted SDK task without opening a duplicate tab or losing focus to recovery', async () => {
     let resolve!: (value: unknown) => void;
-    const h = host({ transport: { requestJson: () => new Promise(done => { resolve = done; }) } });
+    const h = host({ transport: { requestJson: path => path.includes('by_session')
+      ? new Promise(done => { resolve = done; }) : Promise.resolve({ data: { items: [] } }) } });
     const c = createTaskPanelController(h);
     const pending = c.enterConversation({ sessionId: 's1', kind: 'bot' });
     c.adoptPresentedTask(tab('mounted')); resolve({ data: { items: [{ task_id: 'other' }] } }); await pending;
-    expect(c.getSnapshot().activeTaskId).toBe('mounted'); expect(h.present).not.toHaveBeenCalled(); c.dispose();
+    expect(c.getSnapshot().activeTaskId).toBe('mounted');
+    expect(vi.mocked(h.present).mock.calls.map(([value]) => value.params.taskId)).toEqual(['other']); c.dispose();
   });
   it('keeps user navigation and default selection out of the SDK interaction channel', () => {
     const h = host(); const c = createTaskPanelController(h); c.adoptPresentedTask(tab('t1'));
@@ -186,7 +188,7 @@ describe('conversation-scoped SDK presentation handshake', () => {
     await c.enterConversation({ sessionId: 's1', kind: 'bot' }, tab);
     expect(c.getSnapshot().activeTaskId).toBe('shown');
     expect(c.getSnapshot().associatedTaskIds).toEqual(['latest', 'relay', 'shown']);
-    expect(h.present).not.toHaveBeenCalled();
+    expect(vi.mocked(h.present).mock.calls.map(([value]) => value.params.taskId)).toEqual(['relay', 'latest']);
     expect(h.history.readPage).not.toHaveBeenCalled();
     c.dispose();
   });
