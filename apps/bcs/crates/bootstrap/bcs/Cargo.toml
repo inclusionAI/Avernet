@@ -218,6 +218,7 @@ clap = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+log = "0.4"
 dirs = "5.0"
 futures-util = "0.3"
 rsa = { workspace = true }

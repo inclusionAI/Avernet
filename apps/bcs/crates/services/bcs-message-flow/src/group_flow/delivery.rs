@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/group_tests.rs"]
+mod key_log_tests;
+
 pub(super) async fn frame_for_target(
     flow: &BcsMessageFlow,
     group: &Group,

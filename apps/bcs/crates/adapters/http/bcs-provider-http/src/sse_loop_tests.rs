@@ -151,12 +151,14 @@ use super::*;
     /// configurable deadline (so the per-frame deadline guard can be exercised).
     struct FixedCtx {
         deadline_ms: u64,
+        missing: bool,
     }
 
     #[async_trait]
     impl BotRunContextPort for FixedCtx {
         async fn put_context(&self, _context: BotRunContext) {}
         async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
+            if self.missing { return None; }
             Some(BotRunContext {
                 run_id: run_id.to_string(),
                 bot_id: "bot-1".into(),
@@ -599,6 +601,7 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
         )
         .await;
         let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx {
+            missing: false,
             deadline_ms: u64::MAX,
         });
         stream_and_drive(
@@ -726,7 +729,8 @@ async fn selected_diagnostics_preserve_stream_frames_and_terminal_outcomes() {
     struct Capture(Arc<Mutex<Vec<Row>>>);
     impl<S: tracing::Subscriber> Layer<S> for Capture {
         fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
-            if event.metadata().target() != "bcs_sse_detail" { return; }
+            if event.metadata().target() != "bcs_sse_detail"
+                && !event.metadata().target().starts_with("bcs_provider_http") { return; }
             let mut row = Row::default(); event.record(&mut row);
             // Retain only this fixture's small metadata, never sibling payloads.
             if row.run.starts_with("log-correlation-") { self.0.lock().unwrap().push(row); }
@@ -774,7 +778,7 @@ async fn selected_diagnostics_preserve_stream_frames_and_terminal_outcomes() {
     ] {
         let recording = Arc::new(RecordingFlow::default());
         let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
-        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: deadline });
+        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: deadline, missing: false });
         let response = axum::http::Response::new(body).into();
         stream_and_drive(response, run.into(), "bot-1".into(), flow, ctx, None).await;
         assert_eq!(recording.pairs(), vec![("chat.event".into(), state)], "{run}: exactly one terminal must be delivered");
@@ -787,4 +791,42 @@ async fn selected_diagnostics_preserve_stream_frames_and_terminal_outcomes() {
         assert_eq!(summary.terminal, terminal);
         assert_eq!(summary.frames, frames);
     }
+
+    // Pending body reads and context retries use virtual time, never real waits.
+    tokio::time::pause();
+    for (run, deadline, reason) in [
+        ("log-correlation-idle-timeout", u64::MAX, "idle_timeout"),
+        ("log-correlation-read-deadline", bcs_protocol::now_ms() + 1000, "run_deadline"),
+    ] {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: deadline, missing: false });
+        let body = reqwest::Body::wrap_stream(futures::stream::pending::<Result<Vec<u8>, std::io::Error>>());
+        stream_and_drive(axum::http::Response::new(body).into(), run.into(), "bot-1".into(), flow, ctx, None).await;
+        assert_eq!(recording.pairs(), vec![("chat.event".into(), ChatEventState::Error)]);
+        let rows = output.0.lock().unwrap();
+        let selected: Vec<_> = rows.iter().filter(|row| row.run == run && row.key).collect();
+        assert_eq!(selected.len(), 1, "{run}: exactly one close summary");
+        assert_eq!(selected[0].reason, reason);
+        assert!(!selected[0].terminal);
+    }
+
+    let run = "log-correlation-context-unavailable";
+    let recording = Arc::new(RecordingFlow::default());
+    let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+    let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: u64::MAX, missing: true });
+    let polled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let body_polled = polled.clone();
+    let body = reqwest::Body::wrap_stream(futures::stream::once(async move {
+        body_polled.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok::<_, std::io::Error>(FINAL.as_bytes())
+    }));
+    stream_and_drive(axum::http::Response::new(body).into(), run.into(), "bot-1".into(), flow, ctx, None).await;
+    assert!(!polled.load(std::sync::atomic::Ordering::SeqCst), "missing context must prevent body consumption");
+    assert!(recording.snapshot().is_empty(), "missing scope must not manufacture a business event");
+    let rows = output.0.lock().unwrap();
+    let selected: Vec<_> = rows.iter().filter(|row| row.run == run && row.key).collect();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].code, "sse.closed");
+    assert_eq!(selected[0].reason, "context_unavailable");
 }

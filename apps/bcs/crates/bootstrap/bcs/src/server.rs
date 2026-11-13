@@ -187,6 +187,8 @@ mod server_construct;
 mod server_infrastructure;
 mod server_run;
 mod state;
+#[cfg(test)]
+mod state_default_tests;
 mod use_case_wiring;
 mod wiring_common;
 mod ws_dispatch;

@@ -441,6 +441,7 @@ dependencies = [
  "hex",
  "inventory",
  "jsonwebtoken",
+ "log",
  "metrics",
  "metrics-exporter-prometheus",
  "opentelemetry",
@@ -2165,6 +2166,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

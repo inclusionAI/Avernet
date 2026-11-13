@@ -1,4 +1,8 @@
 use super::*;
+
+#[cfg(test)]
+#[path = "logging_tests.rs"]
+mod tests;
 pub(super) fn log_state_machine_node_dispatch(
     group: &Group,
     run: &StateMachineRun,

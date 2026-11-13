@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/bot_event_tests.rs"]
+mod key_log_tests;
+
 pub(super) fn build_default_policy_decision(
     group: &Group,
     sender_bot_id: &str,

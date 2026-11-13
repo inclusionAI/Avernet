@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/task_tests.rs"]
+mod key_log_tests;
+
 pub(super) struct TaskCompleteScope {
     pub(super) group_id: String,
     pub(super) session_id: Option<String>,
