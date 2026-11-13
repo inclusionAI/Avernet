@@ -2131,6 +2131,7 @@ class BotService(BotServiceProtocol):
                         permission_owner="owner",
                         description=bot_desc,
                         owner_name=nick_name,
+                        operator_id=user_id,
                     )
                     # 将发布单信息保存到 bot_record 中
                     bot_record["publish"] = publish_record.to_dict()

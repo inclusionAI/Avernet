@@ -95,6 +95,8 @@ class PublishExtState:
         publish_id: int,
         target_status: PublishStatus,
         source_status: PublishStatus,
+        *,
+        audit_operator_id: str | None = None,
     ) -> bool:
         """Atomically advance the status (no ext write) under the optimistic lock.
 
@@ -102,7 +104,8 @@ class PublishExtState:
         ``source_status``); ``False`` if a concurrent writer already moved it."""
         try:
             self._publish_service.update_publish_status(
-                publish_id, target_status.value, source_status.value
+                publish_id, target_status.value, source_status.value,
+                **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
             )
             return True
         except PublishNotFoundError:
@@ -115,6 +118,8 @@ class PublishExtState:
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        *,
+        audit_operator_id: str | None = None,
     ) -> None:
         """Atomically update the publish record's status and ext fields.
 
@@ -128,6 +133,7 @@ class PublishExtState:
             ext=ext,
             source_status=source_status,
             expected_ext=expected_ext,
+            **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
         )
 
     def commit_built_artifact(

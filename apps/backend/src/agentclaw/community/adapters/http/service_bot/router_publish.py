@@ -822,6 +822,7 @@ async def offline_publish(
         # 调用 service 下线
         result = await publish_service.offline_publish(
             publish_id=publish_id,
+            operator_id=user_id,
         )
 
         return ApiResponse(
@@ -1278,6 +1279,7 @@ async def retry_publish_for_others(
         result = await flow_service.retry(
             publish_id=publish_id,
             operator=owner_id,
+            audit_operator_id=user_id,
         )
 
         return ApiResponse(
@@ -1418,6 +1420,7 @@ async def upgrade_bot_type_for_others(
         result = publish_service.upgrade_bot_to_service(
             bot_id=request.bot_id,
             owner_id=request.owner_id,
+            audit_operator_id=user_id,
         )
 
         return ApiResponse(

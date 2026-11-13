@@ -350,3 +350,41 @@ Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,
 retry/compensation infrastructure or publish lock is introduced. These optional
 DB calls can still wait on existing driver/connection timeouts; this is not a
 promise of hard time isolation or DB-outage resilience.
+
+## Release audit
+
+Each attributed service publication draft creation and accepted verify/online
+submission has a distinct `change_id`. Source Bot creator and authenticated
+actor are frozen separately from the stable resource identity. The system
+`env` is independent of `desired_stage`; an online-stage release in a pre
+system remains `env=pre` throughout delivery.
+
+Publication ORM transactions append complete audit snapshots to
+`ac_service_bot_release_audit_event` together with creation/status CAS. A failed
+CAS or rolled-back event insert cannot produce a successful audit. Revision 1
+records submission; revision 2 records the business terminal state. Draft
+creation is immediately terminal. Completion timestamps belong to the original
+business transition, never a later delivery attempt. `validating` is verify
+success; `success` is online success. Queue deadline expiry does not create a
+business failure. Internal legacy calls without an authenticated actor retain
+their old behavior and do not invent one or backfill history.
+
+`ReleaseAuditDeliveryLifecycle` scans up to 100 pending events every eight
+seconds, prioritizing unattempted work, and submits idempotent persistent queue
+tasks. This recovers the commit-to-enqueue crash window. Event delivery restores
+the persisted trusted tenant before calling `ServiceBotReleaseAuditPlugin`;
+its default database implementation projects `ac_service_bot_release_audit`
+using tenant/env/change_id and monotonically increasing revisions. Complete
+terminal snapshots may arrive before submission. Duplicate delivery is safe;
+conflicting content at one revision raises an error. The internal outbox is a
+cross-tenant delivery queue, not a user-readable repository or API.
+
+Apply `sql/2026_11_13_service_bot_release_audit.sql` before deploying producers.
+Local/test database bootstrap creates the same ORM schema. The shared default
+Plugin uses the selected `DatabasePlugin`, including enterprise databases;
+enterprise composition roots can replace only the outbound Plugin for future
+SLS delivery. No SLS SDK or output is included here. Existing rows are not
+backfilled. Monitor `release_audit.event_staged`, `event_delivered`,
+`delivery.request/success/failed/duplicate/conflict`, and `scan_failed`; pending
+events remain available for replay after a plugin failure. Authentication
+credentials and raw publication ext/config are never copied into audit events.
