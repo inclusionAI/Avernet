@@ -195,6 +195,9 @@ user_config:
   # per-operation source is each route's ``x-avernet-security`` marker; this
   # section stores the aggregated table the gateway resolves at request time.
   route_security:
+    # Bounded ACCS executor ingress. A Bot acts as itself, never as its owner.
+    "POST /openapi/v1/task-commission/a2a":
+      bot: required
     # Top-level default: every route requires an authenticated user.
     "/**":
       user: required
@@ -534,6 +537,13 @@ user_config:
       # publishes its public artifact; route_security is inherited from
       # /openapi/v1/collaboration/** and /api/v1/collaboration/** (the backend
       # enforces the gateway-signed principal itself).
+      task-commission-a2a:
+        match: /openapi/v1/task-commission/a2a/**
+        server: backend
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/task-commission/a2a
+          to: /a2a/task-commission
       collaboration-task-context-collab:
         match: /openapi/v1/collaboration/task/context_collab/**
         server: backend

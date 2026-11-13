@@ -142,7 +142,7 @@ authorize an operation merely because a role/template mentions it.
 
 - `task_commission@1` selects strict Work semantics: only declared Task control
   events from an allowed source state; designated typed executor only for
-  submit; public events; `percent` is an integer in `[0,100]` and belongs only
+  progress and submit; public events; `percent` is an integer in `[0,100]` and belongs only
   to progress reporting, never a Message-based side channel. Existing G4 guards
   check artifacts and owner acceptance/cancellation. Terminal/out-of-order
   controls fail before writing.
@@ -205,34 +205,46 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 
 ## Local commission product acceptance
 
-The [commission end-to-end test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule` assembly and installed
-product catalog. The caller obtains `TaskCommissionServiceProtocol` and supplies
-only `PublishTaskCommand` business fields; it does not manually prepare a spec,
-instantiate L6/L5 objects, or choose a profile version in the public command.
-The test replaces only the database boundary with isolated SQLite and the L1
-transport with an observing `MockA2aDelivery`. Product/repository services,
-publication adapter, Open operations, structural G1 and shared G4 are real.
+product catalog. Infrastructure wiring stays in its fixture; the test body
+receives only `TaskCommissionServiceProtocol`, supplies business commands and
+asserts product responses, list/detail views and the exposed activity history.
+It does not inspect ProductInstance/MethodStore, parse delivery envelopes or
+query SQL.
 
-The acceptance flow checks pinned ProductInstance/role facts, a single Open
-binding, publisher-mediated admission **before** dispatch, and the actual L4
-notification's product/MethodBinding refs. The simulated Bot reads the Collet ID
-from that notification and uses product query/Work APIs to report and submit;
-the owner reads and accepts the result. Independent repository/SQL reads verify
-the final state, event history and unchanged persisted instance. Companion cases
-cover rejection/resubmission, cancellation and rejected operations without writes.
+The journey is owner publication and discovery, simulated assignee start,
+progress and submission, then owner review and acceptance. The harness passes
+the published task ID to the simulated Bot; it does not claim that the Bot
+received an actual notification. Real product/repository services, the Open
+adapter and G1/G4 execute behind the API, using isolated SQLite and the default
+local `MockA2aDelivery`.
+
+The separate [protocol/persistence integration suite](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py)
+retains pinned ProductInstance/role checks, the single Open binding,
+publisher-mediated ADMITTED-before-dispatch checks, A2A envelope/bridge
+correlation and independent repository/SQL reads. Its observing delivery mock
+also verifies that Work actions do not republish or redispatch. Companion cases
+cover rejection/resubmission, cancellation, unchanged instance/admission facts
+and rejected operations without writes. These are implementation-integration
+checks, not assertions required in the product user journey.
 
 Run from `apps/backend/`:
 
 ```sh
+# Product user journey only.
 DEPLOY_PROFILE=test .venv/bin/python -m pytest \
   tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py -q
+
+# Internal protocol/persistence integration.
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py -q
 ```
 
-This is local service-level integration evidence, not HTTP authentication, live
-remote A2A, autonomous Bot/LLM execution, artifact upload, production-database
-behavior or durable MethodStore restart evidence. Artifact URIs are recorded
-references; the test does not create or transfer files.
+Both suites provide local service-level integration evidence, not HTTP
+authentication, live remote A2A, autonomous Bot/LLM execution, artifact upload,
+production-database behavior or durable MethodStore restart evidence. Artifact
+URIs are recorded references; the tests do not create or transfer files.
 
 Verification owners:
 
@@ -246,3 +258,23 @@ Verification owners:
   transport/framework/dependency boundaries.
 - Change intent and compatibility impact:
   [2026-11-13 L6 product contracts spec](../../../../../../../specs/2026-11-13-context-collab-l6-product-contracts/spec.md).
+
+## Bot execution reporting follow-up (2026-11-13)
+
+The [commission product boundary](../products/task_commission/README.md) now owns
+the bounded signed-Bot A2A ingress and its wire/example/operational limits. It
+adds HTTP authentication evidence beyond the two service-only suites above;
+outbound delivery is still mock, not live remote execution.
+
+`WorkflowAction.required_role` is an optional additional L4 role restriction;
+`None` adds no role restriction and does not bypass G1 or machine guards. The
+catalog rejects references to undeclared scenario roles. Shared G4 applies a
+declared role rule to both product and generic L4 writes. Commission progress
+requires `selected-agent`; typed legacy executor matching remains available for
+unversioned rows. This fixes enforcement of the existing v1 assignee
+responsibility, without changing topology, upgrading profiles or rewriting old
+events. Publishers can still review results, but cannot report Bot progress.
+
+The earlier no-new-HTTP statement describes the initial L6 contract increment,
+not this follow-up. No transport or concrete product implementation has been
+added to L6. The new transport adapter injects the product API Protocol.

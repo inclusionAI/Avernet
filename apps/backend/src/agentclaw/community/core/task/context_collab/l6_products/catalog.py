@@ -56,6 +56,11 @@ class ProductCatalog:
                     raise ContextCollabValidationError(
                         "unsupported scenario role participant source"
                     )
+            for action in definition.workflow.actions:
+                if action.required_role is not None and action.required_role not in roles:
+                    raise ContextCollabValidationError(
+                        "workflow action requires an undeclared scenario role"
+                    )
             if definition.publication is not None:
                 policy = definition.publication.admission
                 policy.validate_roles(definition.scenario_roles)

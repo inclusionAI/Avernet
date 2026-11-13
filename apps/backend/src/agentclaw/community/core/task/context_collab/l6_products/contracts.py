@@ -81,6 +81,8 @@ class WorkflowAction:
     event_kind: str
     primitive_type: str
     payload_fields: tuple[str, ...]
+    # None adds no action-specific role restriction; G1 and G4 still apply.
+    required_role: str | None = None
 
     def __post_init__(self) -> None:
         if any(

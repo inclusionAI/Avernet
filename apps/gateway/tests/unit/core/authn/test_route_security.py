@@ -639,3 +639,17 @@ def test_shipped_config_requires_app_for_clawweb_machine_apis(path: str) -> None
     req = rs.resolve("GET", path)
 
     assert req == {PrincipalType.APP: Presence.REQUIRED}, path
+
+
+def test_commission_report_requires_bot_without_widening_user_routes() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    assert security.resolve("POST", "/openapi/v1/task-commission/a2a") == {
+        PrincipalType.BOT: Presence.REQUIRED,
+    }
+    assert security.resolve("GET", "/openapi/v1/task-commission/a2a") == {
+        PrincipalType.USER: Presence.REQUIRED,
+    }
+    assert security.resolve("POST", "/api/v1/unregistered") == {
+        PrincipalType.USER: Presence.REQUIRED,
+    }

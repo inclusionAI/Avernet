@@ -112,6 +112,7 @@ def test_dispatched_info_carries_publisher_identity():
         publisher_principal_id="u_1001",
         product_profile_ref=TASK_COMMISSION_PROFILE_REF,
         method_binding_ref="mb_collet_1",
+        context_version=2,
     )
     assert info.publisher_principal_id == "u_1001"
 
@@ -239,6 +240,7 @@ class TestEnvelopeIdentityChainAsserted:
         assert envelope.mode == "EVENT"
         assert envelope.target_ref.object_type == "Collet"
         assert envelope.target_ref.object_id == created.collet_id
+        assert envelope.target_ref.version == str(created.context_version)
         assert envelope.payload == {
             "title": "生成报告",
             "body": "任务正文。",

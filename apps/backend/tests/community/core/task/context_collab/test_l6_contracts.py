@@ -267,3 +267,11 @@ def test_l6_contracts_do_not_import_runtime_or_transport():
                     "httpx",
                     "injector",
                 }, (path.name, module)
+
+
+def test_workflow_role_requirement_must_name_a_declared_role():
+    profile = PRODUCT_CATALOG.get("task_commission", 1)
+    action = replace(profile.workflow.action("report_progress"), required_role="unknown")
+    workflow = replace(profile.workflow, actions=(action,))
+    with pytest.raises(ContextCollabValidationError, match="undeclared scenario role"):
+        ProductCatalog((replace(profile, workflow=workflow),))

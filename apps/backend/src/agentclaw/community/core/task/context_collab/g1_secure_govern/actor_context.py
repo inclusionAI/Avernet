@@ -21,4 +21,4 @@ class ActorContext:
     """已认证调用者上下文;G1 授权与审计的执行主体来源。"""
 
     actor: PrincipalRef
-    source: str  # "api" | "openapi"
+    source: str  # "api" | "openapi" | "a2a"

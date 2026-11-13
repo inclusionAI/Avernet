@@ -27,7 +27,9 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
     DesignatedOpenAdmission,
 )
 
-# A new behavior/topology must use a new ref; existing instances never select latest.
+# New behavior/topology needs a new ref; existing instances never select latest.
+# Executor-only progress below enforces the existing v1 assignee responsibility
+# (authorization bug fix), not a profile migration.
 TASK_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 TASK_COMMISSION_PROFILE = ProductProfileDefinition(
@@ -78,6 +80,7 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
                 "task.progress.updated",
                 "Task",
                 ("note", "percent"),
+                required_role=ROLE_SELECTED_AGENT,
             ),
             WorkflowAction(
                 "submit_task",

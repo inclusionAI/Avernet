@@ -15,6 +15,9 @@ Concrete product definitions, specialized strategies and services live in
 `context_collab/products/`; DI installs and injects a shared immutable catalog.
 L6 supplies reusable contracts/mechanisms, not concrete business templates, a
 second Task/Method engine or Resource access grants.
+The [task commission product boundary](context_collab/products/task_commission/README.md)
+also documents its bounded signed-Bot A2A report ingress and executor-only
+progress enforcement.
 
 ## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
 

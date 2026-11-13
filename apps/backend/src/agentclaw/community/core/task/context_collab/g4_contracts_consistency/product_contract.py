@@ -79,6 +79,26 @@ def validate_product_event(
         raise ContextCollabValidationError(
             "required versioned workflow machine is unavailable"
         )
+    declared = next(
+        (action for action in workflow.actions if action.event_kind == event_kind),
+        None,
+    )
+    if declared is not None and declared.required_role is not None:
+        has_role = actor_has_role(spec, actor, declared.required_role)
+        # Historical unversioned instances have no materialized role facts.
+        if (
+            spec.product_profile_version is None
+            and declared.required_role == ROLE_SELECTED_AGENT
+            and spec.executor_ref is not None
+        ):
+            has_role = (
+                actor.principal_type == spec.executor_ref.agent_type
+                and actor.principal_id == spec.executor_ref.agent_id
+            )
+        if not has_role:
+            raise ContextCollabValidationError(
+                "actor is not the designated executor for this workflow action"
+            )
     if not workflow.strict_control_events or not event_kind.startswith("task."):
         return  # Preserve established nontransition semantics unless the profile opts into strict Work.
     if machine is None or not any(
@@ -88,10 +108,6 @@ def validate_product_event(
             f"product workflow does not permit control event {event_kind!r}"
         )
     if workflow.actions:
-        declared = next(
-            (action for action in workflow.actions if action.event_kind == event_kind),
-            None,
-        )
         if declared is None:
             raise ContextCollabValidationError(
                 f"product workflow has no declared control event {event_kind!r}"

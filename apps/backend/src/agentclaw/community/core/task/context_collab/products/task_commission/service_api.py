@@ -3,7 +3,8 @@
 乙案产品自持合同:``publish_task`` = Context.create + Work.propose/assign;
 ``start_task``/``report_progress``/``submit_task``/``accept_task``/
 ``reject_task``/``cancel_task`` = Work 族六动作;``detail_task``/
-``list_tasks`` = Query.project/search(P1 含,HTTP 后置)。
+``list_tasks`` = Query.project/search(用户 HTTP 后置)。
+``report_execution`` 是 Bot 入站执行报告合同,复用 Work 动作及 G1/G4/CAS。
 
 `T | None` 只用于合法领域可空:``note``(可选备注)与孤儿 ``body``。
 """
@@ -11,6 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
@@ -59,6 +61,24 @@ class TaskAdvanceCommand:
 
 
 @dataclass(frozen=True)
+class TaskExecutionReportCommand:
+    """Authenticated executor input with mandatory concurrency/context fences.
+
+    ``action`` is start_task/report_progress/submit_task, not owner controls.
+    Profile and binding references correlate the dispatch; they grant no access.
+    A stale replay is a conflict, not a second progress event or a success receipt.
+    """
+
+    action: str
+    task: TaskAdvanceCommand
+    expected_version: int
+    product_profile_ref: VersionedProfileRef
+    method_binding_ref: str
+    # None means no caller-specified deadline, not an unlimited lease.
+    deadline: datetime | None = None
+
+
+@dataclass(frozen=True)
 class DispatchedTaskInfo:
     """发布后送达指定执行 bot 的任务信息(L1 渡口 P1 占位承载形)。
 
@@ -77,6 +97,8 @@ class DispatchedTaskInfo:
     # Pinned product selection and actual runtime binding, not access credentials.
     product_profile_ref: VersionedProfileRef
     method_binding_ref: str
+    # Collet revision at dispatch, the initial expected_revision for Bot reports.
+    context_version: int
 
 
 @runtime_checkable
@@ -155,11 +177,15 @@ class TaskAdvancedView:
 
 @runtime_checkable
 class TaskCommissionServiceProtocol(Protocol):
-    """任务代办九用例协议;模块级交付面(P1 无 HTTP,沿公开讨论 spec §5)。"""
+    """任务代办服务协议;用户用例与 Bot 入站报告共用产品权威。"""
 
     def publish_task(
         self, command: PublishTaskCommand, context: ActorContext
     ) -> TaskCommissionCreatedView: ...
+
+    def report_execution(
+        self, command: TaskExecutionReportCommand, context: ActorContext
+    ) -> TaskAdvancedView: ...
 
     def start_task(
         self, command: TaskAdvanceCommand, context: ActorContext

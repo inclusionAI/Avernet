@@ -13,8 +13,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from injector import inject
+
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    top_level_binding_id,
+)
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -84,6 +92,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
+    TaskExecutionReportCommand,
     TaskCommissionCreatedView,
     TaskAdvancedView,
     TaskDispatchPort,
@@ -245,11 +254,22 @@ class TaskCommissionService:
                 publisher_principal_id=context.actor.principal_id,
                 product_profile_ref=profile.ref,
                 method_binding_ref=binding.method_binding_id,
+                context_version=view.context_version,
             )
         )
         return view
 
     # ------------------------------------------------------- Work 六动作
+
+    def report_execution(
+        self, command: TaskExecutionReportCommand, context: ActorContext
+    ) -> TaskAdvancedView:
+        """Receive a Bot report; never accept an owner-controlled action here."""
+        if command.action not in {"start_task", "report_progress", "submit_task"}:
+            raise ContextCollabValidationError("unsupported executor report action")
+        if type(command.expected_version) is not int or command.expected_version < 1:
+            raise ContextCollabValidationError("expected_version must be positive")
+        return self._advance(command.action, command.task, context, report=command)
 
     def start_task(
         self, command: TaskAdvanceCommand, context: ActorContext
@@ -284,7 +304,8 @@ class TaskCommissionService:
     # ------------------------------------------------------------- 私有
 
     def _advance(
-        self, action: str, command: TaskAdvanceCommand, context: ActorContext
+        self, action: str, command: TaskAdvanceCommand, context: ActorContext,
+        *, report: TaskExecutionReportCommand | None = None,
     ) -> TaskAdvancedView:
         record = self._repo.get_current_status(command.collab_context_id)
         if record is None:
@@ -352,6 +373,21 @@ class TaskCommissionService:
         self._authorizer.check_append(
             record.collet, record.context_spec, intent, context
         )
+        if report is not None:
+            executor = record.context_spec.executor_ref
+            if (
+                executor is None
+                or context.actor.principal_type != "bot"
+                or context.actor.principal_type != executor.agent_type
+                or context.actor.principal_id != executor.agent_id
+            ):
+                raise ContextCollabValidationError("actor is not the designated executor")
+            if (
+                report.product_profile_ref != profile.ref
+                or report.method_binding_ref != top_level_binding_id(command.collab_context_id)
+            ):
+                raise ContextCollabValidationError("report context does not match task binding/profile")
+            ensure_expected_version(report.expected_version, record.collet.version)
         validate_product_event(
             catalog=self._product_catalog,
             spec=record.context_spec,
@@ -391,6 +427,9 @@ class TaskCommissionService:
 
             return replace(current, status=resolved)
 
+        if report is not None and report.deadline is not None:
+            if report.deadline.tzinfo is None or report.deadline <= datetime.now(timezone.utc):
+                raise ContextCollabValidationError("report deadline has expired")
         appended = self._repo.append_event(
             command.collab_context_id,
             AppendEventRecordRequest(

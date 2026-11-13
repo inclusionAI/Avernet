@@ -86,7 +86,7 @@ class A2aTaskDispatch(TaskDispatchPort):
                 "target_ref": {
                     "object_type": "Collet",
                     "object_id": info.collet_id,
-                    "version": None,
+                    "version": str(info.context_version),
                     "issuer": LOCAL_ISSUER,
                 },
                 "expected_revision": None,

@@ -322,3 +322,55 @@ Changed-test Ruff and `git diff --check` pass; the changed source file is below
 HTTP authentication, autonomous Bot/LLM execution, artifact upload, production
 DB or durable MethodStore restart evidence. No full Backend suite, push or
 deployment was performed by this follow-up.
+
+
+## Follow-up — separate product user journey from protocol inspection
+
+The previous local acceptance test mixed product use with internal L5/L6,
+transport and SQL assertions. The user journey now lives in
+`test_task_commission_end_to_end.py` and receives only the product Service API
+from its fixture. It publishes business fields, queries the task, simulates the
+assignee's start/progress/submission, and lets the owner review and accept. Its
+assertions use only returned product views and their public activity history;
+it does not obtain MethodStore, ProductCatalog, the delivery mock or a repository.
+The published task ID is handed to the simulated Bot by the harness, not read
+from an A2A envelope. Bot execution remains a necessary part of this local
+journey, not a claim of autonomous execution or notification receipt.
+
+The prior 13 cases and their internal assertions are retained in
+`test_task_commission_protocol_integration.py`; the former main case is renamed
+to describe protocol/persistence integration. L5 admission ordering, L6 pinned
+selection and roles, A2A envelope/bridge evidence, independent SQL reads and
+unchanged state on rejected writes are not removed from coverage. No runtime,
+API, profile or DI registration changed. The owning
+[L6 README](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md#local-commission-product-acceptance)
+now distinguishes the two suites and their shared service-level limitations.
+
+### Verification of the split
+
+The user journey plus moved integration suite passed **14 tests, 17 warnings**.
+The same affected product/L6/repository/DI regression command recorded in the
+previous follow-up then passed **175 tests, 17 warnings, 3.49 seconds**. Ruff
+check and format checks pass for both Python files; they are 136 and 469 lines.
+An AST comparison with the prior committed end-to-end module confirms that the
+moved integration suite is unchanged except for its module documentation and
+main test name/docstring. Changed Markdown relative-link targets exist and
+`git diff --check` passes. No full Backend, HTTP, live A2A, production database,
+deployment, commit or push validation was performed by this follow-up.
+
+## Follow-up: signed Bot execution reports (2026-11-13)
+
+Implemented the bounded gateway Bot-authenticated A2A 0.3.0 ingress, product
+report command with pinned context/revision/deadline fences, and shared G4
+executor-only progress enforcement. The
+[product boundary](../../src/agentclaw/community/core/task/context_collab/products/task_commission/README.md)
+owns the wire, v1 authorization-fix compatibility decision and remaining gaps.
+Outbound delivery remains mock; no live Bot/session interoperability is claimed.
+
+Verification: affected core/DI/repository suites 1072 passed; new endpoint
+framework cases 2 passed; gateway routing/auth policy suites 219 passed. After
+the final legacy-role regression case, focused ingress/runtime suites: 61 passed.
+Ruff and diff whitespace checks passed. Before the request to stop architecture
+gates, the already-running fast gate finished with 476 passed and one coverage
+failure listing 42 L5 routes; the new ingress is not listed. No gate baseline
+was changed and no further architecture gate was run. No live deployment test.

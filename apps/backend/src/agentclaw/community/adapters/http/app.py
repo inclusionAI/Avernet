@@ -896,6 +896,8 @@ app.include_router(bot_message_feedback_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
+from agentclaw.community.adapters.http.task.commission_a2a import router as commission_a2a_router  # noqa: E402
+app.include_router(commission_a2a_router)
 app.include_router(context_collab_router)  # /api/v1/collaboration/task/context_collab — BBS context collab (spec §6.1)
 app.include_router(context_collab_methods_router)  # /api/v1/collaboration/task/context_collab/{id}/method-bindings/… — L5 method ops (2026-11-12 spec §7)
 app.include_router(work_orders_http_router)

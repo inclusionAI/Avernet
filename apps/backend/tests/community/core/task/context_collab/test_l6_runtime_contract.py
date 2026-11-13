@@ -580,3 +580,27 @@ def test_injected_exact_v2_survives_storage_recovery_and_shared_g4(db, monkeypat
     assert started.context_version == 3
     assert restarted_repo.get_current_status(collet_id).product_instance == instance
     assert _counts(db) == (1, 3)
+
+
+def test_legacy_commission_progress_requires_typed_executor(db):
+    _, _, generic, product = _services(db)
+    created = generic.create_context(_command(), _actor())
+    with db.orm_session() as session:
+        row = session.query(ContextCollabColletModel).one()
+        data = json.loads(row.context_spec)
+        for key in (
+            "product_profile_version", "workflow_profile_version", "participants",
+            "role_bindings", "product_instance",
+        ):
+            del data[key]
+        row.context_spec = json.dumps(data)
+    product.start_task(TaskAdvanceCommand(created.collab_context_id), _actor(BOT))
+    for principal in (OWNER, PrincipalRef("human", BOT.principal_id)):
+        with pytest.raises(ContextCollabValidationError, match="designated executor"):
+            product.report_progress(
+                TaskAdvanceCommand(created.collab_context_id, percent=20), _actor(principal),
+            )
+    progressed = product.report_progress(
+        TaskAdvanceCommand(created.collab_context_id, percent=20), _actor(BOT),
+    )
+    assert progressed.context_version == 3
