@@ -232,9 +232,11 @@ def _make_service(repo: _FakeRepo | None = None):
 
 def _top_level_binding(store, repo, collab_context_id):
     """经 L5 自愈缝读回顶层 binding(已投影则幂等返回既有)。"""
-    from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
         _now,
         current_axes,
+    )
+    from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
         ensure_top_level_binding,
     )
 

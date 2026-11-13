@@ -239,3 +239,16 @@ Do not deploy new runtime code against the old schema or mix it with old
 snapshot writers. This does not change Open admission topology or turn result
 submission into an L5 Open operation. Outbound delivery and MethodStore limits
 listed above still apply.
+
+## Layer-owned execution path
+
+Product actions resolve the pinned WorkflowProfile, event mapping, role/sequence
+contract and Bot report context in this module. Both this product and generic
+append then call L4 `operations/work.py`: preparation applies G4 and produces the
+exact Task fence; commit atomically persists through the repository. Report
+deadlines remain between preparation and commit. L5 Open operations now live in
+`l5_methods/operations/open/`; Open still handles admission, not result submission.
+The journey's local trace wraps the actual L4 preparation/commit and G4 resolver,
+so console directory labels follow the moved implementations rather than a
+hardcoded execution narrative. Public actions, reports and profile versions do
+not change. See the [operation map](../../README.md#operation-ownership).

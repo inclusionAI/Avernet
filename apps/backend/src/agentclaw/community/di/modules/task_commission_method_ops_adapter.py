@@ -1,7 +1,7 @@
 """任务代办方法编排缝适配器:产品窄端口 → L5 Open 方法服务。
 
 产品白名单(乙案)不允许 products 直连 ``method_service_api`` /
-``services.open_method_service*``;本适配器住 DI 层(不受产品
+``l5_methods.operations.open``;本适配器住 DI 层(不受产品
 import 法约束),把产品的 ``TaskMethodOpsPort`` 四步翻译到
 ``OpenMethodOpsServiceProtocol``——发布机会、申请提交、筛选、
 录取,指定执行 bot 至 ADMITTED(spec 增量裁决 §9)。
@@ -20,10 +20,14 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from injector import inject
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    top_level_binding_id,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    _now,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -32,8 +36,8 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
     OpenDecisionOpCommand,
-    OpenOpportunityCommand,
     OpenMethodOpsServiceProtocol,
+    OpenOpportunityCommand,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
     require_designated_admission,
@@ -43,10 +47,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     AssigneeAdmissionReceipt,
     TaskMethodOpsPort,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    _now,
-    top_level_binding_id,
-)
+from injector import inject
 
 
 class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):

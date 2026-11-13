@@ -2,7 +2,7 @@
 
 ``collet_lifecycle`` 顶层状态只存在于进程内:store 键为全局唯一的
 ``collet_id``,值是 ``ColletState``;不落数据库、不落 store 列,P2 经新增
-列或 JSON 字段换成持久化实现,服务层只依赖本模块协议零改动。重启归零
+列或 JSON 字段换成持久化实现,服务层只依赖 L4 存储端口零改动。重启归零
 (方案 b 弱化):进程重启后 store 为空,未见过的 collet 与 create_context
 新建的一样,由 ``get_or_seed`` 种子 ``ACTIVE``(沿"创建即可协作"既有
 裁决;``CREATED`` 保留在机器词汇,可达性由 conformance 测试直接构造值
@@ -13,30 +13,16 @@
 from __future__ import annotations
 
 import threading
-from typing import Protocol
 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     ColletState,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    ColletLifecycleStore as ColletLifecycleStore,
+)
 
 # 种子状态:创建即可协作(spec §5.3;"collet.created" 仅注册不配规则)。
 _SEED_STATE = ColletState.ACTIVE
-
-
-class ColletLifecycleStore(Protocol):
-    """Collet 生命周期状态存取协议(P1 内存实现,P2 持久化整体替换)。"""
-
-    def get(self, collet_id: str) -> ColletState | None:
-        """取状态;未见过的 collet 返回 ``None``(不落种)。"""
-        ...
-
-    def set(self, collet_id: str, state: ColletState) -> None:
-        """写入新状态;整锁内原子替换。"""
-        ...
-
-    def get_or_seed(self, collet_id: str) -> ColletState:
-        """取状态;未见过的 collet 种子 ``ACTIVE`` 并写回。"""
-        ...
 
 
 class InMemoryColletLifecycleStore:

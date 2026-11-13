@@ -24,7 +24,7 @@ an installed/default global catalog. Product teams author concrete definitions i
 `products/`; the composition root explicitly installs them in
 [`di/modules/context_collab_products.py`](../../../../di/modules/context_collab_products.py).
 `TaskModule` provides one catalog per injector and injects that same instance into
-repositories, generic/product services, Method lifecycle/recovery and the bounded
+repositories, generic/product services, application Method bootstrap/recovery and the bounded
 Open adapter. Pure selection, instance and G4 helpers require this catalog
 explicitly; none fall back to global/default product installation. An empty or
 incomplete installation rejects unknown profiles rather than silently recovering
@@ -298,3 +298,14 @@ Task/Collet version fences. Existing product profile versions, creation payloads
 and public product IDs are unchanged. The existing `new_instances_only` policy
 concerns product-profile changes; it does not remove the prerequisite storage
 migration or permit mixed snapshot/Task-authoritative writers.
+
+## Layer-owned operation boundary
+
+L6 resolves creation/profile contracts; it does not execute Method operations or
+own Work transitions. Application `services/method_bootstrap.py` translates
+ContextSpec and pinned catalog versions into L5 `ResolvedMethodSpec`. L5 owns
+initial binding/roster creation and consumes an injected recovery port; it never
+imports L6 to heal a binding. Application/product workflow selection supplies a
+machine ID/version to L4 Work, not a ProductProfile object. See the
+[operation ownership map](../README.md#operation-ownership) for ports, compatibility
+imports and preserved restart/transaction limitations.

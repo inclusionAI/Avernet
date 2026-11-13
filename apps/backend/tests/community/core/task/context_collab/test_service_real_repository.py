@@ -562,9 +562,11 @@ class TestDiWiring:
             injector.get(TaskCommissionServiceProtocol),
             injector.get(BbsPublicDiscussionServiceProtocol),
             injector.get(TaskMethodOpsPort),
-            injector.get(MethodLifecycleServiceProtocol),
         ):
             assert consumer._product_catalog is catalog
+        lifecycle = injector.get(MethodLifecycleServiceProtocol)
+        assert lifecycle._recovery._catalog is catalog
+        assert not hasattr(lifecycle, "_product_catalog")
         other = Injector(
             [TestingDatabaseModule(), TaskPersistenceModule(), TaskModule()]
         )

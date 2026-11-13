@@ -22,25 +22,43 @@ core/task/context_collab 的服务单测覆盖。
 
 from contextlib import contextmanager
 
-import pytest
-from fastapi.testclient import TestClient
-from injector import Injector
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user
-from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.core.base import Base
-
 # Side-effect import: registers the 2 context collab models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
+
+# Match the real app's DI-first bootstrap (auth-first isolated imports are not
+# a supported baseline; see knowledge_management/conftest.py for the precedent).
+import agentclaw.community.di  # noqa: E402,F401
+import pytest
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.api.task.context_collab_service import (
+    ContextCollabServiceProtocol,
+)
+from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     StructuralContextCollabAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+    SwarmMethodService,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    GroupMethodOpsServiceProtocol,
+    MethodLifecycleServiceProtocol,
+    OpenMethodOpsServiceProtocol,
+    SwarmMethodOpsServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -49,34 +67,18 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.method_service_api import (
-    GroupMethodOpsServiceProtocol,
-    MethodLifecycleServiceProtocol,
-    OpenMethodOpsServiceProtocol,
-    SwarmMethodOpsServiceProtocol,
-)
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    MethodLifecycleService,
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+    ProductMethodBindingRecovery,
 )
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
-    OpenMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
-    SwarmMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
-    SingleGroupMethodService,
-)
-from agentclaw.community.api.task.context_collab_service import (
-    ContextCollabServiceProtocol,
-)
+from fastapi.testclient import TestClient
+from injector import Injector
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-# Match the real app's DI-first bootstrap (auth-first isolated imports are not
-# a supported baseline; see knowledge_management/conftest.py for the precedent).
-import agentclaw.community.di  # noqa: E402,F401
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PREFIX = "/api/v1/collaboration/task"  # spec §6.1: singular "task"
@@ -129,7 +131,7 @@ def client_world():
         store=store,
         authorizer=authorizer,
         collab_repo=repo,
-        product_catalog=PRODUCT_CATALOG,
+        recovery=ProductMethodBindingRecovery(store, repo, PRODUCT_CATALOG),
     )
     services = {
         ContextCollabServiceProtocol: ContextCollabService(

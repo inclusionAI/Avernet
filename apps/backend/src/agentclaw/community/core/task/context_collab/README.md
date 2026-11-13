@@ -8,14 +8,73 @@ It implements bounded local contracts, not full ACCS conformance.
 
 - **Provides:** transport-free generic collaboration services, L4 primitives,
   L5 Method services, L6 product composition, product services and shared G1–G4
-  enforcement. Public contracts remain in `service_api.py`,
-  `method_service_api.py` and `products/*/service_api.py`.
+  enforcement. Generic/application contracts remain in `service_api.py`; L4 write contracts
+  live in `l4_context_primitives/operations/contracts.py`, Method contracts in
+  `l5_methods/operations/contracts.py`, and product contracts in
+  `products/*/service_api.py`. Root API imports remain compatible.
 - **Consumes:** injected `DatabasePlugin`, product catalog, MethodStore,
   authorization and delivery ports. DI chooses concrete implementations;
   HTTP adapters translate requests but do not own Task transitions.
 - **Dependencies:** L4 uses L2/L3 references and domain errors, not L5/L6
   composition types or read projections. L6 composes lower-layer contracts;
   concrete business templates stay in `products/`. G1–G4 cross-cut these layers.
+
+## Operation ownership
+
+Operation implementation follows the owner of the affected authority, not the
+HTTP route or a shared `services/` folder. This is a local implementation layout
+for ACCS semantic boundaries, not an ACCS-mandated Python directory tree.
+
+```text
+l4_context_primitives/operations/
+  contracts.py           # EventAppendCommand, storage ports and append intent
+  collet_lifecycle.py    # activate/suspend/resume/complete/archive
+  work.py                # G4 Task resolution, Task fence and atomic append
+l5_methods/operations/
+  contracts.py           # Method commands, results and public protocols
+  initialization.py      # top-level Method/roster from resolved Method facts
+  lifecycle.py           # binding lifecycle, inspect, compose and detach
+  single.py / group.py   # separate operations; single_group.py preserves combined API
+  open/                  # opportunity/application/admission operations
+  swarm/                 # execution profile/plan/stage operations
+services/
+  context_collab_service.py  # generic cross-layer application entrypoints
+  method_bootstrap.py       # L6 creation contract -> L5 initialization/recovery
+products/
+  task_commission/           # concrete product profile and business orchestration
+  bbs_public_discussion/
+```
+
+- L4/L5 consume narrow `CollaborationReader`/`EventWriter` ports, not L6's
+  ContextSpec or the richer application repository contract. Persistence exposes
+  creation principal/executor identity facts for governance, preserving existing
+  ID-only Method/Collet rules even for partial legacy rows. These are **creation
+  identities**, not reassignment or a replacement for typed Task executor checks
+  on Bot reporting. Task remains Work authority.
+- Application/product entrypoints retain event-schema checks, G1 authorization,
+  product contracts, pinned workflow selection and their existing error order.
+  They pass only the selected machine ID/version and explicit event intent into
+  L4 `prepare_event_append`. It produces a TaskUpdate and exact Task/Collet
+  fences; `PreparedEventAppend.commit` uses the same repository transaction for
+  generic and commission Work. Preparation does not write; Bot deadlines are
+  still checked after G4 and before commit. Ordinary Messages cannot acquire a
+  TaskUpdate. These internal operations do not expose an unauthenticated API.
+- `TaskModule` injects the L5 lifecycle implementation and an application-owned
+  `TopLevelBindingRecovery` adapter. Only that adapter resolves product catalog
+  versions during recovery. Initialization is idempotent and keeps existing
+  terminated bindings; missing binding recovery retains the existing in-memory
+  restart limitation (no durable method history is fabricated).
+- Old `services/*` operation imports are compatibility forwards, not duplicate
+  implementations. The legacy lifecycle constructor additionally assembles the
+  same recovery adapter for old `product_catalog=` callers. New DI uses the L5
+  implementation directly. Root `method_service_api` and `service_api` reexport
+  canonical command classes, preserving object identity and wire fields.
+
+The [functional port tests](../../../../../../tests/community/core/task/context_collab/test_layer_operations.py)
+exercise L4/L5 with records that have no ContextSpec or product catalog, shared
+Work fences, partial legacy Messages and propagated write failures. The real
+DI/SQL/product journey remains the integration evidence. No new operation family
+is invented for layers that do not yet have a corresponding use case.
 
 ## State ownership
 

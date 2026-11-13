@@ -31,7 +31,7 @@ _ALLOWED_CONTEXT_COLLAB_PARTS = {
     "g4_contracts_consistency",
     "persistence.repository",
     "persistence.method_store",
-    "services.method_lifecycle_service",
+    "services.method_bootstrap",
 }
 def _imported_modules(tree: ast.Module) -> list[str]:
     modules: list[str] = []

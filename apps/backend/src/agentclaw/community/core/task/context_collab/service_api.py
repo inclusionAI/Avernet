@@ -22,6 +22,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    EventAppendCommand as EventAppendCommand,
+)
 
 
 @dataclass
@@ -39,22 +42,6 @@ class ContextCreateCommand:
     executor_ref: AgentRef | None
     objective: str
     resource_refs: list[ResourceRef]
-
-
-@dataclass
-class EventAppendCommand:
-    """追加事件命令;字段与 spec §6.3 表格一一对应。
-
-    追加不设幂等键(spec 作者裁决):重复提交即重复事件。
-    """
-
-    expected_version: int
-    event_kind: str
-    primitive_type: str
-    actor_ref: PrincipalRef
-    parent_event: str | None
-    visibility: str
-    payload: dict
 
 
 @dataclass

@@ -51,11 +51,13 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskDispatchPort,
     TaskMethodOpsPort,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
 )
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (

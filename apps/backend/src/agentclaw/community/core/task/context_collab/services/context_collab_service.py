@@ -8,11 +8,6 @@
 
 from __future__ import annotations
 
-from injector import inject
-
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -24,45 +19,49 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
     ensure_expected_version,
 )
-from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    WorkflowKind,
-)
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
     EventProjection,
     active_chain_ids,
     build_progress,
     project_events,
 )
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
+    CurrentSnapshot,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
     validate_product_event,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
+    validate_event_body,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
+    prepare_event_append,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    MethodKind,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    _now,
+    current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_spec,
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
-    resolve_workflow_status,
-)
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
-    validate_event_body,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
-from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
-    CurrentSnapshot,
-)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
-    EventRecord,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
+from agentclaw.community.core.task.context_collab.l6_products.profiles import (
+    WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -83,16 +82,10 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    _now,
-    current_axes,
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
     project_created_context,
 )
-
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
-    Task,
-    TaskUpdate,
-)
+from injector import inject
 
 CREATION_EVENT_KIND = "task.created"
 CREATION_PRIMITIVE_TYPE = "Task"
@@ -148,30 +141,6 @@ def _event_projection_dict(projection: EventProjection) -> dict:
     字段集合不含 ``steps``(§12.2 #5);值全部取自 G3 投影,不回读仓储。
     """
     return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
-
-
-def _resolve_event_status(
-    collet: Collet,
-    spec: ContextSpec,
-    task: Task | None,
-    command: EventAppendCommand,
-    context: ActorContext,
-    catalog: ProductCatalog,
-) -> "str | None":
-    """G4 状态机裁决的薄包装:权威实现已提升至
-    ``g4_contracts_consistency.workflow_resolution.resolve_workflow_status``
-    (task_commission spec §4.2/裁决 G,与产品层共用同源);``collet``
-    参数保留以稳住调用面,裁决不消费聚合根。"""
-    profile = product_definition(spec, catalog)
-    machine_ref = profile.workflow.state_machine_ref if profile is not None else None
-    return resolve_workflow_status(
-        workflow_kind=machine_ref.profile_id if machine_ref else spec.workflow_kind,
-        task=task,
-        event_kind=command.event_kind,
-        payload=command.payload,
-        actor=context.actor,
-        workflow_version=machine_ref.version if machine_ref else None,
-    )
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
@@ -304,30 +273,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
             parent_event=command.parent_event,
             events=status.events,
         )
-        new_status = _resolve_event_status(
-            collet,
-            status.context_spec,
-            status.task,
-            command,
-            context,
-            self._product_catalog,
+        profile = product_definition(status.context_spec, self._product_catalog)
+        machine_ref = (
+            profile.workflow.state_machine_ref if profile is not None else None
         )
-
-        is_work = command.event_kind.startswith("task.") and command.primitive_type in {
-            "Task",
-            "Activity",
-        }
-        if is_work and status.task is None:
-            raise ContextCollabValidationError("cannot advance Work without an L4 Task")
-        task_update = None
-        if is_work and status.task is not None:
-            task_update = TaskUpdate(
-                status.task.task_id,
-                status.task.version,
-                new_status if new_status is not None else status.task.status,
-            )
-
-        record = self._repository.append_event(
+        prepared = prepare_event_append(
             collab_context_id,
             AppendEventRecordRequest(
                 expected_version=command.expected_version,
@@ -337,9 +287,15 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 parent_event=command.parent_event,
                 visibility=command.visibility,
                 payload=command.payload,
-                task_update=task_update,
             ),
+            task=status.task,
+            actor=context.actor,
+            workflow_kind=machine_ref.profile_id
+            if machine_ref
+            else status.context_spec.workflow_kind,
+            workflow_version=machine_ref.version if machine_ref else None,
         )
+        record = prepared.commit(self._repository)
         return EventAcceptedResult(
             accepted=True,
             collab_context_id=collab_context_id,

@@ -66,9 +66,13 @@ from agentclaw.community.core.task.context_collab.service_api import (
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     MethodLifecycleService,
-    current_axes,
     ensure_top_level_binding,
     project_created_context,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG

@@ -14,15 +14,9 @@ import json
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Protocol, runtime_checkable, Sequence
+from typing import Protocol, Sequence, runtime_checkable
 from uuid import uuid4
 
-from injector import inject
-from sqlalchemy import func
-
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabParentEventError,
@@ -32,7 +26,10 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
     ensure_expected_version,
 )
-
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
+    CurrentSnapshot,
+    project_current_snapshot,
+)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
@@ -40,40 +37,40 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
-from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
-    CurrentSnapshot,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    AppendEventRecordRequest as AppendEventRecordRequest,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
     TaskStatus,
-    TaskUpdate,
 )
-from agentclaw.community.core.task.context_collab.persistence.models import (
-    ContextCollabColletModel,
-    ContextCollabEventModel,
-    ContextCollabTaskModel,
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
     ProductInstance,
     decode_product_instance,
     instantiate_product,
 )
+from agentclaw.community.core.task.context_collab.persistence.models import (
+    ContextCollabColletModel,
+    ContextCollabEventModel,
+    ContextCollabTaskModel,
+)
+from agentclaw.community.core.task.context_collab.persistence.task_storage import (
+    legacy_progress,
+    load_tasks,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-
-from agentclaw.community.core.task.context_collab.persistence.task_storage import (
-    load_tasks,
-    legacy_progress,
-)
-from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
-    project_current_snapshot,
-)
+from injector import inject
+from sqlalchemy import func
 
 # 初始事件对进入 Collet 的主体可见(G4 visibility 白名单内,spec §6.3)。
 _CREATION_EVENT_VISIBILITY = "public"
@@ -103,6 +100,16 @@ class CreateContextRecordRequest:
 
 class _RecordView:
     """Compatibility view generated from Task; never used to adjudicate Work."""
+
+    @property
+    def owner_principal_id(self) -> str:
+        """Creation identity for governance, including genuinely partial legacy rows."""
+        return self.context_spec.principal_ref.principal_id
+
+    @property
+    def designated_executor_id(self) -> str | None:
+        executor = self.context_spec.executor_ref
+        return executor.agent_id if executor is not None else None
 
     @property
     def current_snapshot(self) -> CurrentSnapshot | None:
@@ -139,25 +146,6 @@ class ContextStatusRecord(_RecordView):
     events: list[EventRecord]
     tasks: tuple[Task, ...] = ()
     product_instance: ProductInstance | None = None
-
-
-@dataclass
-class AppendEventRecordRequest:
-    """``append_event`` 请求;追加不设幂等键,重复提交即重复事件。
-
-    ``task_update`` is G4's resolved Work intent plus exact Task ID/version.
-    Both Task and Collet revisions are fenced inside the SQL transaction.
-    Ordinary Messages omit it and cannot alter Task state.
-    """
-
-    expected_version: int
-    event_kind: str
-    primitive_type: str
-    actor_ref: PrincipalRef
-    parent_event: str | None
-    visibility: str
-    payload: dict
-    task_update: TaskUpdate | None = None
 
 
 @dataclass

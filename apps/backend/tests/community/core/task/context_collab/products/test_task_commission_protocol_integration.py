@@ -72,7 +72,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskAdvanceCommand,
     TaskCommissionServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
 )
 from agentclaw.community.di.modules.task_module import TaskModule
