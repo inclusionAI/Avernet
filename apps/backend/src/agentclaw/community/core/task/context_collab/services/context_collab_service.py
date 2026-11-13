@@ -27,6 +27,9 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.obs
     build_progress,
     project_events,
 )
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
+    resolve_workflow_status,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
@@ -172,46 +175,18 @@ def _resolve_event_status(
     command: EventAppendCommand,
     context: ActorContext,
 ) -> "str | None":
-    """G4 状态机裁决(spec §4):返回事件接纳后的新 status。
-
-    ``spec`` / ``snapshot`` 是仓储 record 的伴随投影字段(载体迁移自
-    Collet 聚合根);``spec`` 的 ``workflow_kind`` 未命中
-    ``MACHINE_REGISTRY``,或当前状态对该事件无规则命中 → status 不变
-    (事件仍接纳)。守卫输入按 Controller Ruling R4 用值语义构造:
-    actor 取已认证调用者,responsible 取快照 principal,executor 取
-    创建参数 executor。guard FAIL / BLOCKED 由 ``resolve_transition``
-    抛 ``ContextCollabValidationError`` 自然向外传。
-    """
-    if snapshot is None:
-        # 可空快照(外部部分行):无状态可裁决,事件照常接纳。
-        return None
-    current_status = snapshot.status
-    machine = MACHINE_REGISTRY.get(spec.workflow_kind)
-    if machine is None:
-        return current_status
-    matched_rules = [
-        rule
-        for rule in machine.transitions
-        if rule.event_name == command.event_kind
-        and current_status in rule.from_states
-    ]
-    if not matched_rules:
-        return current_status
-    guard_input = GuardEvaluationInput(
-        actor=context.actor,
-        responsible=snapshot.principal_ref,
-        executor=spec.executor_ref,
+    """G4 状态机裁决的薄包装:权威实现已提升至
+    ``g4_contracts_consistency.workflow_resolution.resolve_workflow_status``
+    (task_commission spec §4.2/裁决 G,与产品层共用同源);``collet``
+    参数保留以稳住调用面,裁决不消费聚合根。"""
+    return resolve_workflow_status(
+        workflow_kind=spec.workflow_kind,
+        executor_ref=spec.executor_ref,
+        snapshot=snapshot,
+        event_kind=command.event_kind,
         payload=command.payload,
+        actor=context.actor,
     )
-    guard_results = {
-        guard_ref: GUARD_REGISTRY[guard_ref](guard_input)
-        for rule in matched_rules
-        for guard_ref in rule.guard_refs
-    }
-    new_status = resolve_transition(
-        machine, current_status, command.event_kind, guard_results
-    )
-    return current_status if new_status is None else new_status
 
 
 class ContextCollabService(ContextCollabServiceProtocol):

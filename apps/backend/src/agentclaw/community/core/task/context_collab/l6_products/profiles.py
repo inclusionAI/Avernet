@@ -17,6 +17,7 @@ class ProductProfile(str, Enum):
     PUBLIC_DISCUSSION = "public_discussion"
     BBS_PUBLIC_DISCUSSION = "bbs_public_discussion"
     BBS_HELP_REQUEST = "bbs_help_request"
+    TASK_COMMISSION = "task_commission"
 
 
 class WorkflowKind(str, Enum):
@@ -26,3 +27,4 @@ class WorkflowKind(str, Enum):
     FORUM_PUBLIC_DISCUSSION = "forum_public_discussion"
     BBS_PUBLIC_DISCUSSION = "bbs_public_discussion"
     BBS_HELP_REQUEST_GOAL = "bbs_help_request_goal"
+    TASK_COMMISSION_GOAL = "task_commission_goal"

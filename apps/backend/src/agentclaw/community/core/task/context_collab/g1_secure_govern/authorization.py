@@ -30,11 +30,17 @@ VISIBILITY_PUBLIC = "public"
 VISIBILITY_WORKSPACE = "workspace"
 VISIBILITY_PRIVATE = "private"
 
-# 顶层 method 白名单(2026-11-12 L5 method objects spec §9.5/§12 第 4 条):
-# create_context 只接受 Single / Open + Group 两个既有产品形态;裸
-# Group / Open / Swarm 作为顶层无责任主体结构拒绝,仅可经嵌套 bind 进入。
+# 顶层 method 白名单(2026-11-12 L5 method objects spec §9.5/§12 第 4 条;
+# 2026-11-13 task_commission spec 裁决 B 扩一项):
+# create_context 接受 Single / Open + Group / Open 三个产品形态;Open 单值
+# 为任务代办的顶层方法形态(P1 闭协作,开放录取族 P2 接 ACCS-304);裸
+# Group / Swarm 作为顶层无责任主体结构拒绝,仅可经嵌套 bind 进入。
 TOP_LEVEL_METHOD_KINDS = frozenset(
-    {MethodKind.SINGLE.value, MethodKind.OPEN_GROUP.value}
+    {
+        MethodKind.SINGLE.value,
+        MethodKind.OPEN_GROUP.value,
+        MethodKind.OPEN.value,
+    }
 )
 
 

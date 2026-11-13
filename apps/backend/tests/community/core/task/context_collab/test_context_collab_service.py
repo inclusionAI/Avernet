@@ -275,26 +275,31 @@ class TestCreateContext:
         )
         assert isinstance(service, ContextCollabServiceProtocol)
 
-    def test_create_rejects_bare_group_open_swarm_top_level(self):
-        """RF#1(spec §9.5):顶层只允许 Single / Open + Group;裸
-        Group / Open / Swarm 经嵌套 bind 进入,直接创建拒绝。"""
+    def test_create_rejects_bare_group_swarm_top_level(self):
+        """顶层白名单 = Single / Open + Group / Open(task_commission spec
+        裁决 B);裸 Group / Swarm 经嵌套 bind 进入,直接创建拒绝。"""
         service = ContextCollabService(
             method_store=InMemoryMethodStore(),
             repository=_FakeContextCollabRepository(),
         )
-        for method_kind in ("Group", "Open", "Swarm"):
+        for method_kind in ("Group", "Swarm"):
             with pytest.raises(
                 ContextCollabValidationError, match="top-level"
             ):
                 service.create_context(
                     make_create_command(method_kind=method_kind), make_actor()
                 )
-        # 白名单内两个产品形态照常通过 G1 create 裁决。
+        # 白名单内产品形态照常通过 G1 create 裁决(含 2026-11-13 新入的
+        # 顶层单值 Open——任务代办产品的方法形态,spec 裁决 B)。
         service.create_context(
             make_create_command(method_kind="Single"), make_actor()
         )
         service.create_context(
             make_create_command(method_kind="Open + Group"), make_actor()
+        )
+        # 裸 "Open" 顶层放行:任务代办产品的协作形态。
+        service.create_context(
+            make_create_command(method_kind="Open"), make_actor()
         )
 
 

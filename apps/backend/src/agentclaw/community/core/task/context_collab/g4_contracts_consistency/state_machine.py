@@ -522,12 +522,66 @@ BBS_HELP_REQUEST_GOAL_MACHINE = StateMachineDefinition(
     ),
 )
 
+# 任务代办(task_commission)复用目标推进语义(2026-11-13 task_commission
+# spec §3):顶层单值 Open(P1 闭协作),executor_ref 只表示被委托/指定的
+# 辅助执行 Agent;守卫词全部复用 GUARD_REGISTRY 已注册谓词,零新词。
+TASK_COMMISSION_GOAL_MACHINE = StateMachineDefinition(
+    schema_version="context-state-machine/1",
+    profile_ref="task_commission_goal",
+    profile_version=1,
+    compatibility_policy="new_contexts_only",
+    initial_state="created",
+    states=(
+        StateDefinition(name="created", governance_kind="waiting",
+                        allowed_methods=("Open",)),
+        StateDefinition(name="in_progress", governance_kind="active",
+                        allowed_methods=("Open",)),
+        StateDefinition(name="reviewing", governance_kind="review",
+                        allowed_methods=("Open",)),
+        StateDefinition(name="blocked", governance_kind="blocked",
+                        allowed_methods=("Open",)),
+        StateDefinition(name="done", governance_kind="terminal_success",
+                        allowed_methods=("Open",)),
+        StateDefinition(name="cancelled", governance_kind="terminal_cancelled",
+                        allowed_methods=("Open",)),
+    ),
+    transitions=(
+        TransitionRule(rule_id="commission_start", from_states=("created",),
+                       event_name="task.started",
+                       guard_refs=("actor_can_start_task",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="commission_update", from_states=("in_progress",),
+                       event_name="task.progress.updated",
+                       guard_refs=("event_matches_task",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="commission_submit", from_states=("in_progress",),
+                       event_name="task.submitted",
+                       guard_refs=("required_artifacts_present",),
+                       to_state="reviewing"),
+        TransitionRule(rule_id="commission_accept", from_states=("reviewing",),
+                       event_name="task.accepted",
+                       guard_refs=("actor_is_responsible_principal",),
+                       to_state="done"),
+        TransitionRule(rule_id="commission_reject", from_states=("reviewing",),
+                       event_name="task.rejected",
+                       guard_refs=("actor_is_responsible_principal",),
+                       to_state="in_progress"),
+        TransitionRule(rule_id="commission_cancel",
+                       from_states=("created", "in_progress", "reviewing", "blocked"),
+                       event_name="task.cancelled",
+                       guard_refs=("actor_can_cancel",),
+                       to_state="cancelled"),
+    ),
+)
+
 # P1 内置 machine;BBS 公开讨论不发明状态机,仍以事件流/查询投影表达。
 MACHINE_REGISTRY: dict[str, StateMachineDefinition] = {
     "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
     "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
+    "task_commission_goal": TASK_COMMISSION_GOAL_MACHINE,
 }
 
 # 内置 machine 注册即过 Conformance:若字面量漂移,导入期立即失败。
 validate_definition(TEAM_TODO_EXECUTION_MACHINE)
 validate_definition(BBS_HELP_REQUEST_GOAL_MACHINE)
+validate_definition(TASK_COMMISSION_GOAL_MACHINE)

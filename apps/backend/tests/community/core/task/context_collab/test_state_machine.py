@@ -13,6 +13,7 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
+    TASK_COMMISSION_GOAL_MACHINE,
     GUARD_REGISTRY,
     GuardEvaluationInput,
     GuardOutcome,
@@ -46,6 +47,7 @@ def test_builtin_machine_pinned():
     assert MACHINE_REGISTRY == {
         "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
         "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
+        "task_commission_goal": TASK_COMMISSION_GOAL_MACHINE,
     }
     assert TEAM_TODO_EXECUTION_MACHINE.schema_version == "context-state-machine/1"
     assert TEAM_TODO_EXECUTION_MACHINE.profile_ref == "team_todo_execution"
@@ -426,3 +428,33 @@ def test_guard_registry_covers_all_machine_guard_refs():
         "required_artifacts_present",
         "event_matches_task",
     }
+
+
+def test_task_commission_goal_machine_pinned():
+    """任务代办专用机器(2026-11-13 task_commission spec §3)复用目标推进语义,
+    L5 方法保持顶层单值 Open(P1 闭协作)。"""
+    assert TASK_COMMISSION_GOAL_MACHINE.profile_ref == "task_commission_goal"
+    assert TASK_COMMISSION_GOAL_MACHINE.profile_version == 1
+    assert TASK_COMMISSION_GOAL_MACHINE.initial_state == "created"
+    assert all(
+        state.allowed_methods == ("Open",)
+        for state in TASK_COMMISSION_GOAL_MACHINE.states
+    )
+    assert [
+        (rule.event_name, rule.from_states, rule.to_state, rule.guard_refs)
+        for rule in TASK_COMMISSION_GOAL_MACHINE.transitions
+    ] == [
+        ("task.started", ("created",), "in_progress",
+         ("actor_can_start_task",)),
+        ("task.progress.updated", ("in_progress",), "in_progress",
+         ("event_matches_task",)),
+        ("task.submitted", ("in_progress",), "reviewing",
+         ("required_artifacts_present",)),
+        ("task.accepted", ("reviewing",), "done",
+         ("actor_is_responsible_principal",)),
+        ("task.rejected", ("reviewing",), "in_progress",
+         ("actor_is_responsible_principal",)),
+        ("task.cancelled", ("created", "in_progress", "reviewing", "blocked"),
+         "cancelled", ("actor_can_cancel",)),
+    ]
+    validate_definition(TASK_COMMISSION_GOAL_MACHINE)
