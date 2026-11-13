@@ -119,3 +119,42 @@ its platform archives/installer pass release gates; then update all pinned links
 Closing the registration guide reloads the external Bot list and reachability.
 OpenClaw setup separates Bot type selection from terminal installation versus
 sending onboarding instructions to the Bot.
+
+## Evolution pages
+
+The [evolution pages](src/pages/EvolutionFactory/index.tsx) keep the existing
+space-scoped API and task controls. Task filters expose only supported category
+and status values. Missing scores remain unassessed; missing deltas are not
+replaced by zero. Bot avatars use the shared deterministic fallback when the
+version data has no custom avatar. The version Bot column shows its current
+space-directory name above the Bot ID, not the owner ID. Names are matched by
+owner and Bot ID across directory pages; unavailable names fall back to the Bot
+ID without blocking version display. Version search also matches these names.
+The version list exposes the source task as
+its own column (name when returned, otherwise task ID), linking to task details.
+Version-source filters use `initial`, `round`, and `snapshot`; Review results
+remain table content, not a filter. Task targets show the directory Bot name
+followed by the object type `(Bot)`, with the real Bot ID as the name fallback.
+Text search also matches the returned source task name. Version generation time
+(`createdAt`) and raw `reviewStatus` / `specVersion` are visible table columns;
+missing values display a dash rather than inferred time or review results.
+
+[Domain details](src/pages/EvolutionFactory/DomainDetail.tsx) separate owner,
+Domain ID, description and template count; long titles and metadata retain
+full text on hover and keyboard focus. Missing detail counts use the loaded
+template list length, not a fabricated count. Associated runs reserve space
+for decimal scores and keep numeric text inside its own table cell.
+
+[Domain templates](src/pages/EvolutionFactory/DomainTemplates.tsx) paginate the
+returned template list, keep draft selections across pages, and preserve
+read-only and published-template restrictions. The diagnosis form uses three equal columns for model and case counts, with
+a full-width focus field. Exact-Session mode keeps the case-count controls
+visible but disabled because those values do not participate in that request.
+Task details use a centered content column; task-specific versions remain available in the expandable
+section below the execution information. Artifact cards still open the full
+output from the selected real step, rather than synthetic report content.
+
+Presentation and interaction regression coverage lives in
+[`test/evolution`](test/evolution), including template pagination, task actions,
+score display and output inspection. Run `npm test -- --runInBand test/evolution`
+in a configured frontend workspace.

@@ -1,11 +1,17 @@
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { DataTableColumn } from '@/components/ui/DataTable';
-import { canCancelStep, canRetryStep, formatTime, isBotEvolutionTask, type Task } from '@/domain/evolution/types';
+import {
+  canCancelStep,
+  canRetryStep,
+  formatTime,
+  isBotEvolutionTask,
+  type Task,
+} from '@/domain/evolution/types';
 import { history } from '@umijs/max';
 import { useMemo } from 'react';
 import { stepName, taskTimes } from './presentation';
-import { Hint, StatusBadge, TypeTag } from './sharedPrimitives';
+import { Hint, TaskStatusBadge, TaskTypeBadge } from './sharedPrimitives';
 
 /** 与 Bot 管理操作列同规范的文字链接：primary 蓝字 13px，hover 10% 蓝底。 */
 const linkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
@@ -26,9 +32,9 @@ export const COLUMN_WIDTHS = [
   'w-[clamp(100px,8vw,120px)]',
   'w-[clamp(150px,12vw,180px)]',
   'w-[clamp(96px,8vw,112px)]',
+  'w-[clamp(110px,9vw,140px)]',
   'w-[clamp(84px,7vw,100px)]',
   'w-[clamp(160px,13vw,190px)]',
-  'w-[clamp(104px,9vw,130px)]',
   'w-[200px]',
 ];
 
@@ -36,6 +42,7 @@ export const COLUMN_WIDTHS = [
 export function useTaskListColumns(
   busy: string,
   action: (taskId: string, stepId: string, operation: 'retry' | 'cancel') => Promise<void>,
+  botNameOf: (ownerId: string, botId: string) => string,
 ) {
   return useMemo<DataTableColumn<Task>[]>(
     () => [
@@ -60,7 +67,9 @@ export function useTaskListColumns(
         width: COLUMN_WIDTHS[1],
         cell: (task) => (
           <Hint content={task.remark || undefined}>
-            <span className="block truncate text-xs text-muted-foreground">{task.remark || '—'}</span>
+            <span className="line-clamp-2 break-words text-xs leading-[18px] text-muted-foreground">
+              {task.remark || '—'}
+            </span>
           </Hint>
         ),
       },
@@ -68,7 +77,7 @@ export function useTaskListColumns(
         id: 'type',
         header: '任务类型',
         width: COLUMN_WIDTHS[2],
-        cell: (task) => <TypeTag type={task.task_type} />,
+        cell: (task) => <TaskTypeBadge type={task.task_type} />,
       },
       {
         id: 'object',
@@ -76,10 +85,12 @@ export function useTaskListColumns(
         width: COLUMN_WIDTHS[3],
         cell: (task) => (
           <div className="min-w-0">
-            <Hint content={task.bot_id}>
-              <span className="block truncate text-[13px] text-foreground">{task.bot_id}</span>
+            <Hint content={`${botNameOf(task.user_id, task.bot_id)} · ${task.bot_id}`}>
+              <span className="block truncate text-[13px] text-foreground">
+                {botNameOf(task.user_id, task.bot_id)}
+                <span className="text-muted-foreground">（Bot）</span>
+              </span>
             </Hint>
-            <span className="mt-0.5 block truncate text-xs text-content-icon">Owner {task.user_id}</span>
           </div>
         ),
       },
@@ -87,33 +98,37 @@ export function useTaskListColumns(
         id: 'status',
         header: '状态',
         width: COLUMN_WIDTHS[4],
-        cell: (task) => <StatusBadge status={task.status} dot />,
+        cell: (task) => <TaskStatusBadge status={task.status} />,
+      },
+      {
+        id: 'node',
+        header: '当前节点',
+        width: COLUMN_WIDTHS[5],
+        cell: (task) => (
+          <Hint content={stepNameOf(task)}>
+            <span className="block truncate text-[13px] text-muted-foreground">{stepNameOf(task)}</span>
+          </Hint>
+        ),
       },
       {
         id: 'creator',
         header: '创建人',
-        width: COLUMN_WIDTHS[5],
+        width: COLUMN_WIDTHS[6],
         cell: (task) => <span className="text-[13px] text-foreground">{task.created_by}</span>,
       },
       {
         id: 'times',
         header: '开始/结束时间',
-        width: COLUMN_WIDTHS[6],
+        width: COLUMN_WIDTHS[7],
         cell: (task) => {
           const times = taskTimes(task);
           return (
             <span className="block text-xs leading-5 text-muted-foreground">
-              <span className="block">{formatTime(times.start)}</span>
-              <span className="block">{formatTime(times.end)}</span>
+              <span className="block whitespace-nowrap">开始：{formatTime(times.start)}</span>
+              <span className="block whitespace-nowrap">结束：{formatTime(times.end)}</span>
             </span>
           );
         },
-      },
-      {
-        id: 'node',
-        header: '当前节点',
-        width: COLUMN_WIDTHS[7],
-        cell: (task) => <span className="text-[13px] text-foreground">{stepNameOf(task)}</span>,
       },
       {
         id: 'actions',
@@ -165,6 +180,6 @@ export function useTaskListColumns(
         },
       },
     ],
-    [busy],
+    [busy, botNameOf],
   );
 }
