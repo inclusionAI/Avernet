@@ -1,0 +1,90 @@
+apps/frontend-nextgen/src/components/GatewayReauthModal.tsx
+  s_3487cf77f0393d::t_06351f76728716 1-49
+apps/frontend-nextgen/src/services/workspace/sessionService.ts
+  s_3487cf77f0393d::t_16185dcaa782f8 122-123,132,135
+  s_3487cf77f0393d::t_a49f2ab1fb26c4 19
+apps/frontend-nextgen/src/services/auth/reauthProbe.ts
+  s_3487cf77f0393d::t_ff7d575cce454b 17-26
+  s_3487cf77f0393d::t_45ab7877cc1554 14-16
+  s_3487cf77f0393d::t_9a376b7a4cb466 27-29
+  s_c055c0e8d059f4::t_741bfdf41773dd 1-13,30-69
+apps/frontend-nextgen/test/utils/reauthBroadcast.test.ts
+  s_3487cf77f0393d::t_7a5b4858026d48 1-82
+apps/frontend-nextgen/test/services/auth/reauthProbe.test.ts
+  s_3487cf77f0393d::t_81b16c1aadfc2b 1
+  s_3487cf77f0393d::t_99ba534997a7cb 2-4
+  s_c055c0e8d059f4::t_16781cbbd885b7 5-139
+apps/frontend-nextgen/test/utils/redirectCurrentTab.openLoginInNewTab.test.ts
+  s_3487cf77f0393d::t_55ac923d664d73 1-53
+apps/frontend-nextgen/src/stores/externalAuthStore.ts
+  s_3487cf77f0393d::t_79db1fd55feef2 35-40
+  s_3487cf77f0393d::t_ad5dc7d8fe07ec 64
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_3487cf77f0393d::t_86798f7def4ad9 70,78-83,88,90
+  s_3487cf77f0393d::t_f7a1ac919fdb60 270-272,276,282
+apps/frontend-nextgen/src/utils/redirectCurrentTab.ts
+  s_3487cf77f0393d::t_8967bd1ecc3307 31-32,41-44,54-65
+  s_3487cf77f0393d::t_d76932277abe93 33-40,45-53
+apps/frontend-nextgen/src/services/workspace/groupExecuteService.ts
+  s_3487cf77f0393d::t_7c7c00d8ce6b30 21
+  s_3487cf77f0393d::t_a30e1fd1ee21a1 93-94,102,105
+  s_3487cf77f0393d::t_fa6bfd39ebf257 142-143,154,157
+apps/frontend-nextgen/test/hooks/useGatewayLoginRedirect.test.tsx
+  s_3487cf77f0393d::t_71dc472465401e 2,6,8-10,13-18,22,25-28,30-34,37,39-46,49-56,58,60-61,64-66,68-73,76,79,81-88,90-100,102-104,106-115,120-121,123,125-126,129-130,132-152,154-157,160-219
+  s_3487cf77f0393d::t_b0533c8d9e7494 4-5,20
+  s_3487cf77f0393d::t_982074730de7a2 118-119
+apps/frontend-nextgen/test/services/backendApi/httpClient.aceLogin.test.ts
+  s_3487cf77f0393d::t_f9ff55d9d6374d 104-121
+apps/frontend-nextgen/src/app.tsx
+  s_3487cf77f0393d::t_e830bbc212a572 76
+  s_3487cf77f0393d::t_1c06741f5eb8c5 4
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRuntime.ts
+  s_3487cf77f0393d::t_c168692fca0609 46-47,51
+  s_3487cf77f0393d::t_9f049c222f6416 8
+apps/frontend-nextgen/test/stores/loginRedirectStore.test.ts
+  s_3487cf77f0393d::t_21b08996245834 1
+  s_3487cf77f0393d::t_f09a0b89de790a 48-101
+apps/frontend-nextgen/src/stores/loginRedirectStore.ts
+  s_3487cf77f0393d::t_6732f0b03dd77a 7-11,15-17,32-38,41,44-52,59-61,76-82
+apps/frontend-nextgen/src/hooks/useGatewayLoginRedirect.ts
+  s_3487cf77f0393d::t_d4899d0f4c036f 2
+  s_3487cf77f0393d::t_55d66a3cea1c95 1,3,5-6,9-25,28,30-40,42-43,45,47-56,58-59,61-76,79-116
+  s_3487cf77f0393d::t_978e3d3953f8d1 77-78
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/CollabPanel.tsx
+  s_a9efbfa4f4161d::t_6d961e0faddc6b 150
+apps/frontend-nextgen/src/utils/reauthBroadcast.ts
+  s_3487cf77f0393d::t_410ec3b61689ac 6-7
+  s_3487cf77f0393d::t_dbeab46dc95311 1-5,8-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a38fe3ba0493f1ca30b1ce7eeb97036cbbd4ae2e",
+  "prompts": {},
+  "sessions": {
+    "s_3487cf77f0393d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6e5ec3a0-e1fe-4634-acfe-8179993eb508",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_a9efbfa4f4161d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5bd3d20a-7397-4a93-9718-0309729a47b7",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_c055c0e8d059f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_c055c0e8d059f4",
+        "model": "unknown"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
