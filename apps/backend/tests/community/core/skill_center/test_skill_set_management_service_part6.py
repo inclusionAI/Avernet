@@ -7,6 +7,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
 from agentclaw.community.core.skill_center.errors import (
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
@@ -705,3 +706,27 @@ async def test_adding_a_new_member_to_the_default_stays_immutable():
             skill_ids=["7"],
         )
     assert repository.exclusion_calls == []
+
+@pytest.mark.asyncio
+async def test_batch_add_reports_runtime_name_conflict_as_partial_failure():
+    class _NameConflictRepository(_SkillRepository):
+        def add_skill(self, **kwargs) -> DesiredStateMutation:
+            if kwargs["skill_id"] == "same-name":
+                raise SkillRuntimeNameConflictError()
+            return super().add_skill(**kwargs)
+
+    repository = _NameConflictRepository()
+    runtime = _ProjectionCountingRuntime()
+
+    outcomes = await _skill_service(repository, runtime).add_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["7", "same-name"],
+    )
+
+    assert outcomes[0] == SkillSetSkillOutcome(skill_id="7", changed=True)
+    assert outcomes[1].skill_id == "same-name"
+    assert isinstance(outcomes[1].error, SkillRuntimeNameConflictError)
+    assert runtime.projections == 1
