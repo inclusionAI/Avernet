@@ -274,3 +274,51 @@ and changed Markdown relative links resolve. AST comparison confirms all 121
 original Group/Open/Swarm test methods remain after splitting. No full Backend
 suite, production database, live A2A, host integration or deployment validation
 was performed; no push was made by this follow-up.
+
+## Follow-up — local product acceptance through installed profiles
+
+The commission end-to-end module now obtains `TaskCommissionServiceProtocol`
+through the actual `TaskModule` / `TaskPersistenceModule` composition. It no
+longer imports another test's fake repository or directly constructs the product
+service. Only `DatabasePlugin` (isolated SQLite) and `A2aDeliveryPort` (observing
+local mock) are replaced; product installation, repository, Open admission
+adapter/services, structural G1 and shared G4 execute normally. No runtime
+contract or production implementation changed in this follow-up.
+
+The main case publishes business fields, verifies pinned L6 selection and L4
+role facts, verifies one Open binding and real admission, observes ADMITTED and
+persisted facts at send time, then simulates the Bot using the notification's
+Collet ID through product query/Work APIs. Owner acceptance, full public event
+history and an independent repository/SQL read verify completion and an unchanged
+ProductInstance. Twelve companion cases exercise rejection and
+resubmission, typed-identity/role/sequence/artifact guards without writes, and
+cancellation from three states with terminal write rejection. Task cancellation
+does not implicitly revoke L5 admission.
+
+Reusable test entry and scope limits are documented in the owning
+[L6 README](../../src/agentclaw/community/core/task/context_collab/l6_products/README.md#local-commission-product-acceptance).
+
+### Verification
+
+The revised module initially passed **13 tests**. After the final assertions and
+formatting, the affected product/L6/repository/DI regression passed **174 tests,
+17 warnings, 3.35 seconds** using:
+
+```sh
+cd apps/backend
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/core/task/context_collab/products \
+  tests/community/core/task/context_collab/test_l6_contracts.py \
+  tests/community/core/task/context_collab/test_l6_layering.py \
+  tests/community/core/task/context_collab/test_l6_runtime_contract.py \
+  tests/community/core/task/context_collab/test_service_real_repository.py \
+  tests/community/di/test_task_module.py \
+  tests/community/repository/task/test_task_persistence_module.py \
+  -q --disable-warnings
+```
+
+Changed-test Ruff and `git diff --check` pass; the changed source file is below
+1,000 lines. This is local service-level product integration, not live A2A,
+HTTP authentication, autonomous Bot/LLM execution, artifact upload, production
+DB or durable MethodStore restart evidence. No full Backend suite, push or
+deployment was performed by this follow-up.

@@ -203,6 +203,37 @@ execution, general Decision orchestration, remote negotiation, live migration,
 automatic compensation and persistent Method lifecycle recovery remain outside
 this minimum contract increment. Do not describe it as full ACCS conformance.
 
+## Local commission product acceptance
+
+The [commission end-to-end test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+uses the actual `TaskModule` / `TaskPersistenceModule` assembly and installed
+product catalog. The caller obtains `TaskCommissionServiceProtocol` and supplies
+only `PublishTaskCommand` business fields; it does not manually prepare a spec,
+instantiate L6/L5 objects, or choose a profile version in the public command.
+The test replaces only the database boundary with isolated SQLite and the L1
+transport with an observing `MockA2aDelivery`. Product/repository services,
+publication adapter, Open operations, structural G1 and shared G4 are real.
+
+The acceptance flow checks pinned ProductInstance/role facts, a single Open
+binding, publisher-mediated admission **before** dispatch, and the actual L4
+notification's product/MethodBinding refs. The simulated Bot reads the Collet ID
+from that notification and uses product query/Work APIs to report and submit;
+the owner reads and accepts the result. Independent repository/SQL reads verify
+the final state, event history and unchanged persisted instance. Companion cases
+cover rejection/resubmission, cancellation and rejected operations without writes.
+
+Run from `apps/backend/`:
+
+```sh
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py -q
+```
+
+This is local service-level integration evidence, not HTTP authentication, live
+remote A2A, autonomous Bot/LLM execution, artifact upload, production-database
+behavior or durable MethodStore restart evidence. Artifact URIs are recorded
+references; the test does not create or transfer files.
+
 Verification owners:
 
 - [Commission declaration/adapter tests](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_l6.py).
