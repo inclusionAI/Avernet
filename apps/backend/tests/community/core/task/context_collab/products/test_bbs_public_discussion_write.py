@@ -39,11 +39,12 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -108,13 +109,18 @@ class _FakeRepo:
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         now = datetime.now(timezone.utc)
-        snapshot = CurrentSnapshot(
+        task = Task(
             objective=request.context_spec.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.context_spec.principal_ref,
             executor_ref=request.context_spec.executor_ref,
-            method_kind=request.context_spec.method_kind,
-            progress=ProgressSnapshot(),
+            task_id="task_" + collab_context_id,
+            collet_ref=collab_context_id,
+            version=1,
+            parent_task_ref=None,
+            completion_conditions=(),
+            created_event_ref=event_id,
+            last_event_ref=event_id,
         )
         collet = Collet(
             collet_id=collab_context_id,
@@ -139,13 +145,14 @@ class _FakeRepo:
         self._status[collab_context_id] = ContextStatusRecord(
             collet=collet,
             context_spec=request.context_spec,
-            current_snapshot=snapshot,
+            tasks=(task,) if task is not None else (),
+            task=task,
             events=[initial_event],
         )
         return ContextCreatedRecord(
             collet=collet,
             context_spec=request.context_spec,
-            current_snapshot=snapshot,
+            task=task,
             initial_event=initial_event,
         )
 
@@ -167,10 +174,15 @@ class _FakeRepo:
             occurred_at=datetime.now(timezone.utc),
         )
         self.append_calls.append(request)
-        new_snapshot = (
-            request.snapshot_updater(record.current_snapshot)
-            if record.current_snapshot is not None
-            else None
+        new_task = (
+            request.task_update.apply(
+                record.task,
+                event_id=event_id,
+                event_kind=request.event_kind,
+                payload=request.payload,
+            )
+            if request.task_update is not None
+            else record.task
         )
         new_collet = dataclasses.replace(
             record.collet,
@@ -180,14 +192,15 @@ class _FakeRepo:
         self._status[collab_context_id] = ContextStatusRecord(
             collet=new_collet,
             context_spec=record.context_spec,
-            current_snapshot=new_snapshot,
+            tasks=(new_task,) if new_task is not None else (),
+            task=new_task,
             events=[*record.events, event],
         )
         return EventAppendedRecord(
             event=event,
             collet=new_collet,
             context_spec=record.context_spec,
-            current_snapshot=new_snapshot,
+            task=new_task,
         )
 
     def get_current_status(self, collab_context_id, *, trunk_events=False):

@@ -64,7 +64,7 @@ class ContextCollabCreatedResult:
     collab_context_id: str
     context_version: int
     current_snapshot: dict  # CurrentSnapshot 派生的 §6.2 响应投影
-    current_event: dict      # 初始事件基础字段投影
+    current_event: dict  # 初始事件基础字段投影
 
 
 @dataclass
@@ -78,7 +78,7 @@ class EventAcceptedResult:
     event_kind: str
     primitive_type: str
     context_version: int
-    # 可空:快照为 NULL 的外部部分行追加事件后无状态可报。
+    # 可空:历史部分行没有 Task,非 Work 追加后无任务状态可报。
     current_status: str | None
 
 
@@ -87,15 +87,19 @@ class TaskProgressProjectionDTO:
     """GET 查询的任务进度投影(spec §6.4 ``task_progress``)。"""
 
     total_events: int
-    events: list[dict]  # 每项含 event_id,parent_event,event_kind,primitive_type,status,summary,content
+    events: list[
+        dict
+    ]  # 每项含 event_id,parent_event,event_kind,primitive_type,status,summary,content
 
 
 @dataclass
 class ContextCollabStatusProjection:
     """查询用例结果(GET 最新状态与任务进度)。
 
-    ``current_snapshot`` 可空:外部写入的只有 spec 的聚合行返回 null,
-    事件链投影照常。
+    ``current_snapshot`` is a derived response, never Task authority. It is
+    null for an explicitly partial legacy row with no Task, or when the latest
+    Task-state evidence is not visible to this caller. Event projection remains
+    independently filtered; progress counts Tasks, not historic events.
     """
 
     collab_context_id: str
@@ -109,9 +113,12 @@ class ContextCollabStatusProjection:
 class ContextCollabServiceProtocol(Protocol):
     """三个北向用例的服务协议;delivery 依赖本协议,不依赖实现类。"""
 
-    def create_context(self, command: ContextCreateCommand,
-                       context: ActorContext) -> ContextCollabCreatedResult: ...
-    def append_event(self, collab_context_id: str, command: EventAppendCommand,
-                     context: ActorContext) -> EventAcceptedResult: ...
-    def get_status(self, collab_context_id: str, *, trunk_events: bool,
-                   context: ActorContext) -> ContextCollabStatusProjection: ...
+    def create_context(
+        self, command: ContextCreateCommand, context: ActorContext
+    ) -> ContextCollabCreatedResult: ...
+    def append_event(
+        self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
+    ) -> EventAcceptedResult: ...
+    def get_status(
+        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
+    ) -> ContextCollabStatusProjection: ...

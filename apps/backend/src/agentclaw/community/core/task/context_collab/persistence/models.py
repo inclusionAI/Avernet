@@ -1,10 +1,8 @@
-"""ORM models for the context collaboration Collet/Event tables.
+"""ORM storage for Collet, independent Task authority and append-only Events.
 
-Phase 1 of the BBS context collaboration protocol persists exactly two tables
-(spec §9.5): one aggregate snapshot row per collaboration context, plus the
-append-only event DAG that rewrites that snapshot. The SQL source of truth for
-production is ``../sql/2026_11_11_context_collab.sql`` (OceanBase MySQL mode);
-tests build these models on SQLite via ``Base.metadata.create_all``.
+Production applies the baseline SQL plus ``../sql/2026_11_13_context_collab_task.sql``.
+Tests build these models on SQLite. ``current_snapshot`` is retained only for
+explicit legacy decoding; new writes persist Task and derive response views.
 """
 
 from __future__ import annotations
@@ -56,14 +54,11 @@ def _base_axes():
 
 
 class ContextCollabColletModel(Base):
-    """One collaboration context: the aggregate snapshot row.
+    """Bounded context and composition metadata, not Task lifecycle authority.
 
-    ``actor_ref`` is the creating principal reference (same value as the
-    initial task.created event carries); ``context_spec`` /
-    ``current_snapshot`` hold the JSON projections of the create request
-    and the current objective/status/executor/progress; the event DAG in
-    ``ac_context_collab_event`` rewrites the snapshot and bumps
-    ``context_version`` per accepted event.
+    ``root_task_ref`` selects independent Task storage. ``context_spec`` retains
+    L6 creation/instance selection; it is not mutable Task or Method state.
+    Every accepted event advances ``context_version``; only Work advances Task.
     """
 
     __tablename__ = "ac_context_collab_collet"
@@ -79,9 +74,10 @@ class ContextCollabColletModel(Base):
     # 外部部分行可以没有;P1 创建路径恒写。
     actor_ref = Column(String(2048), nullable=True)
     context_spec = Column(_medium_text(), nullable=False)
-    # 可空(spec 作者裁决):允许外部写入只有 context_spec 的聚合行;
-    # P1 创建路径仍总是写满快照,读路径对 NULL 容忍。
+    # Legacy-only compatibility column. New rows write NULL; a non-null root
+    # Task reference always wins, even if an old snapshot is still present.
     current_snapshot = Column(_medium_text(), nullable=True)
+    root_task_ref = Column(String(128), nullable=True)
     current_event_id = Column(String(128), nullable=True)
     context_version = Column(
         BigInteger,
@@ -134,13 +130,15 @@ class ContextCollabEventModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     event_id = Column(String(128), nullable=False)
+    task_ref = Column(String(128), nullable=True)
+    task_version_after = Column(BigInteger, nullable=True)
     parent_event = Column(String(128), nullable=True)
     event_kind = Column(String(128), nullable=False)
     # 可空(spec 作者裁决):允许外部写入的部分行;P1 追加路径仍必写白名单值。
     primitive_type = Column(String(64), nullable=True)
     # 可空列(spec 作者裁决):允许外部写入部分字段的事件行;P1 追加路径
     # 仍总是写满这些值,读路径对 NULL 容忍(visibility=NULL 按 private 处理,
-    # primitive_type=NULL 仍参与进度计数 —— 仅排除 Message)。
+    # primitive_type=NULL 仅保留事件展示,不代表独立 Task)。
     # JSON 仅几十字节,varchar(2048) 足够,不再用 mediumtext。
     actor_ref = Column(String(2048), nullable=True)
     visibility = Column(String(32), nullable=True)
@@ -171,3 +169,31 @@ class ContextCollabEventModel(Base):
 
 
 register_avernet_tenant_guard(ContextCollabEventModel)
+
+
+class ContextCollabTaskModel(Base):
+    """Independent L4 Task revision; JSON contains the typed Task, not a view."""
+
+    __tablename__ = "ac_context_collab_task"
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    task_id = Column(String(128), nullable=False)
+    collab_context_id = Column(String(128), nullable=False)
+    parent_task_ref = Column(String(128), nullable=True)
+    task_version = Column(BigInteger, nullable=False)
+    task_data = Column(_medium_text(), nullable=False)
+    env, avernet_tenant, gmt_create, gmt_modified = _base_axes()
+
+    __table_args__ = (
+        Index(
+            "uk_context_collab_task", "avernet_tenant", "env", "task_id", unique=True
+        ),
+        Index(
+            "idx_context_collab_task_context",
+            "avernet_tenant",
+            "env",
+            "collab_context_id",
+        ),
+    )
+
+
+register_avernet_tenant_guard(ContextCollabTaskModel)

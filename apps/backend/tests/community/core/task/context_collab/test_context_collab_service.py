@@ -30,10 +30,11 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -119,13 +120,18 @@ class _FakeContextCollabRepository:
 
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
-        snapshot = CurrentSnapshot(
+        task = Task(
             objective=request.context_spec.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.context_spec.principal_ref,
             executor_ref=request.context_spec.executor_ref,
-            method_kind=request.context_spec.method_kind,
-            progress=ProgressSnapshot(percent=0, current_event_id=None),
+            task_id="task_" + collab_context_id,
+            collet_ref=collab_context_id,
+            version=1,
+            parent_task_ref=None,
+            completion_conditions=(),
+            created_event_ref=event_id,
+            last_event_ref=event_id,
         )
         collet = Collet(
             collet_id=collab_context_id,
@@ -150,7 +156,7 @@ class _FakeContextCollabRepository:
         return ContextCreatedRecord(
             collet=collet,
             context_spec=request.context_spec,
-            current_snapshot=snapshot,
+            task=task,
             initial_event=initial_event,
         )
 
@@ -322,13 +328,18 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
         self.create_calls.append(request)
         collab_context_id = "collet_projected_001"
         event_id = "evt_projected_001"
-        snapshot = CurrentSnapshot(
+        task = Task(
             objective=request.context_spec.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.context_spec.principal_ref,
             executor_ref=request.context_spec.executor_ref,
-            method_kind=request.context_spec.method_kind,
-            progress=ProgressSnapshot(percent=0, current_event_id=None),
+            task_id="task_" + collab_context_id,
+            collet_ref=collab_context_id,
+            version=1,
+            parent_task_ref=None,
+            completion_conditions=(),
+            created_event_ref=event_id,
+            last_event_ref=event_id,
         )
         collet = Collet(
             collet_id=collab_context_id,
@@ -353,7 +364,7 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
         return ContextCreatedRecord(
             collet=collet,
             context_spec=request.context_spec,
-            current_snapshot=snapshot,
+            task=task,
             initial_event=initial_event,
         )
 

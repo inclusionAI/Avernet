@@ -38,6 +38,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -230,7 +232,7 @@ def _discussion(
     record = ContextStatusRecord(
         collet=repo.collet(collet_id),
         context_spec=repo.bbs_spec(objective),
-        current_snapshot=None,
+        task=None,
         events=events,
     )
     return repo.add_record(record, gmt_create=gmt_create)
@@ -269,7 +271,7 @@ class TestListDiscussions:
         record = ContextStatusRecord(
             collet=repo.collet("collet_todo_row_0003"),
             context_spec=_FakeRepo.todo_spec(),
-            current_snapshot=None,
+            task=None,
             events=[],
         )
         repo.add_record(record, gmt_create=datetime(2026, 11, 12, 10, 0, 0))
@@ -326,7 +328,7 @@ class TestGetDiscussion:
         record = ContextStatusRecord(
             collet=repo.collet(collet_id),
             context_spec=_FakeRepo.bbs_spec("外部行的标题"),
-            current_snapshot=None,
+            task=None,
             events=[
                 EventRecord(
                     collab_context_id=collet_id,
@@ -389,7 +391,7 @@ class TestGetDiscussion:
         record = ContextStatusRecord(
             collet=repo.collet("collet_foreign_0001"),
             context_spec=_FakeRepo.todo_spec(),
-            current_snapshot=None,
+            task=None,
             events=[],
         )
         repo.add_record(record)

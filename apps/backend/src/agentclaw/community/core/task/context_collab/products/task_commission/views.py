@@ -1,6 +1,6 @@
 """任务代办读视图(T3):Query.project/search 的产品投影。
 
-``status`` 为 G4 机器权威(快照直读);``events`` 公开投影含 Task 控制事件
+``status`` 读取 G4 推进后的独立 Task;``events`` 公开投影含 Task 控制事件
 ——推进历史是代办消费面的核心;``body`` 沿公开讨论 ``DiscussionDetailBody``
 先例(孤儿帖 None 合法域可空)。
 """

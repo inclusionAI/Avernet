@@ -142,12 +142,18 @@ def _collet_json(engine, collab_context_id, column) -> dict | str | None:
         )
 
 
-def _stored_snapshot(engine, collab_context_id) -> dict:
-    return json.loads(
-        _collet_json(
-            engine, collab_context_id, ContextCollabColletModel.current_snapshot
-        )
+def _stored_snapshot(engine, collab_context_id: str) -> dict:
+    from agentclaw.community.core.task.context_collab.persistence.models import (
+        ContextCollabTaskModel,
     )
+
+    with engine.connect() as conn:
+        raw = conn.scalar(
+            select(ContextCollabTaskModel.task_data).where(
+                ContextCollabTaskModel.collab_context_id == collab_context_id
+            )
+        )
+    return json.loads(raw)
 
 
 def _event_payload(engine, collab_context_id, event_id) -> dict:
@@ -202,27 +208,10 @@ class TestSpecAcceptance:
         # current_snapshot 携带进度(§3.4.2 ProgressSnapshot 五字段)。
         snapshot = _stored_snapshot(engine, created.collab_context_id)
         assert snapshot["objective"] == OBJECTIVE
-        assert snapshot["method_kind"] == "Single"
-        progress = snapshot["progress"]
-        assert progress["percent"] == 0
-        assert progress["completed_count"] == 0
-        assert progress["active_count"] == 0
-        assert progress["blocked_count"] == 0
-        # 初始事件行:task.created / Task、无 parent。
-        with engine.connect() as conn:
-            initial = conn.execute(
-                select(
-                    ContextCollabEventModel.event_kind,
-                    ContextCollabEventModel.primitive_type,
-                    ContextCollabEventModel.parent_event,
-                ).where(
-                    ContextCollabEventModel.collab_context_id
-                    == created.collab_context_id
-                )
-            ).one()
-        assert initial.event_kind == "task.created"
-        assert initial.primitive_type == "Task"
-        assert initial.parent_event is None
+        assert snapshot["status"] == "created"
+        assert snapshot["version"] == 1
+        assert snapshot["task_id"] != created.collab_context_id
+        assert snapshot["reported_percent"] is None
 
     def test_2_create_rejects_missing_executor_and_missing_principal(
         self, service, engine
@@ -415,6 +404,5 @@ class TestSpecAcceptance:
         assert snapshot_raw_after == snapshot_raw_before
         # 两次查询投影一致且 equal 落库快照(实时投影不改写权威行)。
         assert second.current_snapshot == first.current_snapshot
-        assert _stored_snapshot(engine, created.collab_context_id) == json.loads(
-            snapshot_raw_before
-        )
+        assert snapshot_raw_before is None
+        assert _stored_snapshot(engine, created.collab_context_id)["version"] == 1

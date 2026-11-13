@@ -46,10 +46,10 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
@@ -113,11 +113,6 @@ class _PublicMessageIntent:
     parent_event: str | None
     visibility: str
     payload: dict
-
-
-def _identity_updater(snapshot):
-    """恒等快照推进(裁决 J)。"""
-    return snapshot
 
 
 def _principal_id(ref) -> str:
@@ -234,7 +229,7 @@ class BbsPublicDiscussionService:
         validate_product_event(
             catalog=self._product_catalog,
             spec=record.context_spec,
-            snapshot=record.current_snapshot,
+            task=record.task,
             event_kind=_POSTED_EVENT_KIND,
             primitive_type=_MESSAGE_PRIMITIVE,
             visibility=VISIBILITY_PUBLIC,
@@ -300,7 +295,6 @@ class BbsPublicDiscussionService:
                 parent_event=intent.parent_event,
                 visibility=intent.visibility,
                 payload=intent.payload,
-                snapshot_updater=_identity_updater,
             ),
         )
 

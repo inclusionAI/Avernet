@@ -6,6 +6,7 @@ real in-memory SQLite engine, ``Base.metadata.create_all``, and a minimal
 ``db``/``engine`` fixtures that conftest serves to the repository subtree only,
 so the core-side integration tests carry their own copy here.
 """
+
 from contextlib import contextmanager
 
 import pytest
@@ -14,7 +15,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-# Side-effect import: registers the 2 context collab models on Base.metadata.
+
+# Side-effect import: registers the Collet/Task/Event models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
 
 

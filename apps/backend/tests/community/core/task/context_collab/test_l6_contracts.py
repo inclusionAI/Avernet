@@ -20,10 +20,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     Participant,
@@ -192,19 +190,27 @@ def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
     )
 
     spec = _spec()
-    snapshot = CurrentSnapshot(
-        spec.objective,
-        "created",
-        spec.principal_ref,
-        spec.executor_ref,
-        spec.method_kind,
-        ProgressSnapshot(),
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+        Task,
+    )
+
+    task = Task(
+        task_id="task_versioned",
+        collet_ref="collet_versioned",
+        objective=spec.objective,
+        status="created",
+        version=1,
+        principal_ref=spec.principal_ref,
+        executor_ref=spec.executor_ref,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_created",
+        last_event_ref="evt_created",
     )
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
     kwargs = dict(
         workflow_kind=spec.workflow_kind,
-        executor_ref=spec.executor_ref,
-        snapshot=snapshot,
+        task=task,
         event_kind="task.started",
         payload={},
         actor=spec.principal_ref,
@@ -271,7 +277,9 @@ def test_l6_contracts_do_not_import_runtime_or_transport():
 
 def test_workflow_role_requirement_must_name_a_declared_role():
     profile = PRODUCT_CATALOG.get("task_commission", 1)
-    action = replace(profile.workflow.action("report_progress"), required_role="unknown")
+    action = replace(
+        profile.workflow.action("report_progress"), required_role="unknown"
+    )
     workflow = replace(profile.workflow, actions=(action,))
     with pytest.raises(ContextCollabValidationError, match="undeclared scenario role"):
         ProductCatalog((replace(profile, workflow=workflow),))

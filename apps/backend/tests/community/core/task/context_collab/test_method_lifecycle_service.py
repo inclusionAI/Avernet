@@ -38,10 +38,11 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
 )
@@ -108,13 +109,18 @@ def _status_record(**overrides) -> ContextStatusRecord:
     spec = _context_spec(method_kind=fields["method_kind"])
     principal_ref = PrincipalRef("human", PRINCIPAL_ID)
     executor_ref = AgentRef("bot", EXECUTOR_ID)
-    snapshot = CurrentSnapshot(
+    task = Task(
         objective=OBJECTIVE,
         status=fields["status"],
         principal_ref=principal_ref,
         executor_ref=executor_ref,
-        method_kind=fields["method_kind"],
-        progress=ProgressSnapshot(),
+        task_id="task_" + fields["collab_context_id"],
+        collet_ref=fields["collab_context_id"],
+        version=1,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_fixture",
+        last_event_ref="evt_fixture",
     )
     collet = Collet(
         collet_id=fields["collab_context_id"],
@@ -127,7 +133,8 @@ def _status_record(**overrides) -> ContextStatusRecord:
     return ContextStatusRecord(
         collet=collet,
         context_spec=spec,
-        current_snapshot=snapshot,
+        tasks=(task,) if task is not None else (),
+        task=task,
         events=[],
     )
 
@@ -538,7 +545,7 @@ class TestTerminateTopLevelGate:
             )
 
     def test_allowed_on_task_cancelled(self):
-        store, _, service = self._projected_top_level_service("task.cancelled")
+        store, _, service = self._projected_top_level_service("cancelled")
         binding_id = top_level_binding_id(COLLET_ID)
         result = service.terminate(
             COLLET_ID, binding_id, MethodStateChangeCommand(), make_actor()
@@ -548,7 +555,7 @@ class TestTerminateTopLevelGate:
         assert binding.state is BindingState.TERMINATED
 
     def test_allowed_on_task_accepted(self):
-        store, _, service = self._projected_top_level_service("task.accepted")
+        store, _, service = self._projected_top_level_service("done")
         binding_id = top_level_binding_id(COLLET_ID)
         result = service.terminate(
             COLLET_ID, binding_id, MethodStateChangeCommand(), make_actor()

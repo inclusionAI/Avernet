@@ -23,7 +23,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
@@ -589,8 +589,11 @@ def test_legacy_commission_progress_requires_typed_executor(db):
         row = session.query(ContextCollabColletModel).one()
         data = json.loads(row.context_spec)
         for key in (
-            "product_profile_version", "workflow_profile_version", "participants",
-            "role_bindings", "product_instance",
+            "product_profile_version",
+            "workflow_profile_version",
+            "participants",
+            "role_bindings",
+            "product_instance",
         ):
             del data[key]
         row.context_spec = json.dumps(data)
@@ -598,9 +601,11 @@ def test_legacy_commission_progress_requires_typed_executor(db):
     for principal in (OWNER, PrincipalRef("human", BOT.principal_id)):
         with pytest.raises(ContextCollabValidationError, match="designated executor"):
             product.report_progress(
-                TaskAdvanceCommand(created.collab_context_id, percent=20), _actor(principal),
+                TaskAdvanceCommand(created.collab_context_id, percent=20),
+                _actor(principal),
             )
     progressed = product.report_progress(
-        TaskAdvanceCommand(created.collab_context_id, percent=20), _actor(BOT),
+        TaskAdvanceCommand(created.collab_context_id, percent=20),
+        _actor(BOT),
     )
     assert progressed.context_version == 3

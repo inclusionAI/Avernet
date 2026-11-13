@@ -13,10 +13,10 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     VERSIONED_MACHINE_REGISTRY,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
-    CurrentSnapshot,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -33,7 +33,7 @@ def validate_product_event(
     *,
     spec: ContextSpec,
     catalog: ProductCatalog,
-    snapshot: CurrentSnapshot | None,
+    task: Task | None,
     event_kind: str,
     primitive_type: str,
     visibility: str,
@@ -116,16 +116,16 @@ def validate_product_event(
             raise ContextCollabValidationError(
                 f"product control event requires primitive_type {declared.primitive_type}"
             )
-    if snapshot is None:
+    if task is None:
         raise ContextCollabValidationError(
-            "cannot advance task: no snapshot to adjudicate"
+            "cannot advance task: no L4 Task to adjudicate"
         )
     if not any(
-        rule.event_name == event_kind and snapshot.status in rule.from_states
+        rule.event_name == event_kind and task.status in rule.from_states
         for rule in machine.transitions
     ):
         raise ContextCollabValidationError(
-            f"cannot advance task: {event_kind!r} is not allowed from status {snapshot.status!r}"
+            f"cannot advance task: {event_kind!r} is not allowed from status {task.status!r}"
         )
     if workflow.executor_submission_only:
         if primitive_type != "Task":

@@ -116,10 +116,12 @@ cannot be consumed by this publication use case.
 2. `prepare_product_spec` verifies the product/workflow/Method tuple and required
    role subjects, negotiates against **local installed** capabilities, pins
    product/workflow versions, and materializes L4 Participant/RoleBinding facts.
-3. The existing repository atomically writes Collet, initial Event, snapshot and
-   ProductInstance in its existing transaction. The instance occupies the
-   reserved `product_instance` member of the existing `context_spec` JSON column;
-   the L4 ContextSpec decoder does not depend on L6 or own that instance.
+3. The repository atomically writes Collet, an independent root L4 Task,
+   initial Event and ProductInstance metadata. Task has its own ID/revision;
+   `current_snapshot` is a derived G3 response, not persisted Work authority.
+   The instance occupies the reserved `product_instance` member of the existing
+   `context_spec` JSON column. ContextSpec and its decoder belong to L6; L4
+   Collet/Task do not depend on that decoder or own the product selection.
 4. Existing L5 projection creates an explicit top-level MethodBinding. Its
    `profile_versions` come from the pinned product definition; its
    `role_binding_refs` identify the same L4 facts as ProductInstance. A role ref
@@ -151,8 +153,10 @@ authorize an operation merely because a role/template mentions it.
   parents remain the repository's responsibility. Root body/replies may have
   null parent. This existing product rule now applies to generic writes too.
 - Other v1 workflows preserve their established unmatched-event/no-transition
-  and snapshotless-row behavior; strictness is not silently applied to every
-  product. A valid ordinary Message never advances Task state.
+  behavior; strictness is not silently applied to every product. An ordinary
+  Message never advances Task state/version. A genuinely partial legacy row
+  without a Task can receive Messages, but cannot advance Work. A new row with
+  a missing referenced Task is corrupt and rejected, not treated as partial.
 - Completion and compensating actions reuse existing G4 transitions
   (`task.accepted`, `task.rejected`, `task.cancelled`). No second transition table
   or automatic saga/rollback executor is introduced.
@@ -283,3 +287,14 @@ events. Publishers can still review results, but cannot report Bot progress.
 The earlier no-new-HTTP statement describes the initial L6 contract increment,
 not this follow-up. No transport or concrete product implementation has been
 added to L6. The new transport adapter injects the product API Protocol.
+
+## Independent Task authority follow-up (2026-11-13)
+
+The [collaboration boundary](../README.md) owns the Task/Collet distinction,
+read-projection semantics and [database cutover](../sql/2026_11_13_context_collab_task.sql).
+ContextSpec is now L6 composition input; CurrentSnapshot and ProgressSnapshot
+are G3 views. G4 consumes persisted Task, and generic/product Work uses typed
+Task/Collet version fences. Existing product profile versions, creation payloads
+and public product IDs are unchanged. The existing `new_instances_only` policy
+concerns product-profile changes; it does not remove the prerequisite storage
+migration or permit mixed snapshot/Task-authoritative writers.

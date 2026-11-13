@@ -10,7 +10,7 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (

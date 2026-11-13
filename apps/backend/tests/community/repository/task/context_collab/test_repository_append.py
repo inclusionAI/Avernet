@@ -5,7 +5,6 @@
 ``parent_event`` 存在性校验与 CAS 版本推进。以真实落库行为为准校验。
 """
 
-import dataclasses
 import json
 from datetime import datetime
 
@@ -24,9 +23,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
-    CurrentSnapshot,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
@@ -85,8 +83,6 @@ def _created_context(repo: ContextCollabRepository) -> str:
 def _append_request(
     expected_version: int,
     parent_event: str | None,
-    *,
-    snapshot_updater=None,
 ) -> AppendEventRecordRequest:
     return AppendEventRecordRequest(
         expected_version=expected_version,
@@ -96,11 +92,6 @@ def _append_request(
         parent_event=parent_event,
         visibility="workspace",
         payload=dict(MESSAGE_PAYLOAD),
-        snapshot_updater=(
-            snapshot_updater
-            if snapshot_updater is not None
-            else (lambda s: dataclasses.replace(s, status="in_progress"))
-        ),
     )
 
 
@@ -140,13 +131,16 @@ class TestAppendEvent:
         assert isinstance(record.event.occurred_at, datetime)
         assert record.collet.version == 2
         assert record.collet.current_event_id == record.event.event_id
-        assert record.current_snapshot.status == "in_progress"
+        assert record.task.status == "created"
+        assert record.task.version == 1
+        assert record.event.task_ref is None
 
         with db.orm_session() as session:
             row = _collet_row(session, context_id)
             assert row.context_version == 2
             assert row.current_event_id == record.event.event_id
-            assert json.loads(row.current_snapshot)["status"] == "in_progress"
+            assert row.current_snapshot is None
+            assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
             events = _event_rows(session, context_id)
             # 顺序即插入顺序:2 行,按 id 升序初始事件在前。
             assert len(events) == 2
@@ -205,7 +199,8 @@ class TestAppendEvent:
             row = _collet_row(session, context_id)
             assert row.context_version == 2
             assert row.current_event_id == appended.event.event_id
-            assert json.loads(row.current_snapshot)["status"] == "in_progress"
+            assert row.current_snapshot is None
+            assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
             assert len(_event_rows(session, context_id)) == 2
 
     def test_parent_older_than_head_appends_branch_event(self, db):
@@ -221,27 +216,19 @@ class TestAppendEvent:
         )
         assert head.collet.current_event_id == head.event.event_id
 
-        # 第二次:parent_event 指向链中旧事件(root ≠ 当前链头 head)→ 分支;
-        # snapshot_updater 收到的是持锁读出的已落库快照,不是内存旧值。
-        seen: list[CurrentSnapshot] = []
-
-        def branch_updater(current: CurrentSnapshot) -> CurrentSnapshot:
-            seen.append(current)
-            return dataclasses.replace(current, status="reviewing")
-
+        # Message 分支只改变 Collet 事件头,不改变独立 Task。
         branch = repo.append_event(
             context_id,
             _append_request(
                 expected_version=2,
                 parent_event=root_event_id,
-                snapshot_updater=branch_updater,
             ),
         )
 
         assert branch.event.event_id != head.event.event_id
         assert branch.event.context_version_after == 3
         assert branch.collet.version == 3
-        assert [snap.status for snap in seen] == ["in_progress"]
+        assert branch.task == initial.task
 
         with db.orm_session() as session:
             events = _event_rows(session, context_id)
@@ -251,10 +238,7 @@ class TestAppendEvent:
                 root_event_id,
                 root_event_id,
             ]
-            assert (
-                json.loads(_collet_row(session, context_id).current_snapshot)["status"]
-                == "reviewing"
-            )
+            assert _collet_row(session, context_id).current_snapshot is None
 
     def test_unknown_parent_event_is_rejected_without_writes(self, db):
         repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)

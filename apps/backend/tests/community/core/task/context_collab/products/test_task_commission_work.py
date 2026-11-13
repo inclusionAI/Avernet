@@ -48,6 +48,7 @@ from tests.community.core.task.context_collab.products.test_task_commission_publ
     _service,
 )
 
+
 def _advance(collab_context_id, **overrides):
     fields = {
         "collab_context_id": collab_context_id,
@@ -64,14 +65,12 @@ def _publish(service):
 
 class TestFullLifecycle:
     def test_full_lifecycle_walks_machine(self):
-        """"发布→开工→进度→提交→验收" 全链, 快照 status 逐段机器派写。"""
+        """ "发布→开工→进度→提交→验收" 全链, 快照 status 逐段机器派写。"""
         service, repo, _ = _service()
         created = _publish(service)
         collet_id = created.collet_id
 
-        started = service.start_task(
-            _advance(collet_id), _bot_actor(ASSIGNEE)
-        )
+        started = service.start_task(_advance(collet_id), _bot_actor(ASSIGNEE))
         assert started.status == "in_progress"
         assert started.context_version == 3
 
@@ -86,9 +85,7 @@ class TestFullLifecycle:
         )
         assert submitted.status == "reviewing"
 
-        accepted = service.accept_task(
-            _advance(collet_id, note="验收通过"), _actor()
-        )
+        accepted = service.accept_task(_advance(collet_id, note="验收通过"), _actor())
         assert accepted.status == "done"
 
         record = repo._status[collet_id]
@@ -112,9 +109,7 @@ class TestFullLifecycle:
             _advance(collet_id, artifacts=["doc://draft"]), _bot_actor(ASSIGNEE)
         )
 
-        rejected = service.reject_task(
-            _advance(collet_id, note="返工"), _actor()
-        )
+        rejected = service.reject_task(_advance(collet_id, note="返工"), _actor())
         assert rejected.status == "in_progress"
 
         # 打回后 bot 可再提交。
@@ -178,9 +173,7 @@ class TestSequencingGate:
             (service.accept_task, _actor()),
             (service.cancel_task, _actor()),
         ):
-            with pytest.raises(
-                ContextCollabValidationError, match="cannot advance"
-            ):
+            with pytest.raises(ContextCollabValidationError, match="cannot advance"):
                 action(_advance(collet_id), actor)
 
     def test_advance_rejected_after_terminal(self):
@@ -216,9 +209,7 @@ class TestGuardsAndRoles:
         service.start_task(_advance(collet_id), _bot_actor(ASSIGNEE))
 
         with pytest.raises(ContextCollabValidationError, match="executor"):
-            service.submit_task(
-                _advance(collet_id, artifacts=["doc://x"]), _actor()
-            )
+            service.submit_task(_advance(collet_id, artifacts=["doc://x"]), _actor())
         assert repo._status[collet_id].current_snapshot.status == "in_progress"
 
     def test_submit_requires_artifacts(self):
@@ -257,12 +248,10 @@ class TestGuardsAndRoles:
         repo._status[collet_id] = dataclasses.replace(
             record,
             collet=dataclasses.replace(record.collet, collet_id=collet_id),
-            current_snapshot=None,
+            task=None,
         )
 
-        with pytest.raises(
-            ContextCollabValidationError, match="no snapshot"
-        ):
+        with pytest.raises(ContextCollabValidationError, match="no L4 Task"):
             service.start_task(_advance(collet_id), _bot_actor(ASSIGNEE))
 
     def test_stranger_actor_gets_g1_rejection_before_machine_guards(self):
@@ -307,6 +296,7 @@ class TestBoundary:
             Collet,
             ColletState,
         )
+
         record = ContextStatusRecord(
             collet=Collet(
                 collet_id="collet_foreign_todo_0001",
@@ -317,7 +307,7 @@ class TestBoundary:
                 version=1,
             ),
             context_spec=_bbs_spec(),
-            current_snapshot=None,
+            task=None,
             events=[],
         )
         repo._status["collet_foreign_todo_0001"] = record
@@ -327,9 +317,7 @@ class TestBoundary:
                 _advance("collet_foreign_todo_0001"), _bot_actor(ASSIGNEE)
             )
         with pytest.raises(ContextCollabNotFoundError):
-            service.start_task(
-                _advance("collet_missing_404"), _bot_actor(ASSIGNEE)
-            )
+            service.start_task(_advance("collet_missing_404"), _bot_actor(ASSIGNEE))
 
     def test_version_conflict_propagates(self):
         service, repo, _ = _service()
@@ -343,15 +331,13 @@ class TestBoundary:
         repo.append_event = _boom
         try:
             with pytest.raises(ContextCollabVersionConflict):
-                service.start_task(
-                    _advance(created.collet_id), _bot_actor(ASSIGNEE)
-                )
+                service.start_task(_advance(created.collet_id), _bot_actor(ASSIGNEE))
         finally:
             repo.append_event = original
 
 
 def _bbs_spec():
-    from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
         ContextSpec,
     )
 

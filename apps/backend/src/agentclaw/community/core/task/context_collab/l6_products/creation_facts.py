@@ -1,4 +1,4 @@
-"""L4 创建事实 → 初始事件 payload 的唯一装配点。
+"""Composition 创建事实 → 初始事件 payload 的唯一装配点。
 
 事件流 append-only,创建事实今天不写则存量行永远缺失(不可回填性,
 spec 2026-11-12-context-collab-l4-creation-event-facts):本函数是该
@@ -9,7 +9,7 @@ payload 形状的唯一定义点——通用服务与产品层(products/,乙案�
 
 from __future__ import annotations
 
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 
@@ -20,9 +20,7 @@ def creation_payload(spec: ContextSpec, objective: str) -> dict:
         "objective": objective,
         "resource_refs": [ref.to_dict() for ref in spec.resource_refs],
         "method_kind": spec.method_kind,
-        "executor_ref": (
-            spec.executor_ref.to_dict() if spec.executor_ref else None
-        ),
+        "executor_ref": (spec.executor_ref.to_dict() if spec.executor_ref else None),
         "product_kind": spec.product_kind,
         "workflow_kind": spec.workflow_kind,
     }
