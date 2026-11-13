@@ -67,7 +67,7 @@ def shared_world(tmp_path, monkeypatch):
     for method in ("get_by_id_and_entity", "get_by_id_and_owner", "get_unique_by_id"):
         getattr(bots, method).return_value = bot
     binding = SimpleNamespace(
-        id=81, status="ACTIVE", device_provider="teclaw", device_id="logical-runtime",
+        id=81, status="ACTIVE", device_provider="teclaw", device_id="logical-runtime", apply_reason="service",
     )
     bindings = MagicMock()
     bindings.get_by_id.return_value = binding
@@ -127,6 +127,7 @@ def shared_world(tmp_path, monkeypatch):
             di.CallerIdentityRepositoryProtocol: MagicMock(), di.MCPSyncServiceProtocol: MagicMock(),
             di.PassportPlugin: MagicMock(), di.CoreCollaboratorServiceProtocol: MagicMock(),
             di.BcsCallerConfigSyncProtocol: MagicMock(),
+            di.ExpertChatInstanceRepository: instances,
         }.items():
             binder.bind(interface, to=InstanceProvider(value))
 
