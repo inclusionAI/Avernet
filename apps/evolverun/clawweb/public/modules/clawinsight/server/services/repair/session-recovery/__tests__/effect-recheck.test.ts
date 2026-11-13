@@ -91,9 +91,12 @@ it("rechecks a canceled task with original-session evidence and keeps its origin
   await expect(agent.report(running, { phase: "observe", kind: "plan" })).rejects.toMatchObject({ status: 422 });
   const read = await inspect(running, "historical-recheck-evidence");
   const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务后续已恢复", evidence_ids: [read.evidenceId] };
-  await expect(agent.report(await current(task.taskId), { phase: "observe", kind: "observation", judgment: { ...judgment, evidence_ids: [] } }))
+  await expect(agent.report(await current(task.taskId), { phase: "observe", kind: "observation", effect_recheck: true, judgment: { ...judgment, evidence_ids: [] } }))
     .rejects.toMatchObject({ status: 422 });
-  await agent.report(await current(task.taskId), { phase: "observe", kind: "observation", judgment });
+  // Old AIS packages may see the observation view, but must not publish a result.
+  await expect(agent.report(await current(task.taskId), { phase: "observe", kind: "observation", judgment }))
+    .rejects.toThrow("此 AIS 包不支持只读补验回报协议");
+  await agent.report(await current(task.taskId), { phase: "observe", kind: "observation", effect_recheck: true, judgment });
   const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "canceled", phase: task.phase, judgment, execution: { state: "ended" } });
   expect(saved.pending_results.at(-1)).toMatchObject({ task_id: task.taskId, event_id: request.event_id, status: "canceled",
@@ -122,7 +125,7 @@ it("keeps a wait with another online round and discards a late supplement when p
   await service.startEffectRecheck(task.taskId, "while-disabled", actor);
   const running = await current(task.taskId);
   await db.exec("UPDATE ce_app_config SET enabled=1 WHERE config_key='session_recovery_effect_resume_pre'");
-  await agent.report(running, { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response: "unknown",
+  await agent.report(running, { kind: "observation", phase: "observe", effect_recheck: true, judgment: { delivery: "confirmed", response: "unknown",
     effect: "recovered", summary: "配置已重新打开，本次补验不再写入", evidence_ids: [] } });
   const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "waiting_effect", judgment: { effect: "unknown" } });
@@ -165,7 +168,7 @@ it("lets the explicit online continuation replace an in-flight recheck without a
   expect(online).toMatchObject({ status: "running", phase: "observe", judgment: { effect: "unknown" } });
   expect(online.execution?.executionId).not.toBe(offline.execution?.executionId);
   const judgment = { delivery: "unconfirmed", response: "unknown", effect: "unknown", summary: "证据不足", evidence_ids: [] };
-  await expect(agent.report(offline, { phase: "observe", kind: "observation", judgment })).resolves.toEqual({ ok: true });
+  await expect(agent.report(offline, { phase: "observe", kind: "observation", effect_recheck: true, judgment })).resolves.toEqual({ ok: true });
   expect((await current(task.taskId)).timeline.filter(event => event.payload.effect_recheck_outcome)).toHaveLength(1);
   await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith(offline.execution?.jobId, actor.userId));
 });
