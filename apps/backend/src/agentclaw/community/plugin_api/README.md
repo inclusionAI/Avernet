@@ -25,6 +25,7 @@ provides:
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.service_bot_release_audit
   - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count

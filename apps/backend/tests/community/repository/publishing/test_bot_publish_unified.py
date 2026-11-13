@@ -55,6 +55,7 @@ class _FileSqliteDB:
             db.close()
 
     session = orm_session
+    transactional_orm_session = orm_session
 
 
 @pytest.fixture

@@ -26,6 +26,8 @@ class Database:
                 session.rollback()
                 raise
 
+    transactional_orm_session = orm_session
+
 
 @pytest.fixture
 def repository(tmp_path):
@@ -272,3 +274,92 @@ async def test_retry_submission_failure_records_failed_result_without_changing_s
     assert terminal.finish_status == "failed"
     assert terminal.final_publish_status == "success"
     assert repo.get_by_id(record.id).status == "success"
+
+
+def test_external_tenant_submission_finishes_in_default_background_context(repository):
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+    repo, _ = repository
+    with avernet_tenant_scope("external-a"):
+        with repo._db.orm_session() as session:
+            session.add(BotModel(id=2, bot_id="external-bot", bot_name="External",
+                                 entity_id="external-entity", entity_type="staff", creator_id="creator-a",
+                                 owner_id="owner-a", bot_type="service", active_engine="teclaw",
+                                 status="ACTIVE", env="dev"))
+        record = repo.insert(dict(source_bot_pk=2, source_bot_id="external-bot", publish_bot_id="external-bot",
+                                  name="External", owner_id="external-entity", permission_owner="owner",
+                                  version=1, env="dev", status="draft", audit_operator_id="external-actor"))
+        started = repo.update_status(record.id, "building", "draft", audit_operator_id="external-actor")
+    # Existing publication tasks restore no request tenant; trusted submission
+    # identity must carry the original one through terminal event production.
+    repo.compare_and_set_status_with_ext(publish_id=record.id, source_status="building", target_status="failed",
+                                        expected_ext=started.ext, ext=started.ext)
+    terminal = events(repository)[-1].snapshot
+    assert terminal.tenant_id == "external-a"
+    assert terminal.operator_id == "external-actor"
+    assert terminal.finish_status == "failed"
+
+
+def test_autocommit_database_uses_explicit_transaction_for_audit_atomicity(repository):
+    from sqlalchemy import event
+    repo, engine = repository
+
+    class AutocommitDatabase(Database):
+        def __init__(self):
+            self.factory = sessionmaker(engine.execution_options(isolation_level="AUTOCOMMIT"), autoflush=False)
+            self.transactions = 0
+
+        @contextmanager
+        def transactional_orm_session(self):
+            self.transactions += 1
+            factory = sessionmaker(engine.execution_options(isolation_level="SERIALIZABLE"), autoflush=False)
+            with factory() as session:
+                try:
+                    yield session
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
+
+    db = AutocommitDatabase()
+    repo._db = db
+    record = create(repository)
+    assert db.transactions == 1
+
+    def fail_insert(*args):
+        raise RuntimeError("outbox unavailable")
+
+    event.listen(ReleaseAuditEventModel, "before_insert", fail_insert)
+    try:
+        with pytest.raises(RuntimeError, match="outbox unavailable"):
+            repo.update_status(record.id, "building", "draft", audit_operator_id="submitter")
+    finally:
+        event.remove(ReleaseAuditEventModel, "before_insert", fail_insert)
+    assert db.transactions == 2
+    assert repo.get_by_id(record.id).status == "draft"
+    assert len(events(repository)) == 1
+
+
+@pytest.mark.parametrize("artifact_size", [4, 62000])
+def test_audit_change_marker_preserves_artifact_serialization_cas(repository, artifact_size):
+    repo, _ = repository
+
+    class Storage:
+        def __init__(self):
+            self.objects = {}
+
+        def put_object(self, key, content):
+            self.objects[key] = content
+            return True
+
+        def get_object(self, key):
+            return self.objects[key]
+
+    repo._offload = ConfigArtifactOffloader(Storage())
+    record = create(repository)
+    repo.update_status_with_ext(record.id, "draft", {"config_artifact": {"body": "x" * artifact_size}}, "draft")
+    started = repo.update_status(record.id, "building", "draft", audit_operator_id="submitter")
+    finished = repo.compare_and_set_status_with_ext(publish_id=record.id, source_status="building",
+                                                   target_status="failed", expected_ext=started.ext, ext=started.ext)
+    assert finished is not None
+    assert finished.ext["config_artifact"]["body"] == "x" * artifact_size
+    assert events(repository)[-1].snapshot.finish_status == "failed"

@@ -99,7 +99,7 @@ class BotPublishRepository(
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         ext = data.get("ext")
         env = data.get("env", get_current_env())
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             row = self.Model(
                 source_bot_pk=data["source_bot_pk"],
                 source_bot_id=data["source_bot_id"],
@@ -475,7 +475,7 @@ class BotPublishRepository(
         *,
         audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
             )
@@ -507,7 +507,7 @@ class BotPublishRepository(
         ext_json, pending = self._offload.prepare(
             ext, publish_id, get_current_env()
         )
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
             )
@@ -551,7 +551,7 @@ class BotPublishRepository(
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(self.Model.id == publish_id)
             if expected_json is None:
                 query = query.filter(self.Model.ext.is_(None))
@@ -586,7 +586,7 @@ class BotPublishRepository(
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id,
                 self.Model.status == source_status,

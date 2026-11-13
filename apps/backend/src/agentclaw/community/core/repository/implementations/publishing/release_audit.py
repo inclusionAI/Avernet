@@ -96,6 +96,12 @@ def record_transition(session: Session, row, *, source_status: str | None,
         ext.pop("_release_audit_wait_restart", None)
         if source_status == "failed" and status == "success":
             ext["_release_audit_wait_restart"] = snapshot.change_id
+        # Match ConfigArtifactOffloader.prepare: its artifact representation
+        # always serializes last. Preserve the raw offload marker and ordering,
+        # otherwise the next exact serialized-ext CAS rejects an unchanged row.
+        for artifact_key in ("config_artifact", "config_artifact_oss"):
+            if artifact_key in ext:
+                ext[artifact_key] = ext.pop(artifact_key)
         row.ext = json.dumps(ext, ensure_ascii=False)
         _append(session, ReleaseAuditEvent(snapshot))
         return
@@ -103,9 +109,10 @@ def record_transition(session: Session, row, *, source_status: str | None,
     submission_failed = change_id is not None and ext.get("_release_audit_submit_failed") == change_id
     if not change_id or (not submission_failed and status not in {"validating", "success", "failed", "released"}):
         return
+    # Background publication tasks have no request tenant. Correlate only the
+    # trusted persisted publication/change identity and retain its frozen tenant.
     started = session.query(ReleaseAuditEventModel).filter(
         ReleaseAuditEventModel.change_id == change_id,
-        ReleaseAuditEventModel.avernet_tenant == get_current_avernet_tenant(),
         ReleaseAuditEventModel.env == row.env,
         ReleaseAuditEventModel.publish_id == row.id,
         ReleaseAuditEventModel.revision == 1,

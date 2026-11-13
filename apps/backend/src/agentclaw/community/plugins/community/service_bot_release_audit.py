@@ -37,10 +37,14 @@ class DatabaseServiceBotReleaseAudit(ServiceBotReleaseAuditPlugin):
         logger.info(
             "release_audit.delivery.request system=database direction=outbound operation=record "
             "event_id=%s change_id=%s publish_id=%s bot_id=%s env=%s tenant_id=%s "
-            "creator_id=%s operator_id=%s desired_stage=%s finish_status=%s revision=%s",
+            "creator_id=%s operator_id=%s desired_stage=%s finish_status=%s revision=%s "
+            "version=%s before_stage=%s before_status=%s final_publish_status=%s finished_at=%s",
             event.event_id, event.change_id, snapshot.publish_id, snapshot.bot_id,
             snapshot.env, snapshot.tenant_id, snapshot.creator_id, snapshot.operator_id,
             snapshot.desired_stage, snapshot.finish_status, event.revision,
+            snapshot.version, snapshot.before_stage, snapshot.before_status,
+            snapshot.final_publish_status,
+            snapshot.finished_at.isoformat() if snapshot.finished_at is not None else None,
         )
         try:
             # COSEC: the payload cannot switch a guarded sink into another tenant.

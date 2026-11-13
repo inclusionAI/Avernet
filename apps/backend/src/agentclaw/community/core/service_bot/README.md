@@ -48,6 +48,10 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.kernel.service_bot_release_audit
+  - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.release_audit_models
+  - agentclaw.community.plugin_api.service_bot_release_audit
   - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
@@ -388,3 +392,13 @@ backfilled. Monitor `release_audit.event_staged`, `event_delivered`,
 `delivery.request/success/failed/duplicate/conflict`, and `scan_failed`; pending
 events remain available for replay after a plugin failure. Authentication
 credentials and raw publication ext/config are never copied into audit events.
+
+Audit-producing publication writes use
+`DatabasePlugin.transactional_orm_session()`: ordinary `orm_session()` can use
+AUTOCOMMIT in a production database and cannot guarantee atomic status/outbox
+writes. The explicit transaction rolls back both on an event persistence error.
+Source `bot_created_at` preserves the Bot's timestamp as stored; a naive source
+time has unknown timezone and is not relabeled UTC. Newly generated audit event
+times use UTC. Updating audit metadata preserves the offloader's artifact-last
+serialization, including an existing raw offload reference, so subsequent exact
+ext CAS operations remain compatible.

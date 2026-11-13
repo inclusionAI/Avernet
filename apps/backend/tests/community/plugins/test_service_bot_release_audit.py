@@ -192,3 +192,21 @@ def test_concurrent_repeated_insert_leaves_one_row(database):
     with database.orm_session() as db:
         assert db.query(ReleaseAuditModel).count() == 1
         assert db.query(ReleaseAuditModel).one().revision == 1
+
+
+def test_source_bot_creation_timestamp_keeps_unknown_timezone():
+    value = snapshot(bot_created_at=datetime(2026, 1, 1, 8))
+    assert value.bot_created_at.tzinfo is None
+    assert value.to_dict()["bot_created_at"] == "2026-01-01T08:00:00"
+    assert event_for(value).snapshot.change_created_at.tzinfo == timezone.utc
+
+
+def test_sink_logs_terminal_result_fields(database, caplog):
+    from agentclaw.community.plugins.community.service_bot_release_audit import DatabaseServiceBotReleaseAudit
+    value = snapshot(revision=2, finished_at=datetime(2026, 11, 13, 0, 1),
+                     finish_status="succeeded", final_publish_status="success")
+    caplog.set_level("INFO")
+    DatabaseServiceBotReleaseAudit(database).record(event_for(value))
+    for field in ("version=3", "before_stage=verify", "before_status=validating",
+                  "final_publish_status=success", "finished_at=2026-11-13T00:01:00+00:00"):
+        assert field in caplog.text

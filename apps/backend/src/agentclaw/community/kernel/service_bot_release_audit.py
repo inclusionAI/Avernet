@@ -11,7 +11,7 @@ _EXT_FIELDS = frozenset({"schema_version", "operation_type", "request_id", "oper
 
 
 def _utc(value: datetime) -> datetime:
-    # Existing database timestamps are UTC and may not carry tzinfo.
+    # Audit event timestamps are produced in UTC by the publication transaction.
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
@@ -68,7 +68,7 @@ class ReleaseAuditSnapshot:
         object.__setattr__(self, "ext_json", json.dumps(ext, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
         for name in _DATE_FIELDS:
             value = getattr(self, name)
-            if value is not None:
+            if value is not None and name != "bot_created_at":
                 object.__setattr__(self, name, _utc(value))
 
     def to_dict(self) -> dict[str, Any]:
