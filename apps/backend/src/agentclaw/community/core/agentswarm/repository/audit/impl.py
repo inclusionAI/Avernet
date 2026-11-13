@@ -12,9 +12,11 @@ Mirrors :class:`agentclaw.community.core.repository.implementations.governance.a
 
 Rows are written by the HTTP router for: accepted submits, rejected submits
 (admission reasons: ``tenant_limit`` / ``config_missing`` / ``queue_depth`` /
-``global_limit``), and cancel requests (``not_found`` when the tenant cannot
-see the run). Health/ready and per-poll reads are deliberately not audited —
-the closed action set is:
+``global_limit`` / ``identity_source_missing`` /
+``identity_source_invalid_<reason>``, where ``<reason>`` is one of
+``not_owned`` / ``no_passport`` / ``unverified``), and cancel requests
+(``not_found`` when the tenant cannot see the run). Health/ready and per-poll
+reads are deliberately not audited — the closed action set is:
 
     submit_accepted | submit_rejected | cancel_requested
 """

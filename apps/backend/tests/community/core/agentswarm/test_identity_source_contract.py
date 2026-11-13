@@ -25,7 +25,9 @@ from agentclaw.community.core.agentswarm.domain.models import (
 )
 from agentclaw.community.core.agentswarm.service.impl import AgentSwarmService
 from agentclaw.community.core.agentswarm.service.protocols import (
-    IdentitySourceInvalid, IdentitySourceRequired, SubmitRunRequest,
+    IdentitySourceInvalid, IdentitySourceRefusal, IdentitySourceRequired,
+    IDENTITY_SOURCE_NO_PASSPORT, IDENTITY_SOURCE_NOT_OWNED,
+    IDENTITY_SOURCE_UNVERIFIED, SubmitRunRequest,
 )
 
 OWNER = "49912"
@@ -70,16 +72,65 @@ class TestTheServiceRefusesAnUnusableSource:
 
     def test_a_source_the_seam_rejects_is_invalid_not_missing(self):
         seam = MagicMock()
+        seam.identity_source.return_value = IdentitySourceRefusal(
+            IDENTITY_SOURCE_NOT_OWNED,
+            f"identity source {SOURCE!r} is not a Bot owned by the caller",
+        )
+        svc = _service(seam)
+        with pytest.raises(IdentitySourceInvalid) as exc:
+            svc._require_identity_source(_req(kind=AgentKind.BOT,
+                                              identity_bot_id=SOURCE))
+        # The offending id and the seam's case both reach the caller.
+        assert exc.value.bot_id == SOURCE
+        assert exc.value.reason == IDENTITY_SOURCE_NOT_OWNED
+        assert "not a Bot owned by the caller" in str(exc.value)
+        seam.identity_source.assert_called_once_with(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+
+    def test_each_seam_refusal_keeps_its_own_reason(self):
+        """The case is a typed value on the error, not text a caller must parse."""
+        seen = {}
+        for code in (IDENTITY_SOURCE_NOT_OWNED, IDENTITY_SOURCE_NO_PASSPORT,
+                     IDENTITY_SOURCE_UNVERIFIED):
+            seam = MagicMock()
+            seam.identity_source.return_value = IdentitySourceRefusal(
+                code, f"the {code} case",
+            )
+            with pytest.raises(IdentitySourceInvalid) as exc:
+                svc = _service(seam)
+                svc._require_identity_source(
+                    _req(kind=AgentKind.BOT, identity_bot_id=SOURCE))
+            assert exc.value.reason == code
+            assert exc.value.message == f"the {code} case"
+            assert str(exc.value) == f"the {code} case"
+            seen[code] = exc.value.reason
+        assert len(set(seen.values())) == 3
+
+    def test_a_reason_without_a_message_still_names_the_source(self):
+        """A seam from another tree may populate only the code; the error
+        still names the source so a log reader can find it."""
+        seam = MagicMock()
+        seam.identity_source.return_value = IdentitySourceRefusal(
+            IDENTITY_SOURCE_NO_PASSPORT,
+        )
+        svc = _service(seam)
+        with pytest.raises(IdentitySourceInvalid) as exc:
+            svc._require_identity_source(_req(kind=AgentKind.BOT,
+                                              identity_bot_id=SOURCE))
+        assert exc.value.reason == IDENTITY_SOURCE_NO_PASSPORT
+        assert exc.value.message == ""
+        assert SOURCE in str(exc.value)
+
+    def test_a_seam_answer_outside_the_contract_is_not_accepted(self):
+        """A seam returning neither a code nor a reason cannot be trusted."""
+        seam = MagicMock()
         seam.identity_source.return_value = None
         svc = _service(seam)
         with pytest.raises(IdentitySourceInvalid) as exc:
             svc._require_identity_source(_req(kind=AgentKind.BOT,
                                               identity_bot_id=SOURCE))
-        # The offending id is named, and the seam was asked for THIS owner.
-        assert exc.value.bot_id == SOURCE
-        seam.identity_source.assert_called_once_with(
-            owner_id=OWNER, bot_id=SOURCE,
-        )
+        assert exc.value.reason == IDENTITY_SOURCE_UNVERIFIED
 
     def test_a_run_with_no_bot_agent_needs_no_source(self):
         """An llm agent completes in-process and holds no passport."""
@@ -127,31 +178,208 @@ class TestTheSeamAnswersFromTheBotRow:
         }}}).identity_source(owner_id=OWNER, bot_id=SOURCE)
         assert code == SOURCE_CODE
 
-    def test_a_missing_bot_yields_nothing(self):
-        assert self._seam(None).identity_source(
+    def test_a_missing_bot_is_refused_as_not_owned(self):
+        refusal = self._seam(None).identity_source(
             owner_id=OWNER, bot_id=SOURCE,
-        ) is None
+        )
+        assert isinstance(refusal, IdentitySourceRefusal)
+        assert refusal.code == IDENTITY_SOURCE_NOT_OWNED
+        # A Bot the caller does not own says so, and never claims a passport
+        # problem the caller cannot act on.
+        assert "not a Bot owned by the caller" in refusal.message
+        assert "passport" not in refusal.message
 
     def test_a_pending_passport_is_not_usable_yet(self):
-        assert self._seam({"ext": {"passport": {
+        refusal = self._seam({"ext": {"passport": {
             "agent_code": SOURCE_CODE, "status": "PENDING",
-        }}}).identity_source(owner_id=OWNER, bot_id=SOURCE) is None
+        }}}).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+        assert "pending authorization" in refusal.message
 
-    def test_a_bot_with_no_agent_code_yields_nothing(self):
-        assert self._seam({"ext": {"passport": {"status": "ISSUED"}}}).identity_source(
+    def test_a_bot_with_no_agent_code_holds_no_passport(self):
+        refusal = self._seam({"ext": {"passport": {"status": "ISSUED"}}}).identity_source(
             owner_id=OWNER, bot_id=SOURCE,
-        ) is None
+        )
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+        assert "holds no issued passport" in refusal.message
 
-    def test_a_bot_with_no_ext_yields_nothing(self):
-        assert self._seam({"bot_id": SOURCE}).identity_source(
-            owner_id=OWNER, bot_id=SOURCE,
-        ) is None
+    def test_a_bot_with_no_ext_holds_no_passport_when_the_provider_is_silent(self):
+        refusal = _seam_with(
+            {"bot_id": SOURCE}, _SpyPassport({}),
+        ).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
 
-    def test_no_repository_bound_yields_nothing(self):
+    def test_no_repository_bound_is_unverified_not_unowned(self):
         from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
             ManifestBotAuthorizationSource,
         )
         seam = ManifestBotAuthorizationSource(
             manifest_seam=MagicMock(), passport_plugin=MagicMock(), bot_repo=None,
         )
-        assert seam.identity_source(owner_id=OWNER, bot_id=SOURCE) is None
+        refusal = seam.identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert refusal.code == IDENTITY_SOURCE_UNVERIFIED
+        assert "could not be verified" in refusal.message
+
+
+# ── the passport-provider fallback ───────────────────────────
+
+PROVIDER_CODE = "3f1c2a04-8b6e-4d19-9a2c-5d0e7b41c6af"
+
+
+def _issued(code: str = PROVIDER_CODE, status: str = "ISSUED") -> dict:
+    return {"agent_code": code, "status": status}
+
+
+class _SpyPassport:
+    """Records every passport lookup, and answers per Bot id."""
+
+    def __init__(
+        self, answers: dict,
+    ) -> None:
+        self.answers = answers
+        self.queries: list[tuple[str, str]] = []
+
+    def query_agent_passport(self, bot_id: str, owner_workno: str) -> dict | None:
+        self.queries.append((bot_id, owner_workno))
+        return self.answers.get(bot_id)
+
+
+def _seam_with(row, passport: _SpyPassport):
+    from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
+        ManifestBotAuthorizationSource,
+    )
+    repo = MagicMock()
+    repo.get_by_id_and_owner.return_value = row
+    return ManifestBotAuthorizationSource(
+        manifest_seam=MagicMock(), passport_plugin=passport, bot_repo=repo,
+    )
+
+
+class TestAnOlderBotsPassportIsFoundAtTheProvider:
+    """The case this change exists for: a Bot predating `ext.passport`."""
+
+    def test_a_bot_with_no_cached_passport_is_accepted_from_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        code = _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert code == PROVIDER_CODE
+        # Asked for THIS Bot and THIS owner, exactly once.
+        assert passport.queries == [(SOURCE, OWNER)]
+
+    def test_a_cached_passport_with_no_code_falls_back_to_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        code = _seam_with(
+            {"ext": {"passport": {"status": "ISSUED"}}}, passport,
+        ).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert code == PROVIDER_CODE
+
+    def test_a_usable_cached_code_never_reaches_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        code = _seam_with({"ext": {"passport": {
+            "agent_code": SOURCE_CODE, "status": "ISSUED",
+        }}}, passport).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert code == SOURCE_CODE
+        assert passport.queries == []
+
+    def test_a_provider_with_no_passport_either_is_a_refusal(self):
+        passport = _SpyPassport({})
+        refusal = _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+        assert passport.queries == [(SOURCE, OWNER)]
+
+    def test_a_provider_answer_that_is_not_issued_is_a_refusal(self):
+        passport = _SpyPassport({SOURCE: _issued(status="PENDING")})
+        refusal = _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+
+    def test_a_provider_answer_without_a_status_field_is_accepted(self):
+        """The local and self-issued plugins send no status; the code alone
+        is the evidence, the same reading the cached record gets."""
+        passport = _SpyPassport({SOURCE: {
+            "agent_id": SOURCE, "agent_code": PROVIDER_CODE,
+        }})
+        assert _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        ) == PROVIDER_CODE
+
+    def test_a_provider_answer_with_no_agent_code_is_a_refusal(self):
+        passport = _SpyPassport({SOURCE: _issued(code="   ")})
+        refusal = _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+
+    def test_an_unowned_bot_never_reaches_the_provider(self):
+        """Ownership is settled from the Bot row, so no other account's
+        passport can be probed through the refusal text."""
+        passport = _SpyPassport({SOURCE: _issued()})
+        refusal = _seam_with(None, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_NOT_OWNED
+        assert passport.queries == []
+
+
+class TestTheCacheWinsWhereItAnswers:
+    """A cached answer is the answer: the provider is never consulted when
+    the Bot row already settles the question, in either direction."""
+
+    def test_a_pending_cache_is_refused_without_asking_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        refusal = _seam_with({"ext": {"passport": {
+            "agent_code": SOURCE_CODE, "status": "PENDING",
+        }}}, passport).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert refusal.code == IDENTITY_SOURCE_NO_PASSPORT
+        assert "pending authorization" in refusal.message
+        assert passport.queries == []
+
+    def test_a_usable_cache_is_accepted_without_asking_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        code = _seam_with({"ext": {"passport": {
+            "agent_code": SOURCE_CODE,
+        }}}, passport).identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert code == SOURCE_CODE
+        assert passport.queries == []
+
+    def test_an_unowned_bot_is_refused_without_asking_the_provider(self):
+        passport = _SpyPassport({SOURCE: _issued()})
+        refusal = _seam_with(None, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_NOT_OWNED
+        assert passport.queries == []
+
+
+class _RaisingPassport:
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, str]] = []
+
+    def query_agent_passport(self, bot_id: str, owner_workno: str) -> dict:
+        self.queries.append((bot_id, owner_workno))
+        raise RuntimeError("tcauthmng unreachable")
+
+
+class TestAProviderFailureRefusesRatherThanAccepts:
+    """An outage must not mint an identity source, and must not claim the
+    Bot has no passport -- it reads as "could not be verified"."""
+
+    def test_a_raising_provider_reads_as_unverified(self):
+        passport = _RaisingPassport()
+        refusal = _seam_with({"bot_id": SOURCE}, passport).identity_source(
+            owner_id=OWNER, bot_id=SOURCE,
+        )
+        assert refusal.code == IDENTITY_SOURCE_UNVERIFIED
+        assert "could not be verified" in refusal.message
+        # It asked before refusing.
+        assert passport.queries == [(SOURCE, OWNER)]
+
+    def test_no_exception_escapes_the_seam(self):
+        passport = _RaisingPassport()
+        seam = _seam_with({"bot_id": SOURCE}, passport)
+        # Would raise if the provider error propagated.
+        assert seam.identity_source(owner_id=OWNER, bot_id=SOURCE) is not None

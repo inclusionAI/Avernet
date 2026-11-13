@@ -52,6 +52,28 @@ def _service(source: dict[str, Any] | None) -> Mock:
     return svc
 
 
+class _Provider:
+    """A passport provider stand-in that records what it was asked.
+
+    ``answers`` maps bot id → the facade's answer; a missing bot id means the
+    provider has no passport for it, which is the "nothing anywhere" case the
+    refusal wording is about.
+    """
+
+    def __init__(self, answers: dict[str, dict[str, Any]] | None = None) -> None:
+        self.answers = answers or {}
+        self.queries: list[tuple[str, str]] = []
+
+    def query_agent_passport(self, bot_id: str, owner_workno: str) -> dict[str, Any] | None:
+        self.queries.append((bot_id, owner_workno))
+        return self.answers.get(bot_id)
+
+
+class _RaisingProvider:
+    def query_agent_passport(self, bot_id: str, owner_workno: str):
+        raise RuntimeError("tcauthmng unreachable")
+
+
 # ── resolve_identity_source ──────────────────────────────────
 
 
@@ -87,9 +109,13 @@ class TestResolveIdentitySource:
         ],
     )
     def test_source_must_hold_an_issued_non_empty_agent_code(self, passport):
+        """Neither the cache nor the provider has a code for it."""
         svc = _service({"bot_id": "src", "ext": {"passport": passport}})
         with pytest.raises(IdentitySourceInvalidError) as exc:
-            resolve_identity_source(spec=_Spec(identity_bot_id="src"), bot_service=svc)
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=_Provider(),
+            )
         assert str(exc.value) == (
             "identity source 'src' holds no issued passport; "
             "it cannot supply an agent code"
@@ -106,7 +132,10 @@ class TestResolveIdentitySource:
     def test_missing_ext_is_not_an_issued_passport(self):
         svc = _service({"bot_id": "src"})
         with pytest.raises(IdentitySourceInvalidError):
-            resolve_identity_source(spec=_Spec(identity_bot_id="src"), bot_service=svc)
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=_Provider(),
+            )
 
     def test_valid_source_is_returned_verbatim(self):
         source = _issued_source("abc")
@@ -201,5 +230,129 @@ class TestInheritedAgentCode:
     def test_a_source_without_an_agent_code_raises(self):
         svc = _service({"bot_id": "src", "ext": {"passport": {"status": "ISSUED"}}})
         with pytest.raises(IdentitySourceInvalidError) as exc:
-            inherited_agent_code(spec=_Spec(identity_bot_id="src"), bot_service=svc)
+            inherited_agent_code(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=_Provider(),
+            )
         assert str(exc.value) == "identity source 'src' has no agent code"
+
+
+# ── the provider fallback at the creation boundaries ─────────
+
+PROVIDER_CODE = "bdeb1e9e-69d0-43b6-97f6-0270b5b29faa"
+
+
+class TestCreationBoundariesReachTheProvider:
+    """A Bot accepted by the agentswarm submit must also be creatable.
+
+    Before this, both creation checks read only ``ext.passport``, so a run for
+    a Bot with no cached copy passed submit and then failed as it spawned —
+    ``identity source ... holds no issued passport`` burned all three attempts.
+    """
+
+    def test_resolve_accepts_a_bot_whose_passport_the_provider_holds(self):
+        svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
+        provider = _Provider({"src": {
+            "agent_code": PROVIDER_CODE, "status": "ISSUED",
+        }})
+
+        source = resolve_identity_source(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        )
+
+        assert source is not None
+        assert provider.queries == [("src", "owner-1")]
+
+    def test_resolve_accepts_a_provider_answer_without_a_status_field(self):
+        """The prod facade sends no status; the code alone is the evidence."""
+        svc = _service({"bot_id": "src", "entity_id": "owner-1"})
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        assert resolve_identity_source(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        ) is not None
+
+    def test_inherited_code_comes_from_the_provider_when_the_cache_is_silent(self):
+        svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        assert inherited_agent_code(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        ) == PROVIDER_CODE
+
+    def test_the_cache_answers_without_the_provider_at_both_boundaries(self):
+        source = _issued_source("cached-code")
+        svc = _service(source)
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        assert resolve_identity_source(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        ) is source
+        assert inherited_agent_code(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        ) == "cached-code"
+        assert provider.queries == []
+
+    def test_a_cached_pending_passport_refuses_without_the_provider(self):
+        source = {"bot_id": "src", "entity_id": "owner-1",
+                  "ext": {"passport": {"status": "PENDING",
+                                       "agent_code": "cached"}}}
+        svc = _service(source)
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        with pytest.raises(IdentitySourceInvalidError):
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=provider,
+            )
+        with pytest.raises(IdentitySourceInvalidError):
+            inherited_agent_code(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=provider,
+            )
+        assert provider.queries == []
+
+    def test_an_unowned_bot_never_reaches_the_provider(self):
+        svc = _service(None)
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        with pytest.raises(IdentitySourceInvalidError):
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=provider,
+            )
+        assert provider.queries == []
+
+    def test_a_provider_failure_refuses_rather_than_inventing_an_identity(self):
+        svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
+        provider = _RaisingProvider()
+
+        with pytest.raises(IdentitySourceInvalidError) as create_exc:
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=provider,
+            )
+        assert "could not be verified" in str(create_exc.value)
+
+        with pytest.raises(IdentitySourceInvalidError) as code_exc:
+            inherited_agent_code(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+                passport_plugin=provider,
+            )
+        assert "could not be verified" in str(code_exc.value)
+
+    def test_no_provider_bound_is_unverified_not_no_passport(self):
+        """Without a provider the answer is unknown, not a verdict."""
+        svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
+
+        with pytest.raises(IdentitySourceInvalidError) as exc:
+            resolve_identity_source(
+                spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            )
+        assert "could not be verified" in str(exc.value)
+        assert "holds no issued passport" not in str(exc.value)
