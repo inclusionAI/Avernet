@@ -1,11 +1,20 @@
 //! Optional network tracing contract. No vendor SDK, transport or business state.
 use std::{any::Any, future::Future, sync::{Arc, OnceLock}};
 
+mod log_correlation;
+pub use log_correlation::{LogCorrelation, current_log_correlation, in_current_log_context, with_log_correlation};
+
 pub type Carrier = Vec<(String, String)>;
 pub type Context = Arc<dyn Any + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind { HttpServer, HttpClient, RpcClient }
+pub enum Kind {
+    HttpServer,
+    HttpClient,
+    RpcClient,
+    /// gRPC status codes and invocation shape, independent of deployment routing.
+    GrpcClient { server_streaming: bool },
+}
 
 /// Transport metadata only: never supply bodies, credentials or raw errors.
 pub struct RequestInfo<'a> {
@@ -19,6 +28,7 @@ pub struct RequestInfo<'a> {
     pub request_size: Option<u64>,
 }
 
+/// `Rpc` carries the transport's status code; gRPC codes must remain unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome { Http(u16), Rpc(u32), TransportError, Timeout, Cancelled }
 
@@ -58,6 +68,10 @@ pub trait NetworkTracer: Send + Sync {
     /// Optional SDK bridge. Return only valid propagation fields, never bind a
     /// thread-local guard across await. The default preserves SPI-only behavior.
     fn capture_ambient(&self) -> Carrier { Vec::new() }
+
+    /// Read-only log identity. Never creates a span, exports baggage or changes
+    /// child allocation. Unsupported/foreign contexts return None.
+    fn log_correlation(&self, _context: &Context) -> Option<LogCorrelation> { None }
 }
 
 static PROVIDER: OnceLock<Arc<dyn NetworkTracer>> = OnceLock::new();

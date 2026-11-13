@@ -21,8 +21,10 @@ retry policy, authorization decisions or business return values.
    finish after the response are not included in the already emitted snapshot.
 4. Use `operation_id` and `parent_operation_id` to reconstruct nested stages from
    log events. These observations do not create tracing spans or record metrics.
-   Correlation uses request and operation IDs without reading, propagating or
-   emitting a distributed `trace_id` in these observation records.
+   Ordinary correlation uses request and operation IDs. Explicitly selected outer
+   dependency failures/stalls may additionally carry a provider-owned log ID pair
+   under the [read-only contract](../../crates/plugin-api/bcs-tracing-api/CONTEXT.md).
+   The existing `trace_id` field and network propagation are not modified.
    Existing gateway span selection and downstream TraceContext propagation are
    unchanged. `in_current_context` carries request/operation IDs and the logging
    subscriber into selected detached work. It does not
@@ -87,6 +89,20 @@ If the sink stalls, lines can be dropped instead of blocking request workers.
 No dropped-line metric is exported. Console output and disk/collector health are
 separate concerns; logs are not guaranteed complete when the file queue is full.
 
+Log formatting runs on the emitting thread before bytes reach the nonblocking
+writer. Text/JSON correlation skips the selection field visitor when event
+metadata declares no `log_class`; a declared marker still needs its runtime value
+checked. Missing correlation falls back to the original formatter, including
+when tracing is disabled. This fast path reduces overhead; it is not a zero-cost
+guarantee.
+
+Selected text events reuse a thread-local scratch buffer across output layers.
+The buffer is cleared on success, formatting error and panic; nested formatting
+uses a temporary local buffer. Capacity above 64 KiB is released after use to
+avoid retaining unusually large lines. Normal-sized warmed events avoid scratch
+allocations, but still format/copy the original line and append the ID pair.
+Provider lookup and any provider-owned allocations remain separate costs.
+
 ## Deployment
 
 Keep `bcs_http_access` and `bcs_observation` enabled at INFO in file output target
@@ -104,7 +120,8 @@ No collector, dashboard, alert or online experiment is installed by this change.
   remain isolated when futures are polled concurrently.
 - `bcs-http::gateway_trace::observe_request` establishes the request log context.
   Neither it nor the WebSocket dispatcher copies an OpenTelemetry trace ID into
-  observation context. The base never reads a current span and has no trace-ID scope.
+  observation context. The base never reads an OTel span. Selected outer operations
+  capture only the optional neutral log identity for cancellation-safe emission.
 - `bcs-telemetry` retains the original pure GenAI message attribute encoders.
   Existing A2A span creation, provider TraceContext propagation and bootstrap
   exporter configuration retain their owners and behavior.
@@ -114,7 +131,27 @@ No collector, dashboard, alert or online experiment is installed by this change.
   trace-ID helpers and the added observation `trace_id` fields have been removed;
   log queries should use request/operation IDs. Existing tracing diagnostic logs,
   dependency protocol trace fields, wire contracts and configuration are unchanged.
-- Future tracing integrations, including SOFATracer in the internal overlay,
-  should declare their own context/propagation contract. This change adds no
+- Concrete tracing integrations implement the optional public read-only log hook;
+  their SDKs remain outside this package. This integration adds no
   tracing plugin runtime, automatic spans, or metrics; the existing tracing
   event/subscriber mechanism remains the logging extension point.
+
+## Key business event selection
+
+`log_class="business_key"` opts in individual writes: message receipt, route and
+send result; terminal bot events; task/state-machine transitions; Chat result;
+HTTP response-ready/cancelled; authorization rejection; security denial/degradation;
+SSE close summary and only the first lag alert/recovery pair per stream. Successful
+nonterminal Provider callback responses carry an adapter-private extension so
+the HTTP observer leaves them ordinary; error responses remain selected.
+Delta/tool events, individual SSE frames, HTTP started/operation aggregates,
+DB/cache phases and background maintenance remain ordinary. Markers do not create
+identity where no supported context exists. Raw delivery CSV remains byte-compatible.
+
+`observe_key_result` selects outer Provider send/ACK, Fuse operations and BaaS
+operations. Internal implementations may select their own outer boundaries.
+Error/cancel/panic and the existing one-time stall warning qualify; success and
+slow success do not. Existing operation outcomes, timing and result values stay
+unchanged. `in_current_log_context` from the tracing API explicitly captures
+log-only context for Provider final tasks (including nested processing) and the
+unmanaged A2A drain. It does not extend a network span or restore its parent.

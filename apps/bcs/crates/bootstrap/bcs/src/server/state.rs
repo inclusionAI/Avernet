@@ -192,7 +192,13 @@ pub struct BcsServerExtensions {
 #[cfg(any(test, feature = "test-utils"))]
 impl Default for BcsServerState {
     fn default() -> Self {
-        let config = BcsConfig::default();
+        Self::memory_for_config(BcsConfig::default())
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl BcsServerState {
+    pub(super) fn memory_for_config(config: BcsConfig) -> Self {
         let group_session_secret_access = build_secret_access_blocking(&config)
             .expect("Secret provider configuration must be valid");
         let invite_token_secret = resolve_invite_token_secret(&config);
@@ -728,6 +734,9 @@ impl Default for BcsServerState {
             ));
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
+            .friend_use_cases(Arc::new(bcs_test_support::NoopFriendService))
+            .human_actors(Arc::new(bcs_test_support::NoopHumanActorService))
+            .bot_onboarding(Arc::new(bcs_test_support::NoopBotOnboardingService))
             .bot_authority(bot_authority.service.clone())
             .bot_authority_hook(bot_authority.hook.clone())
             .group(sessions)

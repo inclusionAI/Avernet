@@ -122,3 +122,7 @@ mod task_rejection;
 
 mod task_handle_application;
 pub use task_handle_application::TaskHandleApplicationService;
+
+#[cfg(test)]
+#[path = "message_log_tests/tests.rs"]
+mod message_log_tests;

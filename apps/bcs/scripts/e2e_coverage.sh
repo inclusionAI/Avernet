@@ -250,6 +250,7 @@ cli_gate_status=0
 # the next line lands at the new EOF). Skipped under --skip-start only if the
 # caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
 bcs_log="${bcs_log:-${BCS_LOG:-$repo_root/singlebox/.dependencies/logs/bcs.log}}"
+export BCS_LOG="$bcs_log"
 cli_coverage_log="$cov_dir/cli_commands.log"
 if [[ "$aggregate_only" -eq 0 ]]; then
   : > "$bcs_log" 2>/dev/null || true

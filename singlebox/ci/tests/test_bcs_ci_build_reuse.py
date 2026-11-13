@@ -116,6 +116,37 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('--reuse-build requires --coverage', result.stderr)
 
+    def test_non_fast_fail_distinguishes_compile_and_assertion_failures(self) -> None:
+        cases = [
+            ('compile', 'compile_error!("injected fixture compile failure");\n'),
+            ('assertion', '#[test] fn fails() { assert_eq!(1, 2); }\n'),
+        ]
+        for failure, source in cases:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                project = Path(temporary) / 'bcs'
+                shutil.copytree(self.project, project, ignore=shutil.ignore_patterns('target', 'testresult'))
+                (project / 'src/lib.rs').write_text(source)
+                reports = project / 'testresult'
+                reports.mkdir()
+                # Stale reports must not disguise an unsuccessful build.
+                for name in ('junit.xml', 'cobertura.xml', 'test-binaries.json'):
+                    (reports / name).write_text('stale report')
+                result = subprocess.run(['bash', 'scripts/ci_test.sh', '--coverage', '--reuse-build'],
+                                        cwd=project, env=self.env, text=True, capture_output=True)
+                if failure == 'compile':
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('injected fixture compile failure', result.stderr)
+                    self.assertIn('stopping with status=', result.stderr)
+                    for name in ('test-binaries.json', 'test-binaries.json.tmp', 'junit.xml', 'cobertura.xml'):
+                        self.assertFalse((reports / name).exists(), name)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertTrue(json.loads((reports / 'test-binaries.json').read_text())['rust-binaries'])
+                    import xml.etree.ElementTree as ET
+                    junit = ET.parse(reports / 'junit.xml').getroot()
+                    self.assertEqual(len(junit.findall('.//failure')), 1)
+                    self.assertEqual(ET.parse(reports / 'cobertura.xml').getroot().tag, 'coverage')
+
     def test_contract_failures_are_not_hidden(self) -> None:
         self.require_build()
         result = self.run_contract('contract_fails')

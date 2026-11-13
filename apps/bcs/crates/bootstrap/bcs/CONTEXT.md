@@ -283,3 +283,17 @@ allows anonymous calls only for Cards that permit them. It is injected into
 Provider-admin registration, scoped registration and runtime target resolution.
 It does not disable Provider management authentication or satisfy a Card that
 requires Bearer, OAuth or another unsupported scheme.
+
+## Network tracing scope
+
+Composition excludes exact matched routes for health/metrics, manifest/assets,
+WebSocket upgrades, `/me/repair-info`, `/admin/secret/{name}` and the retired
+`/groups/{id}/settings`. Their entire handler scope suppresses network tracing;
+routing, authentication and responses are unchanged. Other matched business and
+identity-support routes remain eligible, including error responses. The public
+executable still defaults to no installed network tracing provider.
+
+Logging owns the selected-event metadata fast path and bounded, reusable text
+scratch buffer. Formatting still runs before asynchronous output; see
+[request and operation observations](../../../docs/observability/request-operation-logging.md#semantics-and-cost)
+for allocation, reentrancy and retention limits.

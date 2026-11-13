@@ -24,6 +24,8 @@ use tracing_subscriber::{
     EnvFilter, Layer,
 };
 
+mod correlation;
+
 pub(crate) const DELIVERY_MONITOR_TARGET: &str = "bcs_message_delivery_monitor";
 const DELIVERY_MONITOR_OUTPUT: &str = "message-delivery";
 static DELIVERY_MONITOR_DROPS: OnceLock<tracing_appender::non_blocking::ErrorCounter> = OnceLock::new();
@@ -358,7 +360,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
                 LogOutputFormat::Text => Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
-                        .with_timer(output_timer)
+                        .event_format(correlation::text(output_timer))
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -370,7 +372,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
                         .with_current_span(false)
                         .with_span_list(false)
                         .with_writer(writer)
-                        .with_timer(output_timer)
+                        .event_format(correlation::json(output_timer))
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -382,7 +384,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
     let console_layer = if config.console {
         Some(
             tracing_subscriber::fmt::layer()
-                .with_timer(timer.clone())
+                .event_format(correlation::text(timer.clone()))
                 .with_ansi(console_ansi_enabled())
                 .with_filter(build_env_filter(config)),
         )

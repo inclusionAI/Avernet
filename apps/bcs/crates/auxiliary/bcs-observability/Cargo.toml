@@ -11,6 +11,7 @@ version     = { workspace = true }
 workspace = true
 
 [dependencies]
+bcs-tracing-api.workspace = true
 serde_json = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
@@ -19,5 +20,5 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true }

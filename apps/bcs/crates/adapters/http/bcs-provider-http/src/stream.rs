@@ -56,7 +56,7 @@ pub(super) async fn stream_and_drive(
     // cover the put_context race: deliver() returns -> put_context runs, but the
     // spawned reader may reach here first.
     let Some(run_ctx) = resolve_run_context(&ctx, &bcn_run_id).await else {
-        warn!(run_id = %bcn_run_id, "sse: run context never became available; closing");
+        warn!(log_class = "business_key", event_code = "sse.closed", reason = "context_unavailable", run_id = %bcn_run_id, "sse: run context never became available; closing");
         return;
     };
     let group_id = run_ctx.group_id.clone();
@@ -71,6 +71,7 @@ pub(super) async fn stream_and_drive(
     let mut lag = LagTracker::default();
     let mut saw_terminal = false;
     let mut close_reason = "run_terminal";
+    let mut diagnostic_reason = "terminal";
 
     // SSE-detail diagnostics: how many frames we consumed, when we started, and
     // how long we blocked waiting on the socket vs processing frames. The gap
@@ -93,12 +94,14 @@ pub(super) async fn stream_and_drive(
         let (read_timeout, deadline_limited) = sse_next_read_timeout(now_ms, deadline_ms);
         if deadline_limited && read_timeout.is_zero() {
             close_reason = "run_deadline";
+            diagnostic_reason = "run_deadline";
             warn!(run_id = %bcn_run_id, "sse run deadline reached; closing stream");
             break 'read;
         }
         let next = tokio::time::timeout(read_timeout, stream.next()).await;
         match next {
             Err(_) => {
+                diagnostic_reason = if deadline_limited { "run_deadline" } else { "idle_timeout" };
                 if deadline_limited {
                     close_reason = "run_deadline";
                 }
@@ -114,9 +117,11 @@ pub(super) async fn stream_and_drive(
                 break 'read;
             }
             Ok(None) => {
+                diagnostic_reason = "eof";
                 // Stream ended. Flush any trailing buffered (non-empty) frame.
                 if !buf.is_empty() {
                     if buf.len() > SSE_MAX_FRAME_BYTES {
+                        diagnostic_reason = "oversized_frame";
                         warn!(
                             run_id = %bcn_run_id,
                             frame_bytes = buf.len(),
@@ -154,6 +159,7 @@ pub(super) async fn stream_and_drive(
                 break 'read;
             }
             Ok(Some(Err(error))) => {
+                diagnostic_reason = "read_error";
                 warn!(
                     target: "bcs_sse_detail",
                     run_id = %bcn_run_id,
@@ -170,6 +176,7 @@ pub(super) async fn stream_and_drive(
                 while let Some((idx, sep_len)) = find_frame_sep(&buf) {
                     let frame: Vec<u8> = buf.drain(..idx + sep_len).collect();
                     if frame.len() > SSE_MAX_FRAME_BYTES {
+                        diagnostic_reason = "oversized_frame";
                         warn!(
                             run_id = %bcn_run_id,
                             frame_bytes = frame.len(),
@@ -200,6 +207,7 @@ pub(super) async fn stream_and_drive(
                     }
                 }
                 if buf.len() > SSE_MAX_FRAME_BYTES {
+                    diagnostic_reason = "oversized_frame";
                     warn!(
                         run_id = %bcn_run_id,
                         buffered_bytes = buf.len(),
@@ -211,6 +219,15 @@ pub(super) async fn stream_and_drive(
             }
         }
     }
+
+    tracing::info!(
+        target: "bcs_sse_detail",
+        log_class = "business_key", event_code = "sse.closed",
+        run_id = %bcn_run_id, group_id = %group_id,
+        reason = diagnostic_reason, saw_terminal, frames,
+        elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
+        "sse stream closed"
+    );
 
     // #3: any close path that did NOT see a chat terminal synthesizes one so the
     // run is cleanly closed and the frontend is never left hanging.
@@ -353,6 +370,8 @@ pub(super) async fn drive_sse_frame(
                     seq,
                     lag_ms,
                     alert_threshold_ms = SSE_LAG_ALERT_MS,
+                    log_class = (!lag.correlated_pair_completed).then_some("business_key"),
+                    event_code = "sse.lag_alert",
                     "sse consumption falling behind producer"
                 );
             }
@@ -364,8 +383,11 @@ pub(super) async fn drive_sse_frame(
                 seq,
                 lag_ms,
                 peak_lag_ms = lag.peak_lag_ms,
+                log_class = (!lag.correlated_pair_completed).then_some("business_key"),
+                event_code = "sse.lag_recovered",
                 "sse consumption recovered"
             );
+            lag.correlated_pair_completed = true;
             lag.peak_lag_ms = 0;
         }
 

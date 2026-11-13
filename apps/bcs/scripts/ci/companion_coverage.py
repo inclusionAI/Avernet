@@ -49,6 +49,7 @@ def supervise(bcs_dir: Path, report_dir: Path) -> int:
         starts[name] = time.monotonic()
         print(f'[companion] {name}: start', flush=True)
         process = subprocess.Popen(command, cwd=bcs_dir, stdout=log, stderr=subprocess.STDOUT,
+                                   env={**os.environ, 'BCS_E2E_DIAGNOSTICS_DIR': str(report_dir / 'grpc-binding')},
                                    start_new_session=True)
         processes.append(process)
         return process

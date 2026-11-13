@@ -164,3 +164,7 @@ fn base64_decode(s: &str) -> Result<String> {
     let bytes = STANDARD.decode(s).context("base64 decode failed")?;
     String::from_utf8(bytes).context("invalid UTF-8 in base64 data")
 }
+
+#[cfg(test)]
+#[path = "handler_tests.rs"]
+mod tests;

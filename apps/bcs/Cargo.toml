@@ -173,6 +173,7 @@ inventory = "0.3"
 # Logging
 tracing            = "0.1"
 tracing-appender   = "0.2"
+tracing-serde      = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
 tracing-opentelemetry = "=0.32.0"
 

@@ -222,6 +222,9 @@ cargo test --workspace
 
 ### Run a Single Integration Test
 
+For live Singlebox coverage scenarios and companion fixtures, see the
+[E2E story guide](scripts/e2e-test/README.md).
+
 ```bash
 # Run only group-related contract tests
 cargo nextest run -p bcs-protocol -- filter_name

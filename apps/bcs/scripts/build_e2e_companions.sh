@@ -3,9 +3,9 @@ set -euo pipefail
 # Only required-features companion binaries; never replace the production bcs.
 bcs_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 case "${1:-all}" in
-  caller) bins=(--bin bcs-caller-e2e) ;;
+  caller) bins=(--bin bcs-caller-e2e --bin bcs-a2a-grpc-peer) ;;
   oauth) bins=(--bin bcs-oauth-e2e) ;;
-  all) bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e) ;;
+  all) bins=(--bin bcs-caller-e2e --bin bcs-oauth-e2e --bin bcs-a2a-grpc-peer) ;;
   *) echo "expected caller, oauth or all" >&2; exit 2 ;;
 esac
 cd "$bcs_dir"

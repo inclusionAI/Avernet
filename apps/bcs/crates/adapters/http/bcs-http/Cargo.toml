@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-tracing-api.workspace = true
 bcs-network-tracing.workspace = true
 bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
@@ -53,7 +54,6 @@ reqwest         = { workspace = true }
 bcs-test-support = { workspace = true }
 
 [dev-dependencies]
-bcs-tracing-api = { workspace = true }
 bcs-network-tracing = { workspace = true, features = ["blocking", "reqwest13"] }
 bcs-provider-http = { workspace = true }
 bcs-collaboration-draft = { workspace = true }
@@ -85,4 +85,5 @@ bcs-user-directory-api = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
