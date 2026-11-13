@@ -18,6 +18,7 @@ import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { executeTask } from '@/services/backendApi/tasks/taskController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { Envelope, ExecuteTaskResponse } from '@/services/tasks/taskModel';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { normalizeAvatarUrl } from '@/utils/avatarSource';
 import type { CreateGroupInput } from './groupCreateRequest';
@@ -89,6 +90,8 @@ export async function loadBcsGroupSessions(
     const offset = pageOpts.offset ?? 0;
     const limit = pageOpts.limit ?? 10;
     const viewParam = viewBotId ? `&view_bot_id=${encodeURIComponent(viewBotId)}` : '';
+    // 捕获请求发出时的认证代次:晚到的 ACE 拦截体(重登成功后才到达)不登记,避免恢复后 Modal 闪回。
+    const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
     const sResp = await fetch(
       `${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=${offset}&limit=${limit}${viewParam}`,
       {
@@ -96,10 +99,10 @@ export async function loadBcsGroupSessions(
       },
     );
     const sessionJson = await sResp.json().catch(() => null);
-    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(绕过 httpClient),登记单飞跳转后返回空列表。
+    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(绕过 httpClient),登记单飞「等待重登」信号后返回空列表。
     if (isAceLoginResponse(sessionJson)) {
       const loginUrl = extractLoginUrl(sessionJson);
-      triggerAceLoginRedirect(loginUrl);
+      triggerAceLoginRedirect(loginUrl, requestAuthEpoch);
       return {
         ok: true,
         data: { items: [], offset, limit, total: 0, hasMore: false },
@@ -136,6 +139,8 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
   try {
     const base = '/openapi/v1/collaboration';
     const viewParam = viewBotId ? `&view_bot_id=${encodeURIComponent(viewBotId)}` : '';
+    // 捕获请求发出时的认证代次(见 loadBcsGroupSessions 同款防线)。
+    const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
     const [dResp, sResp] = await Promise.all([
       fetch(`${base}/groups/${encodeURIComponent(groupId)}`, { credentials: 'include' }),
       fetch(`${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=0&limit=50${viewParam}`, {
@@ -146,10 +151,10 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
       return { ok: false, error: toDomainError('GROUP_MISSING', '该协作群不存在或已被删除。') };
     }
     const detailJson = await dResp.json();
-    // raw-fetch 旁路:群详情未登录时网关放回 ACE 登录体,登记单飞跳转后返回失败(跳转在即)。
+    // raw-fetch 旁路:群详情未登录时网关放回 ACE 登录体,登记单飞「等待重登」信号后返回失败(重登在即)。
     if (isAceLoginResponse(detailJson)) {
       const loginUrl = extractLoginUrl(detailJson);
-      triggerAceLoginRedirect(loginUrl);
+      triggerAceLoginRedirect(loginUrl, requestAuthEpoch);
       return { ok: false, error: toDomainError('GROUP_LOAD_FAILED', '登录状态已失效，请重新登录后重试') };
     }
     const g = (detailJson?.data ?? detailJson) as BcsGroupDetailRaw;
