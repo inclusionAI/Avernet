@@ -2,7 +2,9 @@
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+
+from search_core.config.document_mapping import DocumentMapping
 
 
 class IndexBuildConfig(BaseModel):
@@ -12,6 +14,14 @@ class IndexBuildConfig(BaseModel):
     embedding_dimension: int = Field(strict=True, ge=1, le=8192)
     conversion_version: str = Field(min_length=1, max_length=256)
     filter_fields: tuple[str, ...] = ()
+    document_mapping: DocumentMapping | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        result = handler(self)
+        if self.document_mapping is None:
+            result.pop("document_mapping", None)
+        return result
 
     @field_validator("filter_fields")
     @classmethod

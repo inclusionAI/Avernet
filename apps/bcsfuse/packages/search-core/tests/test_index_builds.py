@@ -210,6 +210,53 @@ def test_build_freezes_requested_filters_and_retry_uses_saved_defaults(tmp_path)
         service.create("invalid", "model", 2, filter_fields={"index_key"})
 
 
+@pytest.mark.parametrize("retry_options", [{}, {"filter_fields": ("category",)}])
+def test_failed_build_retry_inherits_omitted_mapping(tmp_path, retry_options):
+    source, repo, service = world(tmp_path)
+    cfg = service.create(
+        "mapped",
+        "model",
+        2,
+        filter_fields=("category",),
+        document_mapping={"search_text_template": "{name}"},
+    ).config
+    source.fail = "document-2"
+    service.run_once()
+    assert repo.get("mapped").status == "failed"
+
+    service.filter_fields = ("region",)
+    source.fail = ""
+    retried = service.create("mapped", "model", 2, **retry_options)
+    assert retried.status == "pending"
+    assert retried.config == cfg
+    service.run_once()
+    assert repo.get("mapped").status == "completed"
+    assert source.calls.count("document-1") == 1
+    assert source.calls.count("document-2") == 2
+
+
+def test_explicit_null_mapping_does_not_inherit_an_existing_build_mapping(tmp_path):
+    from search_core.api.index_builds import IndexBuildConflict
+
+    _, repo, service = world(tmp_path)
+    cfg = service.create(
+        "mapped",
+        "model",
+        2,
+        document_mapping={"search_text_template": "{name}"},
+    ).config
+    with pytest.raises(IndexBuildConflict):
+        service.create("mapped", "model", 2, document_mapping=None)
+    assert repo.get("mapped").config == cfg
+    assert (
+        service.create(
+            "cleared", "model", 2, document_mapping=None
+        ).config.document_mapping
+        is None
+    )
+    assert service.create("legacy", "model", 2).config.document_mapping is None
+
+
 def test_shared_management_http_preserves_auth_status_and_conflicts(tmp_path):
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.testclient import TestClient

@@ -4,14 +4,17 @@ import { create } from 'zustand';
 /**
  * 网关登录处置的统一状态载体（Store 只做同步 setter，守分层）。
  *
- * `pendingLogin` 是统一信号（单飞：首个胜出，避免并发命中刷新页面）：
- * - `{ mode:'redirect', url }`：内部 `ace-gateway` 策略——硬跳转到 ACE body 提供的登录链接。
+ * `pendingLogin` 是统一信号（单飞：首个胜出，避免并发命中重复处置）：
+ * - `{ mode:'redirect', url }`：内部 `ace-gateway` 策略——「等待重登」信号。url 为 ACE 下发的
+ *   pubLogin 链接（含 go 回跳与 aceToken）。处置由全局 `GatewayReauthModal` 消费：新标签页打开
+ *   登录链接完成重登，原页面不刷新，凭探活/广播感知恢复（ace-gateway-popup-reauth；替代
+ *   `redirect-not-login-to-gateway-login` 的「toast + 当前页 replace」硬跳语义）。
  * - `{ mode:'prompt' }`：外部 `oauth-provider` 策略——弹 `ExternalLoginPromptModal`（不携带 ACE pubLogin url），
  *   登录入口经 `/auth/url` provider 取得。
  *
- * Service 层（`httpClient` / raw-fetch 旁路 / `useExternalAuthGuard`）只调 `requestRedirect(url)` / `requestPrompt()`
- * 「敲门」；toast + `window.location.replace` 由顶层观察者 `useGatewayLoginRedirect`（redirect 模式）消费；
- * prompt 模式由全局 `ExternalLoginPromptModal` 组件消费（守 Service 禁 toast/DOM）。
+ * Service 层（`httpClient` / raw-fetch 旁路 / `useExternalAuthGuard`）只调 `requestRedirect(url)` /
+ * `requestPrompt()`「敲门」；UI 副作用（弹窗 / window.open / 轮询 / 广播受理）由组件层消费
+ * （守 Service 禁 toast/DOM）。
  *
  * `pendingLoginUrl` 为 `redirect` 模式的 url（向后兼容既有 httpClient/observer 测试读取）。
  */
@@ -26,22 +29,36 @@ interface LoginRedirectState {
   pendingLogin: PendingLogin | undefined;
   /** 向后兼容：等于 `pendingLogin?.mode==='redirect' ? pendingLogin.url : undefined`。 */
   pendingLoginUrl: string | undefined;
-  /** 内部(ace-gateway)：登记硬跳转。已 pending 或 url 非法时 no-op（单飞）。 */
-  requestRedirect: (url: string) => void;
+  /**
+   * 内部(ace-gateway)：登记「等待重登」。已 pending 或 url 非法时 no-op（单飞）。
+   * `fromEpoch`：请求发出时捕获的认证代次——与当前代次不一致的晚到拦截体（上一代认证期间发出的
+   * 请求、其响应晚到于重登成功之后）不再登记，避免恢复后 Modal 被旧信号闪回
+   * （与 `requestPrompt` 的代次防线同构，见 ace-gateway-popup-reauth D5）。
+   */
+  requestRedirect: (url: string, fromEpoch?: number) => void;
   /**
    * 外部(oauth-provider)：登记弹窗提示。已 pending 时 no-op（单飞）。
-   * `fromEpoch`：请求发出时捕获的认证代次——仅当与当前一致才登记；晚到的上一代认证请求
-   * 的 401 已被新一轮登录取代，直接忽略（stale 401 防线）。
+   * `fromEpoch`：同 `requestRedirect` 的晚到信号防线。
    */
   requestPrompt: (fromEpoch?: number) => void;
-  /** 重置（测试隔离用；产线一般无需调用）。 */
+  /**
+   * 刷新 redirect 模式下待用的登录链接（探活轮询发现网关下发的新 ACE 拦截体时调用）：
+   * aceToken 短时效，保持 Modal 消费的 url 持续新鲜（ace-gateway-popup-reauth D6）。
+   * 非 redirect 模式或 url 非法时 no-op。
+   */
+  refreshRedirectUrl: (url: string) => void;
+  /** 清口「等待重登」信号：重登恢复（探活确认）或用户关闭 Modal 取消等待时调用。 */
+  resolveReauth: () => void;
+  /** 重置（测试隔离用；产线收口走 `resolveReauth`）。 */
   reset: () => void;
 }
 
 export const useLoginRedirectStore = create<LoginRedirectState>((set, get) => ({
   pendingLogin: undefined,
   pendingLoginUrl: undefined,
-  requestRedirect: (url) => {
+  requestRedirect: (url, fromEpoch) => {
+    // 晚到信号防线：发起时属于上一代认证的请求，其 ACE 拦截体晚到于重登成功之后，忽略。
+    if (fromEpoch !== undefined && useExternalAuthStore.getState().authEpoch !== fromEpoch) return;
     if (get().pendingLogin !== undefined) return; // 单飞：首个信号胜出。
     if (typeof url !== 'string' || url.trim() === '') return; // 非法 url 不登记。
     set({ pendingLogin: { mode: 'redirect', url }, pendingLoginUrl: url });
@@ -56,5 +73,12 @@ export const useLoginRedirectStore = create<LoginRedirectState>((set, get) => ({
     useExternalAuthStore.getState().setUnauthenticated();
     set({ pendingLogin: { mode: 'prompt' } });
   },
+  refreshRedirectUrl: (url) => {
+    const pending = get().pendingLogin;
+    if (pending?.mode !== 'redirect') return; // 仅等待重登期间刷新链接。
+    if (typeof url !== 'string' || url.trim() === '') return;
+    set({ pendingLogin: { mode: 'redirect', url }, pendingLoginUrl: url });
+  },
+  resolveReauth: () => set({ pendingLogin: undefined, pendingLoginUrl: undefined }),
   reset: () => set({ pendingLogin: undefined, pendingLoginUrl: undefined }),
 }));

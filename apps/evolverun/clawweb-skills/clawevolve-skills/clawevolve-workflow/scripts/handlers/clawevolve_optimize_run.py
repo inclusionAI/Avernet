@@ -4799,26 +4799,41 @@ def action_bench_local(args, kind: str, *, template_dir_override: Path | None = 
 # action: prepare
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _prepare_openversion_source(args, workspace: Path) -> None:
+def _prepare_source_plan(args, workspace: Path) -> None:
     """Materialize the frozen primary Plan into a new local optimization Task.
 
     This only transports existing files. It does not rerun Plan, merge sources,
     change Bench Domains, or alter the optimization/acceptance algorithms.
     """
-    if os.environ.get("CLAWWEB_VERSION") != "openversion" or int(args.round) != 1:
+    if int(args.round) != 1:
+        return
+    # Full/Bench tasks already have their own Plan. Do not add a network
+    # dependency to those paths or overwrite inputs on retries.
+    task_root = workspace / "clawevolve_results" / str(args.task_id)
+    input_dirs = (task_root / "optimize/input", task_root / "plan/output")
+    if all(any((directory / name).is_file() for directory in input_dirs for name in names)
+           for names in (("objective.md",), ("objective.json",), ("spec-v0.md", "spec_v0.md"))):
         return
     import urllib.request
     base = str(args.clawweb_url or "").rstrip("/")
-    # COSEC: the local adapter owns the callback address; never fetch an arbitrary source URL.
+    # Use only the dispatcher-provided ClawWeb endpoint, never a source URL
+    # from model output. Deployed ClawWeb uses HTTPS; local HTTP stays loopback.
     parsed = urllib.parse.urlsplit(base)
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
-        raise ValueError("Openversion requires a local ClawWeb URL")
+    if (not parsed.hostname or parsed.username is not None or parsed.password is not None
+        or parsed.query or parsed.fragment
+        or not (parsed.scheme == "https" or (
+            parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}))):
+        raise ValueError("ClawWeb URL must use HTTPS or loopback HTTP")
     task_id, step_id = str(args.task_id), str(args.step_id)
     for value in (task_id, step_id):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", value) or ".." in value:
             raise ValueError("Invalid local Task/Step")
     url = f"{base}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/input?view=native"
-    with urllib.request.urlopen(url, timeout=30) as response:
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise ValueError("ClawWeb source input redirect is not allowed")
+
+    with urllib.request.build_opener(NoRedirect()).open(url, timeout=30) as response:
         frozen = json.load(response)
     if (frozen.get("task", {}).get("taskId") != task_id
         or frozen.get("step", {}).get("stepId") != step_id
@@ -4869,7 +4884,7 @@ def _prepare_openversion_source(args, workspace: Path) -> None:
 
 def action_prepare(args):
     workspace = _resolve_workspace(args)
-    _prepare_openversion_source(args, workspace)
+    _prepare_source_plan(args, workspace)
     skill_base = str(_resolve_skill_base(args))
     task_id = args.task_id or _env("TASK_ID") or _env("EVOLVE_RUN_ID")
     evolve_run_id = task_id

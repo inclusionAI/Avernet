@@ -5,6 +5,7 @@ import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
@@ -42,10 +43,12 @@ export const nextgenTaskPanelHost: TaskPanelHost = {
   getViewer: () => { const id = viewerId(); return id ? { userId: id } : null; },
   getConversation: () => conversation,
   transport: { async requestJson(path, signal) {
+    // 捕获请求发出时的认证代次:晚到的 ACE 拦截体(重登成功后才到达)不登记,避免恢复后 Modal 闪回。
+    const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
     const response = await fetch(path, { credentials: 'include', signal });
     if (!response.ok) throw Object.assign(new Error(`请求失败（${response.status}）`), { status: response.status });
     const body: unknown = await response.json();
-    if (isAceLoginResponse(body)) { triggerAceLoginRedirect(extractLoginUrl(body)); throw Object.assign(new Error('登录状态已失效。'), { name: 'AbortError', status: 401 }); }
+    if (isAceLoginResponse(body)) { triggerAceLoginRedirect(extractLoginUrl(body), requestAuthEpoch); throw Object.assign(new Error('登录状态已失效。'), { name: 'AbortError', status: 401 }); }
     return body;
   } },
   artifacts: taskPanelArtifacts, history: { readPage: (...args) => history.readPage(...args) },

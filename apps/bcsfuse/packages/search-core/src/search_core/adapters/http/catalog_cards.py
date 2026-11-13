@@ -58,9 +58,13 @@ def create_card_router(
     authorize_operator: Authenticator,
     *,
     status_model: type[SharedCardStatus] = CardStatus,
+    allow_document_mapping: bool = False,
 ):
     router = create_shared_card_router(
-        service, authorize_operator, status_model=status_model
+        service,
+        authorize_operator,
+        status_model=status_model,
+        allow_document_mapping=allow_document_mapping,
     )
 
     @router.post(

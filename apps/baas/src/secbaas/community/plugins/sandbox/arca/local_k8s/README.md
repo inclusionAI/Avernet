@@ -51,3 +51,16 @@ deployments that do not opt in.
 The runtime FUSE device mount is reserved: default or request mounts cannot
 overlap its destination. Mount safety failures occur before PVC/ConfigMap or
 Deployment creation.
+
+## AppArmor policy (local runtimes)
+
+Bot runtime pods run privileged (for `/dev/fuse`) with the `arca-fuse`
+localhost AppArmor profile enforced. Kernels whose AppArmor support cannot
+host the profile (e.g. restricted simulator hosts) may opt out explicitly:
+
+```
+LOCAL_K8S_APPARMOR_MODE=disabled
+```
+
+`disabled` omits the `appArmorProfile` field — it never writes `Unconfined`.
+Any other value (or an unset variable) keeps the profile mandatory.
