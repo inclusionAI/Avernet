@@ -1,0 +1,38 @@
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  h_43af82e14600e4 23-24,320-326
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-clone.md
+  h_43af82e14600e4 1-56
+apps/evolverun/clawweb/public/modules/workflow/server/index.ts
+  h_43af82e14600e4 3-5
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-clone.test.ts
+  h_43af82e14600e4 1-130
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-clone.ts
+  h_43af82e14600e4 1-62
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-clone-service.test.ts
+  h_43af82e14600e4 1-242
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-clone-service.ts
+  h_43af82e14600e4 1-485
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/CloneWorkflowPanel.tsx
+  h_43af82e14600e4 1-277
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/CreateWorkflowModal.tsx
+  h_43af82e14600e4 4,9,14-29,92,105,114,120,128-142,183,188,201,318,331
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/CloneWorkflowPanel.test.tsx
+  h_43af82e14600e4 1-56
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  h_43af82e14600e4 5,13,68,313,349-399,464
+apps/evolverun/clawweb/public/shared/web/api/client.ts
+  h_43af82e14600e4 129-158,1820-1838
+apps/evolverun/clawweb/public/shared/web/api/hooks.ts
+  h_43af82e14600e4 29-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cbf8be153acc1e9ec77b0c0194f81417994f017c",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

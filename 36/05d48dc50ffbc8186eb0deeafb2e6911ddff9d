@@ -1,0 +1,46 @@
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md
+  s_64261436edbb0b::t_c55b131a4a6eb5 94-96
+  s_64261436edbb0b::t_0ad1cc2d34b089 78
+  s_64261436edbb0b::t_b1af0ccf2ae63d 66
+  s_64261436edbb0b::t_3de9c6d9754949 104-105
+  s_64261436edbb0b::t_38443fcc59d262 111
+  s_64261436edbb0b::t_7e4f5c633655a6 65
+  s_64261436edbb0b::t_b23db8beb927fd 84-85
+  s_64261436edbb0b::t_43f295b4033775 1-3,5-32,34-64,67-70,72,74-77,79-83,86-93,97-103,107-110,112-124,133-143,145-155
+  s_64261436edbb0b::t_73bb2a41aacad1 125-126,128-132
+  s_64261436edbb0b::t_ca240d606e1d67 127
+  s_64261436edbb0b::t_7e4aeb704cfe8f 73
+  s_64261436edbb0b::t_f7246737e99998 71
+  s_64261436edbb0b::t_2e39d0a8b4e587 33
+  s_64261436edbb0b::t_01b3c6168f60e0 4
+  s_64261436edbb0b::t_0302349a2b84f3 106
+  s_64261436edbb0b::t_8382c88123cac7 144
+apps/backend/specs/2026-11-12-context-collab-l4-resource-binding/spec.md
+  s_64261436edbb0b::t_842bcae0cfc993 36
+  s_64261436edbb0b::t_bfbc84f0460f7a 4
+  s_64261436edbb0b::t_38e9a6df6ca8d6 1-3,5-11,13,15,20-35,37,39-43,47,49-50,54-55,57,59-63,67,69-71
+  s_64261436edbb0b::t_b4beb20399309c 64-66,68
+  s_64261436edbb0b::t_ed30d22a80ce03 12,14,16-19
+  s_64261436edbb0b::t_269001d1a7036f 72-75
+  s_64261436edbb0b::t_32e8cc5dfc5d3c 38,44-46,48,51-53,56,58
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/plan.md
+  s_64261436edbb0b::t_eed20ce6de1917 1-224
+apps/backend/specs/README.md
+  s_64261436edbb0b::t_20d99361ea866e 144-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3605d48dc50ffbc8186eb0deeafb2e6911ddff9d",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

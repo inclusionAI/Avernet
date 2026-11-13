@@ -1,0 +1,18 @@
+apps/bcs/configs/bcs-config-local.toml
+  h_12dd6d063428b2 254
+apps/bcs/scripts/e2e-test/common.sh
+  h_12dd6d063428b2 444,454
+apps/bcs/scripts/e2e_coverage.sh
+  h_12dd6d063428b2 219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8559a7a5258a2cb6750befec187e50aa85060cc6",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

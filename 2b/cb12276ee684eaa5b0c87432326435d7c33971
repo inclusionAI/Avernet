@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  s_e0cb98366a65ad::t_288946a3bb9eaf 307-340
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2bcb12276ee684eaa5b0c87432326435d7c33971",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

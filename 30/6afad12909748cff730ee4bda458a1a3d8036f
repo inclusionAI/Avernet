@@ -1,0 +1,32 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-workbench.md
+  h_43af82e14600e4 13-18,27-29,42-43,60
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-workbench-store.test.ts
+  h_43af82e14600e4 80-89
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-workbench-store.ts
+  h_43af82e14600e4 35-37
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/approval-workbench.test.ts
+  h_43af82e14600e4 77-84
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval-workbench.ts
+  h_43af82e14600e4 55-57,61
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/approval-workbench-admin.test.ts
+  h_43af82e14600e4 1-43
+apps/evolverun/clawweb/public/modules/workflow/server/services/approval-workbench.ts
+  h_43af82e14600e4 11,18,34-39,50,61,64,72-90,94
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/ApprovalWorkbench.tsx
+  h_43af82e14600e4 1,4-50,52-82,84-88,90-98,101-107
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  h_43af82e14600e4 8,15,17,45,52,64,67,74,84,94,100,102,104,116,121,133-181
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  h_43af82e14600e4 352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "306afad12909748cff730ee4bda458a1a3d8036f",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-workbench.md
+  h_43af82e14600e4 20
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/ApprovalWorkbench.tsx
+  h_43af82e14600e4 99-103,121
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  h_43af82e14600e4 6,32-33,46,57,72,84,91-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea901fa89456281c17b721136dca3b3990dd866c",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

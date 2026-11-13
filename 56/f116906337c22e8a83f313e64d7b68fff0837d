@@ -1,0 +1,63 @@
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 8-10
+  s_9e428ec8192673::t_ffd0db6250805d 1-7,11-83
+apps/bcsfuse/packages/search-core/src/search_core/api/index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 4
+  s_9e428ec8192673::t_8e3e7c707b9ae5 1-3,5-27
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 131-133,146,164
+  s_9e428ec8192673::t_75419fec35e1df 1-130,134-145,147-163,165-180
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 7
+  s_9e428ec8192673::t_576a06b3e1bdab 1-6,8-159
+apps/bcsfuse/packages/search-core/src/search_core/core/preparation_lease.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 12-14
+  s_9e428ec8192673::t_e0bfcff0e625d6 1-11,15-32
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_9e428ec8192673::t_98d8c997d34467 1-70
+apps/bcsfuse/packages/search-core/tests/test_source_rebuild.py
+  s_9e428ec8192673::t_765818440d1144 1-23,27-49,51,59-67,69,71-75,77,85-86
+  s_9e428ec8192673::t_a4c20d86cb02fb 24-26,50,52-58,68,70,76,78-84
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 4-43
+  s_9e428ec8192673::t_1903af45e90d58 1-3
+apps/bcsfuse/packages/search-core/src/search_core/config/embedding.py
+  s_9e428ec8192673::t_e953687cc1bb59 69-72
+apps/bcsfuse/packages/search-core/tests/test_embedding_dimensions.py
+  s_9e428ec8192673::t_a13b2dcab945a2 28-32
+  s_9e428ec8192673::t_7ff2949bb9472f 1-27,33-52
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  s_9e428ec8192673::t_5ce7fae1b34339 139-147,149-152,154-165
+  s_9e428ec8192673::t_a4c20d86cb02fb 18-20,38,46-50,52,55,60-62,68,87,94-96,109,111,119-126,129-133,135-138,148,153,166-171
+  s_9e428ec8192673::t_4245e3b23dc83e 1-17,21-37,39-45,51,53-54,56-59,63-67,69-86,88-93,97-108,110,112-118,127-128,134
+apps/bcsfuse/packages/search-core/src/search_core/providers/embedding.py
+  s_9e428ec8192673::t_e953687cc1bb59 45-47,51,343-344
+apps/bcsfuse/packages/search-core/README.md
+  s_9e428ec8192673::t_c8a6b99b04acdb 27-30
+  s_9e428ec8192673::t_98d8c997d34467 15-16,31-36
+  s_9e428ec8192673::t_cfc78d65f55576 37
+apps/bcsfuse/packages/search-core/tests/test_import_boundary.py
+  s_9e428ec8192673::t_5ce7fae1b34339 45-47
+  s_9e428ec8192673::t_a4c20d86cb02fb 24-27,67-79
+apps/bcsfuse/packages/search-core/src/search_core/config/index_builds.py
+  s_9e428ec8192673::t_a4c20d86cb02fb 5-7
+  s_9e428ec8192673::t_bd58a250732c43 1-4,8-38
+apps/bcsfuse/packages/search-core/src/search_core/core/source_rebuild.py
+  s_9e428ec8192673::t_dddd5461536f78 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "56f116906337c22e8a83f313e64d7b68fff0837d",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
