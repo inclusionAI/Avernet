@@ -80,6 +80,7 @@ _SCHEMAS = (
 _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "provider", "model", "instructions", "description", "identity_file",
     "engine", "bot_type", "owner_id", "config_manifest",
+    "goal_excerpt",
 })
 
 # Closed-set parameter vocabulary must be typed with one of the module

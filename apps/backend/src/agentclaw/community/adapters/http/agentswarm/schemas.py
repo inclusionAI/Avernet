@@ -117,11 +117,11 @@ class SubmitRunDTO(BaseModel):
         default=None,
         max_length=64,
         description=(
-            "Provision this run's Bot agents under this Bot's AgentPass "
-            "identity; omit for the ordinary approval flow. The Bot must be "
-            "owned by the caller and hold an issued passport. When set, the "
-            "run's Bot agents never enter AWAITING_AUTHORIZATION, so no "
-            "consent URL is ever reported for them."
+            "The Bot whose AgentPass identity this run's Bot agents run under. "
+            "Required when any agent is bot-kind: a submit that omits it is "
+            "refused with 400, and one naming a Bot the caller does not own, or "
+            "that holds no issued passport, with 422. An llm-only run needs none "
+            "and any value supplied is ignored."
         ),
     )
     options: RunOptionsDTO | None = None
@@ -139,15 +139,16 @@ class RunSummaryDTO(BaseModel):
     error: str | None = None
     started_at: int | None = None
     ended_at: int | None = None
-    goal_excerpt: str
+    goal_excerpt: str = ""
     """The goal's prefix, for telling one run from another in a list.
 
     `goal` is up to 8000 characters; a full page of them would be the whole
     prompt each. The full text stays on ``GET /runs/{id}/detail``.
 
-    Required rather than defaulted: it is derived here, never supplied by a
-    caller, so an omitted value would be a bug in this module rather than a
-    legitimate empty state.
+    Defaulted rather than required because an empty goal is a legitimate state:
+    a run with no goal yields an empty excerpt, and a reader must be able to tell
+    that apart from a missing field. Declaring it required would also publish a
+    backward-incompatible change for a field that is purely additive.
     """
 
 
