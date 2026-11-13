@@ -691,10 +691,22 @@ class ProgressSyncMixin:
                 # so we must clear it here to prevent the marker from persisting.
                 # Use _mutate_and_update_ext to persist the ext change separately from
                 # status updates (the stable record must not change status).
+                observed_change_id = ext.get("_release_audit_wait_restart")
+
                 def _clear_restarting_flag(latest_ext: dict) -> None:
                     restart_ext = latest_ext.get("restart")
+                    # Fence the observation, not just the current publication row:
+                    # a new retry can replace both change and workflow while polling.
+                    if observed_change_id and (
+                        latest_ext.get("_release_audit_wait_restart") != observed_change_id
+                        or not isinstance(restart_ext, dict)
+                        or restart_ext.get(stage.value) != restart_publish_id
+                    ):
+                        return
                     if isinstance(restart_ext, dict):
                         restart_ext.pop("restarting", None)
+                    if observed_change_id:
+                        latest_ext["_release_audit_restart_completed"] = observed_change_id
 
                 self._mutate_and_update_ext(publish_id=publish_id, mutator=_clear_restarting_flag)
 

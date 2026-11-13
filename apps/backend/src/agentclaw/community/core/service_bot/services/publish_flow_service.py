@@ -369,7 +369,8 @@ class PublishFlowService(
         # Every other status is a side-effect-free status query.
         if current_status == PublishStatus.DRAFT:
             if not self._advance_status(
-                publish_id, PublishStatus.BUILDING, PublishStatus.DRAFT
+                publish_id, PublishStatus.BUILDING, PublishStatus.DRAFT,
+                audit_operator_id=operator,
             ):
                 # Lost the race to a concurrent submit → report current progress.
                 return self._describe_current_status(publish_id)
@@ -394,7 +395,8 @@ class PublishFlowService(
                                              message="数字员工审批中", data={"digital_employee_approval": True})
             # Online gate: only the user's /process opens ONLINE_PUB.
             if not self._advance_status(
-                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
+                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING,
+                audit_operator_id=operator,
             ):
                 return self._describe_current_status(publish_id)
             enqueue_online_release(
@@ -415,13 +417,18 @@ class PublishFlowService(
         publish_id: int,
         target_status: PublishStatus,
         source_status: PublishStatus,
+        *,
+        audit_operator_id: str | None = None,
     ) -> bool:
         """Atomically advance a publish record's status under the optimistic lock.
 
         Status-only (no ext write). Returns ``True`` if this call won the
         transition (the record was still at ``source_status``); ``False`` if it
         lost — a concurrent submit already moved it (the double-submit guard)."""
-        return self._ext_state.advance_status(publish_id, target_status, source_status)
+        return self._ext_state.advance_status(
+            publish_id, target_status, source_status,
+            **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
+        )
 
     def _describe_current_status(self, publish_id: int) -> PublishFlowResult:
         """Re-read the record and describe its (now concurrently-advanced) status."""
@@ -762,6 +769,8 @@ class PublishFlowService(
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        *,
+        audit_operator_id: str | None = None,
     ) -> None:
         self._ext_state.update_status(
             publish_id=publish_id,
@@ -769,6 +778,7 @@ class PublishFlowService(
             source_status=source_status,
             ext=ext,
             expected_ext=expected_ext,
+            **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
         )
 
     # ── public accessors for the durable task handlers ───────────────────────

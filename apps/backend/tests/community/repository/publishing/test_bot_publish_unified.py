@@ -55,6 +55,7 @@ class _FileSqliteDB:
             db.close()
 
     session = orm_session
+    transactional_orm_session = orm_session
 
 
 @pytest.fixture
@@ -979,6 +980,12 @@ def test_upgrade_restart_failure_keeps_persisted_draft_for_idempotent_retry(repo
     from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
     from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
 
+    # Upgrading now persists the authenticated draft audit in the same DB.
+    Base.metadata.create_all(repo._db._factory.kw["bind"])
+    with repo._db.orm_session() as session:
+        session.add(BotModel(id=1, bot_id="src-bot", bot_name="Source", entity_id="emp001",
+                             entity_type="staff", creator_id="original-creator", owner_id="current-owner",
+                             active_engine="openclaw", status="ACTIVE", env="dev", bot_type="service"))
     original = repo.insert(_data(status=PublishStatus.SUCCESS, ext=None))
     bot_repo = Mock()
     bot_repo.get_by_pk.return_value = {
