@@ -23,6 +23,12 @@ A **run** pursues a `goal` with a set of **agents** you declare up front:
   on the fly (optionally from your `config_manifest`), the agent runs as that
   bot, and the run's teardown deletes the bot when the run ends.
 
+  A bot agent runs under the passport identity of the Bot you name in
+  `identity_bot_id` (§5.1) — it inherits that Bot's issued AgentPass rather
+  than waiting to be approved on its own, so a run reaches its agents without a
+  human in the loop. Naming the source is therefore **required** for any
+  bot-kind run.
+
 The orchestrator decomposes the goal, spawns/executes agents in rounds
 (parallel waves or sequential dependencies, decided by the goal text), and
 finishes with a `final_answer`. A run ends in one of the terminal statuses
@@ -83,6 +89,25 @@ curl -sS "$BASE/runs/$RUN_ID?tenant=teamclaw"
 Prefer to block? Add `?wait=true` and the same call answers the full summary
 only after the run is terminal (`llm` runs typically complete in seconds).
 
+To run a **bot** agent instead, name the Bot whose passport it inherits —
+required, and the one field people most often miss:
+
+```bash
+curl -sS -X POST "$BASE/runs" -H 'Content-Type: application/json' -d '{
+  "tenant": "teamclaw",
+  "goal": "Write one sentence about the sea",
+  "identity_bot_id": "<a Bot you own, with an issued passport>",
+  "agents": [
+    {"name": "writer", "role": "prose", "kind": "bot",
+     "instructions": "Write exactly one sentence."}
+  ]
+}'
+```
+
+That Bot must be yours and hold an issued passport; otherwise the submit is
+refused with `422` and a message saying which of the two it is (§5.1). The
+run's bot agents inherit it, so none of them waits for approval.
+
 ## 4. Interface index
 
 | # | Method | Path | Purpose |
@@ -111,7 +136,33 @@ Request body (`SubmitRunDTO`, strict — unknown keys are `422`):
 | `provider` | enum | — | `default` \| `stub` \| `avernet` |
 | `model` | string | — | Run-level model override; **outranks** `options.model_name` |
 | `idempotency_key` | string | — | ≤ 190 chars; same key joins the same run |
+| `identity_bot_id` | string | — | ≤ 64 chars. The Bot whose AgentPass identity the run's Bot agents run under — see below |
 | `options` | object | — | Operational overrides (table below) |
+
+**`identity_bot_id` — the identity a run's Bot agents inherit.** Any run that
+contains a `bot`-kind agent **must** name it: a bot agent cannot wait for its
+own approval, so it runs under an existing Bot's passport instead. An
+`llm`-only run needs none, and a value supplied there is ignored.
+
+| Situation | Answer |
+| --- | --- |
+| A bot-kind run omits it | `400` — the field is required |
+| It names a Bot the caller does not own (including one that does not exist) | `422` — refused, and the Bot's passport is not consulted |
+| It names a Bot with no issued passport | `422` — issue a passport for it, or name another Bot |
+| The Bot's passport could not be resolved | `422` — retry; this is never a verdict on the Bot |
+
+The three refusals share the `{"error": …}` envelope, but the message says
+which case it is, because the next step differs. Each is also recorded in the
+audit trail as `identity_source_invalid_<reason>`, where `<reason>` is
+`not_owned`, `no_passport` or `unverified`.
+
+A Bot is accepted when it holds an issued passport, whether that is recorded on
+the Bot itself or held only by the passport provider — a Bot is not made
+unusable just because an older creation never cached that record. A passport
+still awaiting approval is refused; it cannot serve as an identity yet.
+
+The same identity is re-checked when each Bot agent is actually created, so a
+source accepted at submit is one the run can really spawn under.
 
 Each `agents[]` entry (`AgentSpecDTO`, strict):
 
@@ -257,9 +308,40 @@ row cursors) — a fresh connection replays the whole run to date, then tails.
 `FAILED`, `KILLED`.
 
 **Bot state** (bot-kind agents, in detail's `agents[].bot_state`):
-`PROVISIONING`, `READY`, `AUTHORIZATION_REJECTED`,
+`PROVISIONING`, `AWAITING_AUTHORIZATION`, `READY`, `AUTHORIZATION_REJECTED`,
 `AUTHORIZATION_EXPIRED`, `CREATE_FAILED`, `APPLY_FAILED` — the persona bot's
 own creation lifecycle (§8.5).
+
+A bot agent that runs under `identity_bot_id` (§5.1) skips the authorization
+gate entirely: it inherits that Bot's issued passport, so no application is
+made and no consent page exists for it. `AWAITING_AUTHORIZATION` therefore
+appears only on creations that do apply for a passport of their own.
+
+While a bot sits at that gate, its agent carries an additive `authorization`
+descriptor alongside `bot_state`, so a consumer can address the decision from
+the run read alone without joining the creation job:
+
+```json
+{
+  "agent_id": "1d21ffaf…", "name": "hello_writer", "status": "RUNNING",
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {
+    "state": "AWAITING_AUTHORIZATION",
+    "iframe_url": "https://…/consent?app=passport",
+    "redirect_url": "https://…/done",
+    "deadline": "2026-11-20T10:10:00",
+    "application_id": "sim-passport-3d2f0a1b2c04"
+  }
+}
+```
+
+`iframe_url` / `redirect_url` are the consent surfaces (whichever is non-empty
+identifies the page; empty strings mean the payload cannot answer that fact),
+`deadline` is the window's ISO-8601 horizon, and `application_id` names the
+passport application. Presence keys off the passport provider's **live**
+application status, not the agent row's `bot_state`, so a parallel cohort agent
+can carry the gate before the provisioning pool has written its state.
 
 **Guard kinds**: `serial_collapse`, `spurious_parallelism`, `dedupe_reject`,
 `depth_exceeded`, `width_exceeded`, `timeout`, `kill`, `stuck`,
@@ -273,8 +355,9 @@ orchestrator tries a wider wave and is capped.
 | --- | --- | --- |
 | 401 | — | Anonymous caller on a non-probe route |
 | 404 | `{"detail":"run not found"}` | Unknown run id **or** cross-tenant access (same answer by design) |
-| 400 | `{"error":"…"}` | Missing serving configuration for the requested model/provider |
+| 400 | `{"error":"…"}` | Missing serving configuration for the requested model/provider; **or** a bot-kind run naming no `identity_bot_id` |
 | 422 | validation detail | Shape errors: unknown field, over-limit, blank tenant |
+| 422 | `{"error":"…"}` | A named `identity_bot_id` the caller cannot use — not their Bot, no issued passport, or a passport that could not be resolved (§5.1) |
 | 429 | `{"error":"tenant_run_limit_exceeded","tenant":…,"limit":…}` | Too many concurrent runs for this tenant |
 | 429 | `{"error":"global_run_limit_exceeded","limit":…}` | Fleet-wide concurrent run ceiling |
 | 429 | `{"error":"queue_depth_exceeded","limit":…}` | Dispatch queue at capacity |
@@ -408,7 +491,14 @@ credential prefix checks): `${BOT_ENGINE_TYPE}`, `${BOT_ENV}`,
 
 The swarm's manifest travels through the same contract the single-bot create
 surface defines — worth knowing both, because the lifecycle states in
-`agents[].bot_state` are exactly these:
+`agents[].bot_state` are exactly these.
+
+The difference matters: a standalone create applies for a passport of its own,
+so it can land `AWAITING_AUTHORIZATION` and wait for a human. A swarm bot agent
+instead inherits the passport named by `identity_bot_id` and never applies for
+one, which is why an agentswarm run does not stop at a consent page. If you are
+creating a Bot **to be** an identity source for runs, this is the endpoint that
+issues its passport.
 
 **`POST /openapi/v1/bots/with-manifest`** — one request creating a bot and
 its configuration. Body: the ordinary create fields (`bot_name`, `bot_desc`,
@@ -536,6 +626,7 @@ BASE=http://<gateway-host>/openapi/v1/agentswarm
 curl -sS -X POST "$BASE/runs" -H 'Content-Type: application/json' -d '{
   "tenant": "teamclaw",
   "goal": "Greet the user politely and confirm the greeting was logged.",
+  "identity_bot_id": "<a Bot you own, with an issued passport>",
   "agents": [
     {"name": "s1", "role": "greeting reviewer", "kind": "llm",
      "instructions": "Reply with exactly: greeting ok"},
@@ -562,11 +653,12 @@ curl -sS "$BASE/runs/$RUN_ID/detail?tenant=teamclaw"
 curl -sS "$BASE/runs/$RUN_ID/report?tenant=teamclaw"
 ```
 
-Notes for the bot agent: its persona bot provisions through the shared
-background queue (minutes, not seconds — §8.1); the durable manifest
-receipt exists from the moment submit answered, so a slow persona never
-invalidates the document; and when the run ends, the platform's teardown
-deletes the persona bot.
+Notes for the bot agent: it runs under the passport identity of the Bot named
+by `identity_bot_id`, which is why it needs no approval of its own; its persona
+bot then provisions through the shared background queue (minutes, not seconds —
+§8.1); the durable manifest receipt exists from the moment submit answered, so
+a slow persona never invalidates the document; and when the run ends, the
+platform's teardown deletes the persona bot.
 
 ## 10. Related documents
 
