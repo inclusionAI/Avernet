@@ -236,6 +236,12 @@ export interface BotEngineOption {
 /** Bot 编辑页添加 Skill 时允许展示的来源。 */
 export type BotSkillPickerSource = 'market' | 'workshop' | 'mine';
 
+/**
+ * Bot 编辑页添加 MCP 时允许展示的一级来源（弹窗 Segmented 选项由
+ * `getBotMcpPickerSources` 驱动，组件不得硬编码）。
+ */
+export type BotMcpPickerSource = 'internal' | 'open-platform';
+
 /** 仅 Internal Overlay 提供的 Agent Coding 外部资源；Open Core 全部为 null。 */
 export interface AgentCodingInternalResources {
   templateFactoryUrl: string | null;
@@ -656,6 +662,13 @@ export interface AppCapabilities {
   getUserMessagePresentation: () => CapabilityResult<UserMessagePresenter | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
+  /**
+   * Bot 编辑页添加 MCP 时的可选一级来源清单（弹窗 Segmented 选项的唯一事实源）。
+   * Open Core 默认全量 `['internal','open-platform']`（与既有硬编码行为一致，零变化）；
+   * 部署 overlay 可收窄（如内部形态仅 `['internal']`，特定来源不透出）。
+   * 同步签名，不发请求；当前选中值不在清单内时组件回落首个允许项，搜索只发允许来源。
+   */
+  getBotMcpPickerSources: () => CapabilityResult<BotMcpPickerSource[]>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +

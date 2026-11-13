@@ -5,9 +5,13 @@ import '@testing-library/jest-dom';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+// MCP 一级来源可清单（`mock` 前缀让 jest.mock 工厂可引用；默认全量 = Open Core 默认行为）
+let mockMcpSources: string[] = ['internal', 'open-platform'];
+
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
     getBotSkillPickerSources: () => ({ status: 'available', value: ['market', 'workshop', 'mine'] }),
+    getBotMcpPickerSources: () => ({ status: 'available', value: mockMcpSources }),
   }),
 }));
 
@@ -157,6 +161,36 @@ test('MCP 按内部和开放平台分 Tab，并将搜索交给服务端查询', 
   await userEvent.click(screen.getByRole('button', { name: '开放平台' }));
   await userEvent.type(screen.getByPlaceholderText('搜索市场中的 MCP'), '天气');
   await waitFor(() => expect(searchMcp).toHaveBeenLastCalledWith('open-platform', '天气'));
+});
+
+// 插槽收窄守护（getBotMcpPickerSources 契约）：overlay 收窄清单后，被剔除来源的 Tab 不渲染、
+// 搜索回落首个允许来源——部署形态依赖此契约隐藏特定来源（如内部形态仅内部 MCP）。
+test('getBotMcpPickerSources 收窄后仅渲染允许来源，搜索回落首个允许项', async () => {
+  mockMcpSources = ['internal'];
+  try {
+    const searchMcp = jest.fn().mockResolvedValue(undefined);
+    render(
+      <CapabilityPickerModal
+        kind="mcp"
+        open
+        marketItems={[]}
+        skillCenterItems={[]}
+        workshopItems={[]}
+        myItems={[]}
+        existingIds={[]}
+        onOpenChange={jest.fn()}
+        onConfirm={jest.fn()}
+        onSearchMcp={searchMcp}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '内部 MCP' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '开放平台' })).not.toBeInTheDocument();
+    await waitFor(() => expect(searchMcp).toHaveBeenCalledWith('internal', ''));
+    expect(searchMcp.mock.calls.every((call) => call[0] === 'internal')).toBe(true);
+  } finally {
+    mockMcpSources = ['internal', 'open-platform'];
+  }
 });
 
 test('父组件重渲染并更换回调引用时不会重复查询 MCP', async () => {

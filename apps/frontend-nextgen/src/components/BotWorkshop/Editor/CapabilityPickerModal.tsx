@@ -1,4 +1,4 @@
-import { getCapabilities } from '@/capabilities';
+import { getCapabilities, type BotMcpPickerSource } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
@@ -15,8 +15,17 @@ import { CapabilityPickerLocalSkills } from './CapabilityPickerLocalSkills';
 
 type Source = 'mine' | 'market' | 'workshop';
 type MarketSource = 'skillcenter-market' | 'teamclaw-market';
-type McpMarketSource = 'internal' | 'open-platform';
+type McpMarketSource = BotMcpPickerSource;
 type PickerItem = BotEditorSkill | BotEditorMcp;
+
+/**
+ * MCP 一级来源 Segmented 选项（label 与老平台一致）。
+ * 可选清单由 `getBotMcpPickerSources` capability 决定（部署 overlay 可收窄，组件不得硬编码全量）。
+ */
+const MCP_PICKER_SOURCE_OPTIONS: { value: McpMarketSource; label: string }[] = [
+  { value: 'internal', label: '内部 MCP' },
+  { value: 'open-platform', label: '开放平台' },
+];
 
 interface CapabilityPickerModalProps {
   kind: 'skill' | 'mcp';
@@ -57,6 +66,7 @@ export function CapabilityPickerModal({
   editable = true,
 }: CapabilityPickerModalProps) {
   const skillSources = getCapabilities().getBotSkillPickerSources().value;
+  const mcpSources = getCapabilities().getBotMcpPickerSources().value;
   const sources: Source[] = kind === 'skill' ? skillSources : ['market'];
   const [source, setSource] = useState<Source>(() => sources[0] ?? 'mine');
   const [marketSource, setMarketSource] = useState<MarketSource>('skillcenter-market');
@@ -69,6 +79,12 @@ export function CapabilityPickerModal({
   const [deletingId, setDeletingId] = useState<string>();
   const searchMcpRef = useRef(onSearchMcp);
   searchMcpRef.current = onSearchMcp;
+  // MCP 一级来源选项按 capability 清单过滤（部署 overlay 可收窄，如仅内部）；
+  // 当前选中值不在清单内（overlay 收敛/异常路径）时回落首个允许项，搜索只发允许来源。
+  const mcpSourceOptions = MCP_PICKER_SOURCE_OPTIONS.filter((option) => mcpSources.includes(option.value));
+  const activeMcpSource = mcpSourceOptions.some((option) => option.value === mcpMarketSource)
+    ? mcpMarketSource
+    : mcpSourceOptions[0]?.value ?? 'internal';
   const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
   const remoteMcpSearch = kind === 'mcp';
   const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
@@ -92,10 +108,10 @@ export function CapabilityPickerModal({
   useEffect(() => {
     if (!open || kind !== 'mcp' || !searchMcpRef.current) return;
     const timer = setTimeout(() => {
-      void searchMcpRef.current?.(mcpMarketSource, keyword.trim()).catch(() => undefined);
+      void searchMcpRef.current?.(activeMcpSource, keyword.trim()).catch(() => undefined);
     }, 300);
     return () => clearTimeout(timer);
-  }, [kind, keyword, mcpMarketSource, open]);
+  }, [kind, keyword, activeMcpSource, open]);
   const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
   /** 「我的 Skill」未添加卡片可删除（DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}，onLocalDelete 由页面层实现并刷新列表）。 */
   const canDeleteMine = kind === 'skill' && source === 'mine' && editable && Boolean(onLocalDelete);
@@ -192,18 +208,17 @@ export function CapabilityPickerModal({
               className="w-fit"
             />
           ) : null}
-          {kind === 'mcp' ? (
+          {/* MCP 一级来源 Segmented：选项由 getBotMcpPickerSources 过滤（部署 overlay 可收窄）；
+              仅剩单一来源时不渲染切换器（默认全量两来源，Open Core 行为不变）。 */}
+          {kind === 'mcp' && mcpSourceOptions.length > 1 ? (
             <Segmented
-              value={mcpMarketSource}
+              value={activeMcpSource}
               onChange={(value) => {
                 setMcpMarketSource(value);
                 setSelected([]);
                 setKeyword('');
               }}
-              options={[
-                { value: 'internal', label: '内部 MCP' },
-                { value: 'open-platform', label: '开放平台' },
-              ]}
+              options={mcpSourceOptions}
               className="w-fit"
             />
           ) : null}
