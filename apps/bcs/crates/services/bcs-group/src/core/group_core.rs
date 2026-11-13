@@ -103,6 +103,10 @@ impl Default for GroupCore {
 
 #[async_trait]
 impl GroupCoreService for GroupCore {
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        self.repo.read_card_snapshot(id).await
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         let _policy_read = match &self.policy_gate { Some(gate) => Some(gate.read().await), None => None };
         if let Some(registry) = &self.collaboration_registry {

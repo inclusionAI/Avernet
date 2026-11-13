@@ -70,7 +70,18 @@ class ExpertChatSessionRuntimeMixin:
             "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
             bot_id, bot.get("call_type"), bot_call_type,
         )
-        if bot_call_type == McpCallType.CALLER:
+        engine_ctx, strategy = self._resolve_chat_engine_strategy(bot, {})
+        shared_runtime = (
+            bot.get("bot_type") == "service"
+            and not strategy.requires_caller_chat_instance(engine_ctx)
+        )
+        if shared_runtime:
+            logger.info(
+                "expert_chat.runtime.shared_teclaw bot_id=%s owner_id=%s user_id=%s "
+                "binding_id=%s stage=online",
+                bot_id, owner_id, user_id, online_binding,
+            )
+        if bot_call_type == McpCallType.CALLER and not shared_runtime:
             result = await self._instance_service.get_caller_connection(
                 user_id=user_id, bot_id=bot_id, owner_id=owner_id, iam_token=iam_token,
             )

@@ -16,6 +16,7 @@ import {
 } from '@/services/backendApi/collaboration/sessionController';
 import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { DomainError, DomainResult } from './identityService';
 import { mapBcsSessionItem, mapSessionDetail, mapSessionListItem, type BcsSessionRaw } from './mappers';
@@ -118,6 +119,8 @@ export const sessionService = {
 
   /** execute 建群返回的群会话列表：走预发 OpenAPI，映射复用 mappers.mapBcsSessionItem。 */
   async loadBcsSessions(groupId: string, offset = 0): Promise<SessionView[]> {
+    // 捕获请求发出时的认证代次:晚到的 ACE 拦截体(重登成功后才到达)不登记,避免恢复后 Modal 闪回。
+    const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
     const resp = await fetch(
       `/openapi/v1/collaboration/groups/${encodeURIComponent(groupId)}/sessions?offset=${offset}&limit=50`,
       {
@@ -126,10 +129,10 @@ export const sessionService = {
     );
     if (!resp.ok) return [];
     const json = await resp.json().catch(() => null);
-    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(HTTP 200,绕过 httpClient),登记单飞跳转后返回空。
+    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(HTTP 200,绕过 httpClient),登记单飞「等待重登」信号后返回空。
     if (isAceLoginResponse(json)) {
       const loginUrl = extractLoginUrl(json);
-      triggerAceLoginRedirect(loginUrl);
+      triggerAceLoginRedirect(loginUrl, requestAuthEpoch);
       return [];
     }
     const data = json?.data ?? json;

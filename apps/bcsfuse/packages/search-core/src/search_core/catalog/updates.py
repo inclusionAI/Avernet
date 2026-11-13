@@ -10,7 +10,7 @@ import re
 from contextlib import nullcontext
 from dataclasses import replace
 from threading import Lock
-from time import monotonic
+from time import monotonic, sleep, time
 from uuid import uuid4
 
 from search_core.api.cards import CatalogConflict, IndexTargetMismatch
@@ -115,18 +115,21 @@ class CardUpdates(CardManagementService):
         self._active = frozenset()
         self._eligibility = {}
         self._checkpoint = 0.0
+        self._card_checkpoint = 0.0
+        # Unfinished source revisions survive cursor advancement; restart discovers
+        # them again from durable Cards. A new revision resets its retry delay.
+        self._pending_cards = {}
         self._loaded = self.ready = False
         self._lock = Lock()
         self._on_change = on_change
         self.sync_control = sync_control or IndexSyncControl()
-        self._last_reconcile = None  # No successful full check yet.
-        # Stable 0-10% delay spreads replicas without delaying startup recovery.
-        self._schedule_factor = (
-            1
-            + int(hashlib.sha256(instance_id.encode()).hexdigest()[:8], 16)
-            / 0xFFFFFFFF
-            * 0.1
+        self._last_reconcile = None
+        self._reconcile_deadline = 0.0
+        self._reconcile_interval = 0.0
+        self._schedule_fraction = (
+            int(hashlib.sha256(instance_id.encode()).hexdigest()[:8], 16) / 0x100000000
         )
+        self._schedule_factor = 1 + self._schedule_fraction * 0.1
 
     def rebuild(self, agent_id, index_key):
         if index_key != self.index_key:
@@ -193,7 +196,7 @@ class CardUpdates(CardManagementService):
         previous = self._eligibility.get(card.agent_id)
         entry = (revision, card.deleted, filters)
         if previous != entry and (previous is None or revision >= previous[0]):
-            with self._on_change():
+            with self._on_change((card.agent_id,)):
                 self._eligibility = {**self._eligibility, card.agent_id: entry}
 
     def status(self, agent_id):
@@ -228,7 +231,7 @@ class CardUpdates(CardManagementService):
         ]
         if not documents:
             return
-        with self._on_change():
+        with self._on_change(tuple({source_id(d) for d in documents})):
             self._apply_changed_documents(documents)
 
     def _apply_changed_documents(self, changed):
@@ -333,27 +336,64 @@ class CardUpdates(CardManagementService):
                 "search_index_sync", "incremental", "applied", documents=changed
             )
 
+    def _schedule_reconcile(self):
+        interval = self.sync_control.current.reconcile_interval_ms / 1000
+        wall = time()
+        offset = interval * self._schedule_fraction
+        next_slot = (math.floor((wall - offset) / interval) + 1) * interval + offset
+        self._reconcile_deadline = monotonic() + next_slot - wall
+        self._reconcile_interval = interval
+        self._last_reconcile = monotonic()
+
+    def _queue_cards(self, rows):
+        for key, revision in rows:
+            if self._applied.get(key, 0) >= revision:
+                continue
+            previous = self._pending_cards.get(key)
+            if previous is None or revision > previous[0]:
+                self._pending_cards[key] = (revision, 0.0, 0.0)
+
+    def _sync_cards(self):
+        checkpoint = self._card_checkpoint
+        for rows, upper in self.repository.iter_changes(checkpoint, 1000):
+            self._queue_cards(rows)
+            checkpoint = max(checkpoint, upper)
+        # An interrupted page sequence must replay; queued work is idempotent.
+        self._card_checkpoint = checkpoint
+
     def _reconcile_if_due(self):
-        interval = (
-            self.sync_control.current.reconcile_interval_ms
-            / 1000
-            * self._schedule_factor
-        )
-        if (
-            self._last_reconcile is not None
-            and monotonic() - self._last_reconcile < interval
-        ):
+        interval = self.sync_control.current.reconcile_interval_ms / 1000
+        if self._last_reconcile is None:
+            # Startup already restores all Docs and discovers all Cards.
+            self._schedule_reconcile()
             return
-        # A transaction may commit after a newer timestamp was consumed. Scan
-        # only IDs/versions, loading vectors solely for missing/stale documents.
+        if interval != self._reconcile_interval:
+            # Apply a shorter DRM interval promptly; later checks use its slots.
+            self._reconcile_deadline = min(
+                self._reconcile_deadline, self._last_reconcile + interval
+            )
+            self._reconcile_interval = interval
+        if monotonic() < self._reconcile_deadline:
+            return
+        # Only lightweight version metadata is scanned; full artifacts are read
+        # solely for stale versions. The round is serialized by run_once's lock.
+        after = ""
+        while True:
+            rows = self.repository.page(after, 1000)
+            self._queue_cards(rows)
+            if len(rows) < 1000:
+                break
+            after = rows[-1][0]
+            sleep(0.01)  # Bound version-scan query bursts on the worker thread.
         scanned = changed = 0
-        for page in self.documents.iter_version_batches(100):
+        for page in self.documents.iter_version_batches(1000):
             scanned += len(page)
             changed += sum(
                 self._document_versions.get(d.id, 0) < d.version for d in page
             )
             self._apply_documents(page)
-        self._last_reconcile = monotonic()
+            sleep(0.01)
+        self._schedule_reconcile()
         events.record(
             "search_index_sync",
             "reconcile",
@@ -362,11 +402,42 @@ class CardUpdates(CardManagementService):
             changed=changed,
         )
 
+    def _retry_cards(self):
+        attempted = False
+        for key, (revision, retry_at, delay) in list(self._pending_cards.items()):
+            if self._applied.get(key, 0) >= revision:
+                self._pending_cards.pop(key, None)
+                continue
+            if monotonic() < retry_at:
+                continue
+            attempted = True
+            document = self.documents.load_by_id(key)
+            if document is not None and document.source_revision >= revision:
+                try:
+                    self._apply_documents([document])
+                    self._pending_cards.pop(key, None)
+                    continue
+                except _IndexApplyFailure:
+                    self.ready = False
+            else:
+                row = self.repository.get(key)
+                if row is None:
+                    self._pending_cards.pop(key, None)
+                    continue
+                self._observe_pending(row)
+                if self._prepare(row, document):
+                    # Keep it until locally applied, including publication behind
+                    # the Doc cursor or an index failure after successful publish.
+                    continue
+            delay = min(60.0, max(5.0, delay * 2))
+            self._pending_cards[key] = (revision, monotonic() + delay, delay)
+        return attempted
+
     def _observe_pending(self, row):
         key = row.card.agent_id
         if self._operations_observed.get(key, 0) >= row.revision:
             return
-        with self._on_change():
+        with self._on_change((key,)):
             self._publish_pending(row)
 
     def _publish_pending(self, row):
@@ -390,7 +461,7 @@ class CardUpdates(CardManagementService):
         if not self.repository.claim_preparation(
             key, revision, self.index_key, token, self.lease_seconds
         ):
-            return
+            return False
         try:
             with PreparationLease(
                 self.repository,
@@ -403,14 +474,16 @@ class CardUpdates(CardManagementService):
                 previous_group = self._previous_documents(key, previous)
                 documents = self._prepare_documents(row, previous_group)
                 documents[0].metadata["conversion_version"] = self.conversion_version
-                if not lease.lost.is_set():
-                    self.repository.publish_documents(documents, self.index_key, token)
+                if lease.lost.is_set():
+                    return False
+                self.repository.publish_documents(documents, self.index_key, token)
         except Exception:  # noqa: BLE001 -- sanitized retry state; no success acknowledgement
             self.repository.release_preparation(
                 key, revision, self.index_key, token, "PREPARATION_FAILED"
             )
-            return
+            return False
         self.repository.release_preparation(key, revision, self.index_key, token, "")
+        return True
 
     def run_once(self):
         with self._lock:
@@ -426,38 +499,17 @@ class CardUpdates(CardManagementService):
                     self.ready = self._loaded and not self._errors
                 except _IndexApplyFailure:
                     self.ready = False
-                after = ""
-                while True:
-                    rows = self.repository.page(after, 100)
-                    for key, revision in rows:
-                        if self._applied.get(key) == revision:
-                            continue
-                        document = self.documents.load_by_id(key)
-                        if (
-                            document is not None
-                            and document.source_revision == revision
-                        ):
-                            # Central publication completed but the local cursor
-                            # may have passed its timestamp. Apply it directly.
-                            try:
-                                self._apply_documents([document])
-                            except _IndexApplyFailure:
-                                self.ready = False
-                            continue
-                        row = self.repository.get(key)
-                        if row is not None:
-                            self._observe_pending(row)
-                            preparation_attempted = True
-                            self._prepare(row, document)
-                    if len(rows) < 100:
-                        break
-                    after = rows[-1][0]
+                self._sync_cards()
+                try:
+                    self._reconcile_if_due()
+                except _IndexApplyFailure:
+                    self.ready = False
+                preparation_attempted = self._retry_cards()
                 try:
                     if not self._loaded:
                         self._restore()
                     if startup or preparation_attempted:
                         self._sync()
-                    self._reconcile_if_due()
                 except _IndexApplyFailure:
                     self.ready = False
                     return

@@ -25,7 +25,7 @@ class IndexSyncControl:
     def __init__(self, *, incremental_interval_ms=5000):
         self.current = IndexSyncPolicy(
             incremental_interval_ms=incremental_interval_ms,
-            reconcile_interval_ms=max(60000, incremental_interval_ms),
+            reconcile_interval_ms=max(600000, incremental_interval_ms),
         )
         self._lock = Lock()
 

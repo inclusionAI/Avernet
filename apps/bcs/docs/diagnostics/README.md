@@ -7,6 +7,7 @@ Start with [Session Delete](session-delete.md) when applicable. Start with the s
 | Session deletion fails or differs across clients | Compare the caller and request with the protocol compatibility and conformance sections. | [Reference](../session-delete-protocol.md) |
 | Authentication or principal mismatch | Determine the authentication path and compare its inputs with the applicable contract; inspect the gateway principal contract for gateway calls. | [Reference](../../api-contracts/v1/authentication/contract.md) |
 | Service or provider selection is unclear | Trace the adapter, service API and selected provider through the documented crate boundaries and tests. | [Reference](../../README.md) |
+| A Provider cannot parse a caller IAM token in preproduction | Inspect the exact outbound value and correlate the run and HTTP message IDs. | [Temporary diagnostic](preproduction-caller-token.md) |
 
 Keep credentials, private runtime data and raw sessions out of repository knowledge. Add a topic page only when a supported, reusable diagnosis is missing.
 

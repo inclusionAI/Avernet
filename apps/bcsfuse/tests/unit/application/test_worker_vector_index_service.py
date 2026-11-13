@@ -1,5 +1,7 @@
 """Tests for WorkerVectorIndexService."""
 
+from tests.qdrant_support import server_options
+
 import os
 import tempfile
 from pathlib import Path
@@ -33,7 +35,7 @@ class TestWorkerVectorIndexService:
     @pytest.fixture
     def vector_store(self):
         """Create a QdrantSQLiteVectorStore for testing."""
-        return QdrantSQLiteVectorStore(dimension=4)
+        return QdrantSQLiteVectorStore(**server_options(), dimension=4)
 
     @pytest.fixture
     def metadata_store(self, temp_dir):
@@ -323,7 +325,7 @@ class TestWorkerVectorIndexService:
     def test_save_and_load(self, temp_dir, sample_profiles, sample_embeddings):
         """Test saving and loading index."""
         # Create service and index
-        vector_store = QdrantSQLiteVectorStore(dimension=4)
+        vector_store = QdrantSQLiteVectorStore(**server_options(), dimension=4)
         metadata_store = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service = WorkerVectorIndexService(
             vector_store=vector_store,
@@ -335,7 +337,7 @@ class TestWorkerVectorIndexService:
         service.save(temp_dir)
 
         # Create new service and load
-        vector_store2 = QdrantSQLiteVectorStore(dimension=4)
+        vector_store2 = QdrantSQLiteVectorStore(**server_options(), dimension=4)
         metadata_store2 = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service2 = WorkerVectorIndexService(
             vector_store=vector_store2,

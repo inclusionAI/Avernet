@@ -37,3 +37,9 @@ Bot 编辑页调试对话复用普通对话的 slash 输入能力；方案于 20
 The user authorized resuming both repository changes from current dev, local paired validation and two dev-targeted PRs. This supersedes the earlier release-head/no-PR iteration constraint; preserve that earlier evidence as history. Public baseline: 3958a48287907da0393cd38992e8e62c42f4703d, including the merged release integration. Retain the release Sender/file feature; mount only the existing generic composer and user-message presentation extension points. Service debug file requests use the explicit resolved stage; personal debug file requests retain the stage-omitted shape. Knowledge request/card protocol ownership remains in the companion enterprise implementation.
 
 Tracking issue: https://github.com/inclusionAI/Avernet/issues/3866.
+
+
+## Initial debug-session loading amendment (2026-11-11)
+- Match the ordinary conversation initialization boundary: do not mount the debug input or its file/command feature until the authenticated viewer and a selected session are available. Keep the existing loading/empty state and new-session entry.
+- Refreshing an existing session must preserve the mounted input, unsent draft and pending references; loading alone must not unmount it. Do not wait for message history, knowledge lookup or connection completion.
+- Public default hints and deployment-provided command/presentation contracts remain unchanged.

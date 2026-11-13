@@ -1,8 +1,9 @@
 """Merge caller fields using internal CAS; callers never manage revisions."""
 
+from dataclasses import replace
 from uuid import uuid4
 
-from search_core.api.cards import CatalogConflict
+from search_core.api.cards import UNSET_MAPPING, CatalogConflict
 from search_core.catalog.cards import (
     CardSnapshot,
     SearchConfig,
@@ -18,7 +19,17 @@ class CardWrites:
     def validate_labels(self, kind, labels, *, creating, patch):
         """Hosts may require business-specific labels on managed writes."""
 
-    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
+    def upsert(
+        self,
+        agent_id,
+        fields,
+        resource_type,
+        search_config,
+        *,
+        labels=None,
+        document_mapping=UNSET_MAPPING,
+        validate_mapping=None,
+    ):
         # Retry a bounded number of internal races, remerging onto the latest
         # snapshot each time so concurrent edits to different fields survive.
         for _ in range(8):
@@ -48,13 +59,26 @@ class CardWrites:
                 else:
                     merged.pop(key, None)
             self.validate_labels(kind, merged, creating=not active, patch=labels)
+            stored_config = dict(current.config or {}) if current else {}
+            if document_mapping is not UNSET_MAPPING:
+                if document_mapping:
+                    stored_config["document_mapping"] = document_mapping
+                else:
+                    stored_config.pop("document_mapping", None)
+            mapping_changed = stored_config != (current.config or {} if current else {})
             if (
                 active
                 and data == original
                 and config == current.card.search_config
                 and merged == current.card.labels
+                and not mapping_changed
             ):
-                return current
+                warnings = (
+                    validate_mapping(current.card, stored_config)
+                    if validate_mapping
+                    else ()
+                )
+                return replace(current, mapping_warnings=warnings)
             revision = current.revision if current else 0
             snapshot = self.snapshot_type(
                 agent_id=agent_id,
@@ -65,8 +89,15 @@ class CardWrites:
                 labels=merged,
                 search_config=config,
             )
+            warnings = (
+                validate_mapping(snapshot, stored_config) if validate_mapping else ()
+            )
             try:
-                return self.save(snapshot, revision)
+                if mapping_changed:
+                    saved = self.save(snapshot, revision, config=stored_config)
+                else:
+                    saved = self.save(snapshot, revision)
+                return replace(saved, mapping_warnings=warnings)
             except CatalogConflict:
                 continue
         raise RuntimeError("Card write contention; retry request")

@@ -114,6 +114,40 @@ def test_batch_and_state_inputs_keep_boundary_validation(runtime):
     )
 
 
+def test_card_recommend_translates_the_user_catalog_filters(runtime):
+    client, registry = runtime
+    for worker, availability, state, audience in (
+        ("user:public", "private", "offline", "public"),
+        ("user:protected", "private", "online", "protected"),
+        ("bot:public", "public", "online", "private"),
+    ):
+        sync(client, worker, availability=availability, runtime_state=state)
+        response = client.put(
+            f"/api/v2/agent-cards/{worker}",
+            json={"labels": {"user_visibility": [audience]}},
+        )
+        assert response.status_code == 202, response.text
+    registry.require("tc_card_search").updates.run_once()
+
+    for filters, expected in (
+        (
+            {
+                "runtime_state": ["online"],
+                "availability": ["public", "protected", "private"],
+            },
+            {"user:public", "user:protected"},
+        ),
+        ({"runtime_state": ["online"]}, {"bot:public"}),
+    ):
+        response = client.post(
+            "/api/v1/recommend", json={"question": "MySQL", "filters": filters}
+        )
+        assert response.status_code == 200, response.text
+        assert {
+            row["worker_id"] for row in response.json()["recommendations"]
+        } == expected
+
+
 def test_authentication_is_required_on_legacy_aliases(runtime):
     client, _ = runtime
     for method, path, body in (

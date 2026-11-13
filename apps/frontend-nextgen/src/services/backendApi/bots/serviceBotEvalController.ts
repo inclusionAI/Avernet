@@ -60,6 +60,7 @@ export interface ServiceBotEvalHistoryRecord extends BackendUnknownRecord {
   status?: string;
   summary?: string;
   report_url?: string;
+  archive_download_url?: string;
   evaluated_at?: string;
 }
 

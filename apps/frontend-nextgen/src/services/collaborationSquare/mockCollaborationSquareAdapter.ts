@@ -16,11 +16,13 @@ import {
   type PublicTaskTransport,
 } from '@/domain/collaborationSquare/taskMapper';
 import type {
+  BotCandidatePage,
   BotRelationshipStatus,
   CreateSessionResult,
   HumanBotActionContext,
   PublicBot,
   PublicBotDiscoveryQuery,
+  PublicBotDiscoveryResult,
   PublicBotSearchQuery,
   PublicGroup,
   PublicGroupSearchQuery,
@@ -51,20 +53,43 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     return (await this.listBotPage(_query, _context, signal)).items;
   }
 
-  async listBotPage(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
+  async listBotPage(
+    _query?: PublicBotSearchQuery,
+    _context?: HumanBotActionContext,
+    signal?: AbortSignal,
+  ): Promise<BotCandidatePage> {
     this.bots = (await readJson<PublicBotTransport[]>('/api/mock/collaboration-square/bots', signal)).map(
       mapBotTransport,
     );
-    return { items: structuredClone(this.bots), total: this.bots.length };
+    // dev Mock 无服务端过滤：按 BCS 原始 offset 语义本地切片拼页。
+    const offset = Math.max(0, _query?.offset ?? 0);
+    const pageSize = Math.max(1, _query?.pageSize ?? 20);
+    const items = structuredClone(this.bots.slice(offset, offset + pageSize));
+    const nextOffset = offset + items.length;
+    return { items, nextOffset, hasMore: nextOffset < this.bots.length };
   }
 
-  async discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
-    return filterPublicBots(await this.listBots(undefined, context, signal), query.keyword, 'smart');
+  async discoverBots(
+    query: PublicBotDiscoveryQuery,
+    context?: HumanBotActionContext,
+    signal?: AbortSignal,
+  ): Promise<PublicBotDiscoveryResult> {
+    // dev Mock 只做本地关键词近似（与历史 smart 行为一致），本质是名称/描述子串匹配，
+    // 结果模式必须如实标记为 name_fallback；真实语义模式由 BCS ApiAdapter 提供。
+    const keyword = query.keyword.trim();
+    if (!keyword) return { items: [], searchMode: 'empty_query' };
+    return {
+      items: filterPublicBots(await this.listBots(undefined, context, signal), keyword, 'smart'),
+      searchMode: 'name_fallback',
+    };
   }
 
-  async getBotProfile(botId: string, signal?: AbortSignal) {
+  async getBotProfile(bot: PublicBot, signal?: AbortSignal) {
     return mapBotProfileTransport(
-      await readJson<BotProfileTransport>(`/api/mock/collaboration-square/bots/${encodeURIComponent(botId)}`, signal),
+      await readJson<BotProfileTransport>(
+        `/api/mock/collaboration-square/bots/${encodeURIComponent(bot.id)}`,
+        signal,
+      ),
     );
   }
 

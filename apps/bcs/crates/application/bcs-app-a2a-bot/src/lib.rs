@@ -5,6 +5,7 @@ use bcs_service_api::application::a2a_bot::{A2aBotManagementService, ConfigureA2
 use bcs_service_api::core::a2a_bot::A2aBotCoreService;
 use bcs_service_api::port::{a2a_card::A2aCardPort, repo::a2a_bot::A2aBotRecord};
 use bcs_service_api::types::a2a_bot::A2aCardSource;
+pub mod v1;
 mod registration;
 mod names;
 mod management;

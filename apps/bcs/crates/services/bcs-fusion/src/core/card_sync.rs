@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use bcs_fuse_client::{CardResourceType, CardWriteRequest, FuseClient};
 use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 use bcs_service_api::port::{BotCatalogCleanupPort, CatalogChangePort};
-use bcs_service_api::{ActorKind, BotControlPlaneRecord, BotControlPlaneRepoPort, Group, GroupCoreService, GroupKind, UserVisibility};
+use bcs_service_api::{ActorKind, BotControlPlaneRecord, BotControlPlaneRepoPort, GroupCoreService, GroupKind, GroupStrategy, UserVisibility};
+use bcs_service_api::types::GroupCardSnapshot;
 use serde_json::json;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -110,21 +111,20 @@ pub fn agent_card(bot: &BotControlPlaneRecord) -> Option<CardWriteRequest> {
     })
 }
 
-pub fn group_card(group: &Group) -> Option<CardWriteRequest> {
+pub fn group_card(group: GroupCardSnapshot) -> Result<Option<CardWriteRequest>, String> {
     if group.group_kind != GroupKind::Normal || group.visibility != "public"
-        || group.record_status != "active" {
-        return None;
+        || group.record_status != "active"
+        || !matches!(group.group_strategy, GroupStrategy::ManagerWorker | GroupStrategy::StateMachine) {
+        return Ok(None);
     }
-    Some(CardWriteRequest {
+    let Some(mut card) = group.card_template else { return Ok(None); };
+    card.as_object_mut().ok_or("Group Card template must be an object")?
+        .insert("groupId".into(), json!(group.group_id));
+    Ok(Some(CardWriteRequest {
         resource_type: CardResourceType::Group,
         labels: [("visibility".into(), vec![group.visibility.clone()])].into(),
-        card: json!({
-            "groupId": group.id,
-            "name": group.label.as_deref().filter(|name| !name.trim().is_empty()).unwrap_or(&group.id),
-            "description": group.context.as_deref().unwrap_or_default(),
-            "skills": [],
-        }),
-    })
+        card,
+    }))
 }
 
 pub struct FuseCardSyncLifecycle {
@@ -156,8 +156,8 @@ async fn publish(
     let (id, card) = match resource {
         Resource::Agent(id) => (id, bots.get_control_plane(id, env).await.map_err(|e| e.to_string())?
             .as_ref().and_then(agent_card)),
-        Resource::Group(id) => (id, groups.try_get(id).await.map_err(|e| e.to_string())?
-            .as_ref().and_then(group_card)),
+        Resource::Group(id) => (id, groups.read_card_snapshot(id).await.map_err(|e| e.to_string())?
+            .map(group_card).transpose()?.flatten()),
     };
     match card {
         Some(card) => client.put_card(id, &card).await.map(|_| ()),
@@ -210,7 +210,7 @@ impl ServiceLifecycle for FuseCardSyncLifecycle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bcs_service_api::{ActorStatus, BotControlPlaneDescriptor, GroupStatus};
+    use bcs_service_api::{ActorStatus, BotControlPlaneDescriptor};
 
     #[test]
     fn projections_preserve_discovery_visibility_and_clearable_fields() {
@@ -242,17 +242,33 @@ mod tests {
         bot.kind = ActorKind::Human;
         assert!(agent_card(&bot).is_none());
 
-        let mut group = Group::new("group", "agent", vec![]);
-        assert!(group_card(&group).is_none());
+        let template = json!({"name": "Stored name", "description": "Stored goal", "skills": [{"id":"group.execute"}],
+            "supportedInterfaces": [{"url":"local://groups/group", "protocolBinding":"LOCAL"}],
+            "capabilities":{"extensions":[{"params":{"groupKind":"manager_worker"}}]}, "opaque":{"keep":[1,2]}});
+        let mut group = GroupCardSnapshot {
+            group_id: "group".into(), group_kind: GroupKind::Normal, group_strategy: GroupStrategy::ManagerWorker,
+            visibility: "private".into(), record_status: "active".into(), card_template: Some(template.clone()),
+        };
+        assert!(group_card(group.clone()).unwrap().is_none());
         group.visibility = "public".into();
-        group.status = GroupStatus::Completed;
-        assert_eq!(group_card(&group).unwrap().card["description"], "");
-        assert_eq!(serde_json::to_value(group_card(&group).unwrap()).unwrap()["labels"], json!({"visibility":["public"]}));
+        let card = group_card(group.clone()).unwrap().unwrap();
+        let mut expected = template;
+        expected["groupId"] = json!("group");
+        assert_eq!(card.card, expected);
+        assert_eq!(serde_json::to_value(card).unwrap()["labels"], json!({"visibility":["public"]}));
         group.record_status = "provisioning".into();
-        assert!(group_card(&group).is_none());
+        assert!(group_card(group.clone()).unwrap().is_none());
         group.record_status = "active".into();
         group.group_kind = GroupKind::Dm;
-        assert!(group_card(&group).is_none());
+        assert!(group_card(group.clone()).unwrap().is_none());
+        group.group_kind = GroupKind::Normal;
+        group.group_strategy = GroupStrategy::Chat;
+        assert!(group_card(group.clone()).unwrap().is_none());
+        group.group_strategy = GroupStrategy::StateMachine;
+        group.card_template = None;
+        assert!(group_card(group.clone()).unwrap().is_none());
+        group.card_template = Some(json!("malformed template"));
+        assert!(group_card(group).is_err());
     }
 
     #[test]

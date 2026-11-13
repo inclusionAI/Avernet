@@ -4,6 +4,8 @@ This test validates the complete end-to-end flow with real adapters
 but fake embeddings (no LLM dependency).
 """
 
+from tests.qdrant_support import server_options
+
 import os
 import tempfile
 from pathlib import Path
@@ -61,7 +63,7 @@ class TestWorkerVectorIndexIntegration:
     @pytest.fixture
     def vector_store(self, dimension):
         """Create QdrantSQLiteVectorStore."""
-        return QdrantSQLiteVectorStore(dimension=dimension)
+        return QdrantSQLiteVectorStore(**server_options(), dimension=dimension)
 
     @pytest.fixture
     def metadata_store(self, temp_dir):
@@ -240,7 +242,7 @@ class TestWorkerVectorIndexIntegration:
     ):
         """Test that data persists correctly after save/load."""
         # Create service and index
-        vector_store = QdrantSQLiteVectorStore(dimension=dimension)
+        vector_store = QdrantSQLiteVectorStore(**server_options(), dimension=dimension)
         metadata_store = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service = WorkerVectorIndexService(
             vector_store=vector_store,
@@ -254,7 +256,7 @@ class TestWorkerVectorIndexIntegration:
         service.save(temp_dir)
 
         # Create new service and load
-        vector_store2 = QdrantSQLiteVectorStore(dimension=dimension)
+        vector_store2 = QdrantSQLiteVectorStore(**server_options(), dimension=dimension)
         metadata_store2 = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service2 = WorkerVectorIndexService(
             vector_store=vector_store2,

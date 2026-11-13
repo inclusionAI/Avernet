@@ -288,6 +288,10 @@ Runtime probe 的 `READY` 通常必须携带迁移 `preparation_id`。OpenClaw �
 
 Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_center/`，继续复用 Query、DirectActivation、SkillSetManagement。Legacy scope/reference resolution 与 Factory 负责旧参数、Default/exclusion、设备路径适配；保留其 wire compatibility，不恢复第二条 Installation 写路径。
 
+Local OpenAPI 的 ZIP 与目录上传在包校验失败时保持 HTTP 400 / `400101`、
+超限时保持 HTTP 413 / `413101`，并在 `data.reason` 返回安全的细分原因。
+兼容旧服务端缺少该字段及未知值；原因枚举以 `apps/backend/docs/openapi-v1/README.md` 为准。
+
 旧版 `POST /api/skills/upload` 的失败业务响应继续使用 HTTP 200 和
 `success=false`，并额外返回 `error_code`（成功时为 `null`）。错误码定义在
 `core/skill_center/upload_error_codes.py`，Legacy HTTP adapter 负责将既有异常

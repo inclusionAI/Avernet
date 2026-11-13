@@ -34,7 +34,7 @@ def test_keyword_results_survive_slow_vector_search():
             result = await service.retrieve(RetrievalRequest("x", 1, {}))
             assert entered.is_set()
             assert result.status == "degraded"
-            assert result.reasons == ("vector_unavailable",)
+            assert result.reasons == ("vector_unavailable", "vector_timeout")
             assert result.items[0].item_id == "a"
             again = await service.retrieve(RetrievalRequest("x", 1, {}))
             assert again.items and again.status == "degraded"
@@ -78,7 +78,9 @@ def test_budget_returns_keyword_without_waiting_for_slow_embedding_or_rerank():
         assert result.items[0].score_source == "rrf"
         assert set(result.reasons) == {
             "embedding_unavailable",
+            "embedding_timeout",
             "reranker_unavailable",
+            "reranker_timeout",
         }
 
     with ThreadPoolExecutor() as executor:

@@ -1,4 +1,4 @@
-"""Standalone loopback catalog: SQLite, Qdrant Local and offline demo vectors."""
+"""Standalone loopback catalog: SQLite, Qdrant Server and offline demo vectors."""
 
 import argparse
 import asyncio
@@ -88,8 +88,8 @@ def main():
     parser.add_argument("--port", type=int, default=8877)
     parser.add_argument(
         "--qdrant-url",
-        default="",
-        help="Use an existing Qdrant Server; otherwise use Local",
+        required=True,
+        help="Qdrant Server >=1.20 endpoint (Python Local is unsupported)",
     )
     args = parser.parse_args()
     connection = (

@@ -1301,22 +1301,27 @@ models = [
 qdrant = [
     { name = "pydantic" },
     { name = "qdrant-client" },
+    { name = "whoosh" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'models'", specifier = ">=3.12,<4" },
+    { name = "apscheduler", marker = "extra == 'scheduler'", specifier = ">=3,<4" },
     { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.100.0" },
     { name = "httpx", marker = "extra == 'models'", specifier = ">=0.24.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.0" },
+    { name = "pydantic", marker = "extra == 'cards'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'http'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'models'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'qdrant'", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.20.0,<1.21" },
     { name = "requests", marker = "extra == 'models'", specifier = ">=2" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.23" },
+    { name = "whoosh", marker = "extra == 'qdrant'", specifier = "==2.7.4" },
 ]
-provides-extras = ["models", "qdrant", "http", "test"]
+provides-extras = ["cards", "models", "qdrant", "http", "scheduler", "test"]
 
 [[package]]
 name = "starlette"
@@ -1555,6 +1560,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a5/8f/aea9c71cc92bf9b6cc0f7f70df8f0b420636b6c96ef4feee1e16f80f75dd/websockets-16.0-pp311-pypy311_pp73-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0298d07ee155e2e9fda5be8a9042200dd2e3bb0b8a38482156576f863a9d457c", size = 176968, upload-time = "2026-01-10T09:23:41.031Z" },
     { url = "https://files.pythonhosted.org/packages/9a/3f/f70e03f40ffc9a30d817eef7da1be72ee4956ba8d7255c399a01b135902a/websockets-16.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:a653aea902e0324b52f1613332ddf50b00c06fdaf7e92624fbf8c77c78fa5767", size = 178735, upload-time = "2026-01-10T09:23:42.259Z" },
     { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
+]
+
+[[package]]
+name = "whoosh"
+version = "2.7.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/25/2b/6beed2107b148edc1321da0d489afc4617b9ed317ef7b72d4993cad9b684/Whoosh-2.7.4.tar.gz", hash = "sha256:7ca5633dbfa9e0e0fa400d3151a8a0c4bec53bd2ecedc0a67705b17565c31a83", size = 968741, upload-time = "2016-04-04T01:19:32.327Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/19/24d0f1f454a2c1eb689ca28d2f178db81e5024f42d82729a4ff6771155cf/Whoosh-2.7.4-py2.py3-none-any.whl", hash = "sha256:aa39c3c3426e3fd107dcb4bde64ca1e276a65a889d9085a6e4b54ba82420a852", size = 468790, upload-time = "2016-04-04T01:19:40.379Z" },
 ]
 
 [[package]]

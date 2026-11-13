@@ -148,6 +148,12 @@ class CatalogSearchApplication:
                     outcome = "ok"
                 if result.status == "degraded":
                     for reason in failures:
+                        # Detail codes explain the same failure, not another event.
+                        if (
+                            not reason.endswith("_unavailable")
+                            and reason.split("_", 1)[0] + "_unavailable" in failures
+                        ):
+                            continue
                         events.record(
                             "search_degraded",
                             "request",

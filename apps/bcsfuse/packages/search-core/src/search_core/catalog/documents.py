@@ -5,7 +5,7 @@ import math
 from dataclasses import replace
 from uuid import NAMESPACE_URL, uuid5
 
-from search_core.catalog.cards import label_filters
+from search_core.catalog.cards import business_card, label_filters
 from search_core.plugin_api.card_documents import CardProjection
 from search_core.plugin_api.index_documents import IndexDocument
 from search_core.plugin_api.vector_point import VectorPoint
@@ -65,6 +65,7 @@ def build_documents(row, model, embedding_key, filter_fields, converter, previou
         payload={
             "source_id": row.card.agent_id,
             "source_version": row.card.source_version,
+            "name": business_card(row.card).get("name") or "",
             "search_text": text,
             "rerank_text": expressions[0].rerank_text or text,
         },
@@ -140,7 +141,8 @@ def complete_document_group(main, expressions, previous, model, embedding_key):
             id=key,
             vector=list(vector),
             payload={
-                **main.point.payload,
+                # Name evidence belongs to the main Doc once per Card.
+                **{k: v for k, v in main.point.payload.items() if k != "name"},
                 "search_text": expression.search_text,
                 "rerank_text": expression.rerank_text or expression.search_text,
             },

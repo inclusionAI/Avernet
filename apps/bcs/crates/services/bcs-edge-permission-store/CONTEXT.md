@@ -58,6 +58,39 @@ Storage/integrity failures still fail the whole batch. No positive cache, write
 or transaction is added. MySQL uses the existing binary identity predicates;
 SQLite query/row counts do not establish MySQL EXPLAIN or lock/contention results.
 
+### Candidate owner projection
+
+`ownerships_for` deduplicates exact input Bot IDs before bounded queries and
+restores input order and multiplicity in its result. Missing/deleted/version-0
+Bots project `None` (or the legacy creator under the migration shim); corrupt
+initialized owner sets and storage failures still error the batch. Returned
+owner rows are not deduplicated, so actual integrity failures remain observable.
+
+For B distinct IDs the normal path uses `2*ceil(B/128)` statements (states and
+owner actors); the legacy shim adds `ceil(L/128)` creator reads for L version-0
+IDs. Empty input performs no reads. A healthy, fully-owned 100-item candidate
+page therefore adds two statements, or three with legacy creators; zero-owner
+cases add the re-check below. In a healthy initialized state, these return at
+most B state rows plus B owner rows, not B rows in total.
+
+A retirement can commit its tombstone and owner revocation between the state and
+owner SELECTs. For U initialized IDs with no returned owner row, one liveness
+re-check per 128-ID chunk (`ceil(U/128)` extra statements) distinguishes deleted
+Bots (`None`) from still-live corrupt owner state (whole-batch error). Healthy
+pages add no statements; the re-check starts no transaction and takes no lock.
+This reasoning uses the existing single-primary, per-statement read visibility;
+routing these reads to a lagged replica would require a shared snapshot instead.
+
+MySQL state/creator/owner projection reads use an indexable raw identity `IN`
+prefilter plus a binary residual predicate. The residual preserves byte-exact
+case and trailing-space matching on retained collations. Each statement binds
+at most 128 distinct IDs twice (257 parameters including env); SQLite binds each
+ID once (129 including env). Query-count bounds alone do not establish scanned
+row bounds. The opt-in `authority_ownerships_mysql` test runs the full migration
+chain, captures generated statements, checks identity index key parts on a
+20,000-Bot dataset and checks current/legacy collation behavior. No new cache,
+write, lock, transaction, schema, or migration is added to the read path.
+
 ## Runtime ownership
 
 Ownership sync guards both the target's and previous owner's approved manager
@@ -77,6 +110,9 @@ SQL text. The environment is resolved once at construction.
 ## Tests
 
 - `cargo test -p bcs-edge-permission-store`
+- Candidate projection MySQL gate: `cargo test -p bcs-edge-permission-store
+  --test authority_ownerships_mysql -- --ignored` (fresh empty
+  `BCS_TEST_MYSQL_URL`; separate database from other MySQL gates).
 - Plan §6 MySQL gate: `cargo test -p bcs-edge-permission-store
   --test authority_mysql authority_mysql_conformance -- --ignored
   --exact --nocapture` (needs `BCS_TEST_MYSQL_URL`, fresh empty DB).

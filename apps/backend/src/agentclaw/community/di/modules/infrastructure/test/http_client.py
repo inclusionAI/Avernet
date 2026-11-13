@@ -7,6 +7,7 @@ from typing import Annotated
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     QUALIFIER_BCN,
+    QUALIFIER_CLAWWEB,
     QUALIFIER_GENERAL,
     QUALIFIER_MASA_AGENT_EVAL,
     HttpClient,
@@ -39,6 +40,11 @@ class TestHttpClientModule(Module):
         self,
     ) -> Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL]:
         return LocalHttpClient(base_url="http://localhost:8080")
+
+    @singleton
+    @provider
+    def clawweb_http_client(self) -> Annotated[HttpClient, QUALIFIER_CLAWWEB]:
+        return LocalHttpClient(base_url="")
 
     @singleton
     @provider

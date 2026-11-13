@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit, urlencode, quote
 from provider_scope_story import Story
 from a2a_workbench import abort_task
 from a2a_management_cases import exercise as exercise_management
+from a2a_provider_config_cases import exercise as exercise_provider_config
 from a2a_rpc_peer import dispatch as dispatch_rpc, envelope as rpc_envelope
 
 TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
@@ -268,13 +269,28 @@ class A2aStory(Story):
         self.original_policy = None
         self.policy_revision = None
 
+    def request(self, method, path, body=None, **kwargs):
+        value = super().request(method, path, body, **kwargs)
+        if path.startswith("/api/v1/collaboration/a2a/"):
+            assert set(value) == {"code", "message", "data", "request_id"}
+            expected = kwargs.get("status", 200)
+            assert value["code"] == expected * 100
+            assert value["request_id"]
+            if expected >= 400:
+                assert "error_code" in value["data"]
+                # Existing rejection cases compare machine codes on both protocols.
+                return {"error": {"code": value["data"]["error_code"], "request_id": value["request_id"]}}
+            return value["data"]
+        return value
+
     def run(self):
         self.request("POST", "/me/ensure-human")
         provider_name = "a2a-e2e-" + uuid.uuid4().hex
         provider = self.request("POST", "/providers", {"slug": provider_name,
             "name": "A2A E2E " + uuid.uuid4().hex,
             "webhook_url": self.peer.base + "/legacy-webhook-must-not-be-used",
-            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0"})
+            "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
+            "a2a": {"default_owner": self.owner}})
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
@@ -434,6 +450,7 @@ class A2aStory(Story):
         self.request("PUT", control, {"agent_card": poll_card}, token=admin)
         self.poll_rounds(group, bot_id)
         self.named_rounds(provider, provider_name, poll_card)
+        exercise_provider_config(self, provider, poll_card)
         exercise_management(self, provider, poll_card)
         print(f"A2A story: {self.checks} live boundary assertions, thirteen stream and five polling deliveries passed")
 
@@ -461,13 +478,13 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = self.a2a_prefix + "/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
             assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
-            run_path = self.a2a_prefix + "/chat/runs/" + accepted["run_id"]
+            run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 result = self.request("GET", run_path + "?wait_ms=500", token=token)

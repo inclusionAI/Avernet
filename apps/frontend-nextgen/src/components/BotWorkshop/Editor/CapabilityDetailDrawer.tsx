@@ -1,5 +1,5 @@
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { SafeHtml } from '@/components/Common/RichContent';
+import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import { Button } from '@/components/ui';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';

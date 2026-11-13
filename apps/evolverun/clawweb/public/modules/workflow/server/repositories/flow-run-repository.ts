@@ -1,3 +1,4 @@
+import { normalizeFlowRunMarkers } from '../services/flow-run-markers.js';
 import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
@@ -22,6 +23,8 @@ export type FlowRunRow = {
   flow_id: string;
   workflow_id: string;
   workflow_title: string | null;
+  env: string | null;
+  tag: string | null;
   status: string;
   triggered_by: string | null;
   params_json: string | null;
@@ -55,6 +58,8 @@ export type FlowRunInsert = {
   flowId: string;
   workflowId: string;
   workflowTitle?: string | null;
+  env?: string | null;
+  tag?: string | null;
   status: string;
   stateJson?: string | null;
   paramsJson?: string | null;
@@ -267,7 +272,7 @@ export class FlowRunRepository {
     "started_at", "completed_at",
     "triggered_by", "identity_key", "current_phase",
     "origin_session_key", "origin_session_id", "origin_bot_id",
-    "user_id", "plugin_version", "engine",
+    "user_id", "plugin_version", "engine", "env", "tag",
     "workflow_version", "workflow_deploy_number",
     "gmt_create", "gmt_modified",
     "evolution_analysis_status",
@@ -335,13 +340,14 @@ export class FlowRunRepository {
 
   async insert(run: FlowRunInsert): Promise<boolean> {
     try {
+      const markers = normalizeFlowRunMarkers(run);
       // The run must not survive a failed snapshot read/write. Transaction-bound
       // repositories reuse their caller's transaction for purpose registration.
       return await this.db.transaction(async tx => {
         const now = tx.dialect.now();
         await tx.exec(
-          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             run.flowId,
             run.workflowId,
@@ -364,6 +370,8 @@ export class FlowRunRepository {
             run.engine ?? null,
             run.workflowVersion ?? null,
             run.workflowDeployNumber ?? null,
+            markers.env,
+            markers.tag,
             now,
             now,
           ],

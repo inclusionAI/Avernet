@@ -53,7 +53,7 @@ async fn durable_cutover_ignores_old_requests_and_uses_edge_friendships_after_re
     let history = db.query(DbStatement::new(
         "SELECT version, checksum FROM bcs_schema_migrations ORDER BY version"
     )).await.unwrap();
-    assert_eq!(history.last().unwrap().get_i64("version").unwrap(), Some(43));
+    assert_eq!(history.last().unwrap().get_i64("version").unwrap(), Some(44));
     assert!(state.connect_service.get_request("legacy-pending").await.is_err());
     for action in ["accept", "reject"] {
         let response = http.post(format!("http://{addr}/friends/requests/legacy-pending/{action}"))

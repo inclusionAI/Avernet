@@ -15,6 +15,7 @@ from search_core.api.models import (
     SearchResult,
     StageScore,
 )
+from search_core.core.observation import failure_reason, upstream_status
 from search_core.core.ranking import reciprocal_rank_fusion
 from search_core.core.timing import stage_timing
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
@@ -24,8 +25,21 @@ from search_core.plugin_api.retrieval import RetrievalIndex
 
 
 class _StageFailure(Exception):
-    def __init__(self, reason):
+    def __init__(self, reason, detail=""):
         self.reason = reason
+        self.detail = detail
+
+
+def _failure_detail(reason, error):
+    """Return bounded diagnostic codes, never SDK messages or response bodies."""
+    detail = getattr(error, "detail", "") if isinstance(error, _StageFailure) else ""
+    if not detail:
+        status = upstream_status(error)
+        if status is not None and status >= 400:
+            detail = f"http_{status}"
+        elif failure_reason(error) == "timeout":
+            detail = "timeout"
+    return reason.removesuffix("_unavailable") + "_" + detail if detail else ""
 
 
 def _stage_scores(scores):
@@ -116,7 +130,7 @@ class HybridRetrievalService:
                     "embedding", self._embedding.embed, request.query
                 )
                 if not vector or any(not math.isfinite(v) for v in vector):
-                    raise _StageFailure("embedding_unavailable")
+                    raise _StageFailure("embedding_unavailable", "invalid_response")
                 query_vector = tuple(vector)
                 stage["dimension"] = len(vector)
             with stage_timing("vector") as stage:
@@ -192,6 +206,8 @@ class HybridRetrievalService:
                             else "keyword_unavailable"
                         )
                     reasons.append(reason)
+                    if detail := _failure_detail(reason, result):
+                        reasons.append(detail)
                     branches.append(())
                 else:
                     available = True
@@ -276,9 +292,9 @@ class HybridRetrievalService:
                     if len(ids) != len(set(ids)) or not set(ids) <= {
                         r.item_id for r in ranking
                     }:
-                        raise ValueError("invalid reranker candidate identities")
+                        raise _StageFailure("reranker_unavailable", "invalid_response")
                     if any(not math.isfinite(r.score) for r in reranked):
-                        raise ValueError("non-finite reranker score")
+                        raise _StageFailure("reranker_unavailable", "invalid_response")
                     scores = [(r.candidate_id, r.score) for r in reranked]
                     reranker_scores = _stage_scores(scores)
                     score_source = "reranker"
@@ -287,6 +303,8 @@ class HybridRetrievalService:
                 if not self._allow_partial:
                     raise SearchUnavailable("reranker failed") from exc
                 reasons.append("reranker_unavailable")
+                if detail := _failure_detail("reranker_unavailable", exc):
+                    reasons.append(detail)
         with stage_timing("result_build"):
             return SearchResult(
                 items=tuple(

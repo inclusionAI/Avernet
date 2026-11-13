@@ -238,24 +238,30 @@ def test_both_port_bundles_carry_the_bot_config_kind_registry(test_injector) -> 
         assert isinstance(ports.bot_config, BotConfigKindRegistry), bundle
 
 
-def test_the_kind_registry_routes_render_screen_to_the_real_handler(
+def test_the_kind_registry_routes_real_kinds_to_their_handlers(
     test_injector,
 ) -> None:
-    """``render_screen`` is the v1 kind and resolves to the real handler backed
-    by ``RenderScreenService``; any other kind lands on the noop refusal, so a
-    kind the validator accepts but no DI-bound handler resolves surfaces as a
-    failed row in the apply report rather than a silent success."""
+    """``render_screen`` and ``task_nav`` are the v1 kinds and resolve to their
+    real handlers; any other kind lands on the noop refusal, so a kind the
+    validator accepts but no DI-bound handler resolves surfaces as a failed row
+    in the apply report rather than a silent success."""
     from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
         NoopBotConfigSyncHandler,
     )
     from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
         RenderScreenSyncHandler,
     )
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_task_nav_handler import (
+        TaskNavSyncHandler,
+    )
 
     ports = test_injector.get(DevicePorts)()
     registry = ports.bot_config
     assert isinstance(registry.resolve("render_screen"), RenderScreenSyncHandler)
-    assert isinstance(registry.resolve("task_nav"), NoopBotConfigSyncHandler)
+    assert isinstance(registry.resolve("task_nav"), TaskNavSyncHandler)
+    assert isinstance(
+        registry.resolve("no_such_kind"), NoopBotConfigSyncHandler
+    )
 
 
 

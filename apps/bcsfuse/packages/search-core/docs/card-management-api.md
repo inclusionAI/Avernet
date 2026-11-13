@@ -154,13 +154,16 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 
 - `documents`：数据库当前 index_key 下该 Card 的所有 Doc，包括主 Doc、扩展问题 Doc 和删除记录。每条包含 `id`、`doc_version`、`deleted`、完整 `search_text`、`filters` 和向量摘要 `vector`。
 - `qdrant.vector_documents`：本实例实际向量集合中的点，包含实际 `index_key`、`search_text`、`filters` 和 `vector`。
-- `qdrant.keyword_documents`：本实例实际关键词集合中的点，包含实际 `index_key`、`search_text` 和 `filters`。不返回稀疏向量。
+- `qdrant.keyword_documents`：本实例实际关键词集合中的点，保留 `index_key`、`search_text` 和 `filters`，并返回原生 BM25 的 `name`、`text`、`name_grams`。三者直接读取实际 payload 的 `_bm25_name`、`_bm25_text`、`_bm25_name_grams`；`name_grams` 是空格分隔的原始名称片段字符串，保留顺序与重复项，不重新分词。
+- BM25 字段缺失时返回 `null`，已存储的空字符串仍返回 `""`。不会从 Card、Doc 或 `search_text` 补值；`text` 是实际 BM25 正文，可能与已有 `search_text` 不同。它们展示存储内容，不是 Qdrant 分词器生成的全部正文词项或某次查询的分数。
 - `vector` 只包含 `dimension`（实际向量长度）和 `preview`（前 8 个数值）。Qdrant 可能归一化向量，预览数值不同不一定表示出错；预览也不能证明语义质量。
 - `filters` 展示本索引声明的前置标签和 Doc 中记录的标签；不把业务 Card 的所有字段都当作过滤条件。
 - `qdrant.status=ok` 表示这次读取成功，列表为空才表示没有找到点。`unavailable` 表示读取失败，`error=QDRANT_READ_FAILED`；`unsupported` 表示宿主索引不支持此诊断。失败时列表不代表实际数量，数据库内容仍可查看。
 - 顶层 `index_key` 是本实例选定的版本；`qdrant` 每个点的 `index_key` 来自实际 payload，缺失时为 null，不会拿配置值填充。即使 `indexed_*` 与当前版本一致，这里仍可能发现外部删除或错误写入。
 
 本次查询不重新构建 Doc、不调用 embedding 模型，也不修复数据。数据库与两个 Qdrant 集合分别读取，不保证并发更新期间是同一时刻的快照。
+
+TC 和支付宝复用此详细状态响应，原有字段及接口路径保持不变。只增加诊断字段，不改变检索、重建、鉴权或数据库结构。
 
 内容片段示例：
 
@@ -180,7 +183,9 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
     }],
     "keyword_documents": [{
       "id": "test:billing", "index_key": "default",
-      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]}
+      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]},
+      "name": "账单助手", "text": "账单助手\n查询消费账单",
+      "name_grams": "账单助 单助手"
     }]
   }
 }
@@ -225,3 +230,47 @@ HTTP 无关的协议与持久化约定见 [provider contracts](provider-contract
 不表示所有 Card 都已入索引；没有已有 Doc 时可以作为空索引就绪。
 后台沿用版本比较，只补处理缺失或落后的 Card，失败后继续重试，重启也可接续。
 Qdrant 同步失败仍会阻止就绪。首次选择 `default` 只保存配置，不自动登记全量重建任务。
+
+
+## 可选的 Card → Doc 配置
+
+宿主显式启用 `allow_document_mapping=True` 并提供对应服务时，PUT 可在 `card`、
+`labels` 同级传 `document_mapping`；未启用的宿主维持原请求与响应协议。
+当前支付宝应用启用此能力，TC 的原有接口不启用。
+
+```json
+{
+  "document_mapping": {
+    "search_text_template": "{name}\n{skills[].description}",
+    "rerank_text_template": "{name}\n{description}",
+    "filter_fields": {"category": "skills[].tags[]"}
+  }
+}
+```
+
+可只提交配置，也可同时更新 Card 或 labels。省略配置保留旧值；非空对象整组替换
+单 Card 配置；`null` 或 `{}` 清除覆盖。清除后继承当前索引版本的全局规则；
+全局也未配置时走原有构建器。单 Card 可覆盖任一文本模板，过滤项只能覆盖全局
+已声明的键，其余键继承全局。新建过滤键须先构建并启用包含该键的新索引版本。
+
+单 Card 配置保存在 `agent_cards.config.document_mapping`。Card、labels、配置
+在同一事务内保存，只增加一次 Card 版本；配置本身有变化也会触发既有后台同步。
+相同请求重试不增加版本。不改变原始业务 JSON、Doc 表结构或构建租约。
+启用此能力的 GET 在原字段之外返回 `document_mapping`，无覆盖时为 `null`。
+
+模板变量从原始业务 `card` 根节点读取，例如 `{provider.name}`、
+`{skills[].description}`、`{skills[].tags[]}`；支持多层 `[]`，不支持数组下标、
+表达式、函数调用、格式化指令。普通文本原样保留，`{{` / `}}` 输出字面大括号。
+数组文本按顺序用换行拼接且不去重；字符串去首尾空白，数字/布尔值转成文本。
+缺失、null、空字符串跳过；对象或未展开的数组报错。过滤值仅接受字符串，去空和
+去重，空结果移除该过滤项。最终 search_text 为空则拒绝，rerank_text 为空则回退
+search_text。模板和展开后的正文各最多 8192 字符，路径最多 256 字符。
+
+过滤键最多 64 个，名称以英文字母开头、后续为字母数字下划线，最多 128 字符。
+`resource_type`、`labels.*` 及系统身份、正文和关联字段不可覆盖；过滤值支持 Unicode。
+这些是配置接口约束，不代表 Qdrant 本身的容量上限。系统原有 resource_type 和
+Card labels 按原流程保留，不参与自定义映射。
+
+写入时先校验语法，再用合并后的实际 Card 渲染。映射错误返回 422，detail 中说明
+配置位置、实际 Card 路径和原因，任何字段均不落库。缺失可选路径但整体仍有效时
+允许保存，202 可附加 `warnings`。普通未配置请求的业务校验和错误码保持原样。

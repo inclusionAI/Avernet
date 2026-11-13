@@ -81,3 +81,14 @@ collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
 existing access policies.
+
+### Teclaw service chat runtime
+
+Teclaw service Bots, including Caller-identity Bots, create and use sessions on
+an existing successful online publication binding. Engine strategy capability
+`requires_caller_chat_instance` disables independent Caller runtime provisioning
+for Teclaw; other engines retain their existing allocation and polling behavior.
+Authorization precedes runtime selection. Backend-owned session indexes remain
+scoped to the session user, while adapter session creation and subsequent
+connection preparation use the same published runtime. No draft fallback or new
+container is introduced by creating a session.

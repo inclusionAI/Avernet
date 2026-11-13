@@ -1,3 +1,4 @@
+import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
 import { RepairBatchError } from '../../contracts/repair-batch.js';
 import { parseParentRelation, ParentRelationError } from '../../services/parent-related-run-registration.js';
@@ -130,7 +131,7 @@ export function createInternalRunsRouter(
       const requestBody = ordinary ? envelope.run : envelope;
       const normalizedBody = ordinary ? { ...requestBody, type: envelope.type, ordinary_request_key: envelope.ordinary_request_key,
         ordinary_parent_flow_id: envelope.ordinary_parent_flow_id } : requestBody;
-      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, parent_relation } = requestBody as {
+      const { flow_id, workflow_id, workflow_title, status, state_json, triggered_by, params_json, input_json, node_count, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, parent_relation } = requestBody as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
@@ -152,6 +153,8 @@ export function createInternalRunsRouter(
         engine?: string;
         workflow_version?: number | null;
         workflow_deploy_number?: number | null;
+        env?: unknown;
+        tag?: unknown;
         parent_relation?: unknown;
       };
 
@@ -194,7 +197,9 @@ export function createInternalRunsRouter(
         }
       }
 
+      const markers = normalizeFlowRunMarkers({ env, tag });
       const run = {
+        ...markers,
         flowId: flow_id,
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
@@ -262,6 +267,9 @@ export function createInternalRunsRouter(
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
       res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
+      if (error instanceof FlowRunMarkerError) {
+        res.status(400).json({ success: false, error: 'Bad Request', message: error.message }); return;
+      }
       if (ordinary) { respondError(res, error); return; }
       if (error instanceof ParentRelationError) { res.status(error.status).json({ success: false, error: error.status === 409 ? 'Conflict' : error.status === 400 ? 'Bad Request' : 'Service Unavailable' }); return; }
       if (error instanceof RepairBatchError) { res.status(409).json({ success: false, error: error.message, code: error.code }); return; }

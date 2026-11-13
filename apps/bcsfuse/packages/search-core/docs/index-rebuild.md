@@ -127,7 +127,21 @@ the configured conversion version; the host binds model, dimension and collectio
 at startup and uses existing restoration/readiness before accepting traffic.
 Source updates after completion are reconciled by normal background sync.
 No task, HTTP route, cleanup or background thread starts merely by importing these
-modules. The host starts build polling explicitly. Old artifacts are not deleted.
+modules. The catalog host owns an `IndexBuildRunner` for HTTP-triggered execution.
+After a successful PUT commits the task, the route wakes that runner with the
+specific build ID. Idle instances never scan the build table. Request completion
+or disconnection does not own the runner's lifetime. Shutdown signals the existing
+stop flag and waits for in-flight execution before closing providers.
+
+An explicitly requested task waits for an existing owner's lease or a source
+revision conflict, using the existing fenced claim. Failed tasks require another
+PUT with the same configuration. After a process crash, resubmit the same ID;
+another instance can take over after the old lease expires. GET observes state
+and does not trigger work. Completed IDs remain idempotent. Existing pending or
+interrupted tasks from before this deployment must be explicitly resubmitted or
+continued with the existing rebuild command. Startup does not automatically
+launch model work. The standalone router without a trigger remains an enqueue-only
+adapter for hosts that supply their own worker. Old artifacts are not deleted.
 
 When applying a Card Doc to Qdrant, the shared synchronizer adds `index_key` to
 the point payload. Dense and keyword collections receive the same value on both
@@ -143,3 +157,24 @@ remain unchanged. To adopt this capability later, TC supplies its own source
 adapter and conversion/publisher rather than importing an Alipay implementation.
 The HTTP create/retry/status contract remains `PUT /api/v2/index-builds/{build_id}`
 and `GET /api/v2/index-builds/{build_id}`; it is mounted only by opting-in hosts.
+
+
+## Optional mapping-enabled hosts
+
+With `allow_document_mapping=True`, the build request additionally accepts
+`document_mapping` (the same template/path structure as the
+[Card mapping contract](card-management-api.md#可选的-card--doc-配置)) and
+`validation_card_ids` (up to five existing Cards). The host validates syntax and,
+if samples are supplied, renders those Cards before creating the build. A type
+or empty-search-text failure returns 422 without creating a task. Missing optional
+paths produce warnings; no samples produces `NO_VALIDATION_SAMPLE`. Samples do
+not guarantee that every Card in a full build will render successfully.
+
+The global mapping is frozen in the existing build's `config_json`; changing it
+requires a new index key. Omission on a retry inherits its stored rule. Mapping
+filter keys determine the new generation's configured filters; the host retains
+its mandatory system filters. Do not combine mapping with legacy `filter_fields`
+in the same request. A new generation without mapping retains the legacy builder.
+Activation, recovery, retry, concurrency fencing and vector reuse are unchanged.
+The build response includes configured mapping, and the creation response may
+include validation warnings. They are diagnostics, not persisted build state.

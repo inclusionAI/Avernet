@@ -1,7 +1,7 @@
 # 独立启动与 Card 转换
 
 这条入口只安装 Avernet 公共包即可运行，不需要 OCB、内部 SDK、账号或模型密钥。
-默认使用 SQLite + Qdrant Local；离线示例向量用于验证流程，不代表真实语义效果或容量。
+使用 SQLite + 本机 Qdrant Server >=1.20；离线示例向量用于验证流程，不代表真实语义效果或容量。
 TC 继续使用原来的应用入口、Worker/Profile、recommend 和 Fuse，不自动切换到这套 Card 流程。
 
 ## 安装与启动
@@ -11,17 +11,18 @@ TC 继续使用原来的应用入口、Worker/Profile、recommend 和 Fuse，不
 ```bash
 python -m venv .venv-search
 .venv-search/bin/python -m pip install './apps/bcsfuse/packages/search-core[http,qdrant]'
-.venv-search/bin/bcsfuse-catalog --data-dir .data/catalog --port 8877
+docker run --rm -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:v1.20.0
+.venv-search/bin/bcsfuse-catalog --data-dir .data/catalog --port 8877 --qdrant-url http://127.0.0.1:6333
 ```
 
 打开 `http://127.0.0.1:8877/docs`。数据保存在指定目录下：
 
 - `cards.sqlite3`：源 Card、已发布 Doc 和索引任务表。
-- `qdrant/`：本实例的查询索引。
+- 查询索引：指定 Qdrant Server 中的集合；需要持久化时为容器挂载 `/qdrant/storage`。
 
 只允许本机回环访问。这是本地开发入口；服务器部署应在公共组装函数中注入正式鉴权。
-如需使用已启动的 Qdrant Server，可加 `--qdrant-url http://127.0.0.1:6333`；
-连接失败不会自动退回 Local。不同实例应使用独立的 Qdrant 集合。
+必须指定已启动的 Qdrant Server： `--qdrant-url http://127.0.0.1:6333`；
+Python Local 不支持原生 multilingual BM25，明确拒绝启动；连接失败也不会降级。不同实例应使用独立的 Qdrant 集合。
 
 ## 写入、搜索、更新与删除
 

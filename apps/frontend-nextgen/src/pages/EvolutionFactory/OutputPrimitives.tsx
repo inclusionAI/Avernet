@@ -1,5 +1,5 @@
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
+import { SafeHtml } from '@/components/Common/RichContent';
 import { Button } from '@/components/ui/Button';
 import type { JsonObject } from '@/domain/evolution/types';
 import { history, useParams } from '@umijs/max';

@@ -68,3 +68,6 @@ temp
 
 # Vendored internal-registry tarballs — MUST NOT leak to image
 apps/bcs/bcs_single_pre_dir
+
+# Independently published task asset is not a host image build input
+apps/frontend-nextgen/assets/task-panel

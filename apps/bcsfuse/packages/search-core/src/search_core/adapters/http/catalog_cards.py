@@ -53,9 +53,18 @@ class CardRebuildResult(BaseModel):
     card_version: int = Field(validation_alias="saved_revision")
 
 
-def create_card_router(service: CardManagement, authorize_operator: Authenticator):
+def create_card_router(
+    service: CardManagement,
+    authorize_operator: Authenticator,
+    *,
+    status_model: type[SharedCardStatus] = CardStatus,
+    allow_document_mapping: bool = False,
+):
     router = create_shared_card_router(
-        service, authorize_operator, status_model=CardStatus
+        service,
+        authorize_operator,
+        status_model=status_model,
+        allow_document_mapping=allow_document_mapping,
     )
 
     @router.post(

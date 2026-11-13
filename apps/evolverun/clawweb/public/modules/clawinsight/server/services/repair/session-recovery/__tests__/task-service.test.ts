@@ -55,10 +55,10 @@ describe("self-healing task orchestration", () => {
     expect(agent.start).toHaveBeenCalledOnce();
   });
 
-  it("accepts a replay of a task saved before trace IDs were persisted", async () => {
+  it("accepts a replay of a task saved before diagnostic evidence hints were persisted", async () => {
     const { service, agent } = setup();
     const created = await service.create(request, actor);
-    expect(await service.create({ ...request, trace_id: "fault-trace" }, actor)).toEqual(created);
+    expect(await service.create({ ...request, trace_id: "fault-trace", fault_at_ms: 1792107675000 }, actor)).toEqual(created);
     await flush();
     expect(agent.start).toHaveBeenCalledOnce();
   });

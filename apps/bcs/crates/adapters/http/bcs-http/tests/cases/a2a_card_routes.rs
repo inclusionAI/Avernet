@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>> }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
@@ -32,7 +32,7 @@ impl A2aBotManagementService for Management {
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.visibility.lock().unwrap().push(command.visibility.as_str().into());
-        assert_eq!(command.owners,Some(vec!["owner".into()]));
+        self.owners.lock().unwrap().push(command.owners);
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
     }
@@ -209,25 +209,22 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
         ("PUT","/a2a/agents/bot/agent-card",json!({"agent_card":{"name":"订单助手"}}),StatusCode::OK),
         ("POST","/a2a/agents/bot/agent-card:refresh",json!({}),StatusCode::OK),
     ];
-    for prefix in ["", "/api/v1/collaboration"] {
-        for (method,path,body,expected) in cases.clone() {
-            let path = format!("{prefix}{path}");
-            for token in [None,Some("wrong"),Some("test-admin")] {
-                let mut request=Request::builder().method(method).uri(&path).header("content-type","application/json");
-                if let Some(token)=token {request=request.header("authorization",format!("Bearer {token}"));}
-                let response=app.clone().oneshot(request.body(if method=="GET" {Body::empty()} else {Body::from(body.to_string())}).unwrap()).await.unwrap();
-                assert_eq!(response.status(),match token {None=>StatusCode::UNAUTHORIZED,Some("wrong")=>StatusCode::FORBIDDEN,_=>expected});
-                if token==Some("test-admin") && method=="POST" && expected==StatusCode::CREATED {
-                    assert_eq!(response.headers()["location"],format!("{path}/bot/agent-card"));
-                }
-                let bytes=to_bytes(response.into_body(),8192).await.unwrap();
-                let value:Value=serde_json::from_slice(&bytes).unwrap();
-                assert!(!String::from_utf8_lossy(&bytes).contains("private-"));
-                for key in ["provider_id","bot_uuid","revision"] {assert!(value.get(key).is_none());}
-                if token==Some("test-admin") {
-                    assert_eq!(value["agent_name"],"订单助手");assert_eq!(value["bot_id"],"bot");assert!(value.get("bot_runtime_token").is_none());
-                    assert_eq!(value["agent_card"]["skills"][0]["unknown"],42);
-                }
+    for (method,path,body,expected) in cases {
+        for token in [None,Some("wrong"),Some("test-admin")] {
+            let mut request=Request::builder().method(method).uri(path).header("content-type","application/json");
+            if let Some(token)=token {request=request.header("authorization",format!("Bearer {token}"));}
+            let response=app.clone().oneshot(request.body(if method=="GET" {Body::empty()} else {Body::from(body.to_string())}).unwrap()).await.unwrap();
+            assert_eq!(response.status(),match token {None=>StatusCode::UNAUTHORIZED,Some("wrong")=>StatusCode::FORBIDDEN,_=>expected});
+            if token==Some("test-admin") && method=="POST" && expected==StatusCode::CREATED {
+                assert_eq!(response.headers()["location"],format!("{path}/bot/agent-card"));
+            }
+            let bytes=to_bytes(response.into_body(),8192).await.unwrap();
+            let value:Value=serde_json::from_slice(&bytes).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains("private-"));
+            for key in ["provider_id","bot_uuid","revision"] {assert!(value.get(key).is_none());}
+            if token==Some("test-admin") {
+                assert_eq!(value["agent_name"],"订单助手");assert_eq!(value["bot_id"],"bot");assert!(value.get("bot_runtime_token").is_none());
+                assert_eq!(value["agent_card"]["skills"][0]["unknown"],42);
             }
         }
     }
@@ -235,9 +232,7 @@ async fn public_routes_use_ids_return_bot_id_and_exclude_credentials() {
 
 #[tokio::test]
 async fn resource_paths_source_recovery_and_retired_routes_follow_contract() {
-    for prefix in ["", "/api/v1/collaboration"] {
-        assert_resource_paths(prefix).await;
-    }
+    assert_resource_paths("").await;
 }
 
 async fn assert_resource_paths(prefix: &str) {
@@ -269,6 +264,21 @@ async fn assert_resource_paths(prefix: &str) {
     for path in ["/a2a/agent-card?agent_name=x", "/a2a/agents/bot/versions"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn registration_translates_omitted_null_and_empty_owners() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for owners in [None,Some(Value::Null),Some(json!([])),Some(json!(["owner"]))] {
+        let mut body=json!({"provider_bot_ref":"remote","agent_card":{}});
+        if let Some(value)=owners {body["owners"]=value;}
+        let response=app.clone().oneshot(Request::builder().method("POST").uri("/a2a/agents")
+            .header("authorization","Bearer test-admin").header("content-type","application/json")
+            .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::CREATED);
+    }
+    assert_eq!(*management.owners.lock().unwrap(),vec![None,None,Some(vec![]),Some(vec!["owner".into()])]);
 }
 
 #[tokio::test]
@@ -322,4 +332,15 @@ async fn public_errors_are_structured_including_parser_and_method_failures() {
         .body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(response.status(),StatusCode::UNAUTHORIZED);
     assert_eq!(response.headers()["www-authenticate"],"Bearer");
+}
+
+#[tokio::test]
+async fn versioned_a2a_routes_are_not_owned_by_legacy_adapter() {
+    let app=build_router(HttpAppState::new(Services::builder().build_for_test()));
+    for path in ["/agents", "/agents/bot/agent-card", "/agents/bot/agent-card:refresh",
+        "/providers/orders/bots", "/providers/orders/bots/remote/chat-async", "/chat/runs/run", "/chat/runs/run/cancel"] {
+        let response=app.clone().oneshot(Request::builder().uri(format!("/api/v1/collaboration/a2a{path}"))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::NOT_FOUND);
+    }
 }

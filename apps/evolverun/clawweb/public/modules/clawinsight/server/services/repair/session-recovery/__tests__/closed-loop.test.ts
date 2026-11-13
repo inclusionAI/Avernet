@@ -350,6 +350,29 @@ it("NAS reads bind delivery to the current retry's actual user record, never an 
   const found = await agent.sessionRead(task, { clientRequestId: "nas-current-found", purpose: "读取实际新消息", nas_evidence: evidence });
   expect(found.result).toMatchObject({ delivery_confirmed: true, delivery: { message_id: "actual" } });
 });
+it("redacts OC NAS URL arguments and drops supplied comparison claims", async () => {
+  const task = await create("automatic");
+  const original = "fixture".repeat(8), copied = original.slice(0, 6) + original.slice(7);
+  const url = (value: string) => {
+    const url = new URL("https://example.invalid/file");
+    url.searchParams.set("token", value);
+    return url.href;
+  };
+  const receipt = await agent.sessionRead(task, { clientRequestId: "nas-url-argument", purpose: "比较原链接和工具入参",
+    nas_evidence: {
+      source: `${directory}/prod/prod_staff_owner_openclaw_default/.openclaw/agents/main/sessions/original.jsonl`,
+      session_id: "original", delivery_key: request.delivery_key,
+      url_argument_comparisons: [{ status: "match", source_line: 20 }],
+      messages: [
+        { line_no: 5, record: { message: { role: "user", content: url(original) } } },
+        { line_no: 6, record: { message: { role: "assistant", content: [{ type: "toolCall", arguments: { url: url(copied) } }] } } },
+      ],
+    } });
+  expect(receipt).toMatchObject({ status: "succeeded" });
+  expect(receipt.result).not.toHaveProperty("url_argument_comparisons");
+  expect(JSON.stringify(receipt)).not.toContain(original);
+  expect(JSON.stringify(receipt)).not.toContain(copied);
+});
 it.each(["apply", "blocked"])("%s failure callbacks retain saved evidence without a prior effect judgment", async kind => {
   let task = await create("automatic"); const read = await inspect(task, "failure-source");
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要环境修复", evidence_ids: [read.evidenceId] });
@@ -603,8 +626,13 @@ it("accepts internal requests without independent tokens while execution tickets
     expect((await fetch(`${origin}/internal/monitoring/session-recoveries/${task.taskId}/continue`, { method: "POST" })).status).toBe(409);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${input.credentials.executionTicket}` };
     expect((await fetch(`${worker}/bootstrap`)).status).toBe(401);
+    const taskReads = vi.spyOn(tasks, "find");
     const bootstrap = await fetch(`${worker}/bootstrap`, { headers }); expect(bootstrap.status).toBe(200);
+    expect(taskReads).toHaveBeenLastCalledWith(task.taskId, { forBootstrap: true });
     expect((await bootstrap.json()).task.execution.ticketDigest).toBeUndefined();
+    taskReads.mockClear();
+    expect((await fetch(`${worker}/heartbeat`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+    expect(taskReads.mock.calls.some(([, options]) => options?.forBootstrap === true)).toBe(false);
     const read = await fetch(`${worker}/tools/session/read`, { method: "POST", headers, body: JSON.stringify({ clientRequestId: "http-read", purpose: "观察原故障及实际触达" }) });
     const evidence = await read.json(); expect(read.status).toBe(200); expect(evidence.result.delivery_confirmed).toBe(true);
     const ownerUrl = `${origin}/monitoring/session-recoveries/${task.taskId}`;
@@ -997,7 +1025,8 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
   const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
   read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });
   const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-observe", purpose: "从真实用户轨迹核实触达" });
-  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`, notBeforeMs: receipt.started_at_ms }));
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`,
+    sentMessage: receipt.message, notBeforeMs: receipt.started_at_ms }));
   await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");

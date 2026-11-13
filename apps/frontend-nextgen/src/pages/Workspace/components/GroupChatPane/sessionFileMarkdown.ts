@@ -1,6 +1,6 @@
-// markdown-it 为 @alipay/bigfish 传递依赖（src/assets/TaskPanel/MarkdownCell 同款 import 先例）；
+// Markdown 渲染后的 HTML 经通用 RichContent 净化；
 // html:false 禁止内联 HTML（XSS 安全），breaks 换行转 <br>，linkify 自动链接。
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import { getFileExt } from '@/services/workspace/sessionFileUtils';
 import MarkdownIt from 'markdown-it';
 

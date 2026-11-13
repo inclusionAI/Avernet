@@ -80,16 +80,15 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     }
     const terminal = ["completed", "failed", "canceled"].includes(task.status);
     const canConfirm = !terminal && request.status === "pending";
-    const isConfiguration = request.reason === "configuration";
     const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
-      bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: isConfiguration ? "请补齐任务配置" : "请处理权限申请",
-      summary: ownerCardText(request.summary, isConfiguration ? "当前任务需要补齐配置，具体对象和操作请见下方。" : "当前任务需要处理权限申请，具体对象和操作请见下方。"),
-      instructions: ownerCardText(request.instructions, isConfiguration ? "请打开任务详情，查看完整的配置项、处理事项和入口。" : "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
+      bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理权限申请",
+      summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
+      instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
       status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
         : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
       confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
-      confirm_label: request.status === "confirmed" ? "已处理" : isConfiguration ? "已补齐配置，继续核验" : "已获取权限，继续任务" };
+      confirm_label: request.status === "confirmed" ? "已处理" : "已获取权限，继续任务" };
     const outTrackId = recoveryOwnerCardTrackId(task.taskId, environment);
     if (updateOnly) await this.sender.updateCard({ outTrackId, cardParamMap });
     else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
@@ -238,6 +237,17 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     section("当前结果", status === "failed" ? "发送调用失败，详见任务中的实际回执。"
       : status === "unknown" ? "发送结果未知，需核对原会话；不会因此重新执行业务动作。"
       : "恢复消息已提交，触达和恢复效果尚待验证。");
+  } else if (kind === "owner_card_sent") {
+    const request = task.ownerRequest;
+    const sameRequest = request && event.payload.owner_request_id === request.requestId;
+    title = "已向 Owner 发送权限待办卡片";
+    if (sameRequest) {
+      section("受阻原因", request.summary);
+      section("需要 Owner 处理", request.instructions);
+    }
+    section("当前状态", sameRequest && task.status === "waiting_owner" && request.status === "pending"
+      ? "权限待办卡片已发送，等待 Owner 处理。获批后请在钉钉私聊卡片上点击「已获取权限，继续任务」。"
+      : "权限待办卡片已发送，最新处理进展见任务页。");
   } else if (kind === "plan") {
     const plan = event.payload.plan as RecoveryStoredTask["plan"];
     title = "已形成修复方案";
@@ -307,7 +317,9 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     const webhook = config.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? config.webhook;
     const source = task.timeline.find(event => event.event_id === input.eventId);
     if (!source) return;
-    const id = `notification-${input.kind}-${input.eventId}`;
+    if (input.kind === "owner_card_sent" && (source.kind !== "notification" || source.payload.channel !== "owner_card"
+      || source.payload.operation !== "create" || source.payload.state !== "sent" || source.payload.sent !== true)) return;
+    const id = `notification-${input.kind}-${input.kind === "owner_card_sent" ? task.taskId : input.eventId}`;
     const phase = input.kind === "plan" ? "plan" : input.kind === "message" ? "observe" : input.kind === "execution" ? "apply" : task.phase;
     const payload = { channel: "group_webhook", kind: input.kind, source_event_id: input.eventId, phase };
     const claimed = await this.deps.tasks.appendNotification(input.taskId, {

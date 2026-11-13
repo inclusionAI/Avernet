@@ -67,6 +67,76 @@ def validate_render_screen_entry(ctx: Context, location: str, entry: dict[str, A
         )
 
 
+#: The fields a ``task_nav`` entry may carry — closed. A task-nav row is a
+#: cross-bot reference whose workflow permissions (the
+#: ``bot-workflow-permissions`` clawweb owns) copy converges onto the
+#: destination: ``type`` discriminates the clone shape, ``source_bot_id``
+#: names the source row, and ``source_owner_id`` disambiguates it because a
+#: ``bot_id`` is not globally unique (the same ``(bot_id, owner_id)``
+#: addressing the bot-file-sync source uses). The destination side
+#: (``target_bot_id`` / ``target_owner_id``) is the apply context itself,
+#: and ``scope`` / ``dry_run`` are constants the handler writes (``exact`` /
+#: ``false``), so none of the three is an entry field — an extra key is a
+#: caller believing they configured a knob the platform does not expose on
+#: this surface.
+_TASK_NAV_ENTRY_KEYS: frozenset[str] = frozenset({"type", "source_bot_id", "source_owner_id"})
+
+#: The ``type`` values this build knows. v1 ships ``"bot"`` (clone the source
+#: bot's whole workflow-permission set); a future ``"item"`` will clone a
+#: named workflow and carry ``workflow_id`` — added here as a new member and
+#: as a conditional allowed-field below, never a schema break. Closed so a
+#: type the platform does not act on is refused at ``PUT`` rather than
+#: silently no-opping at apply.
+_TASK_NAV_KINDS: frozenset[str] = frozenset({"bot"})
+
+
+def validate_task_nav_entry(ctx: Context, location: str, entry: dict[str, Any]) -> None:
+    """One task-nav row: a ``type`` this build knows, a non-empty
+    ``source_bot_id`` and ``source_owner_id``, nothing else.
+
+    The handler does not read the destination's current workflow permissions
+    to converge (the clawweb ``clone`` endpoint is idempotent and is the single
+    converge), so the row is just the source identity plus the clone shape —
+    the same closed-set discipline ``render_screen`` keeps, only the fields
+    are a reference rather than a verbatim value row.
+
+    ``type`` is the discriminator a future ``"item"`` clone is additive on:
+    today only ``"bot"`` is admitted, and any other value (including a missing
+    one) is one ``invalid_type`` violation, never a no-op. When ``"item"``
+    lands the allowed-field set for that branch widens to include
+    ``workflow_id``; ``"bot"``'s set does not, so the two shapes cannot drift
+    into each other.
+    """
+    for key in entry:
+        if key not in _TASK_NAV_ENTRY_KEYS:
+            ctx.add(
+                f"{location}.{key}",
+                "unknown_field",
+                f"unknown field '{key}' for a task_nav entry",
+            )
+    kind = entry.get("type")
+    if not isinstance(kind, str) or kind not in _TASK_NAV_KINDS:
+        ctx.add(
+            f"{location}.type",
+            "invalid_type",
+            f"a task_nav entry must have a 'type' one of {sorted(_TASK_NAV_KINDS)}",
+        )
+    source_bot_id = entry.get("source_bot_id")
+    if not isinstance(source_bot_id, str) or not source_bot_id:
+        ctx.add(
+            f"{location}.source_bot_id",
+            "missing_source_bot_id",
+            "a task_nav entry must have a non-empty 'source_bot_id'",
+        )
+    source_owner_id = entry.get("source_owner_id")
+    if not isinstance(source_owner_id, str) or not source_owner_id:
+        ctx.add(
+            f"{location}.source_owner_id",
+            "missing_source_owner_id",
+            "a task_nav entry must have a non-empty 'source_owner_id'",
+        )
+
+
 #: The kinds this build knows, each mapped to its per-entry validator. A kind
 #: present here is one the manifest accepts; a kind absent here is one no
 #: apply-time handler resolves either, refused as ``unknown_bot_config_kind``.
@@ -74,10 +144,12 @@ def validate_render_screen_entry(ctx: Context, location: str, entry: dict[str, A
 #: :mod:`.apply_engine.materialisers.bot_config` — two edits, one surface.
 BOT_CONFIG_KIND_VALIDATORS: dict[str, Callable[[Context, str, dict[str, Any]], None]] = {
     "render_screen": validate_render_screen_entry,
+    "task_nav": validate_task_nav_entry,
 }
 
 
 __all__ = [
     "BOT_CONFIG_KIND_VALIDATORS",
     "validate_render_screen_entry",
+    "validate_task_nav_entry",
 ]

@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { useEffect, useState } from 'react';
 import BotAvatar from './BotAvatar';
 import { AvatarSettings } from './BotAvatar/AvatarSettings';
+import type { AvatarProcessingStatus } from './BotAvatar/AvatarEditor';
 
 /** 输入余量不足 10% 时计数器转警示色，提示接近上限。 */
 function FieldCounter({ value, max }: { value: number; max: number }) {
@@ -57,6 +58,7 @@ export function BotBasicInfoDialog({
   // 头像在编辑器内仅本地暂存（undefined = 未改动），与名称/描述一起等「保存修改」统一落库。
   const [stagedAvatar, setStagedAvatar] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
   // 头像编辑器宿主浮层（上传/AIGC）开时抑制本弹窗的外点关闭，避免浮层被连坐卸载。
   const [avatarOverlayOpen, setAvatarOverlayOpen] = useState(false);
 
@@ -65,12 +67,13 @@ export function BotBasicInfoDialog({
     setName(bot.name);
     setDescription(bot.description ?? '');
     setStagedAvatar(undefined);
+    setAvatarStatus('idle');
     setAvatarOverlayOpen(false);
   }, [bot.description, bot.name, open]);
 
   const avatarDirty = !!stagedAvatar && stagedAvatar !== (bot.avatarUrl ?? '');
   const dirty = avatarDirty || name.trim() !== bot.name || description.trim() !== (bot.description ?? '');
-  const canSubmit = editable && !saving && !submitting && !!name.trim() && dirty;
+  const canSubmit = editable && !saving && !submitting && !avatarOverlayOpen && avatarStatus === 'idle' && !!name.trim() && dirty;
   const engineLabel = getBotEngineLabel(bot.runtime.engine);
   const avatarUrl = stagedAvatar ?? (bot.avatarUrl || generateBotAvatar(bot.id || bot.name));
   // 名片实时预览：清空输入时回退到旧名称，避免预览区闪空。
@@ -146,6 +149,7 @@ export function BotBasicInfoDialog({
                 botId={bot.id}
                 editable
                 onStagedChange={setStagedAvatar}
+                onProcessingChange={setAvatarStatus}
                 onOverlayOpenChange={setAvatarOverlayOpen}
                 trigger={
                   <Button

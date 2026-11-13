@@ -81,7 +81,8 @@ def test_64_native_async_model_waits_preserve_keyword_fallback(blocked):
         assert all(
             r.status == "degraded" and r.items[0].item_id == "a" for r in results
         )
-        assert all(r.reasons == (blocked + "_unavailable",) for r in results)
+        expected_reasons = (f"{blocked}_unavailable", f"{blocked}_timeout")
+        assert all(r.reasons == expected_reasons for r in results)
         assert active == 0
 
     # One index worker makes any accidental model-thread submission visible.

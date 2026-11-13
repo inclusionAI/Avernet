@@ -9,6 +9,7 @@ export type RecoveryRequest = {
   session_key: string;
   session_id?: string;
   trace_id?: string;
+  fault_at_ms?: number;
   delivery_key: string;
   diagnosis: string;
   error_location?: string;
@@ -20,12 +21,13 @@ import type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/
 export type RecoveryActor = { userId: string; isAdmin: boolean };
 /** Optional after-hook; implementations must isolate notification failures from business work. */
 export interface RecoveryActionNotifier {
-  after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" }): void;
+  after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" | "owner_card_sent" }): void;
 }
 /** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
 export type RecoveryTermination = { status: "remote_stopped" | "remote_stop_failed" | "stop_pending"; aisJobId: string | null };
-export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
-export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination };
+export type RecoveryExecutionView = { executionId: string; attempt: number; effectRecheckRequestId?: string; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
+export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination;
+  effectRecheckFacts?: Pick<RecoveryStoredTask, "interventionStatus" | "effectWait"> & { hasResumeReservation: boolean; executionActive: boolean } };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
@@ -42,6 +44,8 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   confirmOwner(taskId: string, requestId: string, actor: RecoveryActor, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;
+  startEffectRecheck(taskId: string, requestId: unknown, actor: RecoveryActor): Promise<import("./task-contracts.js").RecoveryEffectRecheckAck>;
+  finishEffectRecheck(taskId: string, executionId: string, judgment: RecoveryJudgment, freshEvidence: ReadonlySet<string>): Promise<void>;
   assess(taskId: string, version: number, input: import("./task-contracts.js").RecoveryAssessment, finalSummary?: unknown): Promise<void>;
   observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void>;
   plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;
@@ -57,7 +61,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
   readonly handleAisStatus: AisStatusHandler;
-  verify(taskId: string, executionId: string, ticket: string, control?: boolean): Promise<RecoveryStoredTask>;
+  verify(taskId: string, executionId: string, ticket: string, control?: boolean, forBootstrap?: boolean): Promise<RecoveryStoredTask>;
   bootstrap(task: RecoveryStoredTask): Promise<unknown>;
   heartbeat(task: RecoveryStoredTask, sessionId?: string): Promise<unknown>;
   sessionRead(task: RecoveryStoredTask, body: Record<string, unknown>): Promise<unknown>;

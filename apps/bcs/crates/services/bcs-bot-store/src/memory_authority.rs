@@ -347,6 +347,14 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         })
     }
 
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<BotOwnershipView>>> {
+        // The batch spine lives in `memory_ownerships_batch.rs`
+        // (mirrors the SQL reads_ownerships split).
+        self.memory_ownership_projection(bot_ids).await
+    }
     async fn managers(&self, query: ManagerListQuery) -> ServiceResult<ManagerPage> {
         check_page_bounds(query.offset, query.limit)?;
         let env = resolve_env();

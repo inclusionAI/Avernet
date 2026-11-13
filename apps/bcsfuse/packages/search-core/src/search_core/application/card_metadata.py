@@ -33,10 +33,12 @@ class CardMetadataRetrieval:
         *,
         project_card=card_metadata,
         project_item=search_item,
+        metadata_dependencies=lambda metadata: (),
     ):
         self.retrieval, self.repository = retrieval, repository
         self.cache, self.state, self.execution = cache, state, execution
         self.project_card, self.project_item = project_card, project_item
+        self.metadata_dependencies = metadata_dependencies
 
     async def retrieve(self, request):
         result = await self.retrieval.retrieve(request)
@@ -53,15 +55,24 @@ class CardMetadataRetrieval:
     async def _enrich(self, result, stage):
         if not result.items:
             return result
-        revision = self.state.revision()
+        revision = self.state.metadata_revision()
         cards, missing = {}, []
+        stale_hits = 0
         for item in result.items:
-            cached = self.cache.get(item.item_id) if revision is not None else None
+            cached, stale = self.cache.get_with_stale(item.item_id)
+            if stale:
+                refresh = self.state.pending_card_metadata.get((revision, item.item_id))
+                if refresh is None or refresh.done():
+                    cached = None  # This request refreshes; followers can use old data.
+                else:
+                    stale_hits += 1
             if cached is None:
                 missing.append(item.item_id)
             else:
                 cards[item.item_id] = cached
-        stage.update(cache_hits=len(cards), cache_misses=len(missing))
+        stage.update(
+            cache_hits=len(cards), cache_misses=len(missing), stale_hits=stale_hits
+        )
         try:
             if missing:
                 with stage_timing("card_fetch"):
@@ -105,7 +116,15 @@ class CardMetadataRetrieval:
         cards = {}
         for key, card in fetched.items():
             cards[key] = self.project_card(card)
-            self.state.put_result(self.cache, revision, key, cards[key])
+            self.state.put_result(
+                self.cache,
+                revision,
+                key,
+                cards[key],
+                dependencies=self.metadata_dependencies(cards[key]),
+            )
+        for key in set(keys) - fetched.keys():
+            self.state.discard_metadata(self.cache, revision, key)
         return cards
 
     async def _fetch_missing(self, cards, missing, revision, stage):

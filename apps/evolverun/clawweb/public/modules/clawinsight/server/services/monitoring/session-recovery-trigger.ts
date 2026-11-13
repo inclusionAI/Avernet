@@ -6,7 +6,7 @@ import { isRecoveryTraceId, parseRequest } from "../repair/session-recovery/vali
 import {
   DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
 } from "./contracts.js";
-import { ACTION_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
+import { RECOVERY_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
 import { target, targetKey } from "./target.js";
 
 export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
@@ -70,7 +70,7 @@ export function createMonitoringRecoveryTrigger(input: {
     async trigger(event) {
       const reason = recoverySkipReason(event);
       if (reason) {
-        console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: ACTION_POLICY_VERSION, reason });
+        console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: RECOVERY_POLICY_VERSION, reason });
         return;
       }
       let allowed: MonitoringTarget[];
@@ -97,12 +97,14 @@ export function createMonitoringRecoveryTrigger(input: {
           event.businessDiagnosis?.trim() ? `业务诊断：${event.businessDiagnosis}` : "",
           event.systemDiagnosis?.trim() ? `系统诊断：${event.systemDiagnosis}` : "",
         ].filter(Boolean).join("\n");
+        const faultAtMs = event.engine === "OC" && event.occurredAt ? Date.parse(event.occurredAt) : NaN;
         request = parseRequest({
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
           target: recoveryTarget,
           session_key: event.sessionKey,
           ...(event.sessionId ? { session_id: event.sessionId } : {}),
           ...(isRecoveryTraceId(event.traceId) ? { trace_id: event.traceId } : {}),
+          ...(Number.isSafeInteger(faultAtMs) && faultAtMs > 0 ? { fault_at_ms: faultAtMs } : {}),
           delivery_key: `monitoring-${createHash("sha256").update(event.eventId).digest("hex")}`,
           diagnosis,
         });

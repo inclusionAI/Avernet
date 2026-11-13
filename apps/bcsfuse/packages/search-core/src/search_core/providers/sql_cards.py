@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from search_core.api.cards import (
+    UNSET_MAPPING,
     CardRecord,
     CatalogConflict,
 )
@@ -169,7 +170,61 @@ class SqlCardRepository(CardWrites):
                 for row in cur.fetchall()
             ]
 
-    def save(self, card, expected_revision):
+    def iter_changes(self, checkpoint, batch_size):
+        """Yield (ID/revision page, fixed DB-time upper bound), including deletes.
+
+        Commit the upper bound only after consuming every page. The inclusive
+        lower bound replays equal timestamps; revision checks deduplicate them.
+        A nonempty first page carries DB time, avoiding a separate clock query.
+        An empty scan leaves the checkpoint unchanged. Late commits older than
+        the checkpoint are recovered by the low-frequency version scan.
+        """
+        if not 1 <= batch_size <= 1000:
+            raise ValueError("invalid page size")
+        stamp = "?" if self.placeholder == "?" else "FROM_UNIXTIME(?)"
+        modified = (
+            "gmt_modify" if self.placeholder == "?" else "UNIX_TIMESTAMP(gmt_modify)"
+        )
+        clock = (
+            self.now_expression
+            if self.placeholder == "?"
+            else "UNIX_TIMESTAMP(CURRENT_TIMESTAMP(6))"
+        )
+        after_time, after_id = checkpoint, ""
+        upper = None
+        while True:
+            ceiling = self.now_expression if upper is None else stamp
+            args = [self.environment, checkpoint]
+            if upper is not None:
+                args.append(upper)
+            args.extend((after_time, after_time, after_id, batch_size))
+            with self._cursor() as (_, cur):
+                self._execute(
+                    cur,
+                    f"""SELECT agent_id,revision,{modified} AS modified_at,{clock} AS scan_upper
+                    FROM {self.table}
+                    WHERE environment=? AND gmt_modify>={stamp} AND gmt_modify<={ceiling}
+                    AND (gmt_modify>{stamp} OR (gmt_modify={stamp} AND agent_id>?))
+                    ORDER BY gmt_modify,agent_id LIMIT ?""",
+                    tuple(args),
+                )
+                rows = cur.fetchall()
+            if not rows:
+                return
+            values = [
+                (r["agent_id"], r["revision"], r["modified_at"], r["scan_upper"])
+                if isinstance(r, dict)
+                else r
+                for r in rows
+            ]
+            if upper is None:
+                upper = float(values[0][3])
+            yield [(r[0], int(r[1])) for r in values], upper
+            after_time, after_id = float(values[-1][2]), values[-1][0]
+            if len(values) < batch_size:
+                return
+
+    def save(self, card, expected_revision, *, config=UNSET_MAPPING):
         if (
             expected_revision < 0
             or len(card.agent_id) > 128
@@ -186,7 +241,9 @@ class SqlCardRepository(CardWrites):
             and not current.card.deleted
             and current.card.source_version == card.source_version
         ):
-            if current.card == card:
+            if current.card == card and (
+                config is UNSET_MAPPING or config == current.config
+            ):
                 return current  # exact replay, including a response lost after commit
             raise CatalogConflict("source version already has different contents")
         if (current.revision if current else 0) != expected_revision:
@@ -227,6 +284,17 @@ class SqlCardRepository(CardWrites):
                     )
                     if cur.rowcount != 1:
                         raise CatalogConflict("revision conflict")
+                if config is not UNSET_MAPPING:
+                    self._execute(
+                        cur,
+                        f"UPDATE {self.table} SET config=?, gmt_modify=gmt_modify "
+                        "WHERE environment=? AND agent_id=?",
+                        (
+                            json.dumps(config, ensure_ascii=False, allow_nan=False),
+                            self.environment,
+                            card.agent_id,
+                        ),
+                    )
                 if card.deleted:
                     self._retire_documents(cur, card.agent_id, expected_revision + 1)
                 conn.commit()
@@ -235,7 +303,9 @@ class SqlCardRepository(CardWrites):
                 # Resolve a competing create without hiding an actual DB failure.
                 latest = self.get(card.agent_id)
                 if latest is not None:
-                    if latest.card == card:
+                    if latest.card == card and (
+                        config is UNSET_MAPPING or config == latest.config
+                    ):
                         return latest
                     raise CatalogConflict("concurrent Card creation") from error
             raise
@@ -247,7 +317,9 @@ class SqlCardRepository(CardWrites):
             current.prepared if current else None,
             "",
             current.profile if current else None,
-            current.config if current else None,
+            (current.config if current else None)
+            if config is UNSET_MAPPING
+            else config,
         )
 
     def delete(self, agent_id, expected_revision):

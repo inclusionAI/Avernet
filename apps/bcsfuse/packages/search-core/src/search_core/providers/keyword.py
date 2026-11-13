@@ -1,51 +1,38 @@
-"""Disposable sparse lexical index; durable payloads remain the source of truth.
+"""Qdrant native BM25 with multilingual text and standard name ngrams.
 
-No embedding service, downloaded tokenizer, or new database schema is needed.
-ASCII words/numeric IDs and Chinese bigrams use deterministic sparse dimensions.
-Qdrant applies IDF and the same payload filters before limiting results.
+BM25 and best-field scoring run on the same Qdrant Server as dense retrieval.
+Python Local is rejected explicitly; there is no alternate scoring fallback.
 """
 
-import hashlib
-import math
-import re
 import unicodedata
-from collections import Counter
 from threading import Lock
 from uuid import NAMESPACE_URL, uuid5
 
-from qdrant_client import QdrantClient, models
+from qdrant_client import models
+from whoosh.analysis import LowercaseFilter, NgramFilter, RegexTokenizer
 
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.plugin_api.vector_search_hit import VectorSearchHit
 from search_core.providers.qdrant_server import remote_client
 
+_FIELDS = ("_bm25_name", "_bm25_text", "_bm25_name_grams")
+_NAME_ANALYZER = (
+    RegexTokenizer(r"[^\W_]+") | LowercaseFilter() | NgramFilter(minsize=3, maxsize=3)
+)
+
 
 def normalize(text: str) -> str:
     return unicodedata.normalize("NFKC", text).strip().casefold()
 
 
-def sparse(text: str) -> models.SparseVector:
-    terms = []
-    for token in re.findall(r"[a-z0-9_]+|[\u3400-\u9fff]+", normalize(text)):
-        if re.fullmatch(r"[\u3400-\u9fff]+", token) and len(token) > 1:
-            terms.extend(token[i : i + 2] for i in range(len(token) - 1))
-        else:
-            terms.append(token)
-    counts = Counter(terms)
-    # Hash collisions combine weights, so indices are always unique and ordered.
-    weights = Counter()
-    for term, count in counts.items():
-        index = int.from_bytes(
-            hashlib.blake2s(term.encode(), digest_size=4).digest(), "big"
-        )
-        weights[index] += 1 + math.log(count)
-    indices = sorted(weights)
-    return models.SparseVector(indices=indices, values=[weights[i] for i in indices])
+def name_grams(text: str) -> str:
+    """Mature tokenizer only; native BM25 owns frequencies and length statistics."""
+    return " ".join(token.text for token in _NAME_ANALYZER(normalize(text)))
 
 
 class QdrantKeywordIndex:
-    """A Local or Server sparse collection, owned by the durable vector store."""
+    """A native full-text collection, owned by the durable vector store."""
 
     def __init__(
         self,
@@ -53,14 +40,23 @@ class QdrantKeywordIndex:
         exact_match_field: str | None = None,
         connection: QdrantConnection = LOCAL_QDRANT,
         collection_name: str = "keywords",
+        hit_payload_fields: tuple[str, ...] | None = None,
     ):
+        if connection.mode != "server":
+            raise ValueError(
+                "Native multilingual BM25 requires Qdrant Server >=1.20; Python Local "
+                "is unsupported. Set QDRANT_MODE=server and QDRANT_URL explicitly."
+            )
         self._exact_match_field = exact_match_field
+        self._hit_payload = (
+            True
+            if hit_payload_fields is None
+            else ["_keyword_external_id", *hit_payload_fields]
+        )
         self.connection = connection
         self.collection_name = collection_name
         self._client = None
         self._init_lock = Lock()
-        if connection.mode == "local":
-            self._ensure_client()
 
     def _ensure_client(self):
         if self._client is not None:
@@ -68,31 +64,32 @@ class QdrantKeywordIndex:
         with self._init_lock:
             if self._client is not None:
                 return
-            client = (
-                remote_client(self.connection)
-                if self.connection.mode == "server"
-                else QdrantClient(location=":memory:")
-            )
+            client = remote_client(self.connection)
             try:
                 if not client.collection_exists(self.collection_name):
-                    client.create_collection(
-                        self.collection_name,
-                        vectors_config={},
-                        sparse_vectors_config={
-                            "text": models.SparseVectorParams(
-                                modifier=models.Modifier.IDF
-                            )
-                        },
+                    client.create_collection(self.collection_name, vectors_config={})
+                schema = client.get_collection(self.collection_name).payload_schema
+                for field in _FIELDS:
+                    params = models.TextIndexParams(
+                        type=models.TextIndexType.TEXT,
+                        tokenizer=(
+                            models.TokenizerType.WHITESPACE
+                            if field == _FIELDS[2]
+                            else models.TokenizerType.MULTILINGUAL
+                        ),
+                        scoring=models.TextScoringParams(
+                            type=models.TextScoringType.BM25
+                        ),
                     )
-                params = client.get_collection(self.collection_name).config.params
-                sparse_config = params.sparse_vectors or {}
-                if (
-                    "text" not in sparse_config
-                    or sparse_config["text"].modifier != models.Modifier.IDF
-                ):
-                    raise ValueError(
-                        "Qdrant keyword collection must use the text IDF sparse vector"
-                    )
+                    existing = schema.get(field)
+                    if existing is None:
+                        client.create_payload_index(
+                            self.collection_name, field, params, wait=True
+                        )
+                    elif existing.params != params:
+                        raise ValueError(
+                            f"Incompatible BM25 index {field}; rebuild keyword index"
+                        )
             except Exception:
                 client.close()
                 raise
@@ -136,12 +133,14 @@ class QdrantKeywordIndex:
                 content = ""
             text = payload.pop("_keyword_text", None)
             if text is None:
-                text = " ".join([str(payload.get("name") or ""), str(content)])
+                text = str(content)
             payload["_keyword_external_id"] = point.id
+            name = str(payload.get("name") or "")
+            payload.update(zip(_FIELDS, (name, str(text), name_grams(name))))
             batch.append(
                 models.PointStruct(
                     id=str(uuid5(NAMESPACE_URL, point.id)),
-                    vector={"text": sparse(text)},
+                    vector={},
                     payload=payload,
                 )
             )
@@ -192,19 +191,34 @@ class QdrantKeywordIndex:
                     ]
                 ),
                 limit=top_k,
+                with_payload=self._hit_payload,
                 with_vectors=False,
             )
-        query_vector = sparse(query)
-        ranked = []
-        if query_vector.indices:
-            ranked = self._client.query_points(
-                self.collection_name,
-                query=query_vector,
-                using="text",
+        query_filter = models.Filter(must=conditions) if conditions else None
+        texts = (query, query, name_grams(query))
+        prefetch = [
+            models.Prefetch(
+                query=models.TextQuery(text=text),
+                using=field,
+                filter=query_filter,
                 limit=top_k,
-                query_filter=models.Filter(must=conditions) if conditions else None,
-                **({"timeout": timeout} if timeout is not None else {}),
-            ).points
+            )
+            for field, text in zip(_FIELDS, texts)
+            if text.strip()
+        ]
+        ranked = self._client.query_points(
+            self.collection_name,
+            prefetch=prefetch,
+            query=models.FormulaQuery(
+                formula=models.MaxExpression(
+                    max=[f"$score[{i}]" for i in range(len(prefetch))]
+                )
+            ),
+            limit=top_k,
+            with_payload=self._hit_payload,
+            query_filter=query_filter,
+            **({"timeout": timeout} if timeout is not None else {}),
+        ).points
         results, seen = [], set()
         exact_score = max((p.score for p in ranked), default=0.0) + 1.0
         for point, is_exact in [
@@ -213,6 +227,8 @@ class QdrantKeywordIndex:
         ]:
             payload = dict(point.payload or {})
             key = payload.pop("_keyword_external_id")
+            for field in _FIELDS:
+                payload.pop(field, None)
             if self._exact_match_field is not None:
                 payload.pop(self._exact_match_field, None)
             if key in seen:

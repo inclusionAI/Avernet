@@ -1,3 +1,8 @@
+use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
+
+#[path = "sql_presets.rs"]
+mod sql_presets;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,6 +36,7 @@ impl GroupContextStoreError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewGroupContextEntry {
+    pub created_from_preset: bool,
     pub context_id: String,
     pub name: String,
     pub scope_level: ScopeLevel,
@@ -49,6 +55,18 @@ pub struct NewGroupContextEntry {
 
 #[async_trait]
 pub trait GroupContextRepo: Send + Sync {
+    async fn preset_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        Ok(self.list_presets(group_id).await?.iter().any(|preset| preset.name == name))
+    }
+
+    async fn list_presets(&self, _group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+        Err(GroupContextStoreError::Backend("preset storage unavailable".into()))
+    }
+
+    async fn change_preset(&self, _group_id: &str, _actor: &str, _change: GroupContextItemPresetChange) -> StoreResult<()> {
+        Err(GroupContextStoreError::Backend("preset storage unavailable".into()))
+    }
+
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry>;
 
     /// Atomically supersede the currently active row (matched by `name`, `scope`,
@@ -134,7 +152,7 @@ impl SqlGroupContextStore {
 
     fn select_cols(&self) -> String {
         let base = "id, context_id, name, scope_level, scope, content, creator, visible_to_json, \
-                    collect_from_json, owners_json, supersedes, change_reason, valid_from, valid_to, \
+                    collect_from_json, owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, \
                     is_superseded, gmt_superseded, tx_time, gmt_create, gmt_modified";
         format!(
             "{base}, {vfm}, {vtm}, {gsm}, {ttm}, {gcm}, {gmm}",
@@ -207,6 +225,7 @@ impl SqlGroupContextStore {
         let gmt_superseded_ms: Option<i64> =
             db_get_column_opt(row, "gmt_superseded_ms").map_err(GroupContextStoreError::backend)?;
         Ok(GroupContextEntry {
+            created_from_preset: db_get_column(row, "created_from_preset").map_err(GroupContextStoreError::backend)?,
             id: db_get_column(row, "id").map_err(GroupContextStoreError::backend)?,
             context_id: db_get_column(row, "context_id")
                 .map_err(GroupContextStoreError::backend)?,
@@ -262,6 +281,18 @@ impl SqlGroupContextStore {
 
 #[async_trait]
 impl GroupContextRepo for SqlGroupContextStore {
+    async fn preset_exists(&self, group_id: &str, name: &str) -> StoreResult<bool> {
+        self.has_preset(group_id, name).await
+    }
+
+    async fn list_presets(&self, group_id: &str) -> StoreResult<Vec<GroupContextItemPreset>> {
+        self.load_presets(group_id).await
+    }
+
+    async fn change_preset(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> StoreResult<()> {
+        self.write_preset(group_id, actor, change).await
+    }
+
     async fn create_active(&self, params: NewGroupContextEntry) -> StoreResult<GroupContextEntry> {
         let visible =
             serde_json::to_string(&params.visible_to).map_err(GroupContextStoreError::backend)?;
@@ -276,8 +307,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
         let result = self
@@ -294,6 +325,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
+                    DbValue::from(params.created_from_preset),
                     params
                         .supersedes
                         .map(DbValue::from)
@@ -352,8 +384,8 @@ impl GroupContextRepo for SqlGroupContextStore {
         let insert_sql = self.sql_with_timestamp_params(
             "INSERT INTO bcs_group_contexts \
              (context_id, name, scope_level, scope, content, creator, visible_to_json, collect_from_json, \
-              owners_json, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
+              owners_json, created_from_preset, supersedes, change_reason, valid_from, valid_to, is_superseded, gmt_superseded, tx_time) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, __bcs_group_context_timestamp_ms__, \
                      __bcs_group_context_timestamp_ms__, FALSE, NULL, __bcs_group_context_timestamp_ms__)",
         );
 
@@ -396,6 +428,7 @@ impl GroupContextRepo for SqlGroupContextStore {
                     DbValue::from(visible.as_str()),
                     DbValue::from(collect.as_str()),
                     owners,
+                    DbValue::from(params.created_from_preset),
                     DbValue::from(expected_active_id),
                     DbValue::from(params.change_reason.as_deref()),
                     valid_from,
@@ -591,6 +624,7 @@ mod tests {
         for migration in [
             include_str!("../../../../migrations/sqlite/034_group_context.sql"),
             include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
+            include_str!("../../../../migrations/sqlite/044_group_context_preset.sql"),
         ] {
             for sql in migration
                 .split(';')
@@ -756,6 +790,7 @@ mod tests {
             .expect("timestamp");
         let created = store
             .create_active(NewGroupContextEntry {
+                created_from_preset: false,
                 context_id: "ctx-load-by-id".into(),
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
@@ -795,6 +830,7 @@ mod tests {
         ] {
             store
                 .create_active(NewGroupContextEntry {
+                    created_from_preset: false,
                     context_id: context_id.into(),
                     name: name.into(),
                     scope_level,

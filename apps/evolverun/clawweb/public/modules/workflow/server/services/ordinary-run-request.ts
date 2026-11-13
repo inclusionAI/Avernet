@@ -1,3 +1,4 @@
+import { normalizeFlowRunMarkers } from './flow-run-markers.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
@@ -31,14 +32,15 @@ const validId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0
 const ordinaryFields = new Set(['type', 'ordinary_request_key', 'ordinary_parent_flow_id', 'flow_id', 'workflow_id',
   'workflow_title', 'status', 'state_json', 'triggered_by', 'params_json', 'input_json', 'node_count', 'identity_key', 'current_phase',
   'started_at', 'credentials_json', 'origin_session_key', 'origin_session_id', 'origin_bot_id', 'user_id', 'plugin_version',
-  'engine', 'workflow_version', 'workflow_deploy_number']);
+  'engine', 'workflow_version', 'workflow_deploy_number', 'env', 'tag']);
 const trialKeys = ['run_request_id', 'run_request_parent_flow_id', 'run_request_bot_id', 'run_request_owner_id',
   'candidate_commit', 'pack_digest', 'input_digest'];
 export const hasTrialFields = (body: Record<string, unknown>) => trialKeys.some(key => Object.hasOwn(body, key));
 
 function fingerprint(run: FlowRunInsert): string {
   // Flow ID and startedAt intentionally excluded: a delivery may propose a new
-  // native ID or occur later. Every other persisted field is frozen, including
+  // native ID or occur later. env/tag are descriptive metadata, excluded from identity.
+  // The pre-existing fields remain frozen, including
   // opaque state/credentials, and only the hash is retained in the association.
   const fields = [run.workflowId, run.workflowTitle ?? null, run.status, run.stateJson ?? null,
     run.paramsJson ?? null, run.inputJson ?? null, run.nodeCount ?? 0, run.triggeredBy ?? null,
@@ -53,6 +55,7 @@ function fingerprint(run: FlowRunInsert): string {
 function validate(body: Record<string, unknown>, run: FlowRunInsert): { key: string; parent: string } {
   if (hasTrialFields(body)) throw conflict();
   if (Object.keys(body).some(key => !ordinaryFields.has(key))) throw invalid();
+  try { normalizeFlowRunMarkers(run); } catch { throw invalid(); }
   if (!validOrdinaryKey(body.ordinary_request_key) || !validId(body.ordinary_parent_flow_id)
     || !validId(run.flowId) || !validId(run.workflowId) || body.ordinary_parent_flow_id === run.flowId) throw invalid();
   if (run.status !== 'pending'

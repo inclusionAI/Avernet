@@ -73,6 +73,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         self.distance = distance
 
         self.connection = connection
+        self._keywords = self._new_keyword_index()
         if connection.mode == "server":
             self._qdrant = QdrantServerVectorStore(
                 connection=connection, collection_name=collection_name,
@@ -98,7 +99,6 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         self._mysql = self._persistence
         self._last_sync_time = 0.0
         self._index_lock = IndexLock(concurrent_reads=connection.mode == "server")
-        self._keywords = self._new_keyword_index()
         self._keywords_ready = True
 
         logger.info(

@@ -888,14 +888,14 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         try:
             return self._package_validator.validate_legacy_local_zip(package)
         except SkillPackageInvalidError as exc:
-            raise LocalSkillInvalidPackageError(exc.reason) from exc
+            raise LocalSkillInvalidPackageError(exc.reason, exc.detail) from exc
         except SkillPackageTooLargeError as exc:
-            raise LocalSkillTooLargeError() from exc
+            raise LocalSkillTooLargeError(exc.reason) from exc
 
     def _pack_directory(self, files: Sequence[tuple[str, bytes]]) -> bytes:
         try:
             return self._package_validator.pack_directory(files)
         except SkillPackageInvalidError as exc:
-            raise LocalSkillInvalidPackageError(exc.reason) from exc
+            raise LocalSkillInvalidPackageError(exc.reason, exc.detail) from exc
         except SkillPackageTooLargeError as exc:
-            raise LocalSkillTooLargeError() from exc
+            raise LocalSkillTooLargeError(exc.reason) from exc

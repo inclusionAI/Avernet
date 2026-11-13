@@ -153,6 +153,7 @@ export function useBotWorkshop() {
   return {
     ...state,
     spaceId,
+    currentUserId: currentOpenApiUserId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
     canOpenConversation: (bot: BotDomain) =>
       canOpenDraftOrPrestableServiceCodingBot(bot, currentOpenApiUserId) ||

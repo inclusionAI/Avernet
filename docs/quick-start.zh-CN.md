@@ -21,6 +21,8 @@
 
 当前 `all` 组会启动 BAAS、backend、BCSFuse、BCS、5 个本地 OpenClaw demo bot、demo bot 和 frontend。`start bcs` 只启动 BCS；需要 BCS 和 5 个 demo bot 时使用 `start bcs_bots`。`bcs_frontend` 使用默认的 `legacy` 前端，其他前端请参考 [前端启动说明](singlebox-nextgen-local.md)。
 
+使用 `start all` 或 `start bcsfuse` 前，先启动 [Qdrant Server 1.20 或更新版本](../apps/bcsfuse/docs/qdrant-modes.md)。
+
 ## 2. 运行目录隔离
 
 `singlebox.sh` 只保留一种支持模式：隔离 singlebox 模式。它默认不会把 5bot profile、workspace 和插件链接写入本机默认 OpenClaw 目录。

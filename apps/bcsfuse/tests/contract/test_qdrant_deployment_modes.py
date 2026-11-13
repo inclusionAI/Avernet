@@ -1,13 +1,10 @@
-"""Composition selects storage explicitly; direct local startup stays offline."""
-
-from search_core.config.qdrant import QdrantConnection
+"""Public TC composition selects a Qdrant Server without external model credentials."""
 
 from app.bootstrap.opensource import build_opensource_provider_registry
+from search_core.config.qdrant import QdrantConnection
 
 
-def test_direct_smoke_defaults_to_local_and_accepts_explicit_server(
-    tmp_path, monkeypatch
-):
+def test_direct_smoke_defaults_to_server_and_honors_explicit_url(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     from app.tc import providers
@@ -34,10 +31,11 @@ def test_direct_smoke_defaults_to_local_and_accepts_explicit_server(
         )
         return captured[-1]["connection"]
 
-    assert connection().mode == "local"
-    monkeypatch.setenv("QDRANT_MODE", "server")
-    monkeypatch.setenv("QDRANT_URL", "http://127.0.0.1:6333")
-    assert connection().mode == "server"
+    default = connection()
+    assert default.mode == "server"
+    assert default.url == "http://127.0.0.1:6333"
+    monkeypatch.setenv("QDRANT_URL", "http://127.0.0.1:16333")
+    assert connection().url == "http://127.0.0.1:16333"
 
 
 def test_connection_mapping_keeps_auth_out_of_repr():

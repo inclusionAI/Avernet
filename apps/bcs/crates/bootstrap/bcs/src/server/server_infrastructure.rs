@@ -363,6 +363,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
@@ -865,6 +866,7 @@ impl BcsServer {
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service = super::infrastructure_helpers::group_context_service(
             db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+            bot_authority.hook.clone(),
         );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
