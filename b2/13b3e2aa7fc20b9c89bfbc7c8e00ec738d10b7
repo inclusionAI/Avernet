@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/corp/plugins/prod/traced_http_client.py
+  s_e6156dae567df5::t_945f98bc295d9e 4,6,20,27-33,74-75,79-106
+  s_e6156dae567df5::t_3cee80c8cc0268 34
+apps/backend/tests/corp/plugins/prod/test_traced_http_client.py
+  s_e6156dae567df5::t_3cee80c8cc0268 44,193
+  s_e6156dae567df5::t_945f98bc295d9e 43,45,170-192,194
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_e6156dae567df5::t_3cee80c8cc0268 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b213b3e2aa7fc20b9c89bfbc7c8e00ec738d10b7",
+  "prompts": {},
+  "sessions": {
+    "s_e6156dae567df5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d0-e03f-7612-a182-6c5ec3ac4ec1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
