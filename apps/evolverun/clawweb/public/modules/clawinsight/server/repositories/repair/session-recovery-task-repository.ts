@@ -4,11 +4,13 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { ObjectStore } from "../../services/object-storage/oss-object-store.js";
-import type { RecoveryEffectResumeConfig, RecoveryEffectResumeSlot, RecoveryMaintenanceTask, RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
+import type { RecoveryEffect, RecoveryEffectConfigCheck, RecoveryEffectResumeConfig, RecoveryEffectResumeSlot, RecoveryMaintenanceTask, RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
 import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
 import { sessionReadCoverage } from "../../services/repair/session-recovery/session-read-coverage.js";
+import { createAgentExecutionStep } from "../../services/repair/common/agent-execution.js";
+import { parseEffectResumeConfig } from "../../services/repair/session-recovery/effect-resume.js";
 import { trajectoryIndexReads } from "../../services/repair/session-recovery/bootstrap-evidence.js";
 
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
@@ -61,9 +63,32 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const [row] = await db.query<{ id: number; version: number; config_json: string; enabled: number }>(
       `SELECT id, version, config_json, enabled FROM ce_app_config WHERE config_key = ?${suffix}`, [key]);
     if (!row?.enabled) return null;
-    const concurrency = JSON.parse(row.config_json)?.concurrency;
-    if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 10) throw new Error("Invalid session recovery effect resume concurrency");
-    return { id: row.id, version: row.version, concurrency };
+    return { id: row.id, version: row.version, ...parseEffectResumeConfig(JSON.parse(row.config_json)) };
+  }
+
+  async latestDiagnosisEffect(task: RecoveryStoredTask, db = this.db, lock = false): Promise<{ version: number; effect: RecoveryEffect } | null> {
+    const [row] = await db.query<{ self_healing_results: string | null }>(
+      `SELECT self_healing_results FROM insight_monitoring_diagnose WHERE event_id = ?${lock && db.dbType !== "sqlite" ? " FOR UPDATE" : ""}`, [task.request.event_id]);
+    if (!row) return null;
+    const results = JSON.parse(row.self_healing_results ?? "[]") as RecoveryStoredTask["pending_results"];
+    return results.reduce<{ version: number; effect: RecoveryEffect }>((latest, item) =>
+      item.task_id === task.taskId && item.result_version > latest.version
+        ? { version: item.result_version, effect: item.effect } : latest, { version: 0, effect: "unknown" });
+  }
+
+  async claimRecheckDispatch(stepId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      "UPDATE ce_steps SET status = 'dispatching', gmt_modified = ? WHERE step_id = ? AND status = 'created'",
+      [nowForDb(this.db.dbType), stepId]);
+    return result.affectedRows === 1;
+  }
+
+  async recordRecheckJob(stepId: string, jobId: string, receipt: Record<string, string>): Promise<void> {
+    const result = await this.db.exec(
+      `UPDATE ce_steps SET status = CASE WHEN status IN ('created','dispatching') THEN 'dispatched' ELSE status END,
+        bot_run_id = ?, bot_response_json = ?, gmt_modified = ? WHERE step_id = ? AND step_type = 'agent_execution'`,
+      [jobId, JSON.stringify(receipt), nowForDb(this.db.dbType), stepId]);
+    if (result.affectedRows !== 1) throw new Error("Recovery recheck execution not found");
   }
 
   async claimEffectResumeDispatch(stepId: string): Promise<boolean> {
@@ -139,17 +164,31 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
   async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
-    effectResumeClaim?: { environment: AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null> {
+    effectResumeClaim?: RecoveryEffectConfigCheck): Promise<RecoveryStoredTask | null> {
     return this.db.transaction(async tx => {
       if (effectResumeClaim) {
         const current = await this.effectResumeConfig(effectResumeClaim.environment, tx, true);
         const expected = effectResumeClaim.config;
-        if (!current || current.id !== expected.id || current.version !== expected.version || current.concurrency !== expected.concurrency) return null;
+        if ("recheck" in effectResumeClaim) {
+          // Scheduler slot reservations change the row version without changing policy.
+          const policy = (config: RecoveryEffectResumeConfig | null) => config && [config.id, config.concurrency,
+            config.intervalSeconds, config.windowSeconds, config.maxResumes].join(":");
+          if (policy(current) !== policy(expected)) return null;
+        } else if (!current || current.id !== effectResumeClaim.config.id || current.version !== effectResumeClaim.config.version) return null;
       }
       const raw = await this.lock(tx, taskId);
       if (!raw) return null;
       const current = await this.hydrate(tx, raw);
       if (current.version !== expectedVersion) return null;
+      if (effectResumeClaim && "recheck" in effectResumeClaim) {
+        const reported = await this.latestDiagnosisEffect(current, tx, true);
+        if (!reported || reported.version !== effectResumeClaim.recheck.diagnosisVersion) return null;
+        if (effectResumeClaim.recheck.register) {
+          const [active] = await tx.query(
+            "SELECT call_id FROM ce_repair_tool_calls WHERE task_id = ? AND status IN ('pending','executing') LIMIT 1", [taskId]);
+          if (active) return null;
+        }
+      }
       const updated = change(structuredClone(current));
       if (updated.taskId !== taskId || updated.version !== expectedVersion + 1) throw new Error("Invalid recovery task transition");
       const priorEvents = current.timeline.filter(businessEvent);
@@ -168,10 +207,15 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       }
       deliveries.push(...added);
       deliveries.sort((a, b) => a.resultVersion - b.resultVersion);
+      if (effectResumeClaim && "recheck" in effectResumeClaim && effectResumeClaim.recheck.register) {
+        const execution = updated.execution!;
+        await createAgentExecutionStep(new EvolveRepository(tx), { taskId, executionId: execution.executionId,
+          executionNo: updated.executionNo!, handler: "session_recovery", metadata: { effectRecheckRequestId: execution.effectRecheck!.requestId } });
+      }
       await this.savePhase(tx, updated, details, fresh, added);
       await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details, deliveries, stored.stoppedResultDelivery), updated.status, nowForDb(tx.dbType), taskId]);
       // Another dispatcher that scanned before this claim must discard its older slot count.
-      if (effectResumeClaim) await tx.exec("UPDATE ce_app_config SET version = version + 1 WHERE id = ?", [effectResumeClaim.config.id]);
+      if (effectResumeClaim && !("recheck" in effectResumeClaim)) await tx.exec("UPDATE ce_app_config SET version = version + 1 WHERE id = ?", [effectResumeClaim.config.id]);
       return updated;
     });
   }
@@ -277,11 +321,12 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   }
   private async hydrate(db: IDatabase, raw: string, forBootstrap = false): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
-    if (value.artifactStorage !== 2) return { ...value, interventionStatus: undefined, interventionAuditComplete: undefined };
+    const legacy = value.artifactStorage !== 2;
     const { artifactStorage: _storage, detailsRef, resultDelivery, stoppedResultDelivery, ...state } = value;
-    const details = await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
-    const task = { ...state, ...details, timeline: [], evidence: details.evidence ?? [], pending_results: [] } as RecoveryStoredTask;
-    const steps = await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
+    const details = legacy ? { ...value, interventionAuditComplete: undefined } : await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
+    const task = { ...state, ...details, timeline: legacy ? [...value.timeline ?? []] : [], evidence: details.evidence ?? [],
+      pending_results: legacy ? value.pending_results ?? [] : [] } as RecoveryStoredTask;
+    const steps = legacy ? [] : await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
     for (const step of steps) {
       const ref = JSON.parse(step.output_json);
       if (ref.objectKey) task.timeline.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
@@ -299,8 +344,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         const evidenceId = `evidence-${call.callId}`;
         if (!task.evidence.some(item => item.evidence_id === evidenceId)) task.evidence.push({ evidence_id: evidenceId, tool_call_id: call.callId, source: call.toolName, location: typeof result.source === "string" ? result.source : `tool-call:${call.callId}`, excerpt: JSON.stringify(result).slice(0, 2000) });
         const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
+        if (legacy && task.timeline.some(event => event.event_id === call.callId || event.payload.tool_call_id === call.callId)) continue;
         task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
-          tool_call_id: call.callId, request, result: { status: result.status, delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
+          tool_call_id: call.callId, tool_name: call.toolName, request, result: { status: result.status, delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
             message: result.message, initial_message: result.initial_message, finished_at_ms: result.finished_at_ms, owner_request_id: result.owner_request_id, dry_run: result.dry_run, dispatched: result.dispatched, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
       }
       if (calls.length < 500) break;
