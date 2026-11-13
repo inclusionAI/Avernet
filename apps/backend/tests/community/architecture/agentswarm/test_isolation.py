@@ -77,10 +77,16 @@ _SCHEMAS = (
 #     own preflight owns; blank means "the host synthesizes the
 #     identity-only persona document", so "" is a semantic default, not
 #     one value of an open set.
+#   goal_excerpt — a derived summary whose empty form is a real state (a
+#     run with no goal), not vocabulary; "" must be distinguishable from
+#     a missing field downstream.
+#   message — refusal wording on the identity-source path: "" means the
+#     refusal named none, and the consumer supplies its own from ``code``.
+#     Like goal_excerpt it is a semantic empty, not a value of an open set.
 _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "provider", "model", "instructions", "description", "identity_file",
     "engine", "bot_type", "owner_id", "config_manifest",
-    "goal_excerpt",
+    "goal_excerpt", "message",
 })
 
 # Closed-set parameter vocabulary must be typed with one of the module

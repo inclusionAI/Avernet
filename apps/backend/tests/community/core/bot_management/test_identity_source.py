@@ -250,6 +250,26 @@ class TestCreationBoundariesReachTheProvider:
     ``identity source ... holds no issued passport`` burned all three attempts.
     """
 
+    def test_the_provider_is_asked_about_the_requesting_entity_at_both_boundaries(self):
+        """One spelling for the owner everywhere: the requester's entity.
+
+        The seam asks the provider about the run's owner; these boundaries must
+        not reach it with a different id for the same Bot.
+        """
+        svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
+        provider = _Provider({"src": {"agent_code": PROVIDER_CODE}})
+
+        resolve_identity_source(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        )
+        inherited_agent_code(
+            spec=_Spec(identity_bot_id="src"), bot_service=svc,
+            passport_plugin=provider,
+        )
+
+        assert provider.queries == [("src", "owner-1"), ("src", "owner-1")]
+
     def test_resolve_accepts_a_bot_whose_passport_the_provider_holds(self):
         svc = _service({"bot_id": "src", "entity_id": "owner-1", "ext": None})
         provider = _Provider({"src": {

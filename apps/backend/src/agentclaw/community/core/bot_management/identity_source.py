@@ -35,6 +35,18 @@ if TYPE_CHECKING:  # bot_service imports this module's consumers; avoid a cycle.
     from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 
+def _refusal_message(
+    *, refusal: IdentitySourceRefusal, source_id: str, no_passport: str,
+) -> str:
+    """This surface's wording for one refusal; ``no_passport`` is per caller."""
+    if refusal.code == IDENTITY_SOURCE_NO_PASSPORT:
+        return no_passport
+    return (
+        f"identity source {source_id!r} could not be verified: "
+        "the passport provider did not answer"
+    )
+
+
 def resolve_identity_source(
     *,
     spec: BotCreateSpec,
@@ -48,10 +60,8 @@ def resolve_identity_source(
     :class:`IdentitySourceInvalidError` naming the reason otherwise.
 
     The passport decision is :func:`resolve_agent_code`, the same rule the
-    agentswarm submit seam applies: the Bot row's cached copy answers where it
-    can, and ``passport_plugin`` is the fallback for the older Bots that predate
-    it. Without the fallback here, a Bot accepted by the submit check fails as
-    the run spawns its agents.
+    agentswarm submit seam applies; without it a Bot accepted by the submit
+    check would fail as the run spawns its agents.
     """
     source_id = (spec.identity_bot_id or "").strip()
     if not source_id:
@@ -77,18 +87,18 @@ def resolve_identity_source(
         passport=(source.get("ext") or {}).get("passport") or {},
         passport_plugin=passport_plugin,
         bot_id=source_id,
-        owner_id=str(source.get("entity_id") or spec.entity_id),
+        # The requesting entity — the same spelling the submit seam uses. The
+        # lookup above is already owner-scoped, so this is the same account.
+        owner_id=spec.entity_id,
     )
     if isinstance(answer, IdentitySourceRefusal):
-        # The caller-facing wording stays the creation surface's own; the
-        # resolution rule only decides whether it is a pass.
-        raise IdentitySourceInvalidError(
-            f"identity source {source_id!r} holds no issued passport; "
-            "it cannot supply an agent code"
-            if answer.code == IDENTITY_SOURCE_NO_PASSPORT
-            else f"identity source {source_id!r} could not be verified: "
-            "the passport provider did not answer"
-        )
+        raise IdentitySourceInvalidError(_refusal_message(
+            refusal=answer, source_id=source_id,
+            no_passport=(
+                f"identity source {source_id!r} holds no issued passport; "
+                "it cannot supply an agent code"
+            ),
+        ))
 
     return source
 
@@ -132,11 +142,6 @@ def inherited_agent_code(
     Never the inheriting Bot's own id: nothing was ever issued under it. Raises
     rather than returning empty, so a missing identity is loud at creation
     instead of surfacing later as opaque failures at the gateway.
-
-    Resolved by :func:`resolve_agent_code`, so a Bot whose cached copy is absent
-    but whose passport the provider still holds yields that code here too — this
-    runs at authorization completion, where returning a fabricated or empty
-    identity would be worse than refusing.
     """
     source_id = (spec.identity_bot_id or "").strip()
     source = bot_service.get_identity_source_row(source_id, entity_id=spec.entity_id)
@@ -148,17 +153,13 @@ def inherited_agent_code(
         passport=(source.get("ext") or {}).get("passport") or {},
         passport_plugin=passport_plugin,
         bot_id=source_id,
-        owner_id=str(source.get("entity_id") or spec.entity_id),
+        owner_id=spec.entity_id,
     )
     if isinstance(answer, IdentitySourceRefusal):
-        if answer.code == IDENTITY_SOURCE_NO_PASSPORT:
-            raise IdentitySourceInvalidError(
-                f"identity source {source_id!r} has no agent code"
-            )
-        raise IdentitySourceInvalidError(
-            f"identity source {source_id!r} could not be verified: the "
-            "passport provider did not answer"
-        )
+        raise IdentitySourceInvalidError(_refusal_message(
+            refusal=answer, source_id=source_id,
+            no_passport=f"identity source {source_id!r} has no agent code",
+        ))
     return answer
 
 
