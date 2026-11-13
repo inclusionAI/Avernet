@@ -29,11 +29,13 @@ export function createTaskPanelController(host: TaskPanelHost) {
   const openTask = (tab: TaskPanelDeclaration, source: OpenSource, present = true) => {
     if (disposed || !tab.params.taskId.trim()) return;
     const id = tab.params.taskId;
+    const alreadyOpen = tabs.has(id);
     if (source === 'explicit' && snapshot.activeTaskId !== id) {
       navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
     }
-    if (source !== 'explicit' && snapshot.activeTaskId) return;
-    focus++; recoveryAbort.abort();
+    focus++;
+    if (alreadyOpen && source !== 'explicit') return;
+    recoveryAbort.abort();
     if (!origins.has(id)) origins.set(id, origins.get(snapshot.activeTaskId ?? '') ?? { handle: host.captureOrigin(), sessionId: snapshot.conversation?.sessionId ?? host.getConversation()?.sessionId ?? null });
     tabs.set(id, tab);
     update({ activeTaskId: id, recovery: { status: 'opened' },
@@ -62,9 +64,13 @@ export function createTaskPanelController(host: TaskPanelHost) {
         const page = await host.history.readPage(conversation, cursor, signal);
         if (!valid(generation, revision) || signal.aborted) return;
         pagesRead++;
-        const found = [...page.messages].sort((a, b) => b.timestamp - a.timestamp)
-          .flatMap(message => [...parseTaskPanelDeclarations(message.content)].reverse())[0];
-        if (found) { openTask(found, 'recovery'); return; }
+        const found = [...page.messages]
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .flatMap(message => parseTaskPanelDeclarations(message.content));
+        if (found.length) {
+          found.forEach((tab) => openTask(tab, 'recovery'));
+          return;
+        }
         if (page.nextCursor === null) { historyDone = true; break; }
         if (page.nextCursor === cursor || cursors.has(page.nextCursor)) throw new Error('历史分页游标未推进，请重试。');
         cursors.add(page.nextCursor); cursor = page.nextCursor;
@@ -163,10 +169,19 @@ export function createTaskPanelController(host: TaskPanelHost) {
     adoptPresentedTask(tab: TaskPanelDeclaration) {
       if (snapshot.activeTaskId !== tab.params.taskId) openTask(tab, 'explicit', false);
     },
-    closeTask() {
+    closeTask(taskId?: string) {
       if (disposed) return;
+      const id = taskId ?? snapshot.activeTaskId;
+      if (id) {
+        tabs.delete(id);
+        origins.delete(id);
+      }
+      if (id && snapshot.activeTaskId !== id) return;
       focus++; recoveryAbort.abort(); navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
-      update({ activeTaskId: null, recovery: { status: 'idle' } });
+      const associatedTaskIds = snapshot.associatedTaskIds.filter((value) => value !== id);
+      const navByTask = { ...snapshot.navByTask };
+      if (id) delete navByTask[id];
+      update({ activeTaskId: null, associatedTaskIds, navByTask, recovery: { status: 'idle' } });
     },
     continueRecovery: async () => {
       if (disposed) return;
@@ -178,8 +193,10 @@ export function createTaskPanelController(host: TaskPanelHost) {
       await scan();
     },
     ingestMessages(messages: readonly HistoryMessage[]) {
-      const tab = [...messages].sort((a,b) => b.timestamp-a.timestamp).flatMap(m => [...parseTaskPanelDeclarations(m.content)].reverse())[0];
-      if (tab) openTask(tab, 'message');
+      const tabsInMessages = [...messages]
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .flatMap((message) => parseTaskPanelDeclarations(message.content));
+      tabsInMessages.forEach((tab) => openTask(tab, 'message'));
     },
     nav(taskId: string) {
       const record = snapshot.navByTask[taskId] ?? emptyNav();

@@ -58,6 +58,35 @@ describe('one controller for declarations and recovery', () => {
     c.ingestMessages([{ id: 'm', timestamp: 1, content: declaration('t1') }]);
     expect(h.present).toHaveBeenCalledTimes(1); c.dispose();
   });
+
+  it('opens every task declaration in a message batch and focuses the newest task', () => {
+    const h = host(); const c = createTaskPanelController(h);
+    c.ingestMessages([
+      { id: 'old', timestamp: 1, content: declaration('t1') },
+      { id: 'new', timestamp: 2, content: declaration('t2') },
+    ]);
+    const present = vi.mocked(h.present);
+    expect(present).toHaveBeenCalledTimes(2);
+    expect(present.mock.calls.map(([tab]) => tab.params.taskId)).toEqual(['t1', 't2']);
+    expect(c.getSnapshot().activeTaskId).toBe('t2');
+    c.dispose();
+  });
+
+  it('opens every declaration found on the recovery page without collapsing to one task', async () => {
+    const h = host({ history: { readPage: vi.fn(async () => ({
+      messages: [
+        { id: 'new', timestamp: 2, content: declaration('t2') },
+        { id: 'old', timestamp: 1, content: declaration('t1') },
+      ],
+      nextCursor: null,
+    })) } });
+    const c = createTaskPanelController(h);
+    await c.enterConversation({ sessionId: 's1', kind: 'bot' });
+    const present = vi.mocked(h.present);
+    expect(present.mock.calls.map(([tab]) => tab.params.taskId)).toEqual(['t1', 't2']);
+    expect(c.getSnapshot().activeTaskId).toBe('t2');
+    c.dispose();
+  });
 });
 
 describe('review regressions', () => {
