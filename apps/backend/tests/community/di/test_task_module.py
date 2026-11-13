@@ -57,6 +57,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+from agentclaw.community.core.task.context_collab.products.task_commission.service import (
+    TaskCommissionService,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
@@ -441,5 +447,18 @@ def test_task_module_binds_bbs_public_discussion_service_singleton():
     # singleton:两次解析取同对象。
     assert inj.get(BbsPublicDiscussionServiceProtocol) is service
     # 复用既有 singleton 依赖。
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
+    assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_binds_task_commission_service_singleton():
+    """任务代办接线(spec §5):协议解析为产品服务 singleton,复用既有
+    ContextCollabAuthorizerProtocol / MethodStoreProtocol 绑定。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    service = inj.get(TaskCommissionServiceProtocol)
+    assert isinstance(service, TaskCommissionService)
+    assert inj.get(TaskCommissionServiceProtocol) is service
     assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
     assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001

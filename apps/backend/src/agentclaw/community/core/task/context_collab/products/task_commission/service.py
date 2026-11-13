@@ -63,6 +63,13 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     EventAppendedRecord,
     InitialEventDraft,
 )
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.views import (
+    DiscussionDetailBody,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.views import (
+    TaskCommissionDetailView,
+    TaskCommissionSummaryView,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     PublishTaskCommand,
     TaskAdvanceCommand,
@@ -378,8 +385,116 @@ class TaskCommissionService:
 
     # ------------------------------------------------------------- 读(T3)
 
-    def list_tasks(self):
-        raise NotImplementedError("read cases land in T3")
+    def list_tasks(self) -> list[TaskCommissionSummaryView]:
+        """Query.search/filter:按 product profile 列任务,gmt_create 倒序。"""
+        rows = self._repo.list_collets_by_product(
+            ProductProfile.TASK_COMMISSION.value
+        )
+        counts = self._repo.count_message_events(
+            [collet.collet_id for collet, _, _ in rows]
+        )
+        return [
+            TaskCommissionSummaryView(
+                collet_id=collet.collet_id,
+                title=spec.objective,
+                initiator_id=collet.initiator_ref.principal_id,
+                message_count=counts.get(collet.collet_id, 0),
+                created_at=gmt_create,
+            )
+            for collet, spec, gmt_create in rows
+        ]
 
-    def detail_task(self, collab_context_id: str):
-        raise NotImplementedError("read cases land in T3")
+    def detail_task(self, collab_context_id: str) -> TaskCommissionDetailView:
+        """Query.project:标题/正文/机器状态/公开推进历史一次给齐。
+
+        title 读源合同沿公开讨论先例(初始事件 payload objective,
+        NULL-payload 外部行回退伴随 spec.objective,P3 撤列时移除);
+        events 只投影 public(裁决 F),Task 控制事件与发言事件同列。
+        """
+        record = self._repo.get_current_status(collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        if (
+            record.context_spec.product_kind
+            != ProductProfile.TASK_COMMISSION.value
+        ):
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} is not "
+                "a task commission"
+            )
+        title = self._title_of(record)
+        messages = [
+            event
+            for event in record.events
+            if event.primitive_type == _MESSAGE_PRIMITIVE
+            and event.visibility == VISIBILITY_PUBLIC
+        ]
+        body_event = messages[0] if messages else None
+        body_view = (
+            DiscussionDetailBody(
+                event_id=body_event.event_id,
+                content=self._content_of(body_event),
+                author_id=self._principal_id(body_event.actor_ref),
+                occurred_at=body_event.occurred_at,
+            )
+            if body_event is not None
+            else None
+        )
+        events = [
+            {
+                "event_id": event.event_id,
+                "event_kind": event.event_kind,
+                "primitive_type": event.primitive_type
+                if event.primitive_type is not None
+                else "",
+                "actor_id": self._principal_id(event.actor_ref),
+                "occurred_at": event.occurred_at,
+            }
+            for event in record.events
+            if event.visibility == VISIBILITY_PUBLIC
+        ]
+        return TaskCommissionDetailView(
+            collet_id=collab_context_id,
+            title=title,
+            status=(
+                record.current_snapshot.status
+                if record.current_snapshot is not None
+                else ""
+            ),
+            body=body_view,
+            events=events,
+        )
+
+    # ------------------------------------------------------- 读投影私有件
+
+    @staticmethod
+    def _title_of(record) -> str:
+        """title 新主=初始事件 payload 的 objective;NULL-payload 回退
+        伴随 ``context_spec.objective``(P3 撤列时移除)。"""
+        title = record.context_spec.objective
+        for event in record.events:
+            if event.event_kind == _CREATION_EVENT_KIND:
+                payload = event.payload
+                if isinstance(payload, dict):
+                    objective = payload.get("objective")
+                    if isinstance(objective, str) and objective.strip():
+                        title = objective
+                break
+        return title
+
+    @staticmethod
+    def _principal_id(ref) -> str:
+        """读投影作者标识;外部部分行(NULL actor 列)读为空串。"""
+        return ref.principal_id if ref is not None else ""
+
+    @staticmethod
+    def _content_of(event) -> str:
+        """读投影正文;payload NULL 的部分行读空串(读面容错,不 422)。"""
+        payload = event.payload
+        if isinstance(payload, dict):
+            content = payload.get("content")
+            if isinstance(content, str):
+                return content
+        return ""

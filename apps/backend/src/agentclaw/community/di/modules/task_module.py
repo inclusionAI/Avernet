@@ -111,6 +111,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
     SwarmMethodOpsServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.products.task_commission.service import (
+    TaskCommissionService,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
@@ -368,6 +374,12 @@ class TaskModule(Module):
         # 作者器/MethodStore 均复用上面既有绑定,无新基建。
         binder.bind(
             BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService,
+            scope=singleton,
+        )
+        # 任务代办产品层(2026-11-13 task_commission spec §5):同款singleton,
+        # 顶层单值 Open 形态;复用既有仓储/作者器/MethodStore 绑定。
+        binder.bind(
+            TaskCommissionServiceProtocol, to=TaskCommissionService,
             scope=singleton,
         )
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
