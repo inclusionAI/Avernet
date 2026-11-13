@@ -25,7 +25,6 @@ import { history } from '@umijs/max';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
-import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';

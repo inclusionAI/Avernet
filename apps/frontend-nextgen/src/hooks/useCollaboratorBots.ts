@@ -73,6 +73,7 @@ export function useCollaboratorBots(params: {
                   canViewLogs: false,
                 },
                 visibleInOpenCore: true,
+                isDefaultBot: false,
               },
               completeness: 'complete' as const,
               warnings: [],
