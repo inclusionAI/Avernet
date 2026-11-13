@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  s_64261436edbb0b::t_0b09880a162d06 16,19,23
+  s_64261436edbb0b::t_64b59fd926e14f 153-158
+  s_64261436edbb0b::t_47291c7e314131 61-63
+  s_64261436edbb0b::t_294e5f5bf16501 437-501
+apps/backend/tests/community/repository/task/context_collab/test_repository_listing.py
+  s_64261436edbb0b::t_027a1a61623ca3 166-171,176,179
+  s_64261436edbb0b::t_4eed007da2f44b 1-165,172-175,177-178,180-182,186-191,194-196
+  s_64261436edbb0b::t_cf0f2274e42482 183-185,192-193,197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1126eb31284b0299e988eabfcca9417dbe3a35cb",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

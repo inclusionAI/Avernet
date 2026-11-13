@@ -1,0 +1,116 @@
+autocoding/skills/teamclaw-cdo-patrol/references/existing-fixes.md
+  s_b506799bd499b1::t_29f4b188ce84a3 5
+autocoding/skills/teamclaw-dima-scan/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 3,6-7,16,37
+autocoding/skills/teamclaw-implement/references/stage-events.md
+  s_b506799bd499b1::t_29f4b188ce84a3 21,46
+autocoding/skills/teamclaw-clarify/references/dima-labels.md
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+  s_b506799bd499b1::t_7137cb6e240942 13
+autocoding/skills/teamclaw-clarify/scripts/stage_events.py
+  s_b506799bd499b1::t_29f4b188ce84a3 191-193,199,201-202,311,318-320
+autocoding/skills/teamclaw-explore/references/dima-labels.md
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+  s_b506799bd499b1::t_7137cb6e240942 13
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_b506799bd499b1::t_29f4b188ce84a3 46,61
+autocoding/skills/teamclaw-plan/references/stage-events.md
+  s_b506799bd499b1::t_29f4b188ce84a3 21,46
+autocoding/skills/teamclaw-dima-scan/references/dima-labels.md
+  s_b506799bd499b1::t_7137cb6e240942 13
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+autocoding/skills/teamclaw-pr-debate/references/dima-labels.md
+  s_b506799bd499b1::t_7137cb6e240942 13
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+autocoding/skills/teamclaw-workflow/references/dima-labels.md
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+  s_b506799bd499b1::t_7137cb6e240942 13
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,51,68
+autocoding/skills/teamclaw-cdo-patrol/references/dima-labels.md
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+  s_b506799bd499b1::t_7137cb6e240942 13
+autocoding/skills/teamclaw-implement/scripts/stage_events.py
+  s_b506799bd499b1::t_29f4b188ce84a3 191-193,199,201-202,311,318-320
+autocoding/skills/teamclaw-pr-debate/scripts/stage_events.py
+  s_b506799bd499b1::t_29f4b188ce84a3 191-193,199,201-202,311,318-320
+autocoding/skills/teamclaw-cdo-patrol/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,46
+autocoding/skills/teamclaw-clarify/references/gate-a-delivery.md
+  s_b506799bd499b1::t_29f4b188ce84a3 13,76,84
+autocoding/skills/teamclaw-implement/references/metrics.md
+  s_b506799bd499b1::t_29f4b188ce84a3 10
+autocoding/skills/teamclaw-dima-difficulty/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 3,6-7,29,33
+autocoding/skills/teamclaw-dima-difficulty/references/dima-labels.md
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+  s_b506799bd499b1::t_7137cb6e240942 13
+autocoding/skills/teamclaw-pr-debate/references/delivery.md
+  s_b506799bd499b1::t_29f4b188ce84a3 4,22
+autocoding/skills/teamclaw-cdo-patrol/references/cdo-intake.md
+  s_b506799bd499b1::t_7137cb6e240942 14
+  s_b506799bd499b1::t_29f4b188ce84a3 40,53
+autocoding/skills/teamclaw-clarify/references/dima-operations.md
+  s_b506799bd499b1::t_29f4b188ce84a3 39,48
+autocoding/skills/teamclaw-implement/tests/test_reporting.py
+  s_b506799bd499b1::t_4a1140e7e457e0 33,62
+autocoding/skills/teamclaw-pr-debate/scripts/debate.py
+  s_b506799bd499b1::t_9f5c82403eecd4 267-268
+  s_b506799bd499b1::t_29f4b188ce84a3 269-271,274
+autocoding/skills/teamclaw-plan/references/no-fix.md
+  s_b506799bd499b1::t_4a1140e7e457e0 57
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,20,65
+autocoding/skills/teamclaw-plan/scripts/stage_events.py
+  s_b506799bd499b1::t_29f4b188ce84a3 191-193,199,201-202,311,318-320
+autocoding/skills/teamclaw-cdo-patrol/assets/dima-template.md
+  s_b506799bd499b1::t_29f4b188ce84a3 47
+autocoding/skills/teamclaw-pr-debate/tests/test_debate.py
+  s_b506799bd499b1::t_4a1140e7e457e0 44,132
+autocoding/skills/teamclaw-implement/tests/test_stage_events.py
+  s_b506799bd499b1::t_7137cb6e240942 89,232-242
+  s_b506799bd499b1::t_4a1140e7e457e0 52
+  s_b506799bd499b1::t_36590dd1488354 243
+autocoding/skills/teamclaw-implement/references/delivery.md
+  s_b506799bd499b1::t_29f4b188ce84a3 21,90
+autocoding/skills/teamclaw-implement/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,53
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,57
+autocoding/skills/teamclaw-explore/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7,39,48
+autocoding/AGENTS.md
+  s_b506799bd499b1::t_4a1140e7e457e0 5
+autocoding/README.md
+  s_b506799bd499b1::t_4a1140e7e457e0 22,80,86
+autocoding/skills/teamclaw-implement/scripts/impl/reporting.py
+  s_b506799bd499b1::t_29f4b188ce84a3 89-91,95,97-98,196,203-205
+autocoding/skills/teamclaw-implement/references/dima-labels.md
+  s_b506799bd499b1::t_7137cb6e240942 13
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+autocoding/skills/teamclaw-plan/references/dima-labels.md
+  s_b506799bd499b1::t_7137cb6e240942 13
+  s_b506799bd499b1::t_29f4b188ce84a3 1-12,14-17
+autocoding/skills/teamclaw-clarify/references/no-fix.md
+  s_b506799bd499b1::t_4a1140e7e457e0 57
+autocoding/skills/teamclaw-clarify/references/stage-events.md
+  s_b506799bd499b1::t_29f4b188ce84a3 21,46
+autocoding/skills/teamclaw-pr-debate/SKILL.md
+  s_b506799bd499b1::t_29f4b188ce84a3 6-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee884ad74f5509412cd0d0260c973483df103d8c",
+  "prompts": {},
+  "sessions": {
+    "s_b506799bd499b1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3c1-2b9f-7950-9b93-957407ab7b7d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

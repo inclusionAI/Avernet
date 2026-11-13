@@ -1,0 +1,23 @@
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sessionHistorySearchModel.ts
+  s_46bcfe8c4c3bdf::t_2d90e3c929d738 1-52
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_46bcfe8c4c3bdf::t_9ea1d920a6474b 14
+  s_46bcfe8c4c3bdf::t_ebb2dd04d21796 27-28
+  s_46bcfe8c4c3bdf::t_3968330d0db1ea 34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e8c9cba094017d42fa73f537004edee51f1e51a",
+  "prompts": {},
+  "sessions": {
+    "s_46bcfe8c4c3bdf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5d246eaa-c821-4882-91d4-4aa45f4572de",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
