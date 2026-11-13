@@ -11,6 +11,9 @@ export interface BotWorkshopState {
   page: number;
   pageSize: number;
   items: BotDomain[];
+  collaboratorBots: BotDomain[];
+  collaboratorBotsLoading: boolean;
+  collaboratorBotsError?: string;
   total?: number;
   hasMore?: boolean;
   loading: boolean;
@@ -28,6 +31,7 @@ export interface BotWorkshopState {
     value: Partial<Pick<BotWorkshopState, 'spaceId' | 'keyword' | 'engine' | 'deployment' | 'serviceMode' | 'page'>>,
   ) => void;
   setResult: (value: Pick<BotWorkshopState, 'items' | 'total' | 'hasMore' | 'loading' | 'error'>) => void;
+  setCollaboratorBots: (bots: BotDomain[], loading: boolean, error?: string) => void;
   reset: () => void;
 }
 const initial = {
@@ -39,6 +43,8 @@ const initial = {
   page: 1,
   pageSize: 20,
   items: [],
+  collaboratorBots: [],
+  collaboratorBotsLoading: false,
   total: undefined,
   hasMore: undefined,
   loading: false,
@@ -57,5 +63,6 @@ export const useBotWorkshopStore = create<BotWorkshopState>((set) => ({
   setCreateScenario: (createScenario) => set({ createScenario }),
   setQueryState: (value) => set(value),
   setResult: (value) => set(value),
+  setCollaboratorBots: (bots, loading, error) => set({ collaboratorBots: bots, collaboratorBotsLoading: loading, collaboratorBotsError: error }),
   reset: () => set(initial),
 }));
