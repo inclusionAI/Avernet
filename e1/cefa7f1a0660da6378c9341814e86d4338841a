@@ -1,0 +1,20 @@
+apps/backend/tests/community/core/agentswarm/test_coverage_gaps.py
+  s_7c6be7001ef8fd::t_28b76d5efebce3 1077-1081,1088-1091
+  s_7c6be7001ef8fd::t_6823a127e89842 1097,1101-1108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1cefa7f1a0660da6378c9341814e86d4338841a",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

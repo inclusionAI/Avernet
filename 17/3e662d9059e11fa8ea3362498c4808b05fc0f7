@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  s_67eaf3663e3fc8::t_08a26e5b22fa4d 9
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceWriteGuardPop.test.tsx
+  s_67eaf3663e3fc8::t_08a26e5b22fa4d 8
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  s_67eaf3663e3fc8::t_08a26e5b22fa4d 9
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  s_67eaf3663e3fc8::t_08a26e5b22fa4d 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "173e662d9059e11fa8ea3362498c4808b05fc0f7",
+  "prompts": {},
+  "sessions": {
+    "s_67eaf3663e3fc8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c876-1b5b-72a3-a80d-b67a0ceee9ed",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
