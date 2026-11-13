@@ -40,8 +40,9 @@ A_EXECUTOR_BOT = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 # ---------------------------------------------------------------- 内置 machine 词汇
 
+
 def test_builtin_machine_pinned():
-    """六状态 / 六迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
+    """六状态 / 八迁移逐字钉死(全局约束重命名后词汇,guard_refs 保留)。"""
     assert MACHINE_REGISTRY == {"team_todo_execution": TEAM_TODO_EXECUTION_MACHINE}
     assert TEAM_TODO_EXECUTION_MACHINE.schema_version == "context-state-machine/1"
     assert TEAM_TODO_EXECUTION_MACHINE.profile_ref == "team_todo_execution"
@@ -56,7 +57,7 @@ def test_builtin_machine_pinned():
         ("in_progress", "active", ("Single",)),
         ("reviewing", "review", ("Single",)),
         ("blocked", "blocked", ("Single",)),
-        ("done", "terminal_success", ("Single",)),
+        ("done", "review", ("Single",)),
         ("cancelled", "terminal_cancelled", ("Single",)),
     ]
     assert [
@@ -69,32 +70,82 @@ def test_builtin_machine_pinned():
         )
         for t in TEAM_TODO_EXECUTION_MACHINE.transitions
     ] == [
-        ("start_task", ("created",), "task.started",
-         ("actor_can_start_task",), "in_progress"),
-        ("update_progress", ("in_progress",), "task.progress.updated",
-         ("event_matches_task",), "in_progress"),
-        ("submit_for_review", ("in_progress",), "task.submitted",
-         ("required_artifacts_present",), "reviewing"),
-        ("accept_task", ("reviewing",), "task.accepted",
-         ("actor_is_responsible_principal",), "done"),
-        ("reject_task", ("reviewing",), "task.rejected",
-         ("actor_is_responsible_principal",), "in_progress"),
-        ("cancel_task", ("created", "in_progress", "reviewing", "blocked"),
-         "task.cancelled", ("actor_can_cancel",), "cancelled"),
+        (
+            "start_task",
+            ("created",),
+            "task.started",
+            ("actor_can_start_task",),
+            "in_progress",
+        ),
+        (
+            "update_progress",
+            ("in_progress",),
+            "task.progress.updated",
+            ("event_matches_task",),
+            "in_progress",
+        ),
+        (
+            "complete_task",
+            ("in_progress",),
+            "task.completed",
+            ("event_matches_task",),
+            "done",
+        ),
+        (
+            "resume_task",
+            ("done",),
+            "task.started",
+            ("actor_can_start_task",),
+            "in_progress",
+        ),
+        (
+            "submit_for_review",
+            ("in_progress",),
+            "task.submitted",
+            ("required_artifacts_present",),
+            "reviewing",
+        ),
+        (
+            "accept_task",
+            ("reviewing",),
+            "task.accepted",
+            ("actor_is_responsible_principal",),
+            "done",
+        ),
+        (
+            "reject_task",
+            ("reviewing",),
+            "task.rejected",
+            ("actor_is_responsible_principal",),
+            "in_progress",
+        ),
+        (
+            "cancel_task",
+            ("created", "in_progress", "reviewing", "blocked"),
+            "task.cancelled",
+            ("actor_can_cancel",),
+            "cancelled",
+        ),
     ]
 
 
 def test_governance_kinds_within_vocab():
     """全部状态 governance_kind 落在 spec §4.2 七类别词汇内。"""
     vocab = {
-        "waiting", "active", "review", "blocked",
-        "terminal_success", "terminal_cancelled", "terminal_failed",
+        "waiting",
+        "active",
+        "review",
+        "blocked",
+        "terminal_success",
+        "terminal_cancelled",
+        "terminal_failed",
     }
     for state in TEAM_TODO_EXECUTION_MACHINE.states:
         assert state.governance_kind in vocab
 
 
 # ---------------------------------------------------------------- §4.4 定义校验
+
 
 def test_validate_builtin_passes_with_blocked_exemption():
     """blocked 无入边,但因 governance_kind=blocked 豁免可达性检查(§4.3)。"""
@@ -103,23 +154,26 @@ def test_validate_builtin_passes_with_blocked_exemption():
 
 def test_undefined_initial_state_rejected():
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, initial_state="uploads")
-    with pytest.raises(ContextCollabValidationError,
-                       match="initial_state is not a defined state"):
+    with pytest.raises(
+        ContextCollabValidationError, match="initial_state is not a defined state"
+    ):
         validate_definition(bad)
 
 
 def test_unreachable_non_exempt_state_rejected():
     """可对照的反例:blocked 无入边,若其 governance_kind 不在豁免类别内即拒。"""
     stale = StateDefinition(
-        name="blocked", governance_kind="active", allowed_methods=("Single",),
+        name="blocked",
+        governance_kind="active",
+        allowed_methods=("Single",),
     )
     states = tuple(
-        stale if s.name == "blocked" else s
-        for s in TEAM_TODO_EXECUTION_MACHINE.states
+        stale if s.name == "blocked" else s for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
-    with pytest.raises(ContextCollabValidationError,
-                       match="is unreachable from initial state"):
+    with pytest.raises(
+        ContextCollabValidationError, match="is unreachable from initial state"
+    ):
         validate_definition(bad)
 
 
@@ -152,39 +206,40 @@ def test_ambiguous_conflicting_rules_rejected():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (conflict,),
     )
-    with pytest.raises(ContextCollabValidationError, match="ambiguous transition rules"):
+    with pytest.raises(
+        ContextCollabValidationError, match="ambiguous transition rules"
+    ):
         validate_definition(bad)
 
 
 def test_terminal_outgoing_edge_rejected():
     """terminal_* 状态不能有出边(spec §4.4 第 3 条)。"""
-    reopen = TransitionRule(
-        rule_id="reopen",
-        from_states=("done",),
-        event_name="task.accepted",
-        guard_refs=("actor_is_responsible_principal",),
-        to_state="reviewing",
+    hard_reopen = TransitionRule(
+        rule_id="hard_reopen",
+        from_states=("cancelled",),
+        event_name="task.started",
+        guard_refs=("actor_can_start_task",),
+        to_state="in_progress",
     )
     bad = dataclasses.replace(
         TEAM_TODO_EXECUTION_MACHINE,
-        transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (reopen,),
+        transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (hard_reopen,),
     )
-    with pytest.raises(ContextCollabValidationError,
-                       match="must not have outgoing edges"):
+    with pytest.raises(
+        ContextCollabValidationError, match="must not have outgoing edges"
+    ):
         validate_definition(bad)
 
 
 def test_unknown_event_name_rejected():
     """event_name 必须来自标准事件注册表(spec §4.4 第 4 条)。"""
     stale = dataclasses.replace(
-        TEAM_TODO_EXECUTION_MACHINE.transitions[0], event_name="artifact.delivered",
+        TEAM_TODO_EXECUTION_MACHINE.transitions[0],
+        event_name="artifact.delivered",
     )
-    transitions = (
-        (stale,) + TEAM_TODO_EXECUTION_MACHINE.transitions[1:]
-    )
+    transitions = (stale,) + TEAM_TODO_EXECUTION_MACHINE.transitions[1:]
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, transitions=transitions)
-    with pytest.raises(ContextCollabValidationError,
-                       match="unregistered event_name"):
+    with pytest.raises(ContextCollabValidationError, match="unregistered event_name"):
         validate_definition(bad)
 
 
@@ -222,11 +277,12 @@ def test_unknown_guard_ref_rejected():
 
 def test_invalid_governance_kind_rejected():
     stale = StateDefinition(
-        name="done", governance_kind="finished", allowed_methods=("Single",),
+        name="done",
+        governance_kind="finished",
+        allowed_methods=("Single",),
     )
     states = tuple(
-        stale if s.name == "done" else s
-        for s in TEAM_TODO_EXECUTION_MACHINE.states
+        stale if s.name == "done" else s for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
     with pytest.raises(ContextCollabValidationError, match="unknown governance_kind"):
@@ -235,11 +291,12 @@ def test_invalid_governance_kind_rejected():
 
 def test_invalid_allowed_method_rejected():
     stale = StateDefinition(
-        name="created", governance_kind="waiting", allowed_methods=("Swarm",),
+        name="created",
+        governance_kind="waiting",
+        allowed_methods=("Swarm",),
     )
     states = tuple(
-        stale if s.name == "created" else s
-        for s in TEAM_TODO_EXECUTION_MACHINE.states
+        stale if s.name == "created" else s for s in TEAM_TODO_EXECUTION_MACHINE.states
     )
     bad = dataclasses.replace(TEAM_TODO_EXECUTION_MACHINE, states=states)
     with pytest.raises(ContextCollabValidationError, match="declares unknown method"):
@@ -248,9 +305,12 @@ def test_invalid_allowed_method_rejected():
 
 # ---------------------------------------------------------------- 迁移裁决
 
+
 def test_resolve_transition_happy_path():
     result = resolve_transition(
-        TEAM_TODO_EXECUTION_MACHINE, "created", "task.started",
+        TEAM_TODO_EXECUTION_MACHINE,
+        "created",
+        "task.started",
         {"actor_can_start_task": PASS_OUTCOME},
     )
     assert result == "in_progress"
@@ -258,30 +318,55 @@ def test_resolve_transition_happy_path():
 
 def test_resolve_transition_no_rule_returns_none():
     """无规则命中返回 None:事件仍可接纳,状态不变。"""
-    assert resolve_transition(
-        TEAM_TODO_EXECUTION_MACHINE, "created", "user_interaction.posted", {},
-    ) is None
+    assert (
+        resolve_transition(
+            TEAM_TODO_EXECUTION_MACHINE,
+            "created",
+            "user_interaction.posted",
+            {},
+        )
+        is None
+    )
 
 
 def test_resolve_transition_terminal_has_no_outgoing():
-    """done 是 terminal_*,任何事件都无出边可命中。"""
-    assert resolve_transition(
-        TEAM_TODO_EXECUTION_MACHINE, "done", "task.accepted", {},
-    ) is None
+    """cancelled 是 terminal_*,任何事件都无出边可命中。"""
+    assert (
+        resolve_transition(
+            TEAM_TODO_EXECUTION_MACHINE,
+            "cancelled",
+            "task.started",
+            {},
+        )
+        is None
+    )
+
+
+def test_resolve_transition_resumes_executor_round_from_done():
+    assert (
+        resolve_transition(
+            TEAM_TODO_EXECUTION_MACHINE,
+            "done",
+            "task.started",
+            {"actor_can_start_task": PASS_OUTCOME},
+        )
+        == "in_progress"
+    )
 
 
 def test_resolve_transition_guard_fail_raises():
     with pytest.raises(ContextCollabValidationError, match="rejected event"):
         resolve_transition(
-            TEAM_TODO_EXECUTION_MACHINE, "reviewing", "task.accepted",
+            TEAM_TODO_EXECUTION_MACHINE,
+            "reviewing",
+            "task.accepted",
             {"actor_is_responsible_principal": FAIL_OUTCOME},
         )
 
 
 def test_resolve_transition_missing_guard_result_raises():
     """守卫结果缺失:fail-closed,禁止假定通过(§4.3 禁止静默失败)。"""
-    with pytest.raises(ContextCollabValidationError,
-                       match="missing guard result"):
+    with pytest.raises(ContextCollabValidationError, match="missing guard result"):
         resolve_transition(TEAM_TODO_EXECUTION_MACHINE, "created", "task.started", {})
 
 
@@ -290,7 +375,9 @@ def test_resolve_transition_blocked_guard_raises():
     blocked = GuardOutcome(verdict="BLOCKED", reason="executor unreachable")
     with pytest.raises(ContextCollabValidationError, match="blocked event"):
         resolve_transition(
-            TEAM_TODO_EXECUTION_MACHINE, "created", "task.started",
+            TEAM_TODO_EXECUTION_MACHINE,
+            "created",
+            "task.started",
             {"actor_can_start_task": blocked},
         )
 
@@ -307,16 +394,20 @@ def test_resolve_transition_ambiguous_matches_raise():
         TEAM_TODO_EXECUTION_MACHINE,
         transitions=TEAM_TODO_EXECUTION_MACHINE.transitions + (conflict,),
     )
-    with pytest.raises(ContextCollabValidationError,
-                       match="ambiguous transition rules match"):
+    with pytest.raises(
+        ContextCollabValidationError, match="ambiguous transition rules match"
+    ):
         resolve_transition(bad, "created", "task.started", {})
 
 
 # ---------------------------------------------------------------- §4.3 守卫事实
 
+
 def _input(actor=P_RESPONSIBLE, responsible=P_RESPONSIBLE, executor=None, payload=None):
     return GuardEvaluationInput(
-        actor=actor, responsible=responsible, executor=executor,
+        actor=actor,
+        responsible=responsible,
+        executor=executor,
         payload={} if payload is None else payload,
     )
 
@@ -333,9 +424,9 @@ def test_guard_actor_can_start_task_executor_bot():
     """Ruling R4:actor 与 executor 结构类型不同,须按值比较 bot 型 principal
     的 principal_id 与 executor 的 agent_id(spec §6.2 / §6.3)。"""
     guard = GUARD_REGISTRY["actor_can_start_task"]
-    assert guard(
-        _input(actor=P_EXECUTOR_BOT, executor=A_EXECUTOR_BOT)
-    ).verdict == "PASS"
+    assert (
+        guard(_input(actor=P_EXECUTOR_BOT, executor=A_EXECUTOR_BOT)).verdict == "PASS"
+    )
     # agent_id 不同 → 不是执行者,显式 FAIL
     outcome = guard(
         _input(actor=P_EXECUTOR_BOT, executor=AgentRef("bot", "bot_other_001"))

@@ -45,6 +45,9 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from agentclaw.community.plugins.local.context_collab_runtime import (
+    LocalContextCollabRuntimePlugin,
+)
 
 COLLET_ID = "collet_001"
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -207,7 +210,9 @@ def _make_service(
 ):
     repo = _FakeStatusRepository(collet or _collet(), events or _fixture_events())
     assert isinstance(repo, ContextCollabRepositoryProtocol)
-    service = ContextCollabService(repository=repo)
+    service = ContextCollabService(
+        repository=repo, runtime=LocalContextCollabRuntimePlugin()
+    )
     assert isinstance(service, ContextCollabServiceProtocol)
     return repo, service
 
@@ -217,9 +222,7 @@ class TestGetStatusHappyPath:
 
     def test_snapshot_progress_reflects_projected_events(self):
         repo, service = _make_service()
-        result = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
+        result = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
         assert isinstance(result, ContextCollabStatusProjection)
         assert result.collab_context_id == COLLET_ID
         assert result.context_version == 4
@@ -241,9 +244,7 @@ class TestGetStatusHappyPath:
 
     def test_current_event_keyed_by_collet_pointer(self):
         _, service = _make_service()
-        result = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
+        result = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
         current_event = result.current_event
         assert current_event is not None
         assert current_event["event_id"] == "evt_004"
@@ -253,19 +254,21 @@ class TestGetStatusHappyPath:
         assert current_event["summary"] == "开始整理协议设计"
         # current 的状态由 collet.current_event_id 决定:evt_004 → active。
         assert current_event["status"] == "active"
-        assert current_event["occurred_at"] == OCCURRED_AT
+        assert current_event["created_at"] == OCCURRED_AT
 
     def test_task_progress_events_projection(self):
         _, service = _make_service()
-        result = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
+        result = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
         task_progress = result.task_progress
         assert isinstance(task_progress, TaskProgressProjectionDTO)
         assert task_progress.total_events == 5
-        assert [
-            entry["event_id"] for entry in task_progress.events
-        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_005"]
+        assert [entry["event_id"] for entry in task_progress.events] == [
+            "evt_001",
+            "evt_002",
+            "evt_003",
+            "evt_004",
+            "evt_005",
+        ]
 
         statuses = {
             entry["event_id"]: entry["status"] for entry in task_progress.events
@@ -286,12 +289,19 @@ class TestGetStatusHappyPath:
             assert "steps" not in entry
             assert set(entry) == {
                 "event_id",
+                "event_seq",
                 "parent_event",
                 "event_kind",
                 "primitive_type",
+                "actor_id",
+                "actor_type",
+                "execution_id",
+                "context_version",
                 "status",
                 "summary",
                 "content",
+                "artifacts",
+                "created_at",
             }
         assert task_progress.events[0]["summary"] == "创建协作任务"
         assert task_progress.events[0]["parent_event"] is None
@@ -329,22 +339,19 @@ class TestTrunkFilterIdentity:
         return _event(**fields)
 
     def test_trunk_flag_filters_events_only(self):
-        _, service = _make_service(
-            events=_fixture_events() + [self._branch_event()]
-        )
-        full = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
-        trunk = service.get_status(
-            COLLET_ID, trunk_events=True, context=make_actor()
-        )
+        _, service = _make_service(events=_fixture_events() + [self._branch_event()])
+        full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
+        trunk = service.get_status(COLLET_ID, trunk_events=True, context=make_actor())
 
         assert full.task_progress.total_events == 6
         # Ruling R9:主干 = current(evt_004)沿 parent 回溯的活动链;
         # 链后的 pending 事件(evt_005)与链外分支(evt_006)都被滤除。
         assert trunk.task_progress.total_events == 4
         assert [entry["event_id"] for entry in trunk.task_progress.events] == [
-            "evt_001", "evt_002", "evt_003", "evt_004",
+            "evt_001",
+            "evt_002",
+            "evt_003",
+            "evt_004",
         ]
         # 两次调用的 current_snapshot、current_event、percent 完全相等。
         assert full.current_snapshot == trunk.current_snapshot
@@ -359,20 +366,22 @@ class TestTrunkFilterIdentity:
         不因 trunk 开关翻回主干上的 40。"""
         _, service = _make_service(
             events=_fixture_events()
-            + [self._branch_event(payload={"summary": "分支提交更多进展",
-                                           "percent": 80})]
+            + [
+                self._branch_event(
+                    payload={"summary": "分支提交更多进展", "percent": 80}
+                )
+            ]
         )
-        full = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
-        trunk = service.get_status(
-            COLLET_ID, trunk_events=True, context=make_actor()
-        )
+        full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
+        trunk = service.get_status(COLLET_ID, trunk_events=True, context=make_actor())
 
         assert full.task_progress.total_events == 6
-        assert [
-            entry["event_id"] for entry in trunk.task_progress.events
-        ] == ["evt_001", "evt_002", "evt_003", "evt_004"]
+        assert [entry["event_id"] for entry in trunk.task_progress.events] == [
+            "evt_001",
+            "evt_002",
+            "evt_003",
+            "evt_004",
+        ]
         assert full.current_snapshot["progress"]["percent"] == 80
         assert trunk.current_snapshot["progress"]["percent"] == 80
 
@@ -393,20 +402,14 @@ class TestTrunkFilterIdentity:
             fixture[4],  # evt_005 Activity pending
         ]
         _, service = _make_service(events=events)
-        full = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
-        trunk = service.get_status(
-            COLLET_ID, trunk_events=True, context=make_actor()
-        )
+        full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
+        trunk = service.get_status(COLLET_ID, trunk_events=True, context=make_actor())
 
         # 全量推导把分支活动也算进 completed(evt_001/e3/分支);
         # 两个开关都必须报告全量推导值(Ruling R6)。
         assert full.current_snapshot["progress"]["completed_count"] == 3
         assert trunk.current_snapshot["progress"]["completed_count"] == 3
-        assert full.current_snapshot["progress"] == (
-            trunk.current_snapshot["progress"]
-        )
+        assert full.current_snapshot["progress"] == (trunk.current_snapshot["progress"])
         # 活动链 = evt_001..evt_004(分支在链外)。
         assert trunk.task_progress.total_events == 4
 
@@ -417,12 +420,8 @@ class TestTrunkFilterIdentity:
             collet=_collet(current_event_id="evt_006"),
             events=_fixture_events() + [self._branch_event()],
         )
-        full = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
-        trunk = service.get_status(
-            COLLET_ID, trunk_events=True, context=make_actor()
-        )
+        full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
+        trunk = service.get_status(COLLET_ID, trunk_events=True, context=make_actor())
 
         # current_event 都指向分支事件且为 active,不因 trunk 开关消失。
         assert full.current_event == trunk.current_event
@@ -442,12 +441,15 @@ class TestTrunkFilterIdentity:
         # Ruling R9:current 指在分支上时,分支就在活动链上;
         # 链 = evt_006 → evt_004 → … → evt_001,链外的 evt_005 被滤除。
         # 列出的主干条目状态与全量视图一致,不退化成全 pending。
+        assert [entry["event_id"] for entry in trunk.task_progress.events] == [
+            "evt_001",
+            "evt_002",
+            "evt_003",
+            "evt_004",
+            "evt_006",
+        ]
         assert [
-            entry["event_id"] for entry in trunk.task_progress.events
-        ] == ["evt_001", "evt_002", "evt_003", "evt_004", "evt_006"]
-        assert [
-            (entry["event_id"], entry["status"])
-            for entry in trunk.task_progress.events
+            (entry["event_id"], entry["status"]) for entry in trunk.task_progress.events
         ] == [
             (entry["event_id"], entry["status"])
             for entry in full.task_progress.events
@@ -464,9 +466,11 @@ class TestVisibilityFiltering:
         result = service.get_status(
             COLLET_ID, trunk_events=False, context=make_actor("u_9999")
         )
-        assert [
-            entry["event_id"] for entry in result.task_progress.events
-        ] == ["evt_001", "evt_004", "evt_005"]
+        assert [entry["event_id"] for entry in result.task_progress.events] == [
+            "evt_001",
+            "evt_004",
+            "evt_005",
+        ]
         assert result.task_progress.total_events == 3
         # workspace(evt_002)与 private(evt_003)不进统计。
         progress = result.current_snapshot["progress"]
@@ -483,9 +487,12 @@ class TestVisibilityFiltering:
             trunk_events=False,
             context=make_actor(EXECUTOR.agent_id),
         )
-        assert [
-            entry["event_id"] for entry in result.task_progress.events
-        ] == ["evt_001", "evt_002", "evt_004", "evt_005"]
+        assert [entry["event_id"] for entry in result.task_progress.events] == [
+            "evt_001",
+            "evt_002",
+            "evt_004",
+            "evt_005",
+        ]
         # evt_002 可见但 Message 不计数;evt_003(private)不可见。
         assert result.current_snapshot["progress"]["completed_count"] == 1
 
@@ -522,9 +529,7 @@ class TestVisibilityFiltering:
             COLLET_ID, trunk_events=False, context=make_actor("u_9999")
         )
         assert result.current_event is None
-        assert result.current_snapshot["progress"]["current_event_id"] == (
-            "evt_002"
-        )
+        assert result.current_snapshot["progress"]["current_event_id"] == ("evt_002")
 
 
 class TestReadOnlyPath:
@@ -534,12 +539,8 @@ class TestReadOnlyPath:
         repo, service = _make_service()
         before = repo.collets[COLLET_ID]
 
-        first = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
-        second = service.get_status(
-            COLLET_ID, trunk_events=False, context=make_actor()
-        )
+        first = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
+        second = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
 
         # 只触发了两次 get_current_status 读取;写路径零调用。
         assert repo.get_calls == [COLLET_ID, COLLET_ID]
