@@ -195,7 +195,7 @@ class CardUpdates(CardManagementService):
         _, warnings = self._map_projection(
             card,
             config,
-            self.document_converter.convert(card),
+            self._convert_projection(card, config),
             validate_keys=validate_keys,
         )
         return warnings
@@ -214,7 +214,19 @@ class CardUpdates(CardManagementService):
         )
 
     def _default_projection(self, row):
-        return self.document_converter.convert(row.card)
+        return self._convert_projection(row.card, row.config)
+
+    def _convert_projection(self, card, config):
+        if type(self.document_converter) is DefaultCardDocumentConverter:
+            mapping = effective_mapping(
+                self.document_mapping, (config or {}).get("document_mapping")
+            )
+            # An explicit template can supply all text, but business filters
+            # must still be extracted and validated by the converter.
+            return self.document_converter.convert(
+                card, allow_empty_text=mapping.search_text_template is not None
+            )
+        return self.document_converter.convert(card)
 
     def _prepare_documents(self, row, previous):
         projection = None
