@@ -182,6 +182,23 @@ def test_invoke_maps_explicit_timeout():
         )
 
 
+
+def test_invoke_maps_default_timeout():
+    """httpx.TimeoutException must raise DeviceAdapterTimeoutError even when no explicit timeout is passed."""
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = httpx.ReadTimeout(
+        "slow", request=httpx.Request("GET", "https://proxy.example/api/test")
+    )
+
+    with pytest.raises(DeviceAdapterTimeoutError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 1},
+                method="GET",
+                path="/api/test",
+            )
+        )
+
 def test_invoke_maps_baas_resolution_error():
     transport, baas = _transport()
     baas.invoke_http.side_effect = BaasServiceError("no active device")
