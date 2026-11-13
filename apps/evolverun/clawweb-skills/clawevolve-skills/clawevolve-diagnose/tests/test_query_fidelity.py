@@ -49,6 +49,6 @@ def test_natural_language_source_keeps_generated_replay_query() -> None:
         "检查语雀知识链接是否正确回写到本地数据文件。",
     )
 
-    assert decision.query == "检查语雀知识链接是否正确回写到本地数据文件"
+    assert decision.query == "检查语雀知识链接是否正确回写到本地数据文件。"
     assert not decision.source_invocation
     assert not decision.notes
