@@ -206,6 +206,9 @@ template produces one expression. `CardUpdates` owns pre-save validation and map
 application, while the host owns default conversion and protected business filters.
 `MappedCardIndexBuildService` shares build validation and mapping inheritance.
 Hosts keep their source publisher and model selection in their composition roots.
+An explicit search template may supply all text when the standard default
+converter's text fields are absent. Its declared filters are still validated;
+unmapped conversion and custom business converter validation remain unchanged.
 
 `CardStore.upsert` optionally accepts `document_mapping` and `validate_mapping`.
 The sentinel means preserve; null/empty clears; nonempty replaces that config key.
