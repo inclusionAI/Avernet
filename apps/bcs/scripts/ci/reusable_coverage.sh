@@ -34,8 +34,12 @@ if [ -n "$spawn_pkgs" ]; then
   # shellcheck disable=SC2086
   cargo build --locked $spawn_pkgs --bins
 fi
+# TEMP-DIAG(#3959): verify spawned helper binaries exist right after the build.
+ls -la "$CARGO_TARGET_DIR/debug/bcs" "$CARGO_TARGET_DIR/debug/bcs-cli" 2>&1 || true
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
+# TEMP-DIAG(#3959): re-verify spawned helper binaries still exist before tests.
+ls -la "$CARGO_TARGET_DIR/debug/bcs" "$CARGO_TARGET_DIR/debug/bcs-cli" 2>&1 || true
 set +e
 cargo nextest run --cargo-metadata testresult/cargo-metadata.json \
   --binaries-metadata testresult/test-binaries.json --config-file "$config" \
