@@ -36,6 +36,16 @@ inventory and writes reports even if some tests fail. The later
 coverage thresholds. Read its three verdicts separately; a successful runner
 step alone does not prove all tests passed.
 
+Compilation or runner failures that leave either JUnit or coverage output
+missing or empty stop the producer immediately, including non-fast-fail mode.
+The reusable runner publishes `test-binaries.json` only after its build/list
+command succeeds, so later MySQL steps cannot consume an empty build inventory.
+
+An `E0433: too many leading super keywords` error in a `tests/*.rs` file can
+mean a child-module helper was also discovered as an independent integration
+test crate. Keep such helpers under `tests/support/` and update their parent's
+`#[path]`; selecting only the parent test target will not expose this mistake.
+
 From `apps/bcs`, run the unit producer and then the gate using the actual base
 SHA selected by the workflow:
 

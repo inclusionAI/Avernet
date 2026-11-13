@@ -3,7 +3,7 @@ use bcs_event_store::MemoryEventStore;
 use bcs_service_api::port::repo::{EventRepoPort, EventRepoError};
 use bcs_service_api::types::EventSubscriptionStatus;
 
-#[path = "memory_delivery_regressions.rs"]
+#[path = "support/memory_delivery_regressions.rs"]
 mod delivery_regressions;
 
 #[tokio::test]

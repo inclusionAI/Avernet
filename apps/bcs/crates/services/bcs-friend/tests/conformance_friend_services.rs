@@ -17,7 +17,7 @@ use bcs_test_support::{
     NoopRelationCoreService,
 };
 
-#[path = "friend_application_regressions.rs"]
+#[path = "support/friend_application_regressions.rs"]
 mod application_regressions;
 
 #[tokio::test]
