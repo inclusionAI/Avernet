@@ -510,6 +510,7 @@ async fn shared_info_checks_membership_and_limits_the_read_principals() {
         (Some(SESSION_ID), None, &reader),
         (None, None, &owner),
         (None, None, &reader),
+        (None, Some("driver"), &owner),
     ] {
         guard.shared_info(GROUP_ID, session, view_bot, human).await.unwrap();
     }
@@ -531,6 +532,8 @@ async fn shared_info_checks_membership_and_limits_the_read_principals() {
         (GROUP_ID, Some(SESSION_ID), Some("driver"), &owner, "permission_denied"),
         (GROUP_ID, Some(SESSION_ID), None, &outsider, "permission_denied"),
         (GROUP_ID, None, None, &outsider, "permission_denied"),
+        (GROUP_ID, None, Some("guest"), &owner, "permission_denied"),
+        (GROUP_ID, None, Some("driver"), &reader, "permission_denied"),
         (GROUP_ID, Some("missing"), None, &owner, "session_not_found"),
         ("missing", None, None, &owner, "group_not_found"),
     ] {
@@ -541,7 +544,7 @@ async fn shared_info_checks_membership_and_limits_the_read_principals() {
     assert_eq!(guard.can_manage_presets("missing", "human_owner").await.unwrap_err().code(), "group_not_found");
 
     let queries = inner.shared_queries.lock().unwrap();
-    assert_eq!(queries.len(), 6);
+    assert_eq!(queries.len(), 7);
     let mut owner_ids = queries[0].actor_ids.clone();
     owner_ids.sort();
     assert_eq!(owner_ids, ["driver", "guest", "human_owner"]);
@@ -551,8 +554,10 @@ async fn shared_info_checks_membership_and_limits_the_read_principals() {
     assert_eq!(queries[3].group_id, GROUP_ID);
     assert_eq!(queries[3].session_id, None);
     assert_eq!(queries[4].actor_ids, ["human_reader"]);
-    assert_eq!(queries[5].group_id, "public-group");
-    assert_eq!(queries[5].actor_ids, ["human_outsider"]);
+    assert_eq!(queries[5].actor_ids, ["driver"]);
+    assert_eq!(queries[5].session_id, None);
+    assert_eq!(queries[6].group_id, "public-group");
+    assert_eq!(queries[6].actor_ids, ["human_outsider"]);
 }
 
 #[tokio::test]
