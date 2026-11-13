@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.27</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.28</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -965,11 +965,11 @@ public interface TaskStore {
 <pre><code>public interface A2aAgentHandler {
     AgentDescriptor descriptor();
 
-    SendMessageResponse sendMessage(BcnCall&lt;SendMessageRequest&gt; call);
-    Flow.Publisher&lt;StreamResponse&gt; sendStreamingMessage(BcnCall&lt;SendMessageRequest&gt; call);
-    Task getTask(BcnCall&lt;GetTaskRequest&gt; call);
-    Flow.Publisher&lt;StreamResponse&gt; subscribeToTask(BcnCall&lt;SubscribeToTaskRequest&gt; call);
-    Task cancelTask(BcnCall&lt;CancelTaskRequest&gt; call);
+    EventKind sendMessage(BcnCall&lt;MessageSendParams&gt; call);
+    Flow.Publisher&lt;StreamingEventKind&gt; sendStreamingMessage(BcnCall&lt;MessageSendParams&gt; call);
+    Task getTask(BcnCall&lt;TaskQueryParams&gt; call);
+    Flow.Publisher&lt;StreamingEventKind&gt; subscribeToTask(BcnCall&lt;TaskIdParams&gt; call);
+    Task cancelTask(BcnCall&lt;CancelTaskParams&gt; call);
 }
 
 /** SDK 在标准请求外包的一层，带上协议层已经处理好的信息。 */
@@ -986,7 +986,7 @@ public interface CallerContext {
     Optional&lt;CallSource&gt; source();          // platform、app、botId、scene
     Optional&lt;String&gt; callerApp();           // 仅 GRPC 绑定可得
 }</code></pre>
-<p>参数和返回值类型都来自 a2a-java。引擎不需要自己解析请求头、扩展协商和调用上下文。</p>
+<p>参数和返回值类型都来自 a2a-java 的 <code>org.a2aproject.sdk.spec</code>，与官方 <code>RequestHandler</code> 使用的类型相同：<code>MessageSendParams</code>、<code>TaskQueryParams</code>、<code>TaskIdParams</code>、<code>CancelTaskParams</code>，返回 <code>EventKind</code>（Task 或 Message）、<code>Task</code>、<code>StreamingEventKind</code>。引擎不需要自己解析请求头、扩展协商和调用上下文。</p>
 <div class="tw"><table>
 <tr><th>方法</th><th>SDK 先做</th><th>引擎做</th><th>SDK 后做</th></tr>
 <tr><td>发送（新 Task）</td><td>版本、协商、输入类型、调用上下文、授权</td><td>创建运行，尽快返回 Task；把 <code>taskAttributes</code> 写入 <code>Task.metadata</code></td><td>校验和过滤输出，去掉保留数据（8.6）</td></tr>
@@ -1057,10 +1057,10 @@ public final class Approvals {
 
 // 工具观察 v2（7.9）
 public final class ToolRecords {
-    public static TaskStatusUpdateEvent started(Task task, String toolCallId, String name, Map<String, Object> args);
-    public static TaskStatusUpdateEvent finished(Task task, String toolCallId, String name, Map<String, Object> args,
+    public static TaskStatusUpdateEvent started(Task task, String toolCallId, String name, Map&lt;String, Object> args);
+    public static TaskStatusUpdateEvent finished(Task task, String toolCallId, String name, Map&lt;String, Object> args,
                                                  boolean isError, String text);
-    public static Part part(String toolCallId, String name, Map<String, Object> args,
+    public static Part part(String toolCallId, String name, Map&lt;String, Object> args,
                             boolean isError, String text);          // L0：回复消息中的 Part
 }
 
@@ -1097,7 +1097,7 @@ public class OrderAgentHandler implements A2aAgentHandler {
     }
 
     @Override
-    public Flow.Publisher&lt;StreamResponse&gt; sendStreamingMessage(BcnCall&lt;SendMessageRequest&gt; call) {
+    public Flow.Publisher&lt;StreamingEventKind&gt; sendStreamingMessage(BcnCall&lt;MessageSendParams&gt; call) {
         Message msg = call.request().message();
         RunRecord run = engine.start(call.caller().userId().orElseThrow(), msg.contextId(),
                                      Texts.of(msg), call.taskAttributes());
@@ -1105,44 +1105,44 @@ public class OrderAgentHandler implements A2aAgentHandler {
     }
 
     @Override
-    public SendMessageResponse sendMessage(BcnCall&lt;SendMessageRequest&gt; call) {
+    public EventKind sendMessage(BcnCall&lt;MessageSendParams&gt; call) {
         Message msg = call.request().message();
         if (msg.taskId() == null) {                          // 非流式的新请求
             RunRecord run = engine.start(call.caller().userId().orElseThrow(), msg.contextId(),
                                          Texts.of(msg), call.taskAttributes());
-            return SendMessageResponse.of(mapper.toTask(run, call.extensions()));
+            return mapper.toTask(run, call.extensions());
         }
         // 审批续交：可能落在任意实例上，只依赖引擎的运行记录
         Task current = mapper.toTask(engine.get(msg.taskId()), call.extensions());
         ApprovalOutcome outcome = Approvals.accept(current, msg);   // 不合法时抛出协议错误
         RunRecord run = engine.confirm(msg.taskId(), outcome.decisions(),
                                        Approvals.receipts(current, outcome));  // 引擎原子地记录并继续（R-06）
-        return SendMessageResponse.of(mapper.toTask(run, call.extensions()));
+        return mapper.toTask(run, call.extensions());
     }
 
     @Override
-    public Task getTask(BcnCall&lt;GetTaskRequest&gt; call) {
+    public Task getTask(BcnCall&lt;TaskQueryParams&gt; call) {
         return mapper.toTask(engine.get(call.request().id()), call.extensions());
     }
 
     @Override
-    public Flow.Publisher&lt;StreamResponse&gt; subscribeToTask(BcnCall&lt;SubscribeToTaskRequest&gt; call) {
+    public Flow.Publisher&lt;StreamingEventKind&gt; subscribeToTask(BcnCall&lt;TaskIdParams&gt; call) {
         return mapper.stream(engine.subscribe(call.request().id()), call.extensions());  // 首帧为快照（R-02）
     }
 
     @Override
-    public Task cancelTask(BcnCall&lt;CancelTaskRequest&gt; call) {
+    public Task cancelTask(BcnCall&lt;CancelTaskParams&gt; call) {
         return mapper.toTask(engine.cancel(call.request().id()), call.extensions());
     }
 }
 
 /** 映射必须是确定性的：同一份运行记录在任何实例上都映射出相同的 Task。 */
 final class RunMapper {
-    StreamResponse toEvent(RunRecord r, RunEvent e, Set&lt;String&gt; ext) {
+    StreamingEventKind toEvent(RunRecord r, RunEvent e, Set&lt;String&gt; ext) {
         return switch (e) {
             case TextDelta t    -&gt; textUpdate(r, "seg-" + t.segmentId(), t.text(), t.isFirst());
-            case ToolStarted t  -&gt; StreamResponse.of(ToolRecords.started(task(r), t.callId(), t.name(), t.args()));
-            case ToolFinished t -&gt; StreamResponse.of(ToolRecords.finished(task(r), t.callId(), t.name(), t.args(), t.failed(), t.summary()));
+            case ToolStarted t  -&gt; ToolRecords.started(task(r), t.callId(), t.name(), t.args());
+            case ToolFinished t -&gt; ToolRecords.finished(task(r), t.callId(), t.name(), t.args(), t.failed(), t.summary());
             case NeedsConfirm c -&gt; statusUpdate(r, TaskState.TASK_STATE_INPUT_REQUIRED,
                                                 Approvals.request(c.batchId(), c.expiresAtMs(), c.calls()));
             case OrderCard c    -&gt; blockUpdate(r, ext.contains(OrderUi.URI)
@@ -1181,7 +1181,7 @@ public class OrderAuthorizer implements AgentAuthorizer {
 <pre><code>public interface MessageAgent {
     AgentDescriptor descriptor();
     /** 返回一条完整的回复。在 SDK 管理的线程上调用，可以阻塞。 */
-    Message reply(BcnCall&lt;SendMessageRequest&gt; call) throws Exception;
+    Message reply(BcnCall&lt;MessageSendParams&gt; call) throws Exception;
 }</code></pre><pre><code>@Component
 public class FaqAgent implements MessageAgent {
     @Override
@@ -1194,7 +1194,7 @@ public class FaqAgent implements MessageAgent {
     }
 
     @Override
-    public Message reply(BcnCall&lt;SendMessageRequest&gt; call) {
+    public Message reply(BcnCall&lt;MessageSendParams&gt; call) {
         String answer = faqService.answer(Texts.of(call.request().message()));
         return Messages.agentText(answer);           // SDK 补齐 messageId、role、contextId
     }
