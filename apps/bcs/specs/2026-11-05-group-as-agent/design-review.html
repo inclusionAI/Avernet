@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BCN Group A2A 方案评审</title>
+<style>
+  :root { color-scheme:light; --bg:#f5f6f8; --paper:#fff; --ink:#202938; --muted:#566174; --line:#dbe1e9; --accent:#2454b6; --soft:#edf3ff; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; scroll-padding-top:85px; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  a { color:var(--accent); text-underline-offset:3px; overflow-wrap:anywhere; }
+  .topbar { position:sticky; top:0; z-index:2; background:var(--paper); border-bottom:1px solid var(--line); }
+  .topbar-inner { max-width:1440px; margin:auto; padding:14px 28px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .brand { font-weight:650; }
+  .topbar nav { display:flex; gap:20px; font-size:14px; flex-wrap:wrap; }
+  .layout { max-width:1440px; margin:0 auto; display:grid; grid-template-columns:200px minmax(0,1fr); gap:28px; padding:30px 28px 70px; }
+  aside { align-self:start; position:sticky; top:94px; font-size:14px; }
+  aside nav { display:grid; gap:4px; }
+  aside a { padding:8px 10px; text-decoration:none; border-radius:6px; }
+  aside a:hover { background:var(--soft); }
+  main { min-width:0; background:var(--paper); padding:34px 40px 50px; border:1px solid var(--line); border-radius:10px; }
+  h1 { font-size:30px; line-height:1.4; margin:0 0 12px; letter-spacing:-.5px; }
+  h2 { font-size:23px; line-height:1.5; margin:48px 0 20px; padding-top:22px; border-top:1px solid var(--line); }
+  h3 { font-size:18px; line-height:1.5; margin:30px 0 14px; }
+  p { margin:14px 0; overflow-wrap:anywhere; }
+  .meta { color:var(--muted); font-size:13px; }
+  strong { font-weight:650; }
+  .table-scroll { max-width:100%; overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:6px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.7; min-width:660px; }
+  th,td { text-align:left; vertical-align:top; padding:11px 14px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+  th { background:#f2f5f9; font-weight:650; }
+  td:first-child { min-width:175px; }
+  tr:last-child td { border-bottom:0; }
+  tbody tr:nth-child(even) { background:#fafbfd; }
+  code { font:.86em/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#eff2f6; padding:2px 5px; border-radius:3px; overflow-wrap:anywhere; }
+  pre { margin:16px 0; padding:18px; background:#f4f6f9; border:1px solid var(--line); border-radius:6px; overflow:auto; max-width:100%; line-height:1.65; }
+  pre code { background:none; padding:0; font-size:13px; overflow-wrap:normal; }
+  details { margin:22px 0; border:1px solid #b8caea; background:#fcfdff; border-radius:7px; }
+  summary { cursor:pointer; color:var(--accent); font-weight:600; padding:14px 18px; font-size:15px; }
+  details[open] > summary { border-bottom:1px solid var(--line); }
+  details > :not(summary) { margin-left:18px; margin-right:18px; }
+  details > :last-child { margin-bottom:18px; }
+  ol, ul { padding-left:26px; }
+  li { margin:8px 0; padding-left:4px; }
+  .tag { display:inline-block; padding:0 9px; border-radius:10px; font-size:12px; font-weight:650; line-height:1.8; white-space:nowrap; }
+  .tag.std { background:#e3f4e8; color:#176a35; }
+  .tag.sub { background:#fff1cf; color:#855400; }
+  .tag.ext { background:#efe7fb; color:#5b2fa0; }
+  .tag.todo { background:#fde8e8; color:#a02525; }
+  .tag.ok { background:#e3f4e8; color:#176a35; }
+  .callout { border-left:4px solid var(--accent); background:var(--soft); padding:6px 20px; border-radius:0 6px 6px 0; margin:22px 0; }
+  .callout.warn { border-left-color:#c98a00; background:#fff8e6; }
+  .cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:20px 0; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:6px 18px 10px; background:#fcfdff; }
+  .card h4 { margin:10px 0 2px; font-size:16px; color:var(--accent); }
+  .card p { margin:6px 0; font-size:14px; line-height:1.7; }
+  figure { margin:26px 0; }
+  figure svg { width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff; display:block; }
+  figcaption { font-size:13px; color:var(--muted); text-align:center; margin-top:8px; }
+  svg text { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; font-size:13px; fill:#202938; }
+  svg .t { font-weight:650; }
+  svg .s { font-size:12px; fill:#566174; }
+  svg .lbl { paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; }
+  svg .old { fill:#f6f7f9; stroke:#98a2b3; stroke-width:1.3; }
+  svg .new { fill:#eaf1ff; stroke:#2454b6; stroke-width:1.5; }
+  svg .ext { fill:#fff6e0; stroke:#c98a00; stroke-width:1.5; }
+  svg .inner { fill:#fff; stroke:#9db7ea; stroke-width:1; }
+  svg .ok { fill:#e3f4e8; stroke:#2e8b57; stroke-width:1.5; }
+  svg .bad { fill:#fde8e8; stroke:#c0392b; stroke-width:1.5; }
+  svg .idle { fill:#eef0f3; stroke:#7b8494; stroke-width:1.5; }
+  svg .life { stroke:#b7c0cf; stroke-dasharray:4 4; stroke-width:1.2; }
+  svg .arr { stroke:#2454b6; stroke-width:1.6; fill:none; marker-end:url(#a); }
+  svg .arr2 { stroke:#2454b6; stroke-width:1.6; fill:none; marker-end:url(#a); marker-start:url(#as); }
+  svg .ret { stroke:#566174; stroke-width:1.4; fill:none; stroke-dasharray:5 3; marker-end:url(#g); }
+  svg .rej { stroke:#c0392b; stroke-width:1.6; fill:none; marker-end:url(#r); }
+  .legend { display:inline-flex; gap:14px; flex-wrap:wrap; justify-content:center; }
+  .legend i { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:5px; border:1.5px solid; }
+  .footer { margin-top:38px; padding-top:18px; border-top:1px solid var(--line); font-size:13px; color:var(--muted); }
+  @media(max-width:1000px) { .layout { grid-template-columns:1fr; } aside { display:none; } main { padding:26px 22px; } .cards { grid-template-columns:1fr; } }
+  @media print { .topbar, aside { display:none; } body { background:#fff; } .layout { display:block; padding:0; } main { padding:0; border:0; } .table-scroll { overflow:visible; } table { min-width:0; } pre { white-space:pre-wrap; } details > :not(summary) { display:block; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#2454b6"/></marker>
+<marker id="as" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M10 0L0 5L10 10z" fill="#2454b6"/></marker>
+<marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#566174"/></marker>
+<marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#c0392b"/></marker>
+</defs></svg>
+<header class="topbar"><div class="topbar-inner"><div class="brand">BCN Group A2A · 方案评审</div><nav aria-label="相关文档"><a href="next-discussion.html">讨论稿</a><a href="spec.md">Spec</a><a href="examples.md">完整示例</a></nav></div></header>
+<div class="layout">
+<aside><nav aria-label="章节">
+<a href="#background">1. 背景与目标</a>
+<a href="#overview">2. 方案总览</a>
+<a href="#flow">3. 调用流程</a>
+<a href="#interface">4. 对外接口（A2A 符合性）</a>
+<a href="#architecture">5. 系统架构</a>
+<a href="#rationale">6. 关键设计取舍</a>
+<a href="#delivery">7. 交付计划与验收</a>
+<a href="#open-items">8. 待确认事项</a>
+<a href="#refs">9. 参考材料</a>
+</nav></aside>
+<main>
+<h1>BCN Group A2A 方案评审</h1>
+<p class="meta">评审日期：2026-11-12 · 代码核对基线：<code>origin/dev</code> · <code>9a61798cb7</code> · 协议：A2A 1.0.1（线上版本字段 <code>1.0</code>） · 状态：待评审</p>
+
+<div class="callout">
+<p><strong>一句话：</strong>让外部 Agent 像调用一个 Agent 一样调用 BCN 协作群：发消息、看进度、拿结果、续聊、取消。对外使用标准 A2A 1.0（HTTP+JSON / SSE），群内由 manager 协调成员，或按自定义流程完成工作。<strong>群是可复用的 Agent，Session 承接连续对话，Task 记录每一轮执行。</strong></p>
+</div>
+
+<p><strong>本次评审希望得到的结论：</strong></p>
+<ol>
+<li><strong>对外接口与 A2A 符合性边界</strong>：标准内的选择、支持子集、BCN 扩展是否可接受（§4）。</li>
+<li><strong>同 context 并发</strong>：本期采用忙碌拒绝（409 / <code>CONTEXT_BUSY</code>），FIFO 排队放下一期待定（§3.2）。</li>
+<li><strong>完成判定</strong>：主从群复用 manager 的 <code>task.complete</code> 与 <code>summary</code>，强绑定本轮 Task/activation；先返回受理 ack，再等 manager 退出并收尾，终态提交后才释放占用（§3.1、§3.4、§5.5）。</li>
+<li><strong>收尾有时限</strong>：执行有期限，取消后确认停止也有期限；到期仍无法确认旧执行已停止，就先暂停该会话接受新一轮，确认停止后再恢复（§3.5）。</li>
+<li><strong>metadata 扩展发布方式</strong>：Card 声明可选扩展，请求用 <code>A2A-Extensions</code> 激活；扩展 URI 与 Schema 使用仓库地址（§4.4）。<code>caller</code> / <code>user</code> 的命名和凭据传递方式待定。</li>
+<li><strong>产物持久化与后续范围</strong>：Artifact 单独建表持久化，并为非文本类型预留；自由聊天群接入 A2A 留待后续讨论，自然语言建群暂不考虑（§1、§5.4、§5.7）。</li>
+</ol>
+<p>逐项记录结论见 <a href="#open-items">§8</a>。</p>
+
+<!-- ============ 1 ============ -->
+<h2 id="background">1. 背景与目标</h2>
+
+<h3>现状与缺口</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="现状与缺口"><table>
+<thead><tr><th>对象</th><th>已有</th><th>缺口</th></tr></thead>
+<tbody>
+<tr><td>BCN 单 Bot</td><td>单 Bot 聊天入口、Card 管理、A2A 出站</td><td>标准 A2A 入站仅为设想，单独排期，不在本期</td></tr>
+<tr><td>BCN Group</td><td>Group Card 模板及存储；Session、StateMachine Run、manager <code>task.complete</code>；<code>bcs_events</code></td><td>无对外标准入站；没有 A2A Task 对象；完成、取消、并发缺少统一的对外语义</td></tr>
+</tbody></table></div>
+
+<h3>要解决的问题</h3>
+<p>第三方 Agent、Fuse 等上游需要把“一个协作群”当作一个可复用的 Agent 使用，而不必知道群里有哪个 manager、哪些成员，或者流程怎么定义。群内的 Session、Run、节点、投递各有自己的状态，需要统一投影成标准的 Task 状态、过程消息和最终结果。</p>
+<div class="callout">
+<p><strong>核心要求：对外是标准 A2A 1.0 协议，不是 BCN 私有接口。</strong></p>
+<ul>
+<li><strong>标准客户端直接可用：</strong>支持 A2A 1.0 HTTP+JSON 绑定的客户端，不需要 BCN 专有 SDK 或群内知识，读取 Agent Card 就能发现、发送、流式订阅、查询和取消。</li>
+<li><strong>用标准对象表达群：</strong>Group 对外就是一个 Agent，一轮执行对应标准 Task，上下文用 <code>contextId</code>，状态、过程消息和产物都走标准的 Task / Message / Artifact / Part。</li>
+<li><strong>偏离有边界且显式声明：</strong>只有“支持标准的子集”和“可选扩展（<code>required: false</code>）”两类，不使用扩展也能完成完整调用；详见 <a href="#interface">§4</a>。</li>
+</ul>
+</div>
+
+<h3>范围</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="范围"><table>
+<thead><tr><th style="width:130px">阶段</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><span class="tag ok">本期</span></td><td>已有主从群（ManagerWorker）和自定义协作群（StateMachine）的 A2A 调用：Card、发送、流式、查询/列表、订阅、取消；过程消息；多轮（终态后新 Task）；忙碌拒绝；有界取消与收尾；Artifact 持久化（独立 artifacts 表，见 <a href="#persistence">§5.4</a>）；调用来源 caller/user（字段命名待定，见 <a href="#ext-meta">§4.4</a>）；基于现有调用主体的资源归属校验</td></tr>
+<tr><td><span class="tag todo">下一期</span></td><td>文件输入（<code>raw</code> / <code>url</code> Part，见 <a href="#files-next">§4.7</a>）；Task 等待补充输入与恢复（<code>input_required</code>）；同 context 的 FIFO 排队（待定）</td></tr>
+<tr><td><span class="tag todo">后续讨论</span></td><td>自由聊天群接入 A2A：如何确定结束、产物是什么尚未定，初步考虑群级设置二选一（返回聊天消息，或交给 LLM 总结为产物），见 <a href="#free-chat">§5.7</a></td></tr>
+<tr><td>另行设计</td><td>认证机制与凭据（联合设计，含 caller/user 的凭据传递方式）；BCN 单 Agent 标准入站；Push Notification</td></tr>
+<tr><td>暂不考虑</td><td>自然语言建群：复杂度和风险过高，本方案不规划</td></tr>
+</tbody></table></div>
+
+<h3>核心模型</h3>
+<div class="cards">
+<div class="card"><h4>Group = Agent</h4><p>一个 Group 对外发布一个 Agent，Card 发布在 <code>/agent-card.json</code>。上游不传 manager、成员、工作流定义或 provider 参数。</p></div>
+<div class="card"><h4>Session = context</h4><p><code>contextId</code> 直接使用 Session.id，不新增映射表。同一 context 内连续对话，保留上一轮结果。</p></div>
+<div class="card"><h4>一轮执行 = Task</h4><p>每次独立执行对应一个 Task，绑定一次 Session activation 或一个 Run；每个 Task 保存独立结果，下一轮不覆盖。</p></div>
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="overview">2. 方案总览</h2>
+
+<h3>A2A 概念与群的对应</h3>
+<p>标记含义：<span class="tag std">标准</span> 使用协议标准字段或标准允许的实现选择；<span class="tag sub">子集</span> 仍是标准协议，但本期只支持其中一部分；<span class="tag ext">扩展</span> BCN 新增字段或业务语义。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="概念对应"><table>
+<thead><tr><th>A2A 概念</th><th>群内对应</th><th>性质</th></tr></thead>
+<tbody>
+<tr><td>Agent / AgentCard</td><td>一个可重复调用的 Group；Card 填入真实调用地址和实际支持的能力</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>contextId</code></td><td>Session.id</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>Task / <code>taskId</code></td><td>一轮独立执行（一次 activation 或一个 Run）</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>message.messageId</code></td><td>一条上游输入；持久化受理，用于重试去重</td><td><span class="tag std">标准</span>（幂等沿用 MAY）</td></tr>
+<tr><td><code>role</code> / <code>parts</code></td><td><code>ROLE_USER</code>；文本 + 至多一个对象 data；本期不接收文件，下一期支持</td><td><span class="tag sub">子集</span></td></tr>
+<tr><td><code>Task.status</code></td><td>Session、Run、节点、投递状态的统一投影</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>statusUpdate.status.message</code></td><td>分工、阶段进展、阶段总结（由 <code>includeProgress</code> 开关控制）</td><td><span class="tag std">标准</span> + <span class="tag ext">扩展</span></td></tr>
+<tr><td>Artifact</td><td>本轮最终结果：manager 的 <code>summary</code>，或状态机的最终输出节点；持久化到独立的 artifacts 表，结构预留非文本 Part</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>CancelTask</td><td>停止整轮工作，确认停止后提交 canceled</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>同 context 只运行一个 Task</td><td>不并行、不排队，忙碌时拒绝</td><td><span class="tag sub">子集</span> + <span class="tag ext">错误原因</span></td></tr>
+<tr><td><code>metadata</code></td><td><code>includeProgress</code> / <code>caller</code> / <code>user</code>（后两者的命名待定）</td><td><span class="tag ext">扩展</span></td></tr>
+</tbody></table></div>
+
+<h3>本期的关键选择</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="关键选择"><table>
+<thead><tr><th>问题</th><th>本期选择</th></tr></thead>
+<tbody>
+<tr><td>返回 Message 还是 Task</td><td><strong>Task-generating</strong>：受理的业务执行统一返回 Task，即使很快完成也返回 completed Task；请求校验失败仍返回错误</td></tr>
+<tr><td>多轮怎样划分 Task</td><td>每次独立执行建一个 Task，多轮通过同一个 context 关联；终态 Task 不再接收消息</td></tr>
+<tr><td>working 时收到带 <code>taskId</code> 的新消息</td><td>返回 UnsupportedOperationError，不追加、不排队</td></tr>
+<tr><td>working 时收到不带 <code>taskId</code> 的新请求</td><td><strong>忙碌拒绝</strong>：409 / <code>CONTEXT_BUSY</code>，不创建 Task；FIFO 排队下一期待定</td></tr>
+<tr><td>Task 等待补充输入</td><td>下一期；本期拒绝含 HumanInput 的静态流程，动态路径意外等待输入时失败收尾</td></tr>
+<tr><td>SendMessage 何时返回</td><td><code>message:send</code> 的 <code>returnImmediately</code> 两种都支持：false（默认）等待终态或中断态；true 立即返回 Task。流式操作（<code>message:stream</code>、subscribe）不受该字段影响，持续推送更新</td></tr>
+<tr><td>怎样获取结果</td><td>GetTask 轮询 + SSE 流式/订阅；<code>pushNotifications=false</code></td></tr>
+<tr><td>相同 messageId 重试</td><td>对外沿用标准 MAY；内部持久化去重并复用原 Task</td></tr>
+<tr><td>取消</td><td>提供；确认停止后转 canceled；超时仍无法确认停止，则 Task 标为 failed，并暂停该 context 接受新一轮</td></tr>
+</tbody></table></div>
+
+<!-- ============ 3 ============ -->
+<h2 id="flow">3. 调用流程</h2>
+
+<h3 id="flow-main">3.1 一次完整调用</h3>
+<p>受理、执行和完成流程相同，区别只在客户端如何取回过程与结果。本期 Card 声明 <code>streaming=true</code>、<code>pushNotifications=false</code>，因此有三种取回方式：</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="三种取回方式"><table>
+<thead><tr><th style="width:230px">调用方式</th><th>首个响应</th><th>取回过程与结果</th><th style="width:150px">适用场景</th></tr></thead>
+<tbody>
+<tr><td><code>message:stream</code></td><td>SSE 首帧 Task（SUBMITTED，含 <code>taskId / contextId</code>）</td><td>同一连接持续推送状态、过程消息和产物，终态后关闭；断线后用 subscribe 或 GetTask 恢复</td><td>需要实时进度</td></tr>
+<tr><td><code>message:send</code> + <code>returnImmediately=true</code></td><td>立即返回 Task（SUBMITTED，含 <code>taskId / contextId</code>），不等待执行</td><td>客户端用 <code>GET /tasks/{taskId}</code> 轮询，直到终态</td><td>长任务，不便保持长连接（推荐）</td></tr>
+<tr><td><code>message:send</code>（默认 <code>returnImmediately=false</code>）</td><td>终态或中断态才返回 Task，单次等待最长 60 秒</td><td>返回即含最终结果；超时返回 504 / <code>SEND_WAIT_TIMEOUT</code>，Task 继续执行，再用 GetTask 取回</td><td>预期很快完成的短任务</td></tr>
+</tbody></table></div>
+
+<p><strong>A. 流式（message:stream）。</strong>首次发送省略 <code>contextId</code>，BCN 创建 Session 与 Task，并在流的第一帧返回 <code>taskId / contextId</code>。</p>
+
+<figure>
+<svg viewBox="0 0 1000 710" role="img" aria-label="流式调用的时序图">
+<rect class="old" x="25" y="12" width="150" height="40" rx="6"/><text class="t" x="100" y="37" text-anchor="middle">上游 Agent</text>
+<rect class="new" x="225" y="12" width="150" height="40" rx="6"/><text class="t" x="300" y="37" text-anchor="middle">bcs-http</text>
+<rect class="new" x="425" y="12" width="150" height="40" rx="6"/><text class="t" x="500" y="37" text-anchor="middle">Group 调用应用服务</text>
+<rect class="ext" x="625" y="12" width="150" height="40" rx="6"/><text class="t" x="700" y="37" text-anchor="middle">群执行</text>
+<rect class="ext" x="825" y="12" width="150" height="40" rx="6"/><text class="t" x="900" y="37" text-anchor="middle">事件与存储</text>
+<line class="life" x1="100" y1="52" x2="100" y2="622"/><line class="life" x1="300" y1="52" x2="300" y2="622"/><line class="life" x1="500" y1="52" x2="500" y2="622"/><line class="life" x1="700" y1="52" x2="700" y2="622"/><line class="life" x1="900" y1="52" x2="900" y2="622"/>
+
+<line class="arr" x1="100" y1="92" x2="298" y2="92"/><text class="lbl" x="110" y="84">① POST message:stream（messageId，可带 contextId）</text>
+<line class="arr" x1="300" y1="130" x2="498" y2="130"/><text class="lbl" x="310" y="122">② 校验主体 / 协议 / 输入 / 资源归属</text>
+<line class="arr" x1="500" y1="168" x2="898" y2="168"/><text class="lbl" x="510" y="160">③ 原子受理：查重 · 占用 context · 保存 Task（SUBMITTED）</text>
+<line class="arr" x1="500" y1="206" x2="698" y2="206"/><text class="lbl" x="510" y="198">④ 启动本轮：Session activation / 新 Run</text>
+<line class="ret" x1="300" y1="244" x2="102" y2="244"/><text class="lbl" x="110" y="236">⑤ SSE 首帧：Task（SUBMITTED，含 taskId / contextId）</text>
+
+<line class="arr" x1="700" y1="290" x2="898" y2="290"/><text class="lbl" x="710" y="282">⑥ 执行中产生 bcs_events</text>
+<line class="ret" x1="898" y1="326" x2="302" y2="326"/><text class="lbl" x="560" y="318">⑦ 按本轮 Task 归集、去重、投影</text>
+<line class="ret" x1="300" y1="362" x2="102" y2="362"/><text class="lbl" x="110" y="354">⑧ SSE statusUpdate（WORKING；includeProgress=true 时带过程消息）</text>
+
+<line class="arr" x1="698" y1="408" x2="502" y2="408"/><text class="lbl" x="520" y="400">⑨ 完成信号：manager task.complete(summary) / 状态机 Run 最终输出</text>
+<line class="ret" x1="502" y1="446" x2="698" y2="446"/><text class="lbl" x="520" y="438">⑩ 冻结本轮派发，固定结果与事件边界，返回受理 ack</text>
+<line class="ret" x1="698" y1="484" x2="502" y2="484"/><text class="lbl" x="520" y="476">⑪ 等待 manager 当前执行退出并完成本轮收尾</text>
+<line class="arr" x1="500" y1="522" x2="898" y2="522"/><text class="lbl" x="510" y="514">⑫ 投影过程事件 → 原子写结果与终态 → 释放 context 占用</text>
+<line class="ret" x1="898" y1="560" x2="302" y2="560"/><text class="lbl" x="560" y="552">⑬ 终态与产物</text>
+<line class="ret" x1="300" y1="598" x2="102" y2="598"/><text class="lbl" x="110" y="590">⑭ SSE：artifactUpdate → COMPLETED，关闭流</text>
+
+<rect x="25" y="622" width="950" height="74" rx="6" fill="#fff8e6" stroke="#c98a00" stroke-dasharray="5 3"/>
+<text class="s" x="40" y="644">步骤③ 若 context 已有执行：返回 409 / CONTEXT_BUSY，不创建 Task；相同 messageId 重试在③查重命中后复用原 Task。</text>
+<text class="s" x="40" y="664">⑩–⑪ 针对主从群：manager 调用完成工具时本轮执行可能尚未退出，先返回 ack 再等待退出，避免互相等待；状态机无此步。</text>
+<text class="s" x="40" y="684">⑫ 提交终态后才释放占用，下一轮不会与上一轮重叠。returnImmediately 只作用于 message:send，不改变本流的持续推送。</text>
+</svg>
+<figcaption><span class="legend"><span><i style="background:#eaf1ff;border-color:#2454b6"></i>新增</span><span><i style="background:#fff6e0;border-color:#c98a00"></i>扩展已有模块</span><span><i style="background:#f6f7f9;border-color:#98a2b3"></i>外部 / 已有</span></span></figcaption>
+</figure>
+
+<p><strong>B. 非流式（message:send + GetTask 轮询）。</strong>以 <code>returnImmediately=true</code> 为例：受理后立即返回 Task，执行在后台继续；客户端保存 <code>taskId</code>，按自己的间隔轮询。</p>
+
+<figure>
+<svg viewBox="0 0 1000 690" role="img" aria-label="message:send 立即返回 Task，客户端轮询 GetTask 的时序图">
+<rect class="old" x="25" y="12" width="150" height="40" rx="6"/><text class="t" x="100" y="37" text-anchor="middle">上游 Agent</text>
+<rect class="new" x="225" y="12" width="150" height="40" rx="6"/><text class="t" x="300" y="37" text-anchor="middle">bcs-http</text>
+<rect class="new" x="425" y="12" width="150" height="40" rx="6"/><text class="t" x="500" y="37" text-anchor="middle">Group 调用应用服务</text>
+<rect class="ext" x="625" y="12" width="150" height="40" rx="6"/><text class="t" x="700" y="37" text-anchor="middle">群执行</text>
+<rect class="ext" x="825" y="12" width="150" height="40" rx="6"/><text class="t" x="900" y="37" text-anchor="middle">事件与存储</text>
+<line class="life" x1="100" y1="52" x2="100" y2="576"/><line class="life" x1="300" y1="52" x2="300" y2="576"/><line class="life" x1="500" y1="52" x2="500" y2="576"/><line class="life" x1="700" y1="52" x2="700" y2="576"/><line class="life" x1="900" y1="52" x2="900" y2="576"/>
+
+<line class="arr" x1="100" y1="92" x2="298" y2="92"/><text class="lbl" x="110" y="84">① POST message:send（messageId，returnImmediately=true）</text>
+<line class="arr" x1="300" y1="130" x2="498" y2="130"/><text class="lbl" x="310" y="122">② 校验主体 / 协议 / 输入 / 资源归属</text>
+<line class="arr" x1="500" y1="168" x2="898" y2="168"/><text class="lbl" x="510" y="160">③ 原子受理：查重 · 占用 context · 保存 Task（SUBMITTED）</text>
+<line class="arr" x1="500" y1="206" x2="698" y2="206"/><text class="lbl" x="510" y="198">④ 启动本轮：Session activation / 新 Run</text>
+<line class="ret" x1="300" y1="244" x2="102" y2="244"/><text class="lbl" x="110" y="236">⑤ 200 返回 Task（SUBMITTED，含 taskId / contextId），不等待执行</text>
+
+<line class="arr" x1="700" y1="294" x2="898" y2="294"/><text class="lbl" x="710" y="286">⑥ 后台执行，事件持续归集、投影</text>
+<line class="arr" x1="100" y1="334" x2="298" y2="334"/><text class="lbl" x="110" y="326">⑦ GET /tasks/{taskId}（可带 historyLength）</text>
+<line class="arr" x1="300" y1="372" x2="898" y2="372"/><text class="lbl" x="560" y="364">⑧ 校验归属，读取已提交的 Task 快照</text>
+<line class="ret" x1="300" y1="410" x2="102" y2="410"/><text class="lbl" x="110" y="402">⑨ Task（WORKING；includeProgress=true 时含过程消息）</text>
+
+<line class="arr" x1="700" y1="460" x2="898" y2="460"/><text class="lbl" x="710" y="452">⑩ 完成：提交结果与终态，释放 context</text>
+<line class="arr" x1="100" y1="500" x2="298" y2="500"/><text class="lbl" x="110" y="492">⑪ GET /tasks/{taskId}</text>
+<line class="ret" x1="300" y1="538" x2="102" y2="538"/><text class="lbl" x="110" y="530">⑫ Task（COMPLETED + Artifact），客户端停止轮询</text>
+
+<rect x="25" y="576" width="950" height="94" rx="6" fill="#fff8e6" stroke="#c98a00" stroke-dasharray="5 3"/>
+<text class="s" x="40" y="598">⑦–⑨ 可重复多次，间隔由客户端决定；GetTask 只读已提交快照，不推进执行，与 SSE 看到的状态和结果一致。</text>
+<text class="s" x="40" y="618">returnImmediately=false（默认）：⑤ 不立即返回，等到终态或中断态才返回完整 Task，无需轮询。</text>
+<text class="s" x="40" y="638">单次等待上限 60 秒，超时返回 504 / SEND_WAIT_TIMEOUT（details 含 taskId），Task 继续执行，用 GetTask 取回。</text>
+<text class="s" x="40" y="658">终态结果建议保留 7 天；到期后 GetTask 返回 TaskNotFoundError，相同 messageId 重试返回 MESSAGE_RESULT_EXPIRED。</text>
+</svg>
+<figcaption>与流式共用步骤 ②–④ 和完成流程（⑩ 对应流式 ⑨–⑫）；区别只在 ⑤ 之后由客户端轮询取回。</figcaption>
+</figure>
+
+<h3 id="flow-multi">3.2 多轮与并发</h3>
+<p>同一 context 同一时间最多运行一轮。上一轮到达终态并完成收尾后，同 <code>contextId</code>、不带 <code>taskId</code> 的新消息会创建下一个 Task，旧结果保留；运行中到达的新请求被拒绝，不排队。</p>
+
+<figure>
+<svg viewBox="0 0 960 290" role="img" aria-label="同一 context 的 Task 时间线">
+<text class="t" x="20" y="142">contextId</text><text class="s" x="20" y="160">= Session.id</text>
+<rect class="new" x="120" y="120" width="380" height="46" rx="6"/><text class="t" x="310" y="148" text-anchor="middle">Task-1：SUBMITTED → WORKING → COMPLETED</text>
+<rect x="120" y="172" width="420" height="10" rx="3" fill="#fff1cf" stroke="#c98a00"/><text class="s" x="320" y="203">▲ context 占用：含取消与收尾，确认后才释放</text>
+<rect class="new" x="580" y="120" width="360" height="46" rx="6"/><text class="t" x="760" y="148" text-anchor="middle">Task-2（新 messageId，同 contextId）</text>
+
+<rect x="120" y="10" width="260" height="54" rx="6" fill="#fde8e8" stroke="#c0392b"/><text x="250" y="32" text-anchor="middle">msg-002（无 taskId，Task-1 运行中）</text><text class="s" x="250" y="52" text-anchor="middle">409 CONTEXT_BUSY，不创建 Task</text>
+<line class="rej" x1="250" y1="64" x2="250" y2="118"/>
+<rect x="400" y="10" width="240" height="54" rx="6" fill="#e3f4e8" stroke="#2e8b57"/><text x="520" y="32" text-anchor="middle">msg-001 重试（同 messageId）</text><text class="s" x="520" y="52" text-anchor="middle">复用并返回原 Task-1</text>
+<line x1="460" y1="64" x2="460" y2="118" stroke="#2e8b57" stroke-width="1.6" stroke-dasharray="5 3"/>
+<rect x="660" y="10" width="280" height="54" rx="6" class="new"/><text x="800" y="32" text-anchor="middle">msg-003（Task-1 终态且收尾完成后）</text><text class="s" x="800" y="52" text-anchor="middle">受理，创建 Task-2，保留 Task-1 结果</text>
+<line class="arr" x1="740" y1="64" x2="740" y2="118"/>
+
+<rect x="120" y="222" width="340" height="54" rx="6" fill="#fde8e8" stroke="#c0392b"/><text x="290" y="244" text-anchor="middle">带 taskId=Task-1 追加消息</text><text class="s" x="290" y="264" text-anchor="middle">UnsupportedOperationError（本期不追加）</text>
+<line class="rej" x1="290" y1="222" x2="290" y2="168"/>
+<rect x="540" y="222" width="400" height="54" rx="6" fill="#eef0f3" stroke="#7b8494"/><text x="740" y="244" text-anchor="middle">Task-1 终态后再 subscribe / cancel</text><text class="s" x="740" y="264" text-anchor="middle">UnsupportedOperationError / TaskNotCancelableError</text>
+</svg>
+<figcaption>虚线为重试，红色为被拒绝的请求。上游遇到忙碌后，可用 <code>activeTaskId</code> 查询或订阅，待前一轮结束再提交。</figcaption>
+</figure>
+
+<h3 id="flow-accept">3.3 受理校验顺序</h3>
+<ol>
+<li>验证调用主体、协议版本和输入能力（含 <code>acceptedOutputModes</code> 协商、扩展字段是否已激活）。</li>
+<li>验证目标群及资源归属（<code>group_id</code>、<code>caller_principal</code>、是否为 A2A 创建的 Session）。</li>
+<li>原子查重：同范围同 <code>messageId</code> 且请求指纹一致，复用原 Task；指纹不同报冲突。</li>
+<li>校验 caller/user 来源绑定与 Task / context 状态（空闲 / 忙碌 / 隔离，隔离指暂停接受新一轮，见 <a href="#flow-cancel">§3.5</a>）。</li>
+<li>新受理：原子保存 ID 预留、初始 Task 和 context 占用，然后启动执行。</li>
+</ol>
+<p>忙碌、参数错误及来源冲突都发生在预留之前，<strong>不预留新的 messageId</strong>。错误清单见 <a href="#errors">§4.5</a>。</p>
+
+<h3 id="flow-state">3.4 Task 状态与完成判定</h3>
+<figure>
+<svg viewBox="0 0 900 310" role="img" aria-label="Task 状态转移">
+<circle cx="28" cy="132" r="7" fill="#202938"/>
+<line class="arr" x1="36" y1="132" x2="58" y2="132"/>
+<rect class="new" x="60" y="108" width="140" height="48" rx="24"/><text class="t" x="130" y="137" text-anchor="middle">SUBMITTED</text>
+<rect class="new" x="330" y="108" width="140" height="48" rx="24"/><text class="t" x="400" y="137" text-anchor="middle">WORKING</text>
+<line class="arr" x1="200" y1="132" x2="328" y2="132"/><text class="lbl s" x="264" y="123" text-anchor="middle">开始执行</text>
+
+<rect class="ok" x="690" y="28" width="150" height="48" rx="24"/><text class="t" x="765" y="57" text-anchor="middle">COMPLETED</text>
+<rect class="bad" x="690" y="108" width="150" height="48" rx="24"/><text class="t" x="765" y="137" text-anchor="middle">FAILED</text>
+<rect class="idle" x="690" y="188" width="150" height="48" rx="24"/><text class="t" x="765" y="217" text-anchor="middle">CANCELED</text>
+<line class="arr" x1="468" y1="118" x2="692" y2="58"/><text class="lbl s" x="548" y="78" text-anchor="end">完成信号 + 结果快照</text>
+<line class="rej" x1="470" y1="132" x2="688" y2="132"/><text class="lbl s" x="580" y="124" text-anchor="middle">失败 / 超时 / 意外等待输入</text>
+<line class="ret" x1="466" y1="148" x2="694" y2="208"/><text class="lbl s" x="540" y="204" text-anchor="middle">取消且确认停止</text>
+
+<rect x="60" y="228" width="190" height="48" rx="24" fill="#fff" stroke="#98a2b3" stroke-dasharray="5 3"/><text x="155" y="257" text-anchor="middle" fill="#566174">REJECTED（本期不生成）</text>
+<rect x="300" y="228" width="230" height="48" rx="24" fill="#fff" stroke="#98a2b3" stroke-dasharray="5 3"/><text x="415" y="257" text-anchor="middle" fill="#566174">INPUT_REQUIRED（下一期）</text>
+<line class="ret" x1="400" y1="158" x2="400" y2="226"/>
+<text class="s" x="765" y="276" text-anchor="middle">终态不可重启；继续工作 = 同 context 新 Task</text>
+</svg>
+<figcaption>线上状态值带 <code>TASK_STATE_</code> 前缀。终态之后不再切换，迟到输出不能修改终态。</figcaption>
+</figure>
+
+<div class="table-scroll" tabindex="0" role="region" aria-label="状态映射"><table>
+<thead><tr><th>群执行事实</th><th style="width:140px">A2A 状态</th><th>提交条件</th></tr></thead>
+<tbody>
+<tr><td>输入通过校验，已原子受理，尚未开始</td><td>SUBMITTED</td><td>持久化 Task 与占用后返回</td></tr>
+<tr><td>本轮 manager 或 Run 正在执行</td><td>WORKING</td><td>关联明确的 activation / Run</td></tr>
+<tr><td>manager 成功提交最终 summary；或 Run 成功且取得指定最终节点输出</td><td>COMPLETED</td><td>冻结本轮派发，完成事件投影和结果快照；Artifact 写入 artifacts 表，并与终态在同一事务提交</td></tr>
+<tr><td>manager <code>task.complete(error)</code>、Run Failed、执行超时、启动失败、输出类型错误</td><td>FAILED</td><td>保存可展示的失败原因；仍需终止关联工作并处理占用</td></tr>
+<tr><td>用户取消，关联工作已停止且收尾完成</td><td>CANCELED</td><td>与完成/失败提交互斥</td></tr>
+<tr><td>运行中意外进入 HumanInput</td><td>FAILED</td><td>本期无 A2A 输入恢复，终止该轮后有界收尾</td></tr>
+</tbody></table></div>
+<p><strong>“完成”只由显式信号触发。</strong>普通聊天最后一条消息、Worker 的单项完成、或一段时间没有消息，都不会触发 COMPLETED。主从群要求 <code>task.complete</code> 精确指向本轮 Session / activation / Task，禁止回退到“该群最新 Running Session”。自由聊天群没有这类显式信号，其结束判定和产物定义留待后续讨论，见 <a href="#free-chat">§5.7</a>。</p>
+<p><strong>接受完成信号后的顺序：</strong>① 原子关闭本轮新派发，确认待办与结果回送已完成，固定最终结果和事件边界；② 先向 <code>task.complete</code> 请求返回受理 ack；③ 再等待 manager 当前执行退出并完成本轮清理；④ 提交结果与终态，释放 context 占用。manager 的调用可能发生在其自身执行结束之前，所以不能在收到信号时立即释放（下一轮会与上一轮重叠），也不能在返回 ack 之前等待其退出（会相互等待）。manager 退出或清理超时，进入同一套有界收尾。</p>
+<p><strong>REJECTED：</strong>本期没有独立的业务拒绝入口，不主动生成该状态；受理前校验失败返回协议错误，受理后启动或执行失败映射为 FAILED。REJECTED 仍是标准终态，取消与订阅的终态规则继续覆盖它。</p>
+<p><strong>manager 迟迟不提交完成信号：</strong>本轮已无运行中或排队的 manager / Worker 调用、待回送结果、定时重试和尚未确认停止的工作时才开始空闲计时。连续空闲 60 秒仍无 <code>task.complete</code>，向 manager 发<strong>一次</strong>提交最终汇总的提醒，再给 120 秒宽限；仍未完成则 FAILED，对外原因为“执行未提交最终结果”。每个 Task 最多提醒一次，提醒标记和截止时间持久化；SSE 心跳、普通过程文本和日志不重置计时，Worker 正常执行但没有过程消息不会被判失败。60 / 120 秒为建议值，见 <a href="#open-items">§8.1</a>。</p>
+
+<h3 id="flow-cancel">3.5 取消与异常收尾</h3>
+<p><strong>取消</strong>覆盖整轮工作，不只是修改状态：</p>
+<ol>
+<li>持久化取消意图，与完成提交互斥；停止生成新的派发。</li>
+<li>主从群覆盖 manager、Worker 和结果回送；状态机覆盖活动节点、等待节点、定时重试和已派发 Bot 工作。</li>
+<li>对已启动工作发出取消并追踪确认；收尾期限内保持占用。</li>
+<li>确认全部停止并完成收尾后写入 <code>TASK_STATE_CANCELED</code>，释放占用；确认前 <code>CancelTask</code> 返回非终态 Task 并通过 <code>status.message</code> 给出进度。</li>
+</ol>
+<p><strong>异常收尾</strong>保证 Task 不会长期停在 working，context 也不会无限被占用：</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="异常收尾"><table>
+<thead><tr><th>情形</th><th>Task 与执行</th><th>context</th></tr></thead>
+<tbody>
+<tr><td>超过执行期限、Worker 失联、意外等待输入</td><td>停止派发并发出取消，收尾期限内确认；正常收尾后 FAILED</td><td>停止确认并保存结果后释放</td></tr>
+<tr><td>用户取消，期限内确认停止</td><td>CANCELED</td><td>释放，可开始下一轮</td></tr>
+<tr><td>收尾期限已过，仍无法确认旧执行是否已停止</td><td>标记 FAILED，说明“未能确认停止”；不再接收这一轮的新派发和事件，并记下待核实的工作</td><td><strong>隔离</strong>：暂停接受新一轮，查询原 Task 不受影响。同 context 的新消息返回 400 / FAILED_PRECONDITION，reason=<code>CONTEXT_UNAVAILABLE</code>（附原 taskId 与恢复提示）；后台有限次重试核实并告警，确认旧执行已停止后恢复</td></tr>
+<tr><td>进程重启</td><td>读取绝对截止时间、执行代次和已派发关联，不重置预算，不重复启动</td><td>恢复占用或隔离；旧代次结果无法进入新一轮</td></tr>
+</tbody></table></div>
+<p><strong>举例：</strong>Task-1 正在让 Worker 干活，上游发来取消。BCN 通知 Worker 停止，但 Worker 断网没有回应，超过收尾期限仍判断不了它是否还在执行。这时：</p>
+<ul>
+<li><strong>Task-1</strong> 标为 FAILED，让上游不再空等。</li>
+<li><strong>这个 context</strong> 暂不接受 Task-2，避免与可能仍在运行的 Task-1 同时执行。</li>
+<li><strong>后台</strong>继续核实；确认旧执行已停止后恢复 context，之后可创建新 Task。FAILED 的 Task-1 保持终态，不会改写。</li>
+</ul>
+<p>不采用“占用超时就自动放开”：超时只说明没收到回复，不能证明 Worker 已经停了，放开可能让两轮同时执行。能让旧执行在限定时间内停下，或在停不下来时隔离，是开放 Group A2A 前必须具备的条件。</p>
+
+<!-- ============ 4 ============ -->
+<h2 id="interface">4. 对外接口（A2A 符合性）</h2>
+
+<div class="callout">
+<p><strong>符合性结论</strong></p>
+<ul>
+<li><strong>协议绑定：</strong>A2A 1.0（规范 1.0.1），HTTP+JSON + SSE；Card 的 <code>supportedInterfaces</code> 声明真实地址、binding 与版本，客户端读 Card 后选择接口。</li>
+<li><strong>标准操作：</strong>Agent Card、SendMessage、SendStreamingMessage、GetTask、ListTasks、SubscribeToTask、CancelTask 均使用标准路径和标准对象。</li>
+<li><strong>标准客户端零改造：</strong>不使用任何 BCN 扩展字段，也能完成“发送 → 查询/订阅 → 取消”的完整调用。</li>
+<li><strong>偏离只有两类，并在 Card / 错误中声明：</strong>支持子集（输入类型、并发、运行中追加），以及可选扩展（<code>required: false</code>）。</li>
+<li><strong>本期不支持的标准能力：</strong>Push Notification（Card 声明 false）、运行中追加消息（<code>UnsupportedOperationError</code>）；文件输入和 <code>input_required</code> 下一期支持（文件见 <a href="#files-next">§4.7</a>），在此之前文件 Part 返回 <code>ContentTypeNotSupportedError</code>。</li>
+</ul>
+</div>
+
+<h3 id="api-list">4.1 接口一览</h3>
+<p>基地址：<code>/api/v1/collaboration/a2a/groups/{group_id}</code>。HTTP JSON 请求使用 <code>Content-Type: application/a2a+json</code> 与 <code>A2A-Version: 1.0</code>；流式响应使用 <code>text/event-stream</code>。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口一览"><table>
+<thead><tr><th>接口</th><th>A2A 操作</th><th>返回与说明</th><th>性质</th></tr></thead>
+<tbody>
+<tr><td><code>GET /agent-card.json</code></td><td>Agent Card</td><td>AgentCard，含 <code>supportedInterfaces</code>、输入/输出模式、能力声明</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>POST /message:send</code></td><td>SendMessage</td><td><code>{"task": …}</code>；Group 固定返回 Task</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>POST /message:stream</code></td><td>SendStreamingMessage</td><td>SSE：先 Task，再状态与产物事件，终态后关闭</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>GET /tasks/{task_id}</code></td><td>GetTask</td><td>Task 快照；可选 <code>historyLength</code></td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>GET /tasks</code></td><td>ListTasks</td><td>可选 <code>contextId</code> 与分页；先按归属过滤再分页</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>POST /tasks/{task_id}:subscribe</code></td><td>SubscribeToTask</td><td>SSE，先当前 Task 再后续事件；已终态返回 UnsupportedOperationError，应改用 GetTask</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>POST /tasks/{task_id}:cancel</code></td><td>CancelTask</td><td>返回更新后的 Task</td><td><span class="tag std">标准</span></td></tr>
+</tbody></table></div>
+<p><strong>路由实现：</strong>当前 axum 0.8.9 / matchit 0.8.4 不允许动态参数后直接拼接 <code>:cancel</code> 等后缀。适配层统一注册 <code>/tasks/{task_action}</code>：GET 把捕获值整体当作 taskId，不拆分；POST 只匹配末尾的 <code>:cancel</code> / <code>:subscribe</code>，去掉后缀后 taskId 必须非空。未知 action 或缺少后缀返回 404；taskId 非法或请求体 id 与路径不一致返回 400；不做重复 URL 解码。对外 URL 仍是上表的标准形式，路由契约测试覆盖两个 action、GET、空 ID、未知后缀和 body 不一致。</p>
+<p><strong>SSE 保活：</strong><code>message:stream</code> 与 subscribe 在无业务事件时每 15 秒发送一次 SSE 注释 <code>: keep-alive</code>。它不是 A2A 事件，不写入 Task.history，不受 <code>includeProgress</code> 控制，不延长执行期限或完成宽限，终态后随流停止。适配层及时 flush、部署关闭该路径的代理缓冲，网关空闲超时须大于心跳间隔；网关总时限独立生效。断线重连先取当前 Task 快照，已终态则改用 GetTask，<strong>不保证事件逐条重放</strong>。</p>
+
+<h3>4.2 协议符合性矩阵</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="符合性矩阵"><table>
+<thead><tr><th style="width:150px">能力</th><th>BCN 处理</th><th style="width:110px">性质</th></tr></thead>
+<tbody>
+<tr><td>Agent Card</td><td><code>defaultInputModes</code>：<code>text/plain</code>、<code>application/json</code>；<code>defaultOutputModes</code> 按群实际产物声明（主从群 <code>text/plain</code>；可输出结构化结果的自定义协作 <code>application/json</code>）；<code>streaming=true</code>、<code>pushNotifications=false</code>；<code>documentationUrl</code> 指向接入文档</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>响应模式</td><td>统一返回 Task（Task-generating）；本期的两类群均如此，自由聊天群后续可能改为返回 Message，见 §5.7</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>returnImmediately</code></td><td>仅作用于 <code>message:send</code>：false（默认）等待终态或中断态再返回；true 立即返回 Task。流式操作（<code>message:stream</code>、subscribe）始终实时推送更新，不受该字段影响</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>historyLength</code></td><td>只裁剪返回的历史条数，不控制过程消息是否生成</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>messageId</code> 幂等</td><td>规范为 MAY；BCN 实现选择去重，不承诺高于标准。不发布既有 <code>message-dedup/v1</code> 扩展</td><td><span class="tag std">标准</span></td></tr>
+<tr><td><code>acceptedOutputModes</code></td><td>与 Card/skill 输出能力求交集；无交集在受理前返回 <code>ContentTypeNotSupportedError</code></td><td><span class="tag std">标准</span></td></tr>
+<tr><td>Artifact 持久化</td><td>最终结果写入独立的 artifacts 表，GetTask 与 SSE 都从该表读取；对外产物类型本期按 Card 声明（<code>text/plain</code>、<code>application/json</code>），存储结构预留 <code>raw</code> / <code>url</code> 等非文本 Part，见 §5.4</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>输入 Parts</td><td>接收文本（保序）和至多一个对象 data；<code>raw</code>/<code>url</code> 文件本期不接收（返回 <code>ContentTypeNotSupportedError</code>），下一期支持，见 §4.7；data 为数组/标量或多个 data Part 返回 <code>400 / INVALID_ARGUMENT</code></td><td><span class="tag sub">子集</span></td></tr>
+<tr><td>流式与订阅</td><td>流先 Task，再 statusUpdate / artifactUpdate，终态后关闭；新订阅已终态 Task 返回 UnsupportedOperationError</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>取消</td><td>终态再次取消返回 TaskNotCancelableError；取消处理中重复请求复用同一取消意图</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>同 context 并发</td><td>不并行、不排队；忙碌 409。协议并不要求 context 级别的忙碌状态，这是 BCN 的调度选择</td><td><span class="tag sub">子集</span></td></tr>
+<tr><td>向 working Task 追加</td><td>UnsupportedOperationError；协议允许服务端选择不支持</td><td><span class="tag sub">子集</span></td></tr>
+<tr><td><code>metadata</code> 扩展字段</td><td><code>includeProgress</code>、<code>caller</code>、<code>user</code>，可选，见 §4.4；<code>caller</code> / <code>user</code> 的命名与凭据传递方式待定</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>业务错误 reason</td><td><code>CONTEXT_BUSY</code> 等，使用标准错误结构（<code>error.details[]</code> 的 ErrorInfo），reason 由 BCN 定义</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>同步等待上限</td><td>单次 HTTP 等待有上限（建议 60 秒），到达后返回 <code>504 / DEADLINE_EXCEEDED</code>，不会成功返回 working Task；业务执行继续</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>请求体上限</td><td>建议 1 MiB（含 message / configuration / metadata），网关与适配层都校验；超限返回 HTTP 413，在解析与受理前拒绝，不创建 Task</td><td><span class="tag ext">扩展</span></td></tr>
+</tbody></table></div>
+
+<h3 id="routes">4.3 与已有路由共存</h3>
+<p>#3900 已将现有 A2A 管理和调用路由增加 <code>/api/v1/collaboration/a2a/...</code> 前缀，并保留 <code>/a2a/...</code> 兼容入口。新增入站只使用版本化路径，不再建立旧前缀别名。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="路由共存"><table>
+<thead><tr><th>用途</th><th>路径（<code>/api/v1/collaboration</code> 之后）</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>管理接入 BCN 的外部 Agent</td><td><code>/a2a/agents</code>；<code>/a2a/agents/{bot_id}/agent-card</code>（GET / PUT：查看、更新 Card 配置）；<code>agent-card:refresh</code>（POST：重新拉取 Card）</td><td>已有，保留处理器与权限</td></tr>
+<tr><td>命名 Bot 调用与运行查询</td><td><code>/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async</code>、<code>/a2a/chat/runs/{run_id}</code></td><td>已有</td></tr>
+<tr><td>BCN 单 Agent 标准入站</td><td><code>/a2a/agents/{bot_id}/agent-card.json</code>、<code>/message:send</code>、<code>/tasks/...</code></td><td>设想，单独排期；与已有 <code>agent-card</code> 管理路径分开</td></tr>
+<tr><td>对外发布 BCN Group 的 Agent，并接收调用</td><td><code>/a2a/groups/{group_id}/agent-card.json</code>、<code>/message:send</code>、<code>/tasks/...</code></td><td><span class="tag ok">本次新增</span></td></tr>
+</tbody></table></div>
+<p><strong>两类 Card 路径名字相近，用途相反：</strong>已有的 <code>agent-card</code> 用来<strong>管理</strong>——登记别人的 Agent，维护它的 Card；新增的 <code>agent-card.json</code> 用来<strong>发布</strong>——让别人发现并调用我们的 Group。两者分别注册，互不影响。</p>
+
+<h3 id="ext-meta">4.4 BCN 扩展：调用来源与过程消息</h3>
+<p>已明确的 <code>includeProgress</code> 放在 <strong>SendMessageRequest 顶层的 <code>metadata</code></strong>，可省略。来源与用户信息暂称 <code>caller</code> / <code>user</code>，名称、内部结构和凭据载体待联合设计；下表保留讨论候选，接入示例只使用已明确字段。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="metadata 字段"><table>
+<thead><tr><th>字段</th><th>含义</th><th>规则</th></tr></thead>
+<tbody>
+<tr><td><code>includeProgress</code></td><td>是否生成并返回过程消息（分工、阶段进展、阶段总结）</td><td>默认 false；本轮首次受理时固定，续聊可重新选择；所有订阅者看到同一份事件流</td></tr>
+<tr><td><code>caller</code>（命名暂定）</td><td>调用 BCN 的上游 Agent</td><td>候选为 <code>{id, name?}</code>；字段名、结构和必填性待定；不作认证键</td></tr>
+<tr><td><code>user</code>（命名暂定）</td><td>上游 Agent 背后的用户</td><td>候选为 <code>{id}</code>；字段名、结构、必填性和凭据传递待定</td></tr>
+</tbody></table></div>
+<div class="callout">
+<p><strong>待定项（在 spec 中列为待定）：</strong></p>
+<ul>
+<li><strong>字段命名：</strong><code>metadata</code> 里调用来源和用户信息的字段叫什么、内部结构如何，尚未确定；<code>caller</code> / <code>user</code> 只是暂定名。</li>
+<li><strong>凭据与认证信息的传递方式：</strong>上游的身份凭据放在 <code>metadata</code>、HTTP 头还是其他位置，尚未确定，与认证机制一并联合设计。</li>
+<li><strong>不变的约束：</strong>无论如何命名，<code>metadata</code> 里的来源信息只是上游自称，不作认证键、不进入去重范围；本期资源归属仍用现有 <code>caller_principal</code> 校验。Schema 在命名确定后定稿。</li>
+</ul>
+</div>
+<p><strong>发现与激活：</strong>Card 的 <code>capabilities.extensions</code> 声明一个 <code>required: false</code> 的扩展，<code>params.metadataSchema</code> 描述 Schema；请求使用已定义字段（当前为 <code>includeProgress</code>）时，以 <code>A2A-Extensions</code> 请求头列出扩展 URI。出现已定义字段却没有激活时，在创建 Session/Task 前返回 <code>400 / CALL_METADATA_NOT_ACTIVATED</code>。</p>
+<p><strong>来源绑定候选：</strong>创建 context 时保存来源，后续省略则继承；显式更换或补绑定返回 <code>400 / FAILED_PRECONDITION · CONTEXT_SOURCE_CONFLICT</code>，另建 context。该规则与来源字段合同一并确认。</p>
+<p><strong>为什么 <code>includeProgress</code> 是扩展：</strong>A2A 1.0.1 规范里没有用于“是否返回执行过程 / thinking”的标准请求字段，也没有标注“这是思考”的标准类型。<code>SendMessageConfiguration</code> 只有 <code>acceptedOutputModes</code>、<code>taskPushNotificationConfig</code>、<code>historyLength</code>、<code>returnImmediately</code>；其中 <code>historyLength</code> 只裁剪返回的历史条数，不决定过程消息是否生成。规范提供的是承载位置，而不是开关：</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="标准承载位置与扩展"><table>
+<thead><tr><th style="width:230px">层面</th><th>A2A 标准能力</th><th style="width:110px">性质</th></tr></thead>
+<tbody>
+<tr><td>过程内容放在哪</td><td><code>TaskStatusUpdateEvent.status.message</code>（Message + Parts）、<code>Task.history</code>、流式 Artifact 分片（<code>append</code> / <code>lastChunk</code>）</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>是否允许附加信息</td><td>Message、Part、Artifact 均有 <code>metadata</code>；规范明确允许用扩展机制扩展 Message 与 TaskStatus Message，携带任务进展的额外信息</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>客户端是否要求过程消息</td><td>无标准字段；规范只描述 Agent 可在状态更新中附带 Message，没有让客户端“要求 / 不要”的入口，且不保证全部写入 history</td><td><span class="tag ext">需扩展</span></td></tr>
+<tr><td>消息是否为“思考 / 阶段摘要”的类型标记</td><td>无标准类型，只能由约定的 <code>metadata</code> 表达</td><td><span class="tag ext">需扩展</span></td></tr>
+</tbody></table></div>
+<p>因此本期的做法是：<strong>承载用标准结构</strong>（过程消息就是普通 <code>status.message</code>，标准客户端看到的是可读文本，不需要识别扩展），<strong>开关用 <code>metadata.includeProgress</code></strong>（经 <code>A2A-Extensions</code> 激活）。不使用扩展时，客户端不会收到分工、阶段进展等过程消息，仍能拿到状态、错误和最终结果。若改为“总是发送”，会带来三个问题：不需要的客户端被噪声打扰；Task.history 变大；增加内部信息暴露面（公开内容规则见 <a href="#projection">§5.6</a>）。</p>
+<p>另外，A2A 的设计原则之一是 <em>Opaque Execution</em>：Agent 协作不需要共享内部思考、计划或工具实现。所以 <code>includeProgress</code> 返回的应是<strong>经过整理的阶段性公开进展</strong>（分工、阶段进展、阶段总结），而不是 manager / Worker 的原始思考或工具输出。</p>
+<details>
+<summary>Agent Card 片段与激活头</summary>
+<pre><code>{
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain"],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "extensions": [{
+      "uri": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/call-metadata/v1.md",
+      "description": "在 SendMessageRequest.metadata 中提供调用来源和过程消息开关。",
+      "required": false,
+      "params": {
+        "metadataSchema": {
+          "$ref": "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/call-metadata/v1.schema.json"
+        }
+      }
+    }]
+  }
+}</code></pre>
+<pre><code>A2A-Extensions: https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/call-metadata/v1.md</code></pre>
+<p><strong>URI 与 Schema 放在仓库：</strong>扩展 URI 使用仓库中规范文件的地址，与已有的 <a href="https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md">source-agent/v2</a>、<a href="../../../../docs/specs/a2a/extensions/message-dedup/v1.md">message-dedup/v1</a> 一致；该地址标识规范，不是服务地址，所有环境使用同一个 URI。定稿后的 Schema 与规范文件放在同一目录。上例中的扩展名 <code>call-metadata</code> 和文件路径是建议值；当前 <a href="call-metadata.schema.json">Schema 草稿</a> 只定义 <code>includeProgress</code>，<code>$id</code> 已使用候选仓库地址。Card.uri 与激活头使用同一扩展 URI；Schema.$id 对应 Schema 自身引用。机器获取 JSON 使用仓库原始内容地址或明确的仓库解析方式。来源字段定稿后再发布正式文件；既有扩展仅作为发布形式参考。</p>
+</details>
+
+<h3 id="errors">4.5 错误模型</h3>
+<p>错误使用标准结构（HTTP 状态 + <code>error.details[]</code> 中的 ErrorInfo）。标准错误按 <a href="https://a2a-protocol.org/v1.0.1/specification/#54-error-code-mappings">A2A §5.4</a> 映射；大写 reason 由 BCN 定义，不属于标准。HTTP 状态与响应中的 <code>error.code</code> 一致，<code>error.status</code> 使用对应的 gRPC 状态名，reason 放在 ErrorInfo 中。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="错误模型"><table>
+<thead><tr><th>场景</th><th>HTTP / status · 错误</th><th>性质</th></tr></thead>
+<tbody>
+<tr><td>未知、跨群或不可访问的 Task</td><td>404 / NOT_FOUND · TaskNotFoundError</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>向 working 或终态 Task 发新消息；订阅已终态 Task</td><td>400 / FAILED_PRECONDITION · UnsupportedOperationError</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>取消已终态 Task</td><td>400 / FAILED_PRECONDITION · TaskNotCancelableError</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>输入或输出媒体类型不支持</td><td>400 / INVALID_ARGUMENT · ContentTypeNotSupportedError</td><td><span class="tag std">标准</span></td></tr>
+<tr><td>同 context 已有执行</td><td>409 / ABORTED · reason <code>CONTEXT_BUSY</code>（details 含 <code>contextId</code>、<code>activeTaskId</code>）；查询原 Task，结束后重试</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>旧执行无法确认已停止，context 暂停接受新一轮</td><td>400 / FAILED_PRECONDITION · reason <code>CONTEXT_UNAVAILABLE</code>；附可见的原 taskId 与恢复提示，不自动重发业务消息</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>context 来源绑定冲突</td><td>400 / FAILED_PRECONDITION · reason <code>CONTEXT_SOURCE_CONFLICT</code>；候选绑定规则，与来源合同一起确认</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>未知、跨群、不可访问或非 A2A 创建的 contextId</td><td>404 / NOT_FOUND · reason <code>CONTEXT_NOT_FOUND</code></td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>同 messageId、不同请求内容</td><td>400 / INVALID_ARGUMENT · reason <code>MESSAGE_ID_CONFLICT</code></td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>同 messageId，Task 结果已清理</td><td>404 / NOT_FOUND · reason <code>MESSAGE_RESULT_EXPIRED</code>；预留保留，不再次执行</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>使用扩展字段但未激活扩展</td><td>400 / INVALID_ARGUMENT · reason <code>CALL_METADATA_NOT_ACTIVATED</code></td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>单次同步等待达到上限</td><td>504 / DEADLINE_EXCEEDED · reason <code>SEND_WAIT_TIMEOUT</code>；可见时 details 带 taskId / contextId，查询或订阅原 Task</td><td><span class="tag ext">扩展</span></td></tr>
+<tr><td>请求体超过上限</td><td>413；在解析与受理前拒绝，不创建 Task</td><td><span class="tag ext">扩展</span></td></tr>
+</tbody></table></div>
+<p><code>SEND_WAIT_TIMEOUT</code> 由 BCN 定义，A2A 标准错误表没有这一项。网关自行返回的 504 可能没有上述 JSON 结构，上游应按“结果未知”处理，用已知 taskId 查询而不是重发。</p>
+
+<h3>4.6 请求示例</h3>
+<details>
+<summary>示例一：新会话，只用标准字段</summary>
+<pre><code>POST /api/v1/collaboration/a2a/groups/7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93/message:send
+Content-Type: application/a2a+json
+A2A-Version: 1.0
+
+{
+  "message": {
+    "messageId": "msg-001",
+    "role": "ROLE_USER",
+    "parts": [{"text": "比较两家供应商，预算为 80 万。"}]
+  },
+  "configuration": {"returnImmediately": true}
+}</code></pre>
+<p>受理后返回：</p>
+<pre><code>{
+  "task": {
+    "id": "task-001",
+    "contextId": "7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93:6d2f8a41",
+    "status": {"state": "TASK_STATE_SUBMITTED"}
+  }
+}</code></pre>
+</details>
+<details>
+<summary>示例二：同 context 续聊，以及运行中发送的忙碌错误</summary>
+<p>请求带上一轮返回的 <code>contextId</code>、新 <code>messageId</code>，省略 <code>taskId</code>：</p>
+<pre><code>{
+  "message": {
+    "messageId": "msg-002",
+    "contextId": "7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93:6d2f8a41",
+    "role": "ROLE_USER",
+    "parts": [{"text": "预算改为 50 万，重新比较并给出建议。"}]
+  },
+  "configuration": {"returnImmediately": true}
+}</code></pre>
+<p>context 空闲时返回新的 <code>task-002</code>，<code>contextId</code> 不变。若 task-001 仍在执行，返回 HTTP 409，且不创建 task-002：</p>
+<pre><code>{
+  "error": {
+    "code": 409,
+    "status": "ABORTED",
+    "message": "当前会话仍有任务执行中，请在任务结束后重试。",
+    "details": [{
+      "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+      "reason": "CONTEXT_BUSY",
+      "domain": "bcn.example.com",
+      "metadata": {"contextId": "7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93:6d2f8a41", "activeTaskId": "task-001"}
+    }]
+  }
+}</code></pre>
+<p>示例中 ErrorInfo 的 <code>domain</code> 为占位，取值在实现评审确定。</p>
+</details>
+<details>
+<summary>示例三：携带调用来源，流式订阅过程</summary>
+<p>示例只使用已明确的 <code>includeProgress</code>；来源字段与凭据传递见 <a href="#ext-meta">§4.4</a> 的待定项。</p>
+<pre><code>POST /api/v1/collaboration/a2a/groups/7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93/message:stream
+Content-Type: application/a2a+json
+A2A-Version: 1.0
+A2A-Extensions: https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/call-metadata/v1.md
+
+{
+  "message": {
+    "messageId": "msg-progress-001",
+    "role": "ROLE_USER",
+    "parts": [
+      {"text": "比较两家供应商。"},
+      {"data": {"budget": 800000, "currency": "CNY"}, "mediaType": "application/json"}
+    ]
+  },
+  "metadata": {
+    "includeProgress": true,
+    "user": {"id": "partner-user-7391"}
+  }
+}</code></pre>
+<p>SSE 顺序：Task → 过程消息 → 最终产物 → 终态。</p>
+<pre><code>data: {"task":{"id":"task-003","contextId":"7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93:8c4e9b17","status":{"state":"TASK_STATE_SUBMITTED"}}}
+
+data: {"statusUpdate":{"taskId":"task-003","contextId":"…:8c4e9b17","status":{"state":"TASK_STATE_WORKING","message":{"messageId":"progress-001","role":"ROLE_AGENT","parts":[{"text":"已开始核对报价和交付周期。"}]}}}}
+
+data: {"artifactUpdate":{"taskId":"task-003","contextId":"…:8c4e9b17","artifact":{"artifactId":"result-003","parts":[{"text":"建议选择供应商 B，总价 72 万，交付周期 6 周。"}]},"lastChunk":true}}
+
+data: {"statusUpdate":{"taskId":"task-003","contextId":"…:8c4e9b17","status":{"state":"TASK_STATE_COMPLETED"}}}</code></pre>
+</details>
+<details>
+<summary>示例四：取消请求与两阶段结果</summary>
+<pre><code>POST /api/v1/collaboration/a2a/groups/7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93/tasks/task-003:cancel
+Content-Type: application/a2a+json
+A2A-Version: 1.0
+
+{"id": "task-003"}</code></pre>
+<p>节点尚未确认停止时，返回仍为非终态的 Task，并通过 <code>status.message</code> 说明进度：</p>
+<pre><code>{
+  "id": "task-003",
+  "contextId": "7f3b9c21-6a84-4d52-9e17-2c8f0a6b5d93:8c4e9b17",
+  "status": {
+    "state": "TASK_STATE_WORKING",
+    "message": {"messageId": "cancel-progress-003", "role": "ROLE_AGENT",
+                "parts": [{"text": "正在停止执行，等待运行节点确认。"}]}
+  }
+}</code></pre>
+<p>确认停止后，GetTask 返回 <code>{"status": {"state": "TASK_STATE_CANCELED"}}</code>。</p>
+</details>
+
+<h3 id="files-next">4.7 下一期：文件输入与协议扩展性</h3>
+<p>本期只接收文本和对象 data，文件输入放到下一期。协议层面不需要为此改路径或升版本，是平滑扩展：</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="文件输入的协议扩展性"><table>
+<thead><tr><th style="width:150px">层面</th><th>为什么能平滑扩展</th></tr></thead>
+<tbody>
+<tr><td>Part 结构</td><td>A2A <code>Part</code> 本就是 <code>text</code> / <code>raw</code>（Base64 字节）/ <code>url</code> / <code>data</code> 四选一，并带可选的 <code>filename</code>、<code>mediaType</code>、<code>metadata</code>。文件是同一结构的另外两个分支，请求/响应对象、路径、Task 状态都不变。</td></tr>
+<tr><td>能力声明</td><td>由 Agent Card 驱动：下一期在 <code>defaultInputModes</code>（或 skill 的 <code>inputModes</code>）加入允许的文件媒体类型即可。只发文本/data 的现有客户端不受影响；在此之前文件 Part 返回 <code>ContentTypeNotSupportedError</code>，之后按声明的类型接受，其余仍拒绝。</td></tr>
+<tr><td>输出方向</td><td>Artifact 的 Part 同样可携带文件，<code>defaultOutputModes</code> 与 <code>acceptedOutputModes</code> 的求交集规则不变。本期 artifacts 表已按 <code>text</code> / <code>data</code> / <code>raw</code> / <code>url</code> 四类 Part 设计存储（§5.4），后续支持文件或其他非文本产物时不需要改表结构，只扩展 Card 声明与发布校验。</td></tr>
+<tr><td>与扩展无关</td><td>文件输入是标准能力，不依赖 call-metadata 扩展；<code>caller</code> / <code>user</code>（命名待定）/ <code>includeProgress</code> 与它正交。</td></tr>
+</tbody></table></div>
+<p><strong>本期实现上的建议：</strong>受理校验中的“输入类型检查”集中在一处，把输入当作带类型的 Part 列表处理，而不是写死“只有文本”。这样下一期主要是扩展这一处校验和文件落库，不需要改动调用流程。</p>
+<p><strong>下一期需要设计的问题：</strong></p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="文件输入待设计问题"><table>
+<thead><tr><th style="width:150px">问题</th><th>需要确定的内容</th></tr></thead>
+<tbody>
+<tr><td>传输形式</td><td><code>raw</code>（Base64 内联，受请求体大小限制）与 <code>url</code>（服务端拉取）是否都支持，各自的适用场景。</td></tr>
+<tr><td>限制与类型</td><td>单文件大小、文件数量、总请求体大小；允许的 <code>mediaType</code> 清单（写进 Card，并在受理前校验）；超限、类型不允许、拉取失败的错误 reason。</td></tr>
+<tr><td>存储与保留</td><td>BCS 已有会话文件工作区（prepare-upload、预签名下载、消息附件）和存储插件，评估复用而不是另建；文件保留期与 Task 结果保留期的关系。</td></tr>
+<tr><td><code>url</code> 的安全</td><td>服务端拉取外部地址有 SSRF 风险：需要地址白名单、禁止内网、大小与超时上限；或只接受 BCN 自己签发的上传引用。</td></tr>
+<tr><td>请求指纹</td><td>当前指纹覆盖规范化 JSON；文件需决定覆盖字节摘要还是 <code>url</code>，以免重试被误判为新请求。</td></tr>
+<tr><td>下发与绑定</td><td>文件如何交给 manager / Worker（以附件引用而不是内联字节）；状态机 <code>Run.input</code> 如何绑定文件。</td></tr>
+<tr><td>历史与内容安全</td><td><code>Task.history</code> 保存引用与摘要，而不是 Base64 原文；病毒/内容扫描；日志脱敏。</td></tr>
+</tbody></table></div>
+
+<!-- ============ 5 ============ -->
+<h2 id="architecture">5. 系统架构</h2>
+
+<h3>5.1 总体架构</h3>
+<figure>
+<svg viewBox="0 0 1000 585" role="img" aria-label="系统总体架构图">
+<rect class="old" x="40" y="12" width="920" height="58" rx="8"/>
+<text class="t" x="500" y="36" text-anchor="middle">上游：外部 Agent · 第三方客户端 · Fuse（标准 A2A 客户端）</text>
+<text class="s" x="500" y="56" text-anchor="middle">读取 Group Card，按 Card 声明的地址、能力和扩展调用</text>
+<line class="arr" x1="500" y1="70" x2="500" y2="100"/><text class="s" x="512" y="90">A2A 1.0 · HTTP+JSON · SSE</text>
+
+<rect class="new" x="40" y="100" width="920" height="98" rx="8"/>
+<text class="t" x="56" y="122">Delivery adapter · bcs-http（新增 Group A2A 入站）</text>
+<rect class="inner" x="56" y="134" width="213" height="52" rx="5"/><text x="162" y="155" text-anchor="middle">版本化路由</text><text class="s" x="162" y="174" text-anchor="middle">/a2a/groups/{id}/…</text>
+<rect class="inner" x="281" y="134" width="213" height="52" rx="5"/><text x="387" y="155" text-anchor="middle">A2A DTO ↔ 执行语义</text><text class="s" x="387" y="174" text-anchor="middle">标准错误映射</text>
+<rect class="inner" x="506" y="134" width="213" height="52" rx="5"/><text x="612" y="155" text-anchor="middle">SSE · 同步等待上限</text><text class="s" x="612" y="174" text-anchor="middle">终态订阅 / 取消错误</text>
+<rect class="inner" x="731" y="134" width="213" height="52" rx="5"/><text x="837" y="155" text-anchor="middle">调用主体解析</text><text class="s" x="837" y="174" text-anchor="middle">媒体协商 · 扩展激活校验</text>
+<line class="arr" x1="500" y1="198" x2="500" y2="226"/>
+
+<rect class="new" x="40" y="226" width="920" height="98" rx="8"/>
+<text class="t" x="56" y="248">Group 调用应用服务（service-api application，与传输无关）</text>
+<rect class="inner" x="56" y="260" width="213" height="52" rx="5"/><text x="162" y="281" text-anchor="middle">资源归属校验</text><text class="s" x="162" y="300" text-anchor="middle">caller_principal · A2A 来源</text>
+<rect class="inner" x="281" y="260" width="213" height="52" rx="5"/><text x="387" y="281" text-anchor="middle">幂等受理 · 原子占用</text><text class="s" x="387" y="300" text-anchor="middle">忙碌拒绝</text>
+<rect class="inner" x="506" y="260" width="213" height="52" rx="5"/><text x="612" y="281" text-anchor="middle">执行期限 · 有界收尾</text><text class="s" x="612" y="300" text-anchor="middle">隔离与重启恢复</text>
+<rect class="inner" x="731" y="260" width="213" height="52" rx="5"/><text x="837" y="281" text-anchor="middle">终态提交</text><text class="s" x="837" y="300" text-anchor="middle">Artifact 落表 · 取消 · 查询 / 订阅</text>
+<line class="arr" x1="146" y1="324" x2="146" y2="352"/><line class="arr" x1="382" y1="324" x2="382" y2="352"/><line class="arr" x1="854" y1="324" x2="854" y2="352"/>
+<text class="s" x="560" y="344">执行语义合同（A2A DTO 不进入此层）</text>
+
+<rect class="ext" x="40" y="352" width="212" height="100" rx="8"/><text class="t" x="146" y="376" text-anchor="middle">Session · bcs-session</text><text class="s" x="146" y="400" text-anchor="middle">复用 ServiceInvocation</text><text class="s" x="146" y="418" text-anchor="middle">重新激活 · activation 关联</text><text class="s" x="146" y="436" text-anchor="middle">受管 Session 删除须停止确认</text>
+<rect class="ext" x="276" y="352" width="212" height="100" rx="8"/><text class="t" x="382" y="376" text-anchor="middle">MessageFlow · 主从群</text><text class="s" x="382" y="400" text-anchor="middle">manager 派发 Workers</text><text class="s" x="382" y="418" text-anchor="middle">task.complete 绑定本轮</text><text class="s" x="382" y="436" text-anchor="middle">回送 · 取消确认</text>
+<rect class="old" x="512" y="352" width="212" height="100" rx="8"/><text class="t" x="618" y="376" text-anchor="middle">执行成员 Bot</text><text class="s" x="618" y="400" text-anchor="middle">Engine adapter · OpenClaw 等</text><text class="s" x="618" y="418" text-anchor="middle">经既有 delivery</text><text class="s" x="618" y="436" text-anchor="middle">投递与取消</text>
+<rect class="ext" x="748" y="352" width="212" height="100" rx="8"/><text class="t" x="854" y="376" text-anchor="middle">Collaboration Runtime</text><text class="s" x="854" y="400" text-anchor="middle">自定义协作（状态机）</text><text class="s" x="854" y="418" text-anchor="middle">新输入启动新 Run</text><text class="s" x="854" y="436" text-anchor="middle">取消确认 · 最终输出</text>
+<line class="arr2" x1="488" y1="402" x2="512" y2="402"/><line class="arr2" x1="724" y1="402" x2="748" y2="402"/>
+
+<path d="M146 452V470H854V452M382 452V470M300 470V490M740 470V490" fill="none" stroke="#2454b6" stroke-width="1.5"/>
+<path d="M296 484l4 6 4-6zM736 484l4 6 4-6z" fill="#2454b6"/>
+<text class="s lbl" x="500" y="466" text-anchor="middle">业务事实与状态（同事务落库）</text>
+
+<rect class="ext" x="40" y="492" width="440" height="82" rx="8"/><text class="t" x="260" y="516" text-anchor="middle">Eventing / Event Store（bcs_events）</text><text class="s" x="260" y="538" text-anchor="middle">已有：事件目录 · 事务落库 · event_id · stream.sequence</text><text class="s" x="260" y="556" text-anchor="middle">新增：按本轮 Task 归集 · 去重 · 投影为 A2A 事件</text>
+<rect class="new" x="520" y="492" width="440" height="82" rx="8"/><text class="t" x="740" y="516" text-anchor="middle">存储（新增记录）</text><text class="s" x="740" y="538" text-anchor="middle">Task · Artifact（artifacts 表）· ID 预留/墓碑 · context 占用</text><text class="s" x="740" y="556" text-anchor="middle">执行关联 · 对外消息历史 · 事件消费位置</text>
+</svg>
+<figcaption><span class="legend"><span><i style="background:#eaf1ff;border-color:#2454b6"></i>新增</span><span><i style="background:#fff6e0;border-color:#c98a00"></i>扩展已有模块</span><span><i style="background:#f6f7f9;border-color:#98a2b3"></i>已有 / 外部</span></span></figcaption>
+</figure>
+
+<h3>5.2 分层与边界</h3>
+<ul>
+<li><strong>依赖方向单向：</strong>delivery adapter 只调用 service-api 的 application 合同；application 编排 core 合同与 port，services 实现合同，store 实现 repo port。合同层不依赖具体 services，由 composition root 装配。A2A DTO、路由、SSE 帧留在 adapter；跨模块的应用合同使用执行语义，不出现 A2A 类型。</li>
+<li><strong>状态归属不变：</strong>Bot 配置、能力、聊天历史归 Engine；用户资产、绑定归 Backend；协作与路由状态（本方案新增的 Task、占用、预留）归 BCS。</li>
+<li><strong>复用优先：</strong>contextId 复用 Session ID，不新增映射表；事件复用 <code>bcs_events</code>，不再复制一套原始业务事件表；Run.input / Run.output 继续使用。</li>
+</ul>
+
+<h3>5.3 模块职责</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="模块职责"><table>
+<thead><tr><th>模块</th><th>本期工作</th></tr></thead>
+<tbody>
+<tr><td>HTTP delivery adapter / bcs-http</td><td>版本化路由与已有 Card 管理共存；统一注册 <code>/tasks/{task_action}</code> 并解析 POST 后缀；标准 DTO、SSE 及 15 秒保活、请求体与等待上限、终态订阅/取消错误；输入输出媒体协商；metadata 激活校验</td></tr>
+<tr><td>service-api application 与 Group 调用应用服务</td><td>资源归属、A2A Session 来源、新轮次、幂等受理、原子占用、忙碌拒绝、期限与终态提交</td></tr>
+<tr><td>Session / bcs-session</td><td>复用 ServiceInvocation；重新激活、activation 关联及收尾；受管 Session 删除也遵守停止确认</td></tr>
+<tr><td>MessageFlow / bcs-message-flow</td><td>来源与 data 注入；<code>task.complete</code> 精确关联本轮，先返回受理 ack 再等待 manager 退出；本轮空闲检查与一次性完成提醒；汇总结果快照；Worker 回送及取消确认</td></tr>
+<tr><td>Collaboration Runtime</td><td>新输入启动新 Run；HumanInput 能力检查；停止派发、取消确认、超时隔离；最终输出</td></tr>
+<tr><td>Eventing / Event Store</td><td>复用 <code>bcs_events</code> 与事务写入；补按本轮执行消费、去重、公开消息投影（统一对外字段约束）和消费位置恢复</td></tr>
+<tr><td>存储与持久化 port</td><td>Task、Artifact（独立 artifacts 表，预留非文本 Part）、ID 预留/墓碑、原始请求、活动占用/隔离、截止时间、完成提醒标记与宽限截止、执行关联、事件完成边界</td></tr>
+<tr><td>上游接入方</td><td>按 Card 调用，保存 ID，区分重试与下一轮，处理 busy、查询和取消</td></tr>
+</tbody></table></div>
+
+<h3 id="persistence">5.4 需要持久化的记录</h3>
+<p>物理表名在实现评审时与已有存储合并确定，下表是必须持久化的内容与约束。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="持久化记录"><table>
+<thead><tr><th>记录</th><th>最少保存内容</th><th>关键约束</th></tr></thead>
+<tbody>
+<tr><td>A2A Task / 调用记录</td><td>task_id、group_id、session_id、activation、完整原请求、来源快照、includeProgress、选定输出类型、状态、执行/收尾截止时间、完成提醒标记与宽限截止、取消意图</td><td>每个 Task 的结果保存在 artifacts 表，下一轮不覆盖；终态与 artifacts 同一事务提交；A2A 来源标记保留至 Session 删除；每个 Task 最多提醒一次</td></tr>
+<tr><td>Artifact（<code>artifacts</code> 表）</td><td>见下方“Artifact 存储”</td><td>持久化；终态与 artifacts 同一事务提交；GetTask 与 SSE 都从此读取；保留期同 Task 结果</td></tr>
+<tr><td>消息受理与 ID 预留</td><td>tenant、caller_principal、group_id、messageId、完整指纹、激活扩展集合、task_id、结果清理标记</td><td>同范围原子唯一；预留随调用存储保留，Task 过期仍不再次执行；外部 <code>caller.id</code> 不作认证键</td></tr>
+<tr><td>context 活动占用</td><td>session_id、当前 task_id、执行代次/状态版本、隔离原因与恢复进度</td><td>一个 context 最多一份占用；受理时原子取得；Task 终态与底层停止分别确认</td></tr>
+<tr><td>本轮执行关联</td><td>task_id 到 Run、节点、delivery、manager/Worker 工作的关联及停止进度</td><td>重启后可继续追踪，迟到事件按轮次隔离</td></tr>
+<tr><td>对外消息历史</td><td>原始输入、最终答复、启用后保留的过程消息及顺序</td><td>用于 Task.history，按 <code>historyLength</code> 返回；内部群聊天保留在原有存储</td></tr>
+<tr><td>A2A 事件消费位置</td><td>task_id、源 stream、消费 sequence、源 event_id、输出顺序、终态完成边界</td><td>终态前完成投影，终态后不再追加公开事件</td></tr>
+</tbody></table></div>
+<p><strong>Artifact 存储：</strong>Artifact 是持久化数据，不只放在内存或随 SSE 发送。单独建 <code>artifacts</code> 表，一个 Task 可有多个 Artifact；Part 的类型不写死为文本，为后续的非文本产物保留位置。下表是建议字段，物理列在实现评审确定。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Artifact 存储字段"><table>
+<thead><tr><th style="width:170px">字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>artifact_id</td><td>A2A <code>artifactId</code>，同一 Task 内唯一；与 task_id 组成唯一键</td></tr>
+<tr><td>task_id、context_id</td><td>所属 Task 与 Session；查询、归属过滤和过期清理都按 Task</td></tr>
+<tr><td>name、description</td><td>可选的展示信息</td></tr>
+<tr><td>parts</td><td>保序的 Part 列表。每个 Part 记录类型（<code>text</code> / <code>data</code> / <code>raw</code> / <code>url</code>）、<code>mediaType</code>、<code>filename</code>、<code>metadata</code>；<code>text</code> / <code>data</code> 内联保存，<code>raw</code> / <code>url</code> 的内容放存储插件，表内只存引用、大小和摘要。存成 JSON 列还是拆 Part 子表，实现评审确定</td></tr>
+<tr><td>metadata、extensions</td><td>对应 A2A Artifact 的 <code>metadata</code> / <code>extensions</code>，原样保存</td></tr>
+<tr><td>position、created_at</td><td>同一 Task 内的输出顺序；提交时间。保留期同 Task 结果（建议 7 天），清理时连同存储插件中的对象一起删除</td></tr>
+</tbody></table></div>
+<p><strong>写入与读取：</strong>Artifact 经 §5.6 的对外内容规则筛选后写入，与成功终态 COMPLETED 在同一事务提交。FAILED / CANCELED 可以没有产物。GetTask 和 SSE 的 <code>artifactUpdate</code> 都从此表读取，重启后结果不变。大对象先持久化，数据库事务提交已准备好的引用；事务失败遗留的未引用对象按清理策略回收。<strong>本期类型边界：</strong>对外只输出 <code>text/plain</code> 和 <code>application/json</code>，由 Card 声明和发布校验约束；存储结构已能容纳其他类型，所以文件等非文本产物进入时不需要改表，只扩展 Card 声明、发布校验和对象存储（与 §4.7 一起设计）。</p>
+<p><strong>请求指纹</strong>使用规范化 JSON，覆盖完整语义请求及扩展激活集合（含 <code>configuration</code> 和全部 <code>metadata</code>，<code>includeProgress</code> 也在其中）；服务端生成的 contextId 不反写。重试保持原请求配置，GetTask 的 <code>historyLength</code> 可单独调整。</p>
+<p><strong>结果保留与 ID 预留分别处理（建议值，期限与容量待确认）：</strong>终态 Task 的结果、输入历史和公开事件自终态提交起保留 <strong>7 天</strong>，读取不续期；非终态或仍在隔离恢复的记录不清理。清理后，按原 messageId 重试返回 404 / <code>MESSAGE_RESULT_EXPIRED</code>（不再次执行），直接 GetTask 返回 TaskNotFoundError。墓碑只保留去重范围、messageId、指纹、taskId 和清理标记，随 Group 调用存储保留，不用会让 ID 重新执行的短 TTL。</p>
+
+<h3 id="exec-paths">5.5 两类群的执行路径</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="两类群的执行路径"><table>
+<thead><tr><th style="width:110px">维度</th><th>主从群（ManagerWorker）</th><th>自定义协作群（StateMachine）</th></tr></thead>
+<tbody>
+<tr><td>输入映射</td><td>文本按顺序进入 manager 本轮输入；对象 data 保存到 Task 原始输入，以独立 JSON 数据块注入 manager 上下文，由 manager 选择传给 Worker</td><td>对象 data 映射到 <code>Run.input.data</code>，由节点输入绑定读取；节点输入和提示必须能看到本轮新要求，不能只读群创建时的固定目标</td></tr>
+<tr><td>新一轮</td><td>复用 Session，重新激活并投递本轮输入</td><td>同一 Session 带新输入从入口创建<strong>新 Run</strong>；保留“失败 Run 重跑”的 rerun 语义，二者不混用（现有 rerun 只接受 Failed Run、沿用旧 input、不接受请求体）</td></tr>
+<tr><td>完成信号</td><td>manager <code>task.complete</code>：精确绑定本轮 Session / activation / Task；待回复工作和回送完成后才受理，<strong>先返回 ack，再等待 manager 退出</strong>，然后提交终态；长期不提交时，空闲 60 秒提醒一次、宽限 120 秒，仍无则 FAILED</td><td>Run 成功并取得指定最终输出节点的输出</td></tr>
+<tr><td>最终结果</td><td>manager 确认的 <code>summary</code> → 写入 artifacts 表（<code>text/plain</code>）；普通阶段总结只作过程消息</td><td><code>final_output</code> → 写入 artifacts 表（结构化 <code>application/json</code>，或由输出节点显式提供文本）</td></tr>
+<tr><td>过程消息来源</td><td>manager 消息；<code>task.assigned</code> / <code>task.completed</code></td><td><code>state_machine.node.started/completed/retry_scheduled</code></td></tr>
+<tr><td>取消范围</td><td>manager、Worker、结果回送</td><td>活动节点、等待节点、定时重试、已派发 Bot 工作</td></tr>
+</tbody></table></div>
+
+<p><strong>多轮时，执行方拿到哪些输入：</strong>仅复用 Session ID 不能保证新一轮拿到背景，输入需要明确传递。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="多轮输入"><table>
+<thead><tr><th style="width:170px">输入信息</th><th>来源与用途</th></tr></thead>
+<tbody>
+<tr><td>最初目标</td><td>首轮输入，作为会话背景保存</td></tr>
+<tr><td>本轮请求与 data</td><td>当前 <code>Message.parts</code>，作为本轮执行的直接输入（状态机进入 <code>Run.input</code>，主从群进入 manager 本轮输入）</td></tr>
+<tr><td>上轮结果与关联 Task</td><td>从同一 context 上一轮已保存的结果读取，支持补充要求和比较</td></tr>
+<tr><td>caller、user</td><td>本轮使用的来源快照，下一轮省略时继承；进入 manager 和节点可见的上下文</td></tr>
+</tbody></table></div>
+<p><strong>读取旧结果作为背景，不等于复用旧执行产物。</strong>新 Run 从入口重新执行，上一轮结果只作为背景提供，不能用旧产物替代本轮执行。例如第二轮只说“预算改为 50 万”，由执行 Agent 结合最初目标和上轮结果理解；适配层只传递确定的输入，不自行理解并改写业务目标。因此节点输入绑定和提示必须能同时看到最初目标、上轮结果与本轮新要求，不能继续只读群创建时的固定目标。每一轮保存独立的输入与输出，旧 Run 保持终态。该输入落到 <code>Run.input</code> 和节点输入合同，与用于开场内容和面板展示的 <code>opening_message</code> 区分。</p>
+
+<h3 id="projection">5.6 事件投影：轮询与 SSE 共用一份 Task</h3>
+<p><code>bcs_events</code> 提供群执行中发生的事实；<strong>轮询和 SSE 是上游获取 Task 状态与结果的两种出口，它们读取的是同一份已保存的 Task</strong>，两者的状态和结果必须一致。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="事件投影"><table>
+<thead><tr><th>层次</th><th>处理内容</th><th>上游看到什么</th></tr></thead>
+<tbody>
+<tr><td>群执行与 <code>bcs_events</code>（已有）</td><td>节点启动、任务完成、manager 消息等业务事实</td><td>BCN 内部消费</td></tr>
+<tr><td>A2A 状态与结果保存（待补齐）</td><td>关联本轮 Task，更新状态和 history，Artifact 写入 artifacts 表；处理重复和迟到事件</td><td>一份可查询、可恢复的 Task 快照</td></tr>
+<tr><td>GetTask 轮询（待补齐）</td><td>读取已保存的当前快照（Task 与 artifacts）；查询本身不推进执行</td><td>请求时的最新状态与结果</td></tr>
+<tr><td>message:stream / subscribe（待补齐）</td><td>先返回 Task 快照，再按顺序发送已保存的变化；<code>artifactUpdate</code> 来自 artifacts 表</td><td>标准 TaskStatusUpdateEvent / TaskArtifactUpdateEvent</td></tr>
+</tbody></table></div>
+<p>事件里的 <code>task_id</code> 是 BCS 内部任务，需经本轮执行关联找到 A2A taskId；<code>sequence</code> 只在各自 stream 内有序，聚合多个 Worker/Run 时要为本 Task 保存确定的输出顺序和消费位置，并按 <code>event_id</code> 去重。<strong>终态提交顺序：</strong>关闭本轮派发 → 固定各源 stream 的完成边界 → 投影边界内应公开的过程事件 → 在同一事务中写入 artifacts 表与终态；终态后的迟到回调只进内部追踪，不产生公开事件。</p>
+
+<p><strong>对外内容规则（同一投影，先筛选再写入）：</strong><code>includeProgress</code> 只控制公开进展是否出现；筛选在写入 <code>Task.history</code>、<code>status.message</code> 和事件流之前完成，GetTask 与 SSE 使用同一份公开数据。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="对外内容规则"><table>
+<thead><tr><th style="width:200px">内容来源</th><th>对外处理</th></tr></thead>
+<tbody>
+<tr><td>派发、节点启动/完成等运行事实</td><td>使用“开始核对报价”“已完成信息整理”等业务阶段模板；可带经配置允许的阶段名和完成数量</td></tr>
+<tr><td>manager 阶段总结与最终 summary、流程结果节点</td><td>仅接受明确标为对外输出、符合发布字段约束的内容；普通内部群聊不直接转发；最终 Artifact 同样受此约束</td></tr>
+<tr><td>FAILED、取消异常、协议错误</td><td>输出稳定的业务原因和下一步建议，如“执行超时”“执行未提交最终结果”；详细诊断留在内部日志，用关联 ID 排查</td></tr>
+<tr><td>成员 Bot ID/姓名、内部路由和地址、系统提示、模型思考、凭据、工具原始返回、堆栈</td><td>只保留在内部；业务结果确需引用工具数据时，通过已定义的对外结果字段投影</td></tr>
+</tbody></table></div>
+<p>约束按字段和确定的事件模板实现，<strong>不依赖模型自行脱敏</strong>：无法确认可公开的过程内容不生成对应进展；错误仍返回概括原因；最终产物未通过发布校验时按执行失败处理。</p>
+
+<h3 id="free-chat">5.7 后续：自由聊天群接入 A2A（待讨论）</h3>
+<p>本期只覆盖主从群和自定义协作群，它们都有明确的结束信号（manager <code>task.complete</code> 或 Run 终态）。自由聊天群后续也需要有办法接入 A2A，但没有这类信号，<strong>如何判定结束、产物是什么</strong>还需要进一步讨论，本期不实现。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="自由聊天群初步方向"><table>
+<thead><tr><th style="width:190px">方式（群级设置二选一）</th><th>对外表现</th><th>需要讨论的问题</th></tr></thead>
+<tbody>
+<tr><td>A. 返回聊天消息</td><td>响应是标准 <code>Message</code>，不创建 Task，没有 Artifact；对 A2A 是标准的 Message-only 响应模式</td><td>什么时候算一次回复结束（单条回复还是一段时间内的多条）；是否支持流式；Message-only 下 <code>contextId</code> 如何续聊；取消和查询无 Task 可用</td></tr>
+<tr><td>B. 交给 LLM 总结为产物</td><td>仍走 Task：按约定条件结束后，由 LLM 对群聊内容总结，作为 Artifact 返回，写入 artifacts 表</td><td>结束条件由谁、按什么触发；总结的输入范围、模型与超时；总结内容也要遵守对外内容规则（§5.6）；总结失败映射为 FAILED</td></tr>
+</tbody></table></div>
+<p><strong>与本期的关系：</strong>本期“Group 固定返回 Task”的选择仅适用于主从群和自定义协作群，Card 的响应模式不应写死成全局规则。方式 A 一旦采用，响应是 Message 而不是 Task，会影响 Card 声明和客户端的处理分支，后续讨论时需要先定响应模式的声明方式。本期不为此增加字段，仅保证：Group 调用应用服务按群类型选择执行路径，artifacts 表不依赖“必须是主从群或状态机”。</p>
+
+<!-- ============ 6 ============ -->
+<h2 id="rationale">6. 关键设计取舍</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="关键设计取舍"><table>
+<thead><tr><th style="width:110px">主题</th><th>本期设计</th><th>理由与代价</th></tr></thead>
+<tbody>
+<tr><td>并发</td><td>占用在原子受理时取得，覆盖启动中、working、取消及收尾未确认的全过程；有活动 Task 时忙碌拒绝</td><td>只检查 <code>status == working</code> 会留下并发窗口。代价：长任务会让同 context 的后续请求被拒，由上游重试；FIFO 排队下一期评估</td></tr>
+<tr><td>完成判定</td><td>只由显式完成信号 + 待办检查 + 回送确认触发；受理 ack 先于等待 manager 退出，终态提交后才释放占用</td><td>避免“我来安排”之类的过程回复让 Task 提前完成；manager 调用完成工具时自身执行可能未结束，先等退出再释放才不会与下一轮重叠，先 ack 才不会相互等待。manager 一直不调用时，空闲 60 秒提醒一次、宽限 120 秒后失败收尾，执行期限仍兜底</td></tr>
+<tr><td>终态一致</td><td>先冻结派发、投影完过程事件，再在同一事务写 artifacts 表与终态</td><td>SSE 终态后无迟到事件，GetTask 与 SSE 一致；成功终态与产物一起可见，FAILED / CANCELED 可以没有产物。代价：多一张表和一次存储读写</td></tr>
+<tr><td>Artifact 持久化</td><td>独立 artifacts 表，Part 结构按 A2A 的四类 Part 设计；本期对外只输出文本和 JSON</td><td>结果不依赖内存和 SSE 连接，重启可恢复；为文件等非文本产物预留，不用以后改表。代价：本期要实现 raw / url 的存储引用约定，但先不开放</td></tr>
+<tr><td>无法确认旧执行已停止</td><td>Task 标 FAILED；context 暂停接受新一轮（隔离），确认旧执行已停后再恢复，不盲目放开</td><td>占用超时不能证明 Worker 已停止，贸然放开可能让两轮同时执行。代价：恢复前该 context 不能续聊。需要自动恢复机制；自动恢复不了时，要有排查和人工处置入口，并配告警</td></tr>
+<tr><td>幂等</td><td>标准 MAY；去重范围 = tenant + caller_principal + group_id + messageId；指纹含全部 configuration/metadata；预留随调用存储保留</td><td>不承诺强于标准；不发布 <code>message-dedup/v1</code>，BCS 出站客户端对未协商的目标不自动重发。metadata.caller 可伪造，不进入去重范围</td></tr>
+<tr><td>资源归属</td><td>复用 <code>caller_principal</code>；只接受 A2A 创建的 ServiceInvocation Session；所有 Task 操作和续聊都校验；列表先过滤再分页</td><td>contextId 是 <code>{group_id}:{8位hex}</code>，不能依赖不可猜测。认证机制与凭据联合设计；metadata 中 <code>caller</code> / <code>user</code> 的命名和凭据传递方式待定，本期只确定归属校验</td></tr>
+<tr><td>过程消息</td><td><code>includeProgress</code>，默认 false，本轮首次受理时固定</td><td>名称对单 Agent、Group 都适用，客户端无需知道 manager / Worker；A2A 没有标准的过程消息开关，只能放进扩展 metadata，不增加非标准 configuration 字段。只返回整理过的阶段性进展，不暴露原始思考；对外内容规则见 <a href="#projection">§5.6</a></td></tr>
+<tr><td>状态机多轮</td><td>新 Task + 新 Run + 本轮 input；上轮结果只读取作为背景；保留失败 rerun</td><td>旧 Run 保持终态，不复用旧产物替代执行；上游仍只调 <code>message:send</code>；不把自然语言理解放进适配层，由节点输入合同看到最初目标、上轮结果与本轮新要求</td></tr>
+<tr><td>同步等待</td><td>单次等待上限、网关超时、Task 执行期限分别设置</td><td>HTTP 超时不取消执行；预计较久的上游应选 <code>message:send</code> 的 returnImmediately=true，或 <code>message:stream</code></td></tr>
+</tbody></table></div>
+
+<!-- ============ 7 ============ -->
+<h2 id="delivery">7. 交付计划与验收</h2>
+<ol>
+<li><strong>先定外部合同。</strong>版本化路径、媒体类型、资源归属、metadata 激活、去重扩展边界、Task/context 规则和标准错误。</li>
+<li><strong>打通受理与两类执行。</strong>新会话、终态后续聊、manager 完成信号、状态机新输入和独立结果持久化。</li>
+<li><strong>补齐过程与有界收尾。</strong>SSE 与查询一致，执行期限、取消及隔离恢复可验证；重启和迟到事件不会混入下一轮。</li>
+</ol>
+<div class="table-scroll" tabindex="0" role="region" aria-label="验收场景"><table>
+<thead><tr><th>验收场景</th><th>要观察到的结果</th></tr></thead>
+<tbody>
+<tr><td>使用标准字段完成两轮调用</td><td>同一 context、两个 Task；旧结果可查询</td></tr>
+<tr><td><code>message:send</code> 以 <code>returnImmediately=true</code> 发起，随后轮询 GetTask</td><td>立即返回 SUBMITTED Task 和 <code>taskId / contextId</code>；轮询看到 WORKING 到终态的同一份快照，终态后含最终 Artifact；与同一 Task 的 SSE 结果一致</td></tr>
+<tr><td>同请求重复受理、结果清理后重试、指纹改变</td><td>复用原 Task；已清理报 <code>MESSAGE_RESULT_EXPIRED</code>；configuration/includeProgress 变化报冲突；均不重复派发</td></tr>
+<tr><td>两请求并发争用同一 context</td><td>最多一项取得执行权，其余返回 <code>CONTEXT_BUSY</code> 且不创建 Task</td></tr>
+<tr><td>includeProgress 为 true / false</td><td>过程消息按开关出现；状态、错误和最终结果始终可获取</td></tr>
+<tr><td>bcs_events 重复消费、消费进程重启</td><td>公开历史不重复，按本 Task 输出顺序恢复</td></tr>
+<tr><td>状态机下一轮把预算改为 50 万</td><td>新 Run 的节点同时看到最初目标、上轮结果和本轮新要求，消费新目标，不复用旧轮次产物</td></tr>
+<tr><td>主从群、状态机各自在节点执行中取消</td><td>停止确认前 context 忙；确认后 canceled；可开启下一轮</td></tr>
+<tr><td>Worker 失联、意外 HumanInput、取消收尾超时、重启</td><td>到期进入失败收尾或隔离，不无限 working；已持久化预算不重置；旧执行不污染新一轮</td></tr>
+<tr><td><code>task.complete</code> 指向旧 activation；manager 未提交最终汇总；manager 调用完成工具时自身执行未结束</td><td>旧完成信号被拒绝；普通消息不触发 completed；先返回 ack、等 manager 退出并收尾后才提交终态并释放占用，下一轮不与上一轮重叠</td></tr>
+<tr><td>manager 已无待执行工作却不提交完成；Worker 正常长时间运行</td><td>前者只提醒一次，宽限到期后失败收尾，重启不重复提醒；后者不因缺少过程消息被判失败</td></tr>
+<tr><td>标准 cancel / subscribe URL 经 axum 注册后调用</td><td>路由可启动且动作解析正确；未知后缀、空 ID、路径与请求体不一致得到约定错误</td></tr>
+<tr><td>内部事件含成员身份、工具原始返回或堆栈</td><td>Task history、状态消息、错误、Artifact 和 SSE 都遵守同一对外字段约束</td></tr>
+<tr><td>无业务事件的长 SSE 经过网关</td><td>15 秒注释心跳及时到达；不延长 Task 期限；终态后停止；断线按 taskId 恢复查询</td></tr>
+<tr><td>终态与过程事件竞争；终态后订阅或再次取消</td><td>过程事件先于最终结果和终态；分别报 UnsupportedOperationError / TaskNotCancelableError</td></tr>
+<tr><td>猜测 ID、跨调用方访问、非 A2A Session 续聊</td><td>查询/列表/订阅/取消/续聊都受归属约束，列表分页不泄漏其他主体数据</td></tr>
+<tr><td>Artifact 持久化；服务重启；输出含非文本 Part 的校验</td><td>Task 终态与 artifacts 表同事务提交，重启后 GetTask 和 SSE 读到相同产物；artifacts 表可存 <code>raw</code> / <code>url</code> 等 Part，但本期对外只输出 <code>text/plain</code> / <code>application/json</code>，其他类型在发布校验处被拒绝并按失败处理；清理时同时删除对象存储中的内容</td></tr>
+<tr><td>includeProgress 漏激活头；来源合同定稿后的绑定冲突</td><td>前者未建 Session/Task，补头可重发；后者按最终来源合同验证 <code>CONTEXT_SOURCE_CONFLICT</code>（400）</td></tr>
+<tr><td>外部 Agent 带用户来源，下一轮省略来源；<code>acceptedOutputModes</code> 不相交；主从群接收对象 data</td><td>manager 与节点仍看到同一来源；无交集在受理前拒绝；对象 data 保留原样并进入 manager 上下文</td></tr>
+<tr><td>BCS 出站客户端首轮响应丢失且目标未协商 message-dedup</td><td>报告结果未知，不自动重发；已有 taskId 时改为查询</td></tr>
+<tr><td>同步等待超时、网关断线；结果保留期到达、请求体超限</td><td>等待超时不成功返回 working，业务执行继续，执行期限仍生效；结果清理后原 ID 不再次执行；超限请求在受理前返回 413</td></tr>
+</tbody></table></div>
+
+<!-- ============ 8 ============ -->
+<h2 id="open-items">8. 待确认事项</h2>
+
+<h3>8.1 需要在会上确认</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="待确认项"><table>
+<thead><tr><th style="width:150px">事项</th><th>建议</th><th style="width:90px">状态</th></tr></thead>
+<tbody>
+<tr><td>入口路径</td><td>新增入站只用 <code>/api/v1/collaboration/a2a/...</code> 版本化前缀；对外发布 Card 的 <code>agent-card.json</code> 与已有的外部 Agent 管理接口 <code>agent-card</code> 名字相近、用途不同，分别注册（<a href="#routes">§4.3</a>）</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>同 context 并发</td><td>忙碌拒绝（409 / <code>CONTEXT_BUSY</code>）；FIFO 排队列下一期待定</td><td><span class="tag ok">已选</span></td></tr>
+<tr><td>Task 等待补充输入</td><td>下一期</td><td><span class="tag ok">已定</span></td></tr>
+<tr><td>文件输入</td><td>本期 Card 不声明文件类型，文件 Part 返回 <code>ContentTypeNotSupportedError</code>；下一期按 §4.7 设计</td><td><span class="tag ok">已定</span></td></tr>
+<tr><td>主从群完成信号</td><td>复用 manager <code>task.complete</code>，以 summary 为最终汇总；强绑定本轮 Task / activation；需明确 manager Skill 的完成动作</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>等待、执行与收尾期限</td><td>单次 HTTP 等待 60 秒、Task 执行 30 分钟、取消收尾 60 秒；评估默认阻塞调用的完成率后定等待上限；网关空闲超时大于 SSE 心跳间隔，总时限覆盖执行与收尾，或允许断线后用 taskId 重新订阅</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>默认阻塞调用的 504</td><td>标准客户端默认 <code>returnImmediately=false</code>，群任务常超过 60 秒会收到 504（不在 A2A 标准错误表内）；在接入文档和 <code>Card.documentationUrl</code> 写明等待上限与 504，长任务推荐 <code>returnImmediately=true</code> 或 stream</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>manager 完成提醒</td><td>空闲 60 秒提醒一次，再给 120 秒宽限；提醒不延长整轮预算</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>结果与墓碑保留</td><td>终态结果（含 artifacts 表中的产物及其对象存储内容）保留 7 天，读取不续期；非终态与隔离中的记录暂缓清理；确认容量预算和清理任务</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>请求体大小上限</td><td>JSON 1 MiB（含 message / configuration / metadata），网关与适配层统一限制，超限 413；接入文档列明</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>扩展 URI 与 Schema 位置</td><td>使用 GitHub 仓库地址，形式同 <code>source-agent/v2</code>：规范文件 <code>docs/specs/a2a/extensions/call-metadata/v1.md</code>，URI 为其 <code>blob/dev</code> 地址；定稿的 Schema 后续放进仓库同一目录。扩展名与路径为建议值，Schema 文件名在发布时确定；Card.uri 与激活头一致，Schema.$id 与 Schema 自身引用一致</td><td><span class="tag ok">已定</span></td></tr>
+<tr><td>Artifact 持久化</td><td>独立 artifacts 表，终态与其同事务提交；Part 结构预留非文本类型，本期对外只输出文本和 JSON；表结构、大对象存放方式、保留期和清理方式在实现评审确定（§5.4）</td><td><span class="tag ok">已定</span></td></tr>
+<tr><td>自由聊天群接入</td><td>后续接入。初步考虑群级设置二选一：返回聊天消息（无 Task、无产物），或交给 LLM 总结为 Artifact；结束判定、总结触发与响应模式的 Card 声明待讨论（§5.7）</td><td><span class="tag todo">后续讨论</span></td></tr>
+<tr><td>去重与既有扩展</td><td>标准 MAY + 内部持久化去重；不发布 Bot endpoint 的 <code>message-dedup/v1</code>；要让 BCS 自动重试时另行确认 Group 范围与重启语义</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>metadata 发现方式</td><td>Card 声明 <code>required: false</code> 的扩展，<code>params.metadataSchema</code> 描述结构；<code>A2A-Extensions</code> 激活；漏头在受理前报错；当前 Schema 只定义 <code>includeProgress</code>；来源字段定稿后明确本扩展拥有的其他键</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>caller / user 命名与凭据传递</td><td><code>metadata</code> 中来源和用户字段的命名、内部结构，以及凭据与认证信息的传递方式（<code>metadata</code>、HTTP 头或其他）均未定，spec 中列为待定项；与认证机制联合设计。本期方案暂用 <code>caller</code> / <code>user</code>，来源信息只是自称，不作认证键</td><td><span class="tag todo">待定</span></td></tr>
+<tr><td>资源归属边界</td><td>复用 <code>caller_principal</code>；仅接受 A2A 创建的 Session；认证链和 Card 安全声明留待联合设计</td><td><span class="tag sub">待确认</span></td></tr>
+<tr><td>异常会话的恢复方式</td><td>如何自动确认旧执行已停止并恢复 context；自动恢复一直失败时，提供什么排查和人工处置入口。谁接收告警，部署前再确认</td><td><span class="tag sub">待确认</span></td></tr>
+</tbody></table></div>
+
+<h3>8.2 已在方案中处理的评审风险</h3>
+<p>以下风险已写入对应章节，会上只需确认结论，不再作为待决项。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="已处理风险"><table>
+<thead><tr><th style="width:170px">风险</th><th>处理方式</th><th style="width:80px">位置</th></tr></thead>
+<tbody>
+<tr><td>路由后缀不可行</td><td>统一注册 <code>/tasks/{task_action}</code>，POST 解析 <code>:cancel</code> / <code>:subscribe</code>，附路由契约测试</td><td><a href="#api-list">§4.1</a></td></tr>
+<tr><td>错误码映射不一致</td><td>集中给出 HTTP / status / reason；仅 <code>CONTEXT_BUSY</code> 为 409 / ABORTED，<code>CONTEXT_UNAVAILABLE</code> 与 <code>CONTEXT_SOURCE_CONFLICT</code> 为 400 / FAILED_PRECONDITION</td><td><a href="#errors">§4.5</a></td></tr>
+<tr><td>REJECTED 无触发条件</td><td>本期不主动生成；受理前校验失败为协议错误，受理后失败为 FAILED</td><td><a href="#flow-state">§3.4</a></td></tr>
+<tr><td>manager 一直不调用完成</td><td>空闲 60 秒提醒一次，宽限 120 秒，仍无则 FAILED；提醒标记持久化</td><td><a href="#flow-state">§3.4</a></td></tr>
+<tr><td>完成与释放占用的先后</td><td>先返回受理 ack，再等 manager 退出并收尾，终态提交后释放占用</td><td><a href="#flow-main">§3.1</a></td></tr>
+<tr><td>对外信息暴露</td><td>业务阶段模板 + 对外结果字段，按字段而非模型脱敏；FAILED 使用稳定业务原因</td><td><a href="#projection">§5.6</a></td></tr>
+<tr><td>SSE 长连接被网关断开</td><td>15 秒注释心跳；断线后先取快照，已终态改用 GetTask，不保证事件重放</td><td><a href="#api-list">§4.1</a></td></tr>
+<tr><td>结果保留与请求体上限</td><td>已给出建议值（7 天、1 MiB），具体数值在 §8.1 确认</td><td><a href="#persistence">§5.4</a></td></tr>
+<tr><td>状态机多轮缺少背景</td><td>明确最初目标、本轮请求、上轮结果与 caller/user 的传递方式</td><td><a href="#exec-paths">§5.5</a></td></tr>
+</tbody></table></div>
+
+
+<!-- ============ 9 ============ -->
+<h2 id="refs">9. 参考材料</h2>
+<ul>
+<li><a href="next-discussion.html">下次讨论稿</a>（<a href="next-discussion.md">Markdown</a>）：本文档的主要来源，含更多表格与示例。</li>
+<li><a href="spec.md">Spec</a>、<a href="overview.md">方案简版</a>、<a href="examples.md">完整示例</a>：已按本次评审更新，统一忙碌拒绝、完成信号、Artifact 持久化、来源待定项与后续范围；交互阅读页和演示稿同步维护。</li>
+<li><a href="call-metadata.schema.json">call-metadata.schema.json</a>：当前只定义 <code>includeProgress</code>，<code>$id</code> 使用候选仓库地址；来源字段待 §4.4 的合同确认后补齐，再与规范一起发布。</li>
+<li><a href="https://a2a-protocol.org/v1.0.1/specification/">A2A 1.0.1 规范</a>、<a href="https://a2a-protocol.org/v1.0.1/topics/extensions/">A2A Extensions</a>、<a href="https://a2a-protocol.org/v1.0.1/topics/life-of-a-task/">Life of a Task</a>。</li>
+<li>既有 A2A 扩展合同：<a href="https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md">source-agent/v2</a>、<a href="../../../../docs/specs/a2a/extensions/message-dedup/v1.md">message-dedup/v1</a>（扩展 URI 使用仓库地址的约定）。</li>
+<li>代码依据：<a href="../../crates/adapters/http/bcs-http/src/router.rs">router.rs</a>、<a href="../../crates/adapters/http/bcs-http/src/routes/services.rs">services.rs</a>、<a href="../../crates/services/bcs-message-flow/src/task_flow.rs">task_flow.rs</a>、<a href="../../crates/services/bcs-collaboration-runtime/src/runtime/completion.rs">completion.rs</a>、<a href="../../crates/services/bcs-collaboration-runtime/src/runtime/rerun.rs">rerun.rs</a>、<a href="../../api-contracts/events/v1/catalog.yaml">事件目录</a>。</li>
+</ul>
+
+<div class="footer">本文整合自 next-discussion、spec 与 overview，并核对 <code>origin/dev</code> 的代码与 A2A 1.0.1 规范；评审结论确定后回写 spec、overview 和 examples。</div>
+</main>
+</div>
+</body>
+</html>
