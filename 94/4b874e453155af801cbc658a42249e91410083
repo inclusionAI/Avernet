@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/method_authorization.py
+  s_64261436edbb0b::t_f28715530abe90 39
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_64261436edbb0b::t_90aea979ccccfe 44-46
+  s_64261436edbb0b::t_8c7f9f37b2653f 272-275
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/creation_facts.py
+  s_64261436edbb0b::t_c89701ce0e248e 1-28
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/actor_context.py
+  s_64261436edbb0b::t_8b0092e86dd436 1-24
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  s_64261436edbb0b::t_437aa21ebbd6c6 14-16
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_64261436edbb0b::t_f28715530abe90 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "944b874e453155af801cbc658a42249e91410083",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

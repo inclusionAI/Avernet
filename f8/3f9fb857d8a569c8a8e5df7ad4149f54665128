@@ -1,0 +1,19 @@
+.gitmodules
+  s_e36835d494c14c::t_f99097d83f4bf8 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f83f9fb857d8a569c8a8e5df7ad4149f54665128",
+  "prompts": {},
+  "sessions": {
+    "s_e36835d494c14c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_e36835d494c14c",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

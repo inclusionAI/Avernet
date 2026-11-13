@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/method_state_machines.py
+  s_a5f125bde83e04::t_89e58e94fef18b 49-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6ee7755d9b5054e59637ba926a76095b5a1e7e9",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

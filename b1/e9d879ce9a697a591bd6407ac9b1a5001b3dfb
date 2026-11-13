@@ -1,0 +1,26 @@
+apps/backend/specs/2026-11-12-teclaw-refresh-session-check/spec.md
+  s_6df2d19f5247b5::t_659768f678f657 7,22
+  s_6df2d19f5247b5::t_6ae86ffc186370 5,19-21
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_6df2d19f5247b5::t_6ae86ffc186370 135,144,303-311,313-325
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_6df2d19f5247b5::t_659768f678f657 132
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_6df2d19f5247b5::t_659768f678f657 37,60,63-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b1e9d879ce9a697a591bd6407ac9b1a5001b3dfb",
+  "prompts": {},
+  "sessions": {
+    "s_6df2d19f5247b5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d01d-682a-7c52-a40b-074c6b5d16ef",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

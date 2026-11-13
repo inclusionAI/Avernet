@@ -1,0 +1,64 @@
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_6d017263d323e4 1,3-6,8,10-13,15,17-56,58-63,65-69,71,73-74,85-91,99-109
+  s_47ed8e91e4b8af::t_a801d8b7be7674 92-98
+AGENTS.md
+  s_47ed8e91e4b8af::t_47ec754b966699 1,3-4,6,8-11,13,15,17-26,28-30
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_1f29e268559789 1,3-6,8,10,12-35
+apps/backend/.gitignore
+  s_47ed8e91e4b8af::t_5b7eda03f7411a 25
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_dde525d5009f53 1-13
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_47ed8e91e4b8af::t_8ba6ce9f224e4e 1,3,5,7-14,16,18,20,22,24
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_5e5a2d0bb53e9d 1-11
+apps/backend/specs/README.md
+  s_47ed8e91e4b8af::t_29ae848e0e1af5 1-11
+docs/adr/README.md
+  s_47ed8e91e4b8af::t_e429eb29d3d127 1-11
+docs/agents/git-workflow.md
+  s_47ed8e91e4b8af::t_5f3cefeb1af5be 1,3,5,7,9,11,13-17,19,21
+docs/agents/internal-access.md
+  s_47ed8e91e4b8af::t_0aa6644eab7bfa 1,3
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_d29a1f17479b07 1,3,5,7-12,14,16,18,20
+docs/agents/runtime-ownership.md
+  s_47ed8e91e4b8af::t_40b01384f07ea5 1,3
+docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_0a5087f119c3f0 1-12
+docs/agents/templates/adr.md
+  s_47ed8e91e4b8af::t_995cb8ab786458 1-13
+docs/agents/templates/app.md
+  s_47ed8e91e4b8af::t_66eeda94835851 1-13
+docs/agents/templates/diagnostic.md
+  s_47ed8e91e4b8af::t_2ef78d45c4412a 1-13
+docs/agents/templates/domain.md
+  s_47ed8e91e4b8af::t_ec4afc3ae9f0fe 1-13
+docs/agents/templates/flow.md
+  s_47ed8e91e4b8af::t_52c44fca69af59 1-13
+docs/agents/templates/spec.md
+  s_47ed8e91e4b8af::t_ba140eff109803 1-13
+docs/arch/README.md
+  s_47ed8e91e4b8af::t_02ee489382d709 1-13
+docs/flows/README.md
+  s_47ed8e91e4b8af::t_2affc8dba22822 1-13
+docs/flows/backend-runtime-targeting.md
+  s_47ed8e91e4b8af::t_f7c93c793268ff 1,3,5,7,9-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c096a2c550c4be4906853d3f9bbe13c8736826b",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
