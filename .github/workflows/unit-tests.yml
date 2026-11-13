@@ -166,8 +166,9 @@ jobs:
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip-bcs != 'true'
         run: |
-          rustup toolchain install 1.99.1 --profile minimal --component llvm-tools
-          rustup default 1.99.1
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add llvm-tools
           rustc --version
           cargo --version
 
