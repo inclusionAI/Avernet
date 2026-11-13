@@ -33,13 +33,15 @@ if [ -n "$spawn_pkgs" ]; then
   # Intentional word splitting: the variable holds repeated "-p <name>" pairs.
   # shellcheck disable=SC2086
   cargo build --locked $spawn_pkgs --bins
+  # Pin the spawned server binaries for the process-level tests: nextest may
+  # execute their test binaries outside `debug/deps`, breaking their relative
+  # path arithmetic (observed as ENOENT in runs 43345664811 / 43351522373 /
+  # 43369707101). The helpers honor BCS_E2E_SERVER_BIN first.
+  export BCS_E2E_SERVER_BIN="$CARGO_TARGET_DIR/debug/bcs"
+  export BCS_E2E_CLI_BIN="$CARGO_TARGET_DIR/debug/bcs-cli"
 fi
-# TEMP-DIAG(#3959): verify spawned helper binaries exist right after the build.
-ls -la "$CARGO_TARGET_DIR/debug/bcs" "$CARGO_TARGET_DIR/debug/bcs-cli" 2>&1 || true
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
-# TEMP-DIAG(#3959): re-verify spawned helper binaries still exist before tests.
-ls -la "$CARGO_TARGET_DIR/debug/bcs" "$CARGO_TARGET_DIR/debug/bcs-cli" 2>&1 || true
 set +e
 cargo nextest run --cargo-metadata testresult/cargo-metadata.json \
   --binaries-metadata testresult/test-binaries.json --config-file "$config" \
