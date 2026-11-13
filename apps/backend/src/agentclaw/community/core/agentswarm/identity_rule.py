@@ -1,24 +1,12 @@
 """The one rule for "may this Bot supply identity?".
 
-Three boundaries ask the same question and must not answer it differently:
-
-* the agentswarm submit seam (``plugins/community/agentswarm/bot_authorization``),
-  before any run row is written;
-* the creation boundary (``core/bot_management/identity_source.resolve_identity_source``),
-  before any manifest is stored or Passport applied for;
-* authorization completion (``core/bot_management/identity_source.inherited_agent_code``),
-  where the created Bot is finally minted under that identity.
-
-They were written at different times and each read only the cached copy on the
-Bot row (``ac_bots.ext.passport``). That copy is a snapshot of what the Passport
-provider once said, and Bots created before it existed carry none — so all
-three refused a Bot whose passport the provider still answers for. Fixing one
-boundary alone moved the failure later, into the swarm's spawn, where it read
-as a swarm bug.
-
-Ownership is settled first and by the caller: this module never looks a Bot up,
-so it can be shared by an adapter that resolves through a repository and by one
-that resolves through a service, without either learning the other's world.
+Three boundaries ask it and must not answer differently: the agentswarm submit
+seam, the creation boundary (``resolve_identity_source``), and authorization
+completion (``inherited_agent_code``). Each once read only
+``ac_bots.ext.passport`` — a snapshot many Bots predate — so all three refused a
+Bot whose passport the provider still answers for; fixing one alone moved the
+failure into the spawn. Ownership is settled by the caller, so this module never
+looks a Bot up.
 """
 from __future__ import annotations
 
