@@ -3,18 +3,19 @@ import { parseTaskPanelDeclarations } from '../history/parseTaskPanelDeclaration
 import { createTaskClient, mainSessionId, recordTitle, type TaskListRecord } from '../data/taskClient';
 import type { TaskNavRecord } from '../panel/v2/taskPanelNav';
 export interface TaskPanelSnapshot {
-  conversation: ConversationRef | null; activeTaskId: string | null; associatedTaskIds: readonly string[];
+  conversation: ConversationRef | null; activeTaskId: string | null; associatedTaskIds: readonly string[]; orderedTaskIds: readonly string[];
   navByTask: Record<string, TaskNavRecord>; recovery: RecoveryState;
   records: readonly TaskListRecord[]; navigationError: string | null;
 }
 const emptyNav = (): TaskNavRecord => ({ selectedNodeId: null, drillStack: [] });
 export function createTaskPanelController(host: TaskPanelHost) {
-  let snapshot: TaskPanelSnapshot = { conversation: null, activeTaskId: null, associatedTaskIds: [], navByTask: {},
+  let snapshot: TaskPanelSnapshot = { conversation: null, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], navByTask: {},
     recovery: { status: 'idle' }, records: [], navigationError: null };
   const listeners = new Set<() => void>();
   const update = (patch: Partial<TaskPanelSnapshot>) => { snapshot = { ...snapshot, ...patch }; listeners.forEach(fn => fn()); };
   const client = createTaskClient(host);
   let epoch = 0; let focus = 0; let viewerId: string | null = null;
+  let associationAbort = new AbortController();
   let recoveryAbort = new AbortController(); let navigationAbort = new AbortController();
   let cursor: string | null = null; let pagesRead = 0; let historyDone = false;
   let scanning = false; let disposed = false; let recoveryStarted = false;
@@ -29,27 +30,33 @@ export function createTaskPanelController(host: TaskPanelHost) {
   const openTask = (tab: TaskPanelDeclaration, source: OpenSource, present = true) => {
     if (disposed || !tab.params.taskId.trim()) return;
     const id = tab.params.taskId;
+    const alreadyOpen = tabs.has(id);
     if (source === 'explicit' && snapshot.activeTaskId !== id) {
       navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
     }
-    if (source !== 'explicit' && snapshot.activeTaskId) return;
-    focus++; recoveryAbort.abort();
+    if (alreadyOpen && source !== 'explicit') {
+      if (present && source === 'recovery') host.present(tab, source);
+      return;
+    }
+    const keepFocus = source === 'recovery' && snapshot.activeTaskId !== null;
+    if (!keepFocus) { focus++; recoveryAbort.abort(); }
     if (!origins.has(id)) origins.set(id, origins.get(snapshot.activeTaskId ?? '') ?? { handle: host.captureOrigin(), sessionId: snapshot.conversation?.sessionId ?? host.getConversation()?.sessionId ?? null });
     tabs.set(id, tab);
-    update({ activeTaskId: id, recovery: { status: 'opened' },
+    update({ activeTaskId: keepFocus ? snapshot.activeTaskId : id, recovery: { status: 'opened' },
       associatedTaskIds: [...new Set([...snapshot.associatedTaskIds, id])],
+      orderedTaskIds: [...new Set([...snapshot.orderedTaskIds, id])],
       navByTask: { ...snapshot.navByTask, [id]: snapshot.navByTask[id] ?? emptyNav() } });
     if (present) host.present({ ...tab, params: { ...tab.params, userId: host.getViewer()?.userId } }, source);
   };
-  const loadRecords = async (generation: number) => {
+  const loadRecords = async (generation: number, signal = recoveryAbort.signal) => {
     const owner = snapshot.conversation?.sessionId.match(/:user:([^:]+)$/)?.[1] || viewerId;
     if (!owner) return [];
     try {
-      const records = await client.list(owner, recoveryAbort.signal);
-      if (!disposed && generation === epoch && !recoveryAbort.signal.aborted) update({ records });
+      const records = await client.list(owner, signal);
+      if (!disposed && generation === epoch && !signal.aborted) update({ records });
       return records;
     } catch (error) {
-      if (recoveryAbort.signal.aborted) return [];
+      if (signal.aborted) return [];
       throw error;
     }
   };
@@ -62,9 +69,15 @@ export function createTaskPanelController(host: TaskPanelHost) {
         const page = await host.history.readPage(conversation, cursor, signal);
         if (!valid(generation, revision) || signal.aborted) return;
         pagesRead++;
-        const found = [...page.messages].sort((a, b) => b.timestamp - a.timestamp)
-          .flatMap(message => [...parseTaskPanelDeclarations(message.content)].reverse())[0];
-        if (found) { openTask(found, 'recovery'); return; }
+        const found = [...page.messages]
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .flatMap(message => parseTaskPanelDeclarations(message.content));
+        if (found.length) {
+          update({ orderedTaskIds: [...new Set(found.map(tab => tab.params.taskId))],
+            activeTaskId: snapshot.activeTaskId ?? found[found.length - 1].params.taskId });
+          found.forEach((tab) => openTask(tab, 'recovery'));
+          return;
+        }
         if (page.nextCursor === null) { historyDone = true; break; }
         if (page.nextCursor === cursor || cursors.has(page.nextCursor)) throw new Error('历史分页游标未推进，请重试。');
         cursors.add(page.nextCursor); cursor = page.nextCursor;
@@ -92,12 +105,14 @@ export function createTaskPanelController(host: TaskPanelHost) {
     }
     if (!sameConversation) {
       navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
-      epoch++; recoveryAbort.abort(); recoveryAbort = new AbortController();
+      epoch++; associationAbort.abort(); associationAbort = new AbortController();
+      recoveryAbort.abort(); recoveryAbort = new AbortController();
       cursor = null; pagesRead = 0; historyDone = false; scanning = false; cursors.clear(); recoveryStarted = false; recoveryPhase = 'association';
       const nextViewer = host.getViewer()?.userId ?? null;
-      if (viewerId !== nextViewer) { origins.clear(); tabs.clear(); update({ navByTask: {} }); }
+      tabs.clear();
+      if (viewerId !== nextViewer) { origins.clear(); update({ navByTask: {} }); }
       viewerId = nextViewer;
-      update({ conversation, activeTaskId: null, associatedTaskIds: [], records: [], recovery: { status: 'idle' } });
+      update({ conversation, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
     }
     if (!viewerId) return;
     // Scoped SDK presentation is adopted before any lookup, without opening a duplicate tab.
@@ -110,16 +125,30 @@ export function createTaskPanelController(host: TaskPanelHost) {
     if (!snapshot.activeTaskId) update({ recovery: { status: 'searching' } });
     const generation = epoch; const revision = focus;
     try {
-      const ids = await client.bySession(conversation.sessionId, recoveryAbort.signal);
-      if (!valid(generation, revision)) return;
-      update({ associatedTaskIds: [...new Set([...ids, ...(snapshot.activeTaskId ? [snapshot.activeTaskId] : [])])] });
+      // Association discovery belongs to the conversation, not the current tab's focus.
+      const signal = associationAbort.signal;
+      const isCurrent = () => !disposed && generation === epoch && !signal.aborted && host.getViewer()?.userId === viewerId;
+      const ids = await client.bySession(conversation.sessionId, signal);
+      if (!isCurrent()) return;
+      update({ associatedTaskIds: [...new Set([...ids, ...snapshot.associatedTaskIds])] });
       if (ids.length) {
         let records: TaskListRecord[] = [];
-        try { records = await loadRecords(generation); } catch { /* task id is already authoritative; metadata is supplemental */ }
-        if (!valid(generation, revision)) return;
-        if (snapshot.activeTaskId) return;
-        const record = records.find(r => r.task_id === ids[0]);
-        openTask(declaration(ids[0], record ? recordTitle(record) : '任务'), 'recovery'); return;
+        try { records = await loadRecords(generation, signal); } catch { /* task id is already authoritative; metadata is supplemental */ }
+        if (!isCurrent()) return;
+        const created = new Map(records.map(record => [record.task_id, Date.parse((record.gmt_create ?? '').replace(' ', 'T'))]));
+        // by_session is newest-first by association update, not task creation.
+        // Creation time wins; absent metadata retains the reverse index order.
+        const ordered = [...new Set(ids)].reverse().sort((a, b) => {
+          const left = created.get(a); const right = created.get(b);
+          return Number.isFinite(left) && Number.isFinite(right) ? left! - right! : 0;
+        });
+        update({ orderedTaskIds: [...ordered, ...snapshot.orderedTaskIds.filter(id => !ordered.includes(id))],
+          activeTaskId: snapshot.activeTaskId ?? ordered[ordered.length - 1] });
+        for (const id of ordered) {
+          const record = records.find(r => r.task_id === id);
+          openTask(declaration(id, record ? recordTitle(record) : '任务'), 'recovery');
+        }
+        return;
       }
     } catch (error) {
       const status = (error as { status?: number })?.status;
@@ -163,10 +192,19 @@ export function createTaskPanelController(host: TaskPanelHost) {
     adoptPresentedTask(tab: TaskPanelDeclaration) {
       if (snapshot.activeTaskId !== tab.params.taskId) openTask(tab, 'explicit', false);
     },
-    closeTask() {
+    closeTask(taskId?: string) {
       if (disposed) return;
+      const id = taskId ?? snapshot.activeTaskId;
+      if (id) {
+        tabs.delete(id);
+        origins.delete(id);
+      }
+      if (id && snapshot.activeTaskId !== id) return;
       focus++; recoveryAbort.abort(); navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
-      update({ activeTaskId: null, recovery: { status: 'idle' } });
+      const associatedTaskIds = snapshot.associatedTaskIds.filter((value) => value !== id);
+      const navByTask = { ...snapshot.navByTask };
+      if (id) delete navByTask[id];
+      update({ activeTaskId: null, associatedTaskIds, orderedTaskIds: snapshot.orderedTaskIds.filter(value => value !== id), navByTask, recovery: { status: 'idle' } });
     },
     continueRecovery: async () => {
       if (disposed) return;
@@ -178,8 +216,10 @@ export function createTaskPanelController(host: TaskPanelHost) {
       await scan();
     },
     ingestMessages(messages: readonly HistoryMessage[]) {
-      const tab = [...messages].sort((a,b) => b.timestamp-a.timestamp).flatMap(m => [...parseTaskPanelDeclarations(m.content)].reverse())[0];
-      if (tab) openTask(tab, 'message');
+      const tabsInMessages = [...messages]
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .flatMap((message) => parseTaskPanelDeclarations(message.content));
+      tabsInMessages.forEach((tab) => openTask(tab, 'message'));
     },
     nav(taskId: string) {
       const record = snapshot.navByTask[taskId] ?? emptyNav();
@@ -193,8 +233,8 @@ export function createTaskPanelController(host: TaskPanelHost) {
     },
     leaveConversation() {
       if (disposed) return;
-      recoveryStarted = false; epoch++; focus++; recoveryAbort.abort(); navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
-      update({ conversation: null, activeTaskId: null, associatedTaskIds: [], records: [], recovery: { status: 'idle' } });
+      recoveryStarted = false; epoch++; focus++; associationAbort.abort(); recoveryAbort.abort(); navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
+      update({ conversation: null, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
     },
     dispose() { if (disposed) return; controller.leaveConversation(); disposed = true; listeners.clear(); tabs.clear(); origins.clear(); },
   };

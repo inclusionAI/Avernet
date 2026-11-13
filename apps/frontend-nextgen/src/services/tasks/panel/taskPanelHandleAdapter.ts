@@ -23,8 +23,23 @@ function shouldKeepTaskPanelActiveTask(tab: PanelTab): boolean {
   return true;
 }
 
+const restoringTabs = new Set<string>();
+
+/** The SDK appends new tabs and has no reorder operation. Rebuild task tabs only,
+ * in one synchronous batch, without treating ordering as a user close. */
+export function restoreOrderedTaskPanelTabs(handle: PanelHandle, tabs: readonly PanelTab[], activeId: string | null, reorderExisting: boolean): void {
+  if (reorderExisting && tabs.length > 1) {
+    tabs.forEach(tab => restoringTabs.add(tab.id));
+    try { tabs.forEach(tab => handle.closeTab(tab.id)); }
+    finally { tabs.forEach(tab => restoringTabs.delete(tab.id)); }
+  }
+  tabs.forEach(tab => handle.openTab(tab));
+  if (activeId) handle.focusTab(activeId);
+}
+
 /** SDK's internal tab-X and imperative ref.closeTab share this acknowledgement. */
 export function onTaskPanelTabClosed(id: string): void {
+  if (restoringTabs.has(id)) return;
   const controller = peekTaskPanelController();
   const active = controller?.getSnapshot().activeTaskId;
   const store = useTaskConversationNavigationStore.getState();

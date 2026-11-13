@@ -117,7 +117,7 @@ const taskRecord = (
 
 const makePanelRef = () => {
   const openTab = jest.fn();
-  const handle = { openTab, closePanel: jest.fn() } as unknown as PanelHandle;
+  const handle = { openTab, focusTab: jest.fn(), closePanel: jest.fn() } as unknown as PanelHandle;
   return { openTab, ref: { current: handle } as React.RefObject<PanelHandle | null> };
 };
 
@@ -198,7 +198,7 @@ describe('buildRelayTaskPanelTab', () => {
 });
 
 describe('useSessionTaskPanelBootstrap', () => {
-  it('by_session 返回多个 task 时默认打开最新 ref，并记录全部关联 task', async () => {
+  it('by_session 恢复全部 task tab，焦点保留在最新 ref', async () => {
     const { ref, openTab } = makePanelRef();
     mockGetTaskBySession.mockResolvedValue({
       ok: true,
@@ -213,14 +213,16 @@ describe('useSessionTaskPanelBootstrap', () => {
       useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
     );
 
-    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(2));
     expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
     expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
     expect(openTab.mock.calls[0][0]).toMatchObject({
-      id: 'task-task-new',
-      title: 'task-new',
+      id: 'task-task-old',
+      title: 'task-old',
       type: 'taskPanel.TaskLoopView',
     });
+    expect(openTab.mock.calls[1][0]).toMatchObject({ id: 'task-task-new' });
+    expect(ref.current?.focusTab).toHaveBeenLastCalledWith('task-task-new');
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-new');
     expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
     expect(useTaskSessionAssociationStore.getState().activeSessionTaskIds).toEqual([
@@ -352,8 +354,9 @@ describe('useSessionTaskPanelBootstrap', () => {
       useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
     );
 
-    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(3));
     expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-old' });
+    expect(ref.current?.focusTab).toHaveBeenLastCalledWith('task-task-old');
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-old');
     expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
@@ -381,8 +384,9 @@ describe('useSessionTaskPanelBootstrap', () => {
       resolveSessionTask({ ok: true, data: [sessionRef('task-relay')] });
     });
 
-    expect(openTab).not.toHaveBeenCalled();
-    expect(mockListMyTasks).not.toHaveBeenCalled();
+    expect(openTab).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-task-relay' }));
+    expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+    expect(ref.current?.focusTab).toHaveBeenLastCalledWith('task-task-aixui');
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-aixui');
   });
 
@@ -561,7 +565,24 @@ it('等待 PanelHandle 时旧恢复不得覆盖已展示的新任务', async () 
     act(() => mockController.adoptPresentedTask({ id: 'task-task-chosen', type: 'taskPanel.TaskLoopView', title: '任务', closable: true, params: { taskId: 'task-chosen' } }));
     deferred.current = panel.ref.current;
     await act(async () => jest.advanceTimersByTimeAsync(200));
-    expect(panel.openTab).not.toHaveBeenCalled();
+    expect(panel.openTab).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-task-recovery' }));
+    expect(panel.ref.current?.focusTab).toHaveBeenLastCalledWith('task-task-chosen');
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-chosen');
   } finally { jest.useRealTimers(); }
+});
+
+
+it('容器延迟就绪时保留全部待恢复 tab，而不是只保留最后一个', async () => {
+  const panel = makePanelRef();
+  const handle = panel.ref.current;
+  (panel.ref as { current: PanelHandle | null }).current = null;
+  mockGetTaskBySession.mockResolvedValue({ ok: true, data: [sessionRef('task-new'), sessionRef('task-old')] });
+  mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
+  renderHook(() => useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: panel.ref }));
+  await waitFor(() => expect(mockController?.getSnapshot().associatedTaskIds).toEqual(['task-new', 'task-old']));
+  expect(panel.openTab).not.toHaveBeenCalled();
+  await act(async () => { (panel.ref as { current: PanelHandle | null }).current = handle; });
+  await waitFor(() => expect(panel.openTab).toHaveBeenCalledTimes(2));
+  expect(panel.openTab.mock.calls.map((args: unknown[]) => (args[0] as { id: string }).id)).toEqual(['task-task-old', 'task-task-new']);
+  expect(handle?.focusTab).toHaveBeenLastCalledWith('task-task-new');
 });
