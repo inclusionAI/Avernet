@@ -14,3 +14,5 @@ mod session_files_member_gate_contract;
 mod session_list_contract;
 #[path = "cases/session_members_contract.rs"]
 mod session_members_contract;
+#[path = "cases/session_handler_edges.rs"]
+mod session_handler_edges;

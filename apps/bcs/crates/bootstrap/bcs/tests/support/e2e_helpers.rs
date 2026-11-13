@@ -92,11 +92,28 @@ impl ProcessManager {
         extra_config: Option<serde_json::Value>,
     ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
 
-        // Build BCS binary path
-        let bcs_bin = std::env::current_exe()?
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("bcs"))
+        // Resolve the server binary robustly, in order:
+        // 1. `BCS_E2E_SERVER_BIN` (explicit, exported by the CI coverage script
+        //    so the lookup does not depend on compile-time env nor layout),
+        // 2. cargo's compile-time `CARGO_BIN_EXE_<name>` for integration tests,
+        // 3. historical current_exe-relative `debug/deps`-based arithmetic.
+        // The relative form alone breaks when nextest `--binaries-metadata`
+        // executes the test binary as `debug/build/<pkg>-<hash>/<test>` instead
+        // of `debug/deps/<test>` (observed failing in runs 43345664811,
+        // 43351522373, 43369707101: the server was resolved to a nonexistent
+        // `debug/build/bcs-<hash>/bcs`).
+        let parent_bin = std::env::current_exe().ok().and_then(|exe| {
+            exe.parent()
+                .and_then(|deps| deps.parent())
+                .map(|dir| dir.join("bcs"))
+        });
+        let bcs_bin = std::env::var("BCS_E2E_SERVER_BIN")
+            .ok()
+            .or_else(|| std::env::var("CARGO_BIN_EXE_bcs").ok())
+            .map(PathBuf::from)
+            .or_else(|| option_env!("CARGO_BIN_EXE_bcs").map(PathBuf::from))
+            .filter(|path| path.is_file())
+            .or(parent_bin)
             .ok_or("Could not find bcs binary")?;
 
         // Create configs directory with bcs-config.json
@@ -543,17 +560,31 @@ pub async fn get_bots(bcs_url: &str, token: &str) -> Result<serde_json::Value, B
 // bcs-cli Helpers
 // ============================================================================
 
+/// Resolve the bcs-cli binary robustly: explicit CI env (`BCS_E2E_CLI_BIN`)
+/// first (the CI coverage runner may execute test binaries outside
+/// `debug/deps`, which breaks the historical relative resolution), keeping the
+/// relative form only as a fallback.
+fn resolve_cli_bin() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(path) = std::env::var("BCS_E2E_CLI_BIN") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    std::env::current_exe()?
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("bcs-cli"))
+        .ok_or_else(|| "Could not find bcs-cli binary".into())
+}
+
 /// Run bcs-cli without any token (for health check only)
 /// Used in non-E2E tests where no BCN plugin is running.
 pub fn run_bcs_cli_no_token(
     bcs_url: &str,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -583,11 +614,7 @@ pub fn run_bcs_cli_with_token(
     token: &str,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -619,11 +646,7 @@ pub fn run_bcs_cli_with_env_token(
     bot_data_dir: &PathBuf,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -656,11 +679,7 @@ pub fn run_bcs_cli_with_session_file(
     bot_data_dir: &PathBuf,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
