@@ -1,0 +1,2384 @@
+.dockerignore
+  h_059e888e5e4e82 71-73
+.github/workflows/backend-unit-tests.yml
+  h_059e888e5e4e82 1-96
+.github/workflows/frontend-nextgen.yml
+  h_059e888e5e4e82 52-54,57-68
+.github/workflows/publish-task-panel.yml
+  h_059e888e5e4e82 1-59
+.github/workflows/search-core.yml
+  h_059e888e5e4e82 17-25,33-34,36-37
+.github/workflows/singlebox-coverage.yml
+  h_059e888e5e4e82 35-40,51-53,108,115-118,178,180-189,262,266-271,322
+.github/workflows/unit-tests.yml
+  h_059e888e5e4e82 234
+CLAUDE.md
+  h_059e888e5e4e82 22-23
+CONTEXT-MAP.md
+  h_059e888e5e4e82 27-30,35-38
+README.md
+  h_059e888e5e4e82 233
+README.zh-CN.md
+  h_059e888e5e4e82 232
+apps/baas/src/secbaas/community/api/device_manage/_device.py
+  h_059e888e5e4e82 29-36
+apps/baas/src/secbaas/community/core/service/paas/_local_paas_service.py
+  h_059e888e5e4e82 2378
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/README.md
+  h_059e888e5e4e82 54-66
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_config.py
+  h_059e888e5e4e82 66,135,141-150
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_sandbox_plugin.py
+  h_059e888e5e4e82 323-329,342-345,348,517-519
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_apparmor_policy.py
+  h_059e888e5e4e82 1-58
+apps/backend/README.md
+  h_059e888e5e4e82 156-166
+apps/backend/docs/diagnostics/README.md
+  h_059e888e5e4e82 13
+apps/backend/docs/diagnostics/httpx-send-hook-wrapper.md
+  h_059e888e5e4e82 1-64
+apps/backend/docs/openapi-v1/README.md
+  h_059e888e5e4e82 1831,1834-1844
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  h_059e888e5e4e82 1062,1064-1074
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  h_059e888e5e4e82 1486,1505
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  h_059e888e5e4e82 41,377
+apps/backend/specs/2026-11-06-task-search-viewer/plan.md
+  h_059e888e5e4e82 54-60,63-66,68-70
+apps/backend/specs/2026-11-11-bot-config-task-nav-kind/plan.md
+  h_059e888e5e4e82 1-79
+apps/backend/specs/2026-11-11-bot-config-task-nav-kind/spec.md
+  h_059e888e5e4e82 1-162
+apps/backend/specs/2026-11-11-bot-config-task-nav-kind/tasks.md
+  h_059e888e5e4e82 1-63
+apps/backend/specs/2026-11-12-teclaw-refresh-session-check/spec.md
+  h_059e888e5e4e82 1-26
+apps/backend/specs/teclaw-caller-refresh/001-spec-output.md
+  h_059e888e5e4e82 1-122
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/router.py
+  h_059e888e5e4e82 97-111,252-261,277,280,288,293-296,310,315,512-532,542,560-562
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/schemas.py
+  h_059e888e5e4e82 142-151
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/router.py
+  h_059e888e5e4e82 5-6
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/schemas.py
+  h_059e888e5e4e82 21-25
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  h_059e888e5e4e82 19,46,1305-1306,1525-1526,2633-2642,2757-2758
+apps/backend/src/agentclaw/community/adapters/http/desktop/router.py
+  h_059e888e5e4e82 8,14,133-134,234-235
+apps/backend/src/agentclaw/community/adapters/http/error_logging.py
+  h_059e888e5e4e82 74
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  h_059e888e5e4e82 196-205,210-220,223
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas.py
+  h_059e888e5e4e82 23-26
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_inventory.py
+  h_059e888e5e4e82 1-3,7-11,22-171
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/desktop_metadata.py
+  h_059e888e5e4e82 41-44
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_payloads.py
+  h_059e888e5e4e82 24-25,33-79,92-94,100-104
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/render_screens/gating.py
+  h_059e888e5e4e82 36-37,43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/render_screens/router.py
+  h_059e888e5e4e82 84-86,92-98
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  h_059e888e5e4e82 58,551
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/converter.py
+  h_059e888e5e4e82 41,59-60,78
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/schemas.py
+  h_059e888e5e4e82 107,160-163
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  h_059e888e5e4e82 44-51,95-102,128,145-158,160
+apps/backend/src/agentclaw/community/adapters/http/task/manifest_routes.py
+  h_059e888e5e4e82 1-73
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  h_059e888e5e4e82 85-87
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  h_059e888e5e4e82 40,102
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_search.py
+  h_059e888e5e4e82 32-44
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py
+  h_059e888e5e4e82 348-356,364
+apps/backend/src/agentclaw/community/api/README.md
+  h_059e888e5e4e82 327
+apps/backend/src/agentclaw/community/api/bot_friend_auth_service.py
+  h_059e888e5e4e82 21-23
+apps/backend/src/agentclaw/community/api/task/task_manifest_service.py
+  h_059e888e5e4e82 1-8
+apps/backend/src/agentclaw/community/configs/application-community.yaml
+  h_059e888e5e4e82 165-170
+apps/backend/src/agentclaw/community/configs/application-singlebox.yaml
+  h_059e888e5e4e82 209-214
+apps/backend/src/agentclaw/community/configs/application.yaml
+  h_059e888e5e4e82 166-172
+apps/backend/src/agentclaw/community/core/agentswarm/repository/run/impl.py
+  h_059e888e5e4e82 185-193,202-203
+apps/backend/src/agentclaw/community/core/agentswarm/service/impl.py
+  h_059e888e5e4e82 238-239,241
+apps/backend/src/agentclaw/community/core/agentswarm/service/protocols.py
+  h_059e888e5e4e82 401-402
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  h_059e888e5e4e82 147
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_config_task_nav_handler.py
+  h_059e888e5e4e82 1-117
+apps/backend/src/agentclaw/community/core/bot_config_manifest/schema/bot_config_kinds.py
+  h_059e888e5e4e82 70-139,147,154
+apps/backend/src/agentclaw/community/core/bot_inventory/README.md
+  h_059e888e5e4e82 64-71
+apps/backend/src/agentclaw/community/core/bot_inventory/services/bot_inventory_service.py
+  h_059e888e5e4e82 561-573
+apps/backend/src/agentclaw/community/core/bot_inventory/types.py
+  h_059e888e5e4e82 42
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  h_059e888e5e4e82 15-20,171-178
+apps/backend/src/agentclaw/community/core/bot_management/avatar.py
+  h_059e888e5e4e82 7-27
+apps/backend/src/agentclaw/community/core/bot_management/bcn_metadata.py
+  h_059e888e5e4e82 4,11-16,18-27,30-31,34
+apps/backend/src/agentclaw/community/core/bot_management/bot_workflow_permissions_clone_port.py
+  h_059e888e5e4e82 1-127
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  h_059e888e5e4e82 29,223-224
+apps/backend/src/agentclaw/community/core/bot_management/engines/default.py
+  h_059e888e5e4e82 95-98
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  h_059e888e5e4e82 221-224
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  h_059e888e5e4e82 22,1504-1506,3258-3259
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  h_059e888e5e4e82 63-74
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_auth_sync_service.py
+  h_059e888e5e4e82 9-22,76-86,92,98
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  h_059e888e5e4e82 24-28,38-75,96-97,104-107,114,329-331,891,947
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  h_059e888e5e4e82 37-40,54,57,60-91
+apps/backend/src/agentclaw/community/core/caller_identity/contracts.py
+  h_059e888e5e4e82 127
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  h_059e888e5e4e82 10,132-138,223-269
+apps/backend/src/agentclaw/community/core/caller_identity/service.py
+  h_059e888e5e4e82 581-585
+apps/backend/src/agentclaw/community/core/caller_identity/session_validator.py
+  h_059e888e5e4e82 7,61-85
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_bot_service.py
+  h_059e888e5e4e82 19,694-698,792-797
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_creation_lifecycle.py
+  h_059e888e5e4e82 14,141
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  h_059e888e5e4e82 84-94
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  h_059e888e5e4e82 73-84
+apps/backend/src/agentclaw/community/core/knowledge_management/README.md
+  h_059e888e5e4e82 102-111
+apps/backend/src/agentclaw/community/core/knowledge_management/ports.py
+  h_059e888e5e4e82 52-56
+apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py
+  h_059e888e5e4e82 305-306
+apps/backend/src/agentclaw/community/core/repository/README.md
+  h_059e888e5e4e82 82-104
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  h_059e888e5e4e82 501-508
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/metadata_locators.py
+  h_059e888e5e4e82 1-65
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/bot.py
+  h_059e888e5e4e82 294-308
+apps/backend/src/agentclaw/community/core/service_bot/services/service_bot_eval_service.py
+  h_059e888e5e4e82 125
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  h_059e888e5e4e82 706
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  h_059e888e5e4e82 291-294
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  h_059e888e5e4e82 69-71,73-74,83-86
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  h_059e888e5e4e82 891,893,899,901
+apps/backend/src/agentclaw/community/core/skill_center/skill_package.py
+  h_059e888e5e4e82 33-35,37,56-59,140,164,167-170,223,226-229,235,309,316-323,342
+apps/backend/src/agentclaw/community/core/task/README.md
+  h_059e888e5e4e82 22-27
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  h_059e888e5e4e82 29,35
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_queries.py
+  h_059e888e5e4e82 16-19
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  h_059e888e5e4e82 19,30-65,68-69,114,121-138,197-215,220,228-230,263-265,284-285
+apps/backend/src/agentclaw/community/core/task/task_clarification/bot_session_reader.py
+  h_059e888e5e4e82 1-46
+apps/backend/src/agentclaw/community/core/task/task_clarification/distillation.py
+  h_059e888e5e4e82 1-41
+apps/backend/src/agentclaw/community/core/task/task_clarification/extraction.py
+  h_059e888e5e4e82 1-36
+apps/backend/src/agentclaw/community/core/task/task_clarification/models.py
+  h_059e888e5e4e82 1-54
+apps/backend/src/agentclaw/community/core/task/task_clarification/service_protocol.py
+  h_059e888e5e4e82 1-44
+apps/backend/src/agentclaw/community/core/task/task_dispatch/search.py
+  h_059e888e5e4e82 43,57,76,99
+apps/backend/src/agentclaw/community/core/task/task_harness/centralized_recovery.py
+  h_059e888e5e4e82 5
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  h_059e888e5e4e82 4,55,81,106,194-227,318,320-321,505-509,944-950
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  h_059e888e5e4e82 178-180,183,185-191,194,209,221,376
+apps/backend/src/agentclaw/community/core/task/task_harness/timeout_policy.py
+  h_059e888e5e4e82 1-29
+apps/backend/src/agentclaw/community/core/task/task_panel/README.md
+  h_059e888e5e4e82 1-40
+apps/backend/src/agentclaw/community/core/task/task_panel/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest.py
+  h_059e888e5e4e82 1-43
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  h_059e888e5e4e82 1-82
+apps/backend/src/agentclaw/community/core/task/task_runner/client/bcs_http_adapter.py
+  h_059e888e5e4e82 26-30,101-103,136-138,171-178
+apps/backend/src/agentclaw/community/core/task/task_runner/client/candidate_search.py
+  h_059e888e5e4e82 119,141
+apps/backend/src/agentclaw/community/core/task/task_runner/client/catalog_keyword_discover.py
+  h_059e888e5e4e82 67,71,96-97,147
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  h_059e888e5e4e82 14,18-25,33,43-56,103,116,126-128,160,171,173,180-196,215-216,253
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  h_059e888e5e4e82 113
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  h_059e888e5e4e82 44,49-53,62
+apps/backend/src/agentclaw/community/di/clawweb_config.py
+  h_059e888e5e4e82 1-33
+apps/backend/src/agentclaw/community/di/config.py
+  h_059e888e5e4e82 28
+apps/backend/src/agentclaw/community/di/container.py
+  h_059e888e5e4e82 137-139,207-211
+apps/backend/src/agentclaw/community/di/modules/apply_engine_module.py
+  h_059e888e5e4e82 47,92-98,102-105,551-564,570,574-580,583
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  h_059e888e5e4e82 143-145
+apps/backend/src/agentclaw/community/di/modules/clawweb_config_module.py
+  h_059e888e5e4e82 1-51
+apps/backend/src/agentclaw/community/di/modules/config_module.py
+  h_059e888e5e4e82 30,84
+apps/backend/src/agentclaw/community/di/modules/http_client_module.py
+  h_059e888e5e4e82 25,128-142
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/http_client.py
+  h_059e888e5e4e82 10,44-48
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 30-31,829-834
+apps/backend/src/agentclaw/community/plugin_api/http_client.py
+  h_059e888e5e4e82 173,178-183
+apps/backend/tests/community/acceptance/bot_collaborator/test_explicit_standing_live.py
+  h_059e888e5e4e82 188-230,315-377
+apps/backend/tests/community/adapters/http/agentswarm/test_authorization_surface.py
+  h_059e888e5e4e82 73-74
+apps/backend/tests/community/adapters/http/agentswarm/test_goal_excerpt.py
+  h_059e888e5e4e82 1-39
+apps/backend/tests/community/adapters/http/agentswarm/test_http_adapter.py
+  h_059e888e5e4e82 48-54,123-124,126-127,358-393,450-451,499-501
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  h_059e888e5e4e82 248-253
+apps/backend/tests/community/adapters/http/openapi_v1/render_screens/test_render_screens_handlers.py
+  h_059e888e5e4e82 66,92,94,102,117,119,207,209
+apps/backend/tests/community/adapters/http/openapi_v1/routines/test_routines_handlers.py
+  h_059e888e5e4e82 113-117,120
+apps/backend/tests/community/adapters/http/openapi_v1/test_desktop_metadata.py
+  h_059e888e5e4e82 89-104
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  h_059e888e5e4e82 9,17-21,37-49,57-60,69,94-97,126-136,149-150
+apps/backend/tests/community/adapters/http/openapi_v1/test_skills_endpoints.py
+  h_059e888e5e4e82 43-45,61-62,1176-1224
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  h_059e888e5e4e82 193-196
+apps/backend/tests/community/adapters/http/task/test_router.py
+  h_059e888e5e4e82 896
+apps/backend/tests/community/adapters/http/task/test_schemas.py
+  h_059e888e5e4e82 772-811
+apps/backend/tests/community/adapters/http/test_desktop_avatar_error.py
+  h_059e888e5e4e82 1-27
+apps/backend/tests/community/api/bot_management/test_update_bot_invalid_body.py
+  h_059e888e5e4e82 1-77
+apps/backend/tests/community/api/expert_chat/test_router.py
+  h_059e888e5e4e82 774-821
+apps/backend/tests/community/config/golden/community.json
+  h_059e888e5e4e82 107-109
+apps/backend/tests/community/config/golden/singlebox.json
+  h_059e888e5e4e82 119-121
+apps/backend/tests/community/contracts/gateway/test_service_backed_api_contracts.py
+  h_059e888e5e4e82 1277-1323
+apps/backend/tests/community/contracts/test_bot_workflow_permissions_clone_port.py
+  h_059e888e5e4e82 1-197
+apps/backend/tests/community/core/agentswarm/repository/test_storage.py
+  h_059e888e5e4e82 109,113,392-412
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  h_059e888e5e4e82 205-207,222-225,243-248,252-253,272,565,589-607
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_config_kind_registry.py
+  h_059e888e5e4e82 62,64,70
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_config_task_nav_handler.py
+  h_059e888e5e4e82 1-131
+apps/backend/tests/community/core/bot_config_manifest/test_manifest_entry_schema.py
+  h_059e888e5e4e82 1014,1017,1050-1148
+apps/backend/tests/community/core/bot_inventory/services/test_bot_inventory_service.py
+  h_059e888e5e4e82 606,821,834-838,842-870
+apps/backend/tests/community/core/bot_management/services/test_bot_service_bcn_sync.py
+  h_059e888e5e4e82 389-403
+apps/backend/tests/community/core/bot_management/test_bcn_metadata.py
+  h_059e888e5e4e82 14,20,22,24-25,30,37-40,48-51,59,62-79
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_059e888e5e4e82 95-102,1268-1270,1294-1296,1311-1315,1317-1330,1332-1347,1372,1382-1384,1398-1400,1414-1416,1435-1437,1459,1466,1479,1483,1499,1513,1529-1558,2149-2154,2159,2171-2174,2196,2222,2226,2242,2255,2258,2261-2283
+apps/backend/tests/community/core/bot_public/test_friend_auth_sync_service.py
+  h_059e888e5e4e82 18,20,32-35,47,50,96-121,123,125,145,147
+apps/backend/tests/community/core/caller_identity/test_service.py
+  h_059e888e5e4e82 1424-1441
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  h_059e888e5e4e82 1-357
+apps/backend/tests/community/core/desktop_bot/services/test_desktop_bot_service.py
+  h_059e888e5e4e82 245-267
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  h_059e888e5e4e82 2534-2622
+apps/backend/tests/community/core/service_bot/services/test_service_bot_eval_service.py
+  h_059e888e5e4e82 103
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  h_059e888e5e4e82 813
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  h_059e888e5e4e82 2669-2705
+apps/backend/tests/community/core/skill_center/test_skill_package_validator.py
+  h_059e888e5e4e82 570-604
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  h_059e888e5e4e82 10,31-38,57,79-120
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  h_059e888e5e4e82 421,427,435,440,455
+apps/backend/tests/community/core/task/task_harness/test_relay_stale_early_exit.py
+  h_059e888e5e4e82 1-198
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  h_059e888e5e4e82 95,104,107,109-111,114-121,311-324
+apps/backend/tests/community/core/task/task_panel/test_http.py
+  h_059e888e5e4e82 1-141
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  h_059e888e5e4e82 1-56
+apps/backend/tests/community/core/task/task_panel/test_storage.py
+  h_059e888e5e4e82 1-77
+apps/backend/tests/community/core/task/task_runner/integration/test_bcs_http_adapter.py
+  h_059e888e5e4e82 9,204,206,224-235
+apps/backend/tests/community/core/task/task_runner/integration/test_semantic_keyword_bot_discover.py
+  h_059e888e5e4e82 14,134,159,173,268-328
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  h_059e888e5e4e82 34,44,137-141,144,146,151-154,159,237-273
+apps/backend/tests/community/core/task/task_trajectory/test_trajectory_gates_reset.py
+  h_059e888e5e4e82 73-74
+apps/backend/tests/community/core/token_exchange/test_pipeline.py
+  h_059e888e5e4e82 178-212
+apps/backend/tests/community/di/test_apply_engine_module_wiring.py
+  h_059e888e5e4e82 241,244-247,254-256,261-264
+apps/backend/tests/community/endpoints/test_openapi_bot_metadata.py
+  h_059e888e5e4e82 114-155
+apps/backend/tests/community/endpoints/test_openapi_routines.py
+  h_059e888e5e4e82 95,212,343
+apps/backend/tests/community/endpoints/test_task_panel_manifest.py
+  h_059e888e5e4e82 1-48
+apps/backend/tests/community/http/test_copy_route.py
+  h_059e888e5e4e82 79-80,220-221,227-231,238-249,251-256
+apps/backend/tests/community/knowledge_management/test_activity_bot_name.py
+  h_059e888e5e4e82 1-64
+apps/backend/tests/community/knowledge_management/test_legacy_personal_bots.py
+  h_059e888e5e4e82 78
+apps/backend/tests/community/knowledge_management/test_service.py
+  h_059e888e5e4e82 245
+apps/backend/tests/community/repository/bot/test_metadata_locators.py
+  h_059e888e5e4e82 1-191
+apps/backend/tests/community/repository/task/test_intake_atomic_creation.py
+  h_059e888e5e4e82 33-35,134-180
+apps/bcs/Cargo.lock
+  h_059e888e5e4e82 714,2241
+apps/bcs/api-contracts/v1/domain-models.yaml
+  h_059e888e5e4e82 332-339
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  h_059e888e5e4e82 5-14,121-125
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  h_059e888e5e4e82 1-232
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/mod.rs
+  h_059e888e5e4e82 1-30
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  h_059e888e5e4e82 1-186
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  h_059e888e5e4e82 31,86,119-123
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs
+  h_059e888e5e4e82 1,54
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  h_059e888e5e4e82 1-461
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/fixtures.rs
+  h_059e888e5e4e82 227,247
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/read.rs
+  h_059e888e5e4e82 70-74
+apps/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs
+  h_059e888e5e4e82 114-125
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  h_059e888e5e4e82 142-148
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  h_059e888e5e4e82 268-271
+apps/bcs/crates/adapters/http/bcs-http/src/routes/group_context.rs
+  h_059e888e5e4e82 9,47-48,116,131-212,376-392,489-507
+apps/bcs/crates/adapters/http/bcs-http/src/routes/group_messages.rs
+  h_059e888e5e4e82 56-59
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers.rs
+  h_059e888e5e4e82 729
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/registration.rs
+  h_059e888e5e4e82 16,203
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  h_059e888e5e4e82 13,35,212-227,235,269-283,336-346
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  h_059e888e5e4e82 638
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/provider_slug_contract.rs
+  h_059e888e5e4e82 56-89
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_token_diagnostics.rs
+  h_059e888e5e4e82 1-39
+apps/bcs/crates/adapters/http/bcs-provider-http/src/client_policy_tests.rs
+  h_059e888e5e4e82 233
+apps/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs
+  h_059e888e5e4e82 157,167
+apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
+  h_059e888e5e4e82 74,86,97,131,236-238
+apps/bcs/crates/adapters/http/bcs-provider-http/src/transport.rs
+  h_059e888e5e4e82 32,46-53,282,485
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_token_diagnostics.rs
+  h_059e888e5e4e82 1-183
+apps/bcs/crates/adapters/ws/bcs-ws/tests/authority_delivery.rs
+  h_059e888e5e4e82 143-149
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  h_059e888e5e4e82 78-92
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  h_059e888e5e4e82 8
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  h_059e888e5e4e82 106
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  h_059e888e5e4e82 1-300
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_v1.rs
+  h_059e888e5e4e82 1-168
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  h_059e888e5e4e82 148,152-171,173-182
+apps/bcs/crates/application/v1/bcs-app-bot/src/lib.rs
+  h_059e888e5e4e82 524-536,541,547-551
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_cutover.rs
+  h_059e888e5e4e82 268-311
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_policy.rs
+  h_059e888e5e4e82 262-268,412-418
+apps/bcs/crates/application/v1/bcs-app-group-context/Cargo.toml
+  h_059e888e5e4e82 20
+apps/bcs/crates/application/v1/bcs-app-group-context/src/service.rs
+  h_059e888e5e4e82 1-2,45,66,113,135-163,166-182,191-199,201,409
+apps/bcs/crates/application/v1/bcs-app-group-context/tests/group_context_service.rs
+  h_059e888e5e4e82 51-54,102,126,155,189,238,311,421,438,466,622,689,715,746,824,891,926,964,1069,1135,1237,1340,1402,1525,1702
+apps/bcs/crates/application/v1/bcs-app-session/CONTEXT.md
+  h_059e888e5e4e82 38-40,84-85
+apps/bcs/crates/application/v1/bcs-app-session/src/group_context_access.rs
+  h_059e888e5e4e82 1,3-5,16,23,31,37,153-169,177-211
+apps/bcs/crates/application/v1/bcs-app-session/tests/conformance_delivery_admission.rs
+  h_059e888e5e4e82 113-119
+apps/bcs/crates/application/v1/bcs-app-session/tests/delivery_admission.rs
+  h_059e888e5e4e82 119-125
+apps/bcs/crates/application/v1/bcs-app-session/tests/group_context_access_guard.rs
+  h_059e888e5e4e82 24,34-57,128,151,385-449
+apps/bcs/crates/bootstrap/bcs/src/server.rs
+  h_059e888e5e4e82 322,828
+apps/bcs/crates/bootstrap/bcs/src/server/infrastructure_helpers.rs
+  h_059e888e5e4e82 71,93
+apps/bcs/crates/bootstrap/bcs/src/server/server_construct.rs
+  h_059e888e5e4e82 261,670
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  h_059e888e5e4e82 366,869
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  h_059e888e5e4e82 273-280,282
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  h_059e888e5e4e82 328,727
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  h_059e888e5e4e82 5
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  h_059e888e5e4e82 263-270
+apps/bcs/crates/bootstrap/bcs/tests/integration_friend_cutover.rs
+  h_059e888e5e4e82 56
+apps/bcs/crates/bootstrap/bcs/tests/integration_fuse_cards.rs
+  h_059e888e5e4e82 8,135,150-165
+apps/bcs/crates/bootstrap/bcs/tests/integration_group_context.rs
+  h_059e888e5e4e82 37,65-69,591-768
+apps/bcs/crates/contracts/bcs-domain/src/group_context.rs
+  h_059e888e5e4e82 131-132,171-189
+apps/bcs/crates/contracts/bcs-domain/src/lib.rs
+  h_059e888e5e4e82 30
+apps/bcs/crates/contracts/bcs-domain/src/provider_a2a.rs
+  h_059e888e5e4e82 1-61
+apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs
+  h_059e888e5e4e82 87-88,141-142,171-172
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  h_059e888e5e4e82 3-20,93-106
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  h_059e888e5e4e82 4
+apps/bcs/crates/service-api/bcs-service-api/src/application/provider.rs
+  h_059e888e5e4e82 52,78
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/a2a.rs
+  h_059e888e5e4e82 1-56
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/bot.rs
+  h_059e888e5e4e82 179-185
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/group_context.rs
+  h_059e888e5e4e82 53-54,200-215,236-237
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs
+  h_059e888e5e4e82 7
+apps/bcs/crates/service-api/bcs-service-api/src/core/bot_authority.rs
+  h_059e888e5e4e82 54-66
+apps/bcs/crates/service-api/bcs-service-api/src/core/group.rs
+  h_059e888e5e4e82 6,165-170
+apps/bcs/crates/service-api/bcs-service-api/src/core/provider.rs
+  h_059e888e5e4e82 108-118,130-141
+apps/bcs/crates/service-api/bcs-service-api/src/lib.rs
+  h_059e888e5e4e82 16
+apps/bcs/crates/service-api/bcs-service-api/src/port/bot_authority.rs
+  h_059e888e5e4e82 13,40-50
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/bot_authority.rs
+  h_059e888e5e4e82 49,60-81
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group.rs
+  h_059e888e5e4e82 64-71
+apps/bcs/crates/service-api/bcs-service-api/src/types/bot_authority.rs
+  h_059e888e5e4e82 464,468-469
+apps/bcs/crates/service-api/bcs-service-api/src/types/mod.rs
+  h_059e888e5e4e82 25-38
+apps/bcs/crates/service-api/bcs-service-api/tests/v1_authorization_resolver.rs
+  h_059e888e5e4e82 76-82
+apps/bcs/crates/service-api/bcs-service-api/tests/v1_group_context_application_contracts.rs
+  h_059e888e5e4e82 211,257,346,375,395,496-518
+apps/bcs/crates/services/bcs-bot-store/src/memory.rs
+  h_059e888e5e4e82 26-29
+apps/bcs/crates/services/bcs-bot-store/src/memory_authority.rs
+  h_059e888e5e4e82 350-357
+apps/bcs/crates/services/bcs-bot-store/src/memory_ownerships_batch.rs
+  h_059e888e5e4e82 1-183
+apps/bcs/crates/services/bcs-bot/src/application/caller_delivery_gate.rs
+  h_059e888e5e4e82 3-11
+apps/bcs/crates/services/bcs-bot/src/application/provider.rs
+  h_059e888e5e4e82 330,341,376,389
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/management.rs
+  h_059e888e5e4e82 76-86,130-132,291-302,379-382
+apps/bcs/crates/services/bcs-bot/tests/authority_provider.rs
+  h_059e888e5e4e82 157
+apps/bcs/crates/services/bcs-bot/tests/provider_a2a_patch.rs
+  h_059e888e5e4e82 1-215
+apps/bcs/crates/services/bcs-bot/tests/provider_initial_managers.rs
+  h_059e888e5e4e82 36
+apps/bcs/crates/services/bcs-bot/tests/provider_management.rs
+  h_059e888e5e4e82 170
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  h_059e888e5e4e82 163,563-579
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  h_059e888e5e4e82 86
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/friend_cutover_tests.rs
+  h_059e888e5e4e82 8
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  h_059e888e5e4e82 270-271,282,740-741
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  h_059e888e5e4e82 9,48,67,96,127
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/group_human_mention_notify_mode.rs
+  h_059e888e5e4e82 66
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  h_059e888e5e4e82 61-93,113-115
+apps/bcs/crates/services/bcs-edge-permission-store/src/authority/mod.rs
+  h_059e888e5e4e82 35,45-46
+apps/bcs/crates/services/bcs-edge-permission-store/src/authority/reads.rs
+  h_059e888e5e4e82 9-10,39,224-233,432,478-479,488,510,514,523,832,844
+apps/bcs/crates/services/bcs-edge-permission-store/src/authority/reads_ownerships.rs
+  h_059e888e5e4e82 1-188
+apps/bcs/crates/services/bcs-edge-permission-store/tests/authority_batch_cost.rs
+  h_059e888e5e4e82 73-131,175-194
+apps/bcs/crates/services/bcs-edge-permission-store/tests/authority_mysql.rs
+  h_059e888e5e4e82 538
+apps/bcs/crates/services/bcs-edge-permission-store/tests/authority_ownerships_mysql.rs
+  h_059e888e5e4e82 1-161
+apps/bcs/crates/services/bcs-edge-permission-store/tests/authority_reads.rs
+  h_059e888e5e4e82 20-26,29,171-227,260-356
+apps/bcs/crates/services/bcs-edge-permission/src/authority.rs
+  h_059e888e5e4e82 109-117,355-364,441-456,575-595
+apps/bcs/crates/services/bcs-eventing/src/subscription.rs
+  h_059e888e5e4e82 111-121
+apps/bcs/crates/services/bcs-fusion/CONTEXT.md
+  h_059e888e5e4e82 7-13
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  h_059e888e5e4e82 11-12,114,116-118,120-123,126-127,159-160,213,245-252,254-258,260,263-271
+apps/bcs/crates/services/bcs-group-context-store/src/memory.rs
+  h_059e888e5e4e82 1-3,19,32-77,193
+apps/bcs/crates/services/bcs-group-context-store/src/sql_presets.rs
+  h_059e888e5e4e82 1-157
+apps/bcs/crates/services/bcs-group-context-store/src/store.rs
+  h_059e888e5e4e82 1-5,39,58-69,155,228,284-295,310-311,328,387-388,431,627,793,833
+apps/bcs/crates/services/bcs-group-context-store/tests/common/mod.rs
+  h_059e888e5e4e82 11,45-48,57,83-84,125,157,217,249,419-459
+apps/bcs/crates/services/bcs-group-context-store/tests/conformance_group_context_repo.rs
+  h_059e888e5e4e82 19,181-212
+apps/bcs/crates/services/bcs-group-context-store/tests/conformance_group_context_repo_mysql.rs
+  h_059e888e5e4e82 3-5,52,55-57,61-87,115-126,172,212
+apps/bcs/crates/services/bcs-group-store/src/card_snapshot.rs
+  h_059e888e5e4e82 1-36
+apps/bcs/crates/services/bcs-group-store/src/card_template.rs
+  h_059e888e5e4e82 2,27,29-31,35,57-73,76,96,125,158-159,169,171-172,176,179
+apps/bcs/crates/services/bcs-group-store/src/lib.rs
+  h_059e888e5e4e82 46
+apps/bcs/crates/services/bcs-group-store/src/memory.rs
+  h_059e888e5e4e82 29,91-104,227,252,259-261
+apps/bcs/crates/services/bcs-group-store/src/memory_card_tests.rs
+  h_059e888e5e4e82 33-45
+apps/bcs/crates/services/bcs-group-store/src/store_eventful.rs
+  h_059e888e5e4e82 216
+apps/bcs/crates/services/bcs-group-store/src/store_repo.rs
+  h_059e888e5e4e82 13-16
+apps/bcs/crates/services/bcs-group-store/src/store_writes.rs
+  h_059e888e5e4e82 243,305
+apps/bcs/crates/services/bcs-group-store/tests/fixtures/manager-worker-card-template.json
+  h_059e888e5e4e82 3,33
+apps/bcs/crates/services/bcs-group-store/tests/fixtures/state-machine-card-template.json
+  h_059e888e5e4e82 3,33
+apps/bcs/crates/services/bcs-group-store/tests/group_card_snapshots.rs
+  h_059e888e5e4e82 1-88
+apps/bcs/crates/services/bcs-group-store/tests/group_card_templates.rs
+  h_059e888e5e4e82 31,46,127-140,142-144,222-227,230,250-251
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  h_059e888e5e4e82 7-13
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  h_059e888e5e4e82 106-109
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  h_059e888e5e4e82 564
+apps/bcs/crates/services/bcs-message-flow/src/queued_admission.rs
+  h_059e888e5e4e82 650,661,680-693
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_inline_policy_off_contract.rs
+  h_059e888e5e4e82 1-283
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_session_access.rs
+  h_059e888e5e4e82 81-87
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_via_controlled_bot.rs
+  h_059e888e5e4e82 282-288
+apps/bcs/crates/services/bcs-message-flow/tests/suite_caller_admission.rs
+  h_059e888e5e4e82 8-9
+apps/bcs/crates/services/bcs-session-store/src/mysql_operations/operations_1.rs
+  h_059e888e5e4e82 349-353,356-357
+apps/bcs/crates/services/bcs-session-store/tests/support/session_completion_recovery.rs
+  h_059e888e5e4e82 2,155-272
+apps/bcs/crates/test-support/bcs-test-support/src/bot_authority.rs
+  h_059e888e5e4e82 8-11,190-200,870-879
+apps/bcs/crates/test-support/bcs-test-support/src/bot_authority/failing.rs
+  h_059e888e5e4e82 1-82
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_authority_contract.rs
+  h_059e888e5e4e82 189-190,677
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_authority_contract_ownerships.rs
+  h_059e888e5e4e82 1-102
+apps/bcs/crates/test-support/bcs-test-support/src/contract/group_card.rs
+  h_059e888e5e4e82 1-51
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  h_059e888e5e4e82 8,31
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  h_059e888e5e4e82 40
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  h_059e888e5e4e82 60,62,66,69,186,188
+apps/bcs/crates/tools/bcs-cli/src/cli/group_context_commands.rs
+  h_059e888e5e4e82 192-194,196,207-208,216-221
+apps/bcs/crates/tools/bcs-cli/src/cli/resource_args.rs
+  h_059e888e5e4e82 19-26,29-30,41
+apps/bcs/crates/tools/bcs-cli/src/cli/tests/group_context.rs
+  h_059e888e5e4e82 34,490-513
+apps/bcs/docs/bcsfuse-catalog.md
+  h_059e888e5e4e82 52-58,66-89,182-184,186
+apps/bcs/docs/diagnostics/README.md
+  h_059e888e5e4e82 10
+apps/bcs/docs/diagnostics/preproduction-caller-token.md
+  h_059e888e5e4e82 1-33
+apps/bcs/docs/group-context-api.md
+  h_059e888e5e4e82 530-562
+apps/bcs/docs/provider-a2a-default-owner.md
+  h_059e888e5e4e82 1-64
+apps/bcs/migrations/README.md
+  h_059e888e5e4e82 762-772
+apps/bcs/migrations/mysql/046_group_context_preset.sql
+  h_059e888e5e4e82 1-13
+apps/bcs/migrations/sqlite/044_group_context_preset.sql
+  h_059e888e5e4e82 1-13
+apps/bcs/scripts/e2e-test/a2a_management_cases.py
+  h_059e888e5e4e82 61-63
+apps/bcs/scripts/e2e-test/a2a_provider_config_cases.py
+  h_059e888e5e4e82 1-63
+apps/bcs/scripts/e2e-test/a2a_story.py
+  h_059e888e5e4e82 21,272-285,292-293,453,481,487
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  h_059e888e5e4e82 13,63,65-66,102,117,229-260,282,284,292,349-361
+apps/bcs/scripts/e2e-test/cli-stories.sh
+  h_059e888e5e4e82 556-617,720-724
+apps/bcs/scripts/e2e-test/fuse_cards_story.py
+  h_059e888e5e4e82 251-252,257-261,263
+apps/bcs/scripts/e2e-test/group_card_story.py
+  h_059e888e5e4e82 27,29,31,86,99,143-146
+apps/bcs/scripts/e2e_coverage.sh
+  h_059e888e5e4e82 383-385
+apps/bcs/scripts/test_changed_line_cov.py
+  h_059e888e5e4e82 193
+apps/bcs/scripts/test_group_card_story.py
+  h_059e888e5e4e82 20,26
+apps/bcs/specs/2026-09-09-group-context-api/spec-05-presets.md
+  h_059e888e5e4e82 1-41
+apps/bcs/specs/2026-11-11-caller-forced-managed-admission/spec.md
+  h_059e888e5e4e82 1-94
+apps/bcs/tests/openapi/test_bot_v1_contract.py
+  h_059e888e5e4e82 199-202
+apps/bcsfuse/.env.example
+  h_059e888e5e4e82 28,30-34
+apps/bcsfuse/README.md
+  h_059e888e5e4e82 54-55,63,68,73,97-99,184,250,252-255,257,259-260,435-436,482-486,490
+apps/bcsfuse/conftest.py
+  h_059e888e5e4e82 1-40
+apps/bcsfuse/docs/archive/legacy-tc/legacy_providers.py.txt
+  h_059e888e5e4e82 43
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  h_059e888e5e4e82 5-6,8-9,11-12,17-21,26,30-38,102,107
+apps/bcsfuse/docs/qdrant-modes.md
+  h_059e888e5e4e82 5,16-17,20-22,25-28,42-43,50
+apps/bcsfuse/main.py
+  h_059e888e5e4e82 17-19
+apps/bcsfuse/packages/search-core/README.md
+  h_059e888e5e4e82 8,26,47-51,82-84,88-140
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  h_059e888e5e4e82 157-158,166-167,186-188,233-276
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  h_059e888e5e4e82 130-144,160-180
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  h_059e888e5e4e82 4,14-15,21,24-25
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  h_059e888e5e4e82 111,169-226
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  h_059e888e5e4e82 110-113
+apps/bcsfuse/packages/search-core/pyproject.toml
+  h_059e888e5e4e82 16
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/card_diagnostics.py
+  h_059e888e5e4e82 35-47,52
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  h_059e888e5e4e82 10,13,28-32,37-40,46-49,61-64,93,97,105-106,110-111,116,119-127,136,138-139,146-149,181,196,202-207
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  h_059e888e5e4e82 56-62,64-67
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  h_059e888e5e4e82 4,11-15,17,29-33,50-54,56,66-69,74-78,82-84,88,93,96-106,114,116-117,119-120,130
+apps/bcsfuse/packages/search-core/src/search_core/api/cards.py
+  h_059e888e5e4e82 6,15-21,40,56-70
+apps/bcsfuse/packages/search-core/src/search_core/api/index_builds.py
+  h_059e888e5e4e82 8-9,25,43-57
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  h_059e888e5e4e82 64,70-79,97,102-105,111-115,117-118,122,129,131,134-139
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  h_059e888e5e4e82 36,41,58,60,62-68,73-75,119-127
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  h_059e888e5e4e82 73-75,101,146-150
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  h_059e888e5e4e82 151-156
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  h_059e888e5e4e82 32,82,102,138-139,146-147,192,259,282-295
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/local.py
+  h_059e888e5e4e82 1,91-92
+apps/bcsfuse/packages/search-core/src/search_core/catalog/documents.py
+  h_059e888e5e4e82 8,68,144-145
+apps/bcsfuse/packages/search-core/src/search_core/catalog/inspection.py
+  h_059e888e5e4e82 55-59
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  h_059e888e5e4e82 13,118-121,126-130,132,199,234,339-363,365-368,370-387,389,395-396,405-435,440,464,477-479,484,486,502-507
+apps/bcsfuse/packages/search-core/src/search_core/config/document_mapping.py
+  h_059e888e5e4e82 1-234
+apps/bcsfuse/packages/search-core/src/search_core/config/index_builds.py
+  h_059e888e5e4e82 5-7,17-24
+apps/bcsfuse/packages/search-core/src/search_core/config/index_sync.py
+  h_059e888e5e4e82 28
+apps/bcsfuse/packages/search-core/src/search_core/config/search.py
+  h_059e888e5e4e82 12,53
+apps/bcsfuse/packages/search-core/src/search_core/core/index_build_runner.py
+  h_059e888e5e4e82 1-51
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  h_059e888e5e4e82 10,40-48,50,52-59,67
+apps/bcsfuse/packages/search-core/src/search_core/core/memory_cache.py
+  h_059e888e5e4e82 11-43,67-74,78-79,84,96,100-106,109-110,112,116-117,119,121,123-140,142,145-147,162-167,184-186,195-202
+apps/bcsfuse/packages/search-core/src/search_core/core/retrieval.py
+  h_059e888e5e4e82 18,28,30-42,133,209-210,295,297,306-307
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  h_059e888e5e4e82 7,10,23-24,27-42
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  h_059e888e5e4e82 30-33
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  h_059e888e5e4e82 3,6,22-32,62-68,74,76-81,92-94,96-100
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  h_059e888e5e4e82 1,3-4,11-12,19-23,29-31,35,43,45-49,51-55,67,70-82,84-92,136,138-139,143,194,197-203,205-221,230-231
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  h_059e888e5e4e82 1,17-19,32,44-48,58
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  h_059e888e5e4e82 13,173-227,244-246,287-297,306-308,320-322
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  h_059e888e5e4e82 92
+apps/bcsfuse/packages/search-core/tests/test_build_on_demand.py
+  h_059e888e5e4e82 1-73
+apps/bcsfuse/packages/search-core/tests/test_cache_copy.py
+  h_059e888e5e4e82 1-77
+apps/bcsfuse/packages/search-core/tests/test_card_incremental.py
+  h_059e888e5e4e82 1-208
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  h_059e888e5e4e82 249-304
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_coalescing.py
+  h_059e888e5e4e82 72
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_refresh.py
+  h_059e888e5e4e82 1-217
+apps/bcsfuse/packages/search-core/tests/test_catalog_startup.py
+  h_059e888e5e4e82 1-2,131
+apps/bcsfuse/packages/search-core/tests/test_catalog_table_isolation.py
+  h_059e888e5e4e82 3-4,52
+apps/bcsfuse/packages/search-core/tests/test_document_mapping.py
+  h_059e888e5e4e82 1-88
+apps/bcsfuse/packages/search-core/tests/test_embedding_singleflight_drm.py
+  h_059e888e5e4e82 3-4,54-58
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  h_059e888e5e4e82 213-259
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  h_059e888e5e4e82 3-4,46-50,94-101,106-144
+apps/bcsfuse/packages/search-core/tests/test_keyword_names.py
+  h_059e888e5e4e82 1-80
+apps/bcsfuse/packages/search-core/tests/test_native_async_models.py
+  h_059e888e5e4e82 84-85
+apps/bcsfuse/packages/search-core/tests/test_native_keyword.py
+  h_059e888e5e4e82 1-159
+apps/bcsfuse/packages/search-core/tests/test_provider_execution.py
+  h_059e888e5e4e82 3-4,82-84,107-109
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  h_059e888e5e4e82 3-4,17-19,143-145
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  h_059e888e5e4e82 1,15,19,21-25,34-37,122,241-295
+apps/bcsfuse/packages/search-core/tests/test_retrieval_pipeline.py
+  h_059e888e5e4e82 1,18-22
+apps/bcsfuse/packages/search-core/tests/test_retrieval_resilience.py
+  h_059e888e5e4e82 165-207
+apps/bcsfuse/packages/search-core/tests/test_retrieval_review.py
+  h_059e888e5e4e82 37,81,83
+apps/bcsfuse/packages/search-core/tests/test_score_details.py
+  h_059e888e5e4e82 62
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  h_059e888e5e4e82 223
+apps/bcsfuse/src/app/adapters/http/cors_middleware.py
+  h_059e888e5e4e82 1,9,12-13,18-21
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_keyword_index.py
+  h_059e888e5e4e82 1,6
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  h_059e888e5e4e82 76
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_sqlite_vector_store.py
+  h_059e888e5e4e82 25,39
+apps/bcsfuse/src/app/tc/bootstrap.py
+  h_059e888e5e4e82 18-37,57-58,72-74,82,84-85,100-101,105,107,109,120,129-143,174,182-183,191-192
+apps/bcsfuse/src/app/tc/card_profiles.py
+  h_059e888e5e4e82 1-181
+apps/bcsfuse/src/app/tc/providers.py
+  h_059e888e5e4e82 5,70,85-88,90,93-98,100,155
+apps/bcsfuse/src/app/tc/routes.py
+  h_059e888e5e4e82 130-146,158-159,180
+apps/bcsfuse/src/app/tc/search.py
+  h_059e888e5e4e82 22,40,60-69,127,189-191,264
+apps/bcsfuse/src/app/tc/v2.py
+  h_059e888e5e4e82 4,78,89,98-100
+apps/bcsfuse/tests/contract/test_keyword_retrieval.py
+  h_059e888e5e4e82 3-4,37
+apps/bcsfuse/tests/contract/test_mysql_vector_decode_failures.py
+  h_059e888e5e4e82 3-4,68-71
+apps/bcsfuse/tests/contract/test_qdrant_deployment_modes.py
+  h_059e888e5e4e82 1,4,7,34-38
+apps/bcsfuse/tests/contract/test_qdrant_mysql_vector_store_contract.py
+  h_059e888e5e4e82 20-21,49,57,78,222,362
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_get_contract.py
+  h_059e888e5e4e82 3-4,19,31,39-43,53-57
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_recovery.py
+  h_059e888e5e4e82 3-4,15,40,54-58,76,88-90,100,126-128,138-142,162-164
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  h_059e888e5e4e82 7,16,43-106
+apps/bcsfuse/tests/contract/test_tc_http_compat.py
+  h_059e888e5e4e82 117-150
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  h_059e888e5e4e82 1,6-7,13,31,81-84,86,88-94,96-127,129-131,133-166,168-172,174-202,204-218,220-221,225-232,234,236-270,272-279,281-283,286-292,296-298,300-301,319-320,323,330,355-356,375,380,408,422,453,455,474,490-492,499,538
+apps/bcsfuse/tests/contract/test_vector_point_lookup.py
+  h_059e888e5e4e82 3-4,58-63,74-78,93-97
+apps/bcsfuse/tests/integration/test_mysql_backup_restore_e2e.py
+  h_059e888e5e4e82 24-25,87,398,500,502,583
+apps/bcsfuse/tests/integration/test_opencore_app_startup_health_e2e.py
+  h_059e888e5e4e82 19
+apps/bcsfuse/tests/integration/test_qdrant_durable_sync_e2e.py
+  h_059e888e5e4e82 3-4,43,94-105
+apps/bcsfuse/tests/integration/test_qdrant_mysql_performance_smoke.py
+  h_059e888e5e4e82 35-36,90,518
+apps/bcsfuse/tests/integration/test_qdrant_mysql_rebuild_e2e.py
+  h_059e888e5e4e82 26-27,68,301
+apps/bcsfuse/tests/integration/test_real_llm_embedding.py
+  h_059e888e5e4e82 17-18,262,293
+apps/bcsfuse/tests/integration/test_worker_vector_index_flow.py
+  h_059e888e5e4e82 7-8,66,245,259
+apps/bcsfuse/tests/qdrant_support.py
+  h_059e888e5e4e82 1-23
+apps/bcsfuse/tests/unit/application/test_worker_vector_index_service.py
+  h_059e888e5e4e82 3-4,38,328,340
+apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
+  h_059e888e5e4e82 7,48-85
+apps/bcsfuse/tests/unit/infra/test_qdrant_durable_vector_store.py
+  h_059e888e5e4e82 3-4,97
+apps/bcsfuse/uv.lock
+  h_059e888e5e4e82 1304,1310,1314,1321-1322,1324,1565-1573
+apps/evolverun/bench-case/bcn-bench-case/README.md
+  h_059e888e5e4e82 1-39
+apps/evolverun/bench-case/bcn-bench-case/case.template.md
+  h_059e888e5e4e82 1-93
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/case.md
+  h_059e888e5e4e82 1-93
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/bots.json
+  h_059e888e5e4e82 1-32
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/manager/AGENTS.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/manager/IDENTITY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/manager/KNOWLEDGE.md
+  h_059e888e5e4e82 1-5
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/manager/TOOLS.md
+  h_059e888e5e4e82 1-5
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/worker/AGENTS.md
+  h_059e888e5e4e82 1-7
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/worker/IDENTITY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/worker/KNOWLEDGE.md
+  h_059e888e5e4e82 1-5
+apps/evolverun/bench-case/bcn-bench-case/task_00_connectivity/profiles/worker/TOOLS.md
+  h_059e888e5e4e82 1-5
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/case.md
+  h_059e888e5e4e82 1-107
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/bots.json
+  h_059e888e5e4e82 1-50
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/AGENTS.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/BOOTSTRAP.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/HEARTBEAT.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/IDENTITY.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/KNOWLEDGE.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/MEMORY.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/OKR.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/OUTPUT.md
+  h_059e888e5e4e82 1-21
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/RULES.md
+  h_059e888e5e4e82 1-9
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/SAFETY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/SOUL.md
+  h_059e888e5e4e82 1-18
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/TOOLS.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/ceo/USER.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/AGENTS.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/BOOTSTRAP.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/HEARTBEAT.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/IDENTITY.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/KNOWLEDGE.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/MEMORY.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/OKR.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/OUTPUT.md
+  h_059e888e5e4e82 1-18
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/RULES.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/SAFETY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/SOUL.md
+  h_059e888e5e4e82 1-17
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/TOOLS.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/customer-service/USER.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/AGENTS.md
+  h_059e888e5e4e82 1-15
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/BOOTSTRAP.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/HEARTBEAT.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/IDENTITY.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/KNOWLEDGE.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/MEMORY.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/OKR.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/OUTPUT.md
+  h_059e888e5e4e82 1-18
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/RULES.md
+  h_059e888e5e4e82 1-9
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/SAFETY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/SOUL.md
+  h_059e888e5e4e82 1-17
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/TOOLS.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/engineering/USER.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/AGENTS.md
+  h_059e888e5e4e82 1-15
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/BOOTSTRAP.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/HEARTBEAT.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/IDENTITY.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/KNOWLEDGE.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/MEMORY.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/OKR.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/OUTPUT.md
+  h_059e888e5e4e82 1-18
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/RULES.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/SAFETY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/SOUL.md
+  h_059e888e5e4e82 1-17
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/TOOLS.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/product-manager/USER.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/AGENTS.md
+  h_059e888e5e4e82 1-15
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/BOOTSTRAP.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/HEARTBEAT.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/IDENTITY.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/KNOWLEDGE.md
+  h_059e888e5e4e82 1-13
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/MEMORY.md
+  h_059e888e5e4e82 1-16
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/OKR.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/OUTPUT.md
+  h_059e888e5e4e82 1-18
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/RULES.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/SAFETY.md
+  h_059e888e5e4e82 1-8
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/SOUL.md
+  h_059e888e5e4e82 1-17
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/TOOLS.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/profiles/verification/USER.md
+  h_059e888e5e4e82 1-11
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/.gitignore
+  h_059e888e5e4e82 1-5
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/README.md
+  h_059e888e5e4e82 1-172
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/SKILL.md
+  h_059e888e5e4e82 1-33
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/prompts/report.md
+  h_059e888e5e4e82 1-12
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/references/local.md
+  h_059e888e5e4e82 1-35
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/requirements.txt
+  h_059e888e5e4e82 1
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/agents.py
+  h_059e888e5e4e82 1-125
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/bcn.py
+  h_059e888e5e4e82 1-45
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/config.py
+  h_059e888e5e4e82 1-40
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/evidence.py
+  h_059e888e5e4e82 1-101
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/processes.py
+  h_059e888e5e4e82 1-55
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/runtime.py
+  h_059e888e5e4e82 1-127
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/adapters/local/services.py
+  h_059e888e5e4e82 1-64
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/bench.py
+  h_059e888e5e4e82 1-59
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/case_loader.py
+  h_059e888e5e4e82 1-44
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/contracts.py
+  h_059e888e5e4e82 1-37
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/evaluation.py
+  h_059e888e5e4e82 1-48
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/grading.py
+  h_059e888e5e4e82 1-29
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/judge_worker.py
+  h_059e888e5e4e82 1-10
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/profile_loader.py
+  h_059e888e5e4e82 1-70
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/runner.py
+  h_059e888e5e4e82 1-133
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/core/transcript.py
+  h_059e888e5e4e82 1-50
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/scripts/outputs/file.py
+  h_059e888e5e4e82 1-65
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/tests/test_p1.py
+  h_059e888e5e4e82 1-126
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/tests/test_report.py
+  h_059e888e5e4e82 1-41
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/tests/test_v1.py
+  h_059e888e5e4e82 1-183
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/tests/test_v3.py
+  h_059e888e5e4e82 1-233
+apps/evolverun/clawweb-skills/clawevolve-skills/clawbench-bcn/tests/test_v4.py
+  h_059e888e5e4e82 1-141
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/acquisition/service_export.py
+  h_059e888e5e4e82 824
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/acquisition/sessions.py
+  h_059e888e5e4e82 1110,1139,1156
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/artifacts/outputs.py
+  h_059e888e5e4e82 3-4,23
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/artifacts/session_source.py
+  h_059e888e5e4e82 1-37
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/integration/output.py
+  h_059e888e5e4e82 134-143,146,231-232,263
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/integration/plan_source.py
+  h_059e888e5e4e82 3-4,107
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/clawevolve_diagnose/models.py
+  h_059e888e5e4e82 175
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-diagnose/tests/test_session_traceability.py
+  h_059e888e5e4e82 1-60
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/scripts/handlers/clawevolve_optimize_run.py
+  h_059e888e5e4e82 4802,4808-4815,4819-4820,4822-4826,4832-4836,4887
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/tests/test_clawevolve_optimize_run_singlebox.py
+  h_059e888e5e4e82 120-125,127-128,134-135,139,145,149-157,160-163,165-171,175-192
+apps/evolverun/clawweb/docs/flow-run-markers.md
+  h_059e888e5e4e82 1-130
+apps/evolverun/clawweb/package-lock.json
+  h_059e888e5e4e82 7657-7665,8860-8861
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  h_059e888e5e4e82 23-24,320-326
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/app-config-repository.ts
+  h_059e888e5e4e82 98
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/__tests__/evolve.test.ts
+  h_059e888e5e4e82 4192-4207
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/CaseSessionSource.tsx
+  h_059e888e5e4e82 1-28
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/Evolve.tsx
+  h_059e888e5e4e82 1,2858-2859,3096
+apps/evolverun/clawweb/public/modules/clawinsight/docs/monitoring-diagnosis-actions-v4.md
+  h_059e888e5e4e82 3-4,12,14,20,42,44,97,100-103
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  h_059e888e5e4e82 97,175,223-241,308,323,329,344,362-364,366,368
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  h_059e888e5e4e82 18-19,28-29,40-67
+apps/evolverun/clawweb/public/modules/clawinsight/package.json
+  h_059e888e5e4e82 52-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/fixtures/monitoring/recovery-eligibility-v3.json
+  h_059e888e5e4e82 1-87
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-repository.ts
+  h_059e888e5e4e82 83-86,102
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  h_059e888e5e4e82 7,12-14,43-44,46-127,156,158,166-167,169-178,183-191,210-214,217-218,299,322,324,326-329,347,349,356
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  h_059e888e5e4e82 380-382,426,428-444
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery.ts
+  h_059e888e5e4e82 64-69,107,109
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/action-policy.test.ts
+  h_059e888e5e4e82 5,11-12,27,54-68
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/session-recovery-trigger.test.ts
+  h_059e888e5e4e82 54-62,65-67,76-96
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/action-policy.ts
+  h_059e888e5e4e82 5,11,17-19
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/session-recovery-trigger.ts
+  h_059e888e5e4e82 9,73,100,107
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/common/agent-execution.ts
+  h_059e888e5e4e82 43,49
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  h_059e888e5e4e82 104-156
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/assessment-dispatch.test.ts
+  h_059e888e5e4e82 10-13,19,37-38,46,48-49,51-53,57-69
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/bootstrap-evidence.test.ts
+  h_059e888e5e4e82 1-108
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/cc-session-reader.test.ts
+  h_059e888e5e4e82 15-20,23,25,36-38
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/closed-loop.test.ts
+  h_059e888e5e4e82 353-375,629,631,633-635,1028-1029
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-recheck.test.ts
+  h_059e888e5e4e82 1-174
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-resume.test.ts
+  h_059e888e5e4e82 1-212
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/intervention-result.test.ts
+  h_059e888e5e4e82 235-237,253-256,266-281
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/notification.test.ts
+  h_059e888e5e4e82 27-51
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/oc-session-reader.test.ts
+  h_059e888e5e4e82 99-119
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  h_059e888e5e4e82 31,35,38
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/session-argument-evidence.test.ts
+  h_059e888e5e4e82 1-101
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  h_059e888e5e4e82 58,61
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  h_059e888e5e4e82 39-41,43,46,58,458-475
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_059e888e5e4e82 1-2,25-26,31,35,93-156,158,178-179,185,187-188,191,199-205,207-215,218,234-237,242-244,246,248-251,254-263,265,285-288,292,294-296,311-314,335,337,339-343,361,366,383-385,396-398,405-407,411,413,418,421,433,474,495,498-500,505-506,509-511,516,530,665,678-694,733,767-768,775-778,794,800,809-810,852,905,940-943
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/bootstrap-evidence.ts
+  h_059e888e5e4e82 1-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  h_059e888e5e4e82 12,24,28-30,47-48,64
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/effect-recheck.ts
+  h_059e888e5e4e82 1-40
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/effect-resume.ts
+  h_059e888e5e4e82 1-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  h_059e888e5e4e82 84-86,91,240-250,320-322
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  h_059e888e5e4e82 4,29,33,35,48
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result.ts
+  h_059e888e5e4e82 22,24
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-argument-evidence.ts
+  h_059e888e5e4e82 1-2,4-9,11-12,15-27,29-33,36-41,43-47,49-79,83-88,91-95,97-102,105-108,110-143,145-170,172,174-176,178-184
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-reader.ts
+  h_059e888e5e4e82 5,132
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  h_059e888e5e4e82 19,69-80,98-100,117,143-144,154-158,161,163-170,178-179
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  h_059e888e5e4e82 9-10,19,25-27,29,36,38,40,55,137-143,291-306,310-364,387,408,411-417,430-433,437-438,441,592-600,603-604,610,615-626,643-646,649,653-740,778,810-813,822,824,826,841-847,909
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/validation.ts
+  h_059e888e5e4e82 33,53-54,62
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/OwnerCooperation.tsx
+  h_059e888e5e4e82 23,50,57,60
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/RecoveryTaskLinks.tsx
+  h_059e888e5e4e82 29-30
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  h_059e888e5e4e82 39-40,659
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/session-recovery.ts
+  h_059e888e5e4e82 6
+apps/evolverun/clawweb/public/modules/workflow/docs/bot-workflow-permission-clone-ob-index.sql
+  h_059e888e5e4e82 1-19
+apps/evolverun/clawweb/public/modules/workflow/docs/bot-workflow-permission-clone.md
+  h_059e888e5e4e82 1-95
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-editor.md
+  h_059e888e5e4e82 1-63
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-validation.md
+  h_059e888e5e4e82 1-92
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-access.md
+  h_059e888e5e4e82 36-42
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-clone.md
+  h_059e888e5e4e82 1-56
+apps/evolverun/clawweb/public/modules/workflow/server/index.ts
+  h_059e888e5e4e82 3-5
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  h_059e888e5e4e82 4,15
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/flow-run-markers.test.ts
+  h_059e888e5e4e82 1-145
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-run-request-migration.integration.test.ts
+  h_059e888e5e4e82 54,77
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/run-list-search.test.ts
+  h_059e888e5e4e82 17
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/run-read-repository.test.ts
+  h_059e888e5e4e82 18-20
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  h_059e888e5e4e82 9,498-504,565-566,569
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_059e888e5e4e82 1,26-27,61-62,275,343,349-350,373-374
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-read-repository.ts
+  h_059e888e5e4e82 73
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  h_059e888e5e4e82 64,80
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.integration.test.ts
+  h_059e888e5e4e82 1-214
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.test.ts
+  h_059e888e5e4e82 2,9,14,60-64,130,139,155-156,160,169,183,200,210,215,235,249,271-272,280,287,307,319,326-327,332-373
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-operations.test.ts
+  h_059e888e5e4e82 37
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/fanout-public-writes.test.ts
+  h_059e888e5e4e82 20
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/rerun-lifecycle-stage.test.ts
+  h_059e888e5e4e82 55,122-136,296
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-clone.test.ts
+  h_059e888e5e4e82 1-130
+apps/evolverun/clawweb/public/modules/workflow/server/routes/bot-workflow-permission-clone.ts
+  h_059e888e5e4e82 21,233
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-run-markers.test.ts
+  h_059e888e5e4e82 1-90
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-association.test.ts
+  h_059e888e5e4e82 21
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/ordinary-request-reuse.test.ts
+  h_059e888e5e4e82 18
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/version-contract.test.ts
+  h_059e888e5e4e82 25
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_059e888e5e4e82 1,134,156-157,200,202,270-272
+apps/evolverun/clawweb/public/modules/workflow/server/routes/run-baas-routes.ts
+  h_059e888e5e4e82 1-512
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_059e888e5e4e82 1,96
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-clone.ts
+  h_059e888e5e4e82 1-62
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/rerun-markers.test.ts
+  h_059e888e5e4e82 1-46
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-association.test.ts
+  h_059e888e5e4e82 37
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-fanout-origin.test.ts
+  h_059e888e5e4e82 24
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows.test.ts
+  h_059e888e5e4e82 58
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-clone-service.test.ts
+  h_059e888e5e4e82 1-241
+apps/evolverun/clawweb/public/modules/workflow/server/services/flow-run-markers.ts
+  h_059e888e5e4e82 1-18
+apps/evolverun/clawweb/public/modules/workflow/server/services/ordinary-run-request.ts
+  h_059e888e5e4e82 1,35,42-43,58
+apps/evolverun/clawweb/public/modules/workflow/server/services/parent-related-run-registration.ts
+  h_059e888e5e4e82 1,88,90-91,96
+apps/evolverun/clawweb/public/modules/workflow/server/services/rerun-command.ts
+  h_059e888e5e4e82 1-2,51,53,58,70,73
+apps/evolverun/clawweb/public/modules/workflow/server/services/rerun-markers.ts
+  h_059e888e5e4e82 1-57
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-clone-service.ts
+  h_059e888e5e4e82 1-483
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflow-ai.ts
+  h_059e888e5e4e82 1-27
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunMarkers.tsx
+  h_059e888e5e4e82 1-46
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunSummaryHeader.tsx
+  h_059e888e5e4e82 4,189
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDraftPreview.tsx
+  h_059e888e5e4e82 1-144
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDrawer.tsx
+  h_059e888e5e4e82 1-134
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunMarkers.integration.test.tsx
+  h_059e888e5e4e82 1-208
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDraftPreview.test.tsx
+  h_059e888e5e4e82 1-124
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  h_059e888e5e4e82 1-247
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/CloneWorkflowPanel.tsx
+  h_059e888e5e4e82 1-277
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/CreateWorkflowModal.tsx
+  h_059e888e5e4e82 4,9,14-29,92,105,114,120,128-142,183,188,201,318,331
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/OverviewTab.tsx
+  h_059e888e5e4e82 12,147,630
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/CloneWorkflowPanel.test.tsx
+  h_059e888e5e4e82 1-56
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.test.tsx
+  h_059e888e5e4e82 1-142
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useWorkflowAiDraft.ts
+  h_059e888e5e4e82 1-108
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_059e888e5e4e82 40-41,107-109,258-293,778-795,921,938-947
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowRuns.tsx
+  h_059e888e5e4e82 8,431,557
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  h_059e888e5e4e82 5,13,68,313,349-399,464
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAi.test.tsx
+  h_059e888e5e4e82 1-79
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAiMode.test.tsx
+  h_059e888e5e4e82 1-191
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  h_059e888e5e4e82 9,12
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  h_059e888e5e4e82 12,24
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  h_059e888e5e4e82 9,12
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceWriteGuardPop.test.tsx
+  h_059e888e5e4e82 8,11
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.test.ts
+  h_059e888e5e4e82 1-278
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.ts
+  h_059e888e5e4e82 1-107
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-spec.ts
+  h_059e888e5e4e82 1-142
+apps/evolverun/clawweb/public/shared/docs/bot-runtime.md
+  h_059e888e5e4e82 40
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  h_059e888e5e4e82 41,63,127
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-markers-migration.test.ts
+  h_059e888e5e4e82 1-110
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-run-request-migration.test.ts
+  h_059e888e5e4e82 278,313,387,442,488,534,546,573,607,645,698,731
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-history.test.ts
+  h_059e888e5e4e82 1-20
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-incompatible-init.test.ts
+  h_059e888e5e4e82 38
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-trigger-lock.test.ts
+  h_059e888e5e4e82 88,121-122,205
+apps/evolverun/clawweb/public/shared/server/repositories/__tests__/bot-workflow-permission-merge.test.ts
+  h_059e888e5e4e82 1-277
+apps/evolverun/clawweb/public/shared/server/repositories/bot-workflow-permission-repository.ts
+  h_059e888e5e4e82 135-170
+apps/evolverun/clawweb/public/shared/server/schema-flow-run-markers.ts
+  h_059e888e5e4e82 1-26
+apps/evolverun/clawweb/public/shared/server/schema-types.ts
+  h_059e888e5e4e82 1-20
+apps/evolverun/clawweb/public/shared/server/schema-v1-36.ts
+  h_059e888e5e4e82 1-854
+apps/evolverun/clawweb/public/shared/server/schema-v109-143.ts
+  h_059e888e5e4e82 1-668
+apps/evolverun/clawweb/public/shared/server/schema-v37-74.ts
+  h_059e888e5e4e82 1-853
+apps/evolverun/clawweb/public/shared/server/schema-v75-108.ts
+  h_059e888e5e4e82 1-867
+apps/evolverun/clawweb/public/shared/server/schema.ts
+  h_059e888e5e4e82 23-30,105-109,111
+apps/evolverun/clawweb/public/shared/server/services/bot-runtime/contracts.ts
+  h_059e888e5e4e82 20-23,26-27
+apps/evolverun/clawweb/public/shared/web/api/client.ts
+  h_059e888e5e4e82 129-157,1819-1837
+apps/evolverun/clawweb/public/shared/web/api/hooks.ts
+  h_059e888e5e4e82 29-61
+apps/evolverun/clawweb/public/shared/web/types.ts
+  h_059e888e5e4e82 352-354
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/README.md
+  h_059e888e5e4e82 1-35
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/cli.mjs
+  h_059e888e5e4e82 1-258
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/dashboard.mjs
+  h_059e888e5e4e82 1-25
+apps/evolverun/clawweb/scripts/sql/flow-run-markers-v152.mysql.sql
+  h_059e888e5e4e82 1-43
+apps/evolverun/docs/research/agent-improvement/README.md
+  h_059e888e5e4e82 47-50
+apps/evolverun/docs/research/agent-improvement/benchmark/outcome-process-assessment.md
+  h_059e888e5e4e82 1-176
+apps/frontend-nextgen/README.md
+  h_059e888e5e4e82 30-50
+apps/frontend-nextgen/assets/task-panel/.gitignore
+  h_059e888e5e4e82 1-9
+apps/frontend-nextgen/assets/task-panel/LICENSE
+  h_059e888e5e4e82 1-176
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  h_059e888e5e4e82 1-178
+apps/frontend-nextgen/assets/task-panel/README.md
+  h_059e888e5e4e82 1-140
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  h_059e888e5e4e82 1-3053
+apps/frontend-nextgen/assets/task-panel/package.json
+  h_059e888e5e4e82 1-63
+apps/frontend-nextgen/assets/task-panel/scripts/check-boundaries.mjs
+  h_059e888e5e4e82 1-50
+apps/frontend-nextgen/assets/task-panel/scripts/check-release-ref.mjs
+  h_059e888e5e4e82 1-12
+apps/frontend-nextgen/assets/task-panel/scripts/serve-assets.mjs
+  h_059e888e5e4e82 1-29
+apps/frontend-nextgen/assets/task-panel/scripts/serve-smoke.mjs
+  h_059e888e5e4e82 1-12
+apps/frontend-nextgen/assets/task-panel/scripts/verify-independent.mjs
+  h_059e888e5e4e82 1-25
+apps/frontend-nextgen/assets/task-panel/src/contracts/index.ts
+  h_059e888e5e4e82 1-47
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  h_059e888e5e4e82 1-203
+apps/frontend-nextgen/assets/task-panel/src/data/collectTaskArtifacts.ts
+  h_059e888e5e4e82 1-29
+apps/frontend-nextgen/assets/task-panel/src/data/filePreview.ts
+  h_059e888e5e4e82 1-86
+apps/frontend-nextgen/assets/task-panel/src/data/taskClient.ts
+  h_059e888e5e4e82 1-87
+apps/frontend-nextgen/assets/task-panel/src/data/taskStatus.ts
+  h_059e888e5e4e82 1-33
+apps/frontend-nextgen/assets/task-panel/src/data/taskSwitcher.ts
+  h_059e888e5e4e82 1-44
+apps/frontend-nextgen/assets/task-panel/src/history/parseTaskPanelDeclarations.ts
+  h_059e888e5e4e82 1-38
+apps/frontend-nextgen/assets/task-panel/src/index.ts
+  h_059e888e5e4e82 1-12
+apps/frontend-nextgen/assets/task-panel/src/panel/GroupDrillDown.tsx
+  h_059e888e5e4e82 14-16,35,40-41,103,130,477,528,557,576,614
+apps/frontend-nextgen/assets/task-panel/src/panel/MarkdownCell.tsx
+  h_059e888e5e4e82 7-8
+apps/frontend-nextgen/assets/task-panel/src/panel/PanelMarkdown.tsx
+  h_059e888e5e4e82 1-10
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskArtifactsView.tsx
+  h_059e888e5e4e82 1-50
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskLoopView.tsx
+  h_059e888e5e4e82 1-85
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanelFetcher.tsx
+  h_059e888e5e4e82 11-12,54,75,82,121,123,146-147,167
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useGroupMemberNames.ts
+  h_059e888e5e4e82 1,18,36,50
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useTaskArtifactPreview.ts
+  h_059e888e5e4e82 2-4,6,10,12-14,16-17,22,24,27-28,31-33,35-38,40-44,46-49,51,53-54,56-62,65,67-69,72,74-78
+apps/frontend-nextgen/assets/task-panel/src/panel/hostContext.tsx
+  h_059e888e5e4e82 1-11
+apps/frontend-nextgen/assets/task-panel/src/panel/taskPanelMapper.ts
+  h_059e888e5e4e82 9
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/ArtifactsSection.tsx
+  h_059e888e5e4e82 1,53,63
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactPreviewDrawer.tsx
+  h_059e888e5e4e82 1,4,16-17,88,130
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactsList.tsx
+  h_059e888e5e4e82 6-7,9
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.css
+  h_059e888e5e4e82 1-11
+apps/frontend-nextgen/assets/task-panel/src/public-api.ts
+  h_059e888e5e4e82 1-10
+apps/frontend-nextgen/assets/task-panel/src/rich-content/SafeHtml.tsx
+  h_059e888e5e4e82 163
+apps/frontend-nextgen/assets/task-panel/test/asset-delivery.mjs
+  h_059e888e5e4e82 1-21
+apps/frontend-nextgen/assets/task-panel/test/boundaries.test.ts
+  h_059e888e5e4e82 1-25
+apps/frontend-nextgen/assets/task-panel/test/browser-smoke.html
+  h_059e888e5e4e82 1-16
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  h_059e888e5e4e82 1-248
+apps/frontend-nextgen/assets/task-panel/test/controllerHostMigration.test.ts
+  h_059e888e5e4e82 1-98
+apps/frontend-nextgen/assets/task-panel/test/data/taskClient.test.ts
+  h_059e888e5e4e82 1-88
+apps/frontend-nextgen/assets/task-panel/test/data/taskSwitcher.test.ts
+  h_059e888e5e4e82 1-69
+apps/frontend-nextgen/assets/task-panel/test/declarations.test.ts
+  h_059e888e5e4e82 1-28
+apps/frontend-nextgen/assets/task-panel/test/panel/DagViewInteractive.test.tsx
+  h_059e888e5e4e82 1,4-7,9,57,63,103,204,211,225,237,246,307-308
+apps/frontend-nextgen/assets/task-panel/test/panel/MarkdownCell.coverage.test.tsx
+  h_059e888e5e4e82 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskArtifactsView.test.tsx
+  h_059e888e5e4e82 1-86
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskInfoTab.coverage.test.tsx
+  h_059e888e5e4e82 1-5
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskLoopView.switcher.test.tsx
+  h_059e888e5e4e82 1-34,36-39,41,43-44,46-47,49,51-60,62-67,69-73,75-87,89-90,92-98,100,102-113,115-126,128-135,137-148,150,153-158
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskPanel.includeActionLog.test.tsx
+  h_059e888e5e4e82 1,4,6,42-43,54,56-57,62
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskProgress.test.tsx
+  h_059e888e5e4e82 1-5,7-8
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.coverage.test.tsx
+  h_059e888e5e4e82 1-4,38
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.test.tsx
+  h_059e888e5e4e82 1-4,28
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.coverage.test.ts
+  h_059e888e5e4e82 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.test.ts
+  h_059e888e5e4e82 1-2,12,17-18
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactTime.test.ts
+  h_059e888e5e4e82 2-3
+apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.coverage.test.ts
+  h_059e888e5e4e82 1-5
+apps/frontend-nextgen/assets/task-panel/test/panel/hooks/useGroupMemberNames.coverage.test.tsx
+  h_059e888e5e4e82 1-3,14,48
+apps/frontend-nextgen/assets/task-panel/test/panel/icons.test.tsx
+  h_059e888e5e4e82 1,3,22,24
+apps/frontend-nextgen/assets/task-panel/test/panel/messageWindowLocate.test.ts
+  h_059e888e5e4e82 1,6-7,52,67-68
+apps/frontend-nextgen/assets/task-panel/test/panel/outputEnvelope.coverage.test.ts
+  h_059e888e5e4e82 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.coverage.test.ts
+  h_059e888e5e4e82 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.test.ts
+  h_059e888e5e4e82 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.coverage.test.ts
+  h_059e888e5e4e82 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.test.ts
+  h_059e888e5e4e82 1-2,7
+apps/frontend-nextgen/assets/task-panel/test/panel/taskArtifactStage.test.ts
+  h_059e888e5e4e82 2-6
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.coverage.test.ts
+  h_059e888e5e4e82 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.execution.test.ts
+  h_059e888e5e4e82 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.test.ts
+  h_059e888e5e4e82 1-3,5-17,20-53,55-56,58,60,62-93,95-96,98,100,102-159,161-168,171-231,233,235-241,243,245-284,286-289,291,293-341,343-347,350-352,354,358-359,361-362,364,371-372,376,380-381,383-395,399,401-434,436-460,462-466,469-503,506-508,510-512,515-577,579-589
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcher.navigation.test.ts
+  h_059e888e5e4e82 1-50
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcherFixtures.ts
+  h_059e888e5e4e82 1-35
+apps/frontend-nextgen/assets/task-panel/test/panel/theme.test.tsx
+  h_059e888e5e4e82 1,3,13,15,97
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.coverage.test.tsx
+  h_059e888e5e4e82 1-3,6-10,13-15,36,40,45,51
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.test.tsx
+  h_059e888e5e4e82 1,3-6
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  h_059e888e5e4e82 1,3-6,8,179
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskArtifactPreviewDrawer.test.tsx
+  h_059e888e5e4e82 1-8,11-13,16,69,93,108,156,195
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskInfoSection.coverage.test.tsx
+  h_059e888e5e4e82 1,3-5,7
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskOutputSection.test.tsx
+  h_059e888e5e4e82 1,3-4,6
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskPanelV2.coverage.test.tsx
+  h_059e888e5e4e82 1-2,4-8,10-11,13-14,17,54-55,59,92
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherBar.test.tsx
+  h_059e888e5e4e82 1,3-5,23,49,64,142,153
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherControl.coverage.test.tsx
+  h_059e888e5e4e82 1-2,5-7,9,35
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/taskPanelNav.coverage.test.ts
+  h_059e888e5e4e82 1,3-5,7
+apps/frontend-nextgen/assets/task-panel/test/release-ref.test.ts
+  h_059e888e5e4e82 1-44
+apps/frontend-nextgen/assets/task-panel/test/release.test.ts
+  h_059e888e5e4e82 1-26
+apps/frontend-nextgen/assets/task-panel/test/rich-content/SafeHtml.asset.test.tsx
+  h_059e888e5e4e82 1-3,9-10
+apps/frontend-nextgen/assets/task-panel/test/setup.ts
+  h_059e888e5e4e82 1-7
+apps/frontend-nextgen/assets/task-panel/test/taskSwitcher.migration.md
+  h_059e888e5e4e82 1-225
+apps/frontend-nextgen/assets/task-panel/test/umd-contract.mjs
+  h_059e888e5e4e82 1-35
+apps/frontend-nextgen/assets/task-panel/tsconfig.json
+  h_059e888e5e4e82 1-8
+apps/frontend-nextgen/assets/task-panel/tsconfig.test.json
+  h_059e888e5e4e82 1-9
+apps/frontend-nextgen/assets/task-panel/vite.config.ts
+  h_059e888e5e4e82 1-13
+apps/frontend-nextgen/assets/task-panel/vitest.config.ts
+  h_059e888e5e4e82 1-5
+apps/frontend-nextgen/config/config.local.ts
+  h_059e888e5e4e82 25-35,49-50,53-61,86-88,96-97
+apps/frontend-nextgen/config/config.ts
+  h_059e888e5e4e82 39-42
+apps/frontend-nextgen/config/routes.ts
+  h_059e888e5e4e82 29-30
+apps/frontend-nextgen/docs/architecture/agent-compute.md
+  h_059e888e5e4e82 1-135
+apps/frontend-nextgen/jest.config.cjs
+  h_059e888e5e4e82 10-13
+apps/frontend-nextgen/scripts/ci-guardrails.mjs
+  h_059e888e5e4e82 103-106,120-125
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/spec.md
+  h_059e888e5e4e82 40-45
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/validation.md
+  h_059e888e5e4e82 111-116
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/migration-map.json
+  h_059e888e5e4e82 1-176
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/plan.md
+  h_059e888e5e4e82 1-397
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/research.md
+  h_059e888e5e4e82 1-81
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/spec.md
+  h_059e888e5e4e82 1-50
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  h_059e888e5e4e82 1-256
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/test-migration-map.json
+  h_059e888e5e4e82 1-325
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/verification.md
+  h_059e888e5e4e82 1-215
+apps/frontend-nextgen/src/app.tsx
+  h_059e888e5e4e82 4,76
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  h_059e888e5e4e82 44-60,360-361,363,366
+apps/frontend-nextgen/src/capabilities/types.ts
+  h_059e888e5e4e82 744-753
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarEditor.tsx
+  h_059e888e5e4e82 5-6,8,20,22,25,27,29,31-41,56,68,92,97
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarSettings.tsx
+  h_059e888e5e4e82 7,15,25,39,74
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/prepareAvatar.ts
+  h_059e888e5e4e82 1-100
+apps/frontend-nextgen/src/components/BotWorkshop/BotBasicInfoDialog.tsx
+  h_059e888e5e4e82 22,61,70,76,152
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotInfoCell.tsx
+  h_059e888e5e4e82 40-46,48-62,82-97,100
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementRuntimeItems.tsx
+  h_059e888e5e4e82 106,112,114,119-125
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusPublicationMenu.tsx
+  h_059e888e5e4e82 43,176-178
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/CopyBotFormFields.tsx
+  h_059e888e5e4e82 9-10,41,47,89,154
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/CreateBotFormFields.tsx
+  h_059e888e5e4e82 11-12,55,120,166,251
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityDetailDrawer.tsx
+  h_059e888e5e4e82 1-2
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityPickerModal.tsx
+  h_059e888e5e4e82 9,68,117,132,143-144,147,221-223
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  h_059e888e5e4e82 212,247-267
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/LocalSkillsPanel.tsx
+  h_059e888e5e4e82 5,24,46-49,55
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput.tsx
+  h_059e888e5e4e82 7,12,15,17-21
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.tsx
+  h_059e888e5e4e82 1-67
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard.tsx
+  h_059e888e5e4e82 1-46
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus.ts
+  h_059e888e5e4e82 1-17
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  h_059e888e5e4e82 12,101-107,111-112
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  h_059e888e5e4e82 1-51
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  h_059e888e5e4e82 12-16,21-22,27-28,64-78
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  h_059e888e5e4e82 60-62,185-186
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  h_059e888e5e4e82 4,22-25,31-32,97-108
+apps/frontend-nextgen/src/components/CollaborationPrivacy/settingsSections.tsx
+  h_059e888e5e4e82 7,87-88,93-94,100-103,114,121-122,126-131,138
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  h_059e888e5e4e82 1,58-59
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  h_059e888e5e4e82 92-93,144-146
+apps/frontend-nextgen/src/components/CollaborationSquare/SquarePageShell/index.tsx
+  h_059e888e5e4e82 22-26,30-31,36,38,48,61,84,106
+apps/frontend-nextgen/src/components/CollaborationSquare/SquareSearchBar/index.tsx
+  h_059e888e5e4e82 5,29-34,39-40,58,87-96
+apps/frontend-nextgen/src/components/Common/RichContent/SafeHtml.tsx
+  h_059e888e5e4e82 1-164
+apps/frontend-nextgen/src/components/Common/RichContent/index.ts
+  h_059e888e5e4e82 1-2
+apps/frontend-nextgen/src/components/Common/RichContent/sanitizeHtml.ts
+  h_059e888e5e4e82 1-64
+apps/frontend-nextgen/src/components/GatewayReauthModal.tsx
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/src/components/ScheduledTasks/RoutineRunConversation.tsx
+  h_059e888e5e4e82 6-7
+apps/frontend-nextgen/src/components/Workspace/ChatLayoutPanelSlot.tsx
+  h_059e888e5e4e82 30-31,98-101,116,121
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  h_059e888e5e4e82 36,48,54,70-71,172-187,205,268
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/composerCapabilitiesMenuTypes.ts
+  h_059e888e5e4e82 22-23
+apps/frontend-nextgen/src/components/Workspace/TaskLinkedSession.tsx
+  h_059e888e5e4e82 1-2,51,60
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAdapter.tsx
+  h_059e888e5e4e82 12-16,44,57,59,66
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAssetBoundary.tsx
+  h_059e888e5e4e82 1-65
+apps/frontend-nextgen/src/components/Workspace/TaskPanelHost.tsx
+  h_059e888e5e4e82 1-36
+apps/frontend-nextgen/src/components/Workspace/persistentTaskPanelStaleRelease.ts
+  h_059e888e5e4e82 4,19
+apps/frontend-nextgen/src/components/agentswarm/AgentComputePanel.tsx
+  h_059e888e5e4e82 1-274
+apps/frontend-nextgen/src/components/agentswarm/AgentFieldCard.tsx
+  h_059e888e5e4e82 1-230
+apps/frontend-nextgen/src/components/agentswarm/ComputeConfigForm.tsx
+  h_059e888e5e4e82 1-217
+apps/frontend-nextgen/src/components/agentswarm/IdentityBotPicker.tsx
+  h_059e888e5e4e82 1-91
+apps/frontend-nextgen/src/components/agentswarm/ModelSelector.tsx
+  h_059e888e5e4e82 1-65
+apps/frontend-nextgen/src/components/agentswarm/PanelResizeHandle.tsx
+  h_059e888e5e4e82 1-86
+apps/frontend-nextgen/src/components/agentswarm/RunCard.tsx
+  h_059e888e5e4e82 1-70
+apps/frontend-nextgen/src/components/agentswarm/RunDetailPanel.tsx
+  h_059e888e5e4e82 1-265
+apps/frontend-nextgen/src/components/agentswarm/RunOptionsPanel.tsx
+  h_059e888e5e4e82 1-134
+apps/frontend-nextgen/src/components/agentswarm/RunStatusBadge.tsx
+  h_059e888e5e4e82 1-24
+apps/frontend-nextgen/src/components/agentswarm/VerticalResizeHandle.tsx
+  h_059e888e5e4e82 1-80
+apps/frontend-nextgen/src/components/ui/Label.tsx
+  h_059e888e5e4e82 1-20
+apps/frontend-nextgen/src/domain/agentswarm/draft.ts
+  h_059e888e5e4e82 1-152
+apps/frontend-nextgen/src/domain/agentswarm/examples.ts
+  h_059e888e5e4e82 1-30
+apps/frontend-nextgen/src/domain/agentswarm/identityOptions.ts
+  h_059e888e5e4e82 1-59
+apps/frontend-nextgen/src/domain/agentswarm/manifest.ts
+  h_059e888e5e4e82 1-135
+apps/frontend-nextgen/src/domain/agentswarm/manifestTemplate.ts
+  h_059e888e5e4e82 1-31
+apps/frontend-nextgen/src/domain/agentswarm/models.ts
+  h_059e888e5e4e82 1-40
+apps/frontend-nextgen/src/domain/agentswarm/options.ts
+  h_059e888e5e4e82 1-94
+apps/frontend-nextgen/src/domain/agentswarm/synthManifest.ts
+  h_059e888e5e4e82 1-31
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  h_059e888e5e4e82 73-74
+apps/frontend-nextgen/src/domain/collaborationSquare/bcsBotMapper.ts
+  h_059e888e5e4e82 1-96
+apps/frontend-nextgen/src/domain/collaborationSquare/mapper.ts
+  h_059e888e5e4e82 313-314,325
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  h_059e888e5e4e82 90,92-93,95,97,103,108-116,139,141-148,152-157,171-195,208-213,222,226-229,340-341
+apps/frontend-nextgen/src/domain/tasks/taskSession.ts
+  h_059e888e5e4e82 1-6
+apps/frontend-nextgen/src/extensions/empty.ts
+  h_059e888e5e4e82 1-2,24,45,61
+apps/frontend-nextgen/src/hooks/localSkillUploadErrors.ts
+  h_059e888e5e4e82 1-48
+apps/frontend-nextgen/src/hooks/useBotAdvancedConfig.ts
+  h_059e888e5e4e82 64,66,68-69
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  h_059e888e5e4e82 34,39,114,118,125-129,131
+apps/frontend-nextgen/src/hooks/useBotEditorCandidates.ts
+  h_059e888e5e4e82 8,22,30,46
+apps/frontend-nextgen/src/hooks/useBotLocalSkillUpload.ts
+  h_059e888e5e4e82 6-10,14-17,19
+apps/frontend-nextgen/src/hooks/useBotPublicationMenu.ts
+  h_059e888e5e4e82 19-20,87-91,103,140,143
+apps/frontend-nextgen/src/hooks/useBotWorkshop.ts
+  h_059e888e5e4e82 156
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyFlow.ts
+  h_059e888e5e4e82 3,46-48,94-103,105,109-112,126,130-132,141,146,166,168-173,182
+apps/frontend-nextgen/src/hooks/useBotWorkshopCreateFlow.ts
+  h_059e888e5e4e82 2-3,47-51
+apps/frontend-nextgen/src/hooks/useCollaborationActorOperationScope.ts
+  h_059e888e5e4e82 1-27
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  h_059e888e5e4e82 140-154
+apps/frontend-nextgen/src/hooks/useCollaborationSquare.ts
+  h_059e888e5e4e82 1-2,5,76-79,128-138,153,157
+apps/frontend-nextgen/src/hooks/useCollaborationSquareFriendActions.ts
+  h_059e888e5e4e82 1-160
+apps/frontend-nextgen/src/hooks/useCollaborationSquareList.ts
+  h_059e888e5e4e82 5,8,12,14,19-20,27,52-56,67,72-73,78,94-122,139-140,146,160,172,175,181-183,198,216-221,233,245
+apps/frontend-nextgen/src/hooks/useCollaborationSquarePagination.ts
+  h_059e888e5e4e82 1-22
+apps/frontend-nextgen/src/hooks/useGatewayLoginRedirect.ts
+  h_059e888e5e4e82 1-3,5-6,9-25,28,30-40,42-43,45,47-56,58-59,61-116
+apps/frontend-nextgen/src/hooks/useLocalSkillUploadError.ts
+  h_059e888e5e4e82 1-29
+apps/frontend-nextgen/src/hooks/useRunDetail.ts
+  h_059e888e5e4e82 1-77
+apps/frontend-nextgen/src/hooks/useRunList.ts
+  h_059e888e5e4e82 1-97
+apps/frontend-nextgen/src/hooks/useRunPolling.ts
+  h_059e888e5e4e82 1-114
+apps/frontend-nextgen/src/hooks/useServiceBotEval.ts
+  h_059e888e5e4e82 11-16,20,25,43,51,72,76,83,95,102
+apps/frontend-nextgen/src/hooks/useServiceBotEvalMenuVisibility.ts
+  h_059e888e5e4e82 2,9,52,54
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 2,6-7,90,92,96-102
+apps/frontend-nextgen/src/hooks/useSharedTaskPanelRecovery.ts
+  h_059e888e5e4e82 1-69
+apps/frontend-nextgen/src/hooks/useSpaceContext.ts
+  h_059e888e5e4e82 12,179-182
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  h_059e888e5e4e82 2-4,172,175-184
+apps/frontend-nextgen/src/pages/AgentCompute/index.tsx
+  h_059e888e5e4e82 1-33
+apps/frontend-nextgen/src/pages/BotWorkshop/Evaluation/index.tsx
+  h_059e888e5e4e82 1-4,6,13,16,33-34,36-38,88-111,114,122-124,127-131,182-184,186-199,254-257,263,266
+apps/frontend-nextgen/src/pages/BotWorkshop/index.tsx
+  h_059e888e5e4e82 28
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/ExpertDetails.tsx
+  h_059e888e5e4e82 1
+apps/frontend-nextgen/src/pages/EvolutionFactory/OutputPrimitives.tsx
+  h_059e888e5e4e82 1-2
+apps/frontend-nextgen/src/pages/Lab/Tasks/TaskArtifactsDrawer.tsx
+  h_059e888e5e4e82 1,35-43
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskDrawers.tsx
+  h_059e888e5e4e82 1,95
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationInteractiveStage.tsx
+  h_059e888e5e4e82 8-9,149-153,170-176
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  h_059e888e5e4e82 111
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotUnavailableTooltip.tsx
+  h_059e888e5e4e82 8,12-14,17,26,48
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionRow.tsx
+  h_059e888e5e4e82 75-76
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionStatus.tsx
+  h_059e888e5e4e82 42,95,98,101
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  h_059e888e5e4e82 1-2,50,102-105,174-175,180,193
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useLegacyShareLinkGuard.ts
+  h_059e888e5e4e82 9,48-55,93,134,139,142-145
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  h_059e888e5e4e82 43
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/CollabPanel.tsx
+  h_059e888e5e4e82 150
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.tsx
+  h_059e888e5e4e82 1
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/sessionFileMarkdown.ts
+  h_059e888e5e4e82 1,3
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  h_059e888e5e4e82 1,110-111,148-149,153,166
+apps/frontend-nextgen/src/services/agentswarm/http.ts
+  h_059e888e5e4e82 1-132
+apps/frontend-nextgen/src/services/agentswarm/refusals.ts
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/src/services/agentswarm/service.ts
+  h_059e888e5e4e82 1-81
+apps/frontend-nextgen/src/services/agentswarm/tenant.ts
+  h_059e888e5e4e82 1-15
+apps/frontend-nextgen/src/services/agentswarm/types.ts
+  h_059e888e5e4e82 1-247
+apps/frontend-nextgen/src/services/auth/reauthProbe.ts
+  h_059e888e5e4e82 1-69
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  h_059e888e5e4e82 101-102,182-183,188
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  h_059e888e5e4e82 186-190,193,197,204,273,277,385-392
+apps/frontend-nextgen/src/services/backendApi/bots/serviceBotEvalController.ts
+  h_059e888e5e4e82 63
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  h_059e888e5e4e82 44-45,49,58,70,78-83,88,90,251,266,270-272,276,282,301
+apps/frontend-nextgen/src/services/bcs/UmdPanel.tsx
+  h_059e888e5e4e82 1,76,172-182
+apps/frontend-nextgen/src/services/bcs/botCandidatesController.ts
+  h_059e888e5e4e82 1-253
+apps/frontend-nextgen/src/services/bcs/libraryCdnInjector.ts
+  h_059e888e5e4e82 68-69
+apps/frontend-nextgen/src/services/botWorkshop/botAdvancedConfigService.ts
+  h_059e888e5e4e82 44,69-79,81,106-115,117-125
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  h_059e888e5e4e82 195,199,248-255,260-261
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  h_059e888e5e4e82 20,25-48,222-232
+apps/frontend-nextgen/src/services/botWorkshop/botWorkshopService.ts
+  h_059e888e5e4e82 317-318
+apps/frontend-nextgen/src/services/collaborationPrivacy/friendApprovalAttributes.ts
+  h_059e888e5e4e82 42-48,52-55,59
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  h_059e888e5e4e82 1,3,6,11,21,34,38,41-43,45,58-59,62,106-191,197,199-212,214,216,218,236,238-243,245,248-260,266-271,273-282,284
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiHelpers.ts
+  h_059e888e5e4e82 16
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareGateway.ts
+  h_059e888e5e4e82 3,13,25-26,28,33-35
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareService.ts
+  h_059e888e5e4e82 8,57-58,60,65,74-75,80,82,94,98,107-108,115-116
+apps/frontend-nextgen/src/services/collaborationSquare/mockCollaborationSquareAdapter.ts
+  h_059e888e5e4e82 19,25,56-60,64-69,72-84,87,89-92
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotCursor.ts
+  h_059e888e5e4e82 1-104
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotMetadata.ts
+  h_059e888e5e4e82 1-146
+apps/frontend-nextgen/src/services/tasks/panel/messageWindowLocate.ts
+  h_059e888e5e4e82 1-71
+apps/frontend-nextgen/src/services/tasks/panel/registerTaskPanel.ts
+  h_059e888e5e4e82 2-3,5-6
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelArtifactAdapter.ts
+  h_059e888e5e4e82 1-43
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetLoader.ts
+  h_059e888e5e4e82 1-95
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelConversationAdapter.ts
+  h_059e888e5e4e82 2-3,6-46,48-50,53-59
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHandleAdapter.ts
+  h_059e888e5e4e82 1-2,4-5,7-11,14-18,20-42,44-52,54-61,63-64
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHistoryAdapter.ts
+  h_059e888e5e4e82 1-29
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRuntime.ts
+  h_059e888e5e4e82 1,3-4,7-8,10-15,17,19-57,59-157
+apps/frontend-nextgen/src/services/workspace/botRegistrationService.ts
+  h_059e888e5e4e82 42-60,66-75
+apps/frontend-nextgen/src/services/workspace/filePreview.ts
+  h_059e888e5e4e82 1-86
+apps/frontend-nextgen/src/services/workspace/groupExecuteService.ts
+  h_059e888e5e4e82 21,93-94,102,105,142-143,154,157
+apps/frontend-nextgen/src/services/workspace/identityService.ts
+  h_059e888e5e4e82 3,166-170
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  h_059e888e5e4e82 1-3,66,72-73,98,100-104,114-116,120-121,277-278,281
+apps/frontend-nextgen/src/services/workspace/sessionService.ts
+  h_059e888e5e4e82 19,122-123,132,135
+apps/frontend-nextgen/src/shell/ReleaseNotesModal.tsx
+  h_059e888e5e4e82 5-6
+apps/frontend-nextgen/src/stores/agentComputePanelStore.ts
+  h_059e888e5e4e82 1-68
+apps/frontend-nextgen/src/stores/externalAuthStore.ts
+  h_059e888e5e4e82 35-40,64
+apps/frontend-nextgen/src/stores/loginRedirectStore.ts
+  h_059e888e5e4e82 7-11,15-17,32-38,41,44-52,59-61,76-82
+apps/frontend-nextgen/src/stores/runGoalStore.ts
+  h_059e888e5e4e82 2,4-8,10-16,19-20,22-24,26-32,34,36-39,41-42
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  h_059e888e5e4e82 2,4,6,8-10,12,37
+apps/frontend-nextgen/src/stores/taskSidePanelStoreTypes.ts
+  h_059e888e5e4e82 1
+apps/frontend-nextgen/src/typings/global.d.ts
+  h_059e888e5e4e82 6-11,40-47
+apps/frontend-nextgen/src/utils/reauthBroadcast.ts
+  h_059e888e5e4e82 1-52
+apps/frontend-nextgen/src/utils/redirectCurrentTab.ts
+  h_059e888e5e4e82 31-65
+apps/frontend-nextgen/src/utils/requestErrorHandler.ts
+  h_059e888e5e4e82 74-88,102-103
+apps/frontend-nextgen/test/capabilities/defaultCapabilities.test.ts
+  h_059e888e5e4e82 337-381
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  h_059e888e5e4e82 284-336,555-625
+apps/frontend-nextgen/test/collaborationSquareService.test.ts
+  h_059e888e5e4e82 22,24-26,200,202,205-206,210,212-213,221-222,239,249-250,253-258,266,274-276,285-286,293,297-318,324,327-329,332-333,341,349,354-355,360,367-377,459-473
+apps/frontend-nextgen/test/components/BotWorkshop/BotAvatar/prepareAvatar.test.ts
+  h_059e888e5e4e82 1-87
+apps/frontend-nextgen/test/components/BotWorkshop/BotEvaluationHistoryMenu.test.tsx
+  h_059e888e5e4e82 1-61
+apps/frontend-nextgen/test/components/BotWorkshop/BotInfoCell.test.tsx
+  h_059e888e5e4e82 1-44
+apps/frontend-nextgen/test/components/BotWorkshop/BotStatusPublicationMenu.test.tsx
+  h_059e888e5e4e82 143-193,308
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  h_059e888e5e4e82 9,823-899
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal.test.tsx
+  h_059e888e5e4e82 97-105,118-119,132
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/CreateBotFormFields.test.tsx
+  h_059e888e5e4e82 8-9,13-14,90-105
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  h_059e888e5e4e82 76-77,80-82,128-164
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput.test.tsx
+  h_059e888e5e4e82 1-33
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.responsive.test.tsx
+  h_059e888e5e4e82 1-53
+apps/frontend-nextgen/test/components/BotWorkshop/localSkillUploadErrors.test.ts
+  h_059e888e5e4e82 1-24
+apps/frontend-nextgen/test/components/BotWorkshop/useLocalSkillUploadError.test.tsx
+  h_059e888e5e4e82 1-30
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  h_059e888e5e4e82 5-8,29-35,115,118,251,259,285-299,317,351,359,602-693
+apps/frontend-nextgen/test/components/CollaborationPrivacy/ExternalBotGeneralConfigDialog.test.tsx
+  h_059e888e5e4e82 19
+apps/frontend-nextgen/test/components/CollaborationSquare/PublicBotCatalogPanel.test.tsx
+  h_059e888e5e4e82 82-93
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareSearchBar.test.tsx
+  h_059e888e5e4e82 75-107
+apps/frontend-nextgen/test/components/Workspace/ChatLayoutPanelSlot.test.tsx
+  h_059e888e5e4e82 26-31,36,268,287,290,319,405,634-652
+apps/frontend-nextgen/test/components/Workspace/TaskLinkedSession.test.tsx
+  h_059e888e5e4e82 13-16
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAdapter.test.tsx
+  h_059e888e5e4e82 7,9-10
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAssetBoundary.test.tsx
+  h_059e888e5e4e82 1-160
+apps/frontend-nextgen/test/components/Workspace/TaskPanelHost.test.tsx
+  h_059e888e5e4e82 1-160
+apps/frontend-nextgen/test/components/agentswarm/AgentComputePanel.flow.test.tsx
+  h_059e888e5e4e82 1-206
+apps/frontend-nextgen/test/components/agentswarm/ComputeConfigForm.test.tsx
+  h_059e888e5e4e82 1-138
+apps/frontend-nextgen/test/components/agentswarm/PanelResizeHandle.test.tsx
+  h_059e888e5e4e82 1-78
+apps/frontend-nextgen/test/components/agentswarm/RunDetailPanel.test.tsx
+  h_059e888e5e4e82 1-158
+apps/frontend-nextgen/test/components/agentswarm/RunOptionsPanel.test.tsx
+  h_059e888e5e4e82 1-79
+apps/frontend-nextgen/test/components/agentswarm/RunStatusBadge.test.tsx
+  h_059e888e5e4e82 1-36
+apps/frontend-nextgen/test/components/agentswarm/VerticalResizeHandle.test.tsx
+  h_059e888e5e4e82 1-78
+apps/frontend-nextgen/test/components/ui/SafeHtml.test.tsx
+  h_059e888e5e4e82 2,108-125
+apps/frontend-nextgen/test/config/bbsProxyConfig.test.ts
+  h_059e888e5e4e82 54-118
+apps/frontend-nextgen/test/domain/agentswarm/draft.test.ts
+  h_059e888e5e4e82 1-95
+apps/frontend-nextgen/test/domain/agentswarm/editAfterConfirm.test.ts
+  h_059e888e5e4e82 1-59
+apps/frontend-nextgen/test/domain/agentswarm/identityNotHardcoded.test.ts
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/test/domain/agentswarm/identityOptions.test.ts
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/test/domain/agentswarm/identityPickerSubmit.test.ts
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/test/domain/agentswarm/manifest.test.ts
+  h_059e888e5e4e82 1-87
+apps/frontend-nextgen/test/domain/agentswarm/manifestAcceptedPayload.test.ts
+  h_059e888e5e4e82 1-118
+apps/frontend-nextgen/test/domain/agentswarm/manifestSubmit.test.ts
+  h_059e888e5e4e82 1-61
+apps/frontend-nextgen/test/domain/agentswarm/manifestTemplate.test.ts
+  h_059e888e5e4e82 1-43
+apps/frontend-nextgen/test/domain/agentswarm/options.test.ts
+  h_059e888e5e4e82 1-61
+apps/frontend-nextgen/test/domain/agentswarm/synthManifest.test.ts
+  h_059e888e5e4e82 1-41
+apps/frontend-nextgen/test/domain/collaborationSquare/bcsBotMapper.test.ts
+  h_059e888e5e4e82 1-162
+apps/frontend-nextgen/test/helpers/taskPanelHost.tsx
+  h_059e888e5e4e82 1-12
+apps/frontend-nextgen/test/helpers/taskPanelRuntime.ts
+  h_059e888e5e4e82 1-41
+apps/frontend-nextgen/test/hooks/useBotAdvancedConfig.test.ts
+  h_059e888e5e4e82 8-14,23-35
+apps/frontend-nextgen/test/hooks/useBotEditor.test.tsx
+  h_059e888e5e4e82 8,15-17,49-71
+apps/frontend-nextgen/test/hooks/useBotWorkshopCopyFlow.test.tsx
+  h_059e888e5e4e82 1-52
+apps/frontend-nextgen/test/hooks/useCollaborationActorOperationScope.test.tsx
+  h_059e888e5e4e82 1-124
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  h_059e888e5e4e82 603-637
+apps/frontend-nextgen/test/hooks/useCollaborationSquare.test.tsx
+  h_059e888e5e4e82 3-4,7-9,27-37,49,61-66,121,131,146,235,267,317,376,420,445-446,448,454,457,474,499,506,508,525,598,678,752,810,847,883,885,888,890,899,909,911,924-926,962-967,974,1003,1008-1009,1344,1490-1518,1813-2243
+apps/frontend-nextgen/test/hooks/useCollaborationSquareList.test.tsx
+  h_059e888e5e4e82 1-373
+apps/frontend-nextgen/test/hooks/useGatewayLoginRedirect.test.tsx
+  h_059e888e5e4e82 2,4-6,8-10,13-18,20,22,25-28,30-34,37,39-46,49-56,58,60-61,64-66,68-73,76,79,81-88,90-100,102-104,106-115,118-121,123,125-126,129-130,132-152,154-157,160-219
+apps/frontend-nextgen/test/hooks/useLegacyShareLinkGuard.test.tsx
+  h_059e888e5e4e82 3,8,118-167,261-310
+apps/frontend-nextgen/test/hooks/useRunDetail.test.ts
+  h_059e888e5e4e82 1-81
+apps/frontend-nextgen/test/hooks/useRunList.test.ts
+  h_059e888e5e4e82 1-87
+apps/frontend-nextgen/test/hooks/useRunPolling.test.ts
+  h_059e888e5e4e82 1-111
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 7,19-76,137,237,340,378,439,553-567
+apps/frontend-nextgen/test/hooks/useSpaceContext.test.ts
+  h_059e888e5e4e82 352-389
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  h_059e888e5e4e82 6,68,238,263,271
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.coverage.test.tsx
+  h_059e888e5e4e82 2-3,5-6,8-11
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.test.tsx
+  h_059e888e5e4e82 11
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.aceLogin.test.tsx
+  h_059e888e5e4e82 2,5-10
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.coverage.test.tsx
+  h_059e888e5e4e82 4-5,10,12-15
+apps/frontend-nextgen/test/integration/taskPanel/nodeSelection.noSend.test.tsx
+  h_059e888e5e4e82 1-56
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.coverage.test.tsx
+  h_059e888e5e4e82 4-5,30-31,35-38,46
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.objectFile.test.tsx
+  h_059e888e5e4e82 5-6,8,10-14,37
+apps/frontend-nextgen/test/integration/taskPanel/useTaskExecution.presentation.test.tsx
+  h_059e888e5e4e82 1-64
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx
+  h_059e888e5e4e82 8-10,13,17-21,33,41
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskNodePanelV2.test.tsx
+  h_059e888e5e4e82 3-6,8,10-14
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 7-12,14-18
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskPanelV2.test.tsx
+  h_059e888e5e4e82 3-7,9,11-18,225
+apps/frontend-nextgen/test/pages/AgentComputePage.test.tsx
+  h_059e888e5e4e82 1-49
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  h_059e888e5e4e82 46-48,69,71,73-74
+apps/frontend-nextgen/test/pages/BotWorkshop/Evaluation.identityGate.test.tsx
+  h_059e888e5e4e82 1-95
+apps/frontend-nextgen/test/pages/Lab/TaskArtifactsDrawer.test.tsx
+  h_059e888e5e4e82 1-40
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  h_059e888e5e4e82 12-15
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  h_059e888e5e4e82 409-427
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationCollapsedRail.test.tsx
+  h_059e888e5e4e82 122-141
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  h_059e888e5e4e82 26-41
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  h_059e888e5e4e82 23-28,76
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  h_059e888e5e4e82 16-22,56-59
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  h_059e888e5e4e82 250
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupTaskRecoveryEntry.test.tsx
+  h_059e888e5e4e82 1-23
+apps/frontend-nextgen/test/services/agentswarm/http.test.ts
+  h_059e888e5e4e82 1-85
+apps/frontend-nextgen/test/services/agentswarm/noAuthorizationTier.test.ts
+  h_059e888e5e4e82 1-55
+apps/frontend-nextgen/test/services/agentswarm/refusals.test.ts
+  h_059e888e5e4e82 1-62
+apps/frontend-nextgen/test/services/agentswarm/service.test.ts
+  h_059e888e5e4e82 1-92
+apps/frontend-nextgen/test/services/agentswarm/tenant.test.ts
+  h_059e888e5e4e82 1-36
+apps/frontend-nextgen/test/services/agentswarm/types.test.ts
+  h_059e888e5e4e82 1-47
+apps/frontend-nextgen/test/services/auth/reauthProbe.test.ts
+  h_059e888e5e4e82 1-139
+apps/frontend-nextgen/test/services/backendApi/bots/botEditorController.test.ts
+  h_059e888e5e4e82 334-350
+apps/frontend-nextgen/test/services/backendApi/httpClient.aceLogin.test.ts
+  h_059e888e5e4e82 104-121,244
+apps/frontend-nextgen/test/services/bcs/botCandidatesController.test.ts
+  h_059e888e5e4e82 1-363
+apps/frontend-nextgen/test/services/botWorkshop/botAccessPolicy.test.ts
+  h_059e888e5e4e82 6,8
+apps/frontend-nextgen/test/services/botWorkshop/botAdvancedConfigService.test.ts
+  h_059e888e5e4e82 65,85,156,172
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  h_059e888e5e4e82 217-226,229,285,288
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  h_059e888e5e4e82 7,31-45,123-141,292-317
+apps/frontend-nextgen/test/services/collaborationPrivacy/mappers.test.ts
+  h_059e888e5e4e82 188-211
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.discovery.test.ts
+  h_059e888e5e4e82 1-662
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.fixtures.ts
+  h_059e888e5e4e82 1-145
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  h_059e888e5e4e82 1,3,6-54,56-62,65,67,69-75,77-81,83,86-99,102-109,112-115,117,121-122,125,127-128,130-131,133,135-143,146-153,155-167,170-174,176-183,185-189,191-199,203-210,212-215,217,220-223,225-230,233-237,240-241,244-250,254-255,257,260-261,263-286,288,290-295,298-299,301-303,305,307,399,402-403,406-414,416-419,422-429,431,481-482,485,487-515,517-520,523,525-562,564,568-573,575,577,579-582,584-589,591-594,597,599-602,604-615,617,619,621-624,626-631,633-635,637-653,655-657,660,662-665,667-672,674-686,688-693,695-699,701-708,710-731,733-736,739-742,744,746-754,756,758-762,764-769,771,773-775
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareRuntimeWiring.test.ts
+  h_059e888e5e4e82 22-66,68-73,75,77-81,83,85,98,110-120,122-124,128-135,139,141,144,147-148,153-154,158
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotCursor.test.ts
+  h_059e888e5e4e82 1-416
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotMetadata.test.ts
+  h_059e888e5e4e82 1-430
+apps/frontend-nextgen/test/services/collaborationSquare/unsupportedCollaborationSquareAdapter.test.ts
+  h_059e888e5e4e82 1,6-16,19-29,32-46
+apps/frontend-nextgen/test/services/tasks/panel/registerTaskPanel.test.ts
+  h_059e888e5e4e82 3,10,13-14
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelArchitecture.test.ts
+  h_059e888e5e4e82 1-95
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  h_059e888e5e4e82 1-117
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelConversationAdapter.test.ts
+  h_059e888e5e4e82 2-5,8-16,18-39,41,43,45-47,49-54,56-60,62-69,71-88,91-95,97,99-106,108-139,142-146
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelHandleAdapter.test.ts
+  h_059e888e5e4e82 2-5,7,9-23,25-39,41-47,49-53,55-57,59-62,64-68,70-77
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.origin-regression.test.ts
+  h_059e888e5e4e82 1-41
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.switcher.test.ts
+  h_059e888e5e4e82 1-28
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.test.tsx
+  h_059e888e5e4e82 1-176
+apps/frontend-nextgen/test/services/workspace/botRegistrationService.test.ts
+  h_059e888e5e4e82 62-133
+apps/frontend-nextgen/test/services/workspace/identityService.test.ts
+  h_059e888e5e4e82 510-592
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  h_059e888e5e4e82 3,10-16,41-45,49-53,56-60
+apps/frontend-nextgen/test/shell/bcsOnlyDiscoveryBoot.test.tsx
+  h_059e888e5e4e82 1-388
+apps/frontend-nextgen/test/sidePanel/UmdPanel.groupLaunch.test.tsx
+  h_059e888e5e4e82 56-66
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.test.ts
+  h_059e888e5e4e82 127-135
+apps/frontend-nextgen/test/stores/agentComputePanelStore.test.ts
+  h_059e888e5e4e82 1-68
+apps/frontend-nextgen/test/stores/loginRedirectStore.test.ts
+  h_059e888e5e4e82 1,48-101
+apps/frontend-nextgen/test/stores/runGoalStore.test.ts
+  h_059e888e5e4e82 1-35
+apps/frontend-nextgen/test/stores/sessionStatusBridge.test.tsx
+  h_059e888e5e4e82 97,106,109,131,136,139,146,152,301,307-325
+apps/frontend-nextgen/test/stores/taskSidePanelStore.test.ts
+  h_059e888e5e4e82 3,5,7-33
+apps/frontend-nextgen/test/userFacingTerminology.test.ts
+  h_059e888e5e4e82 9
+apps/frontend-nextgen/test/utils/reauthBroadcast.test.ts
+  h_059e888e5e4e82 1-82
+apps/frontend-nextgen/test/utils/redirectCurrentTab.openLoginInNewTab.test.ts
+  h_059e888e5e4e82 1-53
+apps/frontend-nextgen/tsconfig.json
+  h_059e888e5e4e82 12-14
+devops/hook/pre_push.sh
+  h_059e888e5e4e82 203-204
+docs/agents/validation.md
+  h_059e888e5e4e82 72,77-86,104-109,134-157
+docs/bcn-a2a-api-reference.zh-CN.md
+  h_059e888e5e4e82 217,221,230-233,235,866
+docs/bcn-a2a-integration-guide.zh-CN.md
+  h_059e888e5e4e82 133
+docs/quick-start.md
+  h_059e888e5e4e82 36-38
+docs/quick-start.zh-CN.md
+  h_059e888e5e4e82 24-25
+docs/specs/2026-11-12-ci-trigger-and-singlebox-performance/plan.md
+  h_059e888e5e4e82 1-853
+docs/specs/2026-11-12-ci-trigger-and-singlebox-performance/spec.md
+  h_059e888e5e4e82 1-242
+docs/specs/2026-11-12-ci-trigger-and-singlebox-performance/validation.md
+  h_059e888e5e4e82 1-133
+docs/specs/a2a/minimal-card-registration-v1.md
+  h_059e888e5e4e82 210-231
+engine/adapter/README.md
+  h_059e888e5e4e82 18-19
+singlebox/ci/singlebox_coverage.sh
+  h_059e888e5e4e82 32-33,55-68,104-114,299,365-382,387-388,391,394-396,398,400,402-405,408-422
+singlebox/ci/tests/test_bcs_cargo_test_tools.py
+  h_059e888e5e4e82 71
+singlebox/ci/tests/test_bcs_ci_build_reuse.py
+  h_059e888e5e4e82 156,175,179
+singlebox/ci/tests/test_bcs_ci_change_detection.py
+  h_059e888e5e4e82 120
+singlebox/ci/tests/test_bcs_panel_asset.py
+  h_059e888e5e4e82 1-77
+singlebox/ci/tests/test_just_test_coverage_gate.py
+  h_059e888e5e4e82 14-15,228-232
+singlebox/ci/tests/test_pre_push_dispatch.py
+  h_059e888e5e4e82 28,30,56,67,76,96,103-122
+singlebox/ci/tests/test_refactory_collaboration_workflow_triggers.py
+  h_059e888e5e4e82 7
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  h_059e888e5e4e82 1,53,60-108,142-193
+singlebox/ci/tests/test_singlebox_parallel_pipeline.py
+  h_059e888e5e4e82 6,47-60,62-105,117-123,134,143-157,161-166,194,214-280
+singlebox/ci/tests/test_unit_test_workflow_diff.py
+  h_059e888e5e4e82 11-16,47-55,58,65-68,75-159,167-171,173,176,185-188
+singlebox/modules/bcs.sh
+  h_059e888e5e4e82 133-152,172-176
+singlebox/modules/bcsfuse.sh
+  h_059e888e5e4e82 298,313-314,319,338
+tools/a2a-json-tool/README.md
+  h_059e888e5e4e82 1-219
+tools/a2a-json-tool/cli.mjs
+  h_059e888e5e4e82 1-45
+tools/a2a-json-tool/editor/json-editor.js
+  h_059e888e5e4e82 1-167
+tools/a2a-json-tool/package-lock.json
+  h_059e888e5e4e82 1-647
+tools/a2a-json-tool/package.json
+  h_059e888e5e4e82 1-26
+tools/a2a-json-tool/scripts/build-editor.mjs
+  h_059e888e5e4e82 1-30
+tools/a2a-json-tool/server.mjs
+  h_059e888e5e4e82 1-81
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/spec.json
+  h_059e888e5e4e82 1-6
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/spec.md
+  h_059e888e5e4e82 1-36
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/tasks.md
+  h_059e888e5e4e82 1-27
+tools/a2a-json-tool/specs/2026-11-11-json-to-a2a/validation.md
+  h_059e888e5e4e82 1-105
+tools/a2a-json-tool/test/cli.test.js
+  h_059e888e5e4e82 1-124
+tools/a2a-json-tool/test/convert-input.test.js
+  h_059e888e5e4e82 1-182
+tools/a2a-json-tool/test/converter.test.js
+  h_059e888e5e4e82 1-183
+tools/a2a-json-tool/test/endpoint-url.test.js
+  h_059e888e5e4e82 1-62
+tools/a2a-json-tool/test/examples.test.js
+  h_059e888e5e4e82 1-36
+tools/a2a-json-tool/test/field-links.test.js
+  h_059e888e5e4e82 1-243
+tools/a2a-json-tool/test/input-parser.test.js
+  h_059e888e5e4e82 1-191
+tools/a2a-json-tool/test/json-editor.test.js
+  h_059e888e5e4e82 1-53
+tools/a2a-json-tool/test/message-content.test.js
+  h_059e888e5e4e82 1-88
+tools/a2a-json-tool/test/message-mapper.test.js
+  h_059e888e5e4e82 1-268
+tools/a2a-json-tool/test/provider-url.test.js
+  h_059e888e5e4e82 1-53
+tools/a2a-json-tool/test/server.test.js
+  h_059e888e5e4e82 1-70
+tools/a2a-json-tool/web/EDITOR-LICENSES.txt
+  h_059e888e5e4e82 1-329
+tools/a2a-json-tool/web/app.js
+  h_059e888e5e4e82 1-289
+tools/a2a-json-tool/web/convert-input.js
+  h_059e888e5e4e82 1-26
+tools/a2a-json-tool/web/converter.js
+  h_059e888e5e4e82 1-216
+tools/a2a-json-tool/web/examples.js
+  h_059e888e5e4e82 1-112
+tools/a2a-json-tool/web/field-links.js
+  h_059e888e5e4e82 1-87
+tools/a2a-json-tool/web/index.html
+  h_059e888e5e4e82 1-94
+tools/a2a-json-tool/web/input-parser.js
+  h_059e888e5e4e82 1-204
+tools/a2a-json-tool/web/json-editor.js
+  h_059e888e5e4e82 1-11
+tools/a2a-json-tool/web/message-mapper.js
+  h_059e888e5e4e82 1-159
+tools/a2a-json-tool/web/style.css
+  h_059e888e5e4e82 1-16
+tools/a2a-json-tool/web/uri.js
+  h_059e888e5e4e82 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a51f0c272d7f1dd36f1c535d5395bab1dfa00527",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

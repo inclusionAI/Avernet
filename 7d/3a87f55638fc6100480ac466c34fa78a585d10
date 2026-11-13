@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  s_64261436edbb0b::t_9f9e17340c92d3 49-50,54,58-75
+  s_64261436edbb0b::t_68b6050d512a4f 76-77
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_64261436edbb0b::t_7be08156a7d8de 1-97,99-142,144-159
+  s_64261436edbb0b::t_e698f030314646 98,143
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  s_64261436edbb0b::t_86188b5b567919 1-31
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  s_64261436edbb0b::t_9f9e17340c92d3 73-75,77,82,138-141,146-148,199,208-218,302-318,494-495
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  s_64261436edbb0b::t_bbcbb42210f85b 144-145
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_64261436edbb0b::t_53a6d4023bf465 114-116,122,389-390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d3a87f55638fc6100480ac466c34fa78a585d10",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
