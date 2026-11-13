@@ -159,8 +159,28 @@ impl ProcessManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // TEMP-DIAG(#3959): report the resolved server binary path on spawn.
+        eprintln!(
+            "spawn diag: exe={:?} exists={} is_file={} cwd_exists={}",
+            bcs_bin,
+            bcs_bin.exists(),
+            bcs_bin.is_file(),
+            data_dir.exists(),
+        );
+        if let Some(dir) = bcs_bin.parent() {
+            match std::fs::read_dir(dir) {
+                Ok(rd) => eprintln!(
+                    "spawn diag: exe parent entries={:?}",
+                    rd.filter_map(|entry| entry.ok())
+                        .map(|entry| entry.file_name())
+                        .collect::<Vec<_>>()
+                ),
+                Err(error) => eprintln!("spawn diag: exe parent read_dir error={error}"),
+            }
+        }
         // Spawn and track immediately - ensures cleanup on failure
-        let mut child = cmd.spawn()?;
+        let mut child = cmd.spawn()
+            .inspect_err(|error| eprintln!("spawn diag: spawn error={error} exe={bcs_bin:?}"))?;
         let (address_tx, address_rx) = std::sync::mpsc::channel();
 
         // Capture and print stdout/stderr in background
