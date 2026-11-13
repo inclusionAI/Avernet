@@ -536,12 +536,16 @@ contains `name`, `scope_level`, `scope`, `content`, `creator`, and
 `gmt_modified`. The creator identifies the writer of the current version.
 
 With a Session ID, the result includes the Group, that Session, and its round
-scopes. The Session must belong to the Group. A member Bot sees entries it can
+scopes. Round writes validate a literal `{sessionId}:` prefix and require a
+nonempty round identifier after it, which may be a UUID. Shared information
+returns all matching rounds and rejects a `roundId` query parameter with HTTP 400.
+The Session must belong to the Group. A member Bot sees entries it can
 read. A Human with access sees entries readable by the Human or by a Bot they
 manage that participates in the Group or Session. Without a Session ID, the
-endpoint requires a Human and returns Group entries readable by that Human.
-An authenticated Human may also pass `view_bot_id` with a Session ID to
-view entries as one Bot they manage. That Bot must participate in the Session.
+endpoint returns only Group entries readable by the caller. The group management
+page uses the Human perspective for this query. An authenticated Human may also
+pass `view_bot_id` to view entries as one Bot they manage. That Bot must
+participate in the requested Session, or in the Group for a group-only query.
 
 ## Predefined names
 
@@ -574,7 +578,9 @@ Owner or Manager (admin) authority on the Group
 driver Bot. Creation records that Human actor as both `creator` and
 `modifier`. Editing records the actor as `modifier` and retains `creator`.
 Names are case-sensitive and unique within a Group. Editing or deleting a definition leaves
-previously recorded contexts intact.
+previously recorded contexts intact. A duplicate preset on add or rename returns
+HTTP 409 with `status: "conflict"`. The display-only `error_msg` includes
+`请重命名后重试。` so the form can tell the operator how to proceed.
 
 To create a context with a predefined name, use `group-context add --preset`
 or set `"preset": true` in the add request. The name must match a definition in

@@ -211,17 +211,20 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
                 member.actor_kind == ActorKind::Bot && member.actor_id == bot_id
             })
         });
+        let has_bot = |bot_id: &str| {
+            if session.is_some() { session_has_bot(bot_id) } else { bots.contains(bot_id) }
+        };
         let actor_ids = if let Some(id) = view_bot_id {
             let user = caller.user.as_ref().filter(|_| caller.bot.is_none())
                 .ok_or_else(|| permission_denied(id, group_id))?;
-            if !session_has_bot(id) || !self.bot_authority.can_manage(&user.id, id).await
+            if !has_bot(id) || !self.bot_authority.can_manage(&user.id, id).await
                 .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?
             {
                 return Err(permission_denied(id, group_id));
             }
             vec![id.to_string()]
         } else if let Some(bot) = &caller.bot {
-            if !session_has_bot(&bot.bot_uuid) {
+            if !has_bot(&bot.bot_uuid) {
                 return Err(permission_denied(&bot.bot_uuid, group_id));
             }
             vec![bot.bot_uuid.clone()]
@@ -234,16 +237,34 @@ impl GroupContextApplicationService for GroupContextAddAccessGuard {
                     member.actor_kind == ActorKind::Human && member.actor_id == human
                 })
             });
-            for id in bots {
-                let manages = self.bot_authority.can_manage(&user.id, id).await
+            if session.is_some() {
+                use futures::{StreamExt, TryStreamExt};
+
+                // Bound outstanding authority reads per request to protect the shared DB pool.
+                let bot_ids: Vec<_> = bots.iter().map(|id| id.to_string()).collect();
+                let managed: Vec<_> = futures::stream::iter(bot_ids)
+                    .map(|id| async move {
+                        self.bot_authority.can_manage(&user.id, &id).await
+                            .map(|allowed| allowed.then_some(id))
+                    })
+                    .buffer_unordered(8)
+                    .try_collect()
+                    .await
                     .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
-                if manages {
-                    manages_member = true;
-                    if session.is_none() {
+                for id in managed.into_iter().flatten() {
+                    can_read_session |= session_has_bot(&id);
+                    actor_ids.push(id);
+                }
+            } else if group.visibility != "public" && !group.participants.iter().any(|member| {
+                member.actor_kind == ActorKind::Human && member.actor_id == human
+            }) {
+                for id in bots {
+                    if self.bot_authority.can_manage(&user.id, id).await
+                        .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?
+                    {
+                        manages_member = true;
                         break;
                     }
-                    can_read_session |= session_has_bot(id);
-                    actor_ids.push(id.to_string());
                 }
             }
             let admitted = if session.is_some() {

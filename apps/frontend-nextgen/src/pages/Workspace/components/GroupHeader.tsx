@@ -238,7 +238,7 @@ export function GroupHeader({
                 onClick={() => onTogglePanel(activePanel === 'history' ? 'none' : 'history')}
               />
             ) : null}
-            {selectedSession && (
+            {(selectedSession || selectedGroup) && (
               <GroupHeaderIcon
                 label={activePanel === 'sharedInfo' ? '关闭共享信息' : '共享信息'}
                 icon={<Layers className="size-4" aria-hidden />}
