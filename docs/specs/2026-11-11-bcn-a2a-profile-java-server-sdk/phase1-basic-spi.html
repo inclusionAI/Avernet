@@ -81,11 +81,11 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="box"><p>本文引用的条款编号（P-xx）、决策编号（Dx）和问题编号（Qx）都来自上位的详细设计稿。本文只规定第一期要做什么、怎么做；第一期不涉及的内容以详细设计为准。</p></div>
 </header>
 <h2 id="s1"><span class="n">1</span>目标与范围</h2>
-<p>第一期交付详细设计中的<b>消息模式</b>（L0，8.9 节）。一个 Agent 只需实现 <code>MessageAgent</code> 一个接口、一个方法，就能以标准 A2A 服务的形式注册到 BCS，并在 BCN 工作台中被调用。</p><h3>包含</h3>
+<p>第一期交付详细设计中的<b>消息模式</b>（L0，8.9 节）。一个 Agent 实现 <code>A2aAgentHandler</code> 接口中的 <code>sendMessage</code> 一个方法（其余四个标准方法用默认实现），就能以标准 A2A 服务的形式注册到 BCS，并在 BCN 工作台中被调用。</p><h3>包含</h3>
 <div class="tw"><table>
 <tr><th>项</th><th>说明</th></tr>
-<tr><td>SPI</td><td><code>MessageAgent</code>：收到一条消息，返回一条完整回复</td></tr>
-<tr><td>标准方法</td><td>SendMessage 正常处理；其余四个方法按 L0 规则返回固定错误（第 6 节）</td></tr>
+<tr><td>SPI</td><td><code>A2aAgentHandler</code>：五个标准方法齐全，第一期只实现 <code>sendMessage</code>，收到一条消息、返回一条完整回复</td></tr>
+<tr><td>标准方法</td><td>SendMessage 和 SendStreamingMessage 正常处理，流式时流中只有一条消息（5.5）；其余三个方法按 L0 规则返回固定错误（第 6 节）</td></tr>
 <tr><td>绑定</td><td>GRPC（SOFARPC Triple）、HTTP+JSON、JSONRPC，由业务在配置中选择开启哪些</td></tr>
 <tr><td>调用上下文</td><td>解析 <code>bcn.caller</code>，只读提供给 Agent；不作为必需扩展（第 10 节）</td></tr>
 <tr><td>AgentCard</td><td>根据描述自动生成、启动时校验、通过 HTTP 发布</td></tr>
@@ -96,22 +96,22 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <h3>不包含</h3>
 <div class="tw"><table>
 <tr><th>项</th><th>放在哪一期</th></tr>
-<tr><td>流式发送（<code>SendStreamingMessage</code>）</td><td>后续。第一期 Card 声明不支持流式</td></tr>
+<tr><td>逐段输出（一边生成一边推送文本）</td><td>后续，需要 Task（L2）。第一期的流式发送只推送一条完整消息，见 5.5</td></tr>
 <tr><td>Task 相关的一切：查询、订阅、取消、审批、推送</td><td>引擎模式和托管模式所在的阶段</td></tr>
-<tr><td>引擎模式 SPI <code>A2aAgentHandler</code>、托管模式 <code>ManagedAgent</code></td><td>后续</td></tr>
+<tr><td>返回 Task 的能力（引擎模式）、托管模式 <code>ManagedAgent</code></td><td>后续。接口不变，覆盖默认方法即可</td></tr>
 <tr><td>扩展编解码工具库：工具观察、内容块、业务扩展</td><td>后续</td></tr>
 <tr><td>文本以外的模态</td><td>后续。第一期请求和回复都只接受文本</td></tr>
-<tr><td>授权 SPI <code>AgentAuthorizer</code>、动态 Agent <code>AgentResolver</code></td><td>后续。第一期 Agent 可以在 <code>reply</code> 中自行读取调用上下文做判断</td></tr>
+<tr><td>授权 SPI <code>AgentAuthorizer</code>、动态 Agent <code>AgentResolver</code></td><td>后续。第一期 Agent 可以在 <code>sendMessage</code> 中自行读取调用上下文做判断</td></tr>
 <tr><td>向 BCS 自动注册</td><td>后续。第一期手动注册（第 15 节）</td></tr>
 </table></div>
 <h2 id="s2"><span class="n">2</span>与总体设计的关系</h2>
-<p>第一期是总体设计的一个子集，不是另一套方案。约束如下，保证后续阶段只增加、不修改：</p><ul><li><code>MessageAgent</code> 和 <code>BcnCall</code> 的名字、方法签名与详细设计一致。后续给 <code>BcnCall</code> 增加的方法都以默认方法加入，已有实现不需要修改。</li><li>内部按详细设计的结构实现：<code>MessageAgent</code> 由 SDK 包装成一个处理五个标准方法的处理器，请求经过同一条流水线和同一套校验。后续加入引擎模式时，流水线不需要重写。</li><li>线上格式、错误码、Card 字段与 Profile 一致，第一期接入的 Agent 在后续阶段不需要重新注册。</li></ul><h2 id="s3"><span class="n">3</span>模块与依赖</h2>
+<p>第一期是总体设计的一个子集，不是另一套方案。约束如下，保证后续阶段只增加、不修改：</p><ul><li><code>A2aAgentHandler</code> 和 <code>BcnCall</code> 的名字、方法签名与详细设计 8.5 节一致，第一期就给出完整的五个方法。后续给 <code>BcnCall</code> 增加的方法都以默认方法加入，已有实现不需要修改。</li><li>请求处理流水线和校验按详细设计 8.6 节实现。后续阶段放开 Task 时，只是放宽校验并启用更多方法，流水线不需要重写。</li><li>线上格式、错误码、Card 字段与 Profile 一致，第一期接入的 Agent 在后续阶段不需要重新注册。</li></ul><h2 id="s3"><span class="n">3</span>模块与依赖</h2>
 <div class="tw"><table>
 <tr><th>模块</th><th>第一期内容</th></tr>
 <tr><td><code>bcn-a2a-spec</code></td><td>常量（扩展 URI、保留键）、<code>AgentDescriptor</code>、Card 生成与校验</td></tr>
-<tr><td><code>bcn-a2a-server-core</code></td><td><code>MessageAgent</code>、<code>BcnCall</code>、<code>CallerContext</code>、请求处理流水线、校验、错误模型、执行控制。不依赖 Spring</td></tr>
+<tr><td><code>bcn-a2a-server-core</code></td><td><code>A2aAgentHandler</code>、<code>BcnCall</code>、<code>CallerContext</code>、请求处理流水线、校验、错误模型、执行控制。不依赖 Spring</td></tr>
 <tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、配置、三种绑定的端点、Card 发布、调用方应用名提取</td></tr>
-<tr><td><code>bcn-a2a-server-test</code></td><td><code>MessageAgentTestRunner</code>：不启动端口的单元测试运行器</td></tr>
+<tr><td><code>bcn-a2a-server-test</code></td><td><code>A2aAgentTestRunner</code>：不启动端口的单元测试运行器</td></tr>
 <tr><td><code>bcn-a2a-tck</code></td><td>TCK 的 Card 和 L0 消息模式分组</td></tr>
 </table></div>
 <p>业务应用只需要引入 starter。Maven 坐标和 Java 包名待定（Q1），本文示例使用 <code>bcn.a2a</code> 作为包名前缀。</p><h3>外部依赖</h3>
@@ -127,18 +127,44 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <h3>接口</h3>
 <pre><code>package bcn.a2a.server;
 
-/** 第一期唯一需要业务实现的接口。 */
-public interface MessageAgent {
+/**
+ * Agent 的 SPI。五个方法与 A2A 的五个标准操作一一对应，名字和类型与标准一致。
+ * 第一期只需要实现 descriptor 和 sendMessage，其余方法保留默认实现。
+ */
+public interface A2aAgentHandler {
 
     /** Agent 的静态描述，SDK 据此生成 AgentCard。启动时调用一次。 */
     AgentDescriptor descriptor();
 
     /**
-     * 处理一条用户消息，返回一条完整回复。
+     * SendMessage。第一期必须返回一条完整回复（Message），不能返回 Task。
      * 在 SDK 管理的线程上调用，可以阻塞；超时后线程会被中断（第 11 节）。
-     * 抛出异常时，调用方收到内部错误，异常详情只记日志。
+     * 抛出 A2AError 时按第 9 节返回对应错误；抛出其他异常时，调用方收到内部错误，异常详情只记日志。
      */
-    Message reply(BcnCall&lt;MessageSendParams&gt; call) throws Exception;
+    EventKind sendMessage(BcnCall&lt;MessageSendParams&gt; call) throws Exception;
+
+    /**
+     * SendStreamingMessage。消息模式下流中只有一条消息，随后关闭（A2A 规范 3.1.2）。
+     * 默认调用 sendMessage，把它的回复作为流中唯一的事件；业务通常不需要覆盖。
+     */
+    default Flow.Publisher&lt;StreamingEventKind&gt; sendStreamingMessage(BcnCall&lt;MessageSendParams&gt; call) throws Exception {
+        return Streams.single(sendMessage(call));
+    }
+
+    /** GetTask。消息模式没有 Task（P-36）。 */
+    default Task getTask(BcnCall&lt;TaskQueryParams&gt; call) {
+        throw new TaskNotFoundError();
+    }
+
+    /** SubscribeToTask。消息模式没有 Task（P-36）。 */
+    default Flow.Publisher&lt;StreamingEventKind&gt; subscribeToTask(BcnCall&lt;TaskIdParams&gt; call) {
+        throw new TaskNotFoundError();
+    }
+
+    /** CancelTask。消息模式没有 Task（P-36）。 */
+    default Task cancelTask(BcnCall&lt;CancelTaskParams&gt; call) {
+        throw new TaskNotFoundError();
+    }
 }
 
 /** SDK 在标准请求外包的一层，带上协议层已经处理好的信息。 */
@@ -155,11 +181,16 @@ public interface CallerContext {
     Optional&lt;String&gt; callerApp();   // 仅 GRPC 绑定可得，来自 SOFARPC 调用上下文
 }
 
-public record CallSource(String platform, String app, String botId, String scene) {}</code></pre><p><code>Message</code>、<code>MessageSendParams</code> 都是 a2a-java 的类型（<code>org.a2aproject.sdk.spec</code>）。SDK 另提供两个辅助方法：</p><pre><code>public final class Messages {
+public record CallSource(String platform, String app, String botId, String scene) {}</code></pre><p>参数和返回值都是 a2a-java 的类型（<code>org.a2aproject.sdk.spec</code>）：<code>MessageSendParams</code>、<code>TaskQueryParams</code>、<code>TaskIdParams</code>、<code>CancelTaskParams</code>；返回的 <code>EventKind</code> 是 <code>Task</code> 和 <code>Message</code> 的共同接口。默认实现抛出的 <code>TaskNotFoundError</code>、<code>UnsupportedOperationError</code> 也是 a2a-java 的错误类型，均为运行时异常。</p><div class="box"><p><b>为什么第一期就给出五个方法。</b>业务从第一期起面对的就是最终的接口，名字和标准一致，读 A2A 规范就能理解。后续阶段需要任务能力时，只需覆盖对应的默认方法，不用换接口。第一期覆盖其余四个方法不会报错，但第一期的校验不允许出现 Task（8.2），所以没有意义。</p></div><p>SDK 另提供几个辅助方法：</p><pre><code>public final class Messages {
     /** 取出消息中所有文本 Part，按顺序拼接。 */
     public static String text(Message message);
     /** 构造一条只含一个文本 Part 的 Agent 回复。messageId、role、contextId 由 SDK 补齐。 */
     public static Message agentText(String text);
+}
+
+public final class Streams {
+    /** 把一个回复包成只有这一个事件的流，供 sendStreamingMessage 的默认实现使用。 */
+    public static Flow.Publisher&lt;StreamingEventKind&gt; single(EventKind reply);
 }</code></pre><h3>AgentDescriptor</h3>
 <pre><code>AgentDescriptor.builder()
     .name("报销问答")                                  // 必填，Card.name
@@ -169,10 +200,11 @@ public record CallSource(String platform, String app, String botId, String scene
     .skill("expense_faq", "报销政策", "回答报销标准、流程和材料要求", "finance")   // 至少一个
     .provider("财务平台", "https://finance.example.internal")                  // 可选
     .documentationUrl("https://docs.example.internal/expense-faq")            // 可选
+    .streaming(true)                                   // 可选，默认 false。在 Card 中声明支持流式，见 5.5
     .acceptCallerContext(true)                         // 可选，在 Card 中声明调用上下文扩展（required:false）
-    .build();</code></pre><p>第一期不提供 <code>streaming</code>、<code>requireUserId</code>、工具观察、审批、多模态等声明方法，避免声明了却不能用。</p><h3>完整示例</h3>
+    .build();</code></pre><p>第一期不提供 <code>requireUserId</code>、工具观察、审批、多模态等声明方法，避免声明了却不能用。</p><h3>完整示例</h3>
 <pre><code>@Component
-public class ExpenseFaqAgent implements MessageAgent {
+public class ExpenseFaqAgent implements A2aAgentHandler {
 
     private final FaqService faqService;
 
@@ -190,16 +222,16 @@ public class ExpenseFaqAgent implements MessageAgent {
     }
 
     @Override
-    public Message reply(BcnCall&lt;MessageSendParams&gt; call) {
+    public Message sendMessage(BcnCall&lt;MessageSendParams&gt; call) {
         String question = Messages.text(call.request().message());
         String userId = call.caller().userId().orElse(null);      // 有就按用户回答，没有就回答通用政策
         String contextId = call.request().message().contextId();  // 多轮会话标识，可能为空
         return Messages.agentText(faqService.answer(userId, contextId, question));
     }
-}</code></pre><p>加上第 12 节的配置，就完成了接入。</p><h2 id="s5"><span class="n">5</span>请求处理</h2>
+}</code></pre><p>只实现了 <code>descriptor</code> 和 <code>sendMessage</code>，其余方法用默认实现；声明 <code>streaming(true)</code> 后流式请求也由同一个 <code>sendMessage</code> 回答。返回类型可以收窄为 <code>Message</code>。加上第 12 节的配置，就完成了接入。</p><h2 id="s5"><span class="n">5</span>请求处理</h2>
 <h3>5.1 SendMessage 的处理顺序</h3>
-<ol class="seq"><li><div><span class="who">绑定层</span>解析请求，得到 protobuf 的 <code>SendMessageRequest</code>，以及版本、扩展协商头、路径中的 tenant、调用方应用名。HTTP 和 JSONRPC 用 protobuf 的 ProtoJSON 解析（忽略未知字段）。</div></li><li><div><span class="who">core</span>检查版本：缺省按 <code>1.0</code> 处理；不是 <code>1.0</code> 返回 <code>VERSION_NOT_SUPPORTED</code>。</div></li><li><div><span class="who">core</span>确定 tenant 并找到 Agent（5.2）。找不到时返回参数错误，错误信息不透露其他 Agent 是否存在。</div></li><li><div><span class="who">core</span>用 <code>ProtoUtils.FromProto.messageSendParams</code> 转成 a2a-java 模型，执行请求校验（8.1）。</div></li><li><div><span class="who">core</span>解析调用上下文（5.3）。</div></li><li><div><span class="who">core</span>申请执行名额（第 11 节），名额已满返回服务繁忙。</div></li><li><div><span class="who">core</span>在执行线程上调用 <code>reply</code>，受超时控制。</div></li><li><div><span class="who">core</span>补齐并校验回复（8.2）：补 <code>messageId</code>、<code>role</code>、<code>contextId</code>。</div></li><li><div><span class="who">绑定层</span>用 <code>ProtoUtils.ToProto.message</code> 转回 protobuf，包成 <code>SendMessageResponse</code>（<code>message</code> 分支）返回；HTTP 响应头回显已启用的扩展。</div></li></ol><h3>5.2 tenant 与多 Agent</h3>
-<p>一个进程可以承载多个 <code>MessageAgent</code> Bean，用 tenant 区分。启动时 SDK 收集所有 Bean：</p><div class="tw"><table>
+<ol class="seq"><li><div><span class="who">绑定层</span>解析请求，得到 protobuf 的 <code>SendMessageRequest</code>，以及版本、扩展协商头、路径中的 tenant、调用方应用名。HTTP 和 JSONRPC 用 protobuf 的 ProtoJSON 解析（忽略未知字段）。</div></li><li><div><span class="who">core</span>检查版本：缺省按 <code>1.0</code> 处理；不是 <code>1.0</code> 返回 <code>VERSION_NOT_SUPPORTED</code>。</div></li><li><div><span class="who">core</span>确定 tenant 并找到 Agent（5.2）。找不到时返回参数错误，错误信息不透露其他 Agent 是否存在。</div></li><li><div><span class="who">core</span>用 <code>ProtoUtils.FromProto.messageSendParams</code> 转成 a2a-java 模型，执行请求校验（8.1）。</div></li><li><div><span class="who">core</span>解析调用上下文（5.3）。</div></li><li><div><span class="who">core</span>申请执行名额（第 11 节），名额已满返回服务繁忙。</div></li><li><div><span class="who">core</span>在执行线程上调用 <code>sendMessage</code>，受超时控制。</div></li><li><div><span class="who">core</span>补齐并校验回复（8.2）：补 <code>messageId</code>、<code>role</code>、<code>contextId</code>。</div></li><li><div><span class="who">绑定层</span>用 <code>ProtoUtils.ToProto.message</code> 转回 protobuf，包成 <code>SendMessageResponse</code>（<code>message</code> 分支）返回；HTTP 响应头回显已启用的扩展。</div></li></ol><h3>5.2 tenant 与多 Agent</h3>
+<p>一个进程可以承载多个 <code>A2aAgentHandler</code> Bean，用 tenant 区分。启动时 SDK 收集所有 Bean：</p><div class="tw"><table>
 <tr><th>情况</th><th>处理</th></tr>
 <tr><td>只有一个 Agent，且没有设置 tenant</td><td>所有请求都交给它；Card 不声明 tenant</td></tr>
 <tr><td>有多个 Agent</td><td>每个都必须设置 tenant，且互不相同，否则启动失败</td></tr>
@@ -208,12 +240,21 @@ public class ExpenseFaqAgent implements MessageAgent {
 </table></div>
 <h3>5.3 调用上下文</h3>
 <p>从 <code>SendMessageRequest.metadata</code> 的 <code>bcn.caller</code> 键读取（详细设计 7.2）。规则：</p><ul><li>只有调用方在 <code>A2A-Extensions</code> 中声明了调用上下文扩展的 URI，SDK 才读取；否则忽略这个键，<code>caller()</code> 全部为空。</li><li>Agent 的描述没有声明 <code>acceptCallerContext(true)</code> 时同样不读取。</li><li>格式不对（不是对象、字段类型不对、<code>userId</code> 超过 128 个字符）时返回参数错误，不静默忽略。</li><li>未知字段忽略。<code>proof</code> 字段第一期不处理。</li><li><code>callerApp</code> 只在 GRPC 绑定下从 SOFARPC 调用上下文读取；HTTP 类绑定下为空。</li><li><code>userId</code> 原值不写日志（第 13 节）。</li></ul><div class="box q"><p><b>第一期不支持"必须有用户"。</b>BCS 目前还不发送调用上下文（待办 A2A-003，详细设计分期 P3），而且 BCS 遇到 Card 中不认识的 <code>required: true</code> 扩展会拒绝注册。所以第一期只能以 <code>required: false</code> 声明，Agent 自己处理没有用户的情况。</p></div><h3>5.4 多轮会话</h3>
-<p>请求的消息带 <code>contextId</code> 时，回复必须沿用；没带时 SDK 生成一个 UUID 放进回复（P-38）。BCS 会在同一会话的下一轮带回它。会话记忆由 Agent 按 <code>contextId</code> 自己保存，多实例部署时要放在共享存储中，SDK 不管理。</p><h2 id="s6"><span class="n">6</span>五个标准方法的行为</h2>
-<div class="tw"><table>
+<p>请求的消息带 <code>contextId</code> 时，回复必须沿用；没带时 SDK 生成一个 UUID 放进回复（P-38）。BCS 会在同一会话的下一轮带回它。会话记忆由 Agent 按 <code>contextId</code> 自己保存，多实例部署时要放在共享存储中，SDK 不管理。</p><h3>5.5 流式发送</h3>
+<p>A2A 规范 3.1.2 节规定，流式发送如果返回消息，流中必须正好只有一条消息，然后立即关闭。消息模式没有 Task，所以第一期的流式发送也是"一条完整消息的流"：调用方要等回复生成完才能看到，体验与非流式相同。它的作用是让只会走流式的调用方也能调用这个 Agent，以及在 Card 中声明 <code>streaming: true</code> 后 BCS 走流式通道。</p><div class="tw"><table>
+<tr><th>项</th><th>设计</th></tr>
+<tr><td>处理顺序</td><td>与 5.1 相同：校验、执行 <code>sendStreamingMessage</code>（默认即 <code>sendMessage</code>）、校验回复</td></tr>
+<tr><td>何时开始写流</td><td>拿到并校验完回复之后，才写响应头和这唯一的事件，然后关闭。因此处理过程中的任何错误都以普通错误响应返回，不会出现流写到一半出错的情况</td></tr>
+<tr><td>等待期间的连接</td><td>回复生成期间连接上没有数据。默认 60 秒的执行超时（第 11 节）要小于 MOSN 和负载均衡的空闲超时；需要更长时间的 Agent 应等到支持逐段输出的阶段</td></tr>
+<tr><td>Card</td><td><code>streaming(true)</code> 时 <code>capabilities.streaming</code> 为 <code>true</code>，BCS 改用 SendStreamingMessage；为 <code>false</code> 时 BCS 用 SendMessage。两种情况下 Agent 代码相同</td></tr>
+<tr><td>覆盖默认实现</td><td>允许，但第一期的校验要求流中只有一条消息（8.2），返回 Task 或多个事件都会被拒绝</td></tr>
+</table></div>
+<h2 id="s6"><span class="n">6</span>五个标准方法的行为</h2>
+<p>除 SendMessage 外，以下行为都由接口的默认实现给出，业务不需要写代码。</p><div class="tw"><table>
 <tr><th>方法</th><th>第一期行为</th><th>依据</th></tr>
-<tr><td>SendMessage</td><td>按第 5 节处理，返回一条消息</td><td>P-35</td></tr>
+<tr><td>SendMessage</td><td>调用业务的 <code>sendMessage</code>，按第 5 节处理，返回一条消息</td><td>P-35</td></tr>
 <tr><td>SendMessage（带 <code>taskId</code>）</td><td><code>TASK_NOT_FOUND</code></td><td>P-36</td></tr>
-<tr><td>SendStreamingMessage</td><td><code>UNSUPPORTED_OPERATION</code>：Card 声明不支持流式</td><td>A2A 规范 3.1.2</td></tr>
+<tr><td>SendStreamingMessage</td><td>默认实现调用 <code>sendMessage</code>，返回只含这一条消息的流，随后关闭（5.5）。未声明 <code>streaming(true)</code> 时也能被调用</td><td>P-35、A2A 规范 3.1.2</td></tr>
 <tr><td>GetTask</td><td><code>TASK_NOT_FOUND</code></td><td>P-36</td></tr>
 <tr><td>CancelTask</td><td><code>TASK_NOT_FOUND</code></td><td>P-36</td></tr>
 <tr><td>SubscribeToTask</td><td><code>TASK_NOT_FOUND</code>。HTTP 同时接受 GET 和 POST（a2a-java 1.4.0 的 proto 为 GET，A2A 1.0.1 为 POST）</td><td>P-36</td></tr>
@@ -246,14 +287,25 @@ Content-Type: application/json
 A2A-Extensions: &lt;调用上下文扩展 URI&gt;
 
 {"message": {"messageId": "4b1f…", "role": "ROLE_AGENT", "contextId": "c-7d2e…",
-             "parts": [{"text": "一线城市每晚不超过 600 元……"}]}}</code></pre><h3>7.2 JSONRPC</h3>
+             "parts": [{"text": "一线城市每晚不超过 600 元……"}]}}</code></pre><p>流式发送返回 SSE，只有一个 <code>data</code> 事件，随后关闭连接：</p><pre><code>POST /a2a/expense-faq/message:stream
+A2A-Version: 1.0
+Accept: text/event-stream
+Content-Type: application/json
+
+{"message": {"messageId": "run-8f2d", "role": "ROLE_USER", "parts": [{"text": "那二线城市呢？"}],
+             "contextId": "c-7d2e…"}}
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+
+data: {"message": {"messageId": "9c0a…", "role": "ROLE_AGENT", "contextId": "c-7d2e…", "parts": [{"text": "二线城市每晚不超过 450 元……"}]}}</code></pre><h3>7.2 JSONRPC</h3>
 <p><code>POST {base-path}/{tenant}/jsonrpc</code>，<code>method</code> 为 A2A 操作名（<code>SendMessage</code> 等，与大小写一致），<code>params</code> 为对应请求对象。只支持单个请求，不支持批量。<code>id</code> 原样返回。</p><pre><code>{"jsonrpc": "2.0", "id": "req-1", "method": "SendMessage",
  "params": {"message": {"messageId": "run-8f2c", "role": "ROLE_USER", "parts": [{"text": "出差住宿标准是多少？"}]}}}
 
 {"jsonrpc": "2.0", "id": "req-1",
  "result": {"message": {"messageId": "4b1f…", "role": "ROLE_AGENT", "contextId": "c-7d2e…",
-                        "parts": [{"text": "一线城市每晚不超过 600 元……"}]}}}</code></pre><p>JSON-RPC 自身的错误：请求体不是合法 JSON 返回 <code>-32700</code>；结构不对返回 <code>-32600</code>；方法名不认识返回 <code>-32601</code>；参数不合法返回 <code>-32602</code>。</p><h3>7.3 GRPC</h3>
-<ul><li>实现 <code>A2AServiceGrpc.A2AServiceImplBase</code>，通过 SOFARPC 以 Triple 协议（<code>tri</code>）暴露。Harness 联调时 MOSN 中发布的服务名为 <code>org.a2aproject.sdk.grpc.A2AServiceGrpc$AsyncService:1.0</code>，SDK 沿用同一接口和版本。</li><li>版本和扩展协商从 GRPC metadata 的 <code>a2a-version</code>、<code>a2a-extensions</code> 读取。</li><li>tenant 从请求的 <code>tenant</code> 字段读取。</li><li>服务发布、订阅和 MOSN 路由由部署流程完成，SDK 不做（参考 <code>docs/specs/2026-10-28-bcs-a2a-grpc/grpc-mosn-runbook.md</code>）。</li><li>SendStreamingMessage 和 SubscribeToTask 是服务端流方法，第一期直接以错误状态结束流。</li></ul><h2 id="s8"><span class="n">8</span>校验规则</h2>
+                        "parts": [{"text": "一线城市每晚不超过 600 元……"}]}}}</code></pre><p>流式发送同样 POST 到这个地址，<code>method</code> 为 <code>SendStreamingMessage</code>，响应为 SSE，唯一的 <code>data</code> 是一个带相同 <code>id</code> 的 JSON-RPC 响应，<code>result</code> 为 <code>{"message": …}</code>。</p><p>JSON-RPC 自身的错误：请求体不是合法 JSON 返回 <code>-32700</code>；结构不对返回 <code>-32600</code>；方法名不认识返回 <code>-32601</code>；参数不合法返回 <code>-32602</code>。</p><h3>7.3 GRPC</h3>
+<ul><li>实现 <code>A2AServiceGrpc.A2AServiceImplBase</code>，通过 SOFARPC 以 Triple 协议（<code>tri</code>）暴露。Harness 联调时 MOSN 中发布的服务名为 <code>org.a2aproject.sdk.grpc.A2AServiceGrpc$AsyncService:1.0</code>，SDK 沿用同一接口和版本。</li><li>版本和扩展协商从 GRPC metadata 的 <code>a2a-version</code>、<code>a2a-extensions</code> 读取。</li><li>tenant 从请求的 <code>tenant</code> 字段读取。</li><li>服务发布、订阅和 MOSN 路由由部署流程完成，SDK 不做（参考 <code>docs/specs/2026-10-28-bcs-a2a-grpc/grpc-mosn-runbook.md</code>）。</li><li>SendStreamingMessage 是服务端流方法：拿到回复后发出一个 <code>StreamResponse</code>（<code>message</code> 分支），然后正常结束流；出错时直接以错误状态结束，不发任何消息。SubscribeToTask 直接以 <code>NOT_FOUND</code> 状态结束。</li></ul><h2 id="s8"><span class="n">8</span>校验规则</h2>
 <h3>8.1 请求</h3>
 <div class="tw"><table>
 <tr><th>检查</th><th>不通过时</th></tr>
@@ -269,7 +321,8 @@ A2A-Extensions: &lt;调用上下文扩展 URI&gt;
 <h3>8.2 回复</h3>
 <p>SDK 先补齐，再校验。补齐：<code>messageId</code> 为空时生成 UUID；<code>role</code> 设为 <code>ROLE_AGENT</code>；<code>contextId</code> 按 5.4 设置，Agent 自己设置了不同的值时以请求的为准并记录告警。</p><div class="tw"><table>
 <tr><th>检查</th><th>不通过时</th></tr>
-<tr><td><code>reply</code> 返回非 null</td><td>内部错误</td></tr>
+<tr><td><code>sendMessage</code> 返回非 null</td><td>内部错误</td></tr>
+<tr><td>返回的是 <code>Message</code>，不是 <code>Task</code>（第一期只支持消息模式）</td><td>内部错误</td></tr>
 <tr><td><code>parts</code> 非空，且全部为文本 Part（P-05、第一期仅文本）</td><td>内部错误</td></tr>
 <tr><td>文本总长不超过 1 MiB（可配置）</td><td>内部错误，不截断（P-74）</td></tr>
 <tr><td><code>taskId</code> 为空</td><td>内部错误</td></tr>
@@ -315,7 +368,7 @@ A2A-Extensions: &lt;调用上下文扩展 URI&gt;
 <tr><th>字段</th><th>来源</th></tr>
 <tr><td><code>supportedInterfaces</code></td><td>配置的 <code>bindings</code> 及其顺序；GRPC 接口带 tenant，HTTP 类接口把 tenant 放在路径中</td></tr>
 <tr><td>调用上下文扩展</td><td>只有 <code>acceptCallerContext(true)</code> 时声明，且固定 <code>required: false</code></td></tr>
-<tr><td><code>streaming</code></td><td>固定 <code>false</code></td></tr>
+<tr><td><code>streaming</code></td><td><code>AgentDescriptor.streaming</code>，默认 <code>false</code></td></tr>
 <tr><td><code>securityRequirements</code></td><td>固定 <code>[]</code>（P-11）</td></tr>
 <tr><td>扩展 URI</td><td>两个新扩展的 URI 待定（Q2），由 <code>bcn-a2a-spec</code> 中的常量提供，确定后只改常量</td></tr>
 </table></div>
@@ -325,8 +378,8 @@ A2A-Extensions: &lt;调用上下文扩展 URI&gt;
 <div class="tw"><table>
 <tr><th>项</th><th>设计</th></tr>
 <tr><td>执行线程</td><td>有界线程池，大小即并发上限（<code>execution.max-concurrent</code>）。名额不足时立即返回服务繁忙，不排队</td></tr>
-<tr><td>RPC 线程</td><td>只做解析、校验和提交执行，不调用 <code>reply</code></td></tr>
-<tr><td>超时</td><td>每次 <code>reply</code> 有最长执行时间（<code>execution.timeout</code>，默认 60 秒）。到时中断线程，返回内部错误。调用方的截止时间（GRPC deadline）更短时以它为准</td></tr>
+<tr><td>RPC 线程</td><td>只做解析、校验和提交执行，不调用 <code>sendMessage</code></td></tr>
+<tr><td>超时</td><td>每次 <code>sendMessage</code> 有最长执行时间（<code>execution.timeout</code>，默认 60 秒）。到时中断线程，返回内部错误。调用方的截止时间（GRPC deadline）更短时以它为准</td></tr>
 <tr><td>调用方断开</td><td>HTTP 连接断开或 GRPC 调用被取消时，中断对应的执行线程。消息模式没有任务，断开后结果无处可取，继续执行没有意义</td></tr>
 <tr><td>优雅停机</td><td>收到停机信号后，新请求返回服务繁忙；等待在途请求完成，最多 <code>shutdown.drain</code>（默认 30 秒）；超时后中断剩余执行</td></tr>
 </table></div>
@@ -340,7 +393,7 @@ A2A-Extensions: &lt;调用上下文扩展 URI&gt;
 <tr><td><code>bcn.a2a.server.http.base-url</code></td><td>开启 HTTP 类绑定时必填</td><td>写入 Card 的内部域名地址</td></tr>
 <tr><td><code>bcn.a2a.server.http.base-path</code></td><td><code>/a2a</code></td><td>HTTP 端点前缀</td></tr>
 <tr><td><code>bcn.a2a.server.execution.max-concurrent</code></td><td>64</td><td>并发执行上限</td></tr>
-<tr><td><code>bcn.a2a.server.execution.timeout</code></td><td>60 秒</td><td>单次 <code>reply</code> 最长执行时间</td></tr>
+<tr><td><code>bcn.a2a.server.execution.timeout</code></td><td>60 秒</td><td>单次 <code>sendMessage</code> 最长执行时间</td></tr>
 <tr><td><code>bcn.a2a.server.shutdown.drain</code></td><td>30 秒</td><td>停机时等待在途请求的上限</td></tr>
 <tr><td><code>bcn.a2a.server.request.max-bytes</code></td><td>1 MiB</td><td>请求体上限</td></tr>
 <tr><td><code>bcn.a2a.server.reply.max-text-bytes</code></td><td>1 MiB</td><td>回复文本上限</td></tr>
@@ -358,7 +411,7 @@ bcn.a2a.server.http.base-url=https://expense.example.internal</code></pre><h2 id
 <h3>14.1 业务单元测试</h3>
 <pre><code>@Test
 void answers_with_one_text_message() {
-    var runner = MessageAgentTestRunner.of(new ExpenseFaqAgent(faqService));
+    var runner = A2aAgentTestRunner.of(new ExpenseFaqAgent(faqService));
 
     Message reply = runner.send("出差住宿标准是多少？");
 
@@ -368,7 +421,7 @@ void answers_with_one_text_message() {
 
 @Test
 void keeps_context_id_across_turns() {
-    var runner = MessageAgentTestRunner.of(new ExpenseFaqAgent(faqService)).userId("2088000000000001");
+    var runner = A2aAgentTestRunner.of(new ExpenseFaqAgent(faqService)).userId("2088000000000001");
     Message first = runner.send("出差住宿标准是多少？");
     Message second = runner.send("那二线城市呢？", first.contextId());
     assertThat(second.contextId()).isEqualTo(first.contextId());
@@ -381,7 +434,7 @@ void keeps_context_id_across_turns() {
 <tr><td>兼容性测试</td><td>用 Harness 联调时抓取的 BCS 请求样本做回放，确认能解析</td></tr>
 </table></div>
 <h3>14.3 TCK</h3>
-<p>第一期 TCK 包含 Card 分组和 L0 消息模式分组：非流式发送只返回一条消息；流式发送返回不支持；查询、订阅、取消和带 <code>taskId</code> 的消息返回 <code>TASK_NOT_FOUND</code>；<code>contextId</code> 的沿用和生成；非文本输入被拒绝；错误带 ErrorInfo。被测 Agent 实现 TCK 约定的 <code>tck:echo</code> 输入即可，SDK 内置一个测试 Agent。</p><h2 id="s15"><span class="n">15</span>与 BCS 联调</h2>
+<p>第一期 TCK 包含 Card 分组和 L0 消息模式分组：非流式发送只返回一条消息；流式发送的流中只有一条消息且随后关闭；查询、订阅、取消和带 <code>taskId</code> 的消息返回 <code>TASK_NOT_FOUND</code>；<code>contextId</code> 的沿用和生成；非文本输入被拒绝；错误带 ErrorInfo。被测 Agent 实现 TCK 约定的 <code>tck:echo</code> 输入即可，SDK 内置一个测试 Agent。</p><h2 id="s15"><span class="n">15</span>与 BCS 联调</h2>
 <h3>15.1 注册</h3>
 <p>第一期手动注册，使用 Provider 管理接口（<code>docs/bcn-provider-agent-card-api-v0.1.zh-CN.md</code>）。开启了 HTTP 时可以提交 Card URL，否则提交内联 Card：</p><pre><code>POST /a2a/agents
 Authorization: Bearer &lt;provider_admin_token&gt;
@@ -392,6 +445,7 @@ Content-Type: application/json
 <p>以下已对照 BCS 下行代码确认，第一期的实现必须与之一致：</p><div class="tw"><table>
 <tr><th>BCS 行为</th><th>对 SDK 的要求</th></tr>
 <tr><td>Card 声明 <code>streaming: false</code> 时，BCS 用 SendMessage（<code>returnImmediately: true</code>）发送</td><td>SendMessage 返回消息即可，<code>returnImmediately</code> 忽略</td></tr>
+<tr><td>Card 声明 <code>streaming: true</code> 时，BCS 用 SendStreamingMessage，流中收到消息即作为最终回复</td><td>由 5.5 保证</td></tr>
 <tr><td>收到消息形式的回复时直接作为最终回复完成本轮</td><td>回复必须是完整答案</td></tr>
 <tr><td>回复的 <code>role</code> 必须是 Agent；<code>contextId</code> 存在时不能为空字符串</td><td>由 8.2 保证</td></tr>
 <tr><td>回复中的 Part 必须全部是文本，否则本轮失败</td><td>由 8.2 保证</td></tr>
@@ -400,24 +454,25 @@ Content-Type: application/json
 <tr><td>GRPC 只经本机 MOSN 调用，Card 中的 GRPC 接口必须与 BCS 配置的路由精确匹配</td><td>Card 中的 <code>grpc.interface-url</code> 与部署时的 MOSN 路由一致</td></tr>
 </table></div>
 <h3>15.3 联调清单</h3>
-<ol><li>注册成功，BCS 返回 <code>bot_id</code>，查询到的 Card 与 SDK 生成的一致。</li><li>工作台单聊：发送问题，收到完整回答。</li><li>同一会话第二轮：Agent 收到第一轮返回的 <code>contextId</code>。</li><li>Agent 抛异常、超时：工作台显示失败，不影响下一轮。</li><li>开启的每种绑定各验证一次；GRPC 经 MOSN 验证。</li><li>两个实例：请求分别落到不同实例都能正常回答。</li><li>滚动发布：发布期间的请求要么正常完成，要么明确失败，不出现卡住的会话。</li></ol><h2 id="s16"><span class="n">16</span>工作拆分与验收</h2>
+<ol><li>注册成功，BCS 返回 <code>bot_id</code>，查询到的 Card 与 SDK 生成的一致。</li><li>工作台单聊：发送问题，收到完整回答。<code>streaming</code> 为 <code>false</code> 和 <code>true</code> 各注册一个 Agent 分别验证。</li><li>同一会话第二轮：Agent 收到第一轮返回的 <code>contextId</code>。</li><li>Agent 抛异常、超时：工作台显示失败，不影响下一轮。</li><li>开启的每种绑定各验证一次；GRPC 经 MOSN 验证。</li><li>两个实例：请求分别落到不同实例都能正常回答。</li><li>滚动发布：发布期间的请求要么正常完成，要么明确失败，不出现卡住的会话。</li></ol><h2 id="s16"><span class="n">16</span>工作拆分与验收</h2>
 <div class="tw"><table>
 <tr><th>工作项</th><th>内容</th><th>验收</th></tr>
 <tr><td>W1 spec</td><td>常量、<code>AgentDescriptor</code>、Card 生成与校验</td><td>Card 校验的单元测试；生成的 Card 通过 BCS 注册接口的校验</td></tr>
-<tr><td>W2 core</td><td><code>MessageAgent</code>、<code>BcnCall</code>、流水线、校验、错误模型、执行控制</td><td>第 8 节、第 6 节、第 11 节的单元测试全部通过</td></tr>
-<tr><td>W3 HTTP+JSON 与 JSONRPC</td><td>Spring MVC 端点、ProtoJSON 编解码、错误体、Card 端点</td><td>MockMvc 集成测试通过</td></tr>
-<tr><td>W4 GRPC</td><td>Triple 服务、metadata、错误状态</td><td>原生 GRPC 客户端经 Triple 调用通过</td></tr>
+<tr><td>W2 core</td><td><code>A2aAgentHandler</code>、<code>BcnCall</code>、流水线、校验、错误模型、执行控制</td><td>第 8 节、第 6 节、第 11 节的单元测试全部通过</td></tr>
+<tr><td>W3 HTTP+JSON 与 JSONRPC</td><td>Spring MVC 端点、ProtoJSON 编解码、单事件 SSE、错误体、Card 端点</td><td>MockMvc 集成测试通过</td></tr>
+<tr><td>W4 GRPC</td><td>Triple 服务、单事件服务端流、metadata、错误状态</td><td>原生 GRPC 客户端经 Triple 调用通过</td></tr>
 <tr><td>W5 starter</td><td>自动装配、配置、调用方应用名、停机</td><td>示例应用以三种绑定启动；停机测试通过</td></tr>
-<tr><td>W6 测试支持与 TCK</td><td><code>MessageAgentTestRunner</code>、TCK 的 Card 与 L0 分组</td><td>示例 Agent 通过 TCK</td></tr>
+<tr><td>W6 测试支持与 TCK</td><td><code>A2aAgentTestRunner</code>、TCK 的 Card 与 L0 分组</td><td>示例 Agent 通过 TCK</td></tr>
 <tr><td>W7 联调</td><td>按第 15 节</td><td>联调清单全部通过，并记录结果</td></tr>
 </table></div>
 <p>第一期整体验收：一个示例 Agent 以 L0 注册到 BCS，经工作台完成多轮问答；三种绑定都通过 TCK；两实例部署和滚动发布按 15.3 验证通过。</p><h2 id="s17"><span class="n">17</span>后续演进</h2>
 <div class="tw"><table>
 <tr><th>后续能力</th><th>对第一期代码的影响</th></tr>
-<tr><td>L0 流式发送（流中只有一条消息）</td><td><code>AgentDescriptor</code> 增加 <code>streaming(true)</code>；SDK 用同一个 <code>reply</code> 响应流式请求。业务代码不变</td></tr>
+<tr><td>逐段输出（L2）</td><td>需要 Task：业务覆盖 <code>sendStreamingMessage</code>，返回 Task 和后续的产出物更新事件，并覆盖 <code>getTask</code>、<code>subscribeToTask</code>、<code>cancelTask</code>；同时放开校验。接口不变</td></tr>
 <tr><td>必须有用户</td><td>BCS 支持调用上下文后，<code>AgentDescriptor</code> 增加 <code>requireUserId(true)</code>，Card 改为 <code>required: true</code></td></tr>
-<tr><td>工具观察（L0 回复中的工具记录）</td><td>提供构造带工具记录的回复的辅助方法；<code>reply</code> 签名不变</td></tr>
-<tr><td>引擎模式、托管模式</td><td>新增 <code>A2aAgentHandler</code>、<code>ManagedAgent</code>；<code>MessageAgent</code> 改由同一个处理器接口承载，对业务透明</td></tr>
+<tr><td>工具观察（L0 回复中的工具记录）</td><td>提供构造带工具记录的回复的辅助方法；<code>sendMessage</code> 签名不变</td></tr>
+<tr><td>引擎模式（返回 Task）</td><td>放开校验，业务覆盖 <code>getTask</code>、<code>cancelTask</code> 等默认方法；接口不变</td></tr>
+<tr><td>托管模式</td><td>新增 <code>ManagedAgent</code>，由 SDK 实现成一个 <code>A2aAgentHandler</code></td></tr>
 <tr><td><code>BcnCall</code> 的新信息（协商结果、保留数据）</td><td>以默认方法加入，已有实现不需要修改</td></tr>
 <tr><td>授权、动态 Agent、自动注册</td><td>新增 <code>AgentAuthorizer</code>、<code>AgentResolver</code>、<code>AgentRegistrar</code>，默认实现与第一期行为相同</td></tr>
 </table></div>

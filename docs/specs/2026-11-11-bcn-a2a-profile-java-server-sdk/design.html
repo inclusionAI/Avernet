@@ -75,7 +75,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <a href="#s1">1 背景与问题</a><a href="#s2">2 目标与范围</a><a href="#s3">3 术语</a><a href="#s4">4 总体架构</a><a href="#s5">5 已确认的决策</a>
 <a href="#s6">6 Profile 规范</a><a class="sub" href="#s6-3">6.3 一致性等级</a><a class="sub" href="#s6-4">6.4 AgentCard</a><a class="sub" href="#s6-5">6.5 方法</a><a class="sub" href="#s6-6">6.6 Task 状态机</a><a class="sub" href="#s6-7">6.7 文本流</a><a class="sub" href="#s6-8">6.8 错误模型</a><a class="sub" href="#s6-11">6.11 Client 侧要求</a><a class="sub" href="#s6-12">6.12 推送通知</a><a class="sub" href="#s6-13">6.13 多模态</a>
 <a href="#s7">7 扩展目录</a><a class="sub" href="#s7-2">7.2 调用上下文</a><a class="sub" href="#s7-4">7.4 扩展模型</a><a class="sub" href="#s7-5">7.5 内容块</a><a class="sub" href="#s7-6">7.6 经 BCS 透传</a><a class="sub" href="#s7-7">7.7 扩展治理</a><a class="sub" href="#s7-8">7.8 群协作</a><a class="sub" href="#s7-9">7.9 工具观察 v2</a>
-<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 三种接入模式</a><a class="sub" href="#s8-3">8.3 与 a2a-java 的关系</a><a class="sub" href="#s8-5">8.5 引擎模式 SPI</a><a class="sub" href="#s8-6">8.6 请求处理与校验</a><a class="sub" href="#s8-7">8.7 编解码工具库</a><a class="sub" href="#s8-8">8.8 引擎模式示例</a><a class="sub" href="#s8-9">8.9 消息模式</a><a class="sub" href="#s8-10">8.10 托管模式</a><a class="sub" href="#s8-12">8.12 配置项</a><a class="sub" href="#s8-16">8.16 推送实现</a>
+<a href="#s8">8 Java Server SDK</a><a class="sub" href="#s8-2">8.2 三种接入模式</a><a class="sub" href="#s8-3">8.3 与 a2a-java 的关系</a><a class="sub" href="#s8-5">8.5 A2aAgentHandler SPI</a><a class="sub" href="#s8-6">8.6 请求处理与校验</a><a class="sub" href="#s8-7">8.7 编解码工具库</a><a class="sub" href="#s8-8">8.8 引擎模式示例</a><a class="sub" href="#s8-9">8.9 消息模式</a><a class="sub" href="#s8-10">8.10 托管模式</a><a class="sub" href="#s8-12">8.12 配置项</a><a class="sub" href="#s8-16">8.16 推送实现</a>
 <a href="#s9">9 多实例设计</a><a class="sub" href="#s9-2">9.2 对引擎的要求</a><a class="sub" href="#s9-3">9.3 跨实例流程</a><a class="sub" href="#s9-4">9.4 停机与恢复</a><a class="sub" href="#s9-5">9.5 托管模式</a>
 <a href="#s10">10 一致性测试 TCK</a><a href="#s11">11 存量 Agent 迁移</a><a href="#s12">12 BCS 侧改动</a><a href="#s13">13 安全与信任</a><a href="#s14">14 风险</a><a href="#s15">15 分期与验收</a><a href="#s16">16 待确认问题</a><a href="#s17">17 参考</a>
 </nav>
@@ -84,7 +84,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <header class="doc">
 <h1>BCN A2A Profile 与 Java Server SDK 详细设计</h1>
 <p class="lead">公司内 Agent 统一遵循的 A2A 协议标准，以及让 SOFABoot 平台按该标准提供 A2A Server 的 Java SDK。本稿用于内部评审，评审通过后规范性文本落回仓库 Markdown。</p>
-<div class="meta"><span><b>状态</b> 评审草案 v0.28</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
+<div class="meta"><span><b>状态</b> 评审草案 v0.29</span><span><b>日期</b> 2026-11-11</span><span><b>范围</b> 协议标准 + Server SDK</span><span><b>技术栈</b> SOFABoot / JDK 17</span></div>
 <div class="box">
 <p><b>评审方式。</b>文中三类编号可以直接引用：</p>
 <ul>
@@ -904,7 +904,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <div class="tw"><table>
 <tr><th></th><th>消息模式（<span class="tag d">D10</span>）</th><th>引擎模式（默认）</th><th>托管模式（可选，<span class="tag d">D9</span>）</th></tr>
 <tr><td>适用</td><td>简单问答，不需要逐段输出、查询和取消</td><td>引擎有自己的运行记录：能按标识查询状态和已输出内容、取消、在任意实例上订阅后续事件</td><td>没有运行记录、但需要任务语义的 Agent</td></tr>
-<tr><td>平台实现</td><td><code>MessageAgent</code>：一个方法（8.9）</td><td><code>A2aAgentHandler</code>：A2A 的五个方法（8.5）</td><td><code>ManagedAgent</code>：执行和取消（8.10）</td></tr>
+<tr><td>平台实现</td><td><code>A2aAgentHandler</code>：只实现 <code>sendMessage</code>（8.9）</td><td><code>A2aAgentHandler</code>：覆盖需要的方法（8.5）</td><td><code>ManagedAgent</code>：执行和取消（8.10）</td></tr>
 <tr><td>任务状态</td><td>没有 Task</td><td>引擎的运行记录</td><td>SDK 代管，存在分布式缓存中</td></tr>
 <tr><td>多实例</td><td>天然满足</td><td>任意实例把请求转给引擎（9.1）</td><td>执行实例写入，其他实例读取（9.5）</td></tr>
 <tr><td>停机重启</td><td>在途请求失败</td><td>由引擎恢复（<span class="tag d">D4</span>）</td><td>在途 Task 失败</td></tr>
@@ -913,7 +913,7 @@ svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:1
 <tr><td>能达到的等级</td><td>L0；可声明工具观察</td><td>L1 到 L3</td><td>L1、L2；可声明工具观察</td></tr>
 <tr><td>业务要准备的</td><td>无</td><td>无额外存储</td><td>一个不淘汰数据的缓存实例（多实例部署时）</td></tr>
 </table></div>
-<p>三种模式共用同一条请求处理流水线和同一套校验：SDK 把 <code>MessageAgent</code> 和 <code>ManagedAgent</code> 分别包装成一个 <code>A2aAgentHandler</code>，所以消息模式和托管模式都是引擎模式的内置实现。</p>
+<p>三种模式共用同一条请求处理流水线和同一套校验：消息模式和引擎模式都直接实现 <code>A2aAgentHandler</code>，区别只在覆盖了哪些方法；SDK 把 <code>ManagedAgent</code> 包装成一个 <code>A2aAgentHandler</code>，所以托管模式是它的内置实现。</p>
 
 <h3 id="s8-3"><span class="n">8.3</span>与官方 a2a-java 的关系</h3>
 <p>SDK 复用官方的协议模型（<code>a2a-java-sdk-spec</code>）和 GRPC 定义（<code>a2a-java-sdk-spec-grpc</code>），SPI 的参数和返回值直接使用这些类型，保证线上格式与标准一致。请求处理流水线、标准校验和托管模式的多实例逻辑由 SDK 自己实现，不复用官方的 <code>DefaultRequestHandler</code>、<code>TaskStore</code> 和 <code>QueueManager</code>。</p>
@@ -952,7 +952,7 @@ public interface TaskStore {
 <tr><th>模块</th><th>内容</th><th>依赖</th></tr>
 <tr><td><code>bcn-a2a-spec</code></td><td>扩展 URI 常量、扩展数据模型、Card 校验器</td><td>a2a-java spec</td></tr>
 <tr><td><code>bcn-a2a-codec</code></td><td>扩展编解码工具库：审批、工具观察 v2、内容块、多模态（8.7）</td><td><code>bcn-a2a-spec</code></td></tr>
-<tr><td><code>bcn-a2a-server-core</code></td><td>请求处理流水线、协商、授权、调用上下文、标准校验（8.6）；引擎模式 SPI 和消息模式（8.9）。不依赖 Spring</td><td><code>bcn-a2a-codec</code></td></tr>
+<tr><td><code>bcn-a2a-server-core</code></td><td>请求处理流水线、协商、授权、调用上下文、标准校验（8.6）；<code>A2aAgentHandler</code>。不依赖 Spring</td><td><code>bcn-a2a-codec</code></td></tr>
 <tr><td><code>bcn-a2a-server-managed</code></td><td>托管模式：<code>ManagedAgent</code>、执行线程池、TaskStore SPI 和内存实现（8.10）</td><td><code>server-core</code></td></tr>
 <tr><td><code>bcn-a2a-server-managed-redis</code></td><td>托管模式的分布式缓存存储（9.5）</td><td><code>server-managed</code>、Redis 客户端</td></tr>
 <tr><td><code>bcn-a2a-server-sofaboot-starter</code></td><td>自动装配、三种绑定的端点、调用方身份提取、Card 发布、可选自动注册</td><td><code>server-core</code>、SOFABoot、a2a-java spec-grpc</td></tr>
@@ -961,15 +961,20 @@ public interface TaskStore {
 </table></div>
 <p>消息模式只需要 starter；引擎模式再加 codec；托管模式再加两个 managed 模块。</p>
 
-<h3 id="s8-5"><span class="n">8.5</span>引擎模式 SPI</h3>
+<h3 id="s8-5"><span class="n">8.5</span>A2aAgentHandler SPI</h3>
+<p>消息模式和引擎模式使用同一个接口。只实现 <code>sendMessage</code> 并返回消息，就是消息模式（8.9）；覆盖其余方法并返回 Task，就是引擎模式。</p>
 <pre><code>public interface A2aAgentHandler {
     AgentDescriptor descriptor();
 
-    EventKind sendMessage(BcnCall&lt;MessageSendParams&gt; call);
-    Flow.Publisher&lt;StreamingEventKind&gt; sendStreamingMessage(BcnCall&lt;MessageSendParams&gt; call);
-    Task getTask(BcnCall&lt;TaskQueryParams&gt; call);
-    Flow.Publisher&lt;StreamingEventKind&gt; subscribeToTask(BcnCall&lt;TaskIdParams&gt; call);
-    Task cancelTask(BcnCall&lt;CancelTaskParams&gt; call);
+    EventKind sendMessage(BcnCall&lt;MessageSendParams&gt; call) throws Exception;
+
+    // 以下四个方法有默认实现，对应消息模式（L0）的行为；需要 Task 能力时覆盖
+    default Flow.Publisher&lt;StreamingEventKind&gt; sendStreamingMessage(BcnCall&lt;MessageSendParams&gt; call) throws Exception {
+        return Streams.single(sendMessage(call));      // 流中只有一条消息（P-35）
+    }
+    default Task getTask(BcnCall&lt;TaskQueryParams&gt; call) { throw new TaskNotFoundError(); }
+    default Flow.Publisher&lt;StreamingEventKind&gt; subscribeToTask(BcnCall&lt;TaskIdParams&gt; call) { throw new TaskNotFoundError(); }
+    default Task cancelTask(BcnCall&lt;CancelTaskParams&gt; call) { throw new TaskNotFoundError(); }
 }
 
 /** SDK 在标准请求外包的一层，带上协议层已经处理好的信息。 */
@@ -1177,35 +1182,30 @@ public class OrderAuthorizer implements AgentAuthorizer {
 }</code></pre>
 
 <h3 id="s8-9"><span class="n">8.9</span>消息模式</h3>
-<p>最轻的接入方式，对应 L0（6.3、<span class="tag d">D10</span>）。Agent 对每次发送只返回一条完整的消息，没有 Task，也没有任何状态。SDK 把 <code>MessageAgent</code> 包装成一个 <code>A2aAgentHandler</code>：用它同时响应 SendMessage 和 SendStreamingMessage（流中只有这一条消息），对 GetTask、SubscribeToTask、CancelTask 和带 <code>taskId</code> 的消息返回 <code>TASK_NOT_FOUND</code>（P-35 到 P-38）。</p>
-<pre><code>public interface MessageAgent {
-    AgentDescriptor descriptor();
-    /** 返回一条完整的回复。在 SDK 管理的线程上调用，可以阻塞。 */
-    Message reply(BcnCall&lt;MessageSendParams&gt; call) throws Exception;
-}</code></pre><pre><code>@Component
-public class FaqAgent implements MessageAgent {
+<p>最轻的接入方式，对应 L0（6.3、<span class="tag d">D10</span>）。Agent 实现 <code>A2aAgentHandler</code>，只写 <code>sendMessage</code>，每次返回一条完整的消息；其余四个方法使用默认实现（8.5）：流式发送调用 <code>sendMessage</code> 并以单条消息的流返回，查询、订阅、取消返回 <code>TASK_NOT_FOUND</code>（P-35 到 P-38）。没有单独的消息模式接口，以后需要 Task 能力时覆盖默认方法即可，不用换接口。</p>
+<pre><code>@Component
+public class FaqAgent implements A2aAgentHandler {
     @Override
     public AgentDescriptor descriptor() {
         return AgentDescriptor.builder()
                 .name("报销问答").description("回答差旅报销政策相关问题").version("1.0.0")
                 .skill("expense_faq", "报销政策", "回答报销标准、流程和材料要求", "finance")
-                .messageOnly()                       // L0；可再声明 .streaming(true)，流中只有一条消息
+                .streaming(true)                     // 可选；流中只有一条消息
                 .build();
     }
 
     @Override
-    public Message reply(BcnCall&lt;MessageSendParams&gt; call) {
-        String answer = faqService.answer(Texts.of(call.request().message()));
+    public Message sendMessage(BcnCall&lt;MessageSendParams&gt; call) {
+        String answer = faqService.answer(Messages.text(call.request().message()));
         return Messages.agentText(answer);           // SDK 补齐 messageId、role、contextId
     }
-}</code></pre>
-<div class="tw"><table>
+}</code></pre><div class="tw"><table>
 <tr><th>项</th><th>行为</th></tr>
 <tr><td>多轮会话</td><td>SDK 沿用请求中的 <code>contextId</code>，没有时生成一个并放进回复（P-38）。会话记忆由 Agent 按 <code>contextId</code> 自己保存</td></tr>
 <tr><td>可用的能力</td><td>文本和文件 Part（6.13）、工具记录（7.9）、调用上下文、Card 描述（E1）和请求参数（E2）</td></tr>
 <tr><td>不可用的能力</td><td>逐段输出、断线后取回结果、取消、exec 审批、结果字段（E3）、过程事件（E4）、内容块（E5）、推送。<code>AgentDescriptor</code> 声明了其中任何一项时启动失败</td></tr>
 <tr><td>断线</td><td>结果丢失。调用方报告结果未知，不自动重发（P-112）</td></tr>
-<tr><td>超时</td><td>SDK 对 <code>reply</code> 施加最长执行时间，超时返回内部错误</td></tr>
+<tr><td>超时</td><td>SDK 对 <code>sendMessage</code> 施加最长执行时间，超时返回内部错误</td></tr>
 <tr><td>多实例</td><td>天然满足，因为没有后续请求</td></tr>
 </table></div>
 
@@ -1522,7 +1522,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <h2 id="s11"><span class="n">11</span>存量 Agent 迁移</h2>
 <div class="tw"><table>
 <tr><th>现有形态</th><th>接入方式</th><th>得到的等级</th><th>工作量</th></tr>
-<tr><td>简单问答，回答一次性给出即可</td><td>消息模式：实现 <code>MessageAgent</code></td><td>L0</td><td>很小</td></tr>
+<tr><td>简单问答，回答一次性给出即可</td><td>消息模式：实现 <code>A2aAgentHandler</code> 的 <code>sendMessage</code></td><td>L0</td><td>很小</td></tr>
 <tr><td>引擎有运行记录，满足 9.2 的要求</td><td>引擎模式：实现 <code>A2aAgentHandler</code>，把五个方法对应到引擎的运行接口，用工具库编码扩展</td><td>L1 到 L3</td><td>中，主要是运行记录到 Task 的映射</td></tr>
 <tr><td>引擎有运行记录，但部分要求不满足</td><td>先补齐引擎能力；在此之前单实例部署，或改用托管模式</td><td>按满足情况</td><td>取决于引擎</td></tr>
 <tr><td>无运行记录的同步接口：请求进，完整文本出</td><td>托管模式：实现 <code>ManagedAgent</code>，一次 <code>append</code> 后 <code>complete</code></td><td>L1 或 L2</td><td>小</td></tr>
@@ -1536,7 +1536,7 @@ default List&lt;TaskKey&gt; pollDue(long nowMs, int limit) { throw new Unsupport
 <ol>
 <li>按 8.2 选择接入模式：消息模式、引擎模式（需满足 9.2 的要求）或托管模式。</li>
 <li>引入 starter 和 codec；托管模式再引入 managed 模块，多实例部署准备一个不淘汰数据的缓存实例（9.5）。</li>
-<li>实现 <code>MessageAgent</code>、<code>A2aAgentHandler</code> 或 <code>ManagedAgent</code>（动态 Agent 再实现 <code>AgentResolver</code>）。</li>
+<li>实现 <code>A2aAgentHandler</code>（消息模式只写 <code>sendMessage</code>）或 <code>ManagedAgent</code>（动态 Agent 再实现 <code>AgentResolver</code>）。</li>
 <li>配置绑定和接口地址，由平台确认 MOSN 路由。</li>
 <li>本地运行 TCK 的对应等级；引擎模式运行引擎要求分组。</li>
 <li>向 BCS 申请 Provider，注册 Agent（手动或开启自动注册）。</li>
