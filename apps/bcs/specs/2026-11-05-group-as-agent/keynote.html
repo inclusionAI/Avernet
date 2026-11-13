@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="BCN Group as an Agent：群 A2A 调用、多轮协作、Artifact 持久化与恢复方案演示稿。">
+  <title>BCN Group as an Agent · 方案演示</title>
+  <style>
+    :root { --paper:#f5f3ec; --ink:#173c35; --muted:#626e66; --line:#cbd1c5; --lime:#d9f47a; --forest:#143e35; --deep:#0b2723; --orange:#b54e30; --scale:1; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; width:100%; height:100%; }
+    body { background:#091b18; color:var(--ink); font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; -webkit-font-smoothing:antialiased; overflow:hidden; }
+    button,a { -webkit-tap-highlight-color:transparent; }
+    button { font:inherit; cursor:pointer; }
+    button:focus-visible,a:focus-visible { outline:3px solid #70c9ff; outline-offset:5px; }
+    #stage { position:absolute; inset:0 0 60px; overflow:hidden; }
+    #deck { position:absolute; width:1600px; height:900px; top:50%; left:50%; transform:translate(-50%,-50%) scale(var(--scale)); transform-origin:center; }
+    .slide { position:absolute; inset:0; padding:70px 90px 66px; background:var(--paper); overflow:hidden; display:none; }
+    .slide.active { display:flex; flex-direction:column; animation:arrive .25s ease-out; }
+    .slide.dark { background:var(--forest); color:var(--paper); --muted:#b3c4b8; --line:#527066; }
+    .slide.lime { background:var(--lime); }
+    .slide::after { content:attr(data-page); position:absolute; right:90px; bottom:34px; font-size:18px; font-variant-numeric:tabular-nums; color:var(--muted); }
+    .eyebrow { font-size:20px; line-height:1.4; letter-spacing:.13em; font-weight:600; color:var(--muted); margin:0 0 21px; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:112px; letter-spacing:-.065em; line-height:1.05; font-weight:650; }
+    h2 { font-size:64px; line-height:1.22; letter-spacing:-.035em; font-weight:600; }
+    h3 { font-size:34px; line-height:1.4; font-weight:600; }
+    p { font-size:29px; line-height:1.65; }
+    .lead { margin-top:22px; max-width:1270px; color:var(--muted); font-size:30px; line-height:1.65; }
+    .accent { color:#cfe881; }
+    .muted { color:var(--muted); }
+    .mono,code,pre { font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; }
+    code { font-size:.82em; }
+    .body { flex:1; min-height:0; margin-top:42px; }
+    .two { display:grid; grid-template-columns:1fr 1fr; gap:64px; }
+    .three { display:grid; grid-template-columns:repeat(3,1fr); gap:48px; }
+    .rule { border-top:2px solid var(--line); padding-top:24px; }
+    .bottom { margin-top:auto; padding-top:23px; border-top:1px solid var(--line); font-size:25px; color:var(--muted); line-height:1.6; }
+    .bottom strong { color:var(--ink); font-weight:600; }
+    .dark .bottom strong { color:var(--lime); }
+    .label { font-size:21px; color:var(--muted); margin-bottom:13px; }
+    .big { font-size:90px; font-weight:550; line-height:1; letter-spacing:-.06em; }
+    .small { font-size:24px; }
+    .tag { display:inline-block; padding:8px 15px; border:1px solid currentColor; border-radius:30px; font-size:20px; line-height:1.3; }
+    .note { display:none; }
+    .cover { justify-content:center; }
+    .cover .eyebrow { position:absolute; top:70px; }
+    .cover h1 { max-width:900px; z-index:1; }
+    .cover .subtitle { font-size:40px; line-height:1.5; margin-top:38px; }
+    .cover .cover-meta { position:absolute; bottom:67px; font-size:22px; color:var(--muted); }
+    .cover-art { position:absolute; width:650px; height:650px; right:10px; top:124px; }
+    .entity-grid { margin-top:62px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:55px; }
+    .entity .term { font-size:72px; letter-spacing:-.04em; margin:17px 0 22px; }
+    .entity .meaning { font-size:30px; margin-bottom:30px; }
+    .entity .detail { font-size:25px; line-height:1.7; color:var(--muted); }
+    .entity-symbol { width:66px; height:66px; display:grid; place-items:center; border:2px solid var(--ink); border-radius:50%; font-size:28px; }
+    .conversation { padding-top:24px; border-top:2px solid var(--line); }
+    .conversation blockquote { margin:22px 0 28px; font-size:43px; line-height:1.5; font-weight:500; }
+    .field-row { display:flex; justify-content:space-between; gap:20px; padding:16px 0; border-top:1px solid var(--line); font-size:25px; }
+    .field-row span:last-child { text-align:right; }
+    .result-line { margin-top:22px; padding:20px 25px; background:var(--ink); color:var(--paper); font-size:25px; }
+    .flow { display:flex; flex-direction:column; align-items:center; }
+    .flow-node { width:100%; text-align:center; border:2px solid var(--line); padding:18px 24px; font-size:29px; line-height:1.45; }
+    .flow-node.filled { background:var(--ink); border-color:var(--ink); color:var(--paper); }
+    .flow-node.light { background:var(--lime); border-color:var(--lime); color:var(--ink); }
+    .arrow { height:30px; width:2px; background:var(--line); position:relative; flex-shrink:0; }
+    .arrow::after { content:""; position:absolute; bottom:-1px; left:-5px; border-left:6px solid transparent; border-right:6px solid transparent; border-top:8px solid var(--line); }
+    .argument { padding-left:40px; border-left:3px solid var(--line); }
+    .argument h3 { margin-bottom:22px; }
+    .argument p + p { margin-top:26px; }
+    .quote { font-size:47px; line-height:1.5; letter-spacing:-.025em; }
+    .quote em { font-style:normal; color:var(--orange); }
+    .input-list { margin-top:25px; }
+    .input-item { display:flex; align-items:center; gap:22px; border-top:1px solid var(--line); padding:22px 0; font-size:30px; }
+    .input-item span { font-size:20px; color:var(--muted); }
+    .run-cycle { display:flex; gap:20px; align-items:center; margin-top:34px; font-size:25px; }
+    .run-cycle b { display:block; background:var(--lime); padding:22px 28px; font-weight:500; }
+    .run-cycle i { font-style:normal; color:var(--muted); }
+    .scenario-table,.compare { width:100%; border-collapse:collapse; font-size:27px; line-height:1.55; }
+    .scenario-table th,.compare th { font-size:22px; color:var(--muted); text-align:left; font-weight:500; padding:0 22px 20px 0; }
+    .scenario-table td,.compare td { border-top:1px solid var(--line); padding:27px 22px 27px 0; vertical-align:top; }
+    .scenario-table td:first-child { width:32%; font-size:33px; font-weight:500; }
+    .scenario-table td:last-child { width:28%; }
+    .compare td { padding:21px 26px 21px 0; }
+    .compare td:first-child { width:17%; color:var(--muted); font-size:24px; }
+    .compare td:nth-child(2) { width:39%; }
+    .compare td:last-child { font-weight:550; }
+    .lane { display:grid; grid-template-columns:205px 1fr; gap:38px; align-items:center; margin:10px 0 43px; }
+    .lane-title { font-size:28px; }
+    .lane-title small { display:block; color:var(--muted); font-size:20px; margin-top:10px; }
+    .lane-track { display:flex; align-items:center; gap:16px; }
+    .task { padding:30px 24px; background:var(--ink); color:var(--paper); flex:1; text-align:center; font-size:29px; }
+    .task small { display:block; font-size:22px; margin-top:15px; color:#d0dcd5; }
+    .task.waiting { background:transparent; border:2px dashed #86978b; color:var(--ink); }
+    .task.waiting small { color:var(--muted); }
+    .lane-track .gate { width:140px; text-align:center; flex-shrink:0; color:var(--orange); font-size:23px; line-height:1.55; }
+    .wide-statement { font-size:34px; padding-top:28px; border-top:2px solid var(--line); line-height:1.6; }
+    .recovery-row { display:grid; grid-template-columns:250px 1fr 350px; gap:35px; padding:29px 0; border-top:1px solid var(--line); align-items:start; }
+    .recovery-row h3 { font-size:31px; }
+    .recovery-row p { font-size:27px; }
+    .recovery-row .outcome { color:var(--orange); font-size:25px; line-height:1.65; }
+    .search-branch { display:grid; grid-template-columns:1.05fr 1fr; gap:100px; margin-top:45px; }
+    .step-number { font-size:19px; display:block; color:var(--muted); margin-bottom:10px; }
+    .decision { border-top:1px solid var(--line); padding:22px 0; }
+    .decision h3 { color:var(--lime); font-size:30px; }
+    .decision p { font-size:25px; color:var(--muted); margin-top:5px; }
+    .creation-flow { display:grid; grid-template-columns:540px 1fr; gap:90px; }
+    .creation-flow .flow-node { padding:15px 25px; font-size:27px; }
+    .creation-flow .arrow { height:24px; }
+    .responsibility { border-top:2px solid var(--line); padding:23px 0 29px; }
+    .responsibility p { font-size:27px; color:var(--muted); margin-top:12px; }
+    .ready-sequence { display:grid; grid-template-columns:1fr 1fr; gap:95px; }
+    .ready-sequence .big { margin:25px 0 32px; font-size:62px; }
+    .checks { display:grid; grid-template-columns:1fr 1fr; gap:24px 32px; }
+    .checks p { font-size:26px; border-top:1px solid var(--line); padding-top:19px; }
+    .check-dot { display:inline-block; width:9px; height:9px; background:var(--ink); border-radius:50%; margin-right:14px; vertical-align:middle; }
+    .timeline { margin-top:47px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:52px; }
+    .milestone { border-top:3px solid var(--ink); padding-top:23px; }
+    .milestone .number { font-size:63px; color:#7f9688; line-height:1; margin-bottom:30px; }
+    .milestone h3 { margin-bottom:19px; }
+    .milestone p { font-size:27px; color:var(--muted); }
+    .later { background:var(--ink); color:var(--paper); padding:23px 30px; margin-top:auto; font-size:26px; line-height:1.5; }
+    .later b { color:var(--lime); margin-right:24px; font-weight:500; }
+    .poc-grid { display:grid; grid-template-columns:1fr 1fr; column-gap:90px; row-gap:35px; }
+    .poc { border-top:2px solid var(--line); padding-top:20px; }
+    .poc .label { color:var(--orange); font-size:21px; }
+    .poc h3 { font-size:31px; }
+    .poc p { margin-top:13px; font-size:25px; color:var(--muted); }
+    .review-columns { display:grid; grid-template-columns:1.04fr 1fr; gap:90px; }
+    .review-list { display:grid; gap:23px; margin-top:25px; }
+    .review-list p { border-top:1px solid var(--line); padding-top:19px; font-size:29px; }
+    .parameters { display:grid; grid-template-columns:1fr 1fr; gap:30px 40px; margin-top:28px; }
+    .parameter { border-top:1px solid var(--line); padding-top:18px; }
+    .parameter b { display:block; font-size:29px; font-weight:500; }
+    .parameter span { display:block; color:var(--muted); margin-top:10px; font-size:23px; line-height:1.5; }
+    .request { padding:28px 32px; min-height:468px; background:var(--deep); color:#e8efe6; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:24px; line-height:1.5; margin:0; tab-size:2; }
+    .request .key { color:#b5ccbe; }
+    .request .value { color:var(--lime); }
+    .endpoint { font-size:23px; color:var(--muted); margin:0 0 21px; overflow-wrap:anywhere; }
+    .request-comment { margin-top:22px; font-size:25px; color:var(--muted); }
+    .closing h2 { font-size:91px; max-width:1200px; margin-top:35px; line-height:1.35; }
+    .closing .three { margin-top:auto; }
+    .source-link { border-top:1px solid var(--line); padding-top:24px; display:block; color:var(--paper); text-decoration:none; }
+    .source-link strong { display:block; font-size:32px; font-weight:500; }
+    .source-link span { display:block; margin-top:11px; color:var(--muted); font-size:23px; }
+    .source-link:hover strong { color:var(--lime); }
+    #toolbar { position:fixed; bottom:0; left:0; right:0; height:60px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; gap:18px; color:#cedbd2; background:#091b18; z-index:10; }
+    .tools,.page-controls { display:flex; align-items:center; gap:8px; }
+    #toolbar button { border:0; color:inherit; background:transparent; border-radius:7px; padding:9px 12px; font-size:14px; line-height:1.2; }
+    #toolbar button:hover { background:#29433a; color:white; }
+    #toolbar button:disabled { opacity:.3; cursor:default; }
+    #page-counter { font:14px "SFMono-Regular",Consolas,monospace; min-width:68px; text-align:center; }
+    #toolbar-title { font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #progress { position:absolute; left:0; top:0; height:2px; width:0; background:var(--lime); transition:width .2s; }
+    dialog { border:1px solid #586d61; border-radius:14px; padding:35px; background:var(--paper); color:var(--ink); max-width:min(900px,calc(100vw - 32px)); max-height:85vh; }
+    dialog::backdrop { background:#001b15c9; backdrop-filter:blur(9px); }
+    dialog h2 { font-size:28px; letter-spacing:0; margin:0 0 24px; }
+    .dialog-head { display:flex; justify-content:space-between; align-items:start; gap:30px; }
+    .close-dialog { background:transparent; border:1px solid var(--line); border-radius:5px; padding:5px 10px; color:var(--ink); font-size:16px; }
+    #index-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    #index-grid button { text-align:left; border:1px solid var(--line); color:var(--ink); background:transparent; padding:15px; border-radius:6px; font-size:16px; display:flex; gap:14px; line-height:1.5; }
+    #index-grid button[aria-current="page"] { background:var(--ink); color:var(--paper); }
+    #index-grid button span { opacity:.65; font-variant-numeric:tabular-nums; }
+    #notes-content { font-size:20px; line-height:1.85; white-space:pre-line; }
+    .dialog-help { margin-top:23px; font-size:14px; color:var(--muted); }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @keyframes arrive { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
+    @media (max-width:650px) { #toolbar { padding:0 8px; gap:7px; } #toolbar-title { display:none; } #toolbar button { padding:9px; } #index-grid { grid-template-columns:1fr; } dialog { padding:23px; } }
+    @page { size:1600px 900px; margin:0; }
+    @media print {
+      html,body { width:auto; height:auto; overflow:visible; background:var(--paper); print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+      #stage,#deck { position:static; width:1600px; height:auto; inset:auto; transform:none; overflow:visible; }
+      .slide,.slide.active { display:flex!important; position:relative; width:1600px; height:900px; break-after:page; animation:none; }
+      .slide:last-child { break-after:auto; }
+      #toolbar,dialog,.sr-only { display:none!important; }
+    }
+  </style>
+</head>
+<body>
+  <main id="stage" aria-label="BCN Group A2A 演示稿">
+    <div id="deck">
+      <section class="slide dark cover active" data-title="Group as an Agent" aria-labelledby="title-1">
+        <p class="eyebrow">BCN / 技术方案</p>
+        <h1 id="title-1">Group<br>as an <span class="accent">Agent</span></h1>
+        <p class="subtitle">让一个协作群，成为可调用的 Agent</p>
+        <p class="cover-meta">方案提议 · 2026.11</p>
+        <svg class="cover-art" viewBox="0 0 650 650" role="img" aria-label="外部统一 Agent 入口，内部由 manager 协调多个 Worker">
+          <circle cx="350" cy="310" r="255" fill="none" stroke="#597c64" stroke-width="1.5"/>
+          <circle cx="350" cy="310" r="195" fill="none" stroke="#597c64" stroke-width="1" stroke-dasharray="5 12"/>
+          <path d="M350 310 L350 115 M350 310 L520 408 M350 310 L181 408" stroke="#a4c88d" stroke-width="2"/>
+          <circle cx="350" cy="115" r="39" fill="#274f40" stroke="#b6ce95" stroke-width="2"/>
+          <circle cx="520" cy="408" r="39" fill="#274f40" stroke="#b6ce95" stroke-width="2"/>
+          <circle cx="181" cy="408" r="39" fill="#274f40" stroke="#b6ce95" stroke-width="2"/>
+          <circle cx="350" cy="310" r="90" fill="#d9f47a"/>
+          <text x="350" y="319" text-anchor="middle" fill="#173c35" font-size="27" font-family="sans-serif">manager</text>
+          <text x="350" y="187" text-anchor="middle" fill="#cbdcc7" font-size="22" font-family="sans-serif">Worker</text>
+          <text x="520" y="483" text-anchor="middle" fill="#cbdcc7" font-size="22" font-family="sans-serif">Worker</text>
+          <text x="181" y="483" text-anchor="middle" fill="#cbdcc7" font-size="22" font-family="sans-serif">Worker</text>
+          <rect x="251" y="548" width="198" height="59" rx="30" fill="#143e35" stroke="#91b478"/>
+          <text x="350" y="587" text-anchor="middle" fill="#d9f47a" font-size="25" font-family="sans-serif">A2A Agent</text>
+        </svg>
+        <aside class="note">这份方案解决的是外部 Agent 如何调用一个已有 BCN 协作群，并持续对话。本期提供主从群与自定义协作群的 A2A，后续讨论自由聊天群。图中用主从群示意，同样的入口也支持自定义协作群。当前为待实施的方案。</aside>
+      </section>
+
+      <section class="slide lime" data-title="群、会话与 Task" aria-labelledby="title-2">
+        <p class="eyebrow">核心模型</p>
+        <h2 id="title-2">群可复用，会话连续，每轮结果独立</h2>
+        <div class="entity-grid body">
+          <div class="entity"><div class="entity-symbol">G</div><div class="term">Group</div><p class="meaning">对外的 Agent</p><p class="detail">成员与协作方式定义能力<br>一个群可服务多个会话</p></div>
+          <div class="entity"><div class="entity-symbol">C</div><div class="term">Context</div><p class="meaning">BCN Session</p><p class="detail">承接同一调用方的连续对话<br>保留目标与轮次关联</p></div>
+          <div class="entity"><div class="entity-symbol">T</div><div class="term">Task</div><p class="meaning">一轮群执行</p><p class="detail">记录进度、状态与最终产物<br>下一轮保留上一轮结果</p></div>
+        </div>
+        <p class="bottom"><strong>调用方只需知道：</strong>向哪个群发消息、在哪个会话继续、查询哪一轮结果。</p>
+        <aside class="note">Group 本身就是 Agent，不需要额外注册占位 Bot。contextId 直接复用 Session.id，Task 绑定本轮 activation 或 Run。群内部可能有多个 Bot Run 或 StateMachine Run，内部标识通过关联记录管理，不混用外部 Task ID。旧结果在公布的保留期内可独立查询。</aside>
+      </section>
+
+      <section class="slide " data-title="第一次直接提问，下一轮带回 contextId" aria-labelledby="title-3">
+        <p class="eyebrow">调用体验</p>
+        <h2 id="title-3">第一次直接提问，下一轮带回 contextId</h2>
+        <div class="body two"><div><h3>首次调用</h3><p class="quote">“比较两家供应商”</p><p>新 messageId<br>省略 contextId / taskId</p><div class="result-line mono">context-1 / task-1</div></div><div><h3>前轮完成后续聊</h3><p class="quote">“预算改为 50 万”</p><p>新 messageId，原 contextId<br>仍省略 taskId</p><div class="result-line mono">context-1 / task-2</div></div></div>
+        <p class="bottom">旧 Task 和 Artifact 保留；下一轮创建新 Task。</p>
+        <aside class="note">contextId 直接复用 Session.id。若前轮仍在执行，返回 CONTEXT_BUSY，不排队。来源及用户字段的名称、结构、凭据传递方式待联合设计。</aside>
+      </section>
+
+      <section class="slide " data-title="显式完成、执行退出、产物提交" aria-labelledby="title-4">
+        <p class="eyebrow">主从群 / ManagerWorker</p>
+        <h2 id="title-4">显式完成、执行退出、产物提交</h2>
+        <div class="body two"><div><div class="flow"><div class="flow-node">manager 调用 task.complete(summary)</div><div class="arrow"></div><div class="flow-node">BCN 固定完成边界，先返回 ack</div><div class="arrow"></div><div class="flow-node">等 manager 退出及整轮工作收尾</div><div class="arrow"></div><div class="flow-node">保存 Artifact 与 COMPLETED</div></div></div><div><h3>完成信号必须指向本轮</h3><p>精确关联 Session、activation 和 Task。</p><h3 style="margin-top:32px">完全空闲却没有完成信号</h3><p>建议 60 秒后提醒一次，<br>再给 120 秒宽限，仍未完成则失败。</p></div></div>
+        <p class="bottom">最后一条聊天、Worker 完成或静默都不会自动判定成功。</p>
+        <aside class="note">完成调用先 ack，再等 manager 退出，避免等待自身造成死锁。提醒只在无活动工作、待回送、重试和未知停止工作时开始；心跳不重置计时。</aside>
+      </section>
+
+      <section class="slide" data-title="自定义协作如何续聊" aria-labelledby="title-5">
+        <p class="eyebrow">自定义协作群 / StateMachine</p>
+        <h2 id="title-5">同一会话里，每轮从入口启动新 Run</h2>
+        <div class="body two">
+          <div><h3>每轮自动带入</h3><div class="input-list"><div class="input-item"><span>01</span>最初的协作目标</div><div class="input-item"><span>02</span>本轮要求</div><div class="input-item"><span>03</span>上一轮结果与状态</div></div><p class="small muted" style="margin-top:25px">需要更早的历史时，由流程显式读取。</p></div>
+          <div><div class="flow"><div class="flow-node">流程入口</div><div class="arrow"></div><div class="flow-node">按本轮要求选择业务分支</div><div class="arrow"></div><div class="flow-node filled">读取指定 final_output 节点</div></div><div class="run-cycle"><b>task-1 / run-1</b><i>下一轮</i><b>task-2 / run-2</b></div></div>
+        </div>
+        <p class="bottom">续聊使用新的正常执行。失败重跑与新一轮对话，各自保留原有语义。</p>
+        <aside class="note">既有自定义协作群执行结束后不能直接响应普通消息，方案在 A2A 应用层明确做 reactivate + start。成功结果使用流程指定的最终输出节点，消除按到达顺序挑最后一个 artifact 的歧义。本期不开放含 HumanInput 的流程；执行中意外进入时按期限失败收尾。</aside>
+      </section>
+
+      <section class="slide" data-title="解释、重算与业务提交" aria-labelledby="title-6">
+        <p class="eyebrow">流程定义</p>
+        <h2 id="title-6">“继续聊”做什么，由流程明确决定</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>本轮消息</th><th>流程选择</th><th>业务写入</th></tr></thead><tbody><tr><td>预算改为 50 万</td><td>重新比较供应商<br><span class="muted">生成新一轮建议</span></td><td>按分析流程执行</td></tr><tr><td>为什么推荐 A？</td><td>读取上一轮结果并解释<br><span class="muted">必要时补读历史</span></td><td>解释分支只读</td></tr><tr><td>按方案提交订单</td><td>校验业务条件后提交<br><span class="muted">使用业务单号去重</span></td><td>由业务规则约束</td></tr></tbody></table></div>
+        <p class="bottom"><strong>两层去重：</strong>messageId 识别同一消息的网络重试，业务单号识别重复的业务操作。</p>
+        <aside class="note">A2A 层负责把消息交给本轮流程。意图识别、分支选择和工具权限由流程实现。验收解释请求时，除了检查回答，还要断言写入能力调用次数为零。不同 messageId 可能表达同一业务意图，仍要依赖业务系统已有的去重合同。</aside>
+      </section>
+
+      <section class="slide " data-title="同一 context 忙碌时，拒绝新一轮" aria-labelledby="title-7">
+        <p class="eyebrow">调度取舍</p>
+        <h2 id="title-7">同一 context 忙碌时，拒绝新一轮</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>收到什么</th><th>本期处理</th></tr></thead><tbody><tr><td>原 messageId 的相同请求</td><td>读取原 Task，避免重复派发</td></tr><tr><td>新 messageId，不带 taskId</td><td>409 / CONTEXT_BUSY<br>不创建 Task，不排队，不预留新 ID</td></tr><tr><td>向 working Task 追加消息</td><td>UnsupportedOperationError</td></tr><tr><td>前轮结束且 context 已释放</td><td>接受新 Task，保留旧结果</td></tr></tbody></table></div>
+        <p class="bottom">不同 context 可以并行。同 context 的 FIFO 排队列为下一期待定。</p>
+        <aside class="note">标准允许同 context 关联多个 Task，但不规定服务端必须串行或排队。本方案固定忙碌拒绝，并用持久化原子占用避免并发启动。</aside>
+      </section>
+
+      <section class="slide " data-title="停止结果未知：任务失败，会话暂时隔离" aria-labelledby="title-8">
+        <p class="eyebrow">取消与恢复</p>
+        <h2 id="title-8">停止结果未知：任务失败，会话暂时隔离</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>阶段</th><th>Task</th><th>context</th></tr></thead><tbody><tr><td>取消已受理，等待停止确认</td><td>WORKING</td><td>保持占用</td></tr><tr><td>全部停止且收尾完成</td><td>CANCELED</td><td>可接受下一轮</td></tr><tr><td>收尾超期，仍无法确认停止</td><td>FAILED</td><td>隔离，返回 CONTEXT_UNAVAILABLE</td></tr><tr><td>后台确认旧执行停止</td><td>原 Task 保持 FAILED</td><td>解除隔离，可创建新 Task</td></tr></tbody></table></div>
+        <p class="bottom">执行建议 30 分钟，收尾建议 60 秒；重启不重置期限。</p>
+        <aside class="note">隔离阻止同一会话启动新工作，原 Task 仍能查询。后台有界核实与告警，无法自动恢复时进入人工处置。不能因为锁过期就放开旧执行。</aside>
+      </section>
+
+      <section class="slide lime" data-title="BCN 已有能力，与本期新增工作" aria-labelledby="title-9">
+        <p class="eyebrow">已有基础与新增职责</p>
+        <h2 id="title-9">BCN 已有能力，与本期新增工作</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>领域</th><th>已有</th><th>新增 / 排期</th></tr></thead><tbody><tr><td>单 Bot</td><td>聊天、Card 管理、A2A 出站</td><td>标准 A2A 入站另行排期</td></tr><tr><td>群与会话</td><td>Session、activation、Run</td><td>Group Card 与 Task 接口</td></tr><tr><td>完成与取消</td><td>task.complete、底层 abort</td><td>本轮关联、退出确认、整轮取消</td></tr><tr><td>结果与事件</td><td>Session.output、bcs_events</td><td>artifacts 表、公开投影与 SSE</td></tr></tbody></table></div>
+        <p class="bottom">BCN 单 Agent 入站设想：目标参数为 bot_id，消息仍用标准 A2A 正文。</p>
+        <aside class="note">已有 /agents/{bot_id}/agent-card 是外部 Agent 管理路由。新增 Group 的 /groups/{group_id}/agent-card.json 发布 BCN 自己的调用能力，两者分开注册。</aside>
+      </section>
+
+      <section class="slide " data-title="Artifact 单独持久化，保留非文本能力" aria-labelledby="title-10">
+        <p class="eyebrow">结果模型</p>
+        <h2 id="title-10">Artifact 单独持久化，保留非文本能力</h2>
+        <div class="body two"><div><h3>一轮可有多个产物</h3><p>task_id + artifact_id 唯一<br>Parts、顺序、名称与描述<br>metadata、extensions、创建时间</p><h3 style="margin-top:32px">本期对外</h3><p>文本 / JSON，按 Card 协商。</p></div><div><h3>存储表达</h3><p>text / data 直接保存；<br>raw / url 可保存对象引用及属性。</p><h3 style="margin-top:32px">一致提交</h3><p>成功终态与 Artifact 同一事务，<br>GetTask 与 SSE 读取相同记录。</p></div></div>
+        <p class="bottom">FAILED / CANCELED 可以没有产物。后续轮次不覆盖旧 Artifact。</p>
+        <aside class="note">大对象先写入对象存储，再在数据库事务里提交引用；事务失败留下的未引用对象可清理。保留期建议 7 天，恢复中的记录暂缓清理。</aside>
+      </section>
+
+      <section class="slide " data-title="过程消息已明确，来源与凭据继续讨论" aria-labelledby="title-11">
+        <p class="eyebrow">metadata 与扩展</p>
+        <h2 id="title-11">过程消息已明确，来源与凭据继续讨论</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>内容</th><th>当前结论</th></tr></thead><tbody><tr><td>includeProgress</td><td>默认 false，通过可选扩展激活<br>只返回整理过的公开业务进展</td></tr><tr><td>caller / user</td><td>暂定名；结构及凭据传递待联合设计</td></tr><tr><td>扩展 URI</td><td>GitHub 仓库中的版本化规范地址</td></tr><tr><td>Schema</td><td>仓库中的版本化 JSON；$id 标识 Schema 自身</td></tr></tbody></table></div>
+        <p class="bottom">使用已定义扩展字段时必须带 A2A-Extensions；漏头在受理前报错。</p>
+        <aside class="note">当前 Schema 只固定 includeProgress。Card.uri 与激活头相同，Schema.$id 与 Schema 引用相同；自动读取 JSON 使用原始内容或仓库解析。自报来源不作认证键。</aside>
+      </section>
+
+      <section class="slide lime" data-title="自由聊天群：先定义何时结束、交付什么" aria-labelledby="title-12">
+        <p class="eyebrow">后续讨论</p>
+        <h2 id="title-12">自由聊天群：先定义何时结束、交付什么</h2>
+        <div class="body two"><div><h3>模式一：直接返回消息</h3><p class="big">Message</p><p>返回聊天消息。<br>没有 Task 和 Artifact。</p></div><div><h3>模式二：LLM 总结</h3><p class="big">Artifact</p><p>以 Task 跟踪工作。<br>由 LLM 形成持久化产物。</p></div></div>
+        <p class="bottom">群级设置是初步方向；结束触发、消息范围和总结失败处理尚待设计。</p>
+        <aside class="note">本期仍只覆盖主从群和自定义协作群。自然语言建群暂不考虑，不规划助手、MCP 或 Fuse 建群流程。</aside>
+      </section>
+
+      <section class="slide " data-title="先闭合执行与存储，再验证客户端体验" aria-labelledby="title-13">
+        <p class="eyebrow">交付顺序</p>
+        <h2 id="title-13">先闭合执行与存储，再验证客户端体验</h2>
+        <div class="timeline body"><div class="milestone"><div class="number">01</div><h3>外部合同</h3><p>Card 与版本化路由<br>输入输出与错误<br>来源及凭据待定项</p></div><div class="milestone"><div class="number">02</div><h3>执行与结果</h3><p>原子受理与占用<br>两类群的多轮执行<br>Artifact 持久化</p></div><div class="milestone"><div class="number">03</div><h3>恢复与接入</h3><p>取消、期限与隔离<br>事件投影及 SSE<br>真实客户端验收</p></div></div>
+        <p class="bottom">协议编码留在 adapter；应用服务编排，执行和存储模块实现合同。</p>
+        <aside class="note">合同层不依赖 services 具体实现，由 composition root 装配。新增工作覆盖 Task、预留、占用、执行关联、Artifact、公开历史和恢复进度。</aside>
+      </section>
+
+      <section class="slide " data-title="四组必须验证的竞争与故障" aria-labelledby="title-14">
+        <p class="eyebrow">验收重点</p>
+        <h2 id="title-14">四组必须验证的竞争与故障</h2>
+        <div class="body"><table class="scenario-table"><thead><tr><th>场景</th><th>预期</th></tr></thead><tbody><tr><td>同 messageId 并发、两个新消息争用 context</td><td>同消息只执行一次；新消息最多一条受理</td></tr><tr><td>task.complete 与 manager 退出、取消竞争</td><td>先 ack 后收尾；只提交一个终局</td></tr><tr><td>Artifact 写入失败、提交后响应丢失</td><td>不暴露部分成功；重试读取已提交结果</td></tr><tr><td>停止未知、进程重启、旧回调迟到</td><td>期限不重置；隔离恢复确认；终态不被覆盖</td></tr></tbody></table></div>
+        <p class="bottom">SSE 先公开过程、再最终产物、再终态；终态后不追加迟到事件。</p>
+        <aside class="note">使用真实持久化边界验证，特别覆盖写失败、重启和事件重复消费。未知执行不能再次派发，结果清理后旧 messageId 仍不能再执行。</aside>
+      </section>
+
+      <section class="slide " data-title="已确定的设计，与仍需确认的合同" aria-labelledby="title-15">
+        <p class="eyebrow">评审决策</p>
+        <h2 id="title-15">已确定的设计，与仍需确认的合同</h2>
+        <div class="body two"><div><h3>已确定</h3><div class="review-list"><p>同 context 忙碌拒绝</p><p>状态机每轮新 Run</p><p>Artifact 独立表持久化</p><p>停止未知有界失败并隔离</p></div></div><div><h3>待确认</h3><div class="review-list"><p>来源字段与凭据传递</p><p>期限、大小与保留期数值</p><p>扩展文件名与错误 domain</p><p>恢复条件及人工处置入口</p></div></div></div>
+        <p class="bottom">自然语言建群暂不考虑；自由聊天群的响应模式另行讨论。</p>
+        <aside class="note">建议值包括 HTTP 等待 60 秒、执行 30 分钟、收尾 60 秒、静默提醒 60/120 秒、保留 7 天、请求体 1 MiB。SSE 心跳为 15 秒。应结合实际容量和网关确定数值。</aside>
+      </section>
+
+      <section class="slide" data-title="附录：两轮请求" aria-labelledby="title-16">
+        <p class="eyebrow">附录 / HTTP+JSON 请求体</p>
+        <h2 id="title-16">两轮调用，保留 contextId，更新 messageId</h2>
+        <p class="small mono" style="font-size:19px;margin:16px 0 0">groupBase = /api/v1/collaboration/a2a/groups/{group_id}</p>
+        <div class="body two" style="margin-top:14px"><div><p class="endpoint mono">POST {groupBase}/message:send</p><div class="request"><pre>{
+  <span class="key">"message"</span>: {
+    <span class="key">"messageId"</span>: <span class="value">"message-1"</span>,
+    <span class="key">"role"</span>: <span class="value">"ROLE_USER"</span>,
+    <span class="key">"parts"</span>: [{<span class="key">"text"</span>: <span class="value">"比较两家供应商"</span>}]
+  },
+  <span class="key">"configuration"</span>: {
+    <span class="key">"returnImmediately"</span>: true
+  }
+}</pre></div><p class="request-comment">响应 Task 提供 contextId 与本轮 id。</p></div><div><p class="endpoint mono">POST {groupBase}/message:send</p><div class="request"><pre>{
+  <span class="key">"message"</span>: {
+    <span class="key">"messageId"</span>: <span class="value">"message-2"</span>,
+    <span class="key">"contextId"</span>: <span class="value">"context-1"</span>,
+    <span class="key">"role"</span>: <span class="value">"ROLE_USER"</span>,
+    <span class="key">"parts"</span>: [{<span class="key">"text"</span>: <span class="value">"预算改为 50 万"</span>}]
+  },
+  <span class="key">"configuration"</span>: {
+    <span class="key">"returnImmediately"</span>: true
+  }
+}</pre></div><p class="request-comment">前轮结束后提交；忙碌时不排队。</p></div></div>
+        <aside class="note">这里展示消息结构。完整请求与错误示例见 examples.md；身份字段与凭据待联合设计。设置 A2A-Version: 1.0，Content-Type 与 Accept 使用 application/a2a+json。SendMessage 响应以 task 包装，GetTask 返回 Task 本体。首次与续聊均省略 taskId。</aside>
+      </section>
+
+      <section class="slide dark closing" data-title="方案资料" aria-labelledby="title-17">
+        <p class="eyebrow">BCN GROUP A2A</p>
+        <h2 id="title-17">调用一个 Agent，<br><span class="accent">完成一轮群协作。</span></h2>
+        <p class="lead" style="margin-top:35px">先让已有群可以可靠地被调用，<br>把每轮执行、产物与恢复边界定义清楚。</p>
+        <div class="three"><a class="source-link" href="overview.md" target="_blank" rel="noopener"><strong>方案简版 ↗</strong><span>快速回顾核心模型与取舍</span></a><a class="source-link" href="spec.md" target="_blank" rel="noopener"><strong>详细设计 ↗</strong><span>合同、恢复、兼容与验收</span></a><a class="source-link" href="examples.md" target="_blank" rel="noopener"><strong>完整请求示例 ↗</strong><span>发送、查询、流式、取消与错误</span></a></div>
+        <aside class="note">已有群以统一 A2A 入口提供一轮协作，并保存各轮 Artifact。后续自由聊天群需要另行确定结束和产物定义。三个资料链接指向演示稿同目录文件。</aside>
+      </section>
+    </div>
+  </main>
+
+  <nav id="toolbar" aria-label="演示控制">
+    <div id="progress" aria-hidden="true"></div>
+    <div class="page-controls"><button id="previous" type="button" aria-label="上一页" title="上一页（←）">←</button><span id="page-counter">01 / 17</span><button id="next" type="button" aria-label="下一页" title="下一页（→ / 空格）">→</button></div>
+    <span id="toolbar-title">Group as an Agent</span>
+    <div class="tools"><button id="index-button" type="button" title="目录（O）">目录</button><button id="notes-button" type="button" title="讲者备注（N）">备注</button><button id="fullscreen" type="button" title="全屏（F）">全屏</button></div>
+  </nav>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+  <dialog id="index-dialog" aria-labelledby="index-title"><div class="dialog-head"><h2 id="index-title">演示目录</h2><button class="close-dialog" type="button" aria-label="关闭目录">关闭</button></div><div id="index-grid"></div><p class="dialog-help">← → / 空格翻页　O 目录　N 备注　F 全屏　Home / End 首尾页</p></dialog>
+  <dialog id="notes-dialog" aria-labelledby="notes-title"><div class="dialog-head"><h2 id="notes-title">讲者备注</h2><button class="close-dialog" type="button" aria-label="关闭备注">关闭</button></div><div id="notes-content"></div></dialog>
+  <script>
+    'use strict';
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const stage = document.getElementById('stage');
+    const previous = document.getElementById('previous');
+    const next = document.getElementById('next');
+    const indexDialog = document.getElementById('index-dialog');
+    const notesDialog = document.getElementById('notes-dialog');
+    const indexGrid = document.getElementById('index-grid');
+    const fullscreen = document.getElementById('fullscreen');
+    let current = 0;
+    function fit() {
+      const scale = Math.min(stage.clientWidth / 1600, stage.clientHeight / 900);
+      document.documentElement.style.setProperty('--scale', String(scale));
+    }
+    function pageFromHash() {
+      const match = /^#slide-(\d+)$/.exec(location.hash);
+      return match ? Math.max(0, Math.min(slides.length - 1, Number(match[1]) - 1)) : 0;
+    }
+    function showSlide(index, updateHash = true) {
+      current = Math.max(0, Math.min(slides.length - 1, index));
+      slides.forEach((slide, i) => {
+        const active = i === current;
+        slide.classList.toggle('active', active);
+        slide.setAttribute('aria-hidden', String(!active));
+        slide.inert = !active;
+        slide.dataset.page = String(i + 1).padStart(2, '0');
+      });
+      previous.disabled = current === 0;
+      next.disabled = current === slides.length - 1;
+      document.getElementById('page-counter').textContent = `${String(current + 1).padStart(2, '0')} / ${slides.length}`;
+      document.getElementById('toolbar-title').textContent = slides[current].dataset.title;
+      document.getElementById('progress').style.width = `${((current + 1) / slides.length) * 100}%`;
+      document.getElementById('announcement').textContent = `第 ${current + 1} 页，共 ${slides.length} 页：${slides[current].dataset.title}`;
+      indexGrid.querySelectorAll('button').forEach((button, i) => {
+        if (i === current) button.setAttribute('aria-current', 'page');
+        else button.removeAttribute('aria-current');
+      });
+      if (updateHash) history.replaceState(null, '', `#slide-${current + 1}`);
+    }
+    slides.forEach((slide, i) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const number = document.createElement('span');
+      number.textContent = String(i + 1).padStart(2, '0');
+      button.append(number, document.createTextNode(slide.dataset.title));
+      button.addEventListener('click', () => { indexDialog.close(); showSlide(i); });
+      indexGrid.append(button);
+    });
+    function openIndex() {
+      indexDialog.showModal();
+      indexGrid.children[current].focus();
+    }
+    function openNotes() {
+      document.getElementById('notes-title').textContent = `${String(current + 1).padStart(2, '0')} / ${slides[current].dataset.title}`;
+      document.getElementById('notes-content').textContent = slides[current].querySelector('.note').textContent;
+      notesDialog.showModal();
+    }
+    async function toggleFullscreen() {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+      } catch {
+        document.getElementById('announcement').textContent = '浏览器未开启全屏，可使用浏览器菜单进入全屏。';
+      }
+    }
+    previous.addEventListener('click', () => showSlide(current - 1));
+    next.addEventListener('click', () => showSlide(current + 1));
+    document.getElementById('index-button').addEventListener('click', openIndex);
+    document.getElementById('notes-button').addEventListener('click', openNotes);
+    fullscreen.addEventListener('click', toggleFullscreen);
+    if (!document.fullscreenEnabled) fullscreen.hidden = true;
+    document.addEventListener('fullscreenchange', () => {
+      fullscreen.textContent = document.fullscreenElement ? '退出全屏' : '全屏';
+      fit();
+    });
+    document.querySelectorAll('dialog').forEach(dialog => {
+      dialog.querySelector('.close-dialog').addEventListener('click', () => dialog.close());
+      dialog.addEventListener('click', event => {
+        const rect = dialog.getBoundingClientRect();
+        if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
+      });
+    });
+    document.addEventListener('keydown', event => {
+      if (event.altKey || event.ctrlKey || event.metaKey || indexDialog.open || notesDialog.open) return;
+      if (event.target.closest('button,a,input,textarea,select') && (event.key === ' ' || event.key === 'Enter')) return;
+      const key = event.key.toLowerCase();
+      const actions = {
+        arrowright: () => showSlide(current + 1), arrowdown: () => showSlide(current + 1),
+        pagedown: () => showSlide(current + 1), ' ': () => showSlide(current + 1),
+        arrowleft: () => showSlide(current - 1), arrowup: () => showSlide(current - 1),
+        pageup: () => showSlide(current - 1), home: () => showSlide(0), end: () => showSlide(slides.length - 1),
+        o: openIndex, n: openNotes, f: toggleFullscreen
+      };
+      if (actions[key]) { event.preventDefault(); actions[key](); }
+    });
+    let touchStart = null;
+    stage.addEventListener('touchstart', event => {
+      if (event.touches.length === 1 && !event.target.closest('a,button')) touchStart = { x:event.touches[0].clientX, y:event.touches[0].clientY };
+    }, { passive:true });
+    stage.addEventListener('touchend', event => {
+      if (!touchStart) return;
+      const dx = event.changedTouches[0].clientX - touchStart.x;
+      const dy = event.changedTouches[0].clientY - touchStart.y;
+      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) showSlide(current + (dx < 0 ? 1 : -1));
+      touchStart = null;
+    }, { passive:true });
+    stage.addEventListener('touchcancel', () => { touchStart = null; }, { passive:true });
+    window.addEventListener('hashchange', () => showSlide(pageFromHash(), false));
+    new ResizeObserver(fit).observe(stage);
+    showSlide(pageFromHash(), false);
+    fit();
+  </script>
+</body>
+</html>
