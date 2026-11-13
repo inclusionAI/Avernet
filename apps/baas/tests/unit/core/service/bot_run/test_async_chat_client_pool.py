@@ -14,6 +14,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.core.service.bot_run._async_chat_client_pool import _ConnEntry
+
 
 @pytest.fixture
 def mock_chat_client():
@@ -266,7 +268,6 @@ class TestSessionRoutedGet:
         出第二条无记录的连接——session_routed get 必须直落持有者，零新建。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -286,7 +287,6 @@ class TestSessionRoutedGet:
         属查找不校验连接模式快照。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -319,7 +319,6 @@ class TestSessionRoutedGet:
         """单条连接 tracks_session 抛错不传染——继续查其它连接。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -338,6 +337,225 @@ class TestSessionRoutedGet:
 
 
 # ==================== total_connections tests ====================
+
+
+class TestInjectRouting:
+
+    @pytest.mark.asyncio
+    async def test_same_session_inject_lock_covers_get_and_rpc(self):
+        """同 session 的 pool inject 必须跨越 get 到 RPC 的完整窗口。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=1.0)
+        first = MagicMock()
+        second = MagicMock()
+        first.inject_message = AsyncMock()
+        second.inject_message = AsyncMock()
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def first_inject(**kwargs):
+            first_started.set()
+            await release_first.wait()
+
+        first.inject_message.side_effect = first_inject
+        pool.get = AsyncMock(side_effect=[first, second])
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+
+        second_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+        )
+        await asyncio.sleep(0)
+        assert pool.get.await_count == 1
+        assert not second_task.done()
+
+        release_first.set()
+        await asyncio.gather(first_task, second_task)
+
+        assert pool.get.await_count == 2
+        first.inject_message.assert_awaited_once_with(
+            message="first",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+        second.inject_message.assert_awaited_once_with(
+            message="second",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+        assert pool._inject_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_same_session_inject_lock_timeout_releases_waiter(self):
+        """池级 session 锁超时后应释放引用，不留下永久占位。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            ConcurrentSessionError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=0.01)
+        client = MagicMock()
+        client.inject_message = AsyncMock()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_inject(**kwargs):
+            started.set()
+            await release.wait()
+
+        client.inject_message.side_effect = blocked_inject
+        pool.get = AsyncMock(return_value=client)
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        with pytest.raises(ConcurrentSessionError, match="same-session"):
+            await pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+
+        assert pool._inject_locks["sandbox-1", "same-session"].users == 1
+        release.set()
+        await first_task
+        assert pool._inject_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_close_all_rejects_pre_shutdown_inject_waiter(self):
+        """close_all 后关闭前排队的 inject 不得复活新连接。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            NotConnectedError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=2, session_key_timeout=1.0)
+        first = MagicMock()
+        second = MagicMock()
+        first.inject_message = AsyncMock()
+        second.inject_message = AsyncMock()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_inject(**kwargs):
+            started.set()
+            await release.wait()
+
+        first.inject_message.side_effect = blocked_inject
+        pool.get = AsyncMock(side_effect=[first, second])
+
+        first_task = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="first",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        waiter = asyncio.create_task(
+            pool.inject_message(
+                "sandbox-1",
+                "ws://host/ws",
+                session_key="same-session",
+                message="second",
+            )
+        )
+        await asyncio.sleep(0)
+
+        await pool.close_all()
+        release.set()
+        await first_task
+        with pytest.raises(NotConnectedError, match="Pool closed"):
+            await waiter
+
+        assert pool.get.await_count == 1
+        assert pool._inject_locks == {}
+
+        # close_all 是可复用边界：关闭后的新调用取得新代次并可懒建连接。
+        await pool.inject_message(
+            "sandbox-1",
+            "ws://host/ws",
+            session_key="same-session",
+            message="after-close",
+        )
+        assert pool.get.await_count == 2
+        second.inject_message.assert_awaited_once_with(
+            message="after-close",
+            session_key="same-session",
+            auth_token=None,
+            attachments=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_close_all_during_connect_closes_unpublished_connection(self):
+        """close_all 与建连并发时不得留下未纳入快照的新连接。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            NotConnectedError,
+        )
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        client = MagicMock()
+        client.is_connected = True
+        client.is_reconnecting = False
+        client.has_active_sessions = False
+        client.active_session_count = 0
+        client.close = AsyncMock()
+        connect_started = asyncio.Event()
+        release_connect = asyncio.Event()
+
+        async def blocked_connect():
+            connect_started.set()
+            await release_connect.wait()
+
+        client.connect = AsyncMock(side_effect=blocked_connect)
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_pool.AsyncChatClient",
+            return_value=client,
+        ):
+            get_task = asyncio.create_task(pool.get("sandbox-1", "ws://host/ws"))
+            await asyncio.wait_for(connect_started.wait(), timeout=1)
+            await pool.close_all()
+            release_connect.set()
+
+            with pytest.raises(NotConnectedError, match="Pool closed"):
+                await get_task
+
+        assert pool.total_connections == 0
+        client.close.assert_awaited_once()
 
 
 class TestTotalConnections:
@@ -1008,7 +1226,6 @@ class TestOutboundAuthRefresh:
     ):
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=2)
@@ -1040,7 +1257,6 @@ class TestOutboundAuthRefresh:
         """v3 BotWebSocketClient 无该转发方法（duck-typed）——复用不动 cookie。"""
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
-            _ConnEntry,
         )
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=1)
@@ -1094,3 +1310,49 @@ class TestOutboundAuthRefresh:
         assert mock_cls.call_count == 1, "复用路径不得重建连接"
         assert mock_client.proxypass_token_minter is not None
         await pool.close_all()
+
+
+class TestSessionRouting:
+    @pytest.mark.asyncio
+    async def test_same_session_reuses_owner_with_multiple_connections(self):
+        """同一 session 即使池有多个连接也必须回到原 owner。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        first = MagicMock()
+        first.is_connected = True
+        first.is_reconnecting = False
+        first.has_active_sessions = True
+        first.active_session_count = 1
+        first.tracks_session = MagicMock(return_value=False)
+        first.refresh_outbound_auth = MagicMock()
+        first.connect = AsyncMock()
+        first.close = AsyncMock()
+
+        second = MagicMock()
+        second.is_connected = True
+        second.is_reconnecting = False
+        second.has_active_sessions = False
+        second.active_session_count = 0
+        second.tracks_session = MagicMock(return_value=False)
+        second.refresh_outbound_auth = MagicMock()
+        second.connect = AsyncMock()
+        second.close = AsyncMock()
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client_pool.AsyncChatClient",
+            side_effect=[first, second],
+        ):
+            pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+            owner = await pool.get("sandbox-1", "ws://host/ws", session_key="s1")
+            assert owner is first
+
+            # 另一个 session 触发第二条连接，模拟默认多连接池。
+            await pool.get("sandbox-1", "ws://host/ws", session_key="s2")
+            assert len(pool._clients["sandbox-1"]) == 2
+
+            first.tracks_session.return_value = True
+            routed = await pool.get("sandbox-1", "ws://host/ws", session_key="s1")
+            assert routed is first
+            await pool.close_all()

@@ -408,6 +408,7 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
+            session_key=session_id,
             token_minter=self._token_minter_for(binding_info, session_id, context),
         )
 
@@ -510,6 +511,7 @@ class BaasBotService(BotService):
             pool_key,
             conn_info.ws_url,
             headers,
+            session_key=session_id,
             token_minter=self._token_minter_for(binding_info, session_id, context),
         )
 
@@ -596,20 +598,19 @@ class BaasBotService(BotService):
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
 
-        client = await self._client_pool.get(
-            pool_key,
-            conn_info.ws_url,
-            headers,
-            token_minter=self._token_minter_for(binding_info, session_id, context),
-        )
-
         try:
             auth_token = context.build_auth_token() if context else None
-            await client.inject_message(
-                message=message,
+            await self._client_pool.inject_message(
+                pool_key,
+                conn_info.ws_url,
+                headers,
                 session_key=session_id,
+                message=message,
                 auth_token=auth_token,
                 attachments=attachments,
+                token_minter=self._token_minter_for(
+                    binding_info, session_id, context
+                ),
             )
             self._mark_session_completed(
                 baas_session_id, result={"content": "inject success"}

@@ -239,7 +239,11 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            session_key=session_id,
+            token_minter=self._token_minter_for(sandbox_id),
         )
 
         try:
@@ -307,7 +311,11 @@ class ClawBotService(BotService):
         headers = self._get_headers(sandbox_id)
 
         client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+            sandbox_id,
+            url,
+            headers,
+            session_key=session_id,
+            token_minter=self._token_minter_for(sandbox_id),
         )
 
         auth_token = context.build_auth_token() if context else None
@@ -371,17 +379,17 @@ class ClawBotService(BotService):
         url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
         headers = self._get_headers(sandbox_id)
 
-        client = await self._client_pool.get(
-            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
-        )
-
         try:
             auth_token = context.build_auth_token() if context else None
-            await client.inject_message(
-                message=message,
+            await self._client_pool.inject_message(
+                sandbox_id,
+                url,
+                headers,
                 session_key=session_id,
+                message=message,
                 auth_token=auth_token,
                 attachments=attachments,
+                token_minter=self._token_minter_for(sandbox_id),
             )
         except BotServiceError:
             raise

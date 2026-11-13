@@ -117,6 +117,7 @@ def _make_context(**overrides):
 def mock_pool():
     pool = MagicMock(spec=AsyncChatClientPool)
     pool.get = AsyncMock()
+    pool.inject_message = AsyncMock()
     return pool
 
 
@@ -801,9 +802,6 @@ class TestInjectMessage:
     async def test_inject_message_success(self, service, wss_resolver, mock_pool):
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
 
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
-
         with (
             patch.object(
                 service,
@@ -819,8 +817,16 @@ class TestInjectMessage:
                 context=_make_context(tenant=TENANT),
             )
 
-        mock_client.inject_message.assert_awaited_once()
-        mock_pool.get.assert_awaited_once()
+        mock_pool.inject_message.assert_awaited_once_with(
+            ANY,
+            ANY,
+            ANY,
+            session_key=SESSION_ID,
+            message="instruction",
+            auth_token=ANY,
+            attachments=None,
+            token_minter=ANY,
+        )
 
     @pytest.mark.asyncio
     async def test_inject_message_error_marks_failed(
@@ -828,9 +834,7 @@ class TestInjectMessage:
     ):
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
 
-        mock_client = AsyncMock()
-        mock_client.inject_message.side_effect = RuntimeError("ws fail")
-        mock_pool.get.return_value = mock_client
+        mock_pool.inject_message.side_effect = RuntimeError("ws fail")
 
         with (
             patch.object(
@@ -1950,6 +1954,7 @@ class TestSendMessageExtended:
                 conn_info.target,
                 conn_info.ws_url,
                 {"x-proxypass-token": conn_info.token},
+                session_key=SESSION_ID,
                 token_minter=_MOCK_ANY,
             )
 
@@ -1967,9 +1972,6 @@ class TestInjectMessageExtended:
         from secbaas.community.api.bot_runtime import BotChatContext
 
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
-
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
 
         context = BotChatContext(
             api_key_prefix="inj-key",
@@ -1992,11 +1994,15 @@ class TestInjectMessageExtended:
                 binding_info=binding,
                 context=context,
             )
-            mock_client.inject_message.assert_awaited_once_with(
-                message="instruction",
+            mock_pool.inject_message.assert_awaited_once_with(
+                ANY,
+                ANY,
+                ANY,
                 session_key=SESSION_ID,
+                message="instruction",
                 auth_token="OPEN_API:app:inj-key",
                 attachments=None,
+                token_minter=ANY,
             )
 
     @pytest.mark.asyncio
@@ -2006,9 +2012,6 @@ class TestInjectMessageExtended:
         # [单测用例]测试场景：无 context 时 auth_token 为 None
         """Without context, auth_token is None in inject_message."""
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
-
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
 
         with (
             patch.object(
@@ -2024,11 +2027,15 @@ class TestInjectMessageExtended:
                 binding_info=binding,
                 context=None,
             )
-            mock_client.inject_message.assert_awaited_once_with(
-                message="instruction",
+            mock_pool.inject_message.assert_awaited_once_with(
+                ANY,
+                ANY,
+                ANY,
                 session_key=SESSION_ID,
+                message="instruction",
                 auth_token=None,
                 attachments=None,
+                token_minter=ANY,
             )
 
     @pytest.mark.asyncio
@@ -2067,9 +2074,6 @@ class TestInjectMessageExtended:
         """Successful inject_message marks session as COMPLETED."""
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
 
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
-
         with (
             patch.object(
                 service,
@@ -2096,11 +2100,7 @@ class TestInjectMessageExtended:
         """BotServiceError from inject_message client is re-raised without wrapping."""
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
 
-        mock_client = AsyncMock()
-        mock_client.inject_message = AsyncMock(
-            side_effect=BotServiceError("already wrapped")
-        )
-        mock_pool.get.return_value = mock_client
+        mock_pool.inject_message.side_effect = BotServiceError("already wrapped")
 
         with (
             patch.object(
@@ -2885,9 +2885,6 @@ class TestBaasBotServiceAttachmentPassthrough:
             url="https://cdn.example.com/f1",
         )
 
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
-
         with (
             patch.object(
                 service,
@@ -2903,8 +2900,8 @@ class TestBaasBotServiceAttachmentPassthrough:
                 attachments=[att1],
             )
 
-        mock_client.inject_message.assert_awaited_once()
-        call_kw = mock_client.inject_message.call_args.kwargs
+        mock_pool.inject_message.assert_awaited_once()
+        call_kw = mock_pool.inject_message.call_args.kwargs
         passed = call_kw["attachments"]
         assert len(passed) == 1
         assert passed[0].attachment_id == "att_1"

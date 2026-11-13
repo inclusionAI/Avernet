@@ -12,7 +12,7 @@ Covers:
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -101,6 +101,7 @@ def baas_binding():
 def mock_pool():
     pool = MagicMock(spec=AsyncChatClientPool)
     pool.get = AsyncMock()
+    pool.inject_message = AsyncMock()
     return pool
 
 
@@ -480,9 +481,6 @@ class TestInjectMessage:
 
     @pytest.mark.asyncio
     async def test_inject_message_success(self, service, arca_binding, mock_pool):
-        mock_client = AsyncMock()
-        mock_pool.get.return_value = mock_client
-
         with patch.object(
             service, "_get_headers", return_value={"x-proxypass-token": "tk"}
         ):
@@ -492,21 +490,22 @@ class TestInjectMessage:
                 binding_info=arca_binding,
             )
 
-        mock_pool.get.assert_awaited_once()
-        mock_client.inject_message.assert_awaited_once_with(
-            message="system instruction",
+        mock_pool.inject_message.assert_awaited_once_with(
+            ANY,
+            ANY,
+            ANY,
             session_key=SESSION_ID,
+            message="system instruction",
             auth_token=None,
             attachments=None,
+            token_minter=ANY,
         )
 
     @pytest.mark.asyncio
     async def test_inject_message_error_releases_client(
         self, service, arca_binding, mock_pool
     ):
-        mock_client = AsyncMock()
-        mock_client.inject_message.side_effect = RuntimeError("ws fail")
-        mock_pool.get.return_value = mock_client
+        mock_pool.inject_message.side_effect = RuntimeError("ws fail")
 
         with patch.object(
             service, "_get_headers", return_value={"x-proxypass-token": "tk"}
