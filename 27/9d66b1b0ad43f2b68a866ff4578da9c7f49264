@@ -1,0 +1,54 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/group_slice.py
+  h_059e888e5e4e82 1-307
+apps/backend/src/agentclaw/community/core/task/context_collab/method_service_api.py
+  h_059e888e5e4e82 1-480
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/__init__.py
+  h_059e888e5e4e82 1-39
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  h_059e888e5e4e82 1-50
+apps/backend/tests/community/core/task/context_collab/test_method_authorization.py
+  h_059e888e5e4e82 1-345
+apps/backend/tests/community/core/task/context_collab/test_method_service_api.py
+  h_059e888e5e4e82 1-527
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/plan.md
+  h_059e888e5e4e82 1-310
+apps/backend/tests/community/core/task/context_collab/test_method_g4_conformance.py
+  h_059e888e5e4e82 1-424
+apps/backend/tests/community/core/task/context_collab/test_group_lifecycle.py
+  h_059e888e5e4e82 1-685
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/binding_slice.py
+  h_059e888e5e4e82 1-199
+apps/backend/tests/community/core/task/context_collab/group_profile_support.py
+  h_059e888e5e4e82 1-243
+apps/backend/src/agentclaw/community/core/task/context_collab/services/single_group_method_service.py
+  h_059e888e5e4e82 1-972
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/method_state_machines.py
+  h_059e888e5e4e82 1-543
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/method_authorization.py
+  h_059e888e5e4e82 1-310
+apps/backend/src/agentclaw/community/core/task/context_collab/services/method_lifecycle_service.py
+  h_059e888e5e4e82 1-886
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/spec.md
+  h_059e888e5e4e82 1-388
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/selection_slice.py
+  h_059e888e5e4e82 1-257
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  h_059e888e5e4e82 1-467
+apps/backend/tests/community/core/task/context_collab/test_group_guards.py
+  h_059e888e5e4e82 1-288
+apps/backend/tests/community/core/task/context_collab/test_method_store.py
+  h_059e888e5e4e82 1-303
+apps/backend/tests/community/core/task/context_collab/test_method_lifecycle_service.py
+  h_059e888e5e4e82 1-773
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "279d66b1b0ad43f2b68a866ff4578da9c7f49264",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
