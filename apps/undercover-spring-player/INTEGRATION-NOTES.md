@@ -51,9 +51,14 @@ cd /path/to/Avernet
 
 ### 1.3 启动 Java 玩家
 
-另开一个终端，在同一组环境变量下启动：
+另开一个终端，**请务必重新执行一遍环境变量注入**，然后再启动：
 
 ```bash
+export OPENAI_API_KEY="replace-with-your-key"
+export SPRING_AI_OPENAI_BASE_URL="https://api.openai.com"
+export OPENAI_MODEL="gpt-4o-mini"
+export BCN_URL="ws://127.0.0.1:21000/ws/bot"
+
 cd apps/undercover-spring-player
 mvn spring-boot:run
 ```
@@ -253,10 +258,12 @@ Connected to BCN at ws://127.0.0.1:21000/ws/bot as bot <bot-uuid>
 - ![第三局结算](evidence/game3-result.png)
 - `mvn test` 全绿结果。
 - ![单元测试结果](evidence/unit-tests-passed.png)
-- `chat.abort` 与迟到 final 的单元测试运行录屏，或 `ChatAbortHandlerTest` 的执行结果。
+- `chat.abort` 与迟到 final 的单元测试运行 & `ChatAbortHandlerTest` 的执行结果。
 - ![打断与迟到测试结果](evidence/chat-abort-test.png)
 
 对局“全程无人工介入”的现场录屏：[点击观看：第三局全程录像（无人工介入）](https://www.bilibili.com/video/BV1BYWi6fEng/)
+
+通过 Ctrl+C 强行中断 Java 客户端测试运行录屏：[点击观看：测试运行录屏](https://www.bilibili.com/video/BV1f9Wq6PEaq/)
 
 ## 8. 交付清单
 
