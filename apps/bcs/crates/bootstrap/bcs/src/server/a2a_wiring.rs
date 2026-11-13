@@ -14,10 +14,12 @@ pub(super) fn build_card_management(
     providers: Arc<dyn ProviderCoreService>, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>,
     registry_repo: Arc<bcs_bot_store::PersistentBotRepo>,
     guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 ) -> crate::Result<(Arc<dyn A2aBotManagementService>, Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>)> {
     let cards = Arc::new(DbA2aBotStore::new(db, crate::env::resolve_env(), flavor).with_registry(&registry_repo));
-    let registration = Arc::new(bcs_bot::core::a2a_provider_registration::A2aProviderRegistrationCore::new(providers.clone(), bots.clone()));
-    let core = Arc::new(A2aBotCore::new(cards, bots));
+    let registration = Arc::new(bcs_bot::core::a2a_provider_registration::A2aProviderRegistrationCore::new(providers.clone(), bots.clone())
+        .with_catalog_changes(catalog_changes.clone()));
+    let core = Arc::new(A2aBotCore::new(cards, bots).with_catalog_changes(catalog_changes));
     let mut fetcher = HttpA2aCardFetcher::new(guard, vec![bcs_a2a_http::tools::EXTENSION.into(),
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
