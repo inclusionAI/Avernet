@@ -84,6 +84,17 @@ def _actor(principal_id: str = "u_1001") -> ActorContext:
     return ActorContext(actor=PrincipalRef("human", principal_id), source="api")
 
 
+def _bot_actor(agent_id: str = "bot_comment_001") -> ActorContext:
+    """L2 词汇:agent 作为已认证调用者 = PrincipalRef("bot", <agent_id>)。
+
+    BBS 场景中 Bot 读到帖子后公开补充意见即走此形态;``principal_id``
+    即 agent_id(G1 ``_is_executor`` 先例按字符串相等匹配)。
+    """
+    return ActorContext(
+        actor=PrincipalRef("bot", agent_id), source="api"
+    )
+
+
 class _FakeRepo:
     """受控 in-memory 仓储:协作编排三方法可用,列表/计数不进本测试面。"""
 
@@ -382,6 +393,30 @@ class TestReplyDiscussion:
                 ),
                 _actor(),
             )
+
+    def test_reply_allows_bot_agent_actor(self):
+        """Bot/Agent 也是回帖一等主体:PrincipalRef("bot", agent_id) 经 G1
+        窄规则(任意已认证 actor 可发 public Message)放行,落库 actor_ref
+        即 bot 身份——BBS 公开讨论的 Agent 补充意见即此形态。"""
+        service, repo, _ = _make_service()
+        created = service.create_discussion(
+            CreateDiscussionCommand(title=TITLE, body=BODY, space=SPACE),
+            _actor(),
+        )
+
+        view = service.reply_discussion(
+            ReplyDiscussionCommand(
+                collab_context_id=created.collet_id,
+                content="Bot 补充:评审结论第 3 条已核对为误。",
+            ),
+            _bot_actor("bot_comment_001"),
+        )
+
+        assert view is not None
+        record = repo._status[created.collet_id]
+        replied = record.events[-1]
+        assert replied.actor_ref.principal_type == "bot"
+        assert replied.actor_ref.principal_id == "bot_comment_001"
 
     def test_reply_allows_stranger_authenticated_actor(self):
         """G1 窄规则:Open+Group 下任意已认证 actor 可发 public Message。"""
