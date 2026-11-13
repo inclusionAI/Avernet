@@ -14,7 +14,7 @@ impl Visit for Selection {
 }
 
 fn correlation(event: &Event<'_>) -> Option<LogCorrelation> {
-    if event.metadata().target() == "bcn_otel" { return None; }
+    if event.metadata().target() == "bcn_otel" || event.metadata().fields().field("log_class").is_none() { return None; }
     let mut selected = Selection(false);
     event.record(&mut selected);
     if !selected.0 { return None; }
@@ -27,6 +27,21 @@ fn correlation(event: &Event<'_>) -> Option<LogCorrelation> {
     Some(correlation)
 }
 
+// Reuse scratch space across events and output layers on this thread. Nested
+// logging must fall back to a local buffer rather than borrowing it twice.
+thread_local! {
+    static TEXT_BUFFER: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+const MAX_RETAINED_TEXT_CAPACITY: usize = 64 * 1024;
+
+struct BufferedLine<'a>(&'a mut String);
+impl Drop for BufferedLine<'_> {
+    fn drop(&mut self) {
+        self.0.clear();
+        if self.0.capacity() > MAX_RETAINED_TEXT_CAPACITY { *self.0 = String::new(); }
+    }
+}
+
 pub(super) struct Text<T>(format::Format<format::Full, T>);
 pub(super) fn text<T: FormatTime>(timer: T) -> Text<T> { Text(format::format().with_timer(timer)) }
 
@@ -34,11 +49,15 @@ impl<S, N, T> FormatEvent<S, N> for Text<T>
 where S: Subscriber + for<'a> LookupSpan<'a>, N: for<'a> FormatFields<'a> + 'static, T: FormatTime + Clone {
     fn format_event(&self, ctx: &FmtContext<'_, S, N>, mut writer: Writer<'_>, event: &Event<'_>) -> fmt::Result {
         let Some(ids) = correlation(event) else { return self.0.format_event(ctx, writer, event); };
-        let mut line = String::new();
-        self.0.clone().with_ansi(writer.has_ansi_escapes()).format_event(ctx, Writer::new(&mut line), event)?;
-        writer.write_str(line.strip_suffix('\n').unwrap_or(&line))?;
-        for (name, value) in ids.fields() { write!(writer, " {name}={value}")?; }
-        writeln!(writer)
+        TEXT_BUFFER.with(|buffer| {
+            let mut shared = buffer.try_borrow_mut();
+            let mut local = String::new();
+            let line = BufferedLine(match &mut shared { Ok(line) => line, Err(_) => &mut local });
+            self.0.clone().with_ansi(writer.has_ansi_escapes()).format_event(ctx, Writer::new(line.0), event)?;
+            writer.write_str(line.0.strip_suffix('\n').unwrap_or(line.0))?;
+            for (name, value) in ids.fields() { write!(writer, " {name}={value}")?; }
+            writeln!(writer)
+        })
     }
 }
 

@@ -89,6 +89,20 @@ If the sink stalls, lines can be dropped instead of blocking request workers.
 No dropped-line metric is exported. Console output and disk/collector health are
 separate concerns; logs are not guaranteed complete when the file queue is full.
 
+Log formatting runs on the emitting thread before bytes reach the nonblocking
+writer. Text/JSON correlation skips the selection field visitor when event
+metadata declares no `log_class`; a declared marker still needs its runtime value
+checked. Missing correlation falls back to the original formatter, including
+when tracing is disabled. This fast path reduces overhead; it is not a zero-cost
+guarantee.
+
+Selected text events reuse a thread-local scratch buffer across output layers.
+The buffer is cleared on success, formatting error and panic; nested formatting
+uses a temporary local buffer. Capacity above 64 KiB is released after use to
+avoid retaining unusually large lines. Normal-sized warmed events avoid scratch
+allocations, but still format/copy the original line and append the ID pair.
+Provider lookup and any provider-owned allocations remain separate costs.
+
 ## Deployment
 
 Keep `bcs_http_access` and `bcs_observation` enabled at INFO in file output target
