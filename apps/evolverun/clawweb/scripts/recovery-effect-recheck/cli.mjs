@@ -47,6 +47,7 @@ async function query(sql, limit = 100) {
     { timeout: 45000, maxBuffer: 16 * 1024 * 1024 }).catch(() => { throw new Error("ODC query unavailable"); });
   const rows = JSON.parse(stdout);
   if (!Array.isArray(rows) || rows.some(row => row["#"] === "-")) throw new Error("ODC query failed");
+  if (rows.length === 1 && typeof rows[0]?.result === "string" && /^查询成功，0 行数据(?: |$)/.test(rows[0].result)) return [];
   return rows;
 }
 async function policy(plane) {
@@ -110,7 +111,8 @@ async function scan() {
           JSON_UNQUOTE(JSON_EXTRACT(t.config_json,'$.controlPlaneEnvironment')) plane,
           JSON_UNQUOTE(JSON_EXTRACT(t.config_json,'$.publicBaseUrl')) base,
           JSON_UNQUOTE(JSON_EXTRACT(t.config_json,'$.level')) level,
-          d.self_healing_results results
+          IF(d.event_id IS NULL, 0, 1) diagnosis_present,
+          COALESCE(d.self_healing_results, '[]') results
         FROM ce_tasks t LEFT JOIN insight_monitoring_diagnose d ON d.event_id=JSON_UNQUOTE(JSON_EXTRACT(t.config_json,'$.request.event_id'))
         WHERE t.task_type='session_recovery' AND t.user_id='${args.owner}' AND t.id > ${cursor}
           AND t.gmt_create >= '${from} 00:00:00' AND t.gmt_create < '${to} 00:00:00'
@@ -126,14 +128,15 @@ async function scan() {
         try {
           const report = JSON.parse(row.results ?? "[]").filter(item => item.task_id === row.task_id)
             .sort((a, b) => b.result_version - a.result_version)[0];
-          reason = definitive(report?.effect) ? "effect_already_known" : row.level === "debug" ? "not_a_live_intervention"
-            : eligibility(await api(plane, row.task_id), currentPolicy);
+          reason = Number(row.diagnosis_present) === 0 ? "diagnosis_missing"
+            : definitive(report?.effect) ? "effect_already_known" : row.level === "debug" ? "not_a_live_intervention"
+              : eligibility(await api(plane, row.task_id), currentPolicy);
         } catch (err) {
           if (err.status === 401 || err.status === 403) throw err;
           reason = "source_unavailable";
         }
         const state = ["eligible", "result_delivery_only", "intervention_needs_evidence"].includes(reason) ? "ready"
-          : ["source_unavailable", "wait_history_unverified", "execution_pending"].includes(reason) ? "unresolved" : "excluded";
+          : ["source_unavailable", "diagnosis_missing", "wait_history_unverified", "execution_pending"].includes(reason) ? "unresolved" : "excluded";
         db.prepare(`INSERT INTO task (id,created,plane,source_status,request,state,reason,updated) VALUES (?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET state=excluded.state,reason=excluded.reason,source_status=excluded.source_status,updated=excluded.updated
           WHERE task.state IN ('excluded','unresolved','ready')`)
