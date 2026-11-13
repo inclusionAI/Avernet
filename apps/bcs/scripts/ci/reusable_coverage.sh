@@ -17,6 +17,12 @@ coverage_env="$(cargo llvm-cov show-env --sh)"
 eval "$coverage_env"
 cargo llvm-cov clean --workspace
 cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
+# Process-level test helpers spawn `<target>/<profile>/bcs` and `bcs-cli` next to
+# the instrumented test binaries. Depending on the restored cache contents those
+# bins can be absent even when the test binaries exist, which fails the
+# integration_http_api / e2e_bot_authority spawn suites with ENOENT. Build the
+# bins of the packages whose tests spawn them so every run is deterministic.
+cargo build --locked -p bcs -p bcs-cli --bins
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
 set +e
