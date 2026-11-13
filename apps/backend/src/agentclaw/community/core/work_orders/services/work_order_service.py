@@ -94,6 +94,11 @@ from agentclaw.community.core.work_orders.execution import (
 from agentclaw.community.kernel.bot_manager_sync import SpaceChange
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
+from agentclaw.community.core.work_orders.services.work_order_presentation import (
+    WorkOrderPresentationRefresher,
+    _business_data,
+)
+
 logger = get_logger()
 
 
@@ -126,6 +131,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
         self._skill_collaborator_approval_handler = skill_collaborator_approval_handler
         self._decision_callbacks = decision_callbacks
         self._manager_sync = bot_manager_sync
+        self._presentation = WorkOrderPresentationRefresher(
+            staff_dept=staff_dept,
+            spaces=spaces,
+        )
 
     @staticmethod
     def _required_text(value: str, *, limit: int, error: type[Exception]) -> str:
@@ -734,38 +743,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
 
     def _get_applicant_name(self, *, applicant_user_id: str) -> str:
-        try:
-            profile = self._staff_dept.get_profile_by_work_no(
-                work_no=normalize_work_no_for_lookup(applicant_user_id)
-            )
-        except StaffProfileLookupError:
-            logger.warning(
-                "failed to resolve applicant nickname; falling back to user id",
-                extra={"user_id": applicant_user_id},
-                exc_info=True,
-            )
-            return applicant_user_id
-
-        nickname = (profile.nick_name or "").strip()
-        return nickname[:128] or applicant_user_id
+        return self._presentation.get_applicant_name(applicant_user_id=applicant_user_id)
 
     def _get_reviewer_name(self, *, reviewer_user_id: str | None) -> str | None:
-        if not reviewer_user_id:
-            return None
-        try:
-            profile = self._staff_dept.get_profile_by_work_no(
-                work_no=normalize_work_no_for_lookup(reviewer_user_id)
-            )
-        except StaffProfileLookupError:
-            logger.warning(
-                "failed to resolve reviewer nickname",
-                extra={"user_id": reviewer_user_id},
-                exc_info=True,
-            )
-            return None
-
-        nickname = (profile.nick_name or "").strip()
-        return nickname[:128] or None
+        return self._presentation.get_reviewer_name(reviewer_user_id=reviewer_user_id)
 
     def list_items(
         self,
@@ -798,228 +779,33 @@ class WorkOrderService(WorkOrderServiceProtocol):
         ]
 
     def _present_skill_collaborator_item(self, item):
-        """Refresh pending Skill-request copy so historical rows gain a nickname."""
-
-        work_order = item.work_order
-        notification = item.notification
-        if (
-            work_order is None
-            or notification is None
-            or work_order.biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
-            or notification.event_type
-            != WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
-        ):
-            return item
-        skill_name = str(_business_data(work_order.biz_data).get("skill_name") or "")
-        if not skill_name:
-            return item
-        applicant_user_id = work_order.applicant_user_id
-        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
-        content = WorkOrderMessageContent.SKILL_COLLABORATOR_PENDING.value.format(
-            applicant_display=skill_collaborator_applicant_display(
-                applicant_user_id=applicant_user_id,
-                applicant_name=applicant_name,
-            ),
-            skill_name=skill_name,
-        )
-        return item.model_copy(
-            update={
-                "notification": notification.model_copy(update={"content": content})
-            }
-        )
+        return self._presentation.present_skill_collaborator_item(item)
 
     def _present_bot_collaborator_item(self, item):
-        """Refresh historical Bot-editor copy so aged rows gain a nickname.
-
-        The guard is the notification *species* (`BOT_COLLABORATOR_APPLIED`),
-        never the work-order status: APPROVED/REJECTED rows whose inbox copy is
-        the applicant-facing applied text re-render with today's nickname, the
-        same read-time refresh contract as Skill rows. The persisted row is
-        never written back; when biz_data lost the bot name, or the rebuild
-        reproduces the stored copy verbatim, the item is returned unchanged.
-        """
-
-        work_order = item.work_order
-        notification = item.notification
-        if (
-            work_order is None
-            or notification is None
-            or work_order.biz_type != WorkOrderBizType.BOT_COLLABORATOR.value
-            or notification.event_type
-            != WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value
-        ):
-            return item
-        bot_name = str(_business_data(work_order.biz_data).get("bot_name") or "")
-        if not bot_name:
-            return item
-        if _content_text(notification.content) is not None:
-            # Envelope-shaped applied copies have no writer today (creation
-            # always writes plain text); rebuilding them as plain text would
-            # change the persisted shape in the presentation. Keep them
-            # verbatim, mirroring the guard `_refresh_detail_applied_copy`
-            # applies on the detail side.
-            return item
-        applicant_user_id = work_order.applicant_user_id
-        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
-        content = WorkOrderMessageContent.BOT_COLLABORATOR_PENDING.value.format(
-            applicant_name=applicant_name,
-            bot_name=bot_name,
-        )
-        if content == notification.content:
-            return item
-        return item.model_copy(
-            update={
-                "notification": notification.model_copy(update={"content": content})
-            }
-        )
+        return self._presentation.present_bot_collaborator_item(item)
 
     def _present_space_join_item(self, item):
-        """Refresh historical Space-join copy so aged rows gain a nickname.
-
-        Space-join rows persist no business data: the display copy embeds the
-        applicant and space names inside a ``{"text": ...}`` JSON envelope. The
-        space name is re-resolved from the referenced Space at read time;
-        when the reverse lookup fails, the space lost its name, or the stored
-        copy is not an envelope, the item is returned unchanged — never worse
-        than the stored copy. The persisted row itself is never written back.
-        """
-
-        work_order = item.work_order
-        notification = item.notification
-        if (
-            work_order is None
-            or notification is None
-            or work_order.biz_type != WorkOrderBizType.SPACE_JOIN.value
-            or notification.event_type
-            != WorkOrderEventType.SPACE_JOIN_APPLIED.value
-        ):
-            return item
-        stored_text = _content_text(notification.content)
-        if stored_text is None:
-            return item
-        content = self._rebuild_space_join_pending_copy(
-            applicant_user_id=work_order.applicant_user_id,
-            space_name=self._lookup_space_name(work_order.biz_id),
-            stored_text=stored_text,
-        )
-        if content is None:
-            return item
-        return item.model_copy(
-            update={
-                "notification": notification.model_copy(update={"content": content})
-            }
-        )
+        return self._presentation.present_space_join_item(item)
 
     def _rebuild_space_join_pending_copy(
-        self,
-        *,
-        applicant_user_id: str | None,
-        space_name: str | None,
-        stored_text: str,
-    ) -> str | None:
-        """Re-render the pending copy in its persisted ``{"text": ...}`` shape."""
-
-        if not applicant_user_id or not space_name:
-            return None
-        text = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-            applicant_name=self._get_applicant_name(
-                applicant_user_id=applicant_user_id
-            ),
-            space_name=space_name,
+        self, *, applicant_user_id, space_name, stored_text
+    ):
+        return self._presentation.rebuild_space_join_pending_copy(
+            applicant_user_id=applicant_user_id, space_name=space_name, stored_text=stored_text
         )
-        if text == stored_text:
-            return None
-        return json.dumps({"text": text}, ensure_ascii=False)
 
     def _rebuild_bot_editor_pending_copy(
-        self,
-        *,
-        applicant_user_id: str | None,
-        biz_data: str | None,
-        stored_text: str,
-    ) -> str | None:
-        """Re-render the pending copy with the same formula as the list path."""
-
-        if not applicant_user_id or not stored_text:
-            return None
-        bot_name = str(_business_data(biz_data).get("bot_name") or "")
-        if not bot_name:
-            return None
-        text = WorkOrderMessageContent.BOT_COLLABORATOR_PENDING.value.format(
-            applicant_name=self._get_applicant_name(
-                applicant_user_id=applicant_user_id
-            ),
-            bot_name=bot_name,
+        self, *, applicant_user_id, biz_data, stored_text
+    ):
+        return self._presentation.rebuild_bot_editor_pending_copy(
+            applicant_user_id=applicant_user_id, biz_data=biz_data, stored_text=stored_text
         )
-        if text == stored_text:
-            return None
-        return text
 
-    def _lookup_space_name(self, space_ref: str | None) -> str | None:
-        """Reverse-resolve the referenced Space name, or give up quietly.
+    def _lookup_space_name(self, space_ref):
+        return self._presentation.lookup_space_name(space_ref)
 
-        Uses the repository read behind ``require_space`` — the same query the
-        creation path locks — so a missing or renamed Space degrades to keeping
-        the stored copy instead of raising during presentation.
-        """
-
-        if not space_ref:
-            return None
-        try:
-            space = self._spaces.get_space(
-                space_id=int(space_ref), env=get_current_env()
-            )
-        except (TypeError, ValueError):
-            return None
-        if space is None:
-            return None
-        name = getattr(space, "name", None)
-        return name.strip() if isinstance(name, str) and name.strip() else None
-
-    def _refresh_detail_applied_copy(self, detail: WorkOrderDetail) -> str | None:
-        """Rebuild the applied copy in details, the list refresh in lockstep.
-
-        The detail view exposes no dedicated applicant field for the adapter
-        to render, so historical rows gain today's nickname only when their
-        persisted ``content`` is rebuilt with the same formulas the list
-        projection uses. Rows without an applied notification, rows whose
-        rebuild reproduces the stored copy verbatim, and space reverse-lookup
-        failures return ``None`` so the stored copy survives untouched; the
-        persisted row is never written back. Like the list refresh the guard
-        is the notification species, never the work-order status.
-        """
-
-        work_order = detail.work_order
-        if detail.event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value:
-            stored_text = _content_text(detail.content)
-            if stored_text is None:
-                return None
-            # Accepted divergence from the list path (which resolves the
-            # space name solely through `_lookup_space_name`): get_detail's
-            # joined space row predates this feature and ignores soft-delete,
-            # so a soft-deleted space can surface its name here while the
-            # list keeps the stored copy. For live spaces both sources
-            # produce the identical name.
-            return self._rebuild_space_join_pending_copy(
-                applicant_user_id=work_order.applicant_user_id,
-                space_name=detail.space_name
-                or self._lookup_space_name(work_order.biz_id),
-                stored_text=stored_text,
-            )
-        if detail.event_type == WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value:
-            stored_text = detail.content
-            if not isinstance(stored_text, str) or not stored_text.strip():
-                return None
-            # Envelope-shaped content would change its persisted shape; only
-            # the plain-text applied copy is rebuilt, list in lockstep.
-            if _content_text(stored_text) is not None:
-                return None
-            return self._rebuild_bot_editor_pending_copy(
-                applicant_user_id=work_order.applicant_user_id,
-                biz_data=work_order.biz_data,
-                stored_text=stored_text,
-            )
-        return None
+    def _refresh_detail_applied_copy(self, detail):
+        return self._presentation.refresh_detail_applied_copy(detail)
 
     def get_detail(self, *, work_order_id: int, actor_id: str):
         detail = self._repository.get_detail(
@@ -1156,30 +942,3 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 owner_id=owner_id,
             )
         return result
-
-
-def _business_data(raw: str | None) -> dict[str, object]:
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _content_text(raw: str | None) -> str | None:
-    """Extract the persisted ``{"text": ...}`` envelope payload, if any."""
-
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    text = parsed.get("text")
-    if isinstance(text, str) and text.strip():
-        return text
-    return None
