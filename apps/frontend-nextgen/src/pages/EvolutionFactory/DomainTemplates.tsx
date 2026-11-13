@@ -1,9 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Pagination } from '@/components/ui/Pagination';
 import type { Template } from '@/domain/evolution/types';
 import type { Dispatch, SetStateAction } from 'react';
-import { ErrorBox, Hint, Section } from './shared';
+import { useState } from 'react';
+import { ErrorBox, Hint } from './shared';
 
 export function DomainTemplates({
   templates,
@@ -11,7 +13,6 @@ export function DomainTemplates({
   selected,
   setSelected,
   busy,
-  batchPublish,
   startTemplate,
   archiveTemplate,
 }: {
@@ -20,25 +21,22 @@ export function DomainTemplates({
   selected: string[];
   setSelected: Dispatch<SetStateAction<string[]>>;
   busy: boolean;
-  batchPublish: () => Promise<void>;
   startTemplate: (name: string) => Promise<void>;
   archiveTemplate: (name: string) => Promise<unknown>;
 }) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const total = templates.data?.length ?? 0;
+  const currentPage = Math.max(1, Math.min(page, Math.ceil(total / pageSize) || 1));
+  const visible = templates.data?.slice((currentPage - 1) * pageSize, currentPage * pageSize) ?? [];
   return (
-    <Section title="评测模板">
+    <section aria-label="评测模板" className="min-w-0">
+      <h2 className="sr-only">评测模板</h2>
       <ErrorBox message={templates.error} retry={templates.reload} />
-      {writable && (
-        <div className="mb-4 flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">已选择 {selected.length} 个待发布模板</span>
-          <Button variant="outline" size="sm" disabled={!selected.length || busy} onClick={() => void batchPublish()}>
-            批量发布
-          </Button>
-        </div>
-      )}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
           <colgroup>
-            {[55, 240, 240, 100, 100, 100, 165].map((width, i) => (
+            {[32, 216, 244, 144, 144, 216, 204].map((width, i) => (
               <col key={i} style={{ width }} />
             ))}
           </colgroup>
@@ -46,14 +44,14 @@ export function DomainTemplates({
             <tr>
               {['选择', '模板名', '展示名称', '最新版本', '发布版本', '状态', '操作'].map((v) => (
                 <th className="whitespace-nowrap p-3 text-xs font-medium" key={v}>
-                  {v}
+                  {v === '选择' ? <span className="sr-only">选择</span> : v}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {templates.data?.map((t) => (
-              <tr className="border-b border-divider" key={t.templateName}>
+            {visible.map((t) => (
+              <tr className="h-[54px] border-b border-divider" key={t.templateName}>
                 <td className="p-3">
                   <Checkbox
                     aria-label={`选择模板 ${t.templateName}`}
@@ -68,7 +66,7 @@ export function DomainTemplates({
                 </td>
                 <td className="p-3">
                   <Hint content={t.templateName}>
-                    <div className="truncate font-mono text-xs">{t.templateName}</div>
+                    <div className="truncate text-[13px]">{t.templateName}</div>
                   </Hint>
                 </td>
                 <td className="p-3">
@@ -77,12 +75,10 @@ export function DomainTemplates({
                   </Hint>
                 </td>
                 <td className="whitespace-nowrap p-3">
-                  <span className="rounded bg-primary/10 px-2 py-1 text-xs text-primary">v{t.latestVersion}</span>
+                  <span className="text-[13px]">V{t.latestVersion}</span>
                 </td>
                 <td className="whitespace-nowrap p-3">
-                  <span className="rounded bg-success/10 px-2 py-1 text-xs text-success">
-                    {t.publishedVersion === null ? '—' : `v${t.publishedVersion}`}
-                  </span>
+                  <span className="text-[13px]">{t.publishedVersion === null ? '—' : `V${t.publishedVersion}`}</span>
                 </td>
                 <td className="whitespace-nowrap p-3">
                   <span
@@ -98,10 +94,11 @@ export function DomainTemplates({
                     <Button
                       size="sm"
                       variant="ghost"
+                      className="h-7 px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary"
                       disabled={busy}
                       onClick={() => void startTemplate(t.templateName)}
                     >
-                      {writable ? '查看/编辑' : '查看'}
+                      {writable ? '编辑' : '查看'}
                     </Button>
                     {writable && (
                       <ConfirmDialog
@@ -110,7 +107,12 @@ export function DomainTemplates({
                           await archiveTemplate(t.templateName);
                         }}
                       >
-                        <Button size="sm" variant="ghost" disabled={busy}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary"
+                          disabled={busy}
+                        >
                           归档
                         </Button>
                       </ConfirmDialog>
@@ -122,9 +124,27 @@ export function DomainTemplates({
           </tbody>
         </table>
       </div>
+      {total > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {writable && <span className="text-xs text-muted-foreground">已选择 {selected.length} 个模板</span>}
+          <div className="min-w-0 flex-1">
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={total}
+              onChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              layout="between"
+            />
+          </div>
+        </div>
+      )}
       {!templates.loading && !templates.error && !templates.data?.length && (
         <p className="mt-3 text-sm text-muted-foreground">暂无模板</p>
       )}
-    </Section>
+    </section>
   );
 }

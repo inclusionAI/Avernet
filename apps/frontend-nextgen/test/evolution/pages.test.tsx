@@ -5,6 +5,7 @@ import { beforeEach, expect, it, jest } from '@jest/globals';
 import EvolutionFactory from '@/pages/EvolutionFactory';
 import CreateTask from '@/pages/EvolutionFactory/CreateTask';
 import DomainDetail from '@/pages/EvolutionFactory/DomainDetail';
+import { EvolutionHeader, EvolutionTabs } from '@/pages/EvolutionFactory/shared';
 import { StepOutput } from '@/pages/EvolutionFactory/StepOutput';
 import { evolutionApi } from '@/services/evolution/evolutionService';
 import '@testing-library/jest-dom/jest-globals';
@@ -76,14 +77,24 @@ const api = jest.mocked(evolutionApi);
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(useLocation).mockReturnValue({ search: '' } as ReturnType<typeof useLocation>);
-  api.models.mockResolvedValue({ defaultModel: 'provider/default', models: ['provider/default', 'provider/other'] });
+  api.models.mockResolvedValue({
+    defaultModel: 'provider/default',
+    models: ['provider/default', 'provider/other'],
+  });
   api.bots.mockResolvedValue({
     items: [{ ownerId: 'owner', botId: 'bot', botName: '测试 Bot', env: 'pre', activeEngine: 'openclaw' }],
     total: 1,
     page: 1,
     pageSize: 50,
   });
-  api.tasks.mockResolvedValue({ tasks: [], total: 0, page: 1, pageSize: 20, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    canViewAll: false,
+  });
   api.domains.mockResolvedValue([]);
 });
 it('offers exactly five Bot types and keeps the template Tab in the URL', async () => {
@@ -103,12 +114,14 @@ it('creates direct-goal tasks with selected model and Bot Owner, not actor fallb
   api.create.mockResolvedValue({ task_id: 'task-1' } as Awaited<ReturnType<typeof evolutionApi.create>>);
   render(<CreateTask />);
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
-  fireEvent.change(screen.getByLabelText('任务名称 *'), { target: { value: '目标测试' } });
-  fireEvent.click(screen.getByRole('radio', { name: /测试 Bot/ }));
+  fireEvent.change(screen.getByLabelText(/任务名称/), { target: { value: '目标测试' } });
+  fireEvent.change(screen.getByLabelText('目标 Bot'), {
+    target: { value: JSON.stringify(['owner', 'bot', 'pre']) },
+  });
   expect(screen.queryByLabelText('进化方式')).not.toBeInTheDocument();
   expect(screen.queryByLabelText('Bot 运行环境')).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('目标 *'), { target: { value: '固定问候' } });
+  fireEvent.change(screen.getByLabelText(/优化目标/), { target: { value: '固定问候' } });
   fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'provider/other' } });
   fireEvent.submit(screen.getByRole('button', { name: '创建任务' }).closest('form')!);
   await waitFor(() =>
@@ -134,8 +147,10 @@ it('does not submit an optimization without a completed diagnosis/Plan source', 
   jest.mocked(useLocation).mockReturnValue({ search: '?type=optimize' } as ReturnType<typeof useLocation>);
   render(<CreateTask />);
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
-  fireEvent.change(screen.getByLabelText('任务名称 *'), { target: { value: '优化' } });
-  fireEvent.click(screen.getByRole('radio', { name: /测试 Bot/ }));
+  fireEvent.change(screen.getByLabelText(/任务名称/), { target: { value: '优化' } });
+  fireEvent.change(screen.getByLabelText('目标 Bot'), {
+    target: { value: JSON.stringify(['owner', 'bot', 'pre']) },
+  });
   fireEvent.submit(screen.getByRole('button', { name: '创建任务' }).closest('form')!);
   expect(await screen.findByRole('alert')).toHaveTextContent('已完成诊断和 Plan');
   expect(api.create).not.toHaveBeenCalled();
@@ -161,7 +176,9 @@ it('displays per-template publication failures rather than treating HTTP 200 as 
     },
   ]);
   api.runs.mockResolvedValue({ runs: [], total: 0 });
-  api.publish.mockResolvedValue({ items: [{ templateName: 'case', success: false, reason: 'invalid template' }] });
+  api.publish.mockResolvedValue({
+    items: [{ templateName: 'case', success: false, reason: 'invalid template' }],
+  });
   render(<DomainDetail />);
   expect(screen.queryByRole('tablist', { name: '智能进化' })).not.toBeInTheDocument();
   expect(screen.getByRole('tab', { name: '目标详情' })).toBeInTheDocument();
@@ -206,16 +223,17 @@ it.each([
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByText('API Key')).not.toBeInTheDocument();
 });
-it('retains focus in exact Session mode and hides ineffective range fields', async () => {
+it('retains focus and the case-count layout in exact Session mode without enabling ineffective inputs', async () => {
   jest.mocked(useLocation).mockReturnValue({ search: '?type=diagnose' } as ReturnType<typeof useLocation>);
   render(<CreateTask />);
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
   expect(screen.getByLabelText('会话时间范围')).toHaveValue('7');
   fireEvent.click(screen.getByRole('radio', { name: '按精确 Session' }));
   expect(screen.queryByLabelText('会话时间范围')).not.toBeInTheDocument();
-  expect(screen.queryByLabelText('Bad Case 数量')).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/Session 标识/)).toHaveAttribute('rows', '6');
-  expect(screen.getByLabelText('关注问题 *')).not.toHaveValue('');
+  expect(screen.getByLabelText('Bad Case 数量')).toBeDisabled();
+  expect(screen.getByLabelText('Good Case 数量')).toBeDisabled();
+  expect(screen.getByLabelText(/Session ID/)).toHaveAttribute('rows', '4');
+  expect(screen.getByLabelText(/关注问题/)).not.toHaveValue('');
 });
 it('does not default to the first model when configuration has no default', async () => {
   api.models.mockResolvedValue({ defaultModel: '', models: ['provider/other'] });
@@ -241,12 +259,21 @@ it('loads selected diagnosis detail for complete Plan validation, without invent
       { stepId: 'p', stepType: 'plan', status: 'succeeded' },
     ],
   } as Awaited<ReturnType<typeof evolutionApi.task>>;
-  api.tasks.mockResolvedValue({ tasks: [source], total: 1, page: 1, pageSize: 50, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [source],
+    total: 1,
+    page: 1,
+    pageSize: 50,
+    totalPages: 1,
+    canViewAll: false,
+  });
   api.task.mockResolvedValue(source);
   render(<CreateTask />);
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
-  fireEvent.change(screen.getByLabelText('任务名称 *'), { target: { value: '优化' } });
-  fireEvent.click(screen.getByRole('radio', { name: /测试 Bot/ }));
+  fireEvent.change(screen.getByLabelText(/任务名称/), { target: { value: '优化' } });
+  fireEvent.change(screen.getByLabelText('目标 Bot'), {
+    target: { value: JSON.stringify(['owner', 'bot', 'pre']) },
+  });
   fireEvent.change(screen.getByLabelText('来源诊断'), { target: { value: 'source' } });
   fireEvent.submit(screen.getByRole('button', { name: '创建任务' }).closest('form')!);
   expect(await screen.findByRole('alert')).toHaveTextContent('Plan 缺少');
@@ -282,7 +309,14 @@ it('uses the same Step retry qualification for all current-space members', async
     config: { botEnv: 'pre' },
     steps: [{ stepId: 'failed-step', stepType: 'plan', status: 'failed' }],
   } as Awaited<ReturnType<typeof evolutionApi.task>>;
-  api.tasks.mockResolvedValue({ tasks: [failed], total: 1, page: 1, pageSize: 20, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [failed],
+    total: 1,
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    canViewAll: false,
+  });
   api.stepAction.mockResolvedValue({});
   render(<EvolutionFactory />);
   fireEvent.click(await screen.findByRole('button', { name: '重试' }));
@@ -316,7 +350,14 @@ it('can retry failed preparation with a pending business step using the existing
       { stepId: 'pending-step', stepType: 'plan', status: 'created' },
     ],
   } as Awaited<ReturnType<typeof evolutionApi.task>>;
-  api.tasks.mockResolvedValue({ tasks: [task], total: 1, page: 1, pageSize: 20, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [task],
+    total: 1,
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    canViewAll: false,
+  });
   api.stepAction.mockResolvedValue({});
   render(<EvolutionFactory />);
   fireEvent.click(await screen.findByRole('button', { name: '重试' }));
@@ -344,13 +385,20 @@ it('renders start/end from raw API Step date strings without a creation-time fal
     gmt_create: '2026-10-14T09:00:00.000Z',
     steps: [{ stepId: 'plan', stepType: 'plan', status: 'succeeded', startedAt, completedAt }],
   } as Awaited<ReturnType<typeof evolutionApi.task>>;
-  api.tasks.mockResolvedValue({ tasks: [task], total: 1, page: 1, pageSize: 20, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [task],
+    total: 1,
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    canViewAll: false,
+  });
   render(<EvolutionFactory />);
   await screen.findByText('时间字段验证');
   const cell = screen.getByText(
     (_, el) =>
       el?.tagName === 'TD' &&
-      el.textContent === new Date(startedAt).toLocaleString() + new Date(completedAt).toLocaleString(),
+      el.textContent === `开始：${new Date(startedAt).toLocaleString()}结束：${new Date(completedAt).toLocaleString()}`,
   );
   expect(cell).toBeInTheDocument();
   expect(screen.queryByText(new Date(task.gmt_create!).toLocaleString())).not.toBeInTheDocument();
@@ -434,7 +482,14 @@ it('uses the filtered server total for ordinary list pagination', async () => {
     config: { botEnv: 'pre' },
     steps: [],
   };
-  api.tasks.mockResolvedValue({ tasks: [task], total: 21, page: 1, pageSize: 20, totalPages: 2, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [task],
+    total: 21,
+    page: 1,
+    pageSize: 20,
+    totalPages: 2,
+    canViewAll: false,
+  });
   render(<EvolutionFactory />);
   await screen.findByText('范围内诊断');
   expect(screen.getByText('共 21 条')).toBeInTheDocument();
@@ -453,7 +508,9 @@ it('keeps Pack creation an auxiliary version operation rather than a diagnosis',
   render(<CreateTask />);
   await waitFor(() => expect(screen.getByLabelText('目标 Bot')).not.toBeDisabled());
   fireEvent.change(screen.getByLabelText('任务名称'), { target: { value: 'Snapshot' } });
-  fireEvent.change(screen.getByLabelText('目标 Bot'), { target: { value: JSON.stringify(['owner', 'bot', 'pre']) } });
+  fireEvent.change(screen.getByLabelText('目标 Bot'), {
+    target: { value: JSON.stringify(['owner', 'bot', 'pre']) },
+  });
   fireEvent.submit(screen.getByRole('button', { name: '确认创建' }).closest('form')!);
   await waitFor(() =>
     expect(api.create).toHaveBeenCalledWith(
@@ -462,4 +519,189 @@ it('keeps Pack creation an auxiliary version operation rather than a diagnosis',
     ),
   );
   expect(api.create.mock.calls[0][1]).not.toHaveProperty('diagnoseIntent');
+});
+
+it('uses the compact 680px task picker and blue selected navigation', async () => {
+  render(<EvolutionFactory />);
+  expect(screen.getByRole('tab', { name: '进化任务' })).toHaveClass('bg-primary/10', 'text-primary', 'border-0');
+  fireEvent.click(screen.getByRole('button', { name: '发起进化' }));
+  expect(screen.getByRole('dialog')).toHaveClass('max-w-[680px]');
+  const help = document.getElementById('evolution-task-type-help');
+  expect(help).toHaveClass('text-primary', 'bg-primary/5');
+  expect(help).not.toHaveClass('text-muted-foreground');
+  expect(screen.getByRole('region', { name: '诊断类' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '优化类' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '全流程类' })).toBeInTheDocument();
+  const icons = screen.getByRole('dialog').querySelectorAll('svg[data-task-icon]');
+  expect(Array.from(icons, (icon) => icon.getAttribute('data-task-icon'))).toEqual([
+    'diagnose',
+    'bench',
+    'bench_optimize',
+    'optimize',
+    'full',
+  ]);
+  const gradientIds = new Set<string>();
+  for (const icon of icons) {
+    expect(icon).toHaveAttribute('width', '32');
+    expect(icon).toHaveAttribute('height', '32');
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    const gradient = icon.querySelector('linearGradient')!;
+    const gradientId = gradient.getAttribute('id')!;
+    expect(gradientIds.has(gradientId)).toBe(false);
+    gradientIds.add(gradientId);
+    expect(icon.querySelector('[fill^="url"]')).toHaveAttribute('fill', `url(#${gradientId})`);
+    expect(icon.querySelector('path[stroke="white"], path[fill="white"]')).not.toBeNull();
+    expect(icon.querySelector('[stroke-dasharray]')).toBeNull();
+  }
+});
+
+it('shares borderless blue pill tabs between Pack pages and list navigation', () => {
+  const header = render(<EvolutionHeader tab="versions" />);
+  const versions = screen.getByRole('tab', { name: '进化版本' });
+  expect(versions).toHaveClass('bg-primary/10', 'text-primary', 'border-0', 'hover:text-primary');
+  expect(versions).toHaveAttribute('aria-selected', 'true');
+  expect(versions).not.toHaveClass('border-b-2', 'bg-secondary');
+  expect(screen.getByRole('tablist')).not.toHaveClass('border-b');
+  expect(screen.getByRole('tab', { name: '进化任务' })).toHaveClass('text-muted-foreground');
+  fireEvent.click(screen.getByRole('tab', { name: '评测模板' }));
+  expect(history.push).toHaveBeenCalledWith('/evolution-factory?tab=templates');
+  header.unmount();
+  render(<EvolutionTabs tab="templates" />);
+  expect(screen.getByRole('tab', { name: '评测模板' })).toHaveClass('bg-primary/10', 'text-primary', 'border-0');
+  expect(screen.getByRole('tab', { name: '进化版本' })).toHaveAttribute('aria-selected', 'false');
+});
+
+it('loads ten tasks per page and requests the next page without changing filters', async () => {
+  api.tasks.mockResolvedValue({
+    tasks: [],
+    total: 56,
+    page: 1,
+    pageSize: 10,
+    totalPages: 6,
+    canViewAll: false,
+  });
+  render(<EvolutionFactory />);
+  await waitFor(() => expect(api.tasks).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 10 })));
+  fireEvent.click(await screen.findByRole('button', { name: '第 2 页' }));
+  await waitFor(() => expect(api.tasks).toHaveBeenCalledWith(expect.objectContaining({ page: 2, pageSize: 10 })));
+});
+
+it.each(['diagnose', 'bench', 'bench_optimize', 'optimize', 'full'])(
+  'keeps a compact header, required Bot and sticky actions for %s',
+  async (type) => {
+    jest.mocked(useLocation).mockReturnValue({ search: `?type=${type}` } as ReturnType<typeof useLocation>);
+    render(<CreateTask />);
+    await screen.findByLabelText('目标 Bot');
+    const submit = screen.getByRole('button', { name: '创建任务' });
+    expect(submit.closest('footer')).toHaveClass('sticky', 'bottom-0', 'h-[72px]');
+    expect(submit).toBeDisabled();
+    expect(screen.getByRole('button', { name: '返回任务列表' })).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: '请选择 Bot' })).not.toBeInTheDocument();
+  },
+);
+
+it('clears the selected Bot when switching task type and preserves same-id Owner/environment choices', async () => {
+  api.bots.mockResolvedValue({
+    items: [
+      { ownerId: 'owner', botId: 'bot', botName: '测试 Bot', env: 'pre', activeEngine: 'openclaw' },
+      { ownerId: 'other-owner', botId: 'bot', botName: '同名 Bot', env: 'prod', activeEngine: 'openclaw' },
+    ],
+    total: 2,
+    page: 1,
+    pageSize: 50,
+  });
+  jest.mocked(useLocation).mockReturnValue({ search: '?type=full' } as ReturnType<typeof useLocation>);
+  const { rerender } = render(<CreateTask />);
+  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
+  const selection = JSON.stringify(['other-owner', 'bot', 'prod']);
+  fireEvent.change(screen.getByLabelText('目标 Bot'), { target: { value: selection } });
+  expect(screen.getByLabelText('目标 Bot')).toHaveValue(selection);
+  expect(screen.getByRole('button', { name: '创建任务' })).toBeEnabled();
+  jest.mocked(useLocation).mockReturnValue({ search: '?type=bench' } as ReturnType<typeof useLocation>);
+  rerender(<CreateTask />);
+  await waitFor(() => expect(screen.getByLabelText('目标 Bot')).toHaveValue(''));
+  expect(screen.getByRole('button', { name: '创建任务' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('目标 Bot'), { target: { value: selection } });
+  expect(screen.getByRole('button', { name: '创建任务' })).toBeEnabled();
+});
+
+it('keeps real task filters instead of showing unsupported engine/deployment filters', async () => {
+  render(<EvolutionFactory />);
+  await waitFor(() => expect(api.tasks).toHaveBeenCalled());
+  expect(screen.getByRole('combobox', { name: '任务分类' })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '任务状态' })).toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: /引擎类型|部署方式|服务类型/ })).not.toBeInTheDocument();
+});
+
+it('places the Bench optimization model and rounds together, with a full-width goal below', async () => {
+  jest.mocked(useLocation).mockReturnValue({ search: '?type=bench_optimize' } as ReturnType<typeof useLocation>);
+  render(<CreateTask />);
+  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
+  const model = screen.getByLabelText('模型').closest('label')!;
+  const rounds = screen.getByRole('spinbutton', { name: /最大优化轮数/ }).closest('label')!;
+  expect(model.parentElement).toBe(rounds.parentElement);
+  expect(model.parentElement).toHaveClass('md:grid-cols-2');
+  expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-2xl');
+  const objective = screen.getByRole('textbox', { name: /优化目标/ }).closest('label')!;
+  expect(objective.parentElement).not.toHaveClass('max-w-[490px]');
+  expect(objective.textContent?.trim().startsWith('*')).toBe(true);
+});
+
+
+it.each([true, false])('shows the evolution target as Bot name and type (name available: %s)', async (available) => {
+  const task = {
+    task_id: 'target-task', task_name: '对象展示任务', task_type: 'full', status: 'completed',
+    user_id: 'owner', created_by: 'owner', bot_id: 'bot', config: {}, steps: [],
+  } as Awaited<ReturnType<typeof evolutionApi.task>>;
+  api.tasks.mockResolvedValue({ tasks: [task], total: 1, page: 1, pageSize: 10, totalPages: 1, canViewAll: false });
+  api.bots.mockResolvedValue({ items: [
+    { ownerId: 'another', botId: 'bot', botName: '其他人的名字', env: 'pre', activeEngine: 'openclaw' },
+    ...(available ? [{ ownerId: 'owner', botId: 'bot', botName: 'PPT助手', env: 'pre', activeEngine: 'openclaw' }] : []),
+  ], total: available ? 2 : 1, page: 1, pageSize: 50 });
+  render(<EvolutionFactory />);
+  const label = available ? 'PPT助手（Bot）' : 'bot（Bot）';
+  expect(await screen.findByText((_, el) => el?.tagName === 'SPAN' && el.textContent === label)).toBeInTheDocument();
+  expect(screen.queryByText('Owner owner')).not.toBeInTheDocument();
+  expect(screen.queryByText(/其他人的名字/)).not.toBeInTheDocument();
+  expect(screen.getByRole('columnheader', { name: '当前节点' })).toBeInTheDocument();
+});
+
+
+it('aligns the diagnosis form with the Figma grid and full-width focus field', async () => {
+  jest.mocked(useLocation).mockReturnValue({ search: '?type=diagnose' } as ReturnType<typeof useLocation>);
+  render(<CreateTask />);
+  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/default'));
+  const model = screen.getByLabelText('模型').closest('label')!;
+  const bad = screen.getByLabelText('Bad Case 数量').closest('label')!;
+  const good = screen.getByLabelText('Good Case 数量').closest('label')!;
+  expect(model.parentElement).toBe(bad.parentElement);
+  expect(model.parentElement).toBe(good.parentElement);
+  expect(model.parentElement).toHaveClass('md:grid-cols-3');
+  expect(screen.getByLabelText('Bad Case 数量')).toBeEnabled();
+  const focus = screen.getByRole('textbox', { name: /关注问题/ });
+  expect(focus).toHaveAttribute('rows', '4');
+  expect(focus.closest('label')!.parentElement).not.toHaveClass('max-w-[490px]');
+  expect(screen.getByLabelText('填写说明')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('radio', { name: '按精确 Session' }));
+  expect(screen.getByRole('textbox', { name: /Session ID/ })).toHaveAttribute('placeholder', '每行填写一个 Session ID，例如：session_id_001');
+  expect(screen.queryByLabelText('最多诊断 Session 数量')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('radio', { name: '按时间范围' }));
+  expect(screen.getByLabelText('Bad Case 数量')).toBeEnabled();
+  expect(screen.queryByRole('textbox', { name: /Session ID/ })).not.toBeInTheDocument();
+});
+
+
+it('separates long Domain metadata and uses the loaded template count when absent from details', async () => {
+  const name = 'bot_20261026_EV_train_'.repeat(8);
+  const description = 'Auto-generated Bench Domain for clawevolve-plan run '.repeat(8);
+  api.domain.mockResolvedValue({ domainId: 'domain', ownerUserId: 'owner', name, description, status: 'active' } as Awaited<ReturnType<typeof evolutionApi.domain>>);
+  api.templates.mockResolvedValue([]);
+  api.runs.mockResolvedValue({ runs: [], total: 0 });
+  render(<DomainDetail />);
+  expect(await screen.findByRole('heading', { name })).toHaveClass('truncate');
+  expect(await screen.findByText('0 个模板')).toBeInTheDocument();
+  expect(screen.getByText('Owner：owner')).toBeInTheDocument();
+  expect(screen.getByText('Domain ID：domain')).toHaveClass('truncate');
+  expect(screen.getByText(description.trim())).toHaveClass('truncate');
+  expect(screen.getByRole('button', { name: '编辑 Domain' })).toBeInTheDocument();
 });

@@ -35,7 +35,7 @@ export function EvolutionSettings({
       {type === 'bench' && (
         <Section title="评测配置" index={3}>
           <ErrorBox message={domains.error} retry={domains.reload} />
-          <div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
+          <div className="grid gap-x-5 gap-y-5 md:grid-cols-2">
             {domainField('benchDomainId', '评测模板')}
             {modelField('评测模型')}
           </div>
@@ -44,12 +44,15 @@ export function EvolutionSettings({
       {type === 'bench_optimize' && (
         <Section title="优化配置" index={3}>
           <ErrorBox message={domains.error} retry={domains.reload} />
-          <div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
+          <div className="grid gap-x-5 gap-y-5 md:grid-cols-2">
             {domainField('trainDomainId', '训练评测模板')}
             {domainField('testDomainId', '测试评测模板')}
           </div>
-          <div className="mt-5 max-w-[480px] space-y-5">
+          <div className="mt-5 grid gap-x-5 gap-y-5 md:grid-cols-2">
             {modelField('优化模型')}
+            {roundsField}
+          </div>
+          <div className="mt-5">
             <Field label="优化目标 *">
               <Textarea
                 required
@@ -59,14 +62,13 @@ export function EvolutionSettings({
                 placeholder="请描述本次优化的目标"
               />
             </Field>
-            <div className="max-w-[200px]">{roundsField}</div>
           </div>
         </Section>
       )}
       {type === 'optimize' && (
         <Section title="诊断配置" index={3}>
           <ErrorBox message={diagnoses.error} retry={diagnoses.reload} />
-          <div className="grid gap-x-10 gap-y-5 md:grid-cols-3">
+          <div className="grid gap-x-5 gap-y-5 md:grid-cols-2">
             <Field label="诊断任务输入 *">
               <Choice
                 label="来源诊断"
@@ -110,12 +112,12 @@ export function EvolutionSettings({
       )}
       {type === 'full' && (
         <Section title="进化配置" index={3}>
-          <div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
+          <div className="grid gap-x-5 gap-y-5 md:grid-cols-2">
             {modelField('规划模型')}
             {roundsField}
           </div>
           <div className="mt-5">
-            <Field label="目标 *">
+            <Field label="优化目标 *">
               <Textarea
                 required
                 maxLength={2000}

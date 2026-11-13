@@ -923,6 +923,7 @@ class BotService(BotServiceProtocol):
                 env=get_current_env(),
                 user_id=owner_id,
                 bot_type=str(bot.get("bot_type") or "personal"),
+                engine_bucket=engine_bucket,
             )
         except Exception as e:
             logger.warning(

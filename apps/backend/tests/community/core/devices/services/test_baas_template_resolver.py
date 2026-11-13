@@ -1041,6 +1041,7 @@ def test_resolve_template_override_reads_existing_database_config():
         env="pre",
         user_id="405935",
         bot_type="service",
+        engine_bucket="openclaw",
     )
 
     assert result == "TEMPLATE-shared-config"
@@ -1060,6 +1061,7 @@ def test_resolve_template_override_skips_unsupported_bot_type():
         env="pre",
         user_id="405935",
         bot_type="desktop",
+        engine_bucket="openclaw",
     )
 
     assert result is None
@@ -1160,6 +1162,7 @@ def test_multi_group_whitelist_allows_duplicate_user_with_same_template():
         env="pre",
         user_id="405935",
         bot_type="service",
+        engine_bucket="openclaw",
     )
 
     assert result == "TEMPLATE-shared"
@@ -1180,6 +1183,7 @@ def test_multi_group_whitelist_rejects_ambiguous_user_mapping():
         env="pre",
         user_id="405935",
         bot_type="personal",
+        engine_bucket="openclaw",
     )
 
     assert result is None
@@ -1208,6 +1212,7 @@ def test_multi_group_whitelist_invalid_config_falls_through(whitelist_config):
         env="pre",
         user_id="405935",
         bot_type="personal",
+        engine_bucket="openclaw",
     )
 
     assert result is None

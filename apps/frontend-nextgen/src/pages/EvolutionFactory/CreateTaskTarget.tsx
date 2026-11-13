@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/Input';
 import type { CreateDraft } from '@/domain/evolution/createTask';
 import type { SpaceBot } from '@/domain/evolution/types';
 import type { Dispatch, SetStateAction } from 'react';
-import { ErrorBox, Field, Section } from './shared';
+import { Choice, ErrorBox, Field, Section } from './shared';
 
 export function CreateTaskTarget({
   draft,
@@ -24,8 +24,8 @@ export function CreateTaskTarget({
   return (
     <>
       <Section title="任务信息" index={1}>
-        <div className="max-w-[480px] space-y-5">
-          <Field label="任务名称 *">
+        <div className="grid gap-x-5 gap-y-5 md:grid-cols-2">
+          <Field label="任务名称 *" labelHint="任务名称最多 128 字，用于识别任务。">
             <Input
               required
               maxLength={128}
@@ -46,67 +46,40 @@ export function CreateTaskTarget({
       </Section>
       <Section title="进化对象" index={2}>
         <ErrorBox message={bots.error} retry={bots.reload} />
-        <div
-          className="max-h-[380px] space-y-2 overflow-y-auto rounded-xl border bg-muted/20 p-2"
-          role="radiogroup"
-          aria-label="请选择 Bot"
-        >
-          {botItems.map((bot) => {
-            const selected = draft.botId === bot.botId && draft.ownerId === bot.ownerId && draft.botEnv === bot.env;
-            return (
-              <Button
-                variant="ghost"
-                style={{ height: 'auto', whiteSpace: 'normal' }}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                key={JSON.stringify([bot.ownerId, bot.botId, bot.env])}
-                className={`flex w-full items-center justify-between gap-4 rounded-xl border bg-card p-4 text-left ${
-                  selected ? 'border-primary' : 'border-border'
-                }`}
-                onClick={() =>
-                  setDraft((d) => ({
-                    ...d,
-                    botId: bot.botId,
-                    ownerId: bot.ownerId,
-                    botEnv: bot.env,
-                    unambiguousEnvironment: bot.unambiguousEnvironment,
-                    sourceDiagnosisTaskId: '',
-                    benchDomainId: '',
-                    trainDomainId: '',
-                    testDomainId: '',
-                  }))
-                }
-              >
-                <span className="min-w-0 space-y-2">
-                  <strong className="block truncate">{bot.botName || bot.botId}</strong>
-                  <span className="block break-all font-mono text-xs text-muted-foreground">
-                    {bot.ownerId} / {bot.botId} / {bot.env}
-                  </span>
-                  <span className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>
-                      {bot.deviceProvider === 'baas'
-                        ? 'BaaS · 推荐'
-                        : bot.deviceProvider === 'arca'
-                        ? 'ARCA · 不推荐'
-                        : '平台未知'}
-                    </span>
-                    <span>{bot.activeEngine}</span>
-                    <span>
-                      {bot.hasServiceBot ? '已有服务 Bot' : bot.botType === 'service' ? '服务型 Bot' : '普通 Bot'}
-                    </span>
-                  </span>
-                </span>
-                <span
-                  className={`h-4 w-4 shrink-0 rounded-full border ${
-                    selected ? 'border-primary bg-primary' : 'border-border'
-                  }`}
-                />
-              </Button>
-            );
-          })}
-          {!bots.loading && !botItems.length && (
-            <p className="p-4 text-sm text-muted-foreground">当前空间暂无支持 OpenClaw 的 Bot</p>
+        <div className="max-w-[490px]">
+          <Field label="目标 Bot *">
+            <Choice
+              label="目标 Bot"
+              value={draft.botId ? JSON.stringify([draft.ownerId, draft.botId, draft.botEnv]) : ''}
+              disabled={bots.loading}
+              options={botItems.map((bot) => ({
+                value: JSON.stringify([bot.ownerId, bot.botId, bot.env]),
+                label: `${bot.botName || bot.botId} · ${bot.ownerId} / ${bot.botId} / ${bot.env}`,
+              }))}
+              onChange={(value) => {
+                const bot = botItems.find((item) => JSON.stringify([item.ownerId, item.botId, item.env]) === value);
+                if (!bot) return;
+                setDraft((d) => ({
+                  ...d,
+                  botId: bot.botId,
+                  ownerId: bot.ownerId,
+                  botEnv: bot.env,
+                  unambiguousEnvironment: bot.unambiguousEnvironment,
+                  sourceDiagnosisTaskId: '',
+                  benchDomainId: '',
+                  trainDomainId: '',
+                  testDomainId: '',
+                }));
+              }}
+            />
+          </Field>
+          {bots.loading && (
+            <p role="status" className="mt-2 text-xs text-muted-foreground">
+              正在加载 Bot…
+            </p>
+          )}
+          {!bots.loading && !bots.error && !botItems.length && (
+            <p className="mt-2 text-xs text-muted-foreground">当前空间暂无支持 OpenClaw 的 Bot</p>
           )}
         </div>
         {(botPage > 1 || botItems.length === 50) && (
