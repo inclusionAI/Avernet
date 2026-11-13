@@ -1,0 +1,24 @@
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  s_64261436edbb0b::t_192c1a3cee656a 4,74,125,141-143,151-152,155
+  s_64261436edbb0b::t_a203e4ebd54f3c 1-3,5-73,75-124,126-140,144-150,153-154,156-160
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/plan.md
+  s_64261436edbb0b::t_31b6a482417e83 1-127
+apps/backend/specs/README.md
+  s_64261436edbb0b::t_41a71997f97b47 143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ca329d4d7197f8d2eec8b0c349f167e77f6074b",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/group_slice.py
+  h_059e888e5e4e82 1-307
+apps/backend/src/agentclaw/community/core/task/context_collab/services/single_group_method_service.py
+  h_059e888e5e4e82 1-972
+apps/backend/tests/community/core/task/context_collab/group_profile_support.py
+  h_059e888e5e4e82 1-243
+apps/backend/tests/community/core/task/context_collab/test_group_guards.py
+  h_059e888e5e4e82 1-288
+apps/backend/tests/community/core/task/context_collab/test_group_lifecycle.py
+  h_059e888e5e4e82 1-685
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5000e8446108c9d93682953c5b19be17850dcedf",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
