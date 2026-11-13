@@ -1,0 +1,31 @@
+autocoding/skills/teamclaw-clarify/references/cdo-investigation.md
+  s_63343409a8a3ba::t_56e981e811db9c 1-28
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_63343409a8a3ba::t_56e981e811db9c 27,29
+autocoding/skills/teamclaw-clarify/references/gate-a-delivery.md
+  s_63343409a8a3ba::t_56e981e811db9c 8
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  s_63343409a8a3ba::t_842dd2b566b2ee 17,40
+  s_63343409a8a3ba::t_56e981e811db9c 19-21,45
+  s_63343409a8a3ba::t_bc572aaa3a52c6 18
+autocoding/tests/test_clarify_routing.py
+  s_63343409a8a3ba::t_1c0ea078ed36c0 1,19-46,50
+autocoding/skills/teamclaw-clarify/references/bot-investigation.md
+  s_63343409a8a3ba::t_56e981e811db9c 1-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66f3d4cc0e9ee8bdcd46b976dd61a1186fb004d2",
+  "prompts": {},
+  "sessions": {
+    "s_63343409a8a3ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c486-2aab-7970-849a-649813792261",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

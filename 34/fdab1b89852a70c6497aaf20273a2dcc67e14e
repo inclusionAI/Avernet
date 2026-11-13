@@ -1,0 +1,16 @@
+apps/bcs-internal/docs/overlay/bcn-runtime.md
+  h_f4a73db4ad12be 99-110
+docs/plans/2026-11-09-bcn-runtime-mvp-acceptance.md
+  h_f4a73db4ad12be 112-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34fdab1b89852a70c6497aaf20273a2dcc67e14e",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

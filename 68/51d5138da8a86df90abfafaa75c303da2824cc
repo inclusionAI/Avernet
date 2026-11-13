@@ -1,0 +1,16 @@
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  h_5b2ec9c12c4d18 3,9
+apps/frontend-nextgen/assets/task-panel/package.json
+  h_5b2ec9c12c4d18 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6851d5138da8a86df90abfafaa75c303da2824cc",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

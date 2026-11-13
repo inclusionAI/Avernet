@@ -1,0 +1,36 @@
+apps/bcs-internal/Cargo.lock
+  h_9547b72f8f06cd 623,649,696-706,715-716,720,735-757,1093,1731,1814,1875,1907,2108,2141-2150,2200,2457,2563-2569
+apps/bcs-internal/Cargo.toml
+  h_9547b72f8f06cd 3,40-42
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  h_9547b72f8f06cd 10
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  h_9547b72f8f06cd 39-41,47-49
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/Cargo.toml
+  h_9547b72f8f06cd 1-31
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/README.md
+  h_9547b72f8f06cd 1-96
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/lib.rs
+  h_9547b72f8f06cd 1-119
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/triple.rs
+  h_9547b72f8f06cd 1-49
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  h_9547b72f8f06cd 1-98
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/triple_wire.rs
+  h_9547b72f8f06cd 1-84
+apps/bcs-internal/scripts/check-p4.sh
+  h_9547b72f8f06cd 19
+submodules/avernet
+  h_9547b72f8f06cd 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c478dee6dd24f313baf0d4b36a7496a8683f80a1",
+  "prompts": {},
+  "humans": {
+    "h_9547b72f8f06cd": {
+      "author": "ray <ray@U-PCF66F1V-2003.local>"
+    }
+  }
+}
