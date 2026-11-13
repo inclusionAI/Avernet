@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/session-recovery-runtime.ts
+  s_9811b7b3d0b263::t_2f7d39689ecdcb 58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4f724d5cdd34478de6bf11ff5c3bbed9a4a50168",
+  "prompts": {},
+  "sessions": {
+    "s_9811b7b3d0b263": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c389-8ac1-7f93-aa03-f9e20121f685",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

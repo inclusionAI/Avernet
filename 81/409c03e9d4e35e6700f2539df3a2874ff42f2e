@@ -1,0 +1,19 @@
+apps/backend/specs/2026-10-20-task-artifact-domain/spec.md
+  s_4efef845bd857d::t_4ffd2e188726cc 255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81409c03e9d4e35e6700f2539df3a2874ff42f2e",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

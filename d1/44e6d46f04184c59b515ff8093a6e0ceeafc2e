@@ -1,0 +1,35 @@
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 26-28,30-48
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_502dbf3f3ce405::t_37e08f5d89f23c 16
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 243,247-258
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.userMessage.test.tsx
+  s_502dbf3f3ce405::t_37e08f5d89f23c 13
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.header.test.tsx
+  s_502dbf3f3ce405::t_37e08f5d89f23c 13
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 12-18,38,48-56
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 191
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 217-218,220-246,252-255
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_502dbf3f3ce405::t_37e08f5d89f23c 76-78,86-88,160,188-191,222-226,312-317,538-540,566-571
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d144e6d46f04184c59b515ff8093a6e0ceeafc2e",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

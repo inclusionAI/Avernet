@@ -1,0 +1,112 @@
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_1d98bfbecbd6f9::t_dbb45cbdc30784 49-51,61-62,65-68,70-71,73
+  s_1d98bfbecbd6f9::t_2506afd5e35b55 95-96
+  s_1d98bfbecbd6f9::t_38e4659b95e02e 270-287
+  s_1d98bfbecbd6f9::t_727f6bbb68ded2 156
+  s_1d98bfbecbd6f9::t_cde43bb48ea2b4 5
+  s_1d98bfbecbd6f9::t_cb89bfd45febeb 64,69,72
+  s_1d98bfbecbd6f9::t_0e05f92786beff 238,251
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_cf4651e8741385::t_8b1e5f21876a46 10
+  s_cf4651e8741385::t_ef93fdec5dcead 2-9,11-37,47-48,50-54,57-59,62,72-75,78-81,84-87,89-93
+  s_cf4651e8741385::t_b19fc5d713c0dd 1
+  s_cf4651e8741385::t_251ed8becbf86e 38-46,49,55,60,64-69,76,82,88
+  s_cf4651e8741385::t_8a6d63f6374873 63,70
+  s_cf4651e8741385::t_800b1396c228c7 56,61,71,77,83
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sidePanePanelMutex.ts
+  s_1d98bfbecbd6f9::t_25a25ebfae9fc9 67,70-73
+  s_1d98bfbecbd6f9::t_fd39a6f9f13260 1-66,68-69,74-83
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_cf4651e8741385::t_c592cd143caac9 280
+  s_cf4651e8741385::t_0c72adc70c3069 251-279,281-287
+  s_cf4651e8741385::t_59959dd45b5819 3
+  s_cf4651e8741385::t_502322af38c0fd 228-230
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  s_1d98bfbecbd6f9::t_ba58d18730ecba 57-58,62
+  s_1d98bfbecbd6f9::t_9e4b0dfe3658b7 291
+  s_1d98bfbecbd6f9::t_3aa6eb5f03c42d 262,277-278,282,292
+  s_1d98bfbecbd6f9::t_98285ff0c58bb3 259-261,263-276,279-281,283-290,293-319
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_cf4651e8741385::t_f9a9a87ff9242a 1-58
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/GroupHistorySidebar.tsx
+  s_1d98bfbecbd6f9::t_e8d498bb631715 5-6,9,14-15,22,24-32
+apps/frontend-nextgen/test/pages/Workspace/GroupWorkspaceAreaManagePanel.test.tsx
+  s_1d98bfbecbd6f9::t_9839045ad3ceca 152-153,155
+  s_1d98bfbecbd6f9::t_3780fc8aed85a7 233,242-243
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChatHeaderPanels.test.ts
+  s_1d98bfbecbd6f9::t_593b8eb37157d1 338
+  s_1d98bfbecbd6f9::t_774767b6e1fed6 49,53-59
+  s_1d98bfbecbd6f9::t_a1ab1326f04ea4 306-337,339-386
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/ChatPanel.css
+  s_dea96bd9ceaff6::t_7b962edaaefeda 14-23
+apps/frontend-nextgen/src/pages/Workspace/components/GroupMembersPanelSlot.tsx
+  s_1d98bfbecbd6f9::t_6ad5935d19386b 6,16,18,21,23-25,29-39
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_cf4651e8741385::t_4817008598c68e 58-62
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SessionFilesSidebar.tsx
+  s_1d98bfbecbd6f9::t_6646a6039bc4e4 2,5-8,11-14,16,18,20-22,24,26-27
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  s_1d98bfbecbd6f9::t_207eb8d9edcac8 6-7,14-15,21,48-51,57-58,64,71-73,116-125,135-136,188,192
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_cf4651e8741385::t_ae014e3844a546 81-123
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_1d98bfbecbd6f9::t_9e0586c9a6e18e 154-157,159-165,172-175,179
+  s_1d98bfbecbd6f9::t_e9a2239046a568 255,261
+  s_1d98bfbecbd6f9::t_5d859757e70588 158
+  s_1d98bfbecbd6f9::t_ddbf6834ed22a5 198-199
+  s_1d98bfbecbd6f9::t_a597745e40e9b5 12-13
+  s_1d98bfbecbd6f9::t_b07e3b4bc95fca 31
+  s_1d98bfbecbd6f9::t_3982768e9cb499 75-76
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_cf4651e8741385::t_5a8b1d48e7dbe7 28-37
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  s_cf4651e8741385::t_c2f40596294967 20-22
+  s_cf4651e8741385::t_1877821a111d87 94-113,134-143,154-183,233-242,249
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_cf4651e8741385::t_323c030f7dab99 60-64
+  s_cf4651e8741385::t_da592783951bb8 4-9
+  s_cf4651e8741385::t_bf052c6944bb1f 40-49
+  s_cf4651e8741385::t_10b0985e13327d 32-38,65,91,137
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  s_1d98bfbecbd6f9::t_31831a0a9ec4fd 130-131
+apps/frontend-nextgen/src/stores/botSessionFileStore.ts
+  s_cf4651e8741385::t_6051b528aceb6d 11-19
+apps/frontend-nextgen/src/pages/Workspace/components/WorkspaceManagePanels.tsx
+  s_1d98bfbecbd6f9::t_3f76246b309665 10,58-61,64-73,96-97,99-108,127-128
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_cf4651e8741385::t_80c0e0d21ab13c 23-32,54-56,145-150
+apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
+  s_cf4651e8741385::t_97b1a2e825e5f9 15-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ddbaedc587253ec8912d69a96d21eb94d8f280ca",
+  "prompts": {},
+  "sessions": {
+    "s_1d98bfbecbd6f9": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "aeac70e7-9af2-48d9-94dd-5396adf57d01",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_cf4651e8741385": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "405d0e18-19fb-4af4-8160-53148afa5fcd",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": null
+    },
+    "s_dea96bd9ceaff6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "90f2d7d4-b5f5-40f8-82d3-541d809d4c7f",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": null
+    }
+  }
+}

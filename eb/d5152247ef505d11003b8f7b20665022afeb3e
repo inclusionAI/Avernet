@@ -1,0 +1,126 @@
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_100250aa373c73 3
+  s_47ed8e91e4b8af::t_f383cd789117d8 9-10
+  s_47ed8e91e4b8af::t_3f271a0dfd02d8 25-26
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_47ed8e91e4b8af::t_e0a97b3582f252 10-11
+docs/agents/knowledge-feedback.md
+  s_47ed8e91e4b8af::t_3f271a0dfd02d8 1-35
+.gitignore
+  s_47ed8e91e4b8af::t_339652629d9593 171-175
+autocoding/skills/teamclaw-clarify/references/applications/baas/index.md
+  s_47ed8e91e4b8af::t_78886af51336cf 1,3,5,7
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_f383cd789117d8 44-46
+  s_47ed8e91e4b8af::t_3f271a0dfd02d8 24-26,42,47-49,56,59
+autocoding/skills/teamclaw-clarify/references/applications/backend/index.md
+  s_47ed8e91e4b8af::t_78886af51336cf 1,3,5,7
+AGENTS.md
+  s_47ed8e91e4b8af::t_e0a97b3582f252 26
+autocoding/skills/teamclaw-clarify/references/applications/bcsfuse/index.md
+  s_47ed8e91e4b8af::t_78886af51336cf 1,3,5,7
+autocoding/skills/teamclaw-implement/references/delivery.md
+  s_47ed8e91e4b8af::t_e0a97b3582f252 6-7
+autocoding/skills/teamclaw-clarify/references/applications/bcs/index.md
+  s_47ed8e91e4b8af::t_78886af51336cf 1,3,5,7
+apps/backend/.gitignore
+  s_47ed8e91e4b8af::t_9cdd32dbf53ba2 24-26
+apps/baas/AGENTS.md
+  s_47ed8e91e4b8af::t_3f18ff83f89121 41-42
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_2a8b63817756cd 3-9,20-21
+apps/baas/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_e11e3a29f7c713 1-16
+apps/baas/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_ad72fcc2298e98 1-3
+apps/baas/docs/arch/README.md
+  s_47ed8e91e4b8af::t_45bf1de959b7f8 1-11
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_f4f68e1c9d8725 12-17
+apps/baas/docs/diagnostics/investigation.md
+  s_47ed8e91e4b8af::t_c46ba7fc02b5ed 1-11
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_6adcd3b752f329 3,10-13
+apps/baas/docs/flows/enterprise-assembly.md
+  s_47ed8e91e4b8af::t_bd536da37c2949 1-11
+apps/baas/specs/README.md
+  s_47ed8e91e4b8af::t_fb8ee64a685ac1 1-7
+apps/backend/AGENTS.md
+  s_47ed8e91e4b8af::t_bf996d96e55753 6-7
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_4414327c44a1d6 3-9
+apps/backend/docs/adr/README.md
+  s_47ed8e91e4b8af::t_be4aa051fbdc3f 1-5
+apps/backend/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_55f02bf74af052 1-16
+apps/backend/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_68924499b32a44 1-3
+apps/backend/docs/arch/README.md
+  s_47ed8e91e4b8af::t_8cb6208b2dc28c 1-11
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_c5882ce49b93e0 14-15
+apps/backend/docs/diagnostics/investigation.md
+  s_47ed8e91e4b8af::t_7673439a1ee964 1-7
+apps/bcs-internal/AGENTS.md
+  s_47ed8e91e4b8af::t_63061386c0e674 52-53
+apps/bcs-internal/README.md
+  s_47ed8e91e4b8af::t_7a5844fca1518a 3-9,20-21
+apps/bcs-internal/docs/adr/README.md
+  s_47ed8e91e4b8af::t_bad1b709cd3321 1-5
+apps/bcs-internal/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_2dd11bd8eea360 1-16
+apps/bcs-internal/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_8b2488b279dcd0 1-3
+apps/bcs-internal/docs/arch/README.md
+  s_47ed8e91e4b8af::t_3aa9f7a4522b1f 1-11
+apps/bcs-internal/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_78e4b286e1c06f 12-17
+apps/bcs-internal/docs/diagnostics/investigation.md
+  s_47ed8e91e4b8af::t_308ad921001259 1-11
+apps/bcs-internal/docs/flows/README.md
+  s_47ed8e91e4b8af::t_b055670d821d7e 3,10-13
+apps/bcs-internal/docs/flows/leader-election.md
+  s_47ed8e91e4b8af::t_209e5dfd725577 1-5
+apps/bcs-internal/specs/README.md
+  s_47ed8e91e4b8af::t_e3d97beef06ce8 1-7
+apps/bcsfuse/AGENTS.md
+  s_47ed8e91e4b8af::t_ace70eb54555e9 1-5
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_8092f5edc03d55 3-9,20-21
+apps/bcsfuse/docs/adr/README.md
+  s_47ed8e91e4b8af::t_5356d670a5563c 1-5
+apps/bcsfuse/docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_bcff04001ba4a4 1-16
+apps/bcsfuse/docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_760891564795f5 1-3
+apps/bcsfuse/docs/arch/README.md
+  s_47ed8e91e4b8af::t_d4e204098bd548 1-11
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_0696ec5662a240 12-17
+apps/bcsfuse/docs/diagnostics/investigation.md
+  s_47ed8e91e4b8af::t_8f30d3a6d6eefb 1-11
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_e9ced802cdf630 3,11-14
+apps/bcsfuse/docs/flows/alipay-retrieval.md
+  s_47ed8e91e4b8af::t_fae3c7d5463324 1-5
+apps/bcsfuse/specs/README.md
+  s_47ed8e91e4b8af::t_f671c4ac6a80bb 1-7
+autocoding/skills/teamclaw-clarify/references/investigation.md
+  s_47ed8e91e4b8af::t_68bd5756b62953 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebd5152247ef505d11003b8f7b20665022afeb3e",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

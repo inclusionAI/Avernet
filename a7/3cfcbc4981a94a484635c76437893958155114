@@ -1,0 +1,49 @@
+docs/designs/bcn-distributed/presentation.html
+  s_ae779de10e764a::t_6fdb6ba56d9110 15,168,173,182,194-196,198-235,237
+  s_ae779de10e764a::t_b2bd3413552341 193
+  s_ae779de10e764a::t_cf016f27350130 197
+docs/designs/bcn-distributed/01-architecture-and-adapters.md
+  s_ae779de10e764a::t_7d749795669cb0 79
+  s_ae779de10e764a::t_652454d889f499 72,131,133,135-136,139-141
+docs/designs/bcn-distributed/tools/build_docs.py
+  s_ae779de10e764a::t_83e15fbf64cc88 63,83
+  s_ae779de10e764a::t_6471c51ce1771e 87
+  s_ae779de10e764a::t_1d1678daa7be37 30,36,47,62,64-65,67-68,125
+docs/designs/bcn-distributed/03-collaboration-modes.md
+  s_ae779de10e764a::t_ee8a89f0ce13f1 9-10
+docs/designs/bcn-distributed/00-overview-design.md
+  s_ae779de10e764a::t_7d749795669cb0 271
+  s_ae779de10e764a::t_ee8a89f0ce13f1 20,65,106,197,199-200,204,320,340,342,344-350,404-405,449,452,459,464,477-478,480,482,490-491
+docs/designs/bcn-distributed/02-communication-and-failover.md
+  s_ae779de10e764a::t_7d749795669cb0 50
+  s_ae779de10e764a::t_652454d889f499 48,51-52,84-106
+  s_ae779de10e764a::t_5d366ab42fb1d3 49
+docs/designs/bcn-distributed/04-validation-and-operations.md
+  s_ae779de10e764a::t_9c7bcf0fe97289 21,33,40-46,48-51,71-72,107,110,147-151,162,179-181,183,187
+  s_ae779de10e764a::t_7d749795669cb0 47
+docs/designs/bcn-distributed/assets/07-planned-drain.svg
+  s_ae779de10e764a::t_1d1678daa7be37 4,6-40
+  s_ae779de10e764a::t_7d749795669cb0 1-3,5
+docs/designs/bcn-distributed/README.md
+  s_ae779de10e764a::t_ee8a89f0ce13f1 19,88,105-106
+docs/designs/bcn-distributed/bcn-distributed-design.md
+  s_ae779de10e764a::t_6fdb6ba56d9110 21,90,107-108,161,206,247,338,340-341,345,412,461,481,483,485-491,545-546,590,593,600,605,618-619,621,623,631-632,715,722,774,776,778-779,782-784,857-858,861,893-915,1017-1018,1155,1167,1174-1180,1182-1185,1205-1206,1241,1244,1281-1285,1296,1313-1315,1317,1321
+  s_ae779de10e764a::t_0ba95269d236d3 859-860
+  s_ae779de10e764a::t_b2b9512665230e 1181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a73cfcbc4981a94a484635c76437893958155114",
+  "prompts": {},
+  "sessions": {
+    "s_ae779de10e764a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19844-2a00-7a03-ac17-a1a451636220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

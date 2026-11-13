@@ -1,0 +1,14 @@
+submodules/avernet
+  h_5b2ec9c12c4d18 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f8208651ec1982e8e7ef9036522ad3482090d39",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

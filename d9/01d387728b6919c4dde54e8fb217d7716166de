@@ -1,0 +1,20 @@
+apps/bcs-internal/configs/bcs-config.toml
+  s_83eaf4a5bf0412::t_9a746abd08c2c6 136-137
+  s_83eaf4a5bf0412::t_7acbc1ff96d7fd 138-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d901d387728b6919c4dde54e8fb217d7716166de",
+  "prompts": {},
+  "sessions": {
+    "s_83eaf4a5bf0412": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a4b1-6c88-7b43-a5ea-62db37597854",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_6df2d19f5247b5::t_959c80f6fb0aa5 208-209,214-216,223-227
+apps/backend/specs/2026-11-12-teclaw-refresh-session-check/spec.md
+  s_6df2d19f5247b5::t_959c80f6fb0aa5 5,22-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ccc465619389a152d2371a718aa72528bf51385",
+  "prompts": {},
+  "sessions": {
+    "s_6df2d19f5247b5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d01d-682a-7c52-a40b-074c6b5d16ef",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

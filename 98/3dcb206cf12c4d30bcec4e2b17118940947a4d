@@ -1,0 +1,79 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/effect-recheck.ts
+  s_7041fdb3e974bb::t_5015d51da1182a 1-9,11-16,19-40
+  s_7041fdb3e974bb::t_19dfa89983017c 10,17-18
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_7041fdb3e974bb::t_19dfa89983017c 107,109-115,141-150,530
+  s_7041fdb3e974bb::t_1f3b643fb9776e 248-250,259-263,265
+  s_7041fdb3e974bb::t_89c1b39b1596d0 31,120-122,199,201-202,242-244,421,767,809,851
+  s_7041fdb3e974bb::t_8e75ecd4b412e6 123,361,366
+  s_7041fdb3e974bb::t_d3028403be9f0a 200,215,255
+  s_7041fdb3e974bb::t_2afaec07d6bdf8 1,35,93-106,108,116-119,124-140,151-156,158,178-179,185,187-188,191,203,207,218,234-237,246,251,254,256-258,292,296,385,397-398,405-407,418,433,516,665,678-693,766,774-777,793,799,808,904
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/dashboard.mjs
+  s_7041fdb3e974bb::t_392d334c24b951 1-25
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_7041fdb3e974bb::t_1f3b643fb9776e 38,292,297-300,302-303,305-306,313,351-352,360
+  s_7041fdb3e974bb::t_1abbf8c46b6901 10,19,36,321-335,340-350,354-356,358-359,361-364,413-417,430-433,437-438,441
+  s_7041fdb3e974bb::t_6fff20752a5726 411-412,604,615,655
+  s_7041fdb3e974bb::t_ee4e630482bd9e 353,357
+  s_7041fdb3e974bb::t_8e75ecd4b412e6 408,658,670-671,676,687,689,693
+  s_7041fdb3e974bb::t_c18f9ffb88ce4e 9,137-142,617,707,711,715
+  s_7041fdb3e974bb::t_89c1b39b1596d0 336-339
+  s_7041fdb3e974bb::t_6e115ac2c38bf5 291,293-296,304,713
+  s_7041fdb3e974bb::t_7e0d2fa67799db 301
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_7041fdb3e974bb::t_5015d51da1182a 7,12,70,72-78,183,185-191,210-214,324,327-329,347,349
+  s_7041fdb3e974bb::t_6fff20752a5726 69,71,184,326
+  s_7041fdb3e974bb::t_89c1b39b1596d0 86-87,89-91
+  s_7041fdb3e974bb::t_c18f9ffb88ce4e 13,66,167,172-177,218
+  s_7041fdb3e974bb::t_d3028403be9f0a 67,79-85,88
+  s_7041fdb3e974bb::t_9c027f0f22f73d 68
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_7041fdb3e974bb::t_1abbf8c46b6901 28,47-48
+  s_7041fdb3e974bb::t_6fff20752a5726 29-30
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/common/agent-execution.ts
+  s_7041fdb3e974bb::t_5015d51da1182a 43,49
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/cli.mjs
+  s_7041fdb3e974bb::t_821ce395f864d0 79-81,84,90-91,161,190,207,220
+  s_7041fdb3e974bb::t_392d334c24b951 1-78,82-83,85-89,92-160,162-189,191-206,208-219,221-258
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_7041fdb3e974bb::t_c18f9ffb88ce4e 71-72,117,154-156,158,164
+  s_7041fdb3e974bb::t_d3028403be9f0a 165
+  s_7041fdb3e974bb::t_89c1b39b1596d0 166
+  s_7041fdb3e974bb::t_5015d51da1182a 73-74,157,167
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-resume.test.ts
+  s_7041fdb3e974bb::t_a8992afd0e2f94 201-212
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/effect-resume.ts
+  s_7041fdb3e974bb::t_6e115ac2c38bf5 8,44-45,52
+  s_7041fdb3e974bb::t_c18f9ffb88ce4e 3-4,6-7,9-18,25,28-34,37,39-40,43,46-51
+  s_7041fdb3e974bb::t_6fff20752a5726 21-24,26
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_7041fdb3e974bb::t_f4a4c8c398e8bb 42-47,50-66
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/README.md
+  s_7041fdb3e974bb::t_f4a4c8c398e8bb 1-35
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery.ts
+  s_7041fdb3e974bb::t_1abbf8c46b6901 64-69
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-recheck.test.ts
+  s_7041fdb3e974bb::t_5bb951cfda21a4 1-73,78-103,105-130,171
+  s_7041fdb3e974bb::t_a8992afd0e2f94 74-75,77,131-150
+  s_7041fdb3e974bb::t_a82bfb8573aeef 76,104,151-170
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-repository.ts
+  s_7041fdb3e974bb::t_1abbf8c46b6901 83-86,102
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_7041fdb3e974bb::t_f4a4c8c398e8bb 223-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "983dcb206cf12c4d30bcec4e2b17118940947a4d",
+  "prompts": {},
+  "sessions": {
+    "s_7041fdb3e974bb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2c7-4774-7de1-a174-e229fad34f15",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

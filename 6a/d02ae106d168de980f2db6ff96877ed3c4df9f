@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_1baa87bb9d5a3a::t_877b487265a678 43
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_1baa87bb9d5a3a::t_a0e760b729aa93 104,106-110,120-122
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_1baa87bb9d5a3a::t_62d8bf02986a9a 48-57,60-61
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_1baa87bb9d5a3a::t_cd077359de8f36 3
+  s_1baa87bb9d5a3a::t_c82452dd084446 34-47,52-54,57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ad02ae106d168de980f2db6ff96877ed3c4df9f",
+  "prompts": {},
+  "sessions": {
+    "s_1baa87bb9d5a3a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7b1848ba-acd0-4428-9747-5009f4a3f56b",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

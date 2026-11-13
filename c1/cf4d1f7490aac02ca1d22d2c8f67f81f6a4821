@@ -1,0 +1,14 @@
+apps/backend/tests/community/adapters/http/bot_public/test_risk_routes.py
+  h_9d7cfd405752f5 370,372-375,381-382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1cf4d1f7490aac02ca1d22d2c8f67f81f6a4821",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

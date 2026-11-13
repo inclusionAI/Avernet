@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/skill_center/test_skill_package_validator.py
+  s_79439ec6a1b301::t_1b5e71629d140f 589-604
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_79439ec6a1b301::t_1b5e71629d140f 2669-2705
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2565ab0e1a31b5c1fb21df698677e7d9f8b26ecb",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
