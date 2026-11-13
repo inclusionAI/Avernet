@@ -638,7 +638,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const receipt = await this.deps.runtime.sendMessage({ target: deliveryTarget, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
         deliveryKey: key, messageMarker: marker, message }).catch(() => ({ status: "unknown" as const }));
       return { ...receipt, session_key: deliverySessionKey, delivery_key: key, message, initial_message: initial,
-        ...(ownerRequest ? { owner_request_id: ownerRequest.requestId } : {}), started_at_ms: startedAt, finished_at_ms: this.now() };
+        started_at_ms: startedAt, finished_at_ms: this.now() };
     });
   }
   async toolGet(task: RecoveryStoredTask, id: string) {
@@ -859,7 +859,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       result = { dispatched, error: error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
         : { code: "controlled_operation_unconfirmed", message: "受控操作未确认，需核对现场与审计" } };
     }
-    result = { ...result as Record<string, unknown>, recorded_at_ms: this.now() };
+    // This server-generated ID links the receipt to the confirmed Owner request.
+    result = { ...result as Record<string, unknown>, ...(ownerRequestId ? { owner_request_id: ownerRequestId } : {}), recorded_at_ms: this.now() };
     try {
       await this.deps.audit.completeToolCall({ callId: call.callId, executionId: execution.executionId, authorizationScopeDigest: scope,
         status, leaseOwner, result });

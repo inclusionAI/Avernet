@@ -1,4 +1,4 @@
-import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
+import { containsSecret, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { validateRecoveryEvidenceReferences } from "./task-state.js";
 import type { RecoveryOwnerRequestInput, RecoveryStoredTask, RecoveryTaskState } from "./task-contracts.js";
@@ -11,7 +11,9 @@ function fail(status: number, message: string): never {
 export function ownerContinuationState(requestId: string, attempt: { request?: unknown; result?: unknown; status?: unknown }) {
   const request = attempt.request as { owner_request_id?: unknown } | undefined;
   const receipt = attempt.result as { owner_request_id?: unknown; status?: unknown } | undefined;
-  if ((request?.owner_request_id ?? receipt?.owner_request_id) !== requestId) return;
+  const storedId = receipt?.owner_request_id ?? request?.owner_request_id;
+  // In-flight requests and older receipts may have passed through PII redaction.
+  if (typeof storedId !== "string" || (storedId !== requestId && storedId !== redactPersistableText(requestId))) return;
   if (attempt.status === "pending" || attempt.status === "executing" || attempt.status === "unknown") return attempt.status;
   if (attempt.status === "succeeded" && receipt?.status === "accepted") return "accepted";
 }
