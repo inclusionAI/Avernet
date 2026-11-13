@@ -220,6 +220,25 @@ Agent 临近 Base 截止时可在 `waiting_owner`、运行中的 `observe / veri
 
 返回 `202 { "status": "accepted", "task_id": "SR-…" }`。仅用于 `waiting_effect`，恢复同一个 Task 的暂停阶段；可创建新的 execution 和容器，但保留已有方案、操作、判断、证据及待回传结果，先读新现场，不重发初始建议。再次调用创建接口不会代替此继续接口。Owner 等待由任务页面确认完整方案后继续；等待到期释放执行，之后确认会为同一任务启动新容器。
 
+## 单条历史效果补验
+
+`POST /api/insight/v1/monitoring/session-recoveries/:taskId/effect-recheck`
+
+Owner 或管理员在原任务控制面调用，传入 `{ "request_id": "调用方生成的稳定标识" }`。
+`202` 返回 `{ "task_id", "execution_id", "status": "accepted" }`。源任务已有确定结论但诊断未收到，且没有待发送的确定结果时，复用结果队列，返回
+`{ "task_id", "result_version", "status": "result_queued" }`，不启动 AIS。同任务同请求标识返回原回执。
+`409` 的 `error` 区分在线仍可续接（`online_resume_available`）、在途执行或工具（`execution_pending`）、
+已有结论（`effect_already_known`）、已有待发结果（`result_delivery_pending`）和并发冲突（`recheck_conflict`）。
+
+仅允许读取原会话和证据、提交本次效果判断。新结论需要确证曾经发生干预，并引用本次成功读取的受控证据。
+结果为 `unknown` 时只记录本次补验结果。补验不改变业务状态、阶段、结束原因和创建时间；不发消息、群通知或 Owner 卡片。
+写回前重新核对在线续接策略、当前执行和最新诊断结论。
+
+复用既有任务详情查询进度。Owner 或管理员可读 `effectRecheckFacts`，其中有在线占位、执行及干预事实；
+`executions[].effectRecheckRequestId` 关联单次调用，时间线的 `effect_recheck_outcome` 区分业务判断，
+`result_version` 对应 `result-<version>` 或 `result-stopped-<version>` 回传事件。
+诊断接收后，由离线同步按任务原创建日更新指标。回传成功不等于 DI 已同步。
+
 ## 任务页面与决策
 
 任务入口：`/insight?module=monitoring&recoveryTaskId=<task_id>`。

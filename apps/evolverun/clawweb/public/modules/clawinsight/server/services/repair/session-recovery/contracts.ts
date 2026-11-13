@@ -25,8 +25,9 @@ export interface RecoveryActionNotifier {
 }
 /** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
 export type RecoveryTermination = { status: "remote_stopped" | "remote_stop_failed" | "stop_pending"; aisJobId: string | null };
-export type RecoveryExecutionView = { executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
-export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination };
+export type RecoveryExecutionView = { executionId: string; attempt: number; effectRecheckRequestId?: string; status: string; jobId: string | null; jobUrl: string | null; termination?: RecoveryTermination };
+export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperate: boolean; canManageShare: boolean; executions: RecoveryExecutionView[]; termination?: RecoveryTermination;
+  effectRecheckFacts?: Pick<RecoveryStoredTask, "interventionStatus" | "effectWait"> & { hasResumeReservation: boolean; executionActive: boolean } };
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
@@ -43,6 +44,8 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   confirmOwner(taskId: string, requestId: string, actor: RecoveryActor, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;
+  startEffectRecheck(taskId: string, requestId: unknown, actor: RecoveryActor): Promise<import("./task-contracts.js").RecoveryEffectRecheckAck>;
+  finishEffectRecheck(taskId: string, executionId: string, judgment: RecoveryJudgment, freshEvidence: ReadonlySet<string>): Promise<void>;
   assess(taskId: string, version: number, input: import("./task-contracts.js").RecoveryAssessment, finalSummary?: unknown): Promise<void>;
   observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void>;
   plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;

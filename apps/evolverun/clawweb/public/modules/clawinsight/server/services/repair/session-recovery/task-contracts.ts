@@ -68,7 +68,10 @@ export type RecoveryTimelineEvent = {
 };
 export type RecoveryEffectWait = { firstAt: number; sinceAt: number; resumes: number };
 export type RecoveryEffectResumeSlot = { firstExecutionNo: number; lastExecutionNo?: number };
-export type RecoveryEffectResumeConfig = { id: number; version: number; concurrency: number };
+export type RecoveryEffectResumeConfig = { id: number; version: number; concurrency: number } & import("./effect-resume.js").EffectResumePolicy;
+export type RecoveryExecution = AgentExecution & { effectRecheck?: { requestId: string; phase: "observe" | "verify" } };
+export type RecoveryEffectRecheckAck = { task_id: string; status: "accepted"; execution_id: string }
+  | { task_id: string; status: "result_queued"; result_version: number };
 export type RecoveryMaintenanceTask = Pick<RecoveryTaskState,
   "taskId" | "status" | "phase" | "controlPlaneEnvironment" | "observationDeadlineAt" | "effectWait" | "effectResumeSlot"> & {
     compact: true;
@@ -111,7 +114,7 @@ export type RecoveryTaskState = {
   runtimeTarget?: AgentRuntimeTargetSnapshot;
   authorizationScopeDigest?: string;
   current?: { stepId: string };
-  execution?: AgentExecution;
+  execution?: RecoveryExecution;
   executionNo?: number;
   /** Task-wide infrastructure failure budget; retryAt is zero while an attempt is active. */
   executionRetry?: { failures: number; retryAt: number; executionId?: string };
@@ -148,12 +151,20 @@ export type RecoveryStoredTask = RecoveryTaskState & {
   timeline: RecoveryTimelineEvent[];
   pending_results: RecoveryTaskResult[];
 };
+export type RecoveryEffectConfigCheck =
+  | { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }
+  | { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig | null;
+      recheck: { register: boolean; diagnosisVersion: number } };
+
 export interface RecoveryTaskStore {
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
   find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;
   update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
-    effectResumeClaim?: { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }): Promise<RecoveryStoredTask | null>;
+    effectResumeClaim?: RecoveryEffectConfigCheck): Promise<RecoveryStoredTask | null>;
+  claimRecheckDispatch?(stepId: string): Promise<boolean>;
+  recordRecheckJob?(stepId: string, jobId: string, receipt: Record<string, string>): Promise<void>;
+  latestDiagnosisEffect?(task: RecoveryStoredTask): Promise<{ version: number; effect: RecoveryEffect } | null>;
   effectResumeConfig?(environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<RecoveryEffectResumeConfig | null>;
   claimEffectResumeDispatch?(stepId: string): Promise<boolean>;
   settleEffectResumeSlot?(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean>;
