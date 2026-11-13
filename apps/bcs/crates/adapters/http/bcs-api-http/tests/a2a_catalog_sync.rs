@@ -1,14 +1,14 @@
-//! V1 adapter -> actual application/Core/SQLite -> consumed queue -> Fuse HTTP.
+//! V1 adapter -> real application/Core/SQLite (assembled in bcs-test-support)
+//! -> consumed queue -> Fuse HTTP. The adapter manifest stays free of the
+//! concrete BCS crates; only the test-support fixture dep carries them.
 use std::sync::Arc;
 use async_trait::async_trait;
 use axum::{body::{Body, to_bytes}, http::Request, routing::put, extract::Path, Json};
-use bcs_app_a2a_bot::{A2aBotManagement, v1::A2aApiService};
-use bcs_bot::{ProviderCore, core::{a2a_bot::A2aBotCore, a2a_provider_registration::A2aProviderRegistrationCore}};
-use bcs_bot_store::{MemoryProviderStore, a2a::DbA2aBotStore};
+use bcs_bot_store::MemoryProviderStore;
 use bcs_db_api::{DbPlugin, DbStatement};
-use bcs_fusion::{CardChangeQueue, FuseCardSyncLifecycle};
 use bcs_service_api::{ProviderCredential, ProviderCredentialRepoPort, ServiceResult, lifecycle::ServiceLifecycle,
     port::a2a_card::{A2aCardPort, ValidatedA2aCard}, types::a2a_bot::select_a2a_interface};
+use bcs_test_support::contract::a2a_catalog_stack::{build_a2a_catalog_stack, fuse_card_sync_worker};
 use bcs_test_support::contract::bot_registration_chain::registration_chain;
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -54,27 +54,18 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
         credentials.insert_credential(ProviderCredential {provider_id:"provider-a".into(), credential_kind:kind.into(),
             secret_value:secret.into(), disabled:false, created_at:0, updated_at:0}).await.unwrap();
     }
-    let queue=Arc::new(CardChangeQueue::default());
-    let providers=Arc::new(ProviderCore::new(chain.provider_repo.clone(), credentials,
-        chain.provider_repo.clone(), chain.registry_core.clone()).with_bot_provider_repo(chain.provider_repo.clone()));
-    let cards=Arc::new(DbA2aBotStore::sqlite(chain.db.clone(), bcs_config::resolve_env_str()).with_registry(&chain.bot_repo));
-    let core=Arc::new(A2aBotCore::new(cards, chain.provider_repo.clone()).with_catalog_changes(Some(queue.clone())));
-    let registration=Arc::new(A2aProviderRegistrationCore::new(providers.clone(), chain.provider_repo.clone())
-        .with_catalog_changes(Some(queue.clone())));
-    let management=Arc::new(A2aBotManagement::new(providers, core, Arc::new(Fetcher))
-        .with_registration(registration, chain.registry_core.clone()));
+    let stack=build_a2a_catalog_stack(&chain, credentials, Arc::new(Fetcher));
     let app=bcs_api_http::router(register_support::test_state(chain.register_service.clone())
-        .with_a2a_service(Arc::new(A2aApiService::new(management))));
+        .with_a2a_service(Arc::new(stack.api)));
 
     let (tx, mut rx)=tokio::sync::mpsc::unbounded_channel();
     let fuse=axum::Router::new().route("/api/v2/agent-cards/{id}", put(move |Path(id): Path<String>, Json(body): Json<Value>| {
         let tx=tx.clone(); async move {tx.send((id,body)).unwrap(); (axum::http::StatusCode::ACCEPTED,Json(json!({"saved":true,"card_version":1})))}
     }));
     let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let config=bcs_fuse_client::BcsFuseConfig {url:format!("http://{}",listener.local_addr().unwrap()),..Default::default()};
+    let addr=listener.local_addr().unwrap();
     let server=tokio::spawn(async move {axum::serve(listener,fuse).await.unwrap()});
-    let worker=FuseCardSyncLifecycle::new(queue, Arc::new(bcs_fuse_client::FuseClient::new(&config).unwrap()),
-        chain.bot_repo.clone(), Arc::new(bcs_test_support::NoopGroupCoreService), bcs_config::resolve_env_str(), 1);
+    let worker=fuse_card_sync_worker(&chain, stack.queue, addr.to_string());
     worker.initialize().await.unwrap();
     let input=json!({"provider_bot_ref":"catalog-ref","owners":["delegated-owner"],"agent_card_url":"https://example.org/card.json"});
     let (status, saved)=call(&app,"POST","/api/v1/collaboration/a2a/agents",input.clone()).await;
