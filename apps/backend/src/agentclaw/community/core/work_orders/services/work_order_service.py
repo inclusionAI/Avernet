@@ -788,7 +788,12 @@ class WorkOrderService(WorkOrderServiceProtocol):
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
-        return total, [self._present_skill_collaborator_item(item) for item in items]
+        return total, [
+            self._present_bot_collaborator_item(
+                self._present_skill_collaborator_item(item)
+            )
+            for item in items
+        ]
 
     def _present_skill_collaborator_item(self, item):
         """Refresh pending Skill-request copy so historical rows gain a nickname."""
@@ -815,6 +820,44 @@ class WorkOrderService(WorkOrderServiceProtocol):
             ),
             skill_name=skill_name,
         )
+        return item.model_copy(
+            update={
+                "notification": notification.model_copy(update={"content": content})
+            }
+        )
+
+    def _present_bot_collaborator_item(self, item):
+        """Refresh historical Bot-editor copy so aged rows gain a nickname.
+
+        The guard is the notification *species* (BOT_COLLABORATOR_APPLIED`),
+        never the work-order status: APPROVED/REJECTED rows whose inbox copy is
+        the applicant-facing applied text re-render with today's nickname, the
+        same read-time refresh contract as Skill rows. The persisted row is
+        never written back; when biz_data lost the bot name, or the rebuild
+        reproduces the stored copy verbatim, the item is returned unchanged.
+        """
+
+        work_order = item.work_order
+        notification = item.notification
+        if (
+            work_order is None
+            or notification is None
+            or work_order.biz_type != WorkOrderBizType.BOT_COLLABORATOR.value
+            or notification.event_type
+            != WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value
+        ):
+            return item
+        bot_name = str(_business_data(work_order.biz_data).get("bot_name") or "")
+        if not bot_name:
+            return item
+        applicant_user_id = work_order.applicant_user_id
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
+        content = WorkOrderMessageContent.BOT_COLLABORATOR_PENDING.value.format(
+            applicant_name=applicant_name,
+            bot_name=bot_name,
+        )
+        if content == notification.content:
+            return item
         return item.model_copy(
             update={
                 "notification": notification.model_copy(update={"content": content})

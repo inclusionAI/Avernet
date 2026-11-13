@@ -890,6 +890,180 @@ def test_list_items_refreshes_historical_skill_editor_request_copy() -> None:
     staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
 
 
+def _bot_editor_list_item(
+    *,
+    order_status: WorkOrderStatus,
+    biz_data: str | None,
+    notification: WorkOrderNotificationRecord,
+) -> WorkOrderListItem:
+    work_order = _work_order().model_copy(
+        update={
+            "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+            "biz_id": "bot-17",
+            "applicant_user_id": "200177",
+            "status": order_status,
+            "biz_data": biz_data,
+        }
+    )
+    return WorkOrderListItem(
+        work_order=work_order,
+        notification=notification,
+        can_approve=False,
+    )
+
+
+def _applied_bot_notification(content: str) -> WorkOrderNotificationRecord:
+    return _notification().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+            "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+            "biz_id": "bot-17",
+            "content": content,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "order_status",
+    [
+        WorkOrderStatus.PENDING,
+        WorkOrderStatus.APPROVED,
+        WorkOrderStatus.REJECTED,
+    ],
+)
+def test_list_items_refreshes_historical_bot_editor_request_copy(
+    order_status: WorkOrderStatus,
+) -> None:
+    """Status-agnostic species guard: any row whose inbox copy is the applied
+    text re-renders with today's nickname, APPROVED/REJECTED history included."""
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    notification = _applied_bot_notification(
+        "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    item = _bot_editor_list_item(
+        order_status=order_status,
+        biz_data=json.dumps({"bot_name": "Editor Bot"}),
+        notification=notification,
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0].notification is not None
+    assert (
+        items[0].notification.content
+        == "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    # Read-time projection only: the stored record object keeps its original copy.
+    assert (
+        notification.content == "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    assert items[0].notification is not notification
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
+
+
+def test_list_items_keeps_bot_editor_copy_when_bot_name_missing() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    notification = _applied_bot_notification(
+        "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    item = _bot_editor_list_item(
+        order_status=WorkOrderStatus.PENDING,
+        biz_data=json.dumps({"bot_name": ""}),
+        notification=notification,
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_list_items_skips_bot_editor_rebuild_when_copy_already_current() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    notification = _applied_bot_notification(
+        "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    item = _bot_editor_list_item(
+        order_status=WorkOrderStatus.APPROVED,
+        biz_data=json.dumps({"bot_name": "Editor Bot"}),
+        notification=notification,
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+
+
+def test_list_items_leaves_reviewed_bot_editor_copy_untouched() -> None:
+    """The species guard keys on the applied copy, not the biz type alone:
+    REVIEWED event rows (decision notices) keep their stored text verbatim."""
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    notification = _notification().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT_COLLABORATOR_REVIEWED,
+            "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+            "biz_id": "bot-17",
+            "content": "你共同编辑 Bot「Editor Bot」的申请已通过。",
+        }
+    )
+    item = _bot_editor_list_item(
+        order_status=WorkOrderStatus.APPROVED,
+        biz_data=json.dumps({"bot_name": "Editor Bot"}),
+        notification=notification,
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+
+
 def test_get_detail_resolves_reviewer_name_from_staff_directory() -> None:
     staff_dept = MagicMock(spec=StaffDeptPlugin)
     staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
