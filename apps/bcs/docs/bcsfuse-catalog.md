@@ -161,6 +161,26 @@ no additional filtering is applied to that context in this change.
 
 ## Publication lifecycle
 
+AgentCard management registration, update (including visibility-only writes),
+explicit URL refresh and configuration notify through the same Core post-commit
+hooks. Explicit refresh commits even for unchanged Card content; existing
+background refresh no-ops remain no-write/no-notification operations. Embedding
+hosts with independent A2A core instances must inject the same catalog port and
+share its consumed queue with public bootstrap. Reusing public crates alone does
+not inject that dependency.
+
+The notification call site logs `agent_card.catalog_change_requested` with
+available Bot/Provider/ref/revision identifiers. Actual Fuse PUT/DELETE operations
+emit `fuse.card.write_started`, `fuse.card.write_succeeded` or
+`fuse.card.write_failed` under `bcs_observation`. The summaries contain no complete
+Card, credential or remote response body. A success includes the validated Fuse
+acknowledgment; HTTP success alone is insufficient. Original trace/request IDs
+are not carried by the identity-only queue; correlate via the resource ID and
+time window without assuming a one-to-one mapping between mutations and attempts.
+This change does not expand the existing Agent discovery projection into the
+complete stored A2A AgentCard JSON.
+
+
 Successful core writes enqueue the resource identity after the storage commit.
 The selected v2 lifecycle reads current BCS state immediately before each
 publication. It coalesces repeated changes and serializes HTTP writes. Registration,

@@ -177,6 +177,7 @@ use secrecy::{ExposeSecret, Secret};
 
 mod channel_wiring;
 mod a2a_wiring;
+mod catalog_wiring;
 mod auth_resources;
 mod infrastructure_helpers;
 mod http_middleware;

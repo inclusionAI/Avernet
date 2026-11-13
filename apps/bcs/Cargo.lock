@@ -560,14 +560,18 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-a2a-bot",
  "bcs-app-auth",
  "bcs-auth-api",
  "bcs-auth-oauth",
+ "bcs-bot",
  "bcs-bot-store",
  "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-domain",
+ "bcs-fuse-client",
+ "bcs-fusion",
  "bcs-service-api",
  "bcs-storage-api",
  "bcs-test-support",
@@ -1593,6 +1597,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
