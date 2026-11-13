@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
@@ -8,29 +7,29 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from task_loader import load_case
-from bcn_adapter import BcnAdapter
-from evidence import collect_member
-from grading_adapter import code_grade, checked_scores, combine
-from runtime import validate_profile, local_url
+from core.case_loader import load_case
+from adapters.local.bcn import BcnAdapter
+from adapters.local.runtime import LocalRuntime
+from adapters.local.evidence import collect_member
+from core.grading import code_grade, checked_scores, combine
 
 class P1Tests(unittest.TestCase):
     def setUp(self):
-        self.case = load_case(ROOT / "examples/task_01_singlebox_feedback_plan.md")
+        self.case = load_case(ROOT.parents[2] / "bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/case.md")
 
     def test_case(self):
-        self.assertEqual(self.case["meta"]["bcn"]["entry_member"], "ceo")
+        self.assertNotIn("bcn", self.case["meta"])
         self.assertNotIn("Expected Behavior", self.case["sections"]["Prompt"])
 
     def test_materials_rejected(self):
-        text = (ROOT / "examples/task_01_singlebox_feedback_plan.md").read_text()
+        text = (ROOT.parents[2] / "bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/case.md").read_text()
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "task.md"
             path.write_text(text.replace("workspace_files: []", "workspace_files: [input.txt]"))
             with self.assertRaises(ValueError): load_case(path)
 
     def test_weight_rejected(self):
-        text = (ROOT / "examples/task_01_singlebox_feedback_plan.md").read_text()
+        text = (ROOT.parents[2] / "bench-case/bcn-bench-case/task_01_singlebox_feedback_plan/case.md").read_text()
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "task.md"; p.write_text(text.replace("automated: 0.1", "automated: .nan"))
             with self.assertRaises(ValueError): load_case(p)
@@ -54,7 +53,7 @@ class P1Tests(unittest.TestCase):
     def test_finite_scores(self):
         for value in (float("nan"), float("inf"), -1, 2, True):
             with self.assertRaises(ValueError): checked_scores({"x": value})
-        self.assertAlmostEqual(combine({"a": 1}, {"b": .5}, {"automated": .1, "llm_judge": .9}), .55)
+        self.assertAlmostEqual(combine({"a": 1}, .5, {"automated": .1, "llm_judge": .9}), .55)
 
     def test_create_goal_once(self):
         adapter = BcnAdapter("bcs-cli", "http://localhost:21000", {})
@@ -72,20 +71,7 @@ class P1Tests(unittest.TestCase):
             with self.assertRaises(RuntimeError): adapter.create({"ceo": "b1"}, "goal", "case")
             self.assertEqual(call.call_count, 1)
 
-    def test_completion_uses_output(self):
-        import time
-        adapter = BcnAdapter("bcs", "http://localhost", {})
-        with patch.object(adapter, "get", return_value={"status": "completed", "output": "answer"}):
-            self.assertEqual(adapter.wait("s", time.monotonic()+5, lambda _: None), ("completed", "answer"))
-        with patch.object(adapter, "get", return_value={"status": "completed", "output": "answer", "error_message": "failed"}):
-            self.assertEqual(adapter.wait("s", time.monotonic()+5, lambda _: None)[0], "failed")
-        self.assertEqual(adapter.wait("s", time.monotonic()-1, lambda _: None)[0], "timeout")
 
-    def test_no_final_fails(self):
-        import time
-        adapter = BcnAdapter("bcs", "http://localhost", {})
-        with patch.object(adapter, "get", return_value={"status": "completed"}):
-            self.assertEqual(adapter.wait("s", time.monotonic()+2, lambda _: None)[0], "failed")
 
     def test_exact_session_collection(self):
         with tempfile.TemporaryDirectory() as d:
@@ -111,77 +97,30 @@ class P1Tests(unittest.TestCase):
             self.assertFalse(got["evidence_complete"])
             self.assertIsNone(got["total_tokens"])
 
-    def test_local_only(self):
-        self.assertEqual(local_url("http://localhost:21000/"), "http://localhost:21000")
-        for url in ("https://example.com", "http://u:p@localhost", "file:///x"):
-            with self.assertRaises(ValueError): local_url(url)
 
-    def test_start_failure_still_stops_owned_bots(self):
-        import benchmark
+
+
+
+
+
+
+    def test_local_poll_maps_formal_completion(self):
         from unittest.mock import MagicMock
-        with tempfile.TemporaryDirectory() as d:
-            team = MagicMock()
-            team.digest, team.mapping = "hash", {"ceo": "owned-ceo"}
-            team.command.side_effect = [RuntimeError("startup failed"), None]
-            with patch.object(benchmark, "Singlebox", return_value=team), patch.object(benchmark, "BcnAdapter") as adapter:
-                path, result = benchmark.run(self.case, {"output_dir": Path(d)}, Path(d)/"source")
-            self.assertEqual([c.args[0] for c in team.command.call_args_list], ["start", "stop"])
-            team.verify_stopped.assert_called_once()
-            adapter.assert_not_called()
-            self.assertEqual(result["execution_status"], "environment_error")
-            self.assertTrue((path / "result.json").exists())
-            log = (path / "runner.log").read_text()
-            self.assertIn("执行异常", log)
-            self.assertIn("本次Bot已停止", log)
-            self.assertIn("未评分", log)
+        runtime = LocalRuntime.__new__(LocalRuntime)
+        runtime.sid = 'g:s'; runtime.client = MagicMock()
+        for state, expected in [({'status': 'running'}, 'running'),
+                                ({'status': 'completed', 'output': 'answer'}, 'completed'),
+                                ({'status': 'completed'}, 'failed'),
+                                ({'status': 'completed', 'output': 'answer', 'error_message': 'error'}, 'failed')]:
+            runtime.client.get.return_value = state
+            self.assertEqual(runtime.poll(3)['status'], expected)
 
-    def test_wait_cli_deadline_is_timeout(self):
+    def test_local_poll_timeout(self):
         import subprocess
-        adapter = BcnAdapter("bcs", "http://localhost", {})
-        with patch("bcn_adapter.time.monotonic", side_effect=[0, 0, 11]), patch.object(adapter, "get", side_effect=subprocess.TimeoutExpired("bcs", 10)):
-            self.assertEqual(adapter.wait("s", 10, lambda _: None), ("timeout", ""))
-
-    def test_runtime_identity_is_unique_without_changing_source(self):
-        from runtime import Singlebox
         from unittest.mock import MagicMock
-        # Resolve repository root without depending on invocation cwd.
-        source = next(p for p in ROOT.parents if (p / "singlebox/agents/5bots_profile").is_dir()) / "singlebox/agents/5bots_profile"
-        original = (source / "bots.json").read_bytes()
-        with tempfile.TemporaryDirectory() as d, patch("runtime.socket.socket", return_value=MagicMock()):
-            team = Singlebox({"port_start": 32001, "model_mode": "home"}, source, Path(d)/"run-unique")
-            manifest = json.loads((team.profile / "bots.json").read_text())
-            self.assertTrue(all("run-unique" in b["name"] for b in manifest["bots"]))
-            self.assertTrue(all("run-unique" in b["profile"] for b in manifest["bots"]))
-        self.assertEqual(original, (source / "bots.json").read_bytes())
-
-    def test_default_runtime_reuses_model_file(self):
-        from runtime import load_runtime
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {}, clear=False):
-            p = Path(d)/"model.json"
-            data = {"agents": {"defaults": {"model": {"primary": "test/example"}}},
-                    "models": {"providers": {"test": {"api": "openai-completions", "baseUrl": "https://example.com/v1", "apiKey": "${TEST_BCN_KEY}"}}}}
-            p.write_text(json.dumps(data))
-            os.environ.update(SINGLEBOX_MODEL_CONFIG_FILE=str(p), TEST_BCN_KEY="test-only-value")
-            config = load_runtime()
-            self.assertEqual(config["model_mode"], "reuse")
-            self.assertEqual(config["judge"]["model"], "example")
-            self.assertNotIn("test-only-value", str(config))
-            self.assertEqual(list(Path(d).iterdir()), [p])
-
-    def test_default_runtime_missing_configuration(self):
-        from runtime import load_runtime
-        with patch.dict(os.environ, {"SINGLEBOX_MODEL_CONFIG_FILE": "/nonexistent/bcn-model.json"}):
-            with self.assertRaisesRegex(ValueError, "configure Singlebox"):
-                load_runtime()
-
-    def test_reuse_environment_does_not_change_model_mode(self):
-        from runtime import Singlebox
-        from unittest.mock import MagicMock
-        repo = next(p for p in ROOT.parents if (p / "singlebox/singlebox.sh").is_file())
-        with tempfile.TemporaryDirectory() as d, patch("runtime.socket.socket", return_value=MagicMock()), patch.dict(os.environ, {"BCN_BENCH_DEFAULT_JUDGE_KEY": "test-only"}):
-            team = Singlebox({"repository": repo, "port_start": 32001, "model_mode": "reuse"}, repo/"singlebox/agents/5bots_profile", Path(d)/"run")
-            self.assertEqual(team.env["SINGLEBOX_MODEL_CONFIG_PREPARED"], "1")
-            self.assertNotIn("BCN_BENCH_DEFAULT_JUDGE_KEY", team.env)
-            self.assertNotEqual(team.env.get("SINGLEBOX_MODEL_CONFIG_MODE"), "reuse")
+        runtime = LocalRuntime.__new__(LocalRuntime)
+        runtime.sid = 'g:s'; runtime.client = MagicMock()
+        runtime.client.get.side_effect = subprocess.TimeoutExpired('bcs', 2)
+        with self.assertRaises(TimeoutError): runtime.poll(2)
 
 if __name__ == "__main__": unittest.main()

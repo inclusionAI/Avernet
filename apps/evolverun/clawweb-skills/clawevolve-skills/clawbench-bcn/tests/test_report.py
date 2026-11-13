@@ -1,37 +1,41 @@
-import json
-import os
+"""Finalization tests replace the removed direct-HTTP report path."""
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from report import generate_report
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from core.evaluation import finalize, evaluation_request
+from outputs.file import save_evaluation
+
 
 class ReportTests(unittest.TestCase):
-    def test_report_preserves_score_and_uses_external_prompt(self):
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {'REPORT_TEST_KEY':'test'}):
-            root=Path(d)
-            result='{"execution_status":"timeout","score":null}'
-            (root/'result.json').write_text(result)
-            prompt=root/'custom.md';prompt.write_text('Custom report instructions')
-            response=MagicMock();response.read.return_value=json.dumps({'choices':[{'message':{'content':'# Report\n未评分'}}]}).encode()
-            opener=MagicMock();opener.open.return_value.__enter__.return_value=response
-            config={'judge':{'model':'example','url':'https://example.com/v1/chat/completions','api_key_env':'REPORT_TEST_KEY','timeout_seconds':2}}
-            with patch('report.urllib.request.build_opener',return_value=opener):
-                output=generate_report(root,config,prompt)
-            self.assertTrue(output.exists())
-            self.assertEqual((root/'result.json').read_text(), result)
-            request=opener.open.call_args.args[0]
-            self.assertEqual(json.loads(request.data)['messages'][0]['content'],'Custom report instructions')
-            self.assertEqual(json.loads((root/'report-generation.json').read_text())['status'],'completed')
+    def test_hybrid_uses_judge_total_and_preserves_original(self):
+        request = {'case': {'meta': {'grading_type': 'hybrid', 'grading_weights': {'automated': .1, 'llm_judge': .9}}}}
+        original = {'execution_status': 'completed', 'grading_status': 'awaiting_evaluation_agent',
+                    'evidence_stable': True, 'evidence_complete': True, 'breakdown': {'automated': {'a': 1}}, 'score': None}
+        result = finalize(request, original, '# Report', {'scores': {'quality': .5}, 'total': .5})
+        self.assertAlmostEqual(result['score'], .55)
+        self.assertIsNone(original['score'])
+        self.assertEqual(original['grading_status'], 'awaiting_evaluation_agent')
+        with self.assertRaises(ValueError): finalize(request, original, '# Report', {'scores': {'quality': 1}})
+        original['evidence_stable'] = False
+        with self.assertRaises(ValueError): finalize(request, original, '# Report', {'scores': {'quality': 1}})
 
-    def test_report_failure_preserves_existing_files(self):
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {'REPORT_TEST_KEY':'test'}):
-            root=Path(d);(root/'result.json').write_text('{"score":null}')
-            (root/'analysis-report.md').write_text('Previous report')
-            config={'judge':{'model':'example','url':'https://example.com','api_key_env':'REPORT_TEST_KEY','timeout_seconds':2}}
-            with patch('report.urllib.request.build_opener',side_effect=TimeoutError),self.assertRaises(TimeoutError):
-                generate_report(root,config)
-            self.assertEqual((root/'analysis-report.md').read_text(),'Previous report')
-            self.assertEqual(json.loads((root/'report-generation.json').read_text())['status'],'error')
+    def test_failed_serialization_preserves_existing_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'analysis-report.md').write_text('previous')
+            (root / 'result.json').write_text('{"score":null}')
+            with self.assertRaises(ValueError):
+                save_evaluation(root, {'evaluation_agent_usage': float('nan')}, 'replacement')
+            self.assertEqual((root / 'analysis-report.md').read_text(), 'previous')
+            self.assertEqual((root / 'result.json').read_text(), '{"score":null}')
+
+    def test_report_required_and_usage_separate(self):
+        request = evaluation_request({'meta': {}, 'sections': {}})
+        original = {'execution_status': 'timeout', 'grading_status': 'skipped', 'score': None, 'total_tokens': 12}
+        with self.assertRaises(ValueError): finalize(request, original, '')
+        final = finalize(request, original, '# Timeout', {'usage': {'tokens': 3}})
+        self.assertEqual(final['total_tokens'], 12)
+        self.assertEqual(final['evaluation_agent_usage'], {'tokens': 3})
+        self.assertIsNone(final['score'])
