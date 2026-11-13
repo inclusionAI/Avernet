@@ -33,12 +33,6 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workf
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
-    GUARD_REGISTRY,
-    GuardEvaluationInput,
-    MACHINE_REGISTRY,
-    resolve_transition,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ContextSpec,
