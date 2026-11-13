@@ -93,7 +93,7 @@ def _trace_call(monkeypatch, owner, name: str, description: str) -> None:
         elif name == "resolve_workflow_status":
             detail += (
                 f", event={kwargs['event_kind']}, "
-                f"from={getattr(kwargs['snapshot'], 'status', None)}"
+                f"from={getattr(kwargs['task'], 'status', None)}"
             )
         _flow_log(directory, f"→ {label}: {detail}")
         try:
@@ -117,41 +117,75 @@ def _trace_call(monkeypatch, owner, name: str, description: str) -> None:
 def _trace_runtime(monkeypatch, injector: Injector) -> None:
     """测试局部安装跟踪;记录实际进入/返回路径,用 pytest -s 实时观察。"""
     for protocol, operations in (
-        (TaskCommissionServiceProtocol, {
-            "publish_task": "用户发布代办,启动产品编排",
-            "report_execution": "接收 Bot 的 start/progress/submit 上报并校验上下文",
-            "_advance": "按产品 WorkflowProfile 推进 L4 Work 动作",
-            "accept_task": "发布人验收成果",
-            "list_tasks": "查询用户任务列表",
-            "detail_task": "读取任务状态、正文及操作历史",
-        }),
-        (TaskMethodOpsPort, {"admit_designated_assignee": "编排指定 Bot 的 Open 参与录取"}),
-        (OpenMethodOpsServiceProtocol, {
-            "publish_opportunity": "L5 Open 发布参与机会",
-            "submit_application": "L5 Open 由发布人代提交指定 Bot 的申请",
-            "screen": "L5 Open 审核参与申请",
-            "admit": "L5 Open 录取指定 Bot",
-        }),
+        (
+            TaskCommissionServiceProtocol,
+            {
+                "publish_task": "用户发布代办,启动产品编排",
+                "report_execution": "接收 Bot 的 start/progress/submit 上报并校验上下文",
+                "_advance": "按产品 WorkflowProfile 推进 L4 Work 动作",
+                "accept_task": "发布人验收成果",
+                "list_tasks": "查询用户任务列表",
+                "detail_task": "读取任务状态、正文及操作历史",
+            },
+        ),
+        (
+            TaskMethodOpsPort,
+            {"admit_designated_assignee": "编排指定 Bot 的 Open 参与录取"},
+        ),
+        (
+            OpenMethodOpsServiceProtocol,
+            {
+                "publish_opportunity": "L5 Open 发布参与机会",
+                "submit_application": "L5 Open 由发布人代提交指定 Bot 的申请",
+                "screen": "L5 Open 审核参与申请",
+                "admit": "L5 Open 录取指定 Bot",
+            },
+        ),
         (TaskDispatchPort, {"dispatch_task_info": "封装任务并交给 L1/A2A 交付端口"}),
-        (A2aDeliveryPort, {"send_message": "本地 Mock 交付,不代表真实远端 Bot 收到通知"}),
-        (ContextCollabAuthorizerProtocol, {
-            "check_create": "G1 校验创建权限",
-            "check_append": "G1 校验事件写入权限",
-        }),
-        (ContextCollabRepositoryProtocol, {
-            "create_context": "创建并持久化 Collet 与初始任务快照",
-            "append_event": "追加事件并持久化快照;返回已保存状态",
-        }),
+        (
+            A2aDeliveryPort,
+            {"send_message": "本地 Mock 交付,不代表真实远端 Bot 收到通知"},
+        ),
+        (
+            ContextCollabAuthorizerProtocol,
+            {
+                "check_create": "G1 校验创建权限",
+                "check_append": "G1 校验事件写入权限",
+            },
+        ),
+        (
+            ContextCollabRepositoryProtocol,
+            {
+                "create_context": "创建并持久化 Collet、独立 Task 与初始事件",
+                "append_event": "追加事件并原子保存 Task;返回已保存状态",
+            },
+        ),
     ):
         implementation = type(injector.get(protocol))
         for name, description in operations.items():
             _trace_call(monkeypatch, implementation, name, description)
     for module, name, description in (
-        (commission_a2a_auth, "verify_bot_principal_token", "验证签名 Bot 身份,不记录凭证"),
+        (
+            commission_a2a_auth,
+            "verify_bot_principal_token",
+            "验证签名 Bot 身份,不记录凭证",
+        ),
         (commission_a2a, "_execute", "A2A HTTP 入站转换命令并调用产品服务"),
-        (commission_service_module, "prepare_product_spec", "L6 校验产品 Profile 并准备创建合同"),
-        (commission_service_module, "validate_product_event", "G4 校验产品合同、角色及时序"),
-        (commission_service_module, "resolve_workflow_status", "G4 状态机计算事件后的目标状态"),
+        (
+            commission_service_module,
+            "prepare_product_spec",
+            "L6 校验产品 Profile 并准备创建合同",
+        ),
+        (
+            commission_service_module,
+            "validate_product_event",
+            "G4 校验产品合同、角色及时序",
+        ),
+        (
+            commission_service_module,
+            "resolve_workflow_status",
+            "G4 状态机计算事件后的目标状态",
+        ),
     ):
         _trace_call(monkeypatch, module, name, description)
 
@@ -169,20 +203,38 @@ def commission_runtime(db, monkeypatch):
     attach_injector(app, injector)
     key = secrets.token_hex(32)
     monkeypatch.setattr(
-        commission_a2a_auth, "get_principal_verifier_config",
+        commission_a2a_auth,
+        "get_principal_verifier_config",
         lambda: PrincipalVerifierConfig(key, "backend", "gateway"),
     )
     now = datetime.now(timezone.utc)
-    signed_principal = jwt.encode({
-        "iss": "gateway", "aud": "backend", "iat": now,
-        "exp": now + timedelta(minutes=5),
-        "principals": [{"type": "bot", "tenant": DEFAULT_AVERNET_TENANT, "bot": {
-            "bot_uuid": BOT_ASSIGNEE, "owner_id": OWNER, "app_id": 1,
-            "agent_code": "writer", "tenant": DEFAULT_AVERNET_TENANT,
-        }}],
-    }, key, algorithm="HS256")
+    signed_principal = jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+            "principals": [
+                {
+                    "type": "bot",
+                    "tenant": DEFAULT_AVERNET_TENANT,
+                    "bot": {
+                        "bot_uuid": BOT_ASSIGNEE,
+                        "owner_id": OWNER,
+                        "app_id": 1,
+                        "agent_code": "writer",
+                        "tenant": DEFAULT_AVERNET_TENANT,
+                    },
+                }
+            ],
+        },
+        key,
+        algorithm="HS256",
+    )
     _trace_runtime(monkeypatch, injector)
-    _flow_log("di/modules", "TaskModule + TaskPersistenceModule 装配完成,启用本地调用跟踪")
+    _flow_log(
+        "di/modules", "TaskModule + TaskPersistenceModule 装配完成,启用本地调用跟踪"
+    )
     with TestClient(app) as client:
         yield (
             injector.get(TaskCommissionServiceProtocol),
@@ -219,13 +271,17 @@ class SimulatedWorkingBot:
                 f"task={created.collet_id}, expected_revision={revision}",
             )
             response = self.client.post(
-                "/a2a/task-commission", json=request, headers=self.headers,
+                "/a2a/task-commission",
+                json=request,
+                headers=self.headers,
             )
             assert response.status_code == 200, response.text
             result = response.json()["result"]["parts"][0]["data"]
             assert result["status"] == "SUCCEEDED", result
             revision = int(result["result_refs"][0]["version"])
-            _flow_log(_TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}")
+            _flow_log(
+                _TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}"
+            )
 
         def report_progress(percent: int, note: str) -> None:
             send("progress", {"percent": percent, "note": note})
@@ -285,13 +341,18 @@ def test_end_to_end_commission_flow(commission_runtime, tmp_path):
         assert progress_detail.status == "in_progress"
         assert progress_detail.events[-1]["event_kind"] == "task.progress.updated"
         assert progress_detail.events[-1]["payload"] == {
-            "note": "初稿完成,校对中", "percent": 60,
+            "note": "初稿完成,校对中",
+            "percent": 60,
         }
         assert progress_detail.events[-1]["actor_id"] == BOT_ASSIGNEE
-        assert all(event["event_kind"] != "task.submitted" for event in progress_detail.events)
+        assert all(
+            event["event_kind"] != "task.submitted" for event in progress_detail.events
+        )
 
         _flow_log(_TEST_DIRECTORY, "用户已看到执行中进度;模拟 Bot 继续校对,尚未提交")
-        report_file.write_text("# Q3 安全报告\n\n安全事件汇总完成,已校对。", encoding="utf-8")
+        report_file.write_text(
+            "# Q3 安全报告\n\n安全事件汇总完成,已校对。", encoding="utf-8"
+        )
         return [artifact]
 
     working_bot.run(created, generate_report)
@@ -332,7 +393,9 @@ def test_failed_bot_execution_does_not_auto_submit(commission_runtime):
     """Bot 已上报进度但执行失败时,不能将任务错误推进到待验收。"""
     service, working_bot = commission_runtime
     created = service.publish_task(
-        PublishTaskCommand(title=TITLE, body=BODY, space=SPACE, assignee_agent_id=BOT_ASSIGNEE),
+        PublishTaskCommand(
+            title=TITLE, body=BODY, space=SPACE, assignee_agent_id=BOT_ASSIGNEE
+        ),
         HUMAN,
     )
 
@@ -347,6 +410,9 @@ def test_failed_bot_execution_does_not_auto_submit(commission_runtime):
     detail = service.detail_task(created.collet_id)
     assert detail.status == "in_progress"
     assert [event["event_kind"] for event in detail.events] == [
-        "task.created", "user_interaction.posted", "task.started", "task.progress.updated",
+        "task.created",
+        "user_interaction.posted",
+        "task.started",
+        "task.progress.updated",
     ]
     assert detail.events[-1]["actor_id"] == BOT_ASSIGNEE

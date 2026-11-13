@@ -8,7 +8,9 @@
 ## Context collaboration / L6 product contracts
 
 The ACCS context-collaboration path is separate from the older goal-driven
-framework below. Its [L6 product contract](context_collab/l6_products/README.md)
+framework below. Its [collaboration boundary](context_collab/README.md)
+owns independent L4 Task authority, G3 read projections and storage cutover.
+Its [L6 product contract](context_collab/l6_products/README.md)
 owns versioned product composition, ScenarioRole → L4 RoleBinding mappings,
 ProductInstance selection and the shared G4 enforcement/compatibility boundary.
 Concrete product definitions, specialized strategies and services live in

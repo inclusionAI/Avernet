@@ -16,7 +16,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
@@ -112,23 +112,11 @@ class TestCreateContext:
                 "product_kind": "team_todo",
                 "workflow_kind": "team_todo_execution",
             }
-            assert json.loads(row.current_snapshot) == {
-                "objective": OBJECTIVE,
-                "status": "created",
-                "principal_ref": {
-                    "principal_type": "human",
-                    "principal_id": "u_1001",
-                },
-                "executor_ref": {"agent_type": "bot", "agent_id": "bot_coding_001"},
-                "method_kind": "Single",
-                "progress": {
-                    "percent": 0,
-                    "completed_count": 0,
-                    "active_count": 0,
-                    "blocked_count": 0,
-                    "current_event_id": None,
-                },
-            }
+            assert row.current_snapshot is None
+            assert row.root_task_ref == record.task.task_id
+            assert record.task.task_id != record.collet.collet_id
+            assert record.task.version == 1
+            assert record.task.created_event_ref == record.initial_event.event_id
 
             evt = events[0]
             assert evt.event_id == record.initial_event.event_id

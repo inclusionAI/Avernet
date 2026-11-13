@@ -297,7 +297,7 @@ class TestBbsProductE2E:
         assert status.current_snapshot["status"] == "done"
         assert status.context_version == accepted.context_version
         assert status.task_progress.total_events == 7
-        assert status.current_snapshot["progress"]["percent"] == 50
+        assert status.current_snapshot["progress"]["percent"] == 100
         assert status.current_event["event_kind"] == "task.accepted"
         assert [event["event_kind"] for event in status.task_progress.events] == [
             "task.created",

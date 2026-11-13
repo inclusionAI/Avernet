@@ -32,6 +32,8 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
@@ -72,27 +74,42 @@ class ColletLifecycleService:
         self._repository = collab_repo
 
     def activate(
-        self, collet_id: str, context: ActorContext, reason: str | None = None,
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
     ) -> ColletLifecycleResult:
         return self._transition(collet_id, context, "collet.activated", reason)
 
     def suspend(
-        self, collet_id: str, context: ActorContext, reason: str | None = None,
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
     ) -> ColletLifecycleResult:
         return self._transition(collet_id, context, "collet.suspended", reason)
 
     def resume(
-        self, collet_id: str, context: ActorContext, reason: str | None = None,
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
     ) -> ColletLifecycleResult:
         return self._transition(collet_id, context, "collet.resumed", reason)
 
     def complete(
-        self, collet_id: str, context: ActorContext, reason: str | None = None,
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
     ) -> ColletLifecycleResult:
         return self._transition(collet_id, context, "collet.completed", reason)
 
     def archive(
-        self, collet_id: str, context: ActorContext, reason: str | None = None,
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
     ) -> ColletLifecycleResult:
         return self._transition(collet_id, context, "collet.archived", reason)
 
@@ -105,14 +122,15 @@ class ColletLifecycleService:
     ) -> ColletLifecycleResult:
         record = self._repository.get_current_status(collet_id)
         if record is None:
-            raise ContextCollabNotFoundError(
-                f"context {collet_id!r} not found"
-            )
+            raise ContextCollabNotFoundError(f"context {collet_id!r} not found")
         self._assert_guard(record.collet, record.context_spec, context)
         # 未见过的 collet(重启后)与新建的一样种子 ACTIVE(spec §5.3)。
         old_state = self._store.get_or_seed(collet_id)
         resolved = resolve_transition(
-            _COLLET_LIFECYCLE_MACHINE, old_state.value, event_kind, {},
+            _COLLET_LIFECYCLE_MACHINE,
+            old_state.value,
+            event_kind,
+            {},
         )
         if resolved is None:
             # 无规则命中 = 非法迁移:拒绝而非静默保持(幂等即天然防重)。
@@ -132,18 +150,17 @@ class ColletLifecycleService:
 
     @staticmethod
     def _assert_guard(
-        collet: Collet, spec: ContextSpec, context: ActorContext,
+        collet: Collet,
+        spec: ContextSpec,
+        context: ActorContext,
     ) -> None:
         """守卫:发起者本人或 executor 结构匹配可调(内联断言,不扩协议)。"""
         executor = spec.executor_ref
-        is_principal = (
-            context.actor.principal_id == collet.initiator_ref.principal_id
-        )
+        is_principal = context.actor.principal_id == collet.initiator_ref.principal_id
         # executor 判定沿 G1 ``_is_executor`` 先例:principal_id 与
         # agent_id 字符串相等。
         is_executor = (
-            executor is not None
-            and context.actor.principal_id == executor.agent_id
+            executor is not None and context.actor.principal_id == executor.agent_id
         )
         if is_principal or is_executor:
             return

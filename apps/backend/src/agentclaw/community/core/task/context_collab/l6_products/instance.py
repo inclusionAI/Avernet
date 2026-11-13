@@ -8,7 +8,7 @@ import json
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (

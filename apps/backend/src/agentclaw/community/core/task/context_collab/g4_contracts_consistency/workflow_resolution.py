@@ -4,8 +4,9 @@
 搬入 G4 层——乙案产品(products/)禁依赖 services,状态裁决是 Work 族
 产品的公共需求,提升后通用服务与产品共用同源,消除复制漂移。
 
-语义(与原函数零漂移):
-- 快照为 ``None``(外部部分行)→ ``None``(无可裁决,事件照常接纳);
+语义:
+- Task 为 ``None``(外部部分行)→ ``None``(无可裁决状态);
+  服务只允许这类上下文接收非 Work 事件;
 - ``workflow_kind`` 未命中 ``MACHINE_REGISTRY`` → 返回原 status(不变);
 - 当前状态对该事件无规则命中 → 返回原 status(G4 通用合同:事件仍可
   接纳,状态不变;产品面的时序刚性由各自的时序门承担,例如共享 ``product_contract.validate_product_event``);
@@ -18,6 +19,8 @@ G4 机器是唯一迁移权威。L6 WorkflowProfile 选择是否严格拒绝越�
 """
 
 from __future__ import annotations
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -35,19 +38,13 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
 def resolve_workflow_status(
     *,
     workflow_kind: str | None,
-    executor_ref,
-    snapshot,
+    task: Task | None,
     event_kind: str,
     payload: dict,
     actor,
     workflow_version: int | None = None,
 ) -> str | None:
-    """G4 机器裁决事件的接纳状态;返回新 status(不变即返回原 status)。
-
-    参数按值语义自备(不消费 wire 命令类型):``executor_ref`` 是创建参数
-    的 ``AgentRef | None``,``snapshot`` 是 record 伴随的
-    ``CurrentSnapshot | None``,``actor`` 为已认证调用的 ``PrincipalRef``。
-    """
+    """Adjudicate an identified L4 Task, never a query snapshot or create DTO."""
     machine = (
         MACHINE_REGISTRY.get(workflow_kind)
         if workflow_version is None
@@ -55,10 +52,10 @@ def resolve_workflow_status(
     )
     if workflow_version is not None and machine is None:
         raise ContextCollabValidationError("versioned workflow machine is unavailable")
-    if snapshot is None:
+    if task is None:
         # Existing partial rows intentionally have no Task state to adjudicate.
         return None
-    current_status = snapshot.status
+    current_status = task.status
     if machine is None:
         return current_status
     matched_rules = [
@@ -70,8 +67,8 @@ def resolve_workflow_status(
         return current_status
     guard_input = GuardEvaluationInput(
         actor=actor,
-        responsible=snapshot.principal_ref,
-        executor=executor_ref,
+        responsible=task.principal_ref,
+        executor=task.executor_ref,
         payload=payload,
     )
     guard_results = {

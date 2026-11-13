@@ -8,9 +8,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Sequence
-
 from injector import inject
 
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
@@ -51,10 +48,14 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schem
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
     CurrentSnapshot,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -86,6 +87,11 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
     _now,
     current_axes,
     project_created_context,
+)
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
+    TaskUpdate,
 )
 
 CREATION_EVENT_KIND = "task.created"
@@ -144,29 +150,10 @@ def _event_projection_dict(projection: EventProjection) -> dict:
     return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
 
 
-def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
-    """按事件顺序取最后一个 payload 携带整数 ``percent`` 的值。
-
-    输入是已经过 visibility 过滤、未做 trunk 过滤的完整可见事件序列
-    (get_status 从全量事件推导,§12.2 #4 / R6),保证 ``trunk_events``
-    开关不影响 percent,也不向非参与方泄露 private 分支的执行进度。
-    ``bool`` 不是合法 percent,跳过。
-    """
-    last_percent = None
-    for record in events:
-        if record.payload is None:
-            continue  # NULL payload 的部分行不携带 percent
-        percent = record.payload.get("percent")
-        if isinstance(percent, bool) or not isinstance(percent, int):
-            continue
-        last_percent = percent
-    return last_percent
-
-
 def _resolve_event_status(
     collet: Collet,
     spec: ContextSpec,
-    snapshot: CurrentSnapshot | None,
+    task: Task | None,
     command: EventAppendCommand,
     context: ActorContext,
     catalog: ProductCatalog,
@@ -179,8 +166,7 @@ def _resolve_event_status(
     machine_ref = profile.workflow.state_machine_ref if profile is not None else None
     return resolve_workflow_status(
         workflow_kind=machine_ref.profile_id if machine_ref else spec.workflow_kind,
-        executor_ref=spec.executor_ref,
-        snapshot=snapshot,
+        task=task,
         event_kind=command.event_kind,
         payload=command.payload,
         actor=context.actor,
@@ -244,7 +230,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                     actor_ref=context.actor,
                     # 创建事实全量入初始事件 payload(事件承载,spec
                     # 2026-11-12-context-collab-l4-creation-event-facts):
-                    # 唯一装配点在 L4 ``creation_facts.creation_payload``,
+                    # 唯一装配点在 L6 ``creation_facts.creation_payload``,
                     # 与产品层(products/)共用防漂移。恒带全部 key,None 也
                     # 写 null——新行与存量行判别有据。
                     payload=creation_payload(spec, objective),
@@ -266,8 +252,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             catalog=self._product_catalog,
         )
 
-        # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
-        # progress.current_event_id 为 None,权威事件指针在 Event record)。
+        # 结果快照是兼容视图;当前事件指针来自持久化的初始 Event。
         snapshot = _created_snapshot_projection(record.current_snapshot)
         snapshot["progress"]["current_event_id"] = record.initial_event.event_id
         return ContextCollabCreatedResult(
@@ -287,8 +272,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
         ``expected_version`` 乐观并发都在仓储持锁事务内裁决,相关错误
         (VersionConflict / ParentEventError 等)原样上抛。本层先拒绝已陈旧版本、
         不吞。追加不设幂等键(spec 作者裁决):重复提交即重复事件,
-        防重由调用方保证。``snapshot_updater`` 是只替换 status 的纯函数,
-        由仓储在其行锁内求值,避免陈旧写。
+        防重由调用方保证。G4 从 Task 求解状态,仓储以 TaskUpdate 同时
+        围栏 Task/Collet 版本,拒绝读后并发变更造成的陈旧写。
         """
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
@@ -310,7 +295,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         validate_product_event(
             catalog=self._product_catalog,
             spec=status.context_spec,
-            snapshot=status.current_snapshot,
+            task=status.task,
             event_kind=command.event_kind,
             primitive_type=command.primitive_type,
             visibility=command.visibility,
@@ -322,18 +307,25 @@ class ContextCollabService(ContextCollabServiceProtocol):
         new_status = _resolve_event_status(
             collet,
             status.context_spec,
-            status.current_snapshot,
+            status.task,
             command,
             context,
             self._product_catalog,
         )
 
-        def _update_status(
-            snapshot: CurrentSnapshot,
-        ) -> CurrentSnapshot:
-            if new_status is None:
-                return snapshot
-            return replace(snapshot, status=new_status)
+        is_work = command.event_kind.startswith("task.") and command.primitive_type in {
+            "Task",
+            "Activity",
+        }
+        if is_work and status.task is None:
+            raise ContextCollabValidationError("cannot advance Work without an L4 Task")
+        task_update = None
+        if is_work and status.task is not None:
+            task_update = TaskUpdate(
+                status.task.task_id,
+                status.task.version,
+                new_status if new_status is not None else status.task.status,
+            )
 
         record = self._repository.append_event(
             collab_context_id,
@@ -345,7 +337,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 parent_event=command.parent_event,
                 visibility=command.visibility,
                 payload=command.payload,
-                snapshot_updater=_update_status,
+                task_update=task_update,
             ),
         )
         return EventAcceptedResult(
@@ -356,11 +348,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             event_kind=record.event.event_kind,
             primitive_type=record.event.primitive_type,
             context_version=record.collet.version,
-            current_status=(
-                record.current_snapshot.status
-                if record.current_snapshot is not None
-                else None
-            ),
+            current_status=(record.task.status if record.task is not None else None),
         )
 
     def get_status(
@@ -369,13 +357,13 @@ class ContextCollabService(ContextCollabServiceProtocol):
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
 
         Ruling R6/R9 / spec §12.2 #4:仓储全量返回事件(顺序即接纳
-        顺序),percent / 统计 / current_event 一律从完整可见事件推导;
+        顺序),Task 计数来自可见 Task 权威状态,已上报百分比要求可见事件证据;
         ``trunk_events=True`` 只过滤返回的 ``task_progress.events[]``
         条目 —— 主干链由 ``active_chain_ids``(current 沿 parent 回溯)
         推导,过滤不改 current_snapshot / current_event / 统计。
-        visibility 过滤(G1)先于推导,统计与列表都只反映 actor 可见的
-        事件。返回的 ``current_snapshot`` 用 ``build_progress`` 的实时
-        投影替换落库 progress;``current_event`` 按 collet 行指针取投影
+        visibility 过滤(G1)先于推导;最新状态证据不可见的 Task 不对外暴露。
+        返回的 ``current_snapshot`` 从 Task 生成并填入 G3 实时进度,
+        不读取持久化视图;``current_event`` 按 collet 行指针取投影
         条目,指针事件不可见时为 ``None``。
         """
         status = self._repository.get_current_status(collab_context_id)
@@ -401,19 +389,23 @@ class ContextCollabService(ContextCollabServiceProtocol):
             if trunk_ids is None
             else [entry for entry in projection if entry.event_id in trunk_ids]
         )
+        visible_ids = frozenset(event.event_id for event in visible_events)
+        tasks = status.tasks or ((status.task,) if status.task is not None else ())
+        visible_tasks = tuple(
+            task
+            for task in tasks
+            if task.last_event_ref is None or task.last_event_ref in visible_ids
+        )
         progress = build_progress(
-            projection,
+            visible_tasks,
             current_event_id=collet.current_event_id,
-            last_percent=_last_payload_percent(visible_events),
+            visible_event_ids=visible_ids,
         )
-        # 可空快照(外部部分行)返回 null;事件链仍照常投影与统计。
-        # to_dict 返回全新嵌套 dict,替换 progress 不会写回 collet 行。
-        snapshot = (
-            None
-            if status.current_snapshot is None
-            else status.current_snapshot.to_dict()
-        )
-        if snapshot is not None:
+        snapshot = None
+        if status.task is not None and status.task in visible_tasks:
+            # Compatibility response only; authoritative Work state is status.task.
+            view = status.current_snapshot
+            snapshot = view.to_dict()
             snapshot["progress"] = progress.to_dict()
         current_event = None
         for entry in projection:

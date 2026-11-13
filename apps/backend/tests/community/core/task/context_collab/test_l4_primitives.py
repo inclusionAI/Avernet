@@ -35,7 +35,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
     CurrentSnapshot,
     ProgressSnapshot,
 )
@@ -121,7 +125,9 @@ def test_context_spec_round_trip_with_none_executor_ref():
     assert spec.executor_ref is None
     assert spec.method_kind == "Open + Group"
     assert spec.resource_refs == (
-        ResourceRef(resource_type="forum_topic", resource_id="topic_001", revision=None),
+        ResourceRef(
+            resource_type="forum_topic", resource_id="topic_001", revision=None
+        ),
         ResourceRef(resource_type="repo", resource_id="repo_001", revision="3"),
     )
     assert isinstance(spec.resource_refs, tuple)
@@ -203,7 +209,7 @@ def test_current_snapshot_from_dict_rejects_unknown_status(bad):
 @pytest.mark.parametrize(
     "data",
     [
-        {**SNAPSHOT_DICT, "method_kind": "swarm"},
+        {**SNAPSHOT_DICT, "method_kind": ""},
         {**SNAPSHOT_DICT, "objective": ""},
         {**SNAPSHOT_DICT, "progress": None},
     ],
@@ -249,7 +255,10 @@ def test_event_record_to_envelope_matches_acc_contract():
     assert envelope.aggregate_ref == "collet_todo_001"
     assert envelope.aggregate_revision == 2
     assert envelope.causation_id == _record().parent_event
-    assert envelope.payload == {"message_kind": "user_interaction", "content": "补充一下上下文"}
+    assert envelope.payload == {
+        "message_kind": "user_interaction",
+        "content": "补充一下上下文",
+    }
 
 
 def test_event_record_from_envelope_reverse_constructor_round_trips():
@@ -317,7 +326,11 @@ def test_role_binding_round_trip():
 
 def test_activity_round_trip():
     activity = Activity.from_dict(
-        {"activity_id": "act_001", "activity_kind": "task.progress.updated", "status": "completed"}
+        {
+            "activity_id": "act_001",
+            "activity_kind": "task.progress.updated",
+            "status": "completed",
+        }
     )
     assert Activity.from_dict(activity.to_dict()) == activity
     with pytest.raises(ContextCollabValidationError):
@@ -337,7 +350,9 @@ def test_decision_round_trip():
     )
     assert Decision.from_dict(decision.to_dict()) == decision
     with pytest.raises(ContextCollabValidationError):
-        Decision.from_dict({"decision_id": "dec_001", "decision_kind": "", "decided_by": {}})
+        Decision.from_dict(
+            {"decision_id": "dec_001", "decision_kind": "", "decided_by": {}}
+        )
 
 
 def test_message_semantic_constants_and_round_trip():

@@ -45,7 +45,7 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
@@ -131,7 +131,7 @@ _EDGE_REQUEST_FIELDS = (
     "state",
 )
 
-# 顶层 terminate 门槛的 Collet 快照任务终态(spec §3.2/§12 第 10 条)。
+# 顶层 terminate 门槛的根 Task 终态(spec §3.2/§12 第 10 条)。
 # spec 用事件词汇 task.cancelled/task.accepted 表达,行存的 TaskStatus
 # wire 值是 cancelled / done(task.accepted 经 G4 机器落为 done);两种
 # 拼写都接受,读取层不做双词汇误杀。
@@ -469,9 +469,8 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         activate / suspend / resume 是活上下文的常规生命周期治理,不受
         任务终态门槛约束(活 Collet 上可暂停/恢复顶层方法);嵌套绑定
         (bind_reason=compose/delegate)连 terminate 也不设门槛;顶层绑定
-        仅在所属 Collet 快照任务状态为终态(task.cancelled /
-        task.accepted)时放行 terminate——活上下文上拒绝,避免摧毁仍活
-        协作的 L5 权威状态。Collet 行不可达或快照缺失一律不放行(fail-safe)。
+        仅在所属 Collet 的根 Task 为终态(done / cancelled)时放行 terminate;
+        活上下文上拒绝,避免摧毁仍活协作的 L5 权威状态。Collet 行不可达或 Task 缺失一律不放行(fail-safe)。
         """
         if op != "terminate":
             return
@@ -481,8 +480,8 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         )
         if not is_top_level:
             return
-        snapshot = record.current_snapshot if record is not None else None
-        status = snapshot.status if snapshot is not None else None
+        task = record.task if record is not None else None
+        status = task.status if task is not None else None
         if status not in _TERMINAL_COLLET_STATUSES:
             raise ContextCollabValidationError(
                 f"top-level method binding {binding.method_binding_id!r} may "

@@ -99,9 +99,7 @@ def test_project_events_trunk_filter_keeps_status_and_order():
     records = _chain_records()
     full = project_events(records, current_event_id="evt_004")
     trunk_ids = active_chain_ids(records, "evt_004")
-    trunk = project_events(
-        records, current_event_id="evt_004", trunk_ids=trunk_ids
-    )
+    trunk = project_events(records, current_event_id="evt_004", trunk_ids=trunk_ids)
 
     assert [p.event_id for p in trunk] == [
         "evt_001",
@@ -136,52 +134,71 @@ def test_project_events_status_by_position_when_current_unknown():
     assert all(p.status == "pending" for p in projections)
 
 
-def test_build_progress_counts_and_percent_fallback():
-    projections = [
-        _projection("evt_001", "completed"),
-        _projection("evt_002", "completed"),
-        _projection("evt_003", "completed"),
-        _projection("evt_004", "active"),
-        _projection("evt_005", "pending"),
-    ]
-    snapshot = build_progress(
-        projections, current_event_id="evt_004", last_percent=None
+def _task(task_id, status, *, percent=None):
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+        Task,
+    )
+    from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+        PrincipalRef,
     )
 
-    assert snapshot.percent == 75
-    assert snapshot.completed_count == 3
-    assert snapshot.active_count == 1
-    assert snapshot.blocked_count == 0
-    assert snapshot.current_event_id == "evt_004"
-
-
-def test_build_progress_last_percent_wins_and_current_event_passthrough():
-    projections = [
-        _projection("evt_001", "completed"),
-        _projection("evt_002", "completed"),
-        _projection("evt_003", "completed"),
-        _projection("evt_004", "active"),
-        _projection("evt_005", "pending"),
-    ]
-    snapshot = build_progress(
-        projections, current_event_id="evt_003", last_percent=40
+    return Task(
+        task_id=task_id,
+        collet_ref="collet_progress",
+        objective="work",
+        status=status,
+        version=1,
+        principal_ref=PrincipalRef("human", "owner"),
+        executor_ref=None,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="created",
+        last_event_ref="updated",
+        reported_percent=percent,
+        progress_event_ref="report" if percent is not None else None,
     )
 
-    assert snapshot.percent == 40
-    assert snapshot.current_event_id == "evt_003"
 
-
-def test_build_progress_ignores_message_events():
-    projections = [
-        _projection("evt_001", "completed"),
-        _projection("evt_002", "completed"),
-        _projection("evt_003", "completed"),
-        _projection("evt_004", "active"),
-        _projection("evt_005", "pending"),
-        _projection("evt_002m", "completed", primitive_type="Message"),
+def test_build_progress_counts_work_items_not_events():
+    tasks = [
+        _task("done", "done"),
+        _task("working", "in_progress"),
+        _task("blocked", "blocked"),
+        _task("pending", "created"),
+        _task("cancelled", "cancelled"),
     ]
-    snapshot = build_progress(
-        projections, current_event_id="evt_004", last_percent=None
+    progress = build_progress(
+        tasks, current_event_id="updated", visible_event_ids=frozenset()
     )
+    assert progress.percent == 25
+    assert (
+        progress.completed_count,
+        progress.active_count,
+        progress.blocked_count,
+    ) == (1, 1, 1)
+    assert progress.current_event_id == "updated"
 
-    assert snapshot.completed_count == 3
+
+def test_build_progress_uses_only_evidenced_visible_report():
+    task = _task("working", "reviewing", percent=40)
+    visible = build_progress(
+        [task], current_event_id="head", visible_event_ids=frozenset({"report"})
+    )
+    hidden = build_progress(
+        [task], current_event_id="head", visible_event_ids=frozenset()
+    )
+    assert visible.percent == 40
+    assert hidden.percent == 0
+    assert visible.completed_count == 0
+    assert visible.active_count == 1
+
+
+def test_one_hundred_percent_report_does_not_complete_task():
+    progress = build_progress(
+        [_task("working", "in_progress", percent=100)],
+        current_event_id=None,
+        visible_event_ids=frozenset({"report"}),
+    )
+    assert progress.percent == 100
+    assert progress.completed_count == 0
+    assert progress.active_count == 1

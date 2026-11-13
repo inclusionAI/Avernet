@@ -23,23 +23,25 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    CurrentSnapshot,
-    ProgressSnapshot,
-)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_commission_001")
 
 
-def _snapshot(status: str) -> CurrentSnapshot:
-    return CurrentSnapshot(
+def _snapshot(status: str) -> Task:
+    return Task(
         objective="整理任务代办 spec",
         status=status,
         principal_ref=PRINCIPAL,
         executor_ref=EXECUTOR,
-        method_kind="Single",
-        progress=ProgressSnapshot(),
+        task_id="task_" + "collet_fixture",
+        collet_ref="collet_fixture",
+        version=1,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_fixture",
+        last_event_ref="evt_fixture",
     )
 
 
@@ -47,8 +49,7 @@ class TestEquivalenceWithLegacyResolver:
     def test_promotes_task_started_for_team_todo(self):
         result = resolve_workflow_status(
             workflow_kind="team_todo_execution",
-            executor_ref=EXECUTOR,
-            snapshot=_snapshot("created"),
+            task=_snapshot("created"),
             event_kind="task.started",
             payload={},
             actor=PRINCIPAL,
@@ -58,9 +59,8 @@ class TestEquivalenceWithLegacyResolver:
     def test_unknown_event_kind_keeps_current_status(self):
         result = resolve_workflow_status(
             workflow_kind="team_todo_execution",
-            executor_ref=EXECUTOR,
-            snapshot=_snapshot("created"),
-            event_kind="task.progress.updated",   # created 上无规则
+            task=_snapshot("created"),
+            event_kind="task.progress.updated",  # created 上无规则
             payload={},
             actor=PRINCIPAL,
         )
@@ -68,9 +68,8 @@ class TestEquivalenceWithLegacyResolver:
 
     def test_unregisterd_workflow_kind_keeps_current_status(self):
         result = resolve_workflow_status(
-            workflow_kind="bbs_public_discussion",   # 公开讨论无机器
-            executor_ref=None,
-            snapshot=_snapshot("created"),
+            workflow_kind="bbs_public_discussion",  # 公开讨论无机器
+            task=_snapshot("created"),
             event_kind="task.started",
             payload={},
             actor=PRINCIPAL,
@@ -80,8 +79,7 @@ class TestEquivalenceWithLegacyResolver:
     def test_null_snapshot_returns_none(self):
         result = resolve_workflow_status(
             workflow_kind="team_todo_execution",
-            executor_ref=EXECUTOR,
-            snapshot=None,
+            task=None,
             event_kind="task.started",
             payload={},
             actor=PRINCIPAL,
@@ -93,8 +91,7 @@ class TestEquivalenceWithLegacyResolver:
         with pytest.raises(ContextCollabValidationError):
             resolve_workflow_status(
                 workflow_kind="team_todo_execution",
-                executor_ref=EXECUTOR,
-                snapshot=_snapshot("reviewing"),
+                task=_snapshot("reviewing"),
                 event_kind="task.accepted",
                 payload={},
                 actor=PrincipalRef("human", "u_stranger"),

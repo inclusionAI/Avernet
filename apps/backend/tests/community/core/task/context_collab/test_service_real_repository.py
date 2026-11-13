@@ -157,12 +157,18 @@ def _collet_column(engine, collab_context_id, column):
         )
 
 
-def _collet_snapshot(engine, collab_context_id) -> dict:
-    return json.loads(
-        _collet_column(
-            engine, collab_context_id, ContextCollabColletModel.current_snapshot
-        )
+def _collet_snapshot(engine, collab_context_id: str) -> dict:
+    from agentclaw.community.core.task.context_collab.persistence.models import (
+        ContextCollabTaskModel,
     )
+
+    with engine.connect() as conn:
+        raw = conn.scalar(
+            select(ContextCollabTaskModel.task_data).where(
+                ContextCollabTaskModel.collab_context_id == collab_context_id
+            )
+        )
+    return json.loads(raw)
 
 
 def _event_column(engine, collab_context_id, event_id, column):
@@ -602,7 +608,7 @@ class TestNullablePartialRows:
             created.collab_context_id, trunk_events=False, context=make_actor()
         )
 
-        assert result.current_snapshot is None
+        assert result.current_snapshot["status"] == "created"
         # 事件链照常投影:初始事件仍在,统计只数非 Message。
         assert result.task_progress.total_events == 1
         assert result.current_event["event_kind"] == "task.created"
@@ -624,7 +630,7 @@ class TestNullablePartialRows:
         )
 
         assert appended.accepted is True
-        assert appended.current_status is None
+        assert appended.current_status == "in_progress"
         assert appended.context_version == 2
         with engine.connect() as conn:
             stored = conn.scalar(

@@ -193,7 +193,7 @@ submission is L4 Work. This is not a live Bot, gateway or artifact-upload test.
 The journey fixture temporarily wraps selected real calls to print
 `[commission-flow][module/directory]` entries, returns and resulting statuses.
 It covers L6 profile preparation, L5 admission, mock outbound delivery,
-authenticated HTTP ingress, G1/G4 checks and repository snapshot writes.
+authenticated HTTP ingress, G1/G4 checks and atomic Collet/Task/Event writes.
 These wrappers preserve real execution and are removed after each test; they
 add no production stdout and do not dump credentials or request bodies.
 
@@ -216,3 +216,26 @@ clients and generic L4 writers; keep DTOs, gateway routing/security, product
 contract and both entrypoint tests aligned. Verification here is local HTTP/SQL
 and gateway routing/auth policy evidence, not deployed multi-service/live-Bot
 interoperability.
+
+## Task authority and compatibility
+
+The product's public `collet_id` / command `collab_context_id` still identifies
+its bounded collaboration context. The repository links that Collet to an
+independent **root L4 Task** with a different ID, its own revision, completion
+conditions, designated executor and event provenance. G4 and the product's
+Work pipeline use Task, not CurrentSnapshot or MethodBinding state.
+
+The body Message advances only the Collet revision; Bot start/progress/submit
+and publisher acceptance also advance the Task revision. Bot requests continue
+to carry the public Collet `expected_revision`; the product resolves and fences
+the current Task revision internally in the same SQL transaction. Public wire
+fields and `task_commission@1` remain unchanged. A 100-percent progress report
+is not acceptance: submission yields `reviewing`; only publisher acceptance
+yields `done`. G3 counts one completed Task, not the number of progress events.
+
+See the [collaboration boundary](../../README.md) for projection semantics,
+read-only legacy decoding and the required [Task storage migration](../../sql/2026_11_13_context_collab_task.sql).
+Do not deploy new runtime code against the old schema or mix it with old
+snapshot writers. This does not change Open admission topology or turn result
+submission into an L5 Open operation. Outbound delivery and MethodStore limits
+listed above still apply.

@@ -5,7 +5,7 @@
   ``executor_ref=AgentRef("bot", assignee)``、
   ``workflow_kind=task_commission_goal``;
 - Work 六动作:G1 授权后经共享 G4 产品合同校验时序与 typed executor
-  RoleBinding(通用 append 同样受约束),再由版本固定的 G4 机器裁决快照;
+  RoleBinding(通用 append 同样受约束),再由版本固定的 G4 机器裁决 Task;
   不维护产品私有时序表或第二套 Task 状态机;
 - 外 profile / collet 不存在一律 404(语义不漂别人的 Collet)。
 """
@@ -47,11 +47,13 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workf
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
-    CurrentSnapshot,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    TaskUpdate,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
@@ -191,6 +193,7 @@ class TaskCommissionService:
         record = self._repo.create_context(
             CreateContextRecordRequest(
                 context_spec=spec,
+                completion_conditions=("提交任务说明所要求的成果，并由发布人验收通过",),
                 initial_event=InitialEventDraft(
                     event_kind=_CREATION_EVENT_KIND,
                     primitive_type=_CREATION_PRIMITIVE_TYPE,
@@ -238,9 +241,7 @@ class TaskCommissionService:
             collet_id=record.collet.collet_id,
             title=title,
             body_event_id=appended.event.event_id,
-            status=record.current_snapshot.status
-            if record.current_snapshot is not None
-            else "created",
+            status=record.task.status,
             context_version=appended.collet.version,
         )
         # 发布成功后自动送达指定执行 bot(交付缝;失败如实上抛,任务已
@@ -304,8 +305,12 @@ class TaskCommissionService:
     # ------------------------------------------------------------- 私有
 
     def _advance(
-        self, action: str, command: TaskAdvanceCommand, context: ActorContext,
-        *, report: TaskExecutionReportCommand | None = None,
+        self,
+        action: str,
+        command: TaskAdvanceCommand,
+        context: ActorContext,
+        *,
+        report: TaskExecutionReportCommand | None = None,
     ) -> TaskAdvancedView:
         record = self._repo.get_current_status(command.collab_context_id)
         if record is None:
@@ -324,19 +329,19 @@ class TaskCommissionService:
             )
         operation = profile.workflow.action(action)
         event_kind = operation.event_kind
-        snapshot = record.current_snapshot
-        if snapshot is None:
-            # 外部部分行无可裁决状态;本产品创建路径恒有快照。
+        task = record.task
+        if task is None:
+            # 外部部分行无可裁决 Task;本产品创建路径恒有独立 Task。
             raise ContextCollabValidationError(
                 f"cannot advance task {command.collab_context_id!r}: "
-                "no snapshot to adjudicate"
+                "no L4 Task to adjudicate"
             )
         payload: dict = {}
         if command.note and "note" in operation.payload_fields:
             payload["note"] = command.note
         if command.percent is not None:
-            # percent 是既存协议词汇(快照投影 `_last_payload_percent` 读
-            # 同名键);仅 progress 动作携带,0-100 整数。
+            # percent 仅由 progress 动作携带;Task 保存其值与事件证据,
+            # 数值为 0-100 整数,并不代表已验收完成。
             if (
                 isinstance(command.percent, bool)
                 or not isinstance(command.percent, int)
@@ -374,24 +379,29 @@ class TaskCommissionService:
             record.collet, record.context_spec, intent, context
         )
         if report is not None:
-            executor = record.context_spec.executor_ref
+            executor = task.executor_ref
             if (
                 executor is None
                 or context.actor.principal_type != "bot"
                 or context.actor.principal_type != executor.agent_type
                 or context.actor.principal_id != executor.agent_id
             ):
-                raise ContextCollabValidationError("actor is not the designated executor")
+                raise ContextCollabValidationError(
+                    "actor is not the designated executor"
+                )
             if (
                 report.product_profile_ref != profile.ref
-                or report.method_binding_ref != top_level_binding_id(command.collab_context_id)
+                or report.method_binding_ref
+                != top_level_binding_id(command.collab_context_id)
             ):
-                raise ContextCollabValidationError("report context does not match task binding/profile")
+                raise ContextCollabValidationError(
+                    "report context does not match task binding/profile"
+                )
             ensure_expected_version(report.expected_version, record.collet.version)
         validate_product_event(
             catalog=self._product_catalog,
             spec=record.context_spec,
-            snapshot=snapshot,
+            task=task,
             event_kind=event_kind,
             primitive_type=intent.primitive_type,
             visibility=intent.visibility,
@@ -400,7 +410,7 @@ class TaskCommissionService:
             events=record.events,
         )
         # 机器是唯一 status 裁决者:守卫 FAIL 在此响亮冒出(如无 artifacts
-        # 提交);快照推进非恒等(区别于公开讨论的 J' 恒等)。
+        # 提交);只有 Work 推进 Task,Message 不改变 Task 状态或版本。
         machine_ref = profile.workflow.state_machine_ref
         if machine_ref is None:
             raise ContextCollabValidationError(
@@ -409,26 +419,16 @@ class TaskCommissionService:
         resolved = resolve_workflow_status(
             workflow_kind=machine_ref.profile_id,
             workflow_version=machine_ref.version,
-            executor_ref=record.context_spec.executor_ref,
-            snapshot=snapshot,
+            task=task,
             event_kind=event_kind,
             payload=payload,
             actor=context.actor,
         )
 
-        def _advance_snapshot(
-            current: CurrentSnapshot | None,
-        ) -> CurrentSnapshot | None:
-            if current is None or resolved is None:
-                return current
-            if resolved == current.status:
-                return current
-            from dataclasses import replace
-
-            return replace(current, status=resolved)
-
         if report is not None and report.deadline is not None:
-            if report.deadline.tzinfo is None or report.deadline <= datetime.now(timezone.utc):
+            if report.deadline.tzinfo is None or report.deadline <= datetime.now(
+                timezone.utc
+            ):
                 raise ContextCollabValidationError("report deadline has expired")
         appended = self._repo.append_event(
             command.collab_context_id,
@@ -440,13 +440,15 @@ class TaskCommissionService:
                 parent_event=None,
                 visibility=VISIBILITY_PUBLIC,
                 payload=payload,
-                snapshot_updater=_advance_snapshot,
+                task_update=TaskUpdate(
+                    task.task_id, task.version, resolved or task.status
+                ),
             ),
         )
         final_status = (
-            appended.current_snapshot.status
-            if appended.current_snapshot is not None
-            else (resolved or snapshot.status)
+            appended.task.status
+            if appended.task is not None
+            else (resolved or task.status)
         )
         return TaskAdvancedView(
             collab_context_id=command.collab_context_id,
@@ -491,7 +493,6 @@ class TaskCommissionService:
                 parent_event=None,
                 visibility=VISIBILITY_PUBLIC,
                 payload={"content": content},
-                snapshot_updater=lambda snapshot: snapshot,
             ),
         )
 
@@ -566,11 +567,7 @@ class TaskCommissionService:
         return TaskCommissionDetailView(
             collet_id=collab_context_id,
             title=title,
-            status=(
-                record.current_snapshot.status
-                if record.current_snapshot is not None
-                else ""
-            ),
+            status=(record.task.status if record.task is not None else ""),
             body=body_view,
             events=events,
         )

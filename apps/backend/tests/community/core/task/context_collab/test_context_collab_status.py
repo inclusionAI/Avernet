@@ -10,6 +10,7 @@ G3 投影(事件状态推导 + 进度统计,Message 不计数)、
 """
 
 from datetime import datetime, timezone
+from dataclasses import replace
 
 import pytest
 
@@ -26,10 +27,11 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-    ContextSpec,
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -75,19 +77,20 @@ def _spec() -> ContextSpec:
     )
 
 
-def _snapshot() -> CurrentSnapshot:
-    """§6.4 示例形态的落库快照:status=in_progress、progress 全 0 初值。
-
-    落库的 snapshot progress 保持创建时的全 0 初值(stale),
-    查询投影必须用 build_progress 的实时值替换它。
-    """
-    return CurrentSnapshot(
+def _task() -> Task:
+    """一个仍在执行的 Task,历史事件数量不代表已完成工作项数量。"""
+    return Task(
         objective=OBJECTIVE,
         status="in_progress",
         principal_ref=PRINCIPAL,
         executor_ref=EXECUTOR,
-        method_kind="Single",
-        progress=ProgressSnapshot(percent=0, current_event_id=None),
+        task_id="task_" + "collet_001",
+        collet_ref="collet_001",
+        version=1,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_001",
+        last_event_ref="evt_004",
     )
 
 
@@ -193,11 +196,11 @@ class _FakeStatusRepository:
     def __init__(
         self,
         collet: Collet,
-        snapshot: CurrentSnapshot | None,
+        task: Task | None,
         events: list[EventRecord],
     ) -> None:
         self.collets: dict[str, Collet] = {collet.collet_id: collet}
-        self.snapshots: dict[str, CurrentSnapshot | None] = {collet.collet_id: snapshot}
+        self.tasks: dict[str, Task | None] = {collet.collet_id: task}
         self.events: dict[str, list[EventRecord]] = {collet.collet_id: list(events)}
         self.get_calls: list[str] = []
         self.write_calls: list[tuple] = []
@@ -213,7 +216,10 @@ class _FakeStatusRepository:
         return ContextStatusRecord(
             collet=collet,
             context_spec=_spec(),
-            current_snapshot=self.snapshots[collab_context_id],
+            tasks=(self.tasks[collab_context_id],)
+            if self.tasks[collab_context_id] is not None
+            else (),
+            task=self.tasks[collab_context_id],
             events=events,
         )
 
@@ -230,9 +236,17 @@ class _FakeStatusRepository:
 def _make_service(
     *, collet: Collet | None = None, events: list[EventRecord] | None = None
 ):
-    repo = _FakeStatusRepository(
-        collet or _collet(), _snapshot(), events or _fixture_events()
-    )
+    records = events if events is not None else _fixture_events()
+    task = _task()
+    for event in records:
+        if event.event_kind == "task.progress.updated" and "percent" in event.payload:
+            task = replace(
+                task,
+                reported_percent=event.payload["percent"],
+                progress_event_ref=event.event_id,
+                last_event_ref=event.event_id,
+            )
+    repo = _FakeStatusRepository(collet or _collet(), task, records)
     assert isinstance(repo, ContextCollabRepositoryProtocol)
     service = ContextCollabService(
         method_store=InMemoryMethodStore(),
@@ -253,16 +267,15 @@ class TestGetStatusHappyPath:
         assert result.collab_context_id == COLLET_ID
         assert result.context_version == 4
 
-        snapshot = result.current_snapshot
-        assert snapshot["objective"] == OBJECTIVE
-        assert snapshot["status"] == "in_progress"
-        progress = snapshot["progress"]
-        # 落库快照的 progress 是全 0 初值,查询必须用实时投影替换。
-        assert repo.snapshots[COLLET_ID].progress.percent == 0
+        task = result.current_snapshot
+        assert task["objective"] == OBJECTIVE
+        assert task["status"] == "in_progress"
+        progress = task["progress"]
+        # 查询进度读取 Task 的显式上报事实。
+        assert repo.tasks[COLLET_ID].reported_percent == 40
         assert progress["percent"] == 40
-        # completed 只计非 Message 事件:evt_001/evt_003 两个 Task;
-        # evt_002(Message)不计数(spec §6.4 示例 completed_count=2)。
-        assert progress["completed_count"] == 2
+        # 只有一个 in_progress Task,不是两个已完成 Task。
+        assert progress["completed_count"] == 0
         assert progress["active_count"] == 1
         assert progress["blocked_count"] == 0
         # current_event_id 沿用 collet 行值,不重新推导(≠ evt_005)。
@@ -376,7 +389,7 @@ class TestTrunkFilterIdentity:
         assert full.current_snapshot == trunk.current_snapshot
         assert full.current_event == trunk.current_event
         assert trunk.current_snapshot["progress"]["percent"] == 40
-        assert trunk.current_snapshot["progress"]["completed_count"] == 2
+        assert trunk.current_snapshot["progress"]["completed_count"] == 0
         assert trunk.current_snapshot["progress"]["active_count"] == 1
         assert trunk.current_event["event_id"] == "evt_004"
 
@@ -424,10 +437,9 @@ class TestTrunkFilterIdentity:
         full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
         trunk = service.get_status(COLLET_ID, trunk_events=True, context=make_actor())
 
-        # 全量推导把分支活动也算进 completed(evt_001/e3/分支);
-        # 两个开关都必须报告全量推导值(Ruling R6)。
-        assert full.current_snapshot["progress"]["completed_count"] == 3
-        assert trunk.current_snapshot["progress"]["completed_count"] == 3
+        # 新增历史活动不新增已完成 Task,两个视图计数都为零。
+        assert full.current_snapshot["progress"]["completed_count"] == 0
+        assert trunk.current_snapshot["progress"]["completed_count"] == 0
         assert full.current_snapshot["progress"] == (trunk.current_snapshot["progress"])
         # 活动链 = evt_001..evt_004(分支在链外)。
         assert trunk.task_progress.total_events == 4
@@ -448,11 +460,10 @@ class TestTrunkFilterIdentity:
         assert full.current_event["event_id"] == "evt_006"
         assert full.current_event["status"] == "active"
 
-        # 统计一致:current 之前的全部非 Message 事件(evt_001/003/004/005)
-        # 都计入 completed,分支事件计入 active。
+        # 事件头移动不改变 Task 的 in_progress 状态。
         assert full.current_snapshot == trunk.current_snapshot
         progress = full.current_snapshot["progress"]
-        assert progress["completed_count"] == 4
+        assert progress["completed_count"] == 0
         assert progress["active_count"] == 1
         assert progress["blocked_count"] == 0
         assert progress["current_event_id"] == "evt_006"
@@ -493,7 +504,7 @@ class TestVisibilityFiltering:
         assert result.task_progress.total_events == 3
         # workspace(evt_002)与 private(evt_003)不进统计。
         progress = result.current_snapshot["progress"]
-        assert progress["completed_count"] == 1
+        assert progress["completed_count"] == 0
         assert progress["active_count"] == 1
         assert progress["blocked_count"] == 0
         assert result.current_event is not None
@@ -513,7 +524,7 @@ class TestVisibilityFiltering:
             "evt_005",
         ]
         # evt_002 可见但 Message 不计数;evt_003(private)不可见。
-        assert result.current_snapshot["progress"]["completed_count"] == 1
+        assert result.current_snapshot["progress"]["completed_count"] == 0
 
     def test_filtered_event_percent_does_not_drive_percent(self):
         """不可见事件携带 percent 时不得驱动该 actor 的进度百分比。"""
@@ -533,7 +544,9 @@ class TestVisibilityFiltering:
         )
         # 外人看不到 private evt_005,percent 停留在可见的 evt_004(40)。
         assert outsider.task_progress.total_events == 2
-        assert outsider.current_snapshot["progress"]["percent"] == 40
+        assert (
+            outsider.current_snapshot is None
+        )  # 最新 Task 状态证据不可见,不泄露进度。
 
         principal = service.get_status(
             COLLET_ID, trunk_events=False, context=make_actor()
@@ -567,7 +580,7 @@ class TestReadOnlyPath:
         # collet 行未变:版本、落库 progress 都保持原样。
         assert repo.collets[COLLET_ID] is before
         assert before.version == 4
-        assert repo.snapshots[COLLET_ID].progress.percent == 0
+        assert repo.tasks[COLLET_ID].reported_percent == 40
         assert before.current_event_id == "evt_004"
         assert len(repo.events[COLLET_ID]) == 5
         # 两次只读结果一致,且未把投影值写回行内。

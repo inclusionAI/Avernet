@@ -17,7 +17,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
@@ -168,7 +168,6 @@ class TestCountMessageEvents:
                     parent_event=None,
                     visibility="public",
                     payload={"content": "回帖正文"} if primitive == "Message" else {},
-                    snapshot_updater=(lambda snapshot: snapshot),
                 ),
             )
 

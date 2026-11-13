@@ -2,8 +2,8 @@
 
 ``EventProjection`` 是事件在查询响应 ``task_progress.events[]`` 中的
 只读投影;``project_events`` 做主干筛选与状态推导;``build_progress``
-从投影统计 ProgressSnapshot。三者都是非权威查询投影,不反向改写
-Collet 快照(§12.2 #6),也不做任何 IO。
+从独立 Task 状态及可见进度证据统计 ProgressSnapshot。事件状态仅表示
+历史位置,不代表 Task 完成。三者都是只读投影,不做 IO 或权威状态写入。
 
 事件顺序即输入顺序(仓储按自增 id 升序,等价接纳顺序);is_trunk 不再
 落库,``trunk_ids`` 由调用方(G3 活动链推导)传入,Ruling R9。
@@ -11,11 +11,16 @@ Collet 快照(§12.2 #6),也不做任何 IO。
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
+    TaskStatus,
+)
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
     ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -39,7 +44,7 @@ class EventProjection:
     event_id: str
     parent_event: str | None
     event_kind: str
-    primitive_type: str | None  # 外部部分行可为 NULL;统计仅排除 Message
+    primitive_type: str | None  # 外部部分行可为 NULL;仅展示,不作为 Task 计数
     status: str  # "completed" | "active" | "pending"
     summary: str | None  # payload.get("summary")
     content: str | None  # payload.get("content")(Message)
@@ -51,7 +56,9 @@ def default_projected_status() -> str:
     return STATUS_PENDING
 
 
-def active_chain_ids(events: Sequence[EventRecord], current_event_id: str | None) -> frozenset[str]:
+def active_chain_ids(
+    events: Sequence[EventRecord], current_event_id: str | None
+) -> frozenset[str]:
     """主干链 = 从 current_event_id 沿 parent_event 回溯到根的事件集合。
 
     Ruling R9:is_trunk 不再落库,"主事件"在查询时由当前活动链推导;
@@ -114,46 +121,40 @@ def project_events(
 
 
 def build_progress(
-    events: Sequence[EventProjection],
+    tasks: Sequence[Task],
     *,
     current_event_id: str | None,
-    last_percent: int | None,
+    visible_event_ids: frozenset[str],
 ) -> ProgressSnapshot:
-    """从事件投影统计任务进度快照(spec §6.4)。
+    """Count work items, not events. Reports are observations, never completion.
 
-    completed_count/active_count/blocked_count 由投影 status 统计,且仅
-    统计 primitive_type != "Message" 的事件(Message 是互动内容,不是
-    进度;spec §6.4 示例:completed_count=2 即 evt_001/003 两个 Task
-    事件)。percent = last_percent(最后一个 payload 带 "percent" 整数的
-    事件),否则 0 if 无计数事件 else round(completed_count*100/计数的
-    非 Message 事件数)。current_event_id 沿用调用方传入的
-    collet.current_event_id,不重新推导。
+    Counts are independent of event-list/trunk position. Percent is an equal
+    weight average over noncancelled Tasks: DONE=100, otherwise only a visible,
+    evidenced executor report contributes. CREATED is pending, not active.
+    Callers must first apply G1 visibility to each Task's current-state evidence.
     """
-    completed_count = 0
-    active_count = 0
-    blocked_count = 0
-    for projection in events:
-        if projection.primitive_type == "Message":
-            continue
-        if projection.status == STATUS_COMPLETED:
-            completed_count += 1
-        elif projection.status == STATUS_ACTIVE:
-            active_count += 1
-        elif projection.status == STATUS_BLOCKED:
-            blocked_count += 1
-    counted = completed_count + active_count + blocked_count
-
-    if last_percent is not None:
-        percent = last_percent
-    elif counted == 0:
-        percent = 0
-    else:
-        percent = round(completed_count * 100 / counted)
-
+    completed = sum(task.status == TaskStatus.DONE.value for task in tasks)
+    active = sum(
+        task.status in {TaskStatus.IN_PROGRESS.value, TaskStatus.REVIEWING.value}
+        for task in tasks
+    )
+    blocked = sum(task.status == TaskStatus.BLOCKED.value for task in tasks)
+    eligible = [task for task in tasks if task.status != TaskStatus.CANCELLED.value]
+    percents = [
+        100
+        if task.status == TaskStatus.DONE.value
+        else (
+            task.reported_percent
+            if task.reported_percent is not None
+            and task.progress_event_ref in visible_event_ids
+            else 0
+        )
+        for task in eligible
+    ]
     return ProgressSnapshot(
-        percent=percent,
-        completed_count=completed_count,
-        active_count=active_count,
-        blocked_count=blocked_count,
+        percent=round(sum(percents) / len(percents)) if percents else 0,
+        completed_count=completed,
+        active_count=active,
+        blocked_count=blocked,
         current_event_id=current_event_id,
     )
