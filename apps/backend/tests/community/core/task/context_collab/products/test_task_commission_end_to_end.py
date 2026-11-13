@@ -52,14 +52,20 @@ class _CapturingDispatchPort(TaskDispatchPort):
 
 
 def _service(repo=_FakeRepo(), port=None):
+    from tests.community.core.task.context_collab.products.test_task_commission_publish import (
+        _method_port,
+    )
+
     port = port or _CapturingDispatchPort()
+    store = InMemoryMethodStore()
     service = TaskCommissionService(
         collab_repo=repo,
         authorizer=StructuralContextCollabAuthorizer(),
-        method_store=InMemoryMethodStore(),
+        method_store=store,
+        method_ops_port=_method_port(repo, store),
         dispatch_port=port,
     )
-    return service, repo, port
+    return service, repo, port, store
 
 
 def _advance(collab_context_id, **overrides):
@@ -75,7 +81,7 @@ def _advance(collab_context_id, **overrides):
 
 def test_end_to_end_commission_flow():
     """四步用户故事,一例贯通(发布→送达→执行产出→查询)。"""
-    service, repo, port = _service()
+    service, repo, port, store = _service()
 
     # ── 1. 用户发布代办任务,指定 bot 执行 ────────────────────────────
     created = service.publish_task(
@@ -88,6 +94,28 @@ def test_end_to_end_commission_flow():
         HUMAN,
     )
     collet_id = created.collet_id
+
+    # 发布同时驱动了真 Open 方法生命周期(spec §9):方法 store 端面
+    # 形态 = OPEN 机会 + 已录取申请 + 录取裁决,bot 是申请人。
+    from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+        ApplicationState,
+        OpportunityState,
+    )
+    from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+        current_axes,
+        top_level_binding_id,
+    )
+
+    axes = current_axes()
+    binding_id = top_level_binding_id(collet_id)
+    [opportunity] = store.list_opportunities(axes, binding_id, collet_id)
+    assert opportunity.state is OpportunityState.OPEN
+    [application] = store.list_applications(axes, binding_id, collet_id)
+    assert application.state is ApplicationState.ADMITTED
+    assert application.applicant_agent_ref == BOT_ASSIGNEE
+    assert application.accountable_principal_ref == "u_owner_001"
+    [decision] = store.list_decisions(axes, binding_id, collet_id)
+    assert decision.admitted_scope_ref == collet_id
 
     # ── 2. 系统自动把任务信息送达指定 bot(交付缝,无需 bot 轮询) ──────
     assert len(port.dispatched) == 1

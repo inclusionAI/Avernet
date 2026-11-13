@@ -107,15 +107,17 @@ class TestReadCases:
     """经真服务全流程(发布+推进)生成数据后再读——读投影吃的是流程真值。"""
 
     def _service(self):
-        from tests.community.core.task.context_collab.products.test_task_commission_publish import (  # noqa: F401
-            _FakeRepo as _WriteFake,
+        from tests.community.core.task.context_collab.products.test_task_commission_publish import (
+            _method_port,
         )
 
         write_fake = _WriteRepoShim()
+        store = InMemoryMethodStore()
         service = TaskCommissionService(
             collab_repo=write_fake,
             authorizer=StructuralContextCollabAuthorizer(),
-            method_store=InMemoryMethodStore(),
+            method_store=store,
+            method_ops_port=_method_port(write_fake, store),
         )
         return service, write_fake
 

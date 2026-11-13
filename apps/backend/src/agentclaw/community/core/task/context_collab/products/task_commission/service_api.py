@@ -79,6 +79,45 @@ class TaskDispatchPort(Protocol):
     def dispatch_task_info(self, info: DispatchedTaskInfo) -> None: ...
 
 
+@dataclass(frozen=True)
+class AssigneeAdmissionCommand:
+    """发布编排驱动的指定执行者录取命令(方法编排缝的语义面)。
+
+    ``collab_context_id`` 即机会 scope_ref 与录取 admitted_scope_ref;
+    ``assignee_agent_id`` 是被指派执行 bot(申请的 applicant_agent_ref);
+    ``accountable_principal_id`` 是发布发起人 principal_id——申请的
+    责任主体:系统代投的申请由发布人担责(withdraw 自助面同语义)。
+    """
+
+    collab_context_id: str
+    assignee_agent_id: str
+    accountable_principal_id: str
+
+
+@dataclass(frozen=True)
+class AssigneeAdmissionReceipt:
+    """方法面四步编排的受理回执;P1 供断言/审计,不进产品视图
+    (方法 store 行即持久结局)。"""
+
+    opportunity_id: str
+    application_id: str
+    decision_id: str
+    state: str
+
+
+@runtime_checkable
+class TaskMethodOpsPort(Protocol):
+    """方法编排缝:发布即驱动真 Open 方法生命周期——
+    publish_opportunity → submit_application → screen → admit
+    (SINGLE_CONTRIBUTION、capacity=1、scope=collet),指定执行者至
+    ADMITTED。P1 系统编排,恒以发布人 ActorContext 调用;实现住 DI
+    适配层(产品白名单外的服务面经此缝进入,白名单零改动)。"""
+
+    def admit_designated_assignee(
+        self, command: AssigneeAdmissionCommand, context: ActorContext
+    ) -> AssigneeAdmissionReceipt: ...
+
+
 @dataclass
 class TaskCommissionCreatedView:
     """发布结果:status 恒为创建态("created");事件身份与并发版本。"""

@@ -190,6 +190,28 @@ def _publish_command(title: str = TITLE, body: str = BODY):
     )
 
 
+def _method_port(repo, store):
+    """真方法编排缝:真适配器 + 真 OpenMethodService(发布的 E2E 语义
+    是裁决内容——方法生命周期必须在每个产品的发布测试里真实走过)。"""
+    from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+        StructuralMethodOpsAuthorizer,
+    )
+    from agentclaw.community.core.task.context_collab.services.open_method_service import (
+        OpenMethodService,
+    )
+    from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+        TaskCommissionOpenMethodAdapter,
+    )
+
+    return TaskCommissionOpenMethodAdapter(
+        open_ops=OpenMethodService(
+            store=store,
+            authorizer=StructuralMethodOpsAuthorizer(),
+            collab_repo=repo,
+        )
+    )
+
+
 def _service(repo: _FakeRepo | None = None, store: InMemoryMethodStore | None = None):
     repo = repo or _FakeRepo()
     store = store or InMemoryMethodStore()
@@ -197,6 +219,7 @@ def _service(repo: _FakeRepo | None = None, store: InMemoryMethodStore | None = 
         collab_repo=repo,
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=store,
+        method_ops_port=_method_port(repo, store),
     )
     return service, repo, store
 

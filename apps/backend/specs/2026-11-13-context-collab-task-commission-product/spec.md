@@ -15,7 +15,7 @@
 第三个产品（公开讨论之后的第二个用例型产品）：**用户发布一个带目标的代办任务，指定一个 bot 作为辅助执行 Agent，任务推进经专用 G4 状态机闭环到验收/取消**。产品形态为**顶层单值 `MethodKind.OPEN`**（协议合同扩张，见 §4），P1 **闭协作**（见裁决 C）。
 
 - ✅ 范围内：新 profile 值与 G4 机器、G1 顶层白名单加 `Open`、状态裁决纯函数提升进 G4、产品自持编排（发布 + Work 全族六动作 + 详情/列表读投影）、DI、模块级 service 接口。
-- ❌ 后置：HTTP/OpenAPI 对外交付（沿公开讨论 spec §5 裁决；P1 模块级接口）；Open 的开放参与（apply/admit 录取族，ACCS-304）——P1 闭协作；结帖生命周期能力操作；产物正文治理（artifacts 为字符串引用清单，`ResourceBinding/Artifact` 实体化 P2+）。
+- ❌ 后置：HTTP/OpenAPI 对外交付（沿公开讨论 spec §5 裁决；P1 模块级接口）；Open 的开放参与（apply/admit 录取族，ACCS-304）——P1 闭协作（**增量裁决 2026-11-13，见 §9**：录取族中「系统内部编排对指定 bot」一段 P1 拉入发布路径；对外参与开放仍留 P2）；结帖生命周期能力操作；产物正文治理（artifacts 为字符串引用清单，`ResourceBinding/Artifact` 实体化 P2+）。
 
 ## 2. 域映射与操作族映射
 
@@ -131,7 +131,7 @@ list_tasks() -> list[TaskCommissionSummaryView>               # 复用仓储两�
 | - | --- | --- |
 | A | 产品形态 | ☐ **另立新 profile**：`task_commission`（不复用 bbs_help_request） |
 | B | 协作方法 | ☐ **顶层单值 `MethodKind.OPEN`**：G1 顶层白名单追加 Open（协议合同扩张）；不改 L5（无 roster、单值投影） |
-| C | Open 的开放语义 | ☐ **P1 闭协作**：G1 公开 Message 窄规则维持仅 Open+Group；参与开放（apply/admit 录取族）P2 接 ACCS-304 |
+| C | Open 的开放语义 | ☐ **P1 闭协作**：G1 公开 Message 窄规则维持仅 Open+Group；参与开放（apply/admit 录取族）P2 接 ACCS-304。**增量裁决（2026-11-13，§9）部分推翻**：发布路径以系统编排驱动录取面四步（publish/submit/screen/admit）至指定 bot；对外公开参与仍 P2 |
 | D | 用例面 | ☐ **全 Work 族**（发布 + 开始/进度/提交/验收/打回/取消）；HTTP 后置 |
 | E | 交付物表达 | ★ `task.submitted` payload `artifacts: list[str]` 字符串引用清单；实体化（Artifact/ResourceBinding 强绑定）P2+ |
 | F | 事件可见性 | ★ 任务正文与全部控制事件一律 `public`——"发布"自带公开语义；闭协作由 G1 写路径把守而非可见性遮蔽 |
@@ -160,3 +160,27 @@ list_tasks() -> list[TaskCommissionSummaryView>               # 复用仓储两�
 | 全量回归 | `context_collab` 目录 + repository + DI（含通用服务改用提升函数的零行为回归） |
 
 按需只跑目录面;CI 门禁延后统一处理。
+
+## 9. 发布驱动的 Open 方法生命周期（P1 增量裁决，2026-11-13）
+
+**裁决背景**：原实现「发布」只投影顶层单值 Open binding，L5 Open 方法服务操作面零调用——挂 Open 之名而不进 Open 生命周期。用户裁决（2026-11-13）：发布之后底层必须走真方法生命周期，否则不叫「使用了 OPEN 这个方法」。
+
+**编排链**（`publish_task` 内同步，发布人 ActorContext，系统代跑）：
+
+```
+create_context（L4 Collet 持久）
+  → project_created_context（既有顶层单值 binding 投影）
+  → 方法编排缝 TaskMethodOpsPort.admit_designated_assignee：
+      publish_opportunity → submit_application → screen → admit
+  → _append_message（任务正文）
+  → TaskDispatchPort.dispatch_task_info（交付缝送达）
+```
+
+- **参与形态**：`participation_type=SINGLE_CONTRIBUTION`、`capacity=1`、`scope_ref=admitted_scope_ref=collet_id`、`closes_at=None`。录取产物只有 `AdmissionDecision`（SINGLE_CONTRIBUTION 不产生 roster/成员/分配行）——与「顶层单值、辅助执行者、不伪装成成员」先例一致；机会 admit 后保持 OPEN（P1 不闭合）。
+- **身份面**：申请的 `applicant_agent_ref`=指定 bot、`accountable_principal_ref`=发布人（系统代投的申请由发布人担责）；publish/screen/admit 走 G1 owner 面（发布人身份与本 Collet spec.principal_ref 字符串相等即过），submit_application 走公开面。产品面之外非 owner 不可达（`check_create` 先挡），非 owner 拒绝用例不住产品测试。
+- **幂等键**：`opportunity_id`/`application_id` 传 `None`（服务端生成）——`publish_task` 恒新 Collet 无重放路径；确定性键反而自陷（`opens_at` 参与机会 replay 形态比对，重试必炸形状校验）。`decision_id` 适配器生成（admit 形态面只比 `admitted_scope_ref`，确定性本可 replay-safe，统一生成口径并记录之）。
+- **失败语义**：方法面任一步抛错原样上穿 `publish_task`；Collet 已持久不回滚（交付缝同款纪律）。screen/admit 中途失败在 `mb_top_{collet_id}` 上留下 OPEN 机会孤儿行是 **P1 接受的中间态**，不做 close/reject 补偿（补偿翻倍失败面；孤儿仅方法面可见、Collet 已不可用）。
+- **依赖落点**（乙案白名单零改动）：窄端口 `TaskMethodOpsPort` + 命令/回执 DTO 住 `products/task_commission/service_api.py`；适配器 `TaskCommissionOpenMethodAdapter` 住 DI 层（`di/modules/task_commission_method_ops_adapter.py`，不受产品 import 法约束），`@inject` 拉 `OpenMethodOpsServiceProtocol` singleton；`TaskModule` 绑端口（同 `TaskDispatchPort` 直接构造样例）。
+- **已知缝隙（后续独立改动，防当 bug 报）**：`accept_task`/`cancel_task` 终态不闭合机会（owner 面 close_opportunity 语义在但未接）；E2E 外部流程零改动——方法面由发布编排自跑，bot 收到的仍是任务信息四步故事。
+
+**测试面**：`products/test_task_commission_method_lifecycle.py`（真链端面形态/缝次序/失败穿透/校验前置）+ E2E 方法 store 断言 + DI 接线测试。

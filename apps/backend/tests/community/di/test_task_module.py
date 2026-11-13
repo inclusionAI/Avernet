@@ -71,6 +71,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskCommissionServiceProtocol,
     TaskDispatchPort,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
@@ -458,6 +462,22 @@ def test_task_module_binds_bbs_public_discussion_service_singleton():
     # 复用既有 singleton 依赖。
     assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
     assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_binds_task_commission_method_ops_adapter():
+    """方法编排缝接线(任务代办 spec §9):TaskMethodOpsPort 解析为
+    真适配器 singleton,与开方法服务同 singleton;产品服务持同端口——
+    发布即驱动真 Open 方法生命周期。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    port = inj.get(TaskMethodOpsPort)
+    assert isinstance(port, TaskCommissionOpenMethodAdapter)
+    assert inj.get(TaskMethodOpsPort) is port
+    assert port._open_ops is inj.get(OpenMethodOpsServiceProtocol)  # noqa: SLF001
+    service = inj.get(TaskCommissionServiceProtocol)
+    assert isinstance(service, TaskCommissionService)
+    assert service._method_ops_port is port  # noqa: SLF001
 
 
 def test_task_module_bridges_dispatch_to_l1_mock():

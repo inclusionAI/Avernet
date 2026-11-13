@@ -124,6 +124,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskCommissionServiceProtocol,
     TaskDispatchPort,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
@@ -422,6 +426,13 @@ class TaskModule(Module):
         )
         binder.bind(
             OpenMethodOpsServiceProtocol, to=OpenMethodService,
+            scope=singleton,
+        )
+        # 方法编排缝(任务代办 spec §9):产品窄端口 → DI 适配器,发布即
+        # 驱动真 Open 方法生命周期;适配器 @inject 拉取上方 Open 方法服务
+        # singleton(交付缝 TaskDispatchPort 同款直接构造绑定)。
+        binder.bind(
+            TaskMethodOpsPort, to=TaskCommissionOpenMethodAdapter,
             scope=singleton,
         )
         binder.bind(

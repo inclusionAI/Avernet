@@ -46,6 +46,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     _FakeRepo,
+    _method_port,
 )
 
 HUMAN = ActorContext(
@@ -68,10 +69,13 @@ def _publish(service):
 
 def _service_with_bridge():
     mock = MockA2aDelivery()
+    repo = _FakeRepo()
+    store = InMemoryMethodStore()
     service = TaskCommissionService(
-        collab_repo=_FakeRepo(),
+        collab_repo=repo,
         authorizer=StructuralContextCollabAuthorizer(),
-        method_store=InMemoryMethodStore(),
+        method_store=store,
+        method_ops_port=_method_port(repo, store),
         dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
     )
     return service, mock
@@ -162,10 +166,13 @@ class TestDispatchFailurePropagation:
             ContextCollabValidationError,
         )
 
+        repo = _FakeRepo()
+        store = InMemoryMethodStore()
         service = TaskCommissionService(
-            collab_repo=_FakeRepo(),
+            collab_repo=repo,
             authorizer=StructuralContextCollabAuthorizer(),
-            method_store=InMemoryMethodStore(),
+            method_store=store,
+            method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=_RejectingDelivery()),
         )
         with pytest.raises(ContextCollabValidationError, match="dispatch"):
@@ -182,10 +189,13 @@ class TestEnvelopeIdentityChainAsserted:
         )
 
         mock = _CapturingDelivery()
+        repo = _FakeRepo()
+        store = InMemoryMethodStore()
         service = TaskCommissionService(
-            collab_repo=_FakeRepo(),
+            collab_repo=repo,
             authorizer=StructuralContextCollabAuthorizer(),
-            method_store=InMemoryMethodStore(),
+            method_store=store,
+            method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
         )
         created = _publish(service)

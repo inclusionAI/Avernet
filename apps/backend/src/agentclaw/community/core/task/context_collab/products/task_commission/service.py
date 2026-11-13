@@ -74,12 +74,14 @@ from agentclaw.community.core.task.context_collab.products.task_commission.dispa
     LoggingTaskDispatch,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    AssigneeAdmissionCommand,
     DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskAdvancedView,
     TaskDispatchPort,
+    TaskMethodOpsPort,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     _now,
@@ -135,14 +137,17 @@ class TaskCommissionService:
         collab_repo: ContextCollabRepositoryProtocol,
         authorizer: ContextCollabAuthorizerProtocol,
         method_store: MethodStoreProtocol,
+        method_ops_port: "TaskMethodOpsPort",
         # 交付缝默认日志送达(P2 经 L1/A2A 换真实现);python-injector 对
         # 带默认值参数同样注入,DI 显式绑定见 task_module(bbs authorizer
-        # 先例同款注释)。
+        # 先例同款注释)。方法编排缝无产品内默认——缺口非合法域态,
+        # 发布必须驱动真方法生命周期。
         dispatch_port: "TaskDispatchPort" = None,
     ) -> None:
         self._repo = collab_repo
         self._authorizer = authorizer
         self._method_store = method_store
+        self._method_ops_port = method_ops_port
         self._dispatch_port = (
             dispatch_port if dispatch_port is not None else LoggingTaskDispatch()
         )
@@ -187,6 +192,19 @@ class TaskCommissionService:
             spec,
             context,
             now=_now(),
+        )
+        # 发布即驱动真 Open 方法生命周期(spec §9 增量裁决,系统编排,
+        # 发布人 ActorContext):publish_opportunity → submit_application
+        # → screen → admit,指定执行 bot 至 ADMITTED。方法面失败如实
+        # 上抛(Collet 已持久不回滚——交付缝同款纪律);bot 仅在
+        # 生命周期完成后才被送达告知。
+        self._method_ops_port.admit_designated_assignee(
+            AssigneeAdmissionCommand(
+                collab_context_id=record.collet.collet_id,
+                assignee_agent_id=assignee,
+                accountable_principal_id=context.actor.principal_id,
+            ),
+            context,
         )
         appended = self._append_message(
             command=None,
