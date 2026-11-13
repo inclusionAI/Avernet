@@ -16,6 +16,11 @@ export CARGO_TARGET_DIR="${CARGO_LLVM_COV_TARGET_DIR:-$cargo_target/llvm-cov-tar
 coverage_env="$(cargo llvm-cov show-env --sh)"
 eval "$coverage_env"
 cargo llvm-cov clean --workspace
+# Process-spawning tests (bcs::e2e_bot_authority, integration_http_api) exec
+# the server binary from the isolated coverage target dir. Build it under the
+# coverage environment so those tests run and the binary is instrumented too.
+cargo build --locked -p bcs --bin bcs
+test -x "${CARGO_TARGET_DIR:?}/debug/bcs"
 cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
 cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
   > testresult/test-binaries.json
