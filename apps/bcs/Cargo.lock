@@ -322,6 +322,7 @@ name = "bcs"
 version = "0.1.4-beta.3"
 dependencies = [
  "a2a-lf",
+ "a2a-pb",
  "anyhow",
  "async-trait",
  "axum",
@@ -463,6 +464,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "toml",
+ "tonic",
  "tower",
  "tower-http",
  "tracing",

@@ -11,10 +11,12 @@ case "${1:-}" in
   --run-only) ;; # Supervisor already built both targets from this checkout.
   *) echo "usage: $0 [--run-only]" >&2; exit 2 ;;
 esac
-if [[ ! -x "$cov_runtime/debug/bcs-caller-e2e" ]]; then
-  echo "missing instrumented caller companion executable" >&2
-  exit 1
-fi
+for binary in bcs-caller-e2e bcs-a2a-grpc-peer; do
+  if [[ ! -x "$cov_runtime/debug/$binary" ]]; then
+    echo "missing instrumented caller companion executable: $binary" >&2
+    exit 1
+  fi
+done
 LLVM_PROFILE_FILE="$cov_runtime/caller-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/caller_execution_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e"
@@ -25,3 +27,8 @@ LLVM_PROFILE_FILE="$cov_runtime/task-cache-%m-%p.profraw" \
 LLVM_PROFILE_FILE="$cov_runtime/custom-binding-%m-%p.profraw" \
   python3 "$bcs_dir/scripts/e2e-test/custom_binding_story.py" \
     --binary "$cov_runtime/debug/bcs-caller-e2e"
+
+LLVM_PROFILE_FILE="$cov_runtime/grpc-binding-%m-%p.profraw" \
+  python3 "$bcs_dir/scripts/e2e-test/custom_binding_story.py" \
+    --binary "$cov_runtime/debug/bcs-caller-e2e" \
+    --grpc-peer-binary "$cov_runtime/debug/bcs-a2a-grpc-peer"

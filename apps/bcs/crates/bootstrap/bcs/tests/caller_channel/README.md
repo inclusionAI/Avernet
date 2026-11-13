@@ -48,3 +48,24 @@ persisted lifecycle state. The fixture is absent from the ordinary BCS binary.
 ```sh
 python3 scripts/e2e-test/task_cache_story.py --binary target/debug/bcs-caller-e2e
 ```
+
+The companion coverage runner also runs the existing A2A user story with a
+deployment-owned gRPC mesh route. The external
+[gRPC peer](../a2a_grpc/runner.rs) translates protobuf requests/events to the
+story's scripted JSON-RPC peer, preserving its send, streaming, recovery,
+polling and cancellation assertions. BCS uses its normal gRPC client; neither
+the fixture nor the story calls that client or domain services directly.
+The story requires all five RPC methods to reach the peer, which also validates
+the deployment routing metadata. Both peer and BCS stop before aggregation.
+
+```sh
+cargo build -p bcs --features test-utils --bin bcs-caller-e2e --bin bcs-a2a-grpc-peer
+python3 scripts/e2e-test/custom_binding_story.py --binary target/debug/bcs-caller-e2e \
+  --grpc-peer-binary target/debug/bcs-a2a-grpc-peer
+```
+
+This gRPC invocation is separate from the custom-binding invocation; both feed
+the existing E2E profile pool. It does not merge unit-test profiles or change
+coverage thresholds or exclusions. See the
+[SSE story guidance](../../../../../scripts/e2e-test/README.md) for the shared
+Singlebox producer's additional fault journeys.

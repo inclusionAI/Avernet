@@ -98,14 +98,15 @@ def command(root):
 
 
 @pytest.mark.parametrize('caller_rc,oauth_rc', [('0', '0'), ('17', '0'), ('0', '19')])
-def test_builds_both_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc):
+def test_builds_companion_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc):
     root, env = companion_repo
     result = subprocess.run(command(root), env={**env, 'CALLER_RC': caller_rc, 'OAUTH_RC': oauth_rc},
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == (int(caller_rc) or int(oauth_rc)), result.stderr
     build = json.loads((root / 'build.json').read_text())
     assert build['args'] == ['build', '-p', 'bcs', '--features', 'test-utils',
-                             '--bin', 'bcs-caller-e2e', '--bin', 'bcs-oauth-e2e']
+                             '--bin', 'bcs-caller-e2e', '--bin', 'bcs-oauth-e2e',
+                             '--bin', 'bcs-a2a-grpc-peer']
     assert build['flags'] == '-Cinstrument-coverage -Clink-dead-code'
     assert build['target'].endswith('target/cov-e2e/llvm-cov-target')
     assert (root / 'caller-finished').exists() and (root / 'oauth-finished').exists()
@@ -156,9 +157,13 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     binary = runtime / f'debug/bcs-{name}-e2e'
     binary.write_text('#!/bin/sh\nexit 0\n')
     binary.chmod(0o755)
+    if name == 'caller':
+        grpc_peer = runtime / 'debug/bcs-a2a-grpc-peer'
+        grpc_peer.write_text('#!/bin/sh\nexit 0\n')
+        grpc_peer.chmod(0o755)
     shared = runtime / 'bcs-shared.profraw'
     shared.write_text('shared')
-    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py']
+    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py', 'custom_binding_story.py']
              if name == 'caller' else ['oauth/story.py'])
     events = tmp_path / 'events'
     for story in names:
@@ -178,8 +183,19 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     assert result.returncode == 0, result.stderr
     assert events.read_text().splitlines() == [Path(n).name for n in names]
     assert shared.read_text() == 'shared'
+    if name == 'caller':
+        grpc_peer.unlink()
+        events.unlink()
+        missing_peer = subprocess.run(['bash', str(scripts / 'caller_e2e_coverage.sh'), '--run-only'],
+                                      env=env, capture_output=True, text=True)
+        assert missing_peer.returncode != 0
+        assert 'bcs-a2a-grpc-peer' in missing_peer.stderr
+        assert not events.exists()
+        grpc_peer.write_text('#!/bin/sh\nexit 0\n')
+        grpc_peer.chmod(0o755)
+    else:
+        events.unlink()
     binary.unlink()
-    events.unlink()
     result = subprocess.run(['bash', str(scripts / f'{name}_e2e_coverage.sh'), '--run-only'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0
