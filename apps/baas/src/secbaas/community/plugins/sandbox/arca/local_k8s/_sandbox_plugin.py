@@ -320,6 +320,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             configmap_name, pvc_name, storage_id, mount_path, extra_mounts or []
         )
 
+        def _apparmor_security_profile() -> dict:
+            profile = _apparmor_profile_name()
+            if profile is None:
+                return {}
+            return {"app_armor_profile": V1AppArmorProfile(
+                type="Localhost", localhost_profile=profile)}
+
         container = V1Container(
             name=self.CONTAINER_NAME,
             image=image,
@@ -332,13 +339,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             ),
             # privileged grants /dev/fuse device-cgroup access needed by the
             # bot runtime's FUSE mounts. The configured localhost profile
-            # must permit those mounts while remaining enforced.
+            # must permit those mounts while remaining enforced. An explicit
+            # LOCAL_K8S_APPARMOR_MODE=disabled turns the profile None: the
+            # appArmorProfile field is omitted entirely (never rewritten to
+            # Unconfined), so the runtime keeps any host-default policy.
             security_context=V1SecurityContext(
                 privileged=True,
-                app_armor_profile=V1AppArmorProfile(
-                    type="Localhost",
-                    localhost_profile=_apparmor_profile_name(),
-                ),
+                **_apparmor_security_profile(),
             ),
             volume_mounts=volume_mounts,
         )
