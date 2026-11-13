@@ -109,3 +109,20 @@ CAS revision and composite Bot/Owner identity are unchanged. The authenticated
 actor stays separate from the target Owner. This adds no display lookup or
 per-target I/O. Activity responses remain provider-owned and pass through the
 content adapter without reconstructing historical names locally.
+
+## Whole-book content delivery
+
+The ordinary content router also exposes `yuque/books` (q/offset/limit) and
+`yuque/book-imports` (list/start/detail/cancel/sync/sync-runs/auto-sync) under
+the existing space/KB prefix. A start accepts exactly one positive `book_id`;
+there is no document-subset or caller-selected execution target. The provider
+must enforce native KB read/write ACLs and exact source/run ownership before
+repair or mutations. The remote adapter uses one fixed KB-scoped upstream request
+per operation; it does not enumerate documents, persist jobs or run a scheduler.
+
+Catalog search precedes pagination upstream. Import-list `next_offset` counts
+examined source rows, so sparse/empty pages may have a continuation. Task
+acceptance is not completion; preserve partial, capped, empty-skip and blocked
+calendar semantics. Whole-book operations must not widen preexisting subtree
+sources. Calendar writes retain the existing version CAS and do not imply an
+enabled platform worker. Existing single-document routes remain unchanged.

@@ -69,6 +69,14 @@ from agentclaw.community.utils.env_utils import get_current_env
 from injector import Module, provider, singleton
 
 
+_LOCAL_K8S_ECB_HTTP_HOSTS = frozenset(
+    {
+        "ecb",
+        "ecb.simulator.svc.cluster.local",
+    }
+)
+
+
 class KnowledgeManagementModule(Module):
     def __init__(self, profile: DeployProfile):
         self.profile = profile
@@ -107,7 +115,14 @@ class KnowledgeManagementModule(Module):
         config: KnowledgeIntegrationConfig,
         http: Annotated[HttpClient, "knowledge"],
     ) -> EcbKnowledgeClient:
-        return EcbKnowledgeClient(config.catalog_origin, config, client=http)
+        local_k8s = self.profile is DeployProfile.LOCAL_K8S
+        return EcbKnowledgeClient(
+            config.catalog_origin,
+            config,
+            client=http,
+            allow_local_http=local_k8s,
+            local_http_hosts=_LOCAL_K8S_ECB_HTTP_HOSTS if local_k8s else frozenset(),
+        )
 
     @provider
     @singleton

@@ -577,3 +577,175 @@ def test_yuque_connection_disabled_before_remote_request(content):
     )
     assert w.client.get(w.prefix + "/yuque/connection").status_code == 503
     assert w.seen == []
+
+
+@pytest.mark.parametrize(
+    "method,suffix,body,status",
+    [
+        ("GET", "/yuque/books?q=team&offset=2&limit=3", None, 200),
+        ("GET", "/yuque/book-imports?offset=2&limit=3", None, 200),
+        ("POST", "/yuque/book-imports", {"book_id": 42}, 201),
+        ("GET", "/yuque/book-imports/ds", None, 200),
+        ("POST", "/yuque/book-imports/ds/cancel", {"task_id": 7}, 200),
+        ("POST", "/yuque/book-imports/ds/sync", None, 202),
+        ("GET", "/yuque/book-imports/ds/sync-runs/root", None, 200),
+        ("GET", "/yuque/book-imports/ds/auto-sync", None, 200),
+        (
+            "PUT",
+            "/yuque/book-imports/ds/auto-sync",
+            {"enabled": False, "expected_version": 1, "schedule": None},
+            200,
+        ),
+    ],
+)
+def test_whole_book_fixed_scoped_paths_one_upstream_call(
+    content, method, suffix, body, status
+):
+    w = content
+    projected = {"status": "COMPLETED", "outcome": "PARTIAL", "next_offset": 20}
+    w.options.update(status=status, body=projected, require_session_context=True)
+    response = w.client.request(
+        method,
+        w.prefix + suffix,
+        json=body,
+        headers={"Cookie": "session=dummy; arbitrary=secret"},
+    )
+    assert response.status_code == status and response.json() == projected
+    assert len(w.seen) == 1
+    request = w.seen[0]
+    assert request.method == method
+    assert str(request.url) == "https://ecb.test/api/v1/knowledge/kb/kb" + suffix
+    assert request.headers["cookie"] == "session=dummy"
+    if body is not None:
+        assert json.loads(request.content) == body
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"kb_id": "foreign"},
+        {"runtime_env": "prod"},
+        {"tenant_id": "spoof"},
+        {"documents": [1]},
+        {"auto_sync_scope": {"mode": "all"}},
+        {"credential_id": "spoof"},
+    ],
+)
+def test_whole_book_rejects_client_execution_or_subset(content, extra):
+    w = content
+    response = w.client.post(
+        w.prefix + "/yuque/book-imports", json={"book_id": 42, **extra}
+    )
+    assert response.status_code == 422 and w.seen == []
+
+
+@pytest.mark.parametrize("book_id", [True, "42", 0, -1, [42]])
+def test_whole_book_requires_one_positive_integer(content, book_id):
+    assert (
+        content.client.post(
+            content.prefix + "/yuque/book-imports", json={"book_id": book_id}
+        ).status_code
+        == 422
+    )
+    assert not content.seen
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 409, 412, 422, 429])
+def test_whole_book_native_rejections_are_not_success(content, status):
+    w = content
+    w.options.update(status=status, body={"detail": "YUQUE_BOOK_SCOPE_UNSUPPORTED"})
+    response = w.client.post(w.prefix + "/yuque/book-imports", json={"book_id": 42})
+    assert response.status_code == status
+    assert response.json() == {"detail": "YUQUE_BOOK_SCOPE_UNSUPPORTED"}
+    w.seen.clear()
+    w.options["deny"] = True
+    assert w.client.get(w.prefix + "/yuque/book-imports").status_code == 403
+    assert not w.seen
+
+
+@pytest.mark.asyncio
+async def test_whole_book_http_wait_yields_event_loop():
+    """Mechanism evidence: real adapter awaits transport instead of blocking."""
+    import asyncio
+    from agentclaw.community.kernel.knowledge_content import ContentAccess
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(request):
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={"items": [], "next_offset": None})
+
+    config = KnowledgeIntegrationConfig(True, "https://ecb.test")
+    client = EcbKnowledgeContentClient(
+        EcbKnowledgeClient(config.catalog_origin, config),
+        AsyncHttpxClient(transport=httpx.MockTransport(delayed)),
+    )
+    service = RemoteKnowledgeContentService(client, prepare_test_access)
+    work = asyncio.create_task(
+        service.book_imports(
+            kb_id="kb", access=ContentAccess("owner", {}), offset=0, limit=100
+        )
+    )
+    await asyncio.wait_for(entered.wait(), 2)
+    assert not work.done()
+    release.set()
+    assert (await asyncio.wait_for(work, 2)).status == 200
+
+
+def test_whole_book_routes_resolve_formal_content_provider_chain():
+    from agentclaw.community.adapters.knowledge_platform.content_ports import (
+        AsyncContentTransport,
+        ContentAccessPolicy,
+    )
+    from agentclaw.community.di.config import HttpClientPoolConfig
+    from agentclaw.community.di.modules.knowledge_management_module import (
+        KnowledgeManagementModule,
+    )
+    from agentclaw.community.di.profile import DeployProfile
+    from injector import InstanceProvider
+
+    seen = []
+
+    def send(request):
+        seen.append(request)
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    injector = Injector(
+        [KnowledgeManagementModule(DeployProfile.TEST)], auto_bind=False
+    )
+    for interface, value in [
+        (
+            KnowledgeIntegrationConfig,
+            KnowledgeIntegrationConfig(True, "https://ecb.test"),
+        ),
+        (KnowledgeManagementConfig, KnowledgeManagementConfig(True, "teamclaw")),
+        (HttpClientPoolConfig, HttpClientPoolConfig()),
+        (AsyncContentTransport, AsyncHttpxClient(transport=httpx.MockTransport(send))),
+        (ContentAccessPolicy, prepare_test_access),
+        (
+            KnowledgeManagementServiceProtocol,
+            SimpleNamespace(authorize_space=lambda **kwargs: None),
+        ),
+    ]:
+        injector.binder.bind(interface, to=InstanceProvider(value))
+    app = FastAPI()
+    attach_injector(app, injector)
+    app.include_router(router)
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        "owner", "owner", "owner"
+    )
+    with TestClient(app) as client:
+        result = client.get(
+            "/api/knowledge/spaces/1/knowledge-bases/kb/yuque/books",
+            headers={"Cookie": "session=dummy"},
+        )
+    assert result.status_code == 200
+    assert len(seen) == 1 and seen[0].url.path == "/api/v1/knowledge/kb/kb/yuque/books"
+    assert isinstance(
+        injector.get(KnowledgeContentServiceProtocol), RemoteKnowledgeContentService
+    )
+    assert injector.get(KnowledgeContentServiceProtocol).client is injector.get(
+        EcbKnowledgeContentClient
+    )
