@@ -21,7 +21,7 @@ import type { MessageReceipt as DeliveryReceipt } from "@avernet/clawweb-shared/
 export type RecoveryActor = { userId: string; isAdmin: boolean };
 /** Optional after-hook; implementations must isolate notification failures from business work. */
 export interface RecoveryActionNotifier {
-  after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" }): void;
+  after(input: { taskId: string; eventId: string; kind: "message" | "plan" | "execution" | "result" | "owner_card_sent" }): void;
 }
 /** Read-only projection of existing auxiliary Steps; never contains workload credentials. */
 export type RecoveryTermination = { status: "remote_stopped" | "remote_stop_failed" | "stop_pending"; aisJobId: string | null };
