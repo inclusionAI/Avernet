@@ -29,8 +29,7 @@ import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
 import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';
-import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
-import { splitBotId } from '@/services/workspace/botSessionService';
+import { useCollaboratorBots } from './useCollaboratorBots';
 
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopHealthCheck } from './useBotWorkshopHealthCheck';
@@ -115,89 +114,7 @@ export function useBotWorkshop() {
     void load();
   }, [load]);
 
-  // Load collaborator (friend) bots and merge into inventory
-  useEffect(() => {
-    if (!requestIdentity.ready || !spaceInitialized || !spaceId || !currentOpenApiUserId) {
-      state.setCollaboratorBots([], false);
-      return;
-    }
-    let cancelled = false;
-    state.setCollaboratorBots([], true);
-    collaborationCandidateService
-      .listFriends(currentOpenApiUserId, {
-        actorType: 'human',
-        offset: 0,
-        limit: 100,
-      })
-      .then((res) => {
-        if (cancelled) return;
-        if (!res.ok) {
-          state.setCollaboratorBots([], false, res.error.friendlyMessage);
-          return;
-        }
-        const mapped: BotDomain[] = res.data.items
-          .filter((bot) => {
-            // Exclude bots already in inventory (de-duplicate by bot_id)
-            const inventoryIds = new Set(state.items.map((item) => item.id));
-            const { realBotId } = splitBotId(bot.id);
-            return !inventoryIds.has(realBotId) && !inventoryIds.has(bot.id);
-          })
-          .map((bot) => {
-            const { realBotId, ownerId } = splitBotId(bot.id);
-            const runtime = resolveBotRuntime({
-              engine: bot.engine,
-              botType: bot.botType,
-              botId: realBotId,
-            });
-            return {
-              id: realBotId,
-              name: bot.name,
-              description: undefined,
-              ownerId,
-              entityKey: `${ownerId ?? 'unknown'}:personal:${realBotId}`,
-              spaceId: undefined,
-              spaceName: undefined,
-              spaceKind: 'personal' as const,
-              ownership: 'personal' as const,
-              deployment: 'cloud' as const,
-              serviceMode: 'non-service' as const,
-              canUpgradeToService: false,
-              lifecycle: 'draft',
-              runtime: {
-                engine: runtime.engine || 'openclaw',
-                isAgentCodingBot: runtime.isAgentCodingBot || false,
-                templateType: bot.templateType,
-                templateName: bot.templateName,
-                bcnEnabled: undefined,
-                capabilityProfile: {
-                  canPublish: false,
-                  canEdit: false,
-                  canChat: true,
-                  canViewLogs: false,
-                },
-                visibleInOpenCore: true,
-              },
-              completeness: 'complete' as const,
-              warnings: [],
-              actions: ['view', 'chat'],
-              disabledActions: {
-                edit: '协作 Bot 仅支持查看和对话',
-                delete: '协作 Bot 仅支持查看和对话',
-                restart: '协作 Bot 仅支持查看和对话',
-                publish: '协作 Bot 仅支持查看和对话',
-              },
-              isCollaboratorBot: true,
-            } as BotDomain;
-          });
-        if (!cancelled) state.setCollaboratorBots(mapped, false);
-      })
-      .catch(() => {
-        if (!cancelled) state.setCollaboratorBots([], false, '协作 Bot 列表加载失败');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentOpenApiUserId, requestIdentity.ready, spaceInitialized, spaceId]);
+  useCollaboratorBots({ userId: currentOpenApiUserId, ready: requestIdentity.ready && spaceInitialized && Boolean(spaceId), enabled: Boolean(currentOpenApiUserId), inventoryItems: state.items, setCollaboratorBots: state.setCollaboratorBots });
   const createFlow = useBotWorkshopCreateFlow({ load, setCreateScenario: state.setCreateScenario });
   const copyHost = useBotWorkshopCopyHost({ load, currentOpenApiUserId });
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
@@ -238,17 +155,12 @@ export function useBotWorkshop() {
     (bot: BotDomain) => canEnterBotDetail(bot, currentOpenApiUserId),
     [currentOpenApiUserId],
   );
-  // Merge collaborator bots into items (dedup by id against inventory)
-  const mergedItems = (() => {
-    const inventoryIds = new Set(state.items.map((item) => item.id));
-    const newCollaborators = state.collaboratorBots.filter((bot) => !inventoryIds.has(bot.id));
-    return [...state.items, ...newCollaborators];
-  })();
-
+  const inventoryIds = new Set(state.items.map((item) => item.id));
+  const mergedItems = [...state.items, ...state.collaboratorBots.filter((b) => !inventoryIds.has(b.id))];
   return {
     ...state,
     items: mergedItems,
-    total: state.total !== undefined ? state.total + state.collaboratorBots.filter(b => !new Set(state.items.map(i => i.id)).has(b.id)).length : undefined,
+    total: state.total !== undefined ? state.total + state.collaboratorBots.filter((b) => !inventoryIds.has(b.id)).length : undefined,
     spaceId,
     currentUserId: currentOpenApiUserId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
