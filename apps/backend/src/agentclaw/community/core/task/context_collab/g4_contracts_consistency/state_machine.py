@@ -1,4 +1,4 @@
-"""G4 状态机:声明式定义 + Conformance 校验 + 守卫 + 内置 team_todo_execution profile。
+"""G4 状态机:声明式定义 + Conformance 校验 + 守卫 + 内置 team_todo_execution / bbs_help_request_goal profile。
 
 属 G4 ``State Machine``,不是 L4 新增上下文类(spec §4)。全部为纯声明式内容
 与纯谓词守卫:禁止脚本、内联 SQL、网络、文件访问或框架 import 进入 Core
@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Mapping
+from types import MappingProxyType
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -133,8 +134,11 @@ def _validate_header(d: StateMachineDefinition) -> None:
             f"unsupported schema_version: {d.schema_version!r}"
         )
     _check_str(d.profile_ref, "profile_ref")
-    if not isinstance(d.profile_version, int) or isinstance(d.profile_version, bool) \
-            or d.profile_version < 1:
+    if (
+        not isinstance(d.profile_version, int)
+        or isinstance(d.profile_version, bool)
+        or d.profile_version < 1
+    ):
         raise ContextCollabValidationError(
             f"profile_version must be a positive int, got: {d.profile_version!r}"
         )
@@ -193,7 +197,8 @@ def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
 
 
 def _validate_transitions(
-    d: StateMachineDefinition, states: dict[str, StateDefinition],
+    d: StateMachineDefinition,
+    states: dict[str, StateDefinition],
 ) -> None:
     """§4.4 第 3/4/5/6 条:引用完整性、终态无出边、rule_id 唯一与裁决唯一。"""
     rule_ids: set[str] = set()
@@ -251,7 +256,7 @@ def _validate_transitions(
 
     # 同一 state+event 命中多条规则 → 多 guard 裁决不明确,拒绝(§4.4 第 5 条)。
     for i, first in enumerate(d.transitions):
-        for second in d.transitions[i + 1:]:
+        for second in d.transitions[i + 1 :]:
             if first.event_name != second.event_name:
                 continue
             overlap = set(first.from_states) & set(second.from_states)
@@ -263,8 +268,9 @@ def _validate_transitions(
                 )
 
 
-def _validate_reachability(d: StateMachineDefinition,
-                           states: dict[str, StateDefinition]) -> None:
+def _validate_reachability(
+    d: StateMachineDefinition, states: dict[str, StateDefinition]
+) -> None:
     """§4.4 第 2 条:非豁免状态必须从起点可达(waiting/blocked 例外,Ruling R3)。"""
     reachable: set[str] = {d.initial_state}
     queue: deque[str] = deque([d.initial_state])
@@ -365,7 +371,8 @@ def _guard_actor_can_start_task(
     ):
         return GuardOutcome(verdict="PASS", reason="actor is the executor agent")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is neither responsible principal nor executor",
+        verdict="FAIL",
+        reason="actor is neither responsible principal nor executor",
     )
 
 
@@ -375,7 +382,8 @@ def _guard_actor_is_responsible_principal(
     if evaluation.actor == evaluation.responsible:
         return GuardOutcome(verdict="PASS", reason="actor is the responsible principal")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is not the responsible principal",
+        verdict="FAIL",
+        reason="actor is not the responsible principal",
     )
 
 
@@ -385,7 +393,8 @@ def _guard_actor_can_cancel(
     if evaluation.actor == evaluation.responsible:
         return GuardOutcome(verdict="PASS", reason="actor may cancel the task")
     return GuardOutcome(
-        verdict="FAIL", reason="actor is not the responsible principal",
+        verdict="FAIL",
+        reason="actor is not the responsible principal",
     )
 
 
@@ -404,7 +413,8 @@ def _guard_event_matches_task(
     if "task_id" not in evaluation.payload:
         return GuardOutcome(verdict="PASS", reason="no explicit task_id in payload")
     return GuardOutcome(
-        verdict="FAIL", reason="explicit task_id not supported in P1",
+        verdict="FAIL",
+        reason="explicit task_id not supported in P1",
     )
 
 
@@ -427,52 +437,251 @@ TEAM_TODO_EXECUTION_MACHINE = StateMachineDefinition(
     compatibility_policy="new_contexts_only",
     initial_state="created",
     states=(
-        StateDefinition(name="created", governance_kind="waiting",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="in_progress", governance_kind="active",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="reviewing", governance_kind="review",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="blocked", governance_kind="blocked",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="done", governance_kind="terminal_success",
-                        allowed_methods=("Single",)),
-        StateDefinition(name="cancelled", governance_kind="terminal_cancelled",
-                        allowed_methods=("Single",)),
+        StateDefinition(
+            name="created", governance_kind="waiting", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="in_progress", governance_kind="active", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="reviewing", governance_kind="review", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="blocked", governance_kind="blocked", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="done", governance_kind="terminal_success", allowed_methods=("Single",)
+        ),
+        StateDefinition(
+            name="cancelled",
+            governance_kind="terminal_cancelled",
+            allowed_methods=("Single",),
+        ),
     ),
     transitions=(
-        TransitionRule(rule_id="start_task", from_states=("created",),
-                       event_name="task.started",
-                       guard_refs=("actor_can_start_task",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="update_progress", from_states=("in_progress",),
-                       event_name="task.progress.updated",
-                       guard_refs=("event_matches_task",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="submit_for_review", from_states=("in_progress",),
-                       event_name="task.submitted",
-                       guard_refs=("required_artifacts_present",),
-                       to_state="reviewing"),
-        TransitionRule(rule_id="accept_task", from_states=("reviewing",),
-                       event_name="task.accepted",
-                       guard_refs=("actor_is_responsible_principal",),
-                       to_state="done"),
-        TransitionRule(rule_id="reject_task", from_states=("reviewing",),
-                       event_name="task.rejected",
-                       guard_refs=("actor_is_responsible_principal",),
-                       to_state="in_progress"),
-        TransitionRule(rule_id="cancel_task",
-                       from_states=("created", "in_progress", "reviewing", "blocked"),
-                       event_name="task.cancelled",
-                       guard_refs=("actor_can_cancel",),
-                       to_state="cancelled"),
+        TransitionRule(
+            rule_id="start_task",
+            from_states=("created",),
+            event_name="task.started",
+            guard_refs=("actor_can_start_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="update_progress",
+            from_states=("in_progress",),
+            event_name="task.progress.updated",
+            guard_refs=("event_matches_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="submit_for_review",
+            from_states=("in_progress",),
+            event_name="task.submitted",
+            guard_refs=("required_artifacts_present",),
+            to_state="reviewing",
+        ),
+        TransitionRule(
+            rule_id="accept_task",
+            from_states=("reviewing",),
+            event_name="task.accepted",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="done",
+        ),
+        TransitionRule(
+            rule_id="reject_task",
+            from_states=("reviewing",),
+            event_name="task.rejected",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="cancel_task",
+            from_states=("created", "in_progress", "reviewing", "blocked"),
+            event_name="task.cancelled",
+            guard_refs=("actor_can_cancel",),
+            to_state="cancelled",
+        ),
     ),
 )
 
-# P1 唯一内置 machine;不发明 forum 状态。
+# BBS 求助(带目标)复用目标推进语义,但不伪装成 Single:公开求助仍以
+# Open+Group 为协作方法,executor_ref 只表示被委托/指定的辅助 Agent,不把
+# 公开贡献者提升为验收或状态迁移权威。
+BBS_HELP_REQUEST_GOAL_MACHINE = StateMachineDefinition(
+    schema_version="context-state-machine/1",
+    profile_ref="bbs_help_request_goal",
+    profile_version=1,
+    compatibility_policy="new_contexts_only",
+    initial_state="created",
+    states=(
+        StateDefinition(
+            name="created", governance_kind="waiting", allowed_methods=("Open + Group",)
+        ),
+        StateDefinition(
+            name="in_progress",
+            governance_kind="active",
+            allowed_methods=("Open + Group",),
+        ),
+        StateDefinition(
+            name="reviewing",
+            governance_kind="review",
+            allowed_methods=("Open + Group",),
+        ),
+        StateDefinition(
+            name="blocked", governance_kind="blocked", allowed_methods=("Open + Group",)
+        ),
+        StateDefinition(
+            name="done",
+            governance_kind="terminal_success",
+            allowed_methods=("Open + Group",),
+        ),
+        StateDefinition(
+            name="cancelled",
+            governance_kind="terminal_cancelled",
+            allowed_methods=("Open + Group",),
+        ),
+    ),
+    transitions=(
+        TransitionRule(
+            rule_id="start_help",
+            from_states=("created",),
+            event_name="task.started",
+            guard_refs=("actor_can_start_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="update_help_progress",
+            from_states=("in_progress",),
+            event_name="task.progress.updated",
+            guard_refs=("event_matches_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="submit_help_for_acceptance",
+            from_states=("in_progress",),
+            event_name="task.submitted",
+            guard_refs=("required_artifacts_present",),
+            to_state="reviewing",
+        ),
+        TransitionRule(
+            rule_id="accept_help",
+            from_states=("reviewing",),
+            event_name="task.accepted",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="done",
+        ),
+        TransitionRule(
+            rule_id="reject_help",
+            from_states=("reviewing",),
+            event_name="task.rejected",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="cancel_help",
+            from_states=("created", "in_progress", "reviewing", "blocked"),
+            event_name="task.cancelled",
+            guard_refs=("actor_can_cancel",),
+            to_state="cancelled",
+        ),
+    ),
+)
+
+# 任务代办(task_commission)复用目标推进语义(2026-11-13 task_commission
+# spec §3):顶层单值 Open(P1 闭协作),executor_ref 只表示被委托/指定的
+# 辅助执行 Agent;守卫词全部复用 GUARD_REGISTRY 已注册谓词,零新词。
+TASK_COMMISSION_GOAL_MACHINE = StateMachineDefinition(
+    schema_version="context-state-machine/1",
+    profile_ref="task_commission_goal",
+    profile_version=1,
+    compatibility_policy="new_contexts_only",
+    initial_state="created",
+    states=(
+        StateDefinition(
+            name="created", governance_kind="waiting", allowed_methods=("Open",)
+        ),
+        StateDefinition(
+            name="in_progress", governance_kind="active", allowed_methods=("Open",)
+        ),
+        StateDefinition(
+            name="reviewing", governance_kind="review", allowed_methods=("Open",)
+        ),
+        StateDefinition(
+            name="blocked", governance_kind="blocked", allowed_methods=("Open",)
+        ),
+        StateDefinition(
+            name="done", governance_kind="terminal_success", allowed_methods=("Open",)
+        ),
+        StateDefinition(
+            name="cancelled",
+            governance_kind="terminal_cancelled",
+            allowed_methods=("Open",),
+        ),
+    ),
+    transitions=(
+        TransitionRule(
+            rule_id="commission_start",
+            from_states=("created",),
+            event_name="task.started",
+            guard_refs=("actor_can_start_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="commission_update",
+            from_states=("in_progress",),
+            event_name="task.progress.updated",
+            guard_refs=("event_matches_task",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="commission_submit",
+            from_states=("in_progress",),
+            event_name="task.submitted",
+            guard_refs=("required_artifacts_present",),
+            to_state="reviewing",
+        ),
+        TransitionRule(
+            rule_id="commission_accept",
+            from_states=("reviewing",),
+            event_name="task.accepted",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="done",
+        ),
+        TransitionRule(
+            rule_id="commission_reject",
+            from_states=("reviewing",),
+            event_name="task.rejected",
+            guard_refs=("actor_is_responsible_principal",),
+            to_state="in_progress",
+        ),
+        TransitionRule(
+            rule_id="commission_cancel",
+            from_states=("created", "in_progress", "reviewing", "blocked"),
+            event_name="task.cancelled",
+            guard_refs=("actor_can_cancel",),
+            to_state="cancelled",
+        ),
+    ),
+)
+
+# P1 内置 machine;BBS 公开讨论不发明状态机,仍以事件流/查询投影表达。
 MACHINE_REGISTRY: dict[str, StateMachineDefinition] = {
     "team_todo_execution": TEAM_TODO_EXECUTION_MACHINE,
+    "bbs_help_request_goal": BBS_HELP_REQUEST_GOAL_MACHINE,
+    "task_commission_goal": TASK_COMMISSION_GOAL_MACHINE,
 }
+
+# Immutable identity for historical workflow resolution. Keep old entries on upgrades.
+VERSIONED_MACHINE_REGISTRY: Mapping[tuple[str, int], StateMachineDefinition] = (
+    MappingProxyType(
+        {
+            (machine.profile_ref, machine.profile_version): machine
+            for machine in MACHINE_REGISTRY.values()
+        }
+    )
+)
 
 # 内置 machine 注册即过 Conformance:若字面量漂移,导入期立即失败。
 validate_definition(TEAM_TODO_EXECUTION_MACHINE)
+validate_definition(BBS_HELP_REQUEST_GOAL_MACHINE)
+validate_definition(TASK_COMMISSION_GOAL_MACHINE)

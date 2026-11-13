@@ -39,6 +39,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     EventAppendedRecord,
     InitialEventDraft,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
@@ -57,7 +58,9 @@ def _context_spec() -> ContextSpec:
         executor_ref=EXECUTOR,
         objective=OBJECTIVE,
         resource_refs=(
-            ResourceRef(resource_type="forum_topic", resource_id="topic_001", revision="3"),
+            ResourceRef(
+                resource_type="forum_topic", resource_id="topic_001", revision="3"
+            ),
         ),
         product_kind="team_todo",
         workflow_kind="team_todo_execution",
@@ -76,7 +79,7 @@ def _created_context(repo: ContextCollabRepository) -> str:
             ),
         )
     )
-    return record.collet.collab_context_id
+    return record.collet.collet_id
 
 
 def _append_request(
@@ -120,7 +123,7 @@ def _event_rows(db, collab_context_id: str) -> list[ContextCollabEventModel]:
 
 class TestAppendEvent:
     def test_happy_path_updates_snapshot_and_version(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
         initial_status = repo.get_current_status(context_id)
         parent = initial_status.events[0].event_id
@@ -135,9 +138,9 @@ class TestAppendEvent:
         assert record.event.parent_event == parent
         assert record.event.context_version_after == 2
         assert isinstance(record.event.occurred_at, datetime)
-        assert record.collet.context_version == 2
+        assert record.collet.version == 2
         assert record.collet.current_event_id == record.event.event_id
-        assert record.collet.current_snapshot.status == "in_progress"
+        assert record.current_snapshot.status == "in_progress"
 
         with db.orm_session() as session:
             row = _collet_row(session, context_id)
@@ -158,7 +161,7 @@ class TestAppendEvent:
     def test_verbatim_resubmit_rejected_by_cas_no_new_rows(self, db):
         """追加无幂等键(Ruling R8):逐字重发被 expected_version 拒绝,
         不落第二条事件(乐观并发即事实上的防重),版本不 bump。"""
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
         parent = repo.get_current_status(context_id).events[0].event_id
 
@@ -166,7 +169,7 @@ class TestAppendEvent:
             context_id,
             _append_request(expected_version=1, parent_event=parent),
         )
-        assert repo.get_current_status(context_id).collet.context_version == 2
+        assert repo.get_current_status(context_id).collet.version == 2
 
         with pytest.raises(ContextCollabVersionConflict):
             repo.append_event(
@@ -183,20 +186,19 @@ class TestAppendEvent:
             assert _collet_row(session, context_id).context_version == 2
 
     def test_stale_expected_version_conflicts_without_writing(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
         parent = repo.get_current_status(context_id).events[0].event_id
         appended = repo.append_event(
             context_id,
             _append_request(expected_version=1, parent_event=parent),
         )
-        assert appended.collet.context_version == 2
+        assert appended.collet.version == 2
 
         with pytest.raises(ContextCollabVersionConflict):
             repo.append_event(
                 context_id,
-                _append_request(expected_version=1, parent_event=parent
-                ),
+                _append_request(expected_version=1, parent_event=parent),
             )
 
         with db.orm_session() as session:
@@ -207,7 +209,7 @@ class TestAppendEvent:
             assert len(_event_rows(session, context_id)) == 2
 
     def test_parent_older_than_head_appends_branch_event(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
         initial = repo.get_current_status(context_id)
         root_event_id = initial.events[0].event_id
@@ -229,7 +231,8 @@ class TestAppendEvent:
 
         branch = repo.append_event(
             context_id,
-            _append_request(expected_version=2,
+            _append_request(
+                expected_version=2,
                 parent_event=root_event_id,
                 snapshot_updater=branch_updater,
             ),
@@ -237,7 +240,7 @@ class TestAppendEvent:
 
         assert branch.event.event_id != head.event.event_id
         assert branch.event.context_version_after == 3
-        assert branch.collet.context_version == 3
+        assert branch.collet.version == 3
         assert [snap.status for snap in seen] == ["in_progress"]
 
         with db.orm_session() as session:
@@ -248,18 +251,20 @@ class TestAppendEvent:
                 root_event_id,
                 root_event_id,
             ]
-            assert json.loads(_collet_row(session, context_id).current_snapshot)[
-                "status"
-            ] == "reviewing"
+            assert (
+                json.loads(_collet_row(session, context_id).current_snapshot)["status"]
+                == "reviewing"
+            )
 
     def test_unknown_parent_event_is_rejected_without_writes(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
 
         with pytest.raises(ContextCollabParentEventError):
             repo.append_event(
                 context_id,
-                _append_request(expected_version=1,
+                _append_request(
+                    expected_version=1,
                     parent_event="evt_not_exist",
                 ),
             )
@@ -270,7 +275,7 @@ class TestAppendEvent:
             assert _collet_row(session, context_id).context_version == 1
 
     def test_none_parent_appends_new_trunk_event(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         context_id = _created_context(repo)
 
         record = repo.append_event(
@@ -289,7 +294,7 @@ class TestAppendEvent:
             assert events[1].parent_event is None
 
     def test_unknown_collab_context_id_raises_not_found(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
         with pytest.raises(ContextCollabNotFoundError):
             repo.append_event(

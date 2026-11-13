@@ -1,14 +1,19 @@
-"""L4 Collet:协作上下文聚合根及其快照(spec §3.4)。
+"""L4 Collet:协作上下文聚合根与伴随值对象(spec §3.4)。
 
+``Collet`` 聚合根只有 ACCS 六字段(聚合标识 / 发起主体引用 / 顶层
+collet 状态 / 归属 Space / 当前事件指针 / 聚合版本);``context_spec``
+与 ``current_snapshot`` 不再挂在聚合上——spec 与快照是仓储 record 的
+伴随投影字段(落库行同值,见 persistence.repository 出入参 dataclass)。
 ``ContextSpec`` 承载创建请求中长期保留的引用与目标;``CurrentSnapshot``
 是 Collet 的当前读写快照(不是第二权威状态);``ProgressSnapshot`` 保存
-GET 查询投影使用的任务进度计数;``Collet`` 聚合根只持有快照与版本,事件
-事实一律由 Event record 承载。本模块只有纯值对象,不做任何 IO。
+GET 查询投影使用的任务进度计数;事件事实一律由 Event record 承载。
+本模块只有纯值对象,不做任何 IO。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -23,6 +28,10 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    Participant,
+    RoleBinding,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
@@ -82,6 +91,54 @@ def _executor_ref_from_dict(data: dict, owner: str) -> AgentRef | None:
     return AgentRef.from_dict(value)
 
 
+def _optional_version(data: dict, key: str) -> int | None:
+    value = data.get(key)
+    if value is not None and (type(value) is not int or value < 1):
+        raise ContextCollabValidationError(
+            f"ContextSpec.{key} must be a positive integer or null"
+        )
+    return value
+
+
+def _object_list(data: dict, key: str) -> list[dict]:
+    value = data.get(key, [])
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ContextCollabValidationError(
+            f"ContextSpec.{key} must be a list of objects"
+        )
+    return value
+
+
+class ColletState(str, Enum):
+    """Collet 大写机器状态词汇(spec §4)。
+
+    与 ``CurrentSnapshot.status`` 的 ``TaskStatus`` 小写词汇是两套闭合
+    词汇:前者服务 G4 ``collet_lifecycle`` 状态机(见
+    ``g4_contracts_consistency.context_state_machines``),后者仍是
+    事件快照投影的 task 状态列。两套词汇不互相渗透/schema 不互认。
+    """
+
+    CREATED = "CREATED"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+
+
+# Collet 顶层键集与合法 state 值(from_dict 严格解码的两张白名单)。
+_COLLET_KEYS = frozenset(
+    {
+        "collet_id",
+        "initiator_ref",
+        "state",
+        "scope",
+        "current_event_id",
+        "version",
+    }
+)
+_COLLET_STATES = frozenset({state.value for state in ColletState})
+
+
 @dataclass
 class ContextSpec:
     """创建请求中长期保留的协作上下文参数(spec §9.2)。
@@ -99,6 +156,11 @@ class ContextSpec:
     resource_refs: tuple[ResourceRef, ...]
     product_kind: str | None
     workflow_kind: str | None
+    # None denotes a pre-versioning row (or a context without L6), not "latest".
+    product_profile_version: int | None = None
+    workflow_profile_version: int | None = None
+    participants: tuple[Participant, ...] = ()
+    role_bindings: tuple[RoleBinding, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict) -> "ContextSpec":
@@ -113,15 +175,25 @@ class ContextSpec:
             method_kind=_method_kind_from_dict(data, "ContextSpec"),
             executor_ref=_executor_ref_from_dict(data, "ContextSpec"),
             objective=_required_str(data, "objective", "ContextSpec"),
-            resource_refs=tuple(
-                ResourceRef.from_dict(item) for item in raw_refs
-            ),
+            resource_refs=tuple(ResourceRef.from_dict(item) for item in raw_refs),
             product_kind=_optional_str(data, "product_kind", "ContextSpec"),
             workflow_kind=_optional_str(data, "workflow_kind", "ContextSpec"),
+            product_profile_version=_optional_version(data, "product_profile_version"),
+            workflow_profile_version=_optional_version(
+                data, "workflow_profile_version"
+            ),
+            participants=tuple(
+                Participant.from_dict(item)
+                for item in _object_list(data, "participants")
+            ),
+            role_bindings=tuple(
+                RoleBinding.from_dict(item)
+                for item in _object_list(data, "role_bindings")
+            ),
         )
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "space": self.space.to_dict(),
             "principal_ref": self.principal_ref.to_dict(),
             "method_kind": self.method_kind,
@@ -133,6 +205,20 @@ class ContextSpec:
             "product_kind": self.product_kind,
             "workflow_kind": self.workflow_kind,
         }
+        # Preserve the original JSON shape of legacy/unprofiled contexts.
+        if (
+            self.product_profile_version is not None
+            or self.workflow_profile_version is not None
+            or self.participants
+            or self.role_bindings
+        ):
+            data.update(
+                product_profile_version=self.product_profile_version,
+                workflow_profile_version=self.workflow_profile_version,
+                participants=[item.to_dict() for item in self.participants],
+                role_bindings=[item.to_dict() for item in self.role_bindings],
+            )
+        return data
 
 
 @dataclass
@@ -189,9 +275,7 @@ class CurrentSnapshot:
     def from_dict(cls, data: dict) -> "CurrentSnapshot":
         raw_status = _required_str(data, "status", "CurrentSnapshot")
         if raw_status not in (status.value for status in TaskStatus):
-            raise ContextCollabValidationError(
-                f"unknown status value: {raw_status!r}"
-            )
+            raise ContextCollabValidationError(f"unknown status value: {raw_status!r}")
         return cls(
             objective=_required_str(data, "objective", "CurrentSnapshot"),
             status=raw_status,
@@ -218,18 +302,72 @@ class CurrentSnapshot:
 
 @dataclass
 class Collet:
-    """L4 协作上下文聚合根。
+    """L4 协作上下文聚合根(ACCS 六字段,spec §3.4)。
 
-    持有聚合标识、创建主体引用(``actor_ref``,与初始 task.created 事件的
-    actor_ref 同值;可空容忍外部部分行)、创建参数、当前快照与聚合版本;
-    事件事实由 ``ac_context_collab_event`` 表(见
-    ``event_envelope.EventRecord``)承载,快照由事件改写,不在此复制事件历史。
+    只持有协议身份与顶层生命:聚合标识(``collab_context_id`` 落库列同名
+    同值)、发起主体引用(与初始 task.created 事件的 actor_ref 同值)、
+    ``collet_lifecycle`` 顶层状态、归属 Space、当前事件指针与聚合版本。
+    ``context_spec`` / ``current_snapshot`` 不在聚合上——它们是仓储
+    record 的伴随投影字段;事件事实由 ``ac_context_collab_event`` 表
+    (见 ``event_envelope.EventRecord``)承载,快照由事件改写,不在此
+    复制事件历史。
     """
 
-    collab_context_id: str
-    actor_ref: PrincipalRef | None
-    context_spec: ContextSpec
-    # 可空:允许外部写入只有 spec 的聚合行;P1 创建路径总是写满。
-    current_snapshot: CurrentSnapshot | None
+    collet_id: str
+    initiator_ref: PrincipalRef
+    state: ColletState
+    scope: SpaceRef
     current_event_id: str | None
-    context_version: int
+    version: int
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Collet":
+        """六字段严格解码;``to_dict`` 结果可无损 round-trip。
+
+        校验:``collet_id`` 非空;``initiator_ref`` / ``scope`` /
+        ``state`` / ``version`` 必填;``state`` 必须命中
+        ``ColletState`` 值;``version`` 必须是 ≥1 整数;未知顶层键
+        (键集 = 六字段名)拒绝。
+        """
+        if not isinstance(data, dict):
+            raise ContextCollabValidationError(
+                f"Collet must be an object, got: {data!r}"
+            )
+        unknown = set(data) - _COLLET_KEYS
+        if unknown:
+            raise ContextCollabValidationError(
+                f"Collet has unknown top-level keys: {sorted(unknown)}; "
+                f"allowed keys: {sorted(_COLLET_KEYS)}"
+            )
+        raw_state = data.get("state")
+        if not isinstance(raw_state, str) or raw_state not in _COLLET_STATES:
+            raise ContextCollabValidationError(f"unknown state value: {raw_state!r}")
+        raw_version = data.get("version")
+        if (
+            isinstance(raw_version, bool)
+            or not isinstance(raw_version, int)
+            or raw_version < 1
+        ):
+            raise ContextCollabValidationError(
+                f"Collet.version must be an integer >= 1, got: {raw_version!r}"
+            )
+        return cls(
+            collet_id=_required_str(data, "collet_id", "Collet"),
+            initiator_ref=PrincipalRef.from_dict(
+                _required_dict(data, "initiator_ref", "Collet")
+            ),
+            state=ColletState(raw_state),
+            scope=SpaceRef.from_dict(_required_dict(data, "scope", "Collet")),
+            current_event_id=_optional_str(data, "current_event_id", "Collet"),
+            version=raw_version,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "collet_id": self.collet_id,
+            "initiator_ref": self.initiator_ref.to_dict(),
+            "state": self.state.value,
+            "scope": self.scope.to_dict(),
+            "current_event_id": self.current_event_id,
+            "version": self.version,
+        }

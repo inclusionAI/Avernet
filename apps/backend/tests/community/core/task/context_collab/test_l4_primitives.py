@@ -22,6 +22,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
+    SpaceRef,
 )
 from agentclaw.community.core.task.context_collab import l4_context_primitives
 from agentclaw.community.core.task.context_collab.l4_context_primitives.activity import (
@@ -33,6 +34,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
+    ColletState,
     ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
@@ -145,7 +147,7 @@ def test_context_spec_round_trip_with_executor_and_optional_profiles():
 @pytest.mark.parametrize(
     "data",
     [
-        {**SPEC_DICT, "method_kind": "Swarm"},
+        {**SPEC_DICT, "method_kind": "swarm"},
         {**SPEC_DICT, "method_kind": ""},
         {**SPEC_DICT, "objective": ""},
         {**SPEC_DICT, "space": {}},
@@ -201,7 +203,7 @@ def test_current_snapshot_from_dict_rejects_unknown_status(bad):
 @pytest.mark.parametrize(
     "data",
     [
-        {**SNAPSHOT_DICT, "method_kind": "Swarm"},
+        {**SNAPSHOT_DICT, "method_kind": "swarm"},
         {**SNAPSHOT_DICT, "objective": ""},
         {**SNAPSHOT_DICT, "progress": None},
     ],
@@ -221,18 +223,21 @@ def test_current_snapshot_accepts_unknown_executor_absence():
 
 def test_collet_holds_aggregate_state():
     spec = ContextSpec.from_dict(SPEC_DICT)
-    snapshot = CurrentSnapshot.from_dict(SNAPSHOT_DICT)
     collet = Collet(
-        collab_context_id="collet_todo_001",
-        actor_ref=None,
-        context_spec=spec,
-        current_snapshot=snapshot,
+        collet_id="collet_todo_001",
+        initiator_ref=spec.principal_ref,
+        state=ColletState.ACTIVE,
+        scope=spec.space,
         current_event_id="evt_004",
-        context_version=4,
+        version=4,
     )
-    assert collet.context_spec == spec
-    assert collet.current_snapshot == snapshot
-    assert collet.context_version == 4
+    # 聚合根只有六字段:spec/快照是 record 伴随投影,不再挂聚合上。
+    assert collet.initiator_ref == spec.principal_ref
+    assert collet.state is ColletState.ACTIVE
+    assert collet.scope == SpaceRef.from_dict(SPEC_DICT["space"])
+    assert collet.current_event_id == "evt_004"
+    assert collet.version == 4
+    assert Collet.from_dict(collet.to_dict()) == collet
 
 
 def test_event_record_to_envelope_matches_acc_contract():

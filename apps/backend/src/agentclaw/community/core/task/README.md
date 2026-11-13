@@ -5,6 +5,20 @@
 > 权威源(冲突时以此为准):
 > - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
+## Context collaboration / L6 product contracts
+
+The ACCS context-collaboration path is separate from the older goal-driven
+framework below. Its [L6 product contract](context_collab/l6_products/README.md)
+owns versioned product composition, ScenarioRole → L4 RoleBinding mappings,
+ProductInstance selection and the shared G4 enforcement/compatibility boundary.
+Concrete product definitions, specialized strategies and services live in
+`context_collab/products/`; DI installs and injects a shared immutable catalog.
+L6 supplies reusable contracts/mechanisms, not concrete business templates, a
+second Task/Method engine or Resource access grants.
+The [task commission product boundary](context_collab/products/task_commission/README.md)
+also documents its bounded signed-Bot A2A report ingress and executor-only
+progress enforcement.
+
 ## 任务副屏资产
 
 展示、声明恢复与导航编排由独立的 [task-panel 资产](../../../../../../frontend-nextgen/assets/task-panel/README.md) 持有；
@@ -25,6 +39,7 @@ frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Pytho
 ```text
 core/task/
 ├── README.md
+├── context_collab/                # ACCS context primitives, methods, product contracts/services
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
