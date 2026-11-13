@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import lock_bot_capabilities
+
 from collections.abc import Callable
 
 from sqlalchemy import and_, func, or_
@@ -264,6 +266,7 @@ class BotSkillSetInstallations:
             return plan
 
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id, env=env)
             plan = plan_resolver(
                 session,
                 bot_id=bot_id,

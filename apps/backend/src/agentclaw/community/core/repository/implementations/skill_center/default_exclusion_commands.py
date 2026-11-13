@@ -7,6 +7,8 @@ the exclusion row together with the member's Installation delta.
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import lock_bot_capabilities
+
 from agentclaw.community.core.models.skill import Skill, SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     center_membership_skill_uuid,
@@ -77,7 +79,8 @@ class DefaultExclusionCommands:
         Installation row is the Set's claim (R1 forbids a direct one), so the
         exclusion retires it in the same transaction.
         """
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             default_exclusions.lock_skill_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 skill_id=int(skill_id) if str(skill_id).isdecimal() else -1,
@@ -151,7 +154,8 @@ class DefaultExclusionCommands:
     ) -> DesiredStateMutation:
         """Remove the exclusion; the member's Installation row comes back with
         it — a Default Set is always active."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             excluded_default_ids = default_exclusions.lock_skill_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 skill_id=int(skill_id) if str(skill_id).isdecimal() else -1,
@@ -199,6 +203,7 @@ class DefaultExclusionCommands:
                 self._require_unique_runtime_names(
                     session, bot_id=bot_id, owner_id=owner_id,
                     candidate_ids={int(skill_id)},
+                    engine_type=engine_type, default_engine_types=default_engine_types,
                 )
                 skill_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id,

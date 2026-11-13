@@ -26,6 +26,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
@@ -501,11 +502,13 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
 
         def mutation() -> DesiredStateMutation:
             nonlocal previous_state
-            try:
+            with self._repository.skill_batch(
+                bot_id=bot_id, owner_id=stable_resource_owner_id(bot)
+            ):
                 for skill_id in skill_ids:
                     try:
                         result = mutation_for_skill(skill_id)
-                    except SkillSetControlPlaneNotFoundError as error:
+                    except (SkillSetControlPlaneNotFoundError, SkillRuntimeNameConflictError) as error:
                         outcomes.append(
                             SkillSetSkillOutcome(skill_id=skill_id, error=error)
                         )
@@ -518,6 +521,11 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                         )
                         continue
 
+                    # The projection decision was made before entering the
+                    # transaction. If activation changed in the meantime,
+                    # roll back the batch and require a fresh request.
+                    if "is_active" in result.item and bool(result.item["is_active"]) != bool(target.get("is_active")):
+                        raise SkillSetControlPlaneConflictError("SKILL_SET_STATE_CHANGED_RETRY")
                     if previous_state is None:
                         previous_state = result.previous_state
                     if result.changed:
@@ -525,20 +533,6 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                     outcomes.append(
                         SkillSetSkillOutcome(skill_id=skill_id, changed=result.changed)
                     )
-            except Exception:
-                # Individual repository writes commit desired state before the
-                # batch reaches its single projection.  A later infrastructure
-                # failure is therefore still pre-projection, but must restore
-                # every earlier successful member before surfacing the error.
-                if previous_state is not None:
-                    self._repository.restore_desired_state(
-                        bot_id=bot_id,
-                        owner_id=stable_resource_owner_id(bot),
-                        state=previous_state,
-                        engine_type=self._engine(bot),
-                    )
-                raise
-
             return DesiredStateMutation(
                 item=target,
                 changed=any(outcome.changed for outcome in outcomes),
