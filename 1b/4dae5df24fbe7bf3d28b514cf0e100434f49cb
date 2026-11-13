@@ -1,0 +1,33 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/oc-trajectory-evidence.test.ts
+  s_d50b7e642256d5::t_b4b0aec638600c 18,22-26,31-34,37-39,44,88-129
+  s_d50b7e642256d5::t_11a3560ae14fa6 130
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  s_d50b7e642256d5::t_7b1c00129c8796 4,51-54,147-148,228-238,249-253,256,265-267,276,284-308,312-313,319,325-326
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  s_d50b7e642256d5::t_ef77a8f81e9cf3 903,906-907
+  s_d50b7e642256d5::t_3e249862fced2d 901-902,904-905,908-923
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_d50b7e642256d5::t_b4b0aec638600c 294
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/tclog.ts
+  s_d50b7e642256d5::t_7b1c00129c8796 816-826
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  s_d50b7e642256d5::t_b4b0aec638600c 59-80
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/mcp_server.py
+  s_d50b7e642256d5::t_b4b0aec638600c 138-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1b4dae5df24fbe7bf3d28b514cf0e100434f49cb",
+  "prompts": {},
+  "sessions": {
+    "s_d50b7e642256d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce9d-00d5-7230-8b8a-75e6f5d85bdf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

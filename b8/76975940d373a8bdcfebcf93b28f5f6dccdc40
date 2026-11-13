@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/bot_build_service.py
+  s_6ce09e1908dab4::t_0070d77bc5d380 57,1551-1595,1623-1632,1634-1658,1682-1685,1710-1718
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b876975940d373a8bdcfebcf93b28f5f6dccdc40",
+  "prompts": {},
+  "sessions": {
+    "s_6ce09e1908dab4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a1b1-ab30-7a00-b915-b1fe8c4d7b7d",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_befd386ce20825::t_45c8a3cfa2ec2c 22
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_defaults.py
+  s_befd386ce20825::t_25629babe59c7c 187,196-197,203
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_mcps.py
+  s_befd386ce20825::t_92f66ca208328a 94
+apps/backend/tests/community/_flows/bot_public_risk/api_lifecycle.py
+  s_befd386ce20825::t_da44b436e9a2f5 1-50
+apps/backend/tests/community/architecture/test_e2e_module_coverage.py
+  s_befd386ce20825::t_6abad275517f14 15,46
+apps/backend/tests/community/core/skill_center/services/test_collect_bot_active_mcps_union.py
+  s_befd386ce20825::t_9f99b8c356fbc4 299-316
+apps/backend/tests/community/e2e/test_bot_public_risk_flow.py
+  s_befd386ce20825::t_c97b9103431bdc 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "63684286f05d14c27a1fc8160e3788738f1b4766",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

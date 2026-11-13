@@ -1,0 +1,25 @@
+apps/bcsfuse/src/app/tc/providers.py
+  s_ce84d91f3d35be::t_9376720b7b4732 5,70,85-88,90,155
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  s_ce84d91f3d35be::t_0a30f742f398a0 63-64
+  s_ce84d91f3d35be::t_deff369b37342c 7,95-97
+  s_ce84d91f3d35be::t_024358375fb147 60-62,65-94,98-106
+apps/bcsfuse/docs/qdrant-modes.md
+  s_ce84d91f3d35be::t_9376720b7b4732 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12aac2608527400855260b7afda97bb6e2f1746f",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

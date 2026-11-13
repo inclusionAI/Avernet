@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/plugins/community/device_adapter_transport.py
+  s_03f4dc99aee256::t_9596a2d3c65352 148-166
+  s_03f4dc99aee256::t_8ef71ef5d70916 145-147
+  s_03f4dc99aee256::t_5b4fb5ae301bb7 167-168
+apps/backend/tests/community/plugins/community/test_device_adapter_transport.py
+  s_03f4dc99aee256::t_c2ee1bb68025ef 168-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6c1dc75ad016e7fc85383599f40c8db47417558",
+  "prompts": {},
+  "sessions": {
+    "s_03f4dc99aee256": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce5-6aef-7903-8e88-a8117778e186",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+docs/flows/backend-runtime-targeting.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-59
+apps/backend/docs/diagnostics/runtime-targeting.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-56
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-73
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_86fe52d1f28f29 19,30-34,40
+CONTEXT.md
+  s_47ed8e91e4b8af::t_54347d22849887 260-277
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_bb1048de645214 8-21,100-112
+apps/backend/docs/bot-manager-sync-operations.md
+  s_47ed8e91e4b8af::t_9f1aeb7f62cdfe 3-4
+apps/backend/docs/flows/bot-manager-sync.md
+  s_47ed8e91e4b8af::t_6cdbb1824ef25c 1-281
+docs/agents/domain.md
+  s_47ed8e91e4b8af::t_03ffd3ccff11a4 18-21,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "874495c1e5ce61f0cbef0f8baf4dc1085ccbbf3f",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

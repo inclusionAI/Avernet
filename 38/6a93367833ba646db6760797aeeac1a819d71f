@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  h_5f06d4d8b4bdd5 9,22,30,76,86-102,110-111,114-118,121-127,130-134,138,142,145,147-149,151-156
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-git-config.test.ts
+  h_5f06d4d8b4bdd5 4-5,94,98,127,161-173,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "386a93367833ba646db6760797aeeac1a819d71f",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

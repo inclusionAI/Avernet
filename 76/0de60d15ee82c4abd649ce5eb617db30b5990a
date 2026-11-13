@@ -1,0 +1,94 @@
+apps/backend/tests/corp/core/default_env_bot/test_default_env_bot_service.py
+  s_72c0792b1b408e::t_9c2e3d07e1e5da 2738,2750
+  s_72c0792b1b408e::t_e13156bf3f4c51 2791-2816
+apps/backend/src/agentclaw/corp/core/default_env_bot/default_env_bot_service.py
+  s_72c0792b1b408e::t_88af8d8c1712ca 1555
+  s_72c0792b1b408e::t_943d5c59f798b5 2154,2160,2162-2163
+  s_72c0792b1b408e::t_527ed28fd22222 1789,1826-1831,1835-1836,1842
+  s_72c0792b1b408e::t_1e678036ac8549 1596
+  s_72c0792b1b408e::t_3e1b5a89df3480 1593,1598-1604,1615
+  s_72c0792b1b408e::t_16b508467d3188 1723-1727,1730-1731
+  s_72c0792b1b408e::t_39f4e8093bcdef 1767-1768,1781-1782,1790-1793,1795-1799,1802,1804,1807-1825,1846,1850-1853
+  s_72c0792b1b408e::t_584e2ca640b29b 2155-2159,2161
+  s_72c0792b1b408e::t_9591b2c37286c6 2164
+apps/backend/tests/corp/core/default_env_bot/test_eval_env_bot_service.py
+  s_72c0792b1b408e::t_54f21a4a8d8c8e 877
+apps/backend/tests/corp/core/default_env_bot/test_eval_publish_poll_task.py
+  s_72c0792b1b408e::t_fc08d086dc6bcc 168,176,181-183,185,191,193-241
+  s_72c0792b1b408e::t_fb4881aa6a7805 51,306
+  s_72c0792b1b408e::t_d949501793bc11 1-50,52-167,169-175,177-180,184,186-190,192,242-264,266,268-277,279-305,307-371,373-405
+  s_72c0792b1b408e::t_191dbd9b70ef5a 278
+  s_72c0792b1b408e::t_395386cd6586f7 265,267
+  s_72c0792b1b408e::t_190240ccb349e8 372
+apps/backend/src/agentclaw/corp/core/default_env_bot/eval_publish_poll_task.py
+  s_72c0792b1b408e::t_c67ce9dcaf7838 63-67
+  s_72c0792b1b408e::t_acedb15b2dd804 227,237,239
+  s_72c0792b1b408e::t_aa8029a5d71311 175,177
+  s_72c0792b1b408e::t_bacb4458b620de 248
+  s_72c0792b1b408e::t_1bdd9f8f76e6e5 7,10,16
+  s_72c0792b1b408e::t_a3bbee12f87ef5 357-374
+  s_72c0792b1b408e::t_4aa149585c2dc2 11-13,17,19-20
+  s_72c0792b1b408e::t_33368ec69b7397 285-287,293-309,311-317
+  s_72c0792b1b408e::t_95894421871fb9 257
+  s_72c0792b1b408e::t_0b10b1b9251881 1-6,8-9,14-15,18,21-25,27,30-52,55-56,79-97,99-174,176,178-194,196-204,206-226,228-236,238,240-247,249-256,258-284,288-292,310,318-356,375-392
+  s_72c0792b1b408e::t_2289ce577bce7a 53-54,57-62,68-78
+  s_72c0792b1b408e::t_e2fe70a7498b1c 26
+  s_72c0792b1b408e::t_392c0757600001 28-29
+  s_72c0792b1b408e::t_b7d20fed0d67d9 98
+  s_72c0792b1b408e::t_b8e5e7ba312e0a 195
+  s_72c0792b1b408e::t_648e00d6eee6dc 205
+apps/backend/src/agentclaw/corp/core/default_env_bot/eval_draft_build_task.py
+  s_72c0792b1b408e::t_23cbf07a4b32ce 202-203
+  s_72c0792b1b408e::t_cc3a1d222bf712 22-24
+  s_72c0792b1b408e::t_688b136eedc63d 205-206
+  s_72c0792b1b408e::t_effd205f220ca4 131-132,135-137
+  s_72c0792b1b408e::t_de8bf10a493999 241
+  s_72c0792b1b408e::t_cb3704b8938d75 181
+  s_72c0792b1b408e::t_36a5b24574efd5 260-264,271-273,275,277
+  s_72c0792b1b408e::t_8ce704b8c103f7 13-21,25
+apps/backend/src/agentclaw/corp/plugins/eval_bot_version_repository.py
+  s_72c0792b1b408e::t_7c302e3adb2a10 146-149,153-159,162-164
+  s_72c0792b1b408e::t_080b7067b45661 150-152,160-161,165
+apps/backend/tests/corp/core/default_env_bot/test_eval_draft_build.py
+  s_72c0792b1b408e::t_c1525137f591ef 1031,1035-1037,1040-1055
+  s_72c0792b1b408e::t_fa566924079e71 758,771-777
+  s_72c0792b1b408e::t_a6139a3078739b 1226-1242,1248-1249
+  s_72c0792b1b408e::t_a35215b48d4a17 1222-1223,1250-1274
+  s_72c0792b1b408e::t_cc48836f4ffb66 1243
+  s_72c0792b1b408e::t_2a9eaed2567001 1147-1153
+  s_72c0792b1b408e::t_37eec1cd382968 1038-1039
+  s_72c0792b1b408e::t_870cfe01a4b444 1221
+  s_72c0792b1b408e::t_f9240bd2a9b0d6 1224-1225
+  s_72c0792b1b408e::t_64aaa4f218297e 1244-1247
+  s_359026c3435dc3::t_65dee95271768d 750,1027-1029,1093,1142
+apps/backend/tests/corp/core/default_env_bot/test_eval_bot_version_repository.py
+  s_72c0792b1b408e::t_05693ac166e451 244-245,251,253,256
+  s_72c0792b1b408e::t_fb4881aa6a7805 246-250,252,254-255,257-262
+apps/backend/src/agentclaw/corp/core/default_env_bot/repository/protocol.py
+  s_72c0792b1b408e::t_c27d2423be8b38 88,91-93,95-97
+  s_72c0792b1b408e::t_bd8d56df021845 84-87,89-90,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "760de60d15ee82c4abd649ce5eb617db30b5990a",
+  "prompts": {},
+  "sessions": {
+    "s_359026c3435dc3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_359026c3435dc3",
+        "model": "unknown"
+      },
+      "human_author": "david.zj <david.zj@antgroup.com>"
+    },
+    "s_72c0792b1b408e": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6149dbdf-70eb-4730-92b5-abdf83219b3b",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "david.zj <david.zj@antgroup.com>"
+    }
+  }
+}

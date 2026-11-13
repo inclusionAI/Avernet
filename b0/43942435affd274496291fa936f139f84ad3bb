@@ -1,0 +1,77 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback.ts
+  s_0e0389a35f491c::t_e032cab3eff77b 43-44,47-50
+  s_0e0389a35f491c::t_4de10a1eb7c5fb 1-37,41-42,45-46,51-53
+  s_0e0389a35f491c::t_da3fb9f52dcf0e 38-40
+apps/evolverun/clawweb/docs/recovery-owner-feedback/team97-routes.patch.json
+  s_0e0389a35f491c::t_36dc73d4e8fb28 1-37
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/session-recovery-runtime.ts
+  s_0e0389a35f491c::t_528473289e5d04 13-14,17-18,20-23
+  s_0e0389a35f491c::t_19043f18feed3f 8-12,15-16,19,24
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/file-download/handbook.md
+  s_0e0389a35f491c::t_8a1c9ab3b99df5 24-31
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/network/handbook.md
+  s_0e0389a35f491c::t_8a1c9ab3b99df5 1-23
+apps/gateway/tests/test_gateway_config.py
+  s_0e0389a35f491c::t_279e34b629062b 376-383
+  s_0e0389a35f491c::t_19043f18feed3f 327
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  s_0e0389a35f491c::t_8a1c9ab3b99df5 14,25-27
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  s_0e0389a35f491c::t_8a1c9ab3b99df5 32
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_0e0389a35f491c::t_7b7315c80e4945 50
+  s_0e0389a35f491c::t_6ffdf3d08bd898 51,53,151-156,158,217,443,445
+  s_0e0389a35f491c::t_0dab32841d4a68 448-450
+  s_0e0389a35f491c::t_de299ced0890c1 131-132,134,444
+  s_0e0389a35f491c::t_5fd44809218cd4 157,161,181,185-192,286,442
+  s_0e0389a35f491c::t_49b1b1f7eded7c 255-256
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_0e0389a35f491c::t_15405ca172febf 18,53-54,134,136,142,144,146,150,152,156-168
+  s_0e0389a35f491c::t_48a79d12bba4b9 154-155
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/final_summary.py
+  s_0e0389a35f491c::t_de299ced0890c1 14
+  s_0e0389a35f491c::t_6ffdf3d08bd898 23-25
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  s_0e0389a35f491c::t_da3fb9f52dcf0e 27-28,54-68
+  s_0e0389a35f491c::t_101205e6b1317c 1,5-19,23-26,29-53
+  s_0e0389a35f491c::t_8970ed46694ad0 20-22
+  s_0e0389a35f491c::t_77e69c41f8c13b 2-4,69-93
+apps/evolverun/clawweb/docs/recovery-owner-feedback/owner-notifications.example.json
+  s_0e0389a35f491c::t_36dc73d4e8fb28 1-13
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  s_0e0389a35f491c::t_d86f7331994c91 52
+  s_0e0389a35f491c::t_8a1c9ab3b99df5 14-51
+apps/gateway/configs/application.yaml
+  s_0e0389a35f491c::t_911eb972517fc2 521,525-526
+  s_0e0389a35f491c::t_267b11b769890b 250-253,520,522-524
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  s_0e0389a35f491c::t_36dc73d4e8fb28 1-41,43,45-50,52,54-57
+  s_0e0389a35f491c::t_feb5fde3d40da0 42,51,53
+  s_0e0389a35f491c::t_48a79d12bba4b9 44
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_0e0389a35f491c::t_19043f18feed3f 23
+  s_0e0389a35f491c::t_528473289e5d04 745
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback.test.ts
+  s_0e0389a35f491c::t_77f9761ce0b070 43
+  s_0e0389a35f491c::t_615f02b2a33134 1-5,7-15,32-42,44-47,53-57
+  s_0e0389a35f491c::t_528473289e5d04 6,16-31
+  s_0e0389a35f491c::t_fe1e918ddb536e 48-52
+apps/evolverun/clawweb/package-lock.json
+  s_0e0389a35f491c::t_d7cdd79e87dd94 38,244,284,316-337,359-360,4717-4719,4725,4733-4736,6351-6366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b043942435affd274496291fa936f139f84ad3bb",
+  "prompts": {},
+  "sessions": {
+    "s_0e0389a35f491c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a56a-2741-7ad2-b03c-29b728d6311b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

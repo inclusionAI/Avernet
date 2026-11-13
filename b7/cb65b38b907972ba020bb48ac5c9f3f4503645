@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/public/modules/workflow/web/api/autoHealDeploySnapshot.ts
+  h_43af82e14600e4 5,34
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionSession.test.ts
+  h_43af82e14600e4 2,23-29
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  h_43af82e14600e4 198-210
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 31,587
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceSaveDeploy.test.tsx
+  h_43af82e14600e4 143-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b7cb65b38b907972ba020bb48ac5c9f3f4503645",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

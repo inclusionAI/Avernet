@@ -1,0 +1,116 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/document_index.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-30
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_9e428ec8192673::t_043093123e01b7 56
+  s_9e428ec8192673::t_a09a64df855d0c 1-9,13-23,28-29,33-42,52-55,63-65,71-76
+  s_9e428ec8192673::t_8df1117181ef2c 10-12,24-27,30-32,43-49,51,57-62,66-70
+  s_9e428ec8192673::t_bec8a16c5cebd7 77-80,82-108,112-124,129-134,142-146,148,150-155
+  s_9e428ec8192673::t_789f3c33f617a7 50,109-111,126-128,135-141
+  s_9e428ec8192673::t_23433edca292a6 81,125,147,149
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/__init__.py
+  s_9e428ec8192673::t_3d2d4b30017581 1
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_process.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-106
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_9e428ec8192673::t_8df1117181ef2c 19,103-105
+  s_9e428ec8192673::t_3d2d4b30017581 1-18,20-102,106-130
+apps/bcsfuse/packages/search-core/pyproject.toml
+  s_9e428ec8192673::t_85dea06b5a69a6 17-18,21-22
+  s_9e428ec8192673::t_5054c85feb33dc 23
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_9e428ec8192673::t_1b7cb585237abc 1-11,14-21,28-30,35,38-281
+  s_9e428ec8192673::t_8df1117181ef2c 12-13,22-27,31-34,36-37
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_9e428ec8192673::t_a1e8baee6dcefc 1-6,8,16-22,34-91
+  s_9e428ec8192673::t_8df1117181ef2c 7,11,14-15,23-33
+  s_9e428ec8192673::t_0a20f33f4719fc 9-10,12-13
+apps/bcsfuse/docs/archive/validation/public-catalog-20261103.md
+  s_9e428ec8192673::t_9b1968eeb32216 1-37
+apps/bcsfuse/packages/search-core/src/search_core/application/admission.py
+  s_9e428ec8192673::t_8df1117181ef2c 7
+  s_9e428ec8192673::t_3d2d4b30017581 1-6,8-37
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/local.py
+  s_9e428ec8192673::t_8df1117181ef2c 28-34,42-52,55-63,79-81,89-93,95-99,102-106
+  s_9e428ec8192673::t_85dea06b5a69a6 1-27,35-41,53-54,64-78,82-88,94,100-101,107-110
+apps/bcsfuse/README.md
+  s_9e428ec8192673::t_bc1ab8b3cdaee5 487-490
+apps/bcsfuse/packages/search-core/src/search_core/application/__init__.py
+  s_9e428ec8192673::t_3d2d4b30017581 1
+apps/bcsfuse/packages/search-core/src/search_core/catalog/documents.py
+  s_9e428ec8192673::t_8df1117181ef2c 8,17-19,26-30,35-41,43-63,65,114
+  s_9e428ec8192673::t_e5abeafce1d8dc 1-7,9-10,66-113,115-159
+  s_9e428ec8192673::t_39609c60499184 11-16,20-23,25,31-34,42,64
+  s_9e428ec8192673::t_f6a2a6bc86b4bb 24
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-188
+apps/bcsfuse/packages/search-core/src/search_core/config/search.py
+  s_9e428ec8192673::t_1b7cb585237abc 1-60
+apps/bcsfuse/packages/search-core/README.md
+  s_9e428ec8192673::t_7ed2e8ec048be5 15,21-23,55-57,70-73,75,80-82,87-95
+apps/bcsfuse/packages/search-core/src/search_core/providers/vector_index_lifecycle.py
+  s_9e428ec8192673::t_3d2d4b30017581 2-69,71-87
+  s_9e428ec8192673::t_8df1117181ef2c 70
+  s_9e428ec8192673::t_789f3c33f617a7 1
+apps/bcsfuse/packages/search-core/src/search_core/catalog/conversion.py
+  s_9e428ec8192673::t_8df1117181ef2c 31-33,36-38,45-48
+  s_9e428ec8192673::t_af99eb373ae3ef 1-30,34-35,39-44,49-52
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_card_preparation.py
+  s_9e428ec8192673::t_8df1117181ef2c 4
+  s_9e428ec8192673::t_e5abeafce1d8dc 1-3,5-147
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/admission.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-5,7-37
+  s_9e428ec8192673::t_8df1117181ef2c 6
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_9e428ec8192673::t_7ed2e8ec048be5 28-30,108-132
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-94
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-11,13-228
+  s_9e428ec8192673::t_8df1117181ef2c 12
+apps/bcsfuse/packages/search-core/src/search_core/providers/demo_embedding.py
+  s_9e428ec8192673::t_a0ecb0019002fd 1-24
+apps/bcsfuse/packages/search-core/src/search_core/config/index_sync.py
+  s_9e428ec8192673::t_8df1117181ef2c 6
+  s_9e428ec8192673::t_3d2d4b30017581 1-5,7-59
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/http.py
+  s_9e428ec8192673::t_1b7cb585237abc 1-3,7-8,11-28,32-67
+  s_9e428ec8192673::t_8df1117181ef2c 4-6,9-10,29-31
+apps/bcsfuse/packages/search-core/src/search_core/application/catalog_retrieval.py
+  s_9e428ec8192673::t_3d2d4b30017581 1-29
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_9e428ec8192673::t_f263934c4c19ae 1-10,12-21,26-27,29-33,44-88,101-127,134-135,139,141-146,155-228,234-460
+  s_9e428ec8192673::t_bec8a16c5cebd7 129-133,140
+  s_9e428ec8192673::t_0a20f33f4719fc 39,41-43
+  s_9e428ec8192673::t_8df1117181ef2c 11,22-25,28,34-38,40,89-100,136-138,147-154,229-233
+  s_9e428ec8192673::t_5c690d867df731 128
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_catalog.py
+  s_9e428ec8192673::t_620d494dbf3805 27-38
+  s_9e428ec8192673::t_39609c60499184 1-6,8,13-26
+  s_9e428ec8192673::t_8df1117181ef2c 7,9-12,39-41
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_9e428ec8192673::t_a1e8baee6dcefc 1-20,22-66
+  s_9e428ec8192673::t_8df1117181ef2c 21
+apps/bcsfuse/packages/search-core/tests/test_default_conversion.py
+  s_9e428ec8192673::t_8df1117181ef2c 22-23,25-31,39-45,53-55,62-64
+  s_9e428ec8192673::t_a09a64df855d0c 1-21,24,32-38,46-52,56-61,65-66
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_9e428ec8192673::t_bc1ab8b3cdaee5 1-87
+apps/bcsfuse/docs/architecture/search-core-boundary.md
+  s_9e428ec8192673::t_7ed2e8ec048be5 12-13,19,32-34,69-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4277abcc031d0c37134ffb8f3887681e62ed446c",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

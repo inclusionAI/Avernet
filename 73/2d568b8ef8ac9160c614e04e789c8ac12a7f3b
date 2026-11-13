@@ -1,0 +1,28 @@
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_3de00d168c3d75 517-522,525-530,532-542,545-562
+  s_ce84d91f3d35be::t_ea9779252c94b1 543-544
+  s_ce84d91f3d35be::t_2be42b6cda5466 523-524,531
+apps/bcsfuse/src/app/tc/legacy_catalog.py
+  s_ce84d91f3d35be::t_74f859f7cb6c45 83-117
+apps/bcsfuse/src/app/tc/legacy_index.py
+  s_ce84d91f3d35be::t_74f859f7cb6c45 169-171
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_2be42b6cda5466 5
+  s_ce84d91f3d35be::t_74f859f7cb6c45 165-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "732d568b8ef8ac9160c614e04e789c8ac12a7f3b",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/llm_judge.py
+  s_7517e37f6fcee5::t_a527ea52b8e52a 29,73,352-356,377-381
+src/ecb/ecb/domain/task_benchmark/gateways.py
+  s_7517e37f6fcee5::t_a527ea52b8e52a 16
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_llm_judge.py
+  s_7517e37f6fcee5::t_7b156f585ec959 56,60
+  s_7517e37f6fcee5::t_1e216ece576471 565-567
+  s_7517e37f6fcee5::t_688773d89fbe5e 455
+  s_7517e37f6fcee5::t_bf17b91b8e1fdb 23-26,430-433
+src/ecb/ecb/infrastructure/task_benchmark/llm_client_gateway.py
+  s_7517e37f6fcee5::t_70df0f612b12fd 33
+src/ecb/tests/infrastructure/task_benchmark/test_openai_adapters.py
+  s_7517e37f6fcee5::t_894c2d07bf77f2 1-55
+src/ecb/ecb/infrastructure/task_benchmark/openai_adapters.py
+  s_7517e37f6fcee5::t_a527ea52b8e52a 45,51,58-63,82-88
+  s_7517e37f6fcee5::t_4361d5233838bf 93-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff1b7d1ee38759aee03cdf136584f70be399d759",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

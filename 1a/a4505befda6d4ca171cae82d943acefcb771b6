@@ -1,0 +1,23 @@
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_c3252bbc5bd454 162
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_c3252bbc5bd454 31,112,121-126,133,229
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_c3252bbc5bd454 11,144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1aa4505befda6d4ca171cae82d943acefcb771b6",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_d4d3c338ea3598 92-93,110-125
+  s_ce84d91f3d35be::t_bf67e266eeb033 126
+apps/bcsfuse/src/app/tc/catalog.py
+  s_ce84d91f3d35be::t_5788df3d4f52fa 29-35,37,56-60,165-171,180-186,269
+apps/bcsfuse/src/app/tc/v2.py
+  s_ce84d91f3d35be::t_ac8d8155b90551 54-58
+  s_ce84d91f3d35be::t_5788df3d4f52fa 36-41,59-60
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_ac8d8155b90551 609-611,618-620,623-625,627-630,632-636,638-641,646-648,653-655,658-660,671-675,689-692,697-699,706-712
+  s_ce84d91f3d35be::t_b09eb3ccbf550f 606-608,612,614-617,621-622,626,631,637,642-645,649-652,656-657,661-670,676-682,684-688,693-696,700-705,713-723
+  s_ce84d91f3d35be::t_9c670c54472102 683
+  s_ce84d91f3d35be::t_c30bd87e921af3 613
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_5788df3d4f52fa 218,222,225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12a99ed1462e81b75e1ff830bd38417bf10e0a3d",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+apps/backend/tests/community/core/cron/services/test_cron_relay_uses_resolver.py
+  s_5c621d315cef42::t_fca5a49667d7a7 31-34,1186-1218,1230-1359,1361-1416
+  s_45822537b9a93b::t_e4434a759913b3 1219-1229
+  s_d46d1b1d7c6466::t_58819e39bdb036 1360,1417-1418
+apps/backend/src/agentclaw/community/core/cron/services/cron_runtime_targets.py
+  s_1b0a50b6b7c34a::t_bbc04650d5e430 69-75,79,82-84,363-365
+  s_45822537b9a93b::t_6d503c425a2706 76-78,80-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "721c7a9ee40fb8b9f776e0fbf16300930ee48f27",
+  "prompts": {},
+  "sessions": {
+    "s_1b0a50b6b7c34a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c38-67e1-7053-9dd5-2e56c70ceeb5",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_45822537b9a93b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c37-a32e-72a1-802a-3e9df98b3597",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_5c621d315cef42": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c37-e041-70d3-ac8e-6a3ede3bffc8",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_d46d1b1d7c6466": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c2d-4564-7670-ada3-f91081eb1bf8",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/frontend-nextgen/test/internal/capability-workshop/useSkillCreate.test.ts
+  s_edf46fcbab38c5::t_a60169ddc0e15b 5,58,192
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillCreate.ts
+  s_edf46fcbab38c5::t_703cedc0b29513 49-50,53-59,61,98
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillEditor.ts
+  s_edf46fcbab38c5::t_703cedc0b29513 61-64
+apps/frontend-nextgen/test/internal/capability-workshop/useSkillEditor.test.ts
+  s_edf46fcbab38c5::t_a60169ddc0e15b 605,623,628-630
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7dd0578e0f5aabeb0eeab2ad919e06e6c52d6ea5",
+  "prompts": {},
+  "sessions": {
+    "s_edf46fcbab38c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c940-a59d-7633-a002-5161c102349e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

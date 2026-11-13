@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-message-flow/src/caller_delegation.rs
+  s_37d6bf63656bc1::t_39fb442227db64 213-289
+  s_37d6bf63656bc1::t_3bc82c18f93e78 165-169
+  s_37d6bf63656bc1::t_9e100100a85fd4 56-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66654884cd22ebca84d08d93578013959e707ccc",
+  "prompts": {},
+  "sessions": {
+    "s_37d6bf63656bc1": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "aaf090ad-8871-4232-b4f2-85b2e25d1fb6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

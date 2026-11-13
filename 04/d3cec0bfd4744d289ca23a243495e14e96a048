@@ -1,0 +1,29 @@
+apps/bcs-internal/docs/sofa-tracer.md
+  s_de8b18a148c239::t_f8d6925722fd2b 23-28,36-38,41-56,99-105
+  s_de8b18a148c239::t_621be708689dd9 132-150
+  s_de8b18a148c239::t_77a28367bdf106 39-40,109
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/http_client.rs
+  s_de8b18a148c239::t_1f7845199f5155 112
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/failure_notifier.rs
+  s_de8b18a148c239::t_1f7845199f5155 304
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_de8b18a148c239::t_1f7845199f5155 242
+apps/bcs-internal/crates/plugins/bcs-bailian/src/lib.rs
+  s_de8b18a148c239::t_1f7845199f5155 177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04d3cec0bfd4744d289ca23a243495e14e96a048",
+  "prompts": {},
+  "sessions": {
+    "s_de8b18a148c239": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a659-522b-7611-85d7-89f0d4fb9517",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

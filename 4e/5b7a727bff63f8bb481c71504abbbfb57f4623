@@ -1,0 +1,48 @@
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/llm_judge.py
+  s_7517e37f6fcee5::t_90b4388079f501 6,26-64,320,354,361,375
+src/ecb/ecb/interfaces/task_benchmark/oncall_effect_router.py
+  s_7517e37f6fcee5::t_9818c705e8c246 15,68-72,74,79-80
+  s_7517e37f6fcee5::t_169993cbc86616 122-124,126-128
+src/ecb/ecb/interfaces/task_benchmark/oncall_effect_schemas.py
+  s_7517e37f6fcee5::t_9818c705e8c246 16-19
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_service.py
+  s_7517e37f6fcee5::t_97640229564a5e 451-496,541-543
+  s_7517e37f6fcee5::t_d56f23f9162bda 1,497-540
+  s_7517e37f6fcee5::t_290f0635be4e7c 450,553,584,592,596-603,605-606,609-618,620,628-630
+  s_7517e37f6fcee5::t_d0fe2aa72d00dd 593-595,604,607-608,619,621-627,631-632
+  s_7517e37f6fcee5::t_5d17fc0560f91f 633-634
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_llm_judge.py
+  s_7517e37f6fcee5::t_2a60970ff4c05f 477-515,518-552
+  s_7517e37f6fcee5::t_0cf2a816bb19cb 516-517
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_afa43aa9d90ce8 1081
+  s_7517e37f6fcee5::t_e95d9e579e36bf 1053-1055,1059,1062-1067,1070
+  s_7517e37f6fcee5::t_65b597b047496f 479-482,484,493,503-520,522,544
+  s_7517e37f6fcee5::t_9c166f8f42d451 957-971
+  s_7517e37f6fcee5::t_169993cbc86616 328,1008-1020,1026-1052,1078-1080,1082-1083,1085-1091
+  s_7517e37f6fcee5::t_83ebded1670290 1021-1025,1084,1092,1098-1104
+  s_7517e37f6fcee5::t_ea6f7969c75fee 1056-1058,1060-1061,1068-1069,1071-1077
+  s_7517e37f6fcee5::t_66c2c6ef3bbd32 1093-1097
+  s_7517e37f6fcee5::t_9af29ab5a2ee52 1105
+src/ecb/tests/interfaces/task_benchmark/test_online_router.py
+  s_7517e37f6fcee5::t_3b7a77b63f0db5 357-358,365-366,371
+  s_7517e37f6fcee5::t_97640229564a5e 374,386,389-390,402-404
+src/ecb/docs/specs/task_regression/2026-11-10-oncall-effect-selected-refresh/implementation.md
+  s_7517e37f6fcee5::t_002e647be8f204 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e5b7a727bff63f8bb481c71504abbbfb57f4623",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

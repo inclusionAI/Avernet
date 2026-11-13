@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/README.md
+  s_cecdc98e721f4b::t_d7082a9ad78206 2222-2225
+apps/bcs/scripts/e2e-runner/bcs_e2e/file_transport.py
+  s_cecdc98e721f4b::t_2c43c64a83322e 490-493,536-541,558-561
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_reporting.py
+  s_cecdc98e721f4b::t_4c77a0daf3b014 200
+apps/bcs/scripts/e2e-runner/tests/test_browser_context.py
+  s_cecdc98e721f4b::t_9f7932030a0f5f 54,58-68
+apps/bcs/scripts/e2e-runner/tests/test_case_adapters.py
+  s_cecdc98e721f4b::t_51c4a6048341fc 70,75-84,93-95
+apps/bcs/scripts/e2e-runner/tests/test_failure_evidence.py
+  s_cecdc98e721f4b::t_c68e84d92a5d9d 201
+apps/bcs/scripts/e2e-runner/tests/test_file_transport.py
+  s_cecdc98e721f4b::t_72acf2ed35462d 230,249,254-288,337
+apps/bcs/scripts/e2e-runner/tests/test_response_correlation.py
+  s_cecdc98e721f4b::t_fbfc37358eced9 4,21-26,177,200-202,256-258
+apps/bcs/scripts/e2e-runner/tests/test_retained_file_remote.py
+  s_cecdc98e721f4b::t_dbbb54b965e1b0 382
+apps/bcs/scripts/e2e-runner/tests/test_storage_targets.py
+  s_cecdc98e721f4b::t_0ba5af9f496e52 26,44,69,84,97,142,145,169-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61d2ec3d4e5a353ac3e52a77ea146f7b741f528e",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
