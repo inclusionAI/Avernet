@@ -4,6 +4,7 @@
 不设幂等键)、``get_current_status`` 全量按 id 升序返回(trunk 过滤在
 服务投影层)、未知 ID 返回 None。JSON 编解码以落库行为准校验。
 """
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -30,6 +31,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     InitialEventDraft,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
@@ -45,7 +47,9 @@ def _context_spec(executor: AgentRef | None = EXECUTOR) -> ContextSpec:
         executor_ref=executor,
         objective=OBJECTIVE,
         resource_refs=(
-            ResourceRef(resource_type="forum_topic", resource_id="topic_001", revision="3"),
+            ResourceRef(
+                resource_type="forum_topic", resource_id="topic_001", revision="3"
+            ),
         ),
         product_kind="team_todo",
         workflow_kind="team_todo_execution",
@@ -68,7 +72,7 @@ def _create_request(
 
 class TestCreateContext:
     def test_inserts_one_collet_and_one_initial_event(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
         record = repo.create_context(_create_request())
 
@@ -167,7 +171,7 @@ class TestCreateContext:
 
     def test_repeated_create_makes_a_second_context(self, db):
         """创建不设幂等键(spec 作者裁决):重复请求各建一个上下文。"""
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
         first = repo.create_context(_create_request())
         second = repo.create_context(_create_request())
@@ -185,13 +189,13 @@ class TestCreateContext:
 
 class TestGetCurrentStatus:
     def test_unknown_id_returns_none(self, db):
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
         assert repo.get_current_status("collet_unknown") is None
 
     def test_full_event_list_is_ordered_by_insertion_id(self, db):
         """仓储全量返回事件,顺序即自增 id;trunk 过滤不在仓储层(R9)。"""
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         # 无执行 Agent 的创建请求:覆盖 executor_ref=None 的 JSON round-trip。
         created = repo.create_context(_create_request(executor=None))
         assert created.context_spec.executor_ref is None

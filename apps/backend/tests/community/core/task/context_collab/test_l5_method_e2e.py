@@ -83,6 +83,7 @@ from agentclaw.community.core.task.context_collab.services.single_group_method_s
 from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
     SwarmMethodService,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 SPACE = SpaceRef(space_id="bbs_community_space", environment="prod")
 OWNER = PrincipalRef(principal_type="human", principal_id="u_topic_owner")
@@ -115,9 +116,7 @@ def _create_command(**overrides) -> ContextCreateCommand:
 
 
 def _future_iso(hours: float = 1.0) -> str:
-    return (
-        datetime.now(timezone.utc) + timedelta(hours=hours)
-    ).isoformat()
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
 
 class _Services:
@@ -125,17 +124,19 @@ class _Services:
 
     def __init__(self, db) -> None:
         self.store = InMemoryMethodStore()
-        self.repo = ContextCollabRepository(db)
+        self.repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         self.authorizer = StructuralMethodOpsAuthorizer()
         self.context_service = ContextCollabService(
             repository=self.repo,
             method_store=self.store,
             authorizer=StructuralContextCollabAuthorizer(),
+            product_catalog=PRODUCT_CATALOG,
         )
         self.lifecycle = MethodLifecycleService(
             store=self.store,
             authorizer=self.authorizer,
             collab_repo=self.repo,
+            product_catalog=PRODUCT_CATALOG,
         )
         self.single_group = SingleGroupMethodService(
             store=self.store,
@@ -144,10 +145,14 @@ class _Services:
             lifecycle=self.lifecycle,
         )
         self.swarm = SwarmMethodService(
-            store=self.store, authorizer=self.authorizer, collab_repo=self.repo,
+            store=self.store,
+            authorizer=self.authorizer,
+            collab_repo=self.repo,
         )
         self.open = OpenMethodService(
-            store=self.store, authorizer=self.authorizer, collab_repo=self.repo,
+            store=self.store,
+            authorizer=self.authorizer,
+            collab_repo=self.repo,
         )
 
 
@@ -173,7 +178,9 @@ def _bind_and_activate(
         _actor(OWNER),
     )
     services.lifecycle.activate(
-        collab_id, binding_id, MethodStateChangeCommand(reason="e2e"),
+        collab_id,
+        binding_id,
+        MethodStateChangeCommand(reason="e2e"),
         _actor(OWNER),
     )
     return binding_id
@@ -196,12 +203,14 @@ class TestL5MethodObjectsE2E:
         assert set(top.method_names) == {"Open", "Group"}
         # group:invite + add_member(顶层 Group 面)。
         services.single_group.invite(
-            collab_id, top_binding,
+            collab_id,
+            top_binding,
             GroupMemberCommand(participant_ref="u_forum_1001", reason="e2e"),
             _actor(OWNER),
         )
         services.single_group.add_member(
-            collab_id, top_binding,
+            collab_id,
+            top_binding,
             GroupMemberCommand(participant_ref="u_forum_1001"),
             _actor(OWNER),
         )
@@ -209,7 +218,8 @@ class TestL5MethodObjectsE2E:
         # → screen → admit(录取产物 = 本 binding 的 ACTIVE 成员行)。
         open_binding = _bind_and_activate(services, collab_id, "Open", "mb_open_e2e")
         published = services.open.publish_opportunity(
-            collab_id, open_binding,
+            collab_id,
+            open_binding,
             OpenOpportunityCommand(
                 scope_ref="task_scope_open_e2e",
                 participation_type="GROUP_MEMBER",
@@ -220,7 +230,9 @@ class TestL5MethodObjectsE2E:
         )
         assert published.state == "OPEN"
         application = services.open.submit_application(
-            collab_id, open_binding, "opp_e2e",
+            collab_id,
+            open_binding,
+            "opp_e2e",
             OpenApplicationCommand(
                 applicant_agent_ref="bot_contrib_001",
                 accountable_principal_ref="u_contrib_001",
@@ -230,20 +242,23 @@ class TestL5MethodObjectsE2E:
         )
         assert application.state == "SUBMITTED"
         services.open.screen(
-            collab_id, open_binding, application.object_id,
-            OpenDecisionOpCommand(), _actor(OWNER),
+            collab_id,
+            open_binding,
+            application.object_id,
+            OpenDecisionOpCommand(),
+            _actor(OWNER),
         )
         admitted = services.open.admit(
-            collab_id, open_binding, application.object_id,
+            collab_id,
+            open_binding,
+            application.object_id,
             OpenAdmitCommand(admitted_scope_ref="scope://contrib"),
             _actor(OWNER),
         )
         assert admitted.state == "ADMITTED"
         products = [
             member
-            for member in services.store.list_members(
-                AXES, open_binding, collab_id
-            )
+            for member in services.store.list_members(AXES, open_binding, collab_id)
             if member.participant_ref == "bot_contrib_001"
         ]
         assert len(products) == 1
@@ -258,7 +273,8 @@ class TestL5MethodObjectsE2E:
             services, collab_id, "Single", "mb_single_e2e"
         )
         selected = services.single_group.select(
-            collab_id, single_parent,
+            collab_id,
+            single_parent,
             SingleSelectCommand(
                 agent_participant_ref="bot_sel_e2e_001",
                 scope_ref="task_scope_sel_e2e",
@@ -268,7 +284,8 @@ class TestL5MethodObjectsE2E:
         )
         assert selected.state == "ACTIVE"
         delegated = services.single_group.delegate(
-            collab_id, single_parent,
+            collab_id,
+            single_parent,
             SingleDelegateCommand(
                 method_kind="Single",
                 parent_scope_ref="task_scope_sel_e2e",
@@ -281,11 +298,14 @@ class TestL5MethodObjectsE2E:
         assert delegated.edge["relation_kind"] == "delegate_to"
         assert delegated.edge["parent_binding"] == single_parent
         services.lifecycle.activate(
-            collab_id, "mb_single_child_e2e",
-            MethodStateChangeCommand(reason="e2e"), _actor(OWNER),
+            collab_id,
+            "mb_single_child_e2e",
+            MethodStateChangeCommand(reason="e2e"),
+            _actor(OWNER),
         )
         child_selected = services.single_group.select(
-            collab_id, "mb_single_child_e2e",
+            collab_id,
+            "mb_single_child_e2e",
             SingleSelectCommand(
                 agent_participant_ref="bot_sel_child_001",
                 scope_ref="task_scope_sel_e2e",
@@ -295,9 +315,7 @@ class TestL5MethodObjectsE2E:
         )
         assert child_selected.state == "ACTIVE"
         # 顶层 inspection:capabilities + conformance evidence 非空(spec §5)。
-        inspection = services.lifecycle.inspect(
-            collab_id, top_binding, _actor(OWNER)
-        )
+        inspection = services.lifecycle.inspect(collab_id, top_binding, _actor(OWNER))
         assert inspection.capabilities
         assert inspection.conformance_evidence
 
@@ -309,12 +327,11 @@ class TestL5MethodObjectsE2E:
             _create_command(), _actor(OWNER)
         )
         collab_id = created.collab_context_id
-        swarm_binding = _bind_and_activate(
-            services, collab_id, "Swarm", "mb_swarm_e2e"
-        )
+        swarm_binding = _bind_and_activate(services, collab_id, "Swarm", "mb_swarm_e2e")
         # 执行剖面声明。
         profile = services.swarm.declare_execution_profile(
-            collab_id, swarm_binding,
+            collab_id,
+            swarm_binding,
             SwarmExecutionProfileCommand(
                 mode="NATIVE_COMPUTE",
                 target_ref="compute://runner/e2e",
@@ -327,7 +344,8 @@ class TestL5MethodObjectsE2E:
         assert profile.state == "ACTIVE"
         # 计划提交 + 校验报告 + adopt + start。
         plan = services.swarm.submit_plan_candidate(
-            collab_id, swarm_binding,
+            collab_id,
+            swarm_binding,
             SwarmPlanCandidateCommand(
                 task_ref="task_swarm_e2e",
                 swarm_plan_id="sp_e2e",
@@ -363,13 +381,12 @@ class TestL5MethodObjectsE2E:
             collab_id, swarm_binding, "sp_e2e", SwarmPlanOpCommand(), _actor(OWNER)
         )
         assert started.state == "RUNNING"
-        stage1 = services.store.get_stage(
-            AXES, "st_e2e_1", swarm_binding, collab_id
-        )
+        stage1 = services.store.get_stage(AXES, "st_e2e_1", swarm_binding, collab_id)
         assert stage1.state.value == "READY"  # 前沿 Stage 同步 READY
         # 分配:lease 未过期 + 已声明剖面 → allocation ACTIVE + Stage RUNNING。
         allocated = services.swarm.allocate_stage(
-            collab_id, swarm_binding,
+            collab_id,
+            swarm_binding,
             SwarmAllocateCommand(
                 stage_ref="st_e2e_1",
                 target_kind="COMPUTE",
@@ -387,8 +404,11 @@ class TestL5MethodObjectsE2E:
         assert allocation.state is AllocationState.ACTIVE
         # 完成:Stage SUCCEEDED、分配 RELEASED、provenance record 仍在。
         completed = services.swarm.complete_stage(
-            collab_id, swarm_binding, "st_e2e_1",
-            SwarmStageOutcomeCommand(), _actor(OWNER),
+            collab_id,
+            swarm_binding,
+            "st_e2e_1",
+            SwarmStageOutcomeCommand(),
+            _actor(OWNER),
         )
         assert completed.state == "SUCCEEDED"
         stage1_done = services.store.get_stage(
@@ -399,17 +419,11 @@ class TestL5MethodObjectsE2E:
             AXES, "alloc_e2e_1", swarm_binding, collab_id
         )
         assert released.state is AllocationState.RELEASED
-        records = services.store.list_execution_records(
-            AXES, swarm_binding, collab_id
-        )
+        records = services.store.list_execution_records(AXES, swarm_binding, collab_id)
         assert records, "provenance 执行记录必须留存"
         # inspection 的 conformance evidence 聚合 L5 对象状态计数。
-        inspection = services.lifecycle.inspect(
-            collab_id, swarm_binding, _actor(OWNER)
-        )
+        inspection = services.lifecycle.inspect(collab_id, swarm_binding, _actor(OWNER))
         assert inspection.conformance_evidence
         # 域外 binding 的 inspection 照常 NotFound(读面越域不误报)。
         with pytest.raises(ContextCollabNotFoundError):
-            services.lifecycle.inspect(
-                collab_id, "mb_ghost_binding", _actor(OWNER)
-            )
+            services.lifecycle.inspect(collab_id, "mb_ghost_binding", _actor(OWNER))

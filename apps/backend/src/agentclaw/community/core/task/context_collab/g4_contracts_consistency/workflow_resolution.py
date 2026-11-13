@@ -8,22 +8,26 @@
 - 快照为 ``None``(外部部分行)→ ``None``(无可裁决,事件照常接纳);
 - ``workflow_kind`` 未命中 ``MACHINE_REGISTRY`` → 返回原 status(不变);
 - 当前状态对该事件无规则命中 → 返回原 status(G4 通用合同:事件仍可
-  接纳,状态不变;产品面的时序刚性由各自的时序门承担,例如
-  ``TASK_COMMISSION_PRECONDITIONS``);
+  接纳,状态不变;产品面的时序刚性由各自的时序门承担,例如共享 ``product_contract.validate_product_event``);
 - 命中规则:守卫按 ``GuardEvaluationInput`` 值语义求值,任一 FAIL/BLOCKED
   由 ``resolve_transition`` 抛 ``ContextCollabValidationError`` 向外传。
 
-``TASK_COMMISSION_PRECONDITIONS`` 是任务代办的产品时序门唯一权威表
-(裁决 J):六动作各自的允许前置状态集,越轨在产品编排里先于机器裁决
-被拒(终态与非法时序不落事件)。
+``TASK_COMMISSION_PRECONDITIONS`` 仅为兼容导出,从机器迁移派生;
+G4 机器是唯一迁移权威。L6 WorkflowProfile 选择是否严格拒绝越序控制事件,
+通用与产品入口都经共享 G4 检查,不另建时序表。
 """
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     GUARD_REGISTRY,
     GuardEvaluationInput,
     MACHINE_REGISTRY,
+    VERSIONED_MACHINE_REGISTRY,
+    TASK_COMMISSION_GOAL_MACHINE,
     resolve_transition,
 )
 
@@ -36,6 +40,7 @@ def resolve_workflow_status(
     event_kind: str,
     payload: dict,
     actor,
+    workflow_version: int | None = None,
 ) -> str | None:
     """G4 机器裁决事件的接纳状态;返回新 status(不变即返回原 status)。
 
@@ -43,18 +48,23 @@ def resolve_workflow_status(
     的 ``AgentRef | None``,``snapshot`` 是 record 伴随的
     ``CurrentSnapshot | None``,``actor`` 为已认证调用的 ``PrincipalRef``。
     """
+    machine = (
+        MACHINE_REGISTRY.get(workflow_kind)
+        if workflow_version is None
+        else VERSIONED_MACHINE_REGISTRY.get((workflow_kind, workflow_version))
+    )
+    if workflow_version is not None and machine is None:
+        raise ContextCollabValidationError("versioned workflow machine is unavailable")
     if snapshot is None:
-        # 可空快照(外部部分行):无状态可裁决,事件照常接纳。
+        # Existing partial rows intentionally have no Task state to adjudicate.
         return None
     current_status = snapshot.status
-    machine = MACHINE_REGISTRY.get(workflow_kind)
     if machine is None:
         return current_status
     matched_rules = [
         rule
         for rule in machine.transitions
-        if rule.event_name == event_kind
-        and current_status in rule.from_states
+        if rule.event_name == event_kind and current_status in rule.from_states
     ]
     if not matched_rules:
         return current_status
@@ -69,21 +79,12 @@ def resolve_workflow_status(
         for rule in matched_rules
         for guard_ref in rule.guard_refs
     }
-    new_status = resolve_transition(
-        machine, current_status, event_kind, guard_results
-    )
+    new_status = resolve_transition(machine, current_status, event_kind, guard_results)
     return current_status if new_status is None else new_status
 
 
-# 任务代办产品时序门(裁决 J):动作事件 → 允许的前置快照状态集。
-# 与 TASK_COMMISSION_GOAL_MACHINE 六迁移形状互补:机器裁决状态推进,
-# 本表在产品编排里先把"越时序/终态后"的入事件拒下(错误词指明状态与
-# 动作),让 G4"无规则命中=事件接纳"的开放合同在刚性流程产品面上收紧。
+# Compatibility export, derived from the authoritative machine, never hand-maintained.
 TASK_COMMISSION_PRECONDITIONS: dict[str, set[str]] = {
-    "task.started": {"created"},
-    "task.progress.updated": {"in_progress"},
-    "task.submitted": {"in_progress"},
-    "task.accepted": {"reviewing"},
-    "task.rejected": {"reviewing"},
-    "task.cancelled": {"created", "in_progress", "reviewing", "blocked"},
+    rule.event_name: set(rule.from_states)
+    for rule in TASK_COMMISSION_GOAL_MACHINE.transitions
 }

@@ -63,13 +63,13 @@ from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
 )
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     ASSIGNEE,
-    BODY,
     SPACE,
     TITLE,
     _FakeRepo,
     _actor,
     _publish_command,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 
 class _SequenceDispatchPort(TaskDispatchPort):
@@ -116,7 +116,8 @@ def _real_method_port(repo, store):
             store=store,
             authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
-        )
+        ),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -129,11 +130,10 @@ def _service(repo=None, store=None, method_port=None, dispatch_port=None):
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=store,
         method_ops_port=(
-            method_port
-            if method_port is not None
-            else _real_method_port(repo, store)
+            method_port if method_port is not None else _real_method_port(repo, store)
         ),
         dispatch_port=dispatch,
+        product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, store, dispatch
 
@@ -153,15 +153,11 @@ class TestPublishDrivesOpenMethodLifecycle:
         assert binding.method_names == ("Open",)
 
         # 机会:恰一行,OPEN,SINGLE_CONTRIBUTION,capacity=1,scope=collet。
-        opportunities = store.list_opportunities(
-            axes, binding_id, view.collet_id
-        )
+        opportunities = store.list_opportunities(axes, binding_id, view.collet_id)
         assert len(opportunities) == 1
         opportunity = opportunities[0]
         assert opportunity.state is OpportunityState.OPEN
-        assert opportunity.participation_type is (
-            ParticipationType.SINGLE_CONTRIBUTION
-        )
+        assert opportunity.participation_type is (ParticipationType.SINGLE_CONTRIBUTION)
         assert opportunity.capacity == 1
         assert opportunity.scope_ref == view.collet_id
         assert opportunity.closes_at is None
@@ -169,9 +165,7 @@ class TestPublishDrivesOpenMethodLifecycle:
         assert opportunity.transitioned_by == "u_1001"
 
         # 申请:恰一行,ADMITTED,applicant=指定 bot,责任主体=发布人。
-        applications = store.list_applications(
-            axes, binding_id, view.collet_id
-        )
+        applications = store.list_applications(axes, binding_id, view.collet_id)
         assert len(applications) == 1
         application = applications[0]
         assert application.state is ApplicationState.ADMITTED
@@ -197,9 +191,7 @@ class TestSeamOrderingAndCommand:
         calls: list[str] = []
         port = _SpyMethodOpsPort(calls)
         dispatch = _SequenceDispatchPort(calls)
-        service, repo, _, _ = _service(
-            method_port=port, dispatch_port=dispatch
-        )
+        service, repo, _, _ = _service(method_port=port, dispatch_port=dispatch)
 
         view = service.publish_task(_publish_command(), _actor())
 
@@ -210,6 +202,9 @@ class TestSeamOrderingAndCommand:
         assert command.collab_context_id == view.collet_id
         assert command.assignee_agent_id == ASSIGNEE
         assert command.accountable_principal_id == "u_1001"
+        assert command.product_profile_ref.profile_id == "task_commission"
+        assert command.product_profile_ref.version == 1
+        assert command.method_binding_ref == top_level_binding_id(view.collet_id)
         assert context.actor.principal_id == "u_1001"
 
         # 次序:方法生命周期先完成,交付缝送达在后。
@@ -230,9 +225,7 @@ class TestMethodOpsFailurePropagates:
             dispatch_port=dispatch,
         )
 
-        with pytest.raises(
-            ContextCollabValidationError, match="method ops boom"
-        ):
+        with pytest.raises(ContextCollabValidationError, match="method ops boom"):
             service.publish_task(_publish_command(), _actor())
 
         # Collet 已持久不回滚(创建事件已在);正文未追加;未送达。
@@ -250,7 +243,9 @@ class TestPublishValidationPrecedesMethodOps:
         with pytest.raises(ContextCollabValidationError):
             service.publish_task(
                 PublishTaskCommand(
-                    title=TITLE, body="  ", space=SPACE,
+                    title=TITLE,
+                    body="  ",
+                    space=SPACE,
                     assignee_agent_id=ASSIGNEE,
                 ),
                 _actor(),
@@ -258,3 +253,19 @@ class TestPublishValidationPrecedesMethodOps:
 
         assert port.commands == []
         assert repo.create_calls == []
+
+
+@pytest.mark.parametrize(
+    "state", ["SUBMITTED", "SCREENING", "REJECTED", "WITHDRAWN", ""]
+)
+def test_publication_gate_rejects_nonadmitted_port_receipt(state):
+    class IncompleteAdmission(TaskMethodOpsPort):
+        def admit_designated_assignee(self, command, context):
+            return AssigneeAdmissionReceipt("opp", "app", "decision", state)
+
+    service, repo, _, dispatch = _service(method_port=IncompleteAdmission())
+    with pytest.raises(ContextCollabValidationError, match="requires an ADMITTED"):
+        service.publish_task(_publish_command(), _actor())
+    assert len(repo.create_calls) == 1
+    assert repo.append_calls == []
+    assert dispatch.dispatched == []

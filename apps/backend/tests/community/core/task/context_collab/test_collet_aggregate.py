@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+
 import json
 
 import pytest
@@ -34,6 +35,7 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 
 def _collet_dict(**overrides) -> dict:
@@ -64,9 +66,7 @@ def test_round_trip_preserves_field_names():
     assert collet.to_dict()["state"] == "ACTIVE"
     assert Collet.from_dict(collet.to_dict()) == collet
     for value in ("CREATED", "ACTIVE", "SUSPENDED", "COMPLETED", "ARCHIVED"):
-        assert Collet.from_dict(_collet_dict(state=value)).state is ColletState(
-            value
-        )
+        assert Collet.from_dict(_collet_dict(state=value)).state is ColletState(value)
 
 
 def test_initiator_and_scope_and_state_required():
@@ -80,9 +80,7 @@ def test_initiator_and_scope_and_state_required():
     with pytest.raises(ContextCollabValidationError):
         Collet.from_dict(_collet_dict(state="active"))
     with pytest.raises(ContextCollabValidationError):
-        Collet.from_dict(
-            _collet_dict(initiator_ref={"principal_type": "human"})
-        )
+        Collet.from_dict(_collet_dict(initiator_ref={"principal_type": "human"}))
     with pytest.raises(ContextCollabValidationError):
         Collet.from_dict(_collet_dict(collet_id="  "))
 
@@ -128,9 +126,7 @@ def test_null_initiator_row_decode_raises(db, engine):
             sql_insert(ContextCollabColletModel).values(
                 collab_context_id=context_id,
                 actor_ref=None,
-                context_spec=json.dumps(
-                    _row_spec().to_dict(), ensure_ascii=False
-                ),
+                context_spec=json.dumps(_row_spec().to_dict(), ensure_ascii=False),
                 current_snapshot=None,
                 context_version=1,
             )
@@ -138,4 +134,6 @@ def test_null_initiator_row_decode_raises(db, engine):
         conn.commit()
 
     with pytest.raises(ContextCollabValidationError, match=context_id):
-        ContextCollabRepository(db).get_current_status(context_id)
+        ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG).get_current_status(
+            context_id
+        )

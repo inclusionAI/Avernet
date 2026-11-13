@@ -3,8 +3,8 @@
 P1 只做结构校验(``StructuralContextCollabAuthorizer``),外部
 Membership / Grant / Policy Authority 的真实授权留给 P2,通过
 ``ContextCollabAuthorizerProtocol`` 接缝替换,不改服务层。
-身份匹配规则:P1 不建 Principal/Agent 注册表,principal 以
-``principal_id``、executor 以 ``agent_id`` 与认证 ActorContext 比对。
+身份匹配规则:P1 不建 Principal/Agent 注册表,新建的版本化产品通过实际 L4 RoleBinding 与认证 ActorContext 的类型+ID 比对;
+未版本化历史行保留原 ID 比对语义。
 """
 
 from __future__ import annotations
@@ -24,7 +24,17 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ROLE_RESPONSIBLE_USER,
+    ROLE_SELECTED_AGENT,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    actor_has_role,
+)
 
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_WORKSPACE = "workspace"
@@ -53,22 +63,28 @@ class ContextCollabAuthorizerProtocol(Protocol):
     """
 
     def check_create(self, spec: ContextSpec, actor: ActorContext) -> None: ...
-    def check_append(self, collet: Collet, spec: ContextSpec, command,
-                     actor: ActorContext) -> None: ...
-    def filter_visible_events(self, collet: Collet, spec: ContextSpec,
-                              events: Sequence[EventRecord],
-                              actor: ActorContext) -> list[EventRecord]: ...
+    def check_append(
+        self, collet: Collet, spec: ContextSpec, command, actor: ActorContext
+    ) -> None: ...
+    def filter_visible_events(
+        self,
+        collet: Collet,
+        spec: ContextSpec,
+        events: Sequence[EventRecord],
+        actor: ActorContext,
+    ) -> list[EventRecord]: ...
 
 
 def _is_principal(spec: ContextSpec, actor: ActorContext) -> bool:
+    if spec.product_profile_version is not None:
+        return actor_has_role(spec, actor.actor, ROLE_RESPONSIBLE_USER)
     # 身份取自创建参数(record 伴随投影的 context_spec),不经快照(可空)。
-    return (
-        actor.actor.principal_id
-        == spec.principal_ref.principal_id
-    )
+    return actor.actor.principal_id == spec.principal_ref.principal_id
 
 
 def _is_executor(spec: ContextSpec, actor: ActorContext) -> bool:
+    if spec.product_profile_version is not None:
+        return actor_has_role(spec, actor.actor, ROLE_SELECTED_AGENT)
     executor = spec.executor_ref
     return executor is not None and actor.actor.principal_id == executor.agent_id
 
@@ -93,8 +109,8 @@ def _is_public_open_message(spec: ContextSpec, command) -> bool:
 class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
     """P1 默认实现(spec §13):仅结构校验。
 
-    - ``check_create``:顶层 method_kind 必须是 Single / Open + Group
-      (spec §9.5;裸 Group/Open/Swarm 只能经嵌套 bind 进入),且
+    - ``check_create``:顶层 method_kind 必须是 Single / Open + Group / Open
+      (裸 Group/Swarm 只能经嵌套 bind 进入),且
       method=Single 时 ``executor_ref`` 不得为 None
       (principal/executor 引用非空已在 value object 校验);
     - ``check_append``:actor 必须是 principal、executor,或 Open+Group
@@ -106,11 +122,11 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
 
     def check_create(self, spec: ContextSpec, actor: ActorContext) -> None:
         # 顶层白名单先于 Single executor 校验:未声明的顶层形态一律拒绝,
-        # Group/Open/Swarm 裸值经嵌套 bind 进入(spec §9.5)。
+        # Group/Swarm 裸值经嵌套 bind 进入(spec §9.5)。
         if spec.method_kind not in TOP_LEVEL_METHOD_KINDS:
             raise ContextCollabValidationError(
                 f"top-level method_kind must be one of {sorted(TOP_LEVEL_METHOD_KINDS)}"
-                f" (spec §9.5), got: {spec.method_kind!r}; bare Group/Open/Swarm may "
+                f" (spec §9.5), got: {spec.method_kind!r}; bare Group/Swarm may "
                 "only enter via a nested method bind"
             )
         if spec.method_kind == MethodKind.SINGLE.value and spec.executor_ref is None:
@@ -118,8 +134,9 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
                 "method_kind 'Single' requires a non-null executor_ref"
             )
 
-    def check_append(self, collet: Collet, spec: ContextSpec, command,
-                     actor: ActorContext) -> None:
+    def check_append(
+        self, collet: Collet, spec: ContextSpec, command, actor: ActorContext
+    ) -> None:
         # P1 结构规则只看认证 actor;command 保留给 P2 策略引用。
         if (
             _is_principal(spec, actor)
@@ -134,7 +151,9 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
         )
 
     def filter_visible_events(
-        self, collet: Collet, spec: ContextSpec,
+        self,
+        collet: Collet,
+        spec: ContextSpec,
         events: Sequence[EventRecord],
         actor: ActorContext,
     ) -> list[EventRecord]:
@@ -149,8 +168,7 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
             ):
                 visible.append(record)
             elif (
-                record.visibility == VISIBILITY_PRIVATE
-                or record.visibility is None
+                record.visibility == VISIBILITY_PRIVATE or record.visibility is None
             ) and is_principal:
                 # visibility=NULL(外部部分行)按 private 处理:收紧不泄露。
                 visible.append(record)

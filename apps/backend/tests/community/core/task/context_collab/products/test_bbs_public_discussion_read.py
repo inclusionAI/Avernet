@@ -15,8 +15,7 @@
 复用 write 测试的 fake 仓储模式(含列表/计数两方法的受控实现)。
 """
 
-import dataclasses
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -53,10 +52,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
-from agentclaw.community.core.task.context_collab.products.service_api import (
-    CreateDiscussionCommand,
-    ReplyDiscussionCommand,
-)
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
@@ -194,6 +190,7 @@ def _service(repo: _FakeRepo) -> BbsPublicDiscussionService:
         collab_repo=repo,
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=InMemoryMethodStore(),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -244,14 +241,14 @@ class TestListDiscussions:
         repo = _FakeRepo()
         older_id = "collet_list_older_0001"
         newer_id = "collet_list_newer_0002"
-        old_rec = _discussion(
+        _discussion(
             repo,
             older_id,
             "早帖标题",
             gmt_create=datetime(2026, 11, 12, 8, 0, 0),
             extra_events=[repo.event(older_id)],
         )
-        new_rec = _discussion(
+        _discussion(
             repo,
             newer_id,
             "晚帖标题",
@@ -287,8 +284,12 @@ class TestGetDiscussion:
     def test_assembles_title_body_and_replies_with_parent_chain(self):
         repo = _FakeRepo()
         collet_id = "collet_detail_0001"
-        body = repo.event(collet_id, payload={"content": "正文内容A"}, actor_id="u_1001")
-        reply_r1 = repo.event(collet_id, payload={"content": "一层回帖"}, actor_id="u_2002")
+        body = repo.event(
+            collet_id, payload={"content": "正文内容A"}, actor_id="u_1001"
+        )
+        reply_r1 = repo.event(
+            collet_id, payload={"content": "一层回帖"}, actor_id="u_2002"
+        )
         reply_r2 = repo.event(
             collet_id,
             payload={"content": "楼中楼"},

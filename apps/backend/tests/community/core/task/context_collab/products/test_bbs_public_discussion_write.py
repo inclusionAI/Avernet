@@ -73,6 +73,7 @@ from agentclaw.community.core.task.context_collab.products.service_api import (
     CreateDiscussionCommand,
     ReplyDiscussionCommand,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
@@ -90,9 +91,7 @@ def _bot_actor(agent_id: str = "bot_comment_001") -> ActorContext:
     BBS 场景中 Bot 读到帖子后公开补充意见即走此形态;``principal_id``
     即 agent_id(G1 ``_is_executor`` 先例按字符串相等匹配)。
     """
-    return ActorContext(
-        actor=PrincipalRef("bot", agent_id), source="api"
-    )
+    return ActorContext(actor=PrincipalRef("bot", agent_id), source="api")
 
 
 class _FakeRepo:
@@ -203,11 +202,7 @@ class _FakeRepo:
     # 测试助手:事件流查询。
     def event_id_of(self, collab_context_id: str, primitive: str) -> str:
         record = self._status[collab_context_id]
-        return next(
-            e.event_id
-            for e in record.events
-            if e.primitive_type == primitive
-        )
+        return next(e.event_id for e in record.events if e.primitive_type == primitive)
 
 
 def _make_service(repo: _FakeRepo | None = None):
@@ -217,6 +212,7 @@ def _make_service(repo: _FakeRepo | None = None):
         collab_repo=repo,
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=store,
+        product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, store
 
@@ -236,6 +232,7 @@ def _top_level_binding(store, repo, collab_context_id):
         repo,
         _actor(),
         now=_now(),
+        catalog=PRODUCT_CATALOG,
     )
 
 

@@ -59,17 +59,12 @@ def parse_method_kinds(wire: str) -> tuple[MethodKind, ...]:
     if _COMPOSITE_SEPARATOR not in wire:
         return (MethodKind.from_wire(wire),)
     declared_composites = {
-        kind.value
-        for kind in MethodKind
-        if _COMPOSITE_SEPARATOR in kind.value
+        kind.value for kind in MethodKind if _COMPOSITE_SEPARATOR in kind.value
     }
     if wire not in declared_composites:
-        raise ContextCollabValidationError(
-            f"unknown method_kind wire value: {wire!r}"
-        )
+        raise ContextCollabValidationError(f"unknown method_kind wire value: {wire!r}")
     return tuple(
-        MethodKind.from_wire(part)
-        for part in wire.split(_COMPOSITE_SEPARATOR)
+        MethodKind.from_wire(part) for part in wire.split(_COMPOSITE_SEPARATOR)
     )
 
 
@@ -113,8 +108,7 @@ def _checked_max_compose_depth(value: object, owner: str) -> int:
     """校验 max_compose_depth:必须为 1..64 整型(bool 不是合法整数)。"""
     if isinstance(value, bool) or not isinstance(value, int):
         raise ContextCollabValidationError(
-            f"{owner}.max_compose_depth must be an integer in 1..64, "
-            f"got: {value!r}"
+            f"{owner}.max_compose_depth must be an integer in 1..64, got: {value!r}"
         )
     if not 1 <= value <= 64:
         raise ContextCollabValidationError(
@@ -165,8 +159,7 @@ def _str_tuple(data: dict, key: str, owner: str) -> tuple[str, ...]:
         isinstance(item, str) and item.strip() for item in value
     ):
         raise ContextCollabValidationError(
-            f"{owner}.{key} must be a list of non-empty strings, "
-            f"got: {value!r}"
+            f"{owner}.{key} must be a list of non-empty strings, got: {value!r}"
         )
     return tuple(value)
 
@@ -270,9 +263,7 @@ class MethodBinding:
         method_kind = MethodKind.from_wire(
             _required_str(data, "method_kind", "MethodBinding")
         ).value
-        expected_names = tuple(
-            kind.value for kind in parse_method_kinds(method_kind)
-        )
+        expected_names = tuple(kind.value for kind in parse_method_kinds(method_kind))
         raw_names = data.get("method_names")
         if not isinstance(raw_names, list) or not all(
             isinstance(name, str) for name in raw_names
@@ -314,49 +305,25 @@ class MethodBinding:
                 f"got: {raw_version!r}"
             )
         return cls(
-            method_binding_id=_required_str(
-                data, "method_binding_id", "MethodBinding"
-            ),
-            collab_context_id=_required_str(
-                data, "collab_context_id", "MethodBinding"
-            ),
+            method_binding_id=_required_str(data, "method_binding_id", "MethodBinding"),
+            collab_context_id=_required_str(data, "collab_context_id", "MethodBinding"),
             method_kind=method_kind,
             method_names=tuple(raw_names),
             profile_versions=dict(raw_versions),
-            parent_scope_ref=_optional_str(
-                data, "parent_scope_ref", "MethodBinding"
-            ),
-            participant_ref=_optional_str(
-                data, "participant_ref", "MethodBinding"
-            ),
-            role_binding_refs=_str_tuple(
-                data, "role_binding_refs", "MethodBinding"
-            ),
+            parent_scope_ref=_optional_str(data, "parent_scope_ref", "MethodBinding"),
+            participant_ref=_optional_str(data, "participant_ref", "MethodBinding"),
+            role_binding_refs=_str_tuple(data, "role_binding_refs", "MethodBinding"),
             config=(
-                _plain_dict(data, "config", "MethodBinding")
-                if "config" in data
-                else {}
+                _plain_dict(data, "config", "MethodBinding") if "config" in data else {}
             ),
-            state=BindingState.from_wire(
-                _required_str(data, "state", "MethodBinding")
-            ),
+            state=BindingState.from_wire(_required_str(data, "state", "MethodBinding")),
             version=raw_version,
             bind_reason=_audit_str(data, "bind_reason", "MethodBinding"),
-            g3_subject_type=_optional_str(
-                data, "g3_subject_type", "MethodBinding"
-            ),
-            transitioned_from=_audit_str(
-                data, "transitioned_from", "MethodBinding"
-            ),
-            transition_reason=_audit_str(
-                data, "transition_reason", "MethodBinding"
-            ),
-            transitioned_by=_audit_str(
-                data, "transitioned_by", "MethodBinding"
-            ),
-            transitioned_at=_audit_str(
-                data, "transitioned_at", "MethodBinding"
-            ),
+            g3_subject_type=_optional_str(data, "g3_subject_type", "MethodBinding"),
+            transitioned_from=_audit_str(data, "transitioned_from", "MethodBinding"),
+            transition_reason=_audit_str(data, "transition_reason", "MethodBinding"),
+            transitioned_by=_audit_str(data, "transitioned_by", "MethodBinding"),
+            transitioned_at=_audit_str(data, "transitioned_at", "MethodBinding"),
         )
 
     def to_dict(self) -> dict:
@@ -381,3 +348,8 @@ class MethodBinding:
             "transitioned_by": self.transitioned_by,
             "transitioned_at": self.transitioned_at,
         }
+
+
+def top_level_binding_id(collab_context_id: str) -> str:
+    """Stable top-level MethodBinding reference; also used by L6 instance records."""
+    return f"mb_top_{collab_context_id}"

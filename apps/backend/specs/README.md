@@ -12,6 +12,8 @@ Use the [repository knowledge standard](../../../docs/agents/knowledge-standard.
 
 ## Existing change records
 
+- [2026-11-13-context-collab-l6-product-contracts](2026-11-13-context-collab-l6-product-contracts/spec.md): executable versioned composition and pinned instance contracts; see record for verification and scope limits.
+
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
 - [2026-07-09-teclaw-artifact-oss-offload](2026-07-09-teclaw-artifact-oss-offload/)

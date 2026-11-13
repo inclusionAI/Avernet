@@ -22,12 +22,21 @@ from uuid import uuid4
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
     OpenDecisionOpCommand,
     OpenOpportunityCommand,
     OpenMethodOpsServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+    require_designated_admission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
@@ -44,21 +53,38 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
     """方法编排缝实现:注入 Open 方法服务 singleton,四步串行驱动。"""
 
     @inject
-    def __init__(self, open_ops: OpenMethodOpsServiceProtocol) -> None:
+    def __init__(
+        self, open_ops: OpenMethodOpsServiceProtocol, product_catalog: ProductCatalog
+    ) -> None:
+        self._product_catalog = product_catalog
         self._open_ops = open_ops
 
     def admit_designated_assignee(
         self, command: AssigneeAdmissionCommand, context
     ) -> AssigneeAdmissionReceipt:
-        binding_id = top_level_binding_id(command.collab_context_id)
+        profile = self._product_catalog.get(
+            command.product_profile_ref.profile_id, command.product_profile_ref.version
+        )
+        policy = require_designated_admission(profile)
+        # The bounded executor implements the declared publisher-mediated strategy.
+        # G1 in OpenMethodService still authorizes each operation; this is not a grant.
+        if command.accountable_principal_id != context.actor.principal_id:
+            raise ContextCollabValidationError(
+                "admission accountable principal must be publisher"
+            )
+        binding_id = command.method_binding_ref
+        if binding_id != top_level_binding_id(command.collab_context_id):
+            raise ContextCollabValidationError(
+                "publication requires the Collet's top-level binding"
+            )
         published = self._open_ops.publish_opportunity(
             command.collab_context_id,
             binding_id,
             OpenOpportunityCommand(
                 scope_ref=command.collab_context_id,
-                participation_type="SINGLE_CONTRIBUTION",
+                participation_type=policy.participation_type.value,
                 opens_at=_now(),
-                capacity=1,
+                capacity=policy.capacity,
                 reason="task_commission.publish",
             ),
             context,
@@ -69,9 +95,7 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             published.object_id,
             OpenApplicationCommand(
                 applicant_agent_ref=command.assignee_agent_id,
-                accountable_principal_ref=(
-                    command.accountable_principal_id
-                ),
+                accountable_principal_ref=(command.accountable_principal_id),
                 reason="task_commission.designated_assignee",
             ),
             context,
@@ -97,6 +121,7 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             ),
             context,
         )
+        profile.require_publication().require_dispatch_ready(admitted.state)
         return AssigneeAdmissionReceipt(
             opportunity_id=published.object_id,
             application_id=submitted.object_id,

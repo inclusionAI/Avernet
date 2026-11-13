@@ -66,6 +66,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -95,9 +96,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
 def make_actor(
     principal_type: str = "human", principal_id: str = "u_1001"
 ) -> ActorContext:
-    return ActorContext(
-        actor=PrincipalRef(principal_type, principal_id), source="api"
-    )
+    return ActorContext(actor=PrincipalRef(principal_type, principal_id), source="api")
 
 
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
@@ -116,7 +115,6 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 
 
 class _FakeContextCollabRepository:
-
     """手写 in-memory 仓储 fake,承载三个用例的仓储真实语义。
 
     创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
@@ -132,7 +130,6 @@ class _FakeContextCollabRepository:
     def count_message_events(self, collab_context_ids):
         raise NotImplementedError("fake does not implement message counting")
 
-
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
         self.context_specs: dict[str, ContextSpec] = {}
@@ -140,7 +137,9 @@ class _FakeContextCollabRepository:
         self.events: dict[str, list[EventRecord]] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
-    def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
+    def create_context(
+        self, request: CreateContextRecordRequest
+    ) -> ContextCreatedRecord:
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         snapshot = CurrentSnapshot(
@@ -249,9 +248,10 @@ def _make_service(**command_overrides):
     repo = _FakeContextCollabRepository()
     assert isinstance(repo, ContextCollabRepositoryProtocol)
     service = ContextCollabService(
-            method_store=InMemoryMethodStore(),
-            repository=repo,
- )
+        method_store=InMemoryMethodStore(),
+        repository=repo,
+        product_catalog=PRODUCT_CATALOG,
+    )
     assert isinstance(service, ContextCollabServiceProtocol)
     created = service.create_context(
         make_create_command(**command_overrides), make_actor()
@@ -275,9 +275,7 @@ class TestAppendEventHappyPath:
             visibility="workspace",
         )
 
-        result = service.append_event(
-            created.collab_context_id, command, make_actor()
-        )
+        result = service.append_event(created.collab_context_id, command, make_actor())
 
         assert isinstance(result, EventAcceptedResult)
         assert result.accepted is True
@@ -318,9 +316,7 @@ class TestStateMachineTransitions:
             payload={},
             visibility="public",
         )
-        result = service.append_event(
-            created.collab_context_id, command, make_actor()
-        )
+        result = service.append_event(created.collab_context_id, command, make_actor())
         assert result.accepted is True
         assert result.event_kind == "task.started"
         assert result.context_version == 2
@@ -349,7 +345,9 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.started",
-                primitive_type="Task", payload={}, visibility="public",
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             make_actor(),
         )
@@ -376,7 +374,9 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.started",
-                primitive_type="Task", payload={}, visibility="public",
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             principal,
         )
@@ -384,13 +384,15 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.submitted",
-                expected_version=2, primitive_type="Task",
-                payload={"artifacts": ["art_pr_001"]}, visibility="public",
+                expected_version=2,
+                primitive_type="Task",
+                payload={"artifacts": ["art_pr_001"]},
+                visibility="public",
             ),
             principal,
         )
         # executor 可以通过 G1 结构授权,但守卫要求 principal 复核。
-        executor_actor = make_actor("human", "bot_coding_001")
+        executor_actor = make_actor("bot", "bot_coding_001")
         accept = make_append_command(
             "task.accepted",
             expected_version=3,
@@ -416,7 +418,9 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.started",
-                primitive_type="Task", payload={}, visibility="public",
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             principal,
         )
@@ -424,8 +428,10 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.submitted",
-                expected_version=2, primitive_type="Task",
-                payload={"artifacts": ["art_pr_001"]}, visibility="public",
+                expected_version=2,
+                primitive_type="Task",
+                payload={"artifacts": ["art_pr_001"]},
+                visibility="public",
             ),
             principal,
         )
@@ -433,8 +439,10 @@ class TestStateMachineTransitions:
             cid,
             make_append_command(
                 "task.accepted",
-                expected_version=3, primitive_type="Task",
-                payload={}, visibility="public",
+                expected_version=3,
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             principal,
         )
@@ -450,7 +458,9 @@ class TestStateMachineTransitions:
             created.collab_context_id,
             make_append_command(
                 "task.cancelled",
-                primitive_type="Task", payload={}, visibility="public",
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             make_actor(),
         )
@@ -461,13 +471,17 @@ class TestStateMachineTransitions:
     def test_unregistered_workflow_kind_status_unchanged(self):
         """workflow_kind 不在 MACHINE_REGISTRY → 不裁决,status 不动。"""
         repo, service, created = _make_service(
-            workflow_kind="forum_public_discussion"
+            product_kind="public_discussion",
+            workflow_kind="forum_public_discussion",
+            method_kind="Open + Group",
         )
         result = service.append_event(
             created.collab_context_id,
             make_append_command(
                 "task.started",
-                primitive_type="Task", payload={}, visibility="public",
+                primitive_type="Task",
+                payload={},
+                visibility="public",
             ),
             make_actor(),
         )
@@ -483,7 +497,8 @@ class TestStateMachineTransitions:
             make_append_command(
                 "task.submitted",
                 primitive_type="Task",
-                payload={"artifacts": ["art_pr_001"]}, visibility="public",
+                payload={"artifacts": ["art_pr_001"]},
+                visibility="public",
             ),
             make_actor(),
         )
@@ -515,9 +530,7 @@ class TestAppendEventRejections:
 
     def test_visibility_out_of_vocabulary_rejected(self):
         repo, service, created = _make_service()
-        command = make_append_command(
-            "user_interaction.posted", visibility="team"
-        )
+        command = make_append_command("user_interaction.posted", visibility="team")
         with pytest.raises(ContextCollabValidationError, match="visibility"):
             service.append_event(created.collab_context_id, command, make_actor())
         assert repo.append_calls == []

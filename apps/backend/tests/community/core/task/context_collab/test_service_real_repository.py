@@ -29,6 +29,19 @@ import pytest
 from injector import Injector
 from sqlalchemy import func, insert as sql_insert, select, update as sql_update
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    MethodLifecycleServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
@@ -71,6 +84,7 @@ from agentclaw.community.di.modules.task_persistence_module import (
 from agentclaw.community.di.modules.testing_database_module import (
     TestingDatabaseModule,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -100,9 +114,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
 def make_actor(
     principal_type: str = "human", principal_id: str = "u_1001"
 ) -> ActorContext:
-    return ActorContext(
-        actor=PrincipalRef(principal_type, principal_id), source="api"
-    )
+    return ActorContext(actor=PrincipalRef(principal_type, principal_id), source="api")
 
 
 def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
@@ -124,9 +136,10 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-            method_store=InMemoryMethodStore(),
-            repository=ContextCollabRepository(db),
- )
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
+    )
 
 
 def _count(engine, model) -> int:
@@ -273,9 +286,9 @@ class TestAcceptanceFlows:
             == 2
         )
         assert result.event_id.startswith("evt_")
-        assert _event_payload(
-            engine, created.collab_context_id, result.event_id
-        ) == {"content": content}
+        assert _event_payload(engine, created.collab_context_id, result.event_id) == {
+            "content": content
+        }
 
     def test_a03_task_started_moves_snapshot_to_in_progress(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
@@ -457,9 +470,9 @@ class TestAcceptanceFlows:
                 make_actor(),
             )
         assert _count(engine, ContextCollabEventModel) == 2
-        assert _event_payload(
-            engine, created.collab_context_id, first.event_id
-        ) == {"content": "唯一消息"}
+        assert _event_payload(engine, created.collab_context_id, first.event_id) == {
+            "content": "唯一消息"
+        }
 
         second = service.append_event(
             created.collab_context_id,
@@ -528,16 +541,28 @@ class TestDiWiring:
 
         repository = injector.get(ContextCollabRepositoryProtocol)
         assert isinstance(repository, ContextCollabRepository)
-        assert (
-            injector.get(ContextCollabRepositoryProtocol)
-            is repository
-        )
+        assert injector.get(ContextCollabRepositoryProtocol) is repository
 
         service = injector.get(ContextCollabServiceProtocol)
         assert isinstance(service, ContextCollabService)
         assert isinstance(service, ContextCollabServiceProtocol)
         assert injector.get(ContextCollabServiceProtocol) is service
         assert isinstance(service._authorizer, StructuralContextCollabAuthorizer)
+        catalog = injector.get(ProductCatalog)
+        assert injector.get(ProductCatalog) is catalog
+        for consumer in (
+            repository,
+            service,
+            injector.get(TaskCommissionServiceProtocol),
+            injector.get(BbsPublicDiscussionServiceProtocol),
+            injector.get(TaskMethodOpsPort),
+            injector.get(MethodLifecycleServiceProtocol),
+        ):
+            assert consumer._product_catalog is catalog
+        other = Injector(
+            [TestingDatabaseModule(), TaskPersistenceModule(), TaskModule()]
+        )
+        assert other.get(ProductCatalog) is not catalog
 
     def test_test_profile_injector_serves_context_collab_service(self):
         """完整测试 profile 组合根也能装配出 ContextCollabService 单例。"""
@@ -561,9 +586,9 @@ class TestNullablePartialRows:
         """模拟外部写入:把聚合行的 current_snapshot 置 NULL。"""
         with engine.connect() as conn:
             conn.execute(
-                sql_update(ContextCollabColletModel).where(
-                    ContextCollabColletModel.collab_context_id == collab_context_id
-                ).values(current_snapshot=None)
+                sql_update(ContextCollabColletModel)
+                .where(ContextCollabColletModel.collab_context_id == collab_context_id)
+                .values(current_snapshot=None)
             )
             conn.commit()
 
@@ -582,9 +607,7 @@ class TestNullablePartialRows:
         assert result.task_progress.total_events == 1
         assert result.current_event["event_kind"] == "task.created"
 
-    def test_append_onto_snapshotless_collet_keeps_null_snapshot(
-        self, service, engine
-    ):
+    def test_append_onto_snapshotless_collet_keeps_null_snapshot(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
         self._null_snapshot_collet(engine, created.collab_context_id)
 
@@ -641,7 +664,8 @@ class TestNullablePartialRows:
         ids = [e["event_id"] for e in principal_view.task_progress.events]
         assert "evt_partial_manual" in ids
         entry = next(
-            e for e in principal_view.task_progress.events
+            e
+            for e in principal_view.task_progress.events
             if e["event_id"] == "evt_partial_manual"
         )
         # payload NULL → summary/content None;primitive_type NULL → 条目 null

@@ -42,6 +42,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 SPACE = SpaceRef(space_id="bbs_community_space", environment="prod")
 OWNER = PrincipalRef(principal_type="human", principal_id="u_topic_owner")
@@ -80,7 +81,7 @@ def _append(
     event_kind: str,
     primitive_type: str,
     actor: PrincipalRef,
-    parent_event: str,
+    parent_event: str | None,
     **payload,
 ):
     return service.append_event(
@@ -113,8 +114,9 @@ class TestBbsProductE2E:
     def test_bbs_public_discussion_e2e(self, db, engine):
         service = ContextCollabService(
             method_store=InMemoryMethodStore(),
-            repository=ContextCollabRepository(db),
- )
+            repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+            product_catalog=PRODUCT_CATALOG,
+        )
         created = service.create_context(_create_command(), _actor(OWNER))
 
         assert created.current_snapshot["method_kind"] == "Open + Group"
@@ -123,7 +125,8 @@ class TestBbsProductE2E:
         assert spec["product_kind"] == "bbs_public_discussion"
         assert spec["workflow_kind"] == "bbs_public_discussion"
 
-        parent_event = created.current_event["event_id"]
+        # A BBS body is a root Message, never a reply to the Task skeleton.
+        parent_event = None
         version = created.context_version
 
         owner_post = _append(
@@ -170,16 +173,17 @@ class TestBbsProductE2E:
             trunk_events=True,
             context=_actor(PrincipalRef("human", "u_reader_9999")),
         )
-        assert (
-            [event["event_id"] for event in reader_status.task_progress.events]
-            == [event["event_id"] for event in status.task_progress.events]
-        )
+        assert [event["event_id"] for event in reader_status.task_progress.events] == [
+            owner_post.event_id,
+            participant_post.event_id,
+        ]
 
     def test_bbs_help_request_with_goal_e2e(self, db, engine):
         service = ContextCollabService(
             method_store=InMemoryMethodStore(),
-            repository=ContextCollabRepository(db),
- )
+            repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+            product_catalog=PRODUCT_CATALOG,
+        )
         created = service.create_context(
             _create_command(
                 product_kind="bbs_help_request",
@@ -220,9 +224,7 @@ class TestBbsProductE2E:
 
         # Open admission does not grant public participants task authority:
         # unrelated participants may reply publicly but cannot advance the goal.
-        with pytest.raises(
-            ContextCollabValidationError, match="only the principal"
-        ):
+        with pytest.raises(ContextCollabValidationError, match="only the principal"):
             service.append_event(
                 created.collab_context_id,
                 EventAppendCommand(

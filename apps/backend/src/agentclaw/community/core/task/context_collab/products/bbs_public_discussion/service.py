@@ -23,6 +23,9 @@ from dataclasses import dataclass
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -34,6 +37,12 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     VISIBILITY_PUBLIC,
     ContextCollabAuthorizerProtocol,
 )
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
+    validate_product_event,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_spec,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
@@ -42,9 +51,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
     creation_payload,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
-    EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
@@ -138,7 +144,10 @@ class BbsPublicDiscussionService:
         collab_repo: ContextCollabRepositoryProtocol,
         authorizer: ContextCollabAuthorizerProtocol,
         method_store: MethodStoreProtocol,
+        *,
+        product_catalog: ProductCatalog,
     ) -> None:
+        self._product_catalog = product_catalog
         self._repo = collab_repo
         self._authorizer = authorizer
         self._method_store = method_store
@@ -160,6 +169,7 @@ class BbsPublicDiscussionService:
             product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
             workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
         )
+        spec = prepare_product_spec(spec, self._product_catalog)
         self._authorizer.check_create(spec, context)
 
         record = self._repo.create_context(
@@ -181,6 +191,7 @@ class BbsPublicDiscussionService:
             spec,
             context,
             now=_now(),
+            catalog=self._product_catalog,
         )
         appended = self._append_public_message(
             record.collet.collet_id,
@@ -220,7 +231,18 @@ class BbsPublicDiscussionService:
                 f"collaboration context {command.collab_context_id!r} is not "
                 "a bbs public discussion"
             )
-        self._assert_message_parent(record.events, command.parent_event_id)
+        validate_product_event(
+            catalog=self._product_catalog,
+            spec=record.context_spec,
+            snapshot=record.current_snapshot,
+            event_kind=_POSTED_EVENT_KIND,
+            primitive_type=_MESSAGE_PRIMITIVE,
+            visibility=VISIBILITY_PUBLIC,
+            payload={"content": content},
+            actor=context.actor,
+            parent_event=command.parent_event_id,
+            events=record.events,
+        )
 
         appended = self._append_public_message(
             command.collab_context_id,
@@ -240,28 +262,6 @@ class BbsPublicDiscussionService:
         )
 
     # ------------------------------------------------------------- 私有
-
-    @staticmethod
-    def _assert_message_parent(
-        events: list[EventRecord], parent_event_id: str | None
-    ) -> None:
-        """产品域断言:parent 必须指向 Message 事件(骨架事件不可当 parent)。
-
-        存在性由仓储把守(不存在/跨流会被拒);此处只拦"在流内但不是
-        用户发言"的骨架事件——把回帖挂到 ``task.created`` 上会把骨架吸进
-        读投影的回复树。
-        """
-        if parent_event_id is None:
-            return
-        target = next(
-            (event for event in events if event.event_id == parent_event_id),
-            None,
-        )
-        if target is not None and target.primitive_type != _MESSAGE_PRIMITIVE:
-            raise ContextCollabValidationError(
-                f"parent_event {parent_event_id!r} is not a Message event; "
-                "replies may only reply to user postings"
-            )
 
     def _append_public_message(
         self,

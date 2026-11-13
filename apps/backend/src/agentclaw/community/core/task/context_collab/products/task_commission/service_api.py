@@ -20,6 +20,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
 
 if TYPE_CHECKING:  # 读视图(T3)落地面,协议签名先钉,运行时不求值。
     from agentclaw.community.core.task.context_collab.products.task_commission.views import (
@@ -60,7 +63,8 @@ class DispatchedTaskInfo:
     """发布后送达指定执行 bot 的任务信息(L1 渡口 P1 占位承载形)。
 
     ``title``/``body`` 即任务正文,``collet_id`` 供 bot 回查协作上下文,
-    ``assignee_agent_id`` 即被指派的执行者本体。
+    ``assignee_agent_id`` 即被指派的执行者本体。两项 ref 用于关联已选
+    L6 Profile 和实际 L5 绑定,不携带授权或 session 凭据。
     """
 
     collet_id: str
@@ -70,6 +74,9 @@ class DispatchedTaskInfo:
     # 发起人身份链(裁决 G,ACCS-001 §5 规则 1):经 L1 桥出域时作为
     # OperationContext.accountable_principal_ref 源。
     publisher_principal_id: str
+    # Pinned product selection and actual runtime binding, not access credentials.
+    product_profile_ref: VersionedProfileRef
+    method_binding_ref: str
 
 
 @runtime_checkable
@@ -87,17 +94,22 @@ class AssigneeAdmissionCommand:
     ``assignee_agent_id`` 是被指派执行 bot(申请的 applicant_agent_ref);
     ``accountable_principal_id`` 是发布发起人 principal_id——申请的
     责任主体:系统代投的申请由发布人担责(withdraw 自助面同语义)。
+    ``product_profile_ref`` 固定本次采用的 L6 定义;适配器必须消费其中
+    的 publication 合同,不能另选 latest。``method_binding_ref`` 是已
+    实例化的 L5 绑定,不是发布人或执行者身份。
     """
 
     collab_context_id: str
     assignee_agent_id: str
     accountable_principal_id: str
+    product_profile_ref: VersionedProfileRef
+    method_binding_ref: str
 
 
 @dataclass(frozen=True)
 class AssigneeAdmissionReceipt:
     """方法面四步编排的受理回执;P1 供断言/审计,不进产品视图
-    (方法 store 行即持久结局)。"""
+    (方法 store 行记录运行时结局,不承诺跨重启持久化)。"""
 
     opportunity_id: str
     application_id: str
@@ -110,7 +122,9 @@ class TaskMethodOpsPort(Protocol):
     """方法编排缝:发布即驱动真 Open 方法生命周期——
     publish_opportunity → submit_application → screen → admit
     (SINGLE_CONTRIBUTION、capacity=1、scope=collet),指定执行者至
-    ADMITTED。P1 系统编排,恒以发布人 ActorContext 调用;实现住 DI
+    ADMITTED。策略、容量、类型及顺序由所选 L6 publication 合同声明;
+    未支持的策略拒绝,失败原样传播,不回滚已创建的下层对象。
+    P1 系统编排,恒以发布人 ActorContext 调用;实现住 DI
     适配层(产品白名单外的服务面经此缝进入,白名单零改动)。"""
 
     def admit_designated_assignee(

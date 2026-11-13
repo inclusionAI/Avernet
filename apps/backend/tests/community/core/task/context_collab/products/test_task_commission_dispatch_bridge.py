@@ -11,8 +11,6 @@
 
 import pytest
 
-from injector import Injector
-
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
     MockA2aDelivery,
 )
@@ -40,6 +38,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
+    TASK_COMMISSION_PROFILE_REF,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
 )
@@ -48,10 +49,9 @@ from tests.community.core.task.context_collab.products.test_task_commission_publ
     _FakeRepo,
     _method_port,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
-HUMAN = ActorContext(
-    actor=PrincipalRef("human", "u_owner_001"), source="api"
-)
+HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
 SPACE = SpaceRef(space_id="space_workspace_001", environment="prod")
 
 
@@ -77,6 +77,7 @@ def _service_with_bridge():
         method_store=store,
         method_ops_port=_method_port(repo, store),
         dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
+        product_catalog=PRODUCT_CATALOG,
     )
     return service, mock
 
@@ -109,6 +110,8 @@ def test_dispatched_info_carries_publisher_identity():
         body="b",
         assignee_agent_id="bot_x",
         publisher_principal_id="u_1001",
+        product_profile_ref=TASK_COMMISSION_PROFILE_REF,
+        method_binding_ref="mb_collet_1",
     )
     assert info.publisher_principal_id == "u_1001"
 
@@ -174,6 +177,7 @@ class TestDispatchFailurePropagation:
             method_store=store,
             method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=_RejectingDelivery()),
+            product_catalog=PRODUCT_CATALOG,
         )
         with pytest.raises(ContextCollabValidationError, match="dispatch"):
             _publish(service)
@@ -197,6 +201,7 @@ class TestEnvelopeIdentityChainAsserted:
             method_store=store,
             method_ops_port=_method_port(repo, store),
             dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
+            product_catalog=PRODUCT_CATALOG,
         )
         created = _publish(service)
 
@@ -213,14 +218,20 @@ class TestEnvelopeIdentityChainAsserted:
         assert envelope.context.caller.identity_id.startswith(
             "avernet-task-commission-dispatcher"
         )
-        assert (
-            envelope.context.accountable_principal_ref.identity_type
-            == "PRINCIPAL"
+        assert envelope.context.accountable_principal_ref.identity_type == "PRINCIPAL"
+        assert envelope.context.accountable_principal_ref.identity_id == "u_owner_001"
+        # L6's pinned selection and actual L5 binding accompany the L4 notification.
+        product_ref = envelope.context.product_profile_ref
+        assert product_ref.object_type == "ProductProfile"
+        assert product_ref.object_id == "task_commission"
+        assert product_ref.version == "1"
+        method_ref = envelope.context.method_binding_ref
+        assert method_ref.object_type == "MethodBinding"
+        from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+            top_level_binding_id,
         )
-        assert (
-            envelope.context.accountable_principal_ref.identity_id
-            == "u_owner_001"
-        )
+
+        assert method_ref.object_id == top_level_binding_id(created.collet_id)
         # 形态(spec §7):L4/message/publish/EVENT、target=Collet、payload 三件。
         assert envelope.layer == "L4"
         assert envelope.operation_family == "message"

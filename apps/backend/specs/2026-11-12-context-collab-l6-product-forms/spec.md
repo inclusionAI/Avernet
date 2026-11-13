@@ -166,3 +166,11 @@ repository currently has no `context_collab` L1 interoperate-deliver bridge, so
 the helper agent behavior is driven at the Service API boundary. When that
 bridge lands, these cases should be extended or mirrored with an external-agent
 transport test rather than reclassifying HTTP delivery as L1.
+
+## 9. Subsequent L6 contract increment (2026-11-13)
+
+The [versioned L6 contract increment](../2026-11-13-context-collab-l6-product-contracts/spec.md)
+supersedes the enum-only/no-profile-catalog trimming in §6 with an immutable,
+code-owned definition catalog and explicit ProductInstance selection. It does
+not add a profile database or mutable runtime registry. See that record for
+compatibility impact and verification; the earlier evidence above is retained.

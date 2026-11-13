@@ -50,6 +50,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     PublishTaskCommand,
     TaskAdvanceCommand,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 ASSIGNEE = "bot_commission_001"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -118,6 +119,7 @@ class TestReadCases:
             authorizer=StructuralContextCollabAuthorizer(),
             method_store=store,
             method_ops_port=_method_port(write_fake, store),
+            product_catalog=PRODUCT_CATALOG,
         )
         return service, write_fake
 
@@ -136,9 +138,7 @@ class TestReadCases:
         repo._gmt_create[collet_id] = datetime(2026, 11, 13, 8, 0, 0)
         # bot 开工+提交,发起人验收——读面应见机器状态与控制历史。
         service.start_task(_adv(collet_id), _bot_actor())
-        service.submit_task(
-            _adv(collet_id, artifacts=["doc://r1"]), _bot_actor()
-        )
+        service.submit_task(_adv(collet_id, artifacts=["doc://r1"]), _bot_actor())
         service.accept_task(_adv(collet_id), _actor())
 
         detail = service.detail_task(collet_id)
@@ -182,9 +182,6 @@ class TestReadCases:
         )
         repo._gmt_create[newer.collet_id] = datetime(2026, 11, 13, 9, 0, 0)
         # 外 profile 一行:不得入列表。
-        from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-            Collet as _C,
-        )
 
         repo._status["collet_foreign_row_1"] = _status_record(
             "collet_foreign_row_1", _open_group_spec("公开讨论帖")
@@ -255,7 +252,6 @@ class _WriteRepoShim(_FakeRepo):
         super().__init__()
 
     def create_context(self, request):
-        import dataclasses
         from uuid import uuid4
 
         collab_context_id = "collet_" + uuid4().hex

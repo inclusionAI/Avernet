@@ -13,6 +13,9 @@ from typing import Sequence
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -21,11 +24,24 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profiles import (
+    WorkflowKind,
+)
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
     EventProjection,
     active_chain_ids,
     build_progress,
     project_events,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
+    validate_product_event,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_spec,
+    product_definition,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
     resolve_workflow_status,
@@ -46,10 +62,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
-)
-from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
-    WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -85,17 +97,6 @@ def _required_str(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ContextCollabValidationError(
             f"{field} must be a non-empty string, got: {value!r}"
-        )
-    return value
-
-
-def _optional_enum_value(value: object, allowed: set[str], field: str) -> str | None:
-    """可空枚举校验;非 None 时必须命中已注册 wire 值。"""
-    if value is None:
-        return None
-    if not isinstance(value, str) or value not in allowed:
-        raise ContextCollabValidationError(
-            f"unknown {field} value: {value!r}, allowed: {sorted(allowed)}"
         )
     return value
 
@@ -168,18 +169,22 @@ def _resolve_event_status(
     snapshot: CurrentSnapshot | None,
     command: EventAppendCommand,
     context: ActorContext,
+    catalog: ProductCatalog,
 ) -> "str | None":
     """G4 状态机裁决的薄包装:权威实现已提升至
     ``g4_contracts_consistency.workflow_resolution.resolve_workflow_status``
     (task_commission spec §4.2/裁决 G,与产品层共用同源);``collet``
     参数保留以稳住调用面,裁决不消费聚合根。"""
+    profile = product_definition(spec, catalog)
+    machine_ref = profile.workflow.state_machine_ref if profile is not None else None
     return resolve_workflow_status(
-        workflow_kind=spec.workflow_kind,
+        workflow_kind=machine_ref.profile_id if machine_ref else spec.workflow_kind,
         executor_ref=spec.executor_ref,
         snapshot=snapshot,
         event_kind=command.event_kind,
         payload=command.payload,
         actor=context.actor,
+        workflow_version=machine_ref.version if machine_ref else None,
     )
 
 
@@ -192,7 +197,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
         repository: ContextCollabRepositoryProtocol,
         method_store: MethodStoreProtocol,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
+        *,
+        product_catalog: ProductCatalog,
     ) -> None:
+        self._product_catalog = product_catalog
         self._repository = repository
         self._method_store = method_store
         self._authorizer = authorizer
@@ -203,9 +211,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
         → 组装结果。
 
-        枚举校验(method_kind / product_kind / workflow_kind)与必填字符串
-        校验(objective)在本层完成;Single 必须有 executor 与顶层 method
-        白名单(Single / Open + Group)由结构授权器完成。创建不设幂等键
+        method/wire 与 objective 校验后走 G1 结构授权;L6 校验产品、工作流、
+        方法组合并钉住版本/RoleBinding,无产品的 L4 创建保留原合同。
+        Single executor 与顶层 method 白名单由 G1 校验。创建不设幂等键
         (spec 作者裁决):重复调用即重复创建。
         """
         objective = _required_str(command.objective, "objective")
@@ -216,18 +224,16 @@ class ContextCollabService(ContextCollabServiceProtocol):
             executor_ref=command.executor_ref,
             objective=objective,
             resource_refs=tuple(command.resource_refs),
-            product_kind=_optional_enum_value(
-                command.product_kind,
-                {profile.value for profile in ProductProfile},
-                "product_kind",
-            ),
-            workflow_kind=_optional_enum_value(
-                command.workflow_kind,
-                {kind.value for kind in WorkflowKind},
-                "workflow_kind",
-            ),
+            product_kind=command.product_kind,
+            workflow_kind=command.workflow_kind,
         )
         self._authorizer.check_create(spec, context)
+        if spec.product_kind is None and spec.workflow_kind is not None:
+            if spec.workflow_kind not in {item.value for item in WorkflowKind}:
+                raise ContextCollabValidationError(
+                    f"unknown workflow_kind value: {spec.workflow_kind!r}"
+                )
+        spec = prepare_product_spec(spec, self._product_catalog)
 
         record = self._repository.create_context(
             CreateContextRecordRequest(
@@ -257,6 +263,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             spec,
             context,
             now=_now(),
+            catalog=self._product_catalog,
         )
 
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
@@ -271,15 +278,14 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
 
     def append_event(
-        self, collab_context_id: str, command: EventAppendCommand,
-        context: ActorContext
+        self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
     ) -> EventAcceptedResult:
         """追加事件用例(spec §6.3):加载 → G4 校验 → G1 check →
         状态机裁决 → 仓储追加 → 组装结果。
 
         涉及聚合状态的并发语义由仓储把守:``parent_event`` 存在性与
         ``expected_version`` 乐观并发都在仓储持锁事务内裁决,相关错误
-        (VersionConflict / ParentEventError 等)原样上抛,本层不预查、
+        (VersionConflict / ParentEventError 等)原样上抛。本层先拒绝已陈旧版本、
         不吞。追加不设幂等键(spec 作者裁决):重复提交即重复事件,
         防重由调用方保证。``snapshot_updater`` 是只替换 status 的纯函数,
         由仓储在其行锁内求值,避免陈旧写。
@@ -296,13 +302,30 @@ class ContextCollabService(ContextCollabServiceProtocol):
             visibility=command.visibility,
             payload=command.payload,
         )
-        self._authorizer.check_append(
-            collet, status.context_spec, command, context
-        )
+        self._authorizer.check_append(collet, status.context_spec, command, context)
 
+        # Fast stale-request rejection precedes sequence checks; repository CAS
+        # remains authoritative for a writer racing after this read.
+        ensure_expected_version(command.expected_version, collet.version)
+        validate_product_event(
+            catalog=self._product_catalog,
+            spec=status.context_spec,
+            snapshot=status.current_snapshot,
+            event_kind=command.event_kind,
+            primitive_type=command.primitive_type,
+            visibility=command.visibility,
+            payload=command.payload,
+            actor=context.actor,
+            parent_event=command.parent_event,
+            events=status.events,
+        )
         new_status = _resolve_event_status(
-            collet, status.context_spec, status.current_snapshot, command,
+            collet,
+            status.context_spec,
+            status.current_snapshot,
+            command,
             context,
+            self._product_catalog,
         )
 
         def _update_status(
@@ -341,8 +364,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
 
     def get_status(
-        self, collab_context_id: str, *, trunk_events: bool,
-        context: ActorContext
+        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
     ) -> ContextCollabStatusProjection:
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
 
@@ -373,16 +395,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
         trunk_ids = None
         if trunk_events:
-            trunk_ids = active_chain_ids(
-                visible_events, collet.current_event_id
-            )
+            trunk_ids = active_chain_ids(visible_events, collet.current_event_id)
         listed_projection = (
             projection
             if trunk_ids is None
-            else [
-                entry for entry in projection
-                if entry.event_id in trunk_ids
-            ]
+            else [entry for entry in projection if entry.event_id in trunk_ids]
         )
         progress = build_progress(
             projection,
@@ -413,8 +430,6 @@ class ContextCollabService(ContextCollabServiceProtocol):
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(
                 total_events=len(listed_projection),
-                events=[
-                    _event_projection_dict(entry) for entry in listed_projection
-                ],
+                events=[_event_projection_dict(entry) for entry in listed_projection],
             ),
         )

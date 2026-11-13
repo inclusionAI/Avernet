@@ -22,6 +22,9 @@ from uuid import uuid4
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabParentEventError,
@@ -52,6 +55,11 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.l6_products.instance import (
+    ProductInstance,
+    decode_product_instance,
+    instantiate_product,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -66,10 +74,10 @@ _logger = logging.getLogger(__name__)
 class InitialEventDraft:
     """创建时固定的初始事件草稿(service 提供):task.created / Task。"""
 
-    event_kind: str       # "task.created"
-    primitive_type: str   # "Task"
+    event_kind: str  # "task.created"
+    primitive_type: str  # "Task"
     actor_ref: PrincipalRef  # 创建人
-    payload: dict         # {"objective": <objective>}
+    payload: dict  # {"objective": <objective>}
 
 
 @dataclass
@@ -92,6 +100,7 @@ class ContextCreatedRecord:
     context_spec: ContextSpec
     current_snapshot: CurrentSnapshot
     initial_event: EventRecord
+    product_instance: ProductInstance | None = None
 
 
 @dataclass
@@ -107,6 +116,7 @@ class ContextStatusRecord:
     context_spec: ContextSpec
     current_snapshot: CurrentSnapshot | None
     events: list[EventRecord]
+    product_instance: ProductInstance | None = None
 
 
 @dataclass
@@ -147,9 +157,15 @@ class ContextCollabRepositoryProtocol(Protocol):
     + 初始事件(parent=None);创建不设幂等键,重复调用即重复创建。
     """
 
-    def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord: ...
-    def append_event(self, collab_context_id: str, request: "AppendEventRecordRequest") -> "EventAppendedRecord": ...
-    def get_current_status(self, collab_context_id: str) -> "ContextStatusRecord | None": ...
+    def create_context(
+        self, request: CreateContextRecordRequest
+    ) -> ContextCreatedRecord: ...
+    def append_event(
+        self, collab_context_id: str, request: "AppendEventRecordRequest"
+    ) -> "EventAppendedRecord": ...
+    def get_current_status(
+        self, collab_context_id: str
+    ) -> "ContextStatusRecord | None": ...
     def list_collets_by_product(
         self, product_kind: str
     ) -> "list[tuple[Collet, ContextSpec, datetime]]": ...
@@ -244,14 +260,17 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
     """两行一事务的 Collet/Event ORM 存取(``@inject db: DatabasePlugin``)。"""
 
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(self, db: DatabasePlugin, product_catalog: ProductCatalog) -> None:
+        self._product_catalog = product_catalog
         self._db = db
 
     def _transaction(self):
         transactional = getattr(self._db, "transactional_orm_session", None)
         return transactional() if transactional is not None else self._db.orm_session()
 
-    def create_context(self, request: CreateContextRecordRequest) -> ContextCreatedRecord:
+    def create_context(
+        self, request: CreateContextRecordRequest
+    ) -> ContextCreatedRecord:
         """创建 Collet + 初始事件(spec §9.4 规则 1:同一事务两行)。
 
         创建不设幂等键(spec 作者裁决):重复调用即重复创建,自然防重
@@ -292,8 +311,20 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             current_event_id=initial_event.event_id,
             version=1,
         )
+        instance = (
+            instantiate_product(
+                spec, collab_context_id, event_id, self._product_catalog
+            )
+            if spec.product_profile_version is not None
+            else None
+        )
         with self._transaction() as db:
-            db.add(self._collet_row(collet, spec, snapshot, now=now))
+            row = self._collet_row(collet, spec, snapshot, now=now)
+            if instance is not None:
+                row.context_spec = _dump_json(
+                    {**spec.to_dict(), "product_instance": instance.to_dict()}
+                )
+            db.add(row)
             db.add(self._event_row(initial_event, now=now))
             db.flush()
             return ContextCreatedRecord(
@@ -301,6 +332,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 context_spec=spec,
                 current_snapshot=snapshot,
                 initial_event=initial_event,
+                product_instance=instance,
             )
 
     def append_event(
@@ -398,9 +430,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 current_snapshot=new_snapshot,
             )
 
-    def get_current_status(
-        self, collab_context_id: str
-    ) -> ContextStatusRecord | None:
+    def get_current_status(self, collab_context_id: str) -> ContextStatusRecord | None:
         """读取 Collet + 全量事件列表(spec §9.4 规则 3:只读,不写库)。
 
         事件按自增 id 升序返回(即接纳顺序);主干(trunk)过滤在查询投影
@@ -427,11 +457,24 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 .all()
             )
             collet, spec, snapshot = _collet_from_row(row)
+            instance = decode_product_instance(
+                json.loads(row.context_spec),
+                spec,
+                collet.collet_id,
+                self._product_catalog,
+            )
+            if instance is not None and (
+                not event_rows or instance.creation_event_ref != event_rows[0].event_id
+            ):
+                raise ContextCollabValidationError(
+                    "ProductInstance creation evidence does not match initial event"
+                )
             return ContextStatusRecord(
                 collet=collet,
                 context_spec=spec,
                 current_snapshot=snapshot,
                 events=[_event_from_row(event_row) for event_row in event_rows],
+                product_instance=instance,
             )
 
     def list_collets_by_product(
@@ -459,8 +502,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     collet, spec, _snapshot = _collet_from_row(row)
                 except ContextCollabValidationError as error:
                     _logger.warning(
-                        "skip undecodable collab context row %s in product "
-                        "listing: %s",
+                        "skip undecodable collab context row %s in product listing: %s",
                         row.collab_context_id,
                         error,
                     )
@@ -470,9 +512,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 listed.append((collet, spec, row.gmt_create))
             return listed
 
-    def count_message_events(
-        self, collab_context_ids: Sequence[str]
-    ) -> dict[str, int]:
+    def count_message_events(self, collab_context_ids: Sequence[str]) -> dict[str, int]:
         """按 Collet 计 Message 事件数(GROUP BY 单查询,禁 N+1)。
 
         键=collab_context_id,值=``primitive_type='Message'`` 事件总数
@@ -488,9 +528,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     func.count(ContextCollabEventModel.id),
                 )
                 .filter(
-                    ContextCollabEventModel.collab_context_id.in_(
-                        collab_context_ids
-                    ),
+                    ContextCollabEventModel.collab_context_id.in_(collab_context_ids),
                     ContextCollabEventModel.primitive_type == "Message",
                     ContextCollabEventModel.env == get_current_env(),
                 )

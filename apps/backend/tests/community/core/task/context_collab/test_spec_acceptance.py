@@ -54,6 +54,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -119,9 +120,10 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-            method_store=InMemoryMethodStore(),
-            repository=ContextCollabRepository(db),
- )
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
+    )
 
 
 def _count(engine, model) -> int:
@@ -142,7 +144,9 @@ def _collet_json(engine, collab_context_id, column) -> dict | str | None:
 
 def _stored_snapshot(engine, collab_context_id) -> dict:
     return json.loads(
-        _collet_json(engine, collab_context_id, ContextCollabColletModel.current_snapshot)
+        _collet_json(
+            engine, collab_context_id, ContextCollabColletModel.current_snapshot
+        )
     )
 
 
@@ -158,8 +162,7 @@ def _event_payload(engine, collab_context_id, event_id) -> dict:
     return json.loads(raw)
 
 
-def _append_message(service, ctx_id, *, expected_version,
-                    parent_event, content) -> str:
+def _append_message(service, ctx_id, *, expected_version, parent_event, content) -> str:
     result = service.append_event(
         ctx_id,
         make_append_command(
@@ -232,9 +235,7 @@ class TestSpecAcceptance:
         领域校验错。Capability/外部授权由 P2 接缝补充,不在 P1 范围。
         """
         with pytest.raises(ContextCollabValidationError, match="executor_ref"):
-            service.create_context(
-                make_create_command(executor_ref=None), make_actor()
-            )
+            service.create_context(make_create_command(executor_ref=None), make_actor())
 
         # responsible(principal_ref)在请求中缺失 → wire 解析为命令字段的
         # 取值路径即拒绝;不允许装配出无责任主体的创建命令。
@@ -261,9 +262,7 @@ class TestSpecAcceptance:
             content=content,
         )
 
-        payload = _event_payload(
-            engine, created.collab_context_id, msg_event_id
-        )
+        payload = _event_payload(engine, created.collab_context_id, msg_event_id)
         assert payload["content"] == content
         assert "content_ref" not in payload
         # top-level 仅 content 一键:正文内联直存,没有任何内容引用键。
@@ -331,9 +330,7 @@ class TestSpecAcceptance:
         assert trunk.current_snapshot == full.current_snapshot
         assert trunk.current_event == full.current_event
         assert trunk.context_version == full.context_version
-        assert (
-            trunk.current_snapshot["progress"] == full.current_snapshot["progress"]
-        )
+        assert trunk.current_snapshot["progress"] == full.current_snapshot["progress"]
 
     def test_5_status_shape_is_three_sections_without_steps(self, service):
         """§12.2 #5:查询返回 current_snapshot / current_event /
@@ -418,6 +415,6 @@ class TestSpecAcceptance:
         assert snapshot_raw_after == snapshot_raw_before
         # 两次查询投影一致且 equal 落库快照(实时投影不改写权威行)。
         assert second.current_snapshot == first.current_snapshot
-        assert _stored_snapshot(
-            engine, created.collab_context_id
-        ) == json.loads(snapshot_raw_before)
+        assert _stored_snapshot(engine, created.collab_context_id) == json.loads(
+            snapshot_raw_before
+        )

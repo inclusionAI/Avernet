@@ -22,11 +22,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
-    ContextCollabEventModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
@@ -57,7 +57,7 @@ def _create(db, product_kind: str, objective: str = "整理评审结论"):
         InitialEventDraft,
     )
 
-    repo = ContextCollabRepository(db)
+    repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
     return repo.create_context(
         CreateContextRecordRequest(
             context_spec=_spec(product_kind, objective),
@@ -76,7 +76,7 @@ class TestListColletsByProduct:
         _create(db, "bbs_public_discussion", objective="公开讨论帖")
         _create(db, "team_todo", objective="待办任务帖")
 
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         rows = repo.list_collets_by_product("bbs_public_discussion")
 
         assert len(rows) == 1
@@ -93,17 +93,16 @@ class TestListColletsByProduct:
             row = (
                 session.query(ContextCollabColletModel)
                 .filter(
-                    ContextCollabColletModel.collab_context_id
-                    == first.collet.collet_id
+                    ContextCollabColletModel.collab_context_id == first.collet.collet_id
                 )
                 .one()
             )
             row.gmt_create = row.gmt_create - timedelta(minutes=10)
         second = _create(db, "bbs_public_discussion", objective="晚帖")
 
-        rows = ContextCollabRepository(db).list_collets_by_product(
-            "bbs_public_discussion"
-        )
+        rows = ContextCollabRepository(
+            db, product_catalog=PRODUCT_CATALOG
+        ).list_collets_by_product("bbs_public_discussion")
 
         assert [r[1].objective for r in rows] == ["晚帖", "早帖"]
         assert rows[0][0].collet_id == second.collet.collet_id
@@ -140,9 +139,9 @@ class TestListColletsByProduct:
             )
             session.add(bad)
 
-        rows = ContextCollabRepository(db).list_collets_by_product(
-            "bbs_public_discussion"
-        )
+        rows = ContextCollabRepository(
+            db, product_catalog=PRODUCT_CATALOG
+        ).list_collets_by_product("bbs_public_discussion")
 
         assert len(rows) == 1
         assert rows[0][0].collet_id == good.collet.collet_id
@@ -154,7 +153,7 @@ class TestCountMessageEvents:
             AppendEventRecordRequest,
         )
 
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         a = _create(db, "bbs_public_discussion", objective="帖 A")
         b = _create(db, "bbs_public_discussion", objective="帖 B")
 
@@ -179,7 +178,7 @@ class TestCountMessageEvents:
         # B: 追加 1 条 Message。
         append(b.collet.collet_id, 1, "Message", "user_interaction.posted")
 
-        repo = ContextCollabRepository(db)
+        repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         counts = repo.count_message_events(
             [a.collet.collet_id, b.collet.collet_id, "collet_missing"]
         )
@@ -191,7 +190,7 @@ class TestCountMessageEvents:
         a = _create(db, "bbs_public_discussion")
         # 只有初始 task.created(Task)事件,无 Message → 不出现在结果键里;
         # 消费方以 ``.get(collab_context_id, 0)`` 取零计数(合同)。
-        counts = ContextCollabRepository(db).count_message_events(
-            [a.collet.collet_id]
-        )
+        counts = ContextCollabRepository(
+            db, product_catalog=PRODUCT_CATALOG
+        ).count_message_events([a.collet.collet_id])
         assert counts == {}

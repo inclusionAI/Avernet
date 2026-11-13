@@ -35,7 +35,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-    ContextSpec,
     CurrentSnapshot,
     ProgressSnapshot,
 )
@@ -64,6 +63,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     PublishTaskCommand,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 ASSIGNEE = "bot_commission_001"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -208,7 +208,8 @@ def _method_port(repo, store):
             store=store,
             authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
-        )
+        ),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -220,6 +221,7 @@ def _service(repo: _FakeRepo | None = None, store: InMemoryMethodStore | None = 
         authorizer=StructuralContextCollabAuthorizer(),
         method_store=store,
         method_ops_port=_method_port(repo, store),
+        product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, store
 
@@ -232,7 +234,13 @@ def _top_binding(store, repo, collab_context_id):
     )
 
     return ensure_top_level_binding(
-        store, current_axes(), collab_context_id, repo, _actor(), now=_now()
+        store,
+        current_axes(),
+        collab_context_id,
+        repo,
+        _actor(),
+        now=_now(),
+        catalog=PRODUCT_CATALOG,
     )
 
 
@@ -273,7 +281,9 @@ class TestPublishTask:
         with pytest.raises(ContextCollabValidationError):
             service.publish_task(
                 PublishTaskCommand(
-                    title=" ", body=BODY, space=SPACE,
+                    title=" ",
+                    body=BODY,
+                    space=SPACE,
                     assignee_agent_id=ASSIGNEE,
                 ),
                 _actor(),
@@ -281,7 +291,9 @@ class TestPublishTask:
         with pytest.raises(ContextCollabValidationError):
             service.publish_task(
                 PublishTaskCommand(
-                    title=TITLE, body="", space=SPACE,
+                    title=TITLE,
+                    body="",
+                    space=SPACE,
                     assignee_agent_id=ASSIGNEE,
                 ),
                 _actor(),
@@ -289,7 +301,9 @@ class TestPublishTask:
         with pytest.raises(ContextCollabValidationError):
             service.publish_task(
                 PublishTaskCommand(
-                    title=TITLE, body=BODY, space=SPACE,
+                    title=TITLE,
+                    body=BODY,
+                    space=SPACE,
                     assignee_agent_id="  ",
                 ),
                 _actor(),

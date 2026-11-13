@@ -98,9 +98,7 @@ class A2aTaskDispatch(TaskDispatchPort):
                 },
             }
         )
-        card = self._delivery.resolve_agent_card(
-            agent_id=info.assignee_agent_id
-        )
+        card = self._delivery.resolve_agent_card(agent_id=info.assignee_agent_id)
         message = A2aMessage.from_dict(
             {
                 "message_id": f"a2amsg_{_uuid.uuid4().hex}",
@@ -159,8 +157,22 @@ def _operation_context(info: DispatchedTaskInfo, now: str) -> dict:
             "collet_ref": ContextRef.from_dict(
                 {"context_type": "COLLET", "context_id": info.collet_id}
             ).to_dict(),
-            "method_binding_ref": None,
-            "product_profile_ref": None,
+            "method_binding_ref": ObjectRef.from_dict(
+                {
+                    "object_type": "MethodBinding",
+                    "object_id": info.method_binding_ref,
+                    "version": None,
+                    "issuer": LOCAL_ISSUER,
+                }
+            ).to_dict(),
+            "product_profile_ref": ObjectRef.from_dict(
+                {
+                    "object_type": "ProductProfile",
+                    "object_id": info.product_profile_ref.profile_id,
+                    "version": str(info.product_profile_ref.version),
+                    "issuer": LOCAL_ISSUER,
+                }
+            ).to_dict(),
             "trace_id": f"trace_{info.collet_id}",
             "correlation_id": None,
             "causation_id": None,

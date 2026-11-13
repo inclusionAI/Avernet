@@ -34,6 +34,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     _FakeRepo,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
 BOT_ASSIGNEE = "bot_writer_001"
@@ -64,6 +65,7 @@ def _service(repo=_FakeRepo(), port=None):
         method_store=store,
         method_ops_port=_method_port(repo, store),
         dispatch_port=port,
+        product_catalog=PRODUCT_CATALOG,
     )
     return service, repo, port, store
 
@@ -165,7 +167,8 @@ def test_end_to_end_commission_flow():
         "task.submitted",
     ]
     progress_event = next(
-        e for e in in_progress_detail.events
+        e
+        for e in in_progress_detail.events
         if e["event_kind"] == "task.progress.updated"
     )
     assert progress_event["payload"]["percent"] == 60

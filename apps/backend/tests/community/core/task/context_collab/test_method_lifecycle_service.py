@@ -70,6 +70,7 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
     project_created_context,
     top_level_binding_id,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 COLLET_ID = "collet_lifecycle_001"
 PRINCIPAL_ID = "u_1001"
@@ -132,7 +133,6 @@ def _status_record(**overrides) -> ContextStatusRecord:
 
 
 class _FakeCollabRepository:
-
     """最小 collet 仓储 fake:按 context 返回受控 ``ContextStatusRecord``。"""
 
     def list_collets_by_product(self, product_kind: str):
@@ -140,7 +140,6 @@ class _FakeCollabRepository:
 
     def count_message_events(self, collab_context_ids):
         raise NotImplementedError("fake does not implement message counting")
-
 
     def __init__(self, records: dict[str, ContextStatusRecord]) -> None:
         self._records = dict(records)
@@ -168,6 +167,7 @@ def make_service():
         store=store,
         authorizer=StructuralMethodOpsAuthorizer(),
         collab_repo=repo,
+        product_catalog=PRODUCT_CATALOG,
     )
     return store, repo, service
 
@@ -185,7 +185,9 @@ def bind_nested(service: MethodLifecycleService, binding_id: str, **overrides):
     return service.bind(COLLET_ID, command, make_actor())
 
 
-def compose(service: MethodLifecycleService, parent_id: str, child_id: str, **overrides):
+def compose(
+    service: MethodLifecycleService, parent_id: str, child_id: str, **overrides
+):
     """经 ``compose`` 建一条 nest 边;字段可覆盖。"""
     fields = {
         "relation": "nest",
@@ -210,24 +212,34 @@ class TestLifecycleTransitions:
         assert bound.binding["version"] == 1
 
         activated = service.activate(
-            COLLET_ID, "mb_nest_1", MethodStateChangeCommand(reason="开始执行"),
+            COLLET_ID,
+            "mb_nest_1",
+            MethodStateChangeCommand(reason="开始执行"),
             make_actor(),
         )
         assert (activated.accepted, activated.state, activated.version) == (
-            True, "ACTIVE", 2,
+            True,
+            "ACTIVE",
+            2,
         )
         suspended = service.suspend(
-            COLLET_ID, "mb_nest_1", MethodStateChangeCommand(reason="暂停"),
+            COLLET_ID,
+            "mb_nest_1",
+            MethodStateChangeCommand(reason="暂停"),
             make_actor(),
         )
         assert (suspended.state, suspended.version) == ("SUSPENDED", 3)
         resumed = service.resume(
-            COLLET_ID, "mb_nest_1", MethodStateChangeCommand(reason="恢复"),
+            COLLET_ID,
+            "mb_nest_1",
+            MethodStateChangeCommand(reason="恢复"),
             make_actor(),
         )
         assert (resumed.state, resumed.version) == ("ACTIVE", 4)
         terminated = service.terminate(
-            COLLET_ID, "mb_nest_1", MethodStateChangeCommand(reason="收尾"),
+            COLLET_ID,
+            "mb_nest_1",
+            MethodStateChangeCommand(reason="收尾"),
             make_actor(),
         )
         assert (terminated.state, terminated.version) == ("TERMINATED", 5)
@@ -269,13 +281,17 @@ class TestLifecycleTransitions:
         store, _, service = make_service()
         bind_nested(service, "mb_cfg_1")
         updated = service.update_config(
-            COLLET_ID, "mb_cfg_1",
-            UpdateBindingConfigCommand(config={"max_compose_depth": 4},
-                                       expected_version=1),
+            COLLET_ID,
+            "mb_cfg_1",
+            UpdateBindingConfigCommand(
+                config={"max_compose_depth": 4}, expected_version=1
+            ),
             make_actor(),
         )
         assert (updated.accepted, updated.state, updated.version) == (
-            True, "BOUND", 2,
+            True,
+            "BOUND",
+            2,
         )
         assert store.get_binding(AXES, "mb_cfg_1", COLLET_ID).config == {
             "max_compose_depth": 4,
@@ -283,16 +299,19 @@ class TestLifecycleTransitions:
         # 陈旧版本号:409 语义冲突。
         with pytest.raises(ContextCollabVersionConflict):
             service.update_config(
-                COLLET_ID, "mb_cfg_1",
+                COLLET_ID,
+                "mb_cfg_1",
                 UpdateBindingConfigCommand(config={}, expected_version=1),
                 make_actor(),
             )
         # 非法 config 形态(max_compose_depth 越界):校验拒绝,不落半态。
         with pytest.raises(ContextCollabValidationError, match="max_compose_depth"):
             service.update_config(
-                COLLET_ID, "mb_cfg_1",
-                UpdateBindingConfigCommand(config={"max_compose_depth": 99},
-                                           expected_version=2),
+                COLLET_ID,
+                "mb_cfg_1",
+                UpdateBindingConfigCommand(
+                    config={"max_compose_depth": 99}, expected_version=2
+                ),
                 make_actor(),
             )
         assert store.get_binding(AXES, "mb_cfg_1", COLLET_ID).version == 2
@@ -303,8 +322,10 @@ class TestBindIdempotency:
         """RF#3:同 ID 同形态返回已存在对象;同 ID 异形态 409 语义冲突。"""
         store, _, service = make_service()
         command = BindMethodCommand(
-            method_kind="Group", method_binding_id="mb_fixed",
-            parent_scope_ref="task_scope_001", bind_reason="compose",
+            method_kind="Group",
+            method_binding_id="mb_fixed",
+            parent_scope_ref="task_scope_001",
+            bind_reason="compose",
         )
         first = service.bind(COLLET_ID, command, make_actor())
         assert first.binding["state"] == "BOUND"
@@ -315,7 +336,8 @@ class TestBindIdempotency:
             service.bind(
                 COLLET_ID,
                 BindMethodCommand(
-                    method_kind="Group", method_binding_id="mb_fixed",
+                    method_kind="Group",
+                    method_binding_id="mb_fixed",
                     parent_scope_ref="task_scope_002",
                 ),
                 make_actor(),
@@ -339,8 +361,12 @@ class TestComposeAndDetach:
         store, _, service = make_service()
         bind_nested(service, "mb_cyc_a")
         bind_nested(service, "mb_cyc_b")
-        service.activate(COLLET_ID, "mb_cyc_a", MethodStateChangeCommand(), make_actor())
-        service.activate(COLLET_ID, "mb_cyc_b", MethodStateChangeCommand(), make_actor())
+        service.activate(
+            COLLET_ID, "mb_cyc_a", MethodStateChangeCommand(), make_actor()
+        )
+        service.activate(
+            COLLET_ID, "mb_cyc_b", MethodStateChangeCommand(), make_actor()
+        )
         edge = compose(service, "mb_cyc_a", "mb_cyc_b")
         assert edge.edge["state"] == "ACTIVE"
         assert edge.edge["relation_kind"] == "nest"
@@ -362,9 +388,11 @@ class TestComposeAndDetach:
             assert accepted.edge["state"] == "ACTIVE"
         with pytest.raises(ContextCollabValidationError, match="max_compose_depth"):
             service_d.compose(
-                COLLET_ID, ids[8],
-                ComposeMethodCommand(relation="nest", child_binding_id=ids[9],
-                                     child_method_kind="Single"),
+                COLLET_ID,
+                ids[8],
+                ComposeMethodCommand(
+                    relation="nest", child_binding_id=ids[9], child_method_kind="Single"
+                ),
                 make_actor(),
             )
         assert store_d.get_composition_edge(AXES, "edge_over", COLLET_ID) is None
@@ -375,15 +403,23 @@ class TestComposeAndDetach:
         # 父 SUSPENDED 拒绝。
         bind_nested(service, "mb_p_susp")
         bind_nested(service, "mb_child_susp")
-        service.activate(COLLET_ID, "mb_p_susp", MethodStateChangeCommand(), make_actor())
-        service.suspend(COLLET_ID, "mb_p_susp", MethodStateChangeCommand(), make_actor())
+        service.activate(
+            COLLET_ID, "mb_p_susp", MethodStateChangeCommand(), make_actor()
+        )
+        service.suspend(
+            COLLET_ID, "mb_p_susp", MethodStateChangeCommand(), make_actor()
+        )
         with pytest.raises(ContextCollabValidationError, match="ACTIVE"):
             compose(service, "mb_p_susp", "mb_child_susp")
         # 父 TERMINATED 拒绝(terminated 后出边创建一律拒绝)。
         bind_nested(service, "mb_p_term")
         bind_nested(service, "mb_child_term")
-        service.activate(COLLET_ID, "mb_p_term", MethodStateChangeCommand(), make_actor())
-        service.terminate(COLLET_ID, "mb_p_term", MethodStateChangeCommand(), make_actor())
+        service.activate(
+            COLLET_ID, "mb_p_term", MethodStateChangeCommand(), make_actor()
+        )
+        service.terminate(
+            COLLET_ID, "mb_p_term", MethodStateChangeCommand(), make_actor()
+        )
         with pytest.raises(ContextCollabValidationError, match="ACTIVE"):
             compose(service, "mb_p_term", "mb_child_term")
 
@@ -396,10 +432,13 @@ class TestComposeAndDetach:
         )
         with pytest.raises(ContextCollabValidationError):
             service.compose(
-                COLLET_ID, "mb_sw_parent",
-                ComposeMethodCommand(relation="escalate",
-                                    child_binding_id="mb_sw_child",
-                                    child_method_kind="Swarm"),
+                COLLET_ID,
+                "mb_sw_parent",
+                ComposeMethodCommand(
+                    relation="escalate",
+                    child_binding_id="mb_sw_child",
+                    child_method_kind="Swarm",
+                ),
                 make_actor(),
             )
 
@@ -407,10 +446,15 @@ class TestComposeAndDetach:
         store, _, service = make_service()
         bind_nested(service, "mb_det_p")
         bind_nested(service, "mb_det_c")
-        service.activate(COLLET_ID, "mb_det_p", MethodStateChangeCommand(), make_actor())
+        service.activate(
+            COLLET_ID, "mb_det_p", MethodStateChangeCommand(), make_actor()
+        )
         compose(service, "mb_det_p", "mb_det_c", edge_id="edge_det_1")
         result = service.detach(
-            COLLET_ID, "edge_det_1", MethodStateChangeCommand(reason="修剪"), make_actor()
+            COLLET_ID,
+            "edge_det_1",
+            MethodStateChangeCommand(reason="修剪"),
+            make_actor(),
         )
         assert result.edge["state"] == "DETACHED"
         assert result.edge["transitioned_from"] == "ACTIVE"
@@ -430,19 +474,25 @@ class TestAuthorizationSeam:
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.bind(
                 COLLET_ID,
-                BindMethodCommand(method_kind="Single",
-                                  parent_scope_ref="task_scope_009"),
+                BindMethodCommand(
+                    method_kind="Single", parent_scope_ref="task_scope_009"
+                ),
                 stranger,
             )
         # owner 先建并激活,随后陌生人对同一 binding 操作仍拒绝。
         owner_result = service.bind(
             COLLET_ID,
-            BindMethodCommand(method_kind="Single", method_binding_id="mb_owned",
-                              parent_scope_ref="task_scope_009"),
+            BindMethodCommand(
+                method_kind="Single",
+                method_binding_id="mb_owned",
+                parent_scope_ref="task_scope_009",
+            ),
             make_actor(),
         )
         assert owner_result.binding["state"] == "BOUND"
-        service.activate(COLLET_ID, "mb_owned", MethodStateChangeCommand(), make_actor())
+        service.activate(
+            COLLET_ID, "mb_owned", MethodStateChangeCommand(), make_actor()
+        )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.terminate(
                 COLLET_ID, "mb_owned", MethodStateChangeCommand(), stranger
@@ -462,13 +512,20 @@ class TestTerminateTopLevelGate:
         repo = _FakeCollabRepository({})
         repo.set_status(COLLET_ID, status)
         service = MethodLifecycleService(
-            store=store, authorizer=StructuralMethodOpsAuthorizer(),
+            store=store,
+            authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
+            product_catalog=PRODUCT_CATALOG,
         )
         record = repo.get_current_status(COLLET_ID)
         project_created_context(
-            store, AXES, COLLET_ID, record.context_spec,
-            make_actor(), now=NOW,
+            store,
+            AXES,
+            COLLET_ID,
+            record.context_spec,
+            make_actor(),
+            now=NOW,
+            catalog=PRODUCT_CATALOG,
         )
         return store, repo, service
 
@@ -507,12 +564,16 @@ class TestTerminateTopLevelGate:
         store, _, service = self._projected_top_level_service("in_progress")
         binding_id = top_level_binding_id(COLLET_ID)
         suspended = service.suspend(
-            COLLET_ID, binding_id, MethodStateChangeCommand(reason="暂停"),
+            COLLET_ID,
+            binding_id,
+            MethodStateChangeCommand(reason="暂停"),
             make_actor(),
         )
         assert (suspended.state, suspended.version) == ("SUSPENDED", 2)
         resumed = service.resume(
-            COLLET_ID, binding_id, MethodStateChangeCommand(reason="恢复"),
+            COLLET_ID,
+            binding_id,
+            MethodStateChangeCommand(reason="恢复"),
             make_actor(),
         )
         assert (resumed.state, resumed.version) == ("ACTIVE", 3)
@@ -540,8 +601,13 @@ class TestTopLevelProjection:
         repo = _FakeCollabRepository({COLLET_ID: _status_record()})
         record = repo.get_current_status(COLLET_ID)
         binding = project_created_context(
-            store, AXES, COLLET_ID, record.context_spec,
-            make_actor(), now=NOW,
+            store,
+            AXES,
+            COLLET_ID,
+            record.context_spec,
+            make_actor(),
+            now=NOW,
+            catalog=PRODUCT_CATALOG,
         )
         # spec §3.2 初始状态作者裁决:顶层投影直接 ACTIVE;§9.2 单向派生。
         assert binding.state is BindingState.ACTIVE
@@ -556,8 +622,13 @@ class TestTopLevelProjection:
         assert binding.transitioned_by == PRINCIPAL_ID
         # 重复投影幂等返回既有对象,不产生第二行。
         again = project_created_context(
-            store, AXES, COLLET_ID, record.context_spec,
-            make_actor(), now="2026-11-12T09:30:00+00:00",
+            store,
+            AXES,
+            COLLET_ID,
+            record.context_spec,
+            make_actor(),
+            now="2026-11-12T09:30:00+00:00",
+            catalog=PRODUCT_CATALOG,
         )
         assert again.method_binding_id == binding.method_binding_id
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
@@ -569,8 +640,13 @@ class TestTopLevelProjection:
         )
         record = repo.get_current_status(COLLET_ID)
         binding = project_created_context(
-            store, AXES, COLLET_ID, record.context_spec,
-            make_actor(), now=NOW,
+            store,
+            AXES,
+            COLLET_ID,
+            record.context_spec,
+            make_actor(),
+            now=NOW,
+            catalog=PRODUCT_CATALOG,
         )
         assert binding.method_names == ("Open", "Group")
         assert binding.profile_versions == {"Open": "0.2", "Group": "0.2"}
@@ -585,7 +661,7 @@ class TestSelfHeal:
         store = InMemoryMethodStore()
         repo = _FakeCollabRepository({COLLET_ID: _status_record()})
         healed = ensure_top_level_binding(
-            store, AXES, COLLET_ID, repo, make_actor(), now=NOW,
+            store, AXES, COLLET_ID, repo, make_actor(), now=NOW, catalog=PRODUCT_CATALOG
         )
         assert healed.state is BindingState.ACTIVE
         assert healed.bind_reason == "create_context_heal"
@@ -593,13 +669,19 @@ class TestSelfHeal:
         assert healed.method_names == ("Single",)
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
         again = ensure_top_level_binding(
-            store, AXES, COLLET_ID, repo, make_actor(), now=NOW,
+            store, AXES, COLLET_ID, repo, make_actor(), now=NOW, catalog=PRODUCT_CATALOG
         )
         assert again.method_binding_id == healed.method_binding_id
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
         with pytest.raises(ContextCollabNotFoundError):
             ensure_top_level_binding(
-                store, AXES, "collet_missing_001", repo, make_actor(), now=NOW,
+                store,
+                AXES,
+                "collet_missing_001",
+                repo,
+                make_actor(),
+                now=NOW,
+                catalog=PRODUCT_CATALOG,
             )
 
     def test_ensure_returns_existing_without_rebuild(self):
@@ -607,11 +689,16 @@ class TestSelfHeal:
         repo = _FakeCollabRepository({COLLET_ID: _status_record()})
         record = repo.get_current_status(COLLET_ID)
         projected = project_created_context(
-            store, AXES, COLLET_ID, record.context_spec,
-            make_actor(), now=NOW,
+            store,
+            AXES,
+            COLLET_ID,
+            record.context_spec,
+            make_actor(),
+            now=NOW,
+            catalog=PRODUCT_CATALOG,
         )
         healed = ensure_top_level_binding(
-            store, AXES, COLLET_ID, repo, make_actor(), now=NOW,
+            store, AXES, COLLET_ID, repo, make_actor(), now=NOW, catalog=PRODUCT_CATALOG
         )
         # 顶层已存在:直接返回权威对象,不重建、不改审计。
         assert healed.method_binding_id == projected.method_binding_id
@@ -623,8 +710,10 @@ class TestSelfHeal:
         store = InMemoryMethodStore()
         repo = _FakeCollabRepository({COLLET_ID: _status_record()})
         service = MethodLifecycleService(
-            store=store, authorizer=StructuralMethodOpsAuthorizer(),
+            store=store,
+            authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
+            product_catalog=PRODUCT_CATALOG,
         )
         result = service.inspect(
             COLLET_ID, top_level_binding_id(COLLET_ID), make_actor()

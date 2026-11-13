@@ -15,6 +15,9 @@ from typing import Annotated
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
@@ -158,9 +161,6 @@ from agentclaw.community.core.task.context_collab.services.single_group_method_s
 from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
     SwarmMethodService,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -203,12 +203,8 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
-from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
-)
-from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
-    ForumInteractionService,
 )
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
@@ -450,6 +446,11 @@ class TaskModule(Module):
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
+
+    @singleton
+    @provider
+    def context_collab_product_catalog(self) -> ProductCatalog:
+        return build_product_catalog()
 
     @singleton
     @provider

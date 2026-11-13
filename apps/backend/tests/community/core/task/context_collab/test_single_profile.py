@@ -83,6 +83,7 @@ from agentclaw.community.core.task.context_collab.services.method_lifecycle_serv
 from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
     SingleGroupMethodService,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 COLLET_ID = "collet_single_001"
 PRINCIPAL_ID = "u_1001"
@@ -147,7 +148,6 @@ def _status_record(**overrides) -> ContextStatusRecord:
 
 
 class _FakeCollabRepository:
-
     """最小 collet 仓储 fake:按 context 返回受控 ``ContextStatusRecord``。"""
 
     def list_collets_by_product(self, product_kind: str):
@@ -155,7 +155,6 @@ class _FakeCollabRepository:
 
     def count_message_events(self, collab_context_ids):
         raise NotImplementedError("fake does not implement message counting")
-
 
     def __init__(self, records: dict[str, ContextStatusRecord]) -> None:
         self._records = dict(records)
@@ -178,6 +177,7 @@ def make_single_service():
         store=store,
         authorizer=StructuralMethodOpsAuthorizer(),
         collab_repo=repo,
+        product_catalog=PRODUCT_CATALOG,
     )
     single = SingleGroupMethodService(
         store=store,
@@ -188,9 +188,11 @@ def make_single_service():
     return store, repo, lifecycle, single
 
 
-def active_single_binding(lifecycle: MethodLifecycleService,
-                          binding_id: str = "mb_single_alpha",
-                          collab_context_id: str = COLLET_ID) -> str:
+def active_single_binding(
+    lifecycle: MethodLifecycleService,
+    binding_id: str = "mb_single_alpha",
+    collab_context_id: str = COLLET_ID,
+) -> str:
     """bind + activate 一条嵌套 Single binding(single 四操作的前置)。"""
     lifecycle.bind(
         collab_context_id,
@@ -226,7 +228,9 @@ def select_agent(
     }
     fields.update(command_overrides)
     return single.select(
-        collab_context_id, binding_id, SingleSelectCommand(**fields),
+        collab_context_id,
+        binding_id,
+        SingleSelectCommand(**fields),
         actor or make_actor(),
     )
 
@@ -309,7 +313,10 @@ class TestSingleSelectionValue:
             SingleSelection.from_dict(selection_dict(requirement_refs=[""]))
 
     def test_valid_until_none_or_nonempty(self):
-        assert SingleSelection.from_dict(selection_dict(valid_until=None)).valid_until is None
+        assert (
+            SingleSelection.from_dict(selection_dict(valid_until=None)).valid_until
+            is None
+        )
         with pytest.raises(ContextCollabValidationError, match="valid_until"):
             SingleSelection.from_dict(selection_dict(valid_until=""))
 
@@ -335,9 +342,7 @@ class TestSelectionStoreSlice:
         assert store.insert_selection(AXES, selection, COLLET_ID) is selection
         again = SingleSelection.from_dict(selection_dict())
         assert store.insert_selection(AXES, again, COLLET_ID) is selection
-        drifted = SingleSelection.from_dict(
-            selection_dict(transition_reason="rerun")
-        )
+        drifted = SingleSelection.from_dict(selection_dict(transition_reason="rerun"))
         with pytest.raises(
             ContextCollabValidationError, match="differs from the stored shape"
         ):
@@ -351,7 +356,9 @@ class TestSelectionStoreSlice:
             AXES, SingleSelection.from_dict(selection_dict()), COLLET_ID
         )
         duplicate = SingleSelection.from_dict(
-            selection_dict(selection_id="sel_002", selected_agent_participant_ref="bot_beta_001")
+            selection_dict(
+                selection_id="sel_002", selected_agent_participant_ref="bot_beta_001"
+            )
         )
         with pytest.raises(ContextCollabValidationError, match="ACTIVE"):
             store.insert_selection(AXES, duplicate, COLLET_ID)
@@ -364,8 +371,13 @@ class TestSelectionStoreSlice:
         )
         assert store.insert_selection(AXES, released, COLLET_ID) is released
         # 回查与现役查询。
-        assert store.get_selection(AXES, "sel_001", "mb_single_alpha", COLLET_ID) is first
-        assert store.get_selection(AXES, "sel_missing", "mb_single_alpha", COLLET_ID) is None
+        assert (
+            store.get_selection(AXES, "sel_001", "mb_single_alpha", COLLET_ID) is first
+        )
+        assert (
+            store.get_selection(AXES, "sel_missing", "mb_single_alpha", COLLET_ID)
+            is None
+        )
         assert (
             store.active_selection(AXES, "mb_single_alpha", "task_scope_001", COLLET_ID)
             is first
@@ -375,7 +387,9 @@ class TestSelectionStoreSlice:
             is other_scope
         )
         assert (
-            store.active_selection(AXES, "mb_single_alpha", "task_scope_none", COLLET_ID)
+            store.active_selection(
+                AXES, "mb_single_alpha", "task_scope_none", COLLET_ID
+            )
             is None
         )
         # list 保持插入序,不过滤状态。
@@ -495,8 +509,12 @@ class TestSelectionStoreSlice:
         )
         # 同 selection id 两个上下文各自独立成行。
         assert first is not second
-        assert store.get_selection(AXES, "sel_001", "mb_single_alpha", COLLET_ID) is first
-        assert store.get_selection(AXES, "sel_001", "mb_single_alpha", other_ctx) is second
+        assert (
+            store.get_selection(AXES, "sel_001", "mb_single_alpha", COLLET_ID) is first
+        )
+        assert (
+            store.get_selection(AXES, "sel_001", "mb_single_alpha", other_ctx) is second
+        )
         # ACTIVE 唯一性按上下文独立:两个上下文各持一个现役,互不占用。
         assert (
             store.active_selection(AXES, "mb_single_alpha", "task_scope_001", COLLET_ID)
@@ -586,6 +604,7 @@ class TestSelectionScopingAndReplay:
             store=store,
             authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
+            product_catalog=PRODUCT_CATALOG,
         )
         single = SingleGroupMethodService(
             store=store,
@@ -630,9 +649,7 @@ class TestSelectionScopingAndReplay:
         )
         first = select_agent(single, binding_id, **command_fields)
         assert first.accepted is True
-        stored_first = store.get_selection(
-            AXES, "sel_replay_1", binding_id, COLLET_ID
-        )
+        stored_first = store.get_selection(AXES, "sel_replay_1", binding_id, COLLET_ID)
         replay = select_agent(single, binding_id, **command_fields)
         assert replay.accepted is True
         assert replay.object_id == first.object_id
@@ -655,9 +672,7 @@ class TestSelectionScopingAndReplay:
             selection_id="sel_replay_2",
             agent="bot_alpha_001",
         )
-        stored_first = store.get_selection(
-            AXES, "sel_replay_2", binding_id, COLLET_ID
-        )
+        stored_first = store.get_selection(AXES, "sel_replay_2", binding_id, COLLET_ID)
         with pytest.raises(
             ContextCollabValidationError, match="differs from the stored shape"
         ):
@@ -701,9 +716,7 @@ class TestRfc301Assertions:
         with pytest.raises(
             ContextCollabValidationError, match="selected_agent_participant_ref"
         ):
-            SingleSelection.from_dict(
-                selection_dict(selected_agent_participant_ref="")
-            )
+            SingleSelection.from_dict(selection_dict(selected_agent_participant_ref=""))
 
     def test_query_result_never_becomes_selection(self):
         """断言 3:Query 结果不自动成为 selection——Select 必须显式携带
@@ -712,7 +725,10 @@ class TestRfc301Assertions:
         binding_id = active_single_binding(lifecycle)
         with pytest.raises(ContextCollabValidationError, match="agent_participant_ref"):
             select_agent(single, binding_id, agent="")
-        assert store.active_selection(AXES, binding_id, "task_scope_001", COLLET_ID) is None
+        assert (
+            store.active_selection(AXES, binding_id, "task_scope_001", COLLET_ID)
+            is None
+        )
         assert store.list_selections(AXES, binding_id, COLLET_ID) == []
 
     def test_replace_is_single_ordered_event(self):
@@ -771,7 +787,10 @@ class TestRfc301Assertions:
         assert released.transitioned_from == "ACTIVE"
         assert released.transition_reason == "任务取消"
         assert released.transitioned_by == PRINCIPAL_ID
-        assert store.active_selection(AXES, binding_id, "task_scope_001", COLLET_ID) is None
+        assert (
+            store.active_selection(AXES, binding_id, "task_scope_001", COLLET_ID)
+            is None
+        )
         again = select_agent(single, binding_id, agent="bot_gamma_001")
         assert again.state == "ACTIVE"
 
@@ -929,9 +948,7 @@ class TestSingleOpsGuards:
                 stranger,
             )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
-            single.release(
-                COLLET_ID, binding_id, MethodStateChangeCommand(), stranger
-            )
+            single.release(COLLET_ID, binding_id, MethodStateChangeCommand(), stranger)
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             single.delegate(
                 COLLET_ID,

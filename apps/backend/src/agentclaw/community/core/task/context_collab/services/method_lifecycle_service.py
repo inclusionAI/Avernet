@@ -27,6 +27,9 @@ from uuid import uuid4
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -45,6 +48,12 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     ContextSpec,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    role_binding_ref,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    validate_product_spec,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
     GroupMemberBinding,
     GroupRoster,
@@ -56,6 +65,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     MethodKind,
     effective_max_compose_depth,
     parse_method_kinds,
+    top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionEdgeState,
@@ -148,16 +158,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def top_level_binding_id(collab_context_id: str) -> str:
-    """顶层 binding 的确定性 ID:由所属 Collet 派生,重启自愈可复算。"""
-    return f"mb_top_{collab_context_id}"
-
-
 def _profile_versions(method_names: tuple[str, ...]) -> dict[str, str]:
     """各核心方法的 Profile 版本:取自代码内注册表(代码即合同来源)。"""
     return {
-        name: METHOD_PROFILE_REGISTRY[name].profile_version
-        for name in method_names
+        name: METHOD_PROFILE_REGISTRY[name].profile_version for name in method_names
     }
 
 
@@ -167,6 +171,7 @@ def _build_top_level_binding(
     actor: ActorContext,
     *,
     now: str,
+    catalog: ProductCatalog,
     bind_reason: str,
     reason: str,
 ) -> MethodBinding:
@@ -178,13 +183,22 @@ def _build_top_level_binding(
     是审计来源说明:创建投影与自愈重建在审计上可区分。
     """
     method_names = tuple(kind.value for kind in parse_method_kinds(spec.method_kind))
+    profile = validate_product_spec(spec, catalog)
+    versions = (
+        {item.method: item.version for item in profile.composition.required_methods}
+        if profile is not None
+        else _profile_versions(method_names)
+    )
     return MethodBinding.from_dict(
         {
             "method_binding_id": top_level_binding_id(collab_context_id),
             "collab_context_id": collab_context_id,
             "method_kind": spec.method_kind,
             "method_names": list(method_names),
-            "profile_versions": _profile_versions(method_names),
+            "profile_versions": versions,
+            "role_binding_refs": [
+                role_binding_ref(collab_context_id, item) for item in spec.role_bindings
+            ],
             "participant_ref": (
                 spec.executor_ref.agent_id if spec.executor_ref else None
             ),
@@ -254,9 +268,7 @@ def _project_initial_roster(
     for index, (participant_id, role) in enumerate(participants.items()):
         member = GroupMemberBinding.from_dict(
             {
-                "group_member_binding_id": (
-                    f"gm_{role}_{binding.method_binding_id}"
-                ),
+                "group_member_binding_id": (f"gm_{role}_{binding.method_binding_id}"),
                 "method_binding_id": binding.method_binding_id,
                 "participant_ref": participant_id,
                 "address": "",
@@ -272,9 +284,7 @@ def _project_initial_roster(
         )
         # roster 自 revision 1 起每插入恰一次 bump:第 index 个成员的
         # 期望 revision = 1 + index,无需在投影内回读。
-        store.insert_member(
-            axes, member, roster.revision + index, collab_context_id
-        )
+        store.insert_member(axes, member, roster.revision + index, collab_context_id)
 
 
 def project_created_context(
@@ -285,6 +295,7 @@ def project_created_context(
     actor: ActorContext,
     *,
     now: str,
+    catalog: ProductCatalog,
 ) -> MethodBinding:
     """create_context 成功后的顶层 ACTIVE 投影(spec §9.2)。
 
@@ -299,8 +310,13 @@ def project_created_context(
     if existing is not None:
         return existing
     binding = _build_top_level_binding(
-        collab_context_id, spec, actor, now=now,
-        bind_reason="create_context", reason="top-level projection",
+        collab_context_id,
+        spec,
+        actor,
+        now=now,
+        bind_reason="create_context",
+        reason="top-level projection",
+        catalog=catalog,
     )
     stored = store.upsert_binding(axes, binding)
     _project_initial_roster(
@@ -317,6 +333,7 @@ def ensure_top_level_binding(
     actor: ActorContext,
     *,
     now: str,
+    catalog: ProductCatalog,
 ) -> MethodBinding:
     """读路径自愈缝(spec §6.4):顶层 binding 缺失时按需静默重建。
 
@@ -342,6 +359,7 @@ def ensure_top_level_binding(
         record.context_spec,
         actor,
         now=now,
+        catalog=catalog,
         bind_reason="create_context_heal",
         reason="top-level projection heal (spec §6.4)",
     )
@@ -353,9 +371,7 @@ def _shape_of(data: dict, fields: tuple[str, ...]) -> tuple:
     return tuple(data.get(field) for field in fields)
 
 
-def _ancestor_chain_depth(
-    parents: dict[str, list[str]], binding_id: str
-) -> int:
+def _ancestor_chain_depth(parents: dict[str, list[str]], binding_id: str) -> int:
     """沿 active 边向上数祖先链长(存在既有环时防御性跳过已访问节点)。
 
     输出 = 从该 binding 到最远根的边数;compose 守卫已挡新环,健在图
@@ -384,7 +400,10 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         store: MethodStoreProtocol,
         authorizer: MethodOpsAuthorizerProtocol,
         collab_repo: ContextCollabRepositoryProtocol,
+        *,
+        product_catalog: ProductCatalog,
     ) -> None:
+        self._product_catalog = product_catalog
         self._store = store
         self._authorizer = authorizer
         self._collab_repo = collab_repo
@@ -396,9 +415,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
     def _load_binding(
         self, axes: StoreAxes, collab_context_id: str, method_binding_id: str
     ) -> MethodBinding:
-        binding = self._store.get_binding(
-            axes, method_binding_id, collab_context_id
-        )
+        binding = self._store.get_binding(axes, method_binding_id, collab_context_id)
         if binding is None:
             raise ContextCollabNotFoundError(
                 f"method binding {method_binding_id!r} not found in "
@@ -435,8 +452,11 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
             collab_context_id, binding
         )
         self._authorizer.check_lifecycle_op(
-            op, binding, context,
-            principal_id=principal_id, executor_id=executor_id,
+            op,
+            binding,
+            context,
+            principal_id=principal_id,
+            executor_id=executor_id,
         )
         return record
 
@@ -533,14 +553,10 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         同 ID 同请求形态返回已存在对象,异形态 409 语义冲突。
         """
         axes = current_axes()
-        method_binding_id = (
-            command.method_binding_id or f"mb_{uuid4().hex[:12]}"
-        )
+        method_binding_id = command.method_binding_id or f"mb_{uuid4().hex[:12]}"
         bind_reason = command.bind_reason or "compose"
         method_kind = MethodKind.from_wire(command.method_kind).value
-        method_names = tuple(
-            kind.value for kind in parse_method_kinds(method_kind)
-        )
+        method_names = tuple(kind.value for kind in parse_method_kinds(method_kind))
         # 经 from_dict 整形校验(method_kind 投影一致、config 结构等),
         # 垃圾入参在落库前拒绝。
         binding = MethodBinding.from_dict(
@@ -568,9 +584,9 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
                 axes, method_binding_id, collab_context_id
             )
             if existing is not None:
-                if _shape_of(
-                    existing.to_dict(), _BINDING_REQUEST_FIELDS
-                ) == _shape_of(binding.to_dict(), _BINDING_REQUEST_FIELDS):
+                if _shape_of(existing.to_dict(), _BINDING_REQUEST_FIELDS) == _shape_of(
+                    binding.to_dict(), _BINDING_REQUEST_FIELDS
+                ):
                     # 重放成功:返回已存在对象(不重写审计/生命周期)。
                     return MethodBindingResult(binding=existing.to_dict())
                 raise ContextCollabValidationError(
@@ -692,6 +708,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
                     self._collab_repo,
                     context,
                     now=_now(),
+                    catalog=self._product_catalog,
                 )
             else:
                 raise ContextCollabNotFoundError(
@@ -788,9 +805,10 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
                     relation.value,
                     CompositionEdgeState.ACTIVE.value,
                 )
-                if _shape_of(
-                    existing.to_dict(), _EDGE_REQUEST_FIELDS
-                ) == candidate_shape:
+                if (
+                    _shape_of(existing.to_dict(), _EDGE_REQUEST_FIELDS)
+                    == candidate_shape
+                ):
                     return CompositionEdgeResult(edge=existing.to_dict())
                 raise ContextCollabValidationError(
                     f"idempotent re-submit of composition edge {edge_id!r} "
@@ -854,9 +872,7 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
             raise ContextCollabValidationError(
                 f"composition edge {edge_id!r} is already detached"
             )
-        parent = self._load_binding(
-            axes, collab_context_id, edge.parent_binding
-        )
+        parent = self._load_binding(axes, collab_context_id, edge.parent_binding)
         self._authorize("detach", parent, context, collab_context_id)
         updated = replace(
             edge,

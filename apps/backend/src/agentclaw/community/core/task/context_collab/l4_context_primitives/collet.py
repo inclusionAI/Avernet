@@ -29,6 +29,10 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    Participant,
+    RoleBinding,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
 )
@@ -87,6 +91,24 @@ def _executor_ref_from_dict(data: dict, owner: str) -> AgentRef | None:
     return AgentRef.from_dict(value)
 
 
+def _optional_version(data: dict, key: str) -> int | None:
+    value = data.get(key)
+    if value is not None and (type(value) is not int or value < 1):
+        raise ContextCollabValidationError(
+            f"ContextSpec.{key} must be a positive integer or null"
+        )
+    return value
+
+
+def _object_list(data: dict, key: str) -> list[dict]:
+    value = data.get(key, [])
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ContextCollabValidationError(
+            f"ContextSpec.{key} must be a list of objects"
+        )
+    return value
+
+
 class ColletState(str, Enum):
     """Collet 大写机器状态词汇(spec §4)。
 
@@ -134,6 +156,11 @@ class ContextSpec:
     resource_refs: tuple[ResourceRef, ...]
     product_kind: str | None
     workflow_kind: str | None
+    # None denotes a pre-versioning row (or a context without L6), not "latest".
+    product_profile_version: int | None = None
+    workflow_profile_version: int | None = None
+    participants: tuple[Participant, ...] = ()
+    role_bindings: tuple[RoleBinding, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict) -> "ContextSpec":
@@ -148,15 +175,25 @@ class ContextSpec:
             method_kind=_method_kind_from_dict(data, "ContextSpec"),
             executor_ref=_executor_ref_from_dict(data, "ContextSpec"),
             objective=_required_str(data, "objective", "ContextSpec"),
-            resource_refs=tuple(
-                ResourceRef.from_dict(item) for item in raw_refs
-            ),
+            resource_refs=tuple(ResourceRef.from_dict(item) for item in raw_refs),
             product_kind=_optional_str(data, "product_kind", "ContextSpec"),
             workflow_kind=_optional_str(data, "workflow_kind", "ContextSpec"),
+            product_profile_version=_optional_version(data, "product_profile_version"),
+            workflow_profile_version=_optional_version(
+                data, "workflow_profile_version"
+            ),
+            participants=tuple(
+                Participant.from_dict(item)
+                for item in _object_list(data, "participants")
+            ),
+            role_bindings=tuple(
+                RoleBinding.from_dict(item)
+                for item in _object_list(data, "role_bindings")
+            ),
         )
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "space": self.space.to_dict(),
             "principal_ref": self.principal_ref.to_dict(),
             "method_kind": self.method_kind,
@@ -168,6 +205,20 @@ class ContextSpec:
             "product_kind": self.product_kind,
             "workflow_kind": self.workflow_kind,
         }
+        # Preserve the original JSON shape of legacy/unprofiled contexts.
+        if (
+            self.product_profile_version is not None
+            or self.workflow_profile_version is not None
+            or self.participants
+            or self.role_bindings
+        ):
+            data.update(
+                product_profile_version=self.product_profile_version,
+                workflow_profile_version=self.workflow_profile_version,
+                participants=[item.to_dict() for item in self.participants],
+                role_bindings=[item.to_dict() for item in self.role_bindings],
+            )
+        return data
 
 
 @dataclass
@@ -224,9 +275,7 @@ class CurrentSnapshot:
     def from_dict(cls, data: dict) -> "CurrentSnapshot":
         raw_status = _required_str(data, "status", "CurrentSnapshot")
         if raw_status not in (status.value for status in TaskStatus):
-            raise ContextCollabValidationError(
-                f"unknown status value: {raw_status!r}"
-            )
+            raise ContextCollabValidationError(f"unknown status value: {raw_status!r}")
         return cls(
             objective=_required_str(data, "objective", "CurrentSnapshot"),
             status=raw_status,
@@ -292,9 +341,7 @@ class Collet:
             )
         raw_state = data.get("state")
         if not isinstance(raw_state, str) or raw_state not in _COLLET_STATES:
-            raise ContextCollabValidationError(
-                f"unknown state value: {raw_state!r}"
-            )
+            raise ContextCollabValidationError(f"unknown state value: {raw_state!r}")
         raw_version = data.get("version")
         if (
             isinstance(raw_version, bool)

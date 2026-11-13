@@ -12,7 +12,7 @@ core/task/context_collab 的服务单测覆盖。
 - 每资源族 1 happy:lifecycle(bind/activate/inspect)、Group(invite/
   members)、Swarm(declare/submit/validate/adopt)、Open(publish/
   submit application);
-- RF #1:顶层裸值 method_kind(裸 Group/Open/Swarm)经 HTTP 创建
+- RF #1:顶层裸值 method_kind(裸 Group/Swarm)经 HTTP 创建
   context 即拒(422 映射)——``create /context_collab`` 是 §6.1 面,
   这里验证的是裸值不能经嵌套 bind 顶替顶层之外,顶层入口的拒;
 - 1 个 409 映射:group change-role 携带陈旧 roster revision →
@@ -32,6 +32,7 @@ from sqlalchemy.pool import StaticPool
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.base import Base
+
 # Side-effect import: registers the 2 context collab models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
@@ -76,6 +77,7 @@ from agentclaw.community.api.task.context_collab_service import (
 # Match the real app's DI-first bootstrap (auth-first isolated imports are not
 # a supported baseline; see knowledge_management/conftest.py for the precedent).
 import agentclaw.community.di  # noqa: E402,F401
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PREFIX = "/api/v1/collaboration/task"  # spec §6.1: singular "task"
 
@@ -118,10 +120,17 @@ def client_world():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    repo = ContextCollabRepository(InMemorySqliteDB(engine))
+    repo = ContextCollabRepository(
+        InMemorySqliteDB(engine), product_catalog=PRODUCT_CATALOG
+    )
     store = InMemoryMethodStore()
     authorizer = StructuralMethodOpsAuthorizer()
-    lifecycle = MethodLifecycleService(store=store, authorizer=authorizer, collab_repo=repo)
+    lifecycle = MethodLifecycleService(
+        store=store,
+        authorizer=authorizer,
+        collab_repo=repo,
+        product_catalog=PRODUCT_CATALOG,
+    )
     services = {
         ContextCollabServiceProtocol: ContextCollabService(
             repository=repo,
@@ -129,18 +138,26 @@ def client_world():
             # §6.1 面用既有 ContextCollabAuthorizer 协议实现;L5 方法面
             # 授权器是并列接缝(spec §8.1),不互通。
             authorizer=StructuralContextCollabAuthorizer(),
+            product_catalog=PRODUCT_CATALOG,
         ),
         MethodStoreProtocol: store,
         MethodOpsAuthorizerProtocol: authorizer,
         MethodLifecycleServiceProtocol: lifecycle,
         GroupMethodOpsServiceProtocol: SingleGroupMethodService(
-            store=store, authorizer=authorizer, collab_repo=repo, lifecycle=lifecycle,
+            store=store,
+            authorizer=authorizer,
+            collab_repo=repo,
+            lifecycle=lifecycle,
         ),
         SwarmMethodOpsServiceProtocol: SwarmMethodService(
-            store=store, authorizer=authorizer, collab_repo=repo,
+            store=store,
+            authorizer=authorizer,
+            collab_repo=repo,
         ),
         OpenMethodOpsServiceProtocol: OpenMethodService(
-            store=store, authorizer=authorizer, collab_repo=repo,
+            store=store,
+            authorizer=authorizer,
+            collab_repo=repo,
         ),
     }
 
@@ -164,12 +181,16 @@ def client_world():
 
 
 def create_body(method_kind: str = "Single") -> dict:
-    """复用 §6.2 create_context wire 示例(key 参数化 method_kind)。"""
+    """复用 create_context wire 示例;产品必须声明兼容的方法/工作流。"""
+    product, workflow = {
+        "Open + Group": ("public_discussion", "forum_public_discussion"),
+        "Open": ("task_commission", "task_commission_goal"),
+    }.get(method_kind, ("team_todo", "team_todo_execution"))
     return {
         "space": {"space_id": "space_workspace_001", "environment": "prod"},
         "principal_ref": {"principal_type": "human", "principal_id": "u_1001"},
-        "product_kind": "team_todo",
-        "workflow_kind": "team_todo_execution",
+        "product_kind": product,
+        "workflow_kind": workflow,
         "method_kind": method_kind,
         "executor_ref": {"agent_type": "bot", "agent_id": "bot_coding_001"},
         "objective": "整理 Context 协作协议评审结论",
@@ -204,9 +225,7 @@ class TestMethodBindingsDelivery:
             },
         )
         assert bound.status_code == 200, bound.text
-        assert bound.json()["data"]["binding"]["method_binding_id"] == (
-            "mb_open_http"
-        )
+        assert bound.json()["data"]["binding"]["method_binding_id"] == ("mb_open_http")
         # activate + inspection(GET)。
         activated = client.post(
             f"{PREFIX}/context_collab/{collab_id}/method-bindings"
@@ -216,8 +235,7 @@ class TestMethodBindingsDelivery:
         assert activated.status_code == 200, activated.text
         assert activated.json()["data"]["state"] == "ACTIVE"
         inspected = client.get(
-            f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/mb_open_http"
+            f"{PREFIX}/context_collab/{collab_id}/method-bindings/mb_open_http"
         )
         assert inspected.status_code == 200, inspected.text
         inspection = inspected.json()["data"]
@@ -358,14 +376,25 @@ class TestMethodBindingsDelivery:
         assert application.json()["data"]["state"] == "SUBMITTED"
 
     def test_bare_top_level_method_kind_rejected_through_http(self, client_world):
-        """RF #1:顶层只接受 Single / Open + Group;裸 Group/Open/Swarm
-        值经 §6.1 create_context 面即拒(422 映射)。"""
+        """裸 Group/Swarm 不能替代产品声明的顶层组合;Open 是代办合法组合。"""
         client = client_world
-        for method_kind in ("Group", "Open", "Swarm"):
+        for method_kind in ("Group", "Swarm"):
             rejected = client.post(
                 f"{PREFIX}/context_collab", json=create_body(method_kind)
             )
             assert rejected.status_code == 422, rejected.text
+
+    def test_incompatible_product_composition_maps_422(self, client_world):
+        body = create_body("Single")
+        body["method_kind"] = "Open + Group"
+        rejected = client_world.post(f"{PREFIX}/context_collab", json=body)
+        assert rejected.status_code == 422, rejected.text
+
+    def test_open_commission_is_a_valid_top_level_composition(self, client_world):
+        created = client_world.post(
+            f"{PREFIX}/context_collab", json=create_body("Open")
+        )
+        assert created.status_code == 200, created.text
 
     def test_group_change_role_conflict_maps_409(self, client_world):
         """409 映射:陈旧 roster revision 的 change-role →

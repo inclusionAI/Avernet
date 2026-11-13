@@ -1,7 +1,8 @@
 """L6 Products:当前产品场景的 Profile 实例值。
 
 ``ProductProfile`` / ``WorkflowKind`` 是 Profile 的实例键值,
-不新建 ProductKind/WorkflowKind 平行类型,也不建 Profile 注册表。
+不新建 ProductKind/WorkflowKind 平行类型。版本化定义见 ``contracts`` /
+``catalog``;枚举是兼容 wire ID,不是完整产品合同或注册授权。
 """
 
 from __future__ import annotations
