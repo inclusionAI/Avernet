@@ -1229,3 +1229,377 @@ def test_review_maps_space_access_denied_to_work_order_error() -> None:
     assert isinstance(exc_info.value.__cause__, SpaceAccessDeniedError)
     notifications.build_space_join_review_result.assert_not_called()
     repository.review_space_join.assert_not_called()
+
+
+# --- Wave 2: Space-join list refresh + detail content rebuild (AC-4) ---
+
+
+def _applied_space_join_notification(content: str) -> WorkOrderNotificationRecord:
+    # The default _notification() is already the SPACE_JOIN_APPLIED shape.
+    return _notification().model_copy(update={"content": content})
+
+
+def _space_join_list_item(
+    *,
+    order_status: WorkOrderStatus,
+    notification: WorkOrderNotificationRecord,
+) -> WorkOrderListItem:
+    work_order = _work_order().model_copy(
+        update={"applicant_user_id": "200177", "status": order_status}
+    )
+    return WorkOrderListItem(
+        work_order=work_order, notification=notification, can_approve=False
+    )
+
+
+def _nickname_staff() -> MagicMock:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    return staff_dept
+
+
+_STORED_SPACE_JOIN_COPY = json.dumps(
+    {"text": "用户「200177」申请加入空间「Team」，请及时处理。"}, ensure_ascii=False
+)
+_REFRESHED_SPACE_JOIN_COPY = (
+    "用户「张三」申请加入空间「Team」，请及时处理。"
+)
+_REFRESHED_SPACE_JOIN_CONTENT = json.dumps(
+    {"text": _REFRESHED_SPACE_JOIN_COPY}, ensure_ascii=False
+)
+
+
+@pytest.mark.parametrize(
+    "order_status",
+    [
+        WorkOrderStatus.PENDING,
+        WorkOrderStatus.APPROVED,
+        WorkOrderStatus.REJECTED,
+    ],
+)
+def test_list_items_refreshes_historical_space_join_request_copy(
+    order_status: WorkOrderStatus,
+) -> None:
+    """Status-agnostic species guard: Space-join rows whose inbox copy is the
+    pending envelope re-render with today's nickname, any status included."""
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = _space()
+    notification = _applied_space_join_notification(_STORED_SPACE_JOIN_COPY)
+    item = _space_join_list_item(
+        order_status=order_status, notification=notification
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0].notification is not None
+    assert items[0].notification.content == _REFRESHED_SPACE_JOIN_CONTENT
+    # Read-time projection only: the stored record object keeps its original copy.
+    assert notification.content == _STORED_SPACE_JOIN_COPY
+    assert items[0].notification is not notification
+    spaces.get_space.assert_called_once_with(space_id=7, env="dev")
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
+
+
+def test_list_items_keeps_space_join_copy_when_space_lookup_fails() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = None
+    notification = _applied_space_join_notification(_STORED_SPACE_JOIN_COPY)
+    item = _space_join_list_item(
+        order_status=WorkOrderStatus.PENDING, notification=notification
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+    spaces.get_space.assert_called_once_with(space_id=7, env="dev")
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_list_items_keeps_space_join_copy_when_content_is_not_envelope() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = _space()
+    stored_plain = "用户「200177」申请加入空间「Team」，请及时处理。"
+    notification = _applied_space_join_notification(stored_plain)
+    item = _space_join_list_item(
+        order_status=WorkOrderStatus.PENDING, notification=notification
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+    spaces.get_space.assert_not_called()
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_list_items_skips_space_join_rebuild_when_copy_already_current() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = _space()
+    notification = _applied_space_join_notification(_REFRESHED_SPACE_JOIN_CONTENT)
+    item = _space_join_list_item(
+        order_status=WorkOrderStatus.PENDING, notification=notification
+    )
+    repository.list_items.return_value = (1, [item])
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0] is item
+    assert items[0].notification is notification
+    spaces.get_space.assert_called_once_with(space_id=7, env="dev")
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
+
+
+@pytest.mark.parametrize(
+    "order_status",
+    [
+        WorkOrderStatus.PENDING,
+        WorkOrderStatus.APPROVED,
+        WorkOrderStatus.REJECTED,
+    ],
+)
+def test_get_detail_rebuilds_space_join_applied_content(
+    order_status: WorkOrderStatus,
+) -> None:
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    detail = _detail().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                update={"applicant_user_id": "200177", "status": order_status}
+            ),
+            "content": _STORED_SPACE_JOIN_COPY,
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    result = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert result.content == _REFRESHED_SPACE_JOIN_CONTENT
+    # Read-time projection only: the repository shape is untouched.
+    assert detail.content == _STORED_SPACE_JOIN_COPY
+    assert result is not detail
+    # The repository already resolved the space name; no reverse lookup.
+    spaces.get_space.assert_not_called()
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
+
+
+def test_get_detail_keeps_space_join_copy_when_space_unresolved() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = None
+    detail = _detail().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                update={"applicant_user_id": "200177"}
+            ),
+            "content": _STORED_SPACE_JOIN_COPY,
+            "space_name": "",
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    result = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert result.content == _STORED_SPACE_JOIN_COPY
+    spaces.get_space.assert_called_once_with(space_id=7, env="dev")
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_get_detail_rebuilds_bot_editor_applied_content() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    stored_plain = "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    detail = _detail().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+            "content": stored_plain,
+            "work_order": _work_order().model_copy(
+                update={
+                    "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                    "biz_id": "bot-17",
+                    "applicant_user_id": "200177",
+                    "biz_data": json.dumps({"bot_name": "Editor Bot"}),
+                }
+            ),
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    result = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert (
+        result.content == "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    )
+    assert detail.content == stored_plain
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        WorkOrderEventType.SPACE_JOIN_REVIEWED,
+        WorkOrderEventType.BOT_COLLABORATOR_REVIEWED,
+    ],
+)
+def test_get_detail_keeps_reviewed_content_untouched(event_type) -> None:
+    """The species guard keys on the applied copy; decision notices stay verbatim."""
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    stored = json.dumps(
+        {"text": "你加入空间「Team」的申请已通过。"}, ensure_ascii=False
+    )
+    detail = _detail().model_copy(
+        update={
+            "event_type": event_type,
+            "content": stored,
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    result = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert result.content == stored
+    spaces.get_space.assert_not_called()
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_get_detail_keeps_envelope_shaped_bot_content_untouched() -> None:
+    """A Bot row whose content oddly took the envelope shape keeps it verbatim:
+    the rebuild would change the persisted shape, so it is skipped."""
+    staff_dept = _nickname_staff()
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    stored = json.dumps(
+        {"text": "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"},
+        ensure_ascii=False,
+    )
+    detail = _detail().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+            "content": stored,
+            "work_order": _work_order().model_copy(
+                update={
+                    "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                    "biz_id": "bot-17",
+                    "applicant_user_id": "200177",
+                    "biz_data": json.dumps({"bot_name": "Editor Bot"}),
+                }
+            ),
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    result = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert result.content == stored
+    staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_list_and_detail_present_the_same_refreshed_space_join_copy() -> None:
+    """AC-4 consistency: the list projection and the detail rebuild share the
+    same formula, so the same row renders the same nickname text everywhere."""
+    staff_dept = _nickname_staff()
+    service, repository, spaces, _, _ = _service(staff_dept=staff_dept)
+    spaces.get_space.return_value = _space()
+    notification = _applied_space_join_notification(_STORED_SPACE_JOIN_COPY)
+    item = _space_join_list_item(
+        order_status=WorkOrderStatus.PENDING, notification=notification
+    )
+    repository.list_items.return_value = (1, [item])
+    detail = _detail().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                update={"applicant_user_id": "200177"}
+            ),
+            "content": _STORED_SPACE_JOIN_COPY,
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+    rendered_detail = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    listed = json.loads(items[0].notification.content)
+    detailed = json.loads(rendered_detail.content)
+    assert listed == detailed
+    assert listed["text"] == _REFRESHED_SPACE_JOIN_COPY
+
+
+def test_list_and_detail_present_the_same_refreshed_bot_editor_copy() -> None:
+    staff_dept = _nickname_staff()
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    stored_plain = "用户「200177」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    refreshed = "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    notification = _applied_bot_notification(stored_plain)
+    item = _bot_editor_list_item(
+        order_status=WorkOrderStatus.PENDING,
+        biz_data=json.dumps({"bot_name": "Editor Bot"}),
+        notification=notification,
+    )
+    repository.list_items.return_value = (1, [item])
+    detail = _detail().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+            "content": stored_plain,
+            "work_order": _work_order().model_copy(
+                update={
+                    "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                    "biz_id": "bot-17",
+                    "applicant_user_id": "200177",
+                    "biz_data": json.dumps({"bot_name": "Editor Bot"}),
+                }
+            ),
+        }
+    )
+    repository.get_detail.return_value = detail
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.INITIATED_BY_ME,
+        item_type=WorkOrderItemType.ALL,
+        page_no=1,
+        page_size=10,
+    )
+    rendered_detail = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert items[0].notification.content == refreshed
+    assert rendered_detail.content == refreshed

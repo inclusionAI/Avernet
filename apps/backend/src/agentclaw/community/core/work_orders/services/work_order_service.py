@@ -789,8 +789,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
             limit=page_size,
         )
         return total, [
-            self._present_bot_collaborator_item(
-                self._present_skill_collaborator_item(item)
+            self._present_space_join_item(
+                self._present_bot_collaborator_item(
+                    self._present_skill_collaborator_item(item)
+                )
             )
             for item in items
         ]
@@ -864,6 +866,148 @@ class WorkOrderService(WorkOrderServiceProtocol):
             }
         )
 
+    def _present_space_join_item(self, item):
+        """Refresh historical Space-join copy so aged rows gain a nickname.
+
+        Space-join rows persist no business data: the display copy embeds the
+        applicant and space names inside a ``{"text": ...}`` JSON envelope. The
+        space name is re-resolved from the referenced Space at read time;
+        when the reverse lookup fails, the space lost its name, or the stored
+        copy is not an envelope, the item is returned unchanged — never worse
+        than the stored copy. The persisted row itself is never written back.
+        """
+
+        work_order = item.work_order
+        notification = item.notification
+        if (
+            work_order is None
+            or notification is None
+            or work_order.biz_type != WorkOrderBizType.SPACE_JOIN.value
+            or notification.event_type
+            != WorkOrderEventType.SPACE_JOIN_APPLIED.value
+        ):
+            return item
+        stored_text = _content_text(notification.content)
+        if stored_text is None:
+            return item
+        content = self._rebuild_space_join_pending_copy(
+            applicant_user_id=work_order.applicant_user_id,
+            space_name=self._lookup_space_name(work_order.biz_id),
+            stored_text=stored_text,
+        )
+        if content is None:
+            return item
+        return item.model_copy(
+            update={
+                "notification": notification.model_copy(update={"content": content})
+            }
+        )
+
+    def _rebuild_space_join_pending_copy(
+        self,
+        *,
+        applicant_user_id: str | None,
+        space_name: str | None,
+        stored_text: str,
+    ) -> str | None:
+        """Re-render the pending copy in its persisted ``{"text": ...}`` shape."""
+
+        if not applicant_user_id or not space_name:
+            return None
+        text = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
+            applicant_name=self._get_applicant_name(
+                applicant_user_id=applicant_user_id
+            ),
+            space_name=space_name,
+        )
+        if text == stored_text:
+            return None
+        return json.dumps({"text": text}, ensure_ascii=False)
+
+    def _rebuild_bot_editor_pending_copy(
+        self,
+        *,
+        applicant_user_id: str | None,
+        biz_data: str | None,
+        stored_text: str,
+    ) -> str | None:
+        """Re-render the pending copy with the same formula as the list path."""
+
+        if not applicant_user_id or not stored_text:
+            return None
+        bot_name = str(_business_data(biz_data).get("bot_name") or "")
+        if not bot_name:
+            return None
+        text = WorkOrderMessageContent.BOT_COLLABORATOR_PENDING.value.format(
+            applicant_name=self._get_applicant_name(
+                applicant_user_id=applicant_user_id
+            ),
+            bot_name=bot_name,
+        )
+        if text == stored_text:
+            return None
+        return text
+
+    def _lookup_space_name(self, space_ref: str | None) -> str | None:
+        """Reverse-resolve the referenced Space name, or give up quietly.
+
+        Uses the repository read behind ``require_space`` — the same query the
+        creation path locks — so a missing or renamed Space degrades to keeping
+        the stored copy instead of raising during presentation.
+        """
+
+        if not space_ref:
+            return None
+        try:
+            space = self._spaces.get_space(
+                space_id=int(space_ref), env=get_current_env()
+            )
+        except (TypeError, ValueError):
+            return None
+        if space is None:
+            return None
+        name = getattr(space, "name", None)
+        return name.strip() if isinstance(name, str) and name.strip() else None
+
+    def _refresh_detail_applied_copy(self, detail: WorkOrderDetail) -> str | None:
+        """Rebuild the applied copy in details, the list refresh in lockstep.
+
+        The detail view exposes no dedicated applicant field for the adapter
+        to render, so historical rows gain today's nickname only when their
+        persisted ``content`` is rebuilt with the same formulas the list
+        projection uses. Rows without an applied notification, rows whose
+        rebuild reproduces the stored copy verbatim, and space reverse-lookup
+        failures return ``None`` so the stored copy survives untouched; the
+        persisted row is never written back. Like the list refresh the guard
+        is the notification species, never the work-order status.
+        """
+
+        work_order = detail.work_order
+        if detail.event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value:
+            stored_text = _content_text(detail.content)
+            if stored_text is None:
+                return None
+            return self._rebuild_space_join_pending_copy(
+                applicant_user_id=work_order.applicant_user_id,
+                space_name=detail.space_name
+                or self._lookup_space_name(work_order.biz_id),
+                stored_text=stored_text,
+            )
+        if detail.event_type == WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value:
+            stored_text = detail.content
+            if not isinstance(stored_text, str) or not stored_text.strip():
+                return None
+            # Envelope-shaped content would change its persisted shape; only
+            # the plain-text applied copy is rebuilt, list in lockstep.
+            if _content_text(stored_text) is not None:
+                return None
+            return self._rebuild_bot_editor_pending_copy(
+                applicant_user_id=work_order.applicant_user_id,
+                biz_data=work_order.biz_data,
+                stored_text=stored_text,
+            )
+        return None
+
     def get_detail(self, *, work_order_id: int, actor_id: str):
         detail = self._repository.get_detail(
             work_order_id=work_order_id,
@@ -872,13 +1016,15 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
         if detail is None:
             raise WorkOrderNotFoundError("work order not found")
-        return detail.model_copy(
-            update={
-                "reviewer_user_name": self._get_reviewer_name(
-                    reviewer_user_id=detail.work_order.reviewer_user_id
-                )
-            }
-        )
+        update = {
+            "reviewer_user_name": self._get_reviewer_name(
+                reviewer_user_id=detail.work_order.reviewer_user_id
+            )
+        }
+        refreshed_content = self._refresh_detail_applied_copy(detail)
+        if refreshed_content is not None:
+            update["content"] = refreshed_content
+        return detail.model_copy(update=update)
 
     def approve(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
         normalized_remark = (review_remark or "").strip() or None
@@ -1007,3 +1153,20 @@ def _business_data(raw: str | None) -> dict[str, object]:
     except (TypeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _content_text(raw: str | None) -> str | None:
+    """Extract the persisted ``{"text": ...}`` envelope payload, if any."""
+
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    text = parsed.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    return None
