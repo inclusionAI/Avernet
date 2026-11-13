@@ -1,11 +1,11 @@
 import { extendCapabilities, getCapabilities, sealExtensions } from '@/capabilities';
 import { ExternalLoginPromptModal } from '@/components/ExternalLoginPromptModal';
 import { CollaborationGroupLaunchObserver } from '@/components/CollaborationGroupLaunchObserver';
+import { GatewayReauthModal } from '@/components/GatewayReauthModal';
 import { InviteCodeBindingModal } from '@/components/InviteCodeBindingModal';
 import { Toaster } from '@/components/ui/sonner';
 import { appExtension, registerSidePanelWiring } from '@/extensions';
 import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
-import { useGatewayLoginRedirect } from '@/hooks/useGatewayLoginRedirect';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { history } from '@umijs/max';
 import React from 'react';
@@ -59,12 +59,6 @@ export function onRouteChange({ location }: { location: { pathname: string } }) 
   }
 }
 
-/** 全局网关登录跳转观察者:无 UI,消费 loginRedirectStore 在未登录时单次 toast + 当前标签页跳转。 */
-function GatewayLoginRedirector() {
-  useGatewayLoginRedirect();
-  return null;
-}
-
 /** 全局接口失败默认提示观察者:无 UI,消费 errorNotifyStore 在协议层失败时兜底弹一条错误提示(可被 Hook 取消)。 */
 function ErrorNotifyObserver() {
   useErrorNotifyObserver();
@@ -76,10 +70,10 @@ export function rootContainer(container: React.ReactNode) {
     React.Fragment,
     null,
     container,
-    React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
     React.createElement(CollaborationGroupLaunchObserver),
     React.createElement(ExternalLoginPromptModal),
+    React.createElement(GatewayReauthModal),
     React.createElement(InviteCodeBindingModal),
     React.createElement(Toaster),
   );
