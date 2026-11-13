@@ -47,7 +47,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
 )
-from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
     ColletLifecycleResult,
     ColletLifecycleService,
 )

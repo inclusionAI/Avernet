@@ -13,11 +13,6 @@ import logging
 import os
 from typing import Annotated
 
-from injector import Binder, Injector, Module, inject, provider, singleton
-
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
-from agentclaw.community.di.modules.context_collab_products import build_product_catalog
-
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
@@ -27,20 +22,10 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
-from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
-from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
-from agentclaw.community.core.task.task_dispatch.task_settings import (
-    HARNESS_POLLER,
-    SEARCH_SKILL,
-    SKILL_REPORT,
-    TaskSettingsService,
-    TaskSettingsServiceProtocol,
-)
 from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
 from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
-from agentclaw.community.api.task.forum_service import ForumServiceProtocol
 from agentclaw.community.api.task.forum_interaction_service import (
     ForumAuthorStatsServiceProtocol,
     ForumInteractionServiceProtocol,
@@ -48,12 +33,15 @@ from agentclaw.community.api.task.forum_interaction_service import (
 from agentclaw.community.api.task.forum_personal_center_activity_service import (
     ForumPersonalCenterActivityServiceProtocol,
 )
+from agentclaw.community.api.task.forum_service import ForumServiceProtocol
+from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
@@ -61,8 +49,10 @@ from agentclaw.community.core.repository.implementations.task.forum import (
     ForumAuthorStatsRepository,
     ForumDigestReportRepository,
     ForumInteractionRepository,
-    ForumPersonalCenterActivityRepository as ForumPersonalCenterActivityRepositoryImpl,
     ForumRepository,
+)
+from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumPersonalCenterActivityRepository as ForumPersonalCenterActivityRepositoryImpl,
 )
 from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackCorrelationRepositoryProtocol,
@@ -81,26 +71,14 @@ from agentclaw.community.core.repository.protocols.task.forum import (
 from agentclaw.community.core.repository.protocols.task.forum_author_stats import (
     ForumAuthorStatsRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.task.forum_digest import (
+    ForumDigestReportRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.forum_interaction import (
     ForumInteractionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
     ForumPersonalCenterActivityRepositoryProtocol,
-)
-from agentclaw.community.core.repository.protocols.task.forum_digest import (
-    ForumDigestReportRepositoryProtocol,
-)
-from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
-from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
-from agentclaw.community.core.task.task_center.bot_intake_skill import (
-    BotTaskIntakeSkill,
-)
-from agentclaw.community.core.task.task_center.intake_target_resolver import (
-    DefaultIntakeTargetResolver,
-)
-from agentclaw.community.core.task.repository.task_intake_repository import (
-    TaskIntakeRepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
@@ -110,15 +88,56 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
+    ColletLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
+    TopLevelBindingRecovery,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+    SwarmMethodService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.method_service_api import (
     GroupMethodOpsServiceProtocol,
     MethodLifecycleServiceProtocol,
     OpenMethodOpsServiceProtocol,
     SwarmMethodOpsServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
-    A2aDeliveryPort,
-    MockA2aDelivery,
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
     A2aTaskDispatch,
@@ -131,65 +150,17 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskDispatchPort,
     TaskMethodOpsPort,
 )
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
-    TaskCommissionOpenMethodAdapter,
-)
-from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
-    BbsPublicDiscussionService,
-)
-from agentclaw.community.core.task.context_collab.products.service_api import (
-    BbsPublicDiscussionServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
-    ColletLifecycleStore,
-    InMemoryColletLifecycleStore,
-)
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    InMemoryMethodStore,
-    MethodStoreProtocol,
-)
-from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
-    ColletLifecycleService,
-)
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    MethodLifecycleService,
-)
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
-    OpenMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
-    SingleGroupMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
-    SwarmMethodService,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.task_dispatch.search import TaskSearch
-from agentclaw.community.core.task.task_center.recovery_lifecycle import (
-    TaskRecoveryLifecycle,
-)
-from agentclaw.community.core.task.task_center.delivery_lifecycle import (
-    TaskDeliveryLifecycle,
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+    ProductMethodBindingRecovery,
 )
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
-)
-from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
-    NotifyingForumInteractionService,
-)
-from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
-    ForumNotificationPublisher,
-)
-from agentclaw.community.core.task.forum.notifications.publisher_protocol import (
-    ForumNotificationPublisherProtocol,
-)
-from agentclaw.community.core.task.forum.services.notifying_forum_service import (
-    NotifyingForumService,
 )
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
@@ -208,11 +179,60 @@ from agentclaw.community.core.task.forum.digest.report_service import (
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
 )
+from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+    NotifyingForumInteractionService,
+)
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
 )
 from agentclaw.community.core.task.forum.interaction.target_verifier import (
     DatabaseForumInteractionTargetVerifier,
+)
+from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
+    ForumInteractionTargetVerifierProtocol,
+)
+from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
+    ForumNotificationPublisher,
+)
+from agentclaw.community.core.task.forum.notifications.publisher_protocol import (
+    ForumNotificationPublisherProtocol,
+)
+from agentclaw.community.core.task.forum.services.notifying_forum_service import (
+    NotifyingForumService,
+)
+from agentclaw.community.core.task.repository.task_intake_repository import (
+    TaskIntakeRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_center.bot_intake_skill import (
+    BotTaskIntakeSkill,
+)
+from agentclaw.community.core.task.task_center.delivery_lifecycle import (
+    TaskDeliveryLifecycle,
+)
+from agentclaw.community.core.task.task_center.intake_target_resolver import (
+    DefaultIntakeTargetResolver,
+)
+from agentclaw.community.core.task.task_center.recovery_lifecycle import (
+    TaskRecoveryLifecycle,
+)
+from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
+from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    TaskArtifactPublishService,
+)
+from agentclaw.community.core.task.task_context.task_graph_service import (
+    TaskGraphService,
+)
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
+from agentclaw.community.core.task.task_dispatch.search import TaskSearch
+from agentclaw.community.core.task.task_dispatch.task_settings import (
+    HARNESS_POLLER,
+    SEARCH_SKILL,
+    SKILL_REPORT,
+    TaskSettingsService,
+    TaskSettingsServiceProtocol,
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
@@ -221,11 +241,13 @@ from agentclaw.community.core.task.task_harness.relay_session_recovery import (
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     TaskRuntimeLivenessProbe,
 )
-from agentclaw.community.core.task.task_context.task_graph_service import (
-    TaskGraphService,
+from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
+from agentclaw.community.core.task.task_panel.manifest_contract import (
+    TaskPanelManifestServiceProtocol,
 )
-from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
-    TaskArtifactPublishService,
+from agentclaw.community.core.task.task_runner.callback_correlation import (
+    CallbackCorrelationRegistry,
+    InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
@@ -233,27 +255,21 @@ from agentclaw.community.core.task.task_runner.client.bcs_token_provider import 
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
-from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry,
-    InMemoryCallbackCorrelationRegistry,
-)
-from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url import (
-    ConfigFrontendUrlProvider,
+from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
 )
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
-    ForumInteractionTargetVerifierProtocol,
-)
-from agentclaw.community.di.config import TaskDispatchConfig
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 logger = logging.getLogger("task.module")
 
@@ -368,8 +384,10 @@ class TaskModule(Module):
         binder.bind(
             MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton
         )
-        # L4 Collet 生命周期接线(2026-11-12 L4 对齐 spec §5.3):进程内
-        # store singleton(重启归零,P2 持久化经同一 ColletLifecycleStore
+        binder.bind(
+            TopLevelBindingRecovery, to=ProductMethodBindingRecovery, scope=singleton
+        )
+        # L4 Collet 生命周期接线:进程内 store singleton(重启归零,P2 持久化经同一 ColletLifecycleStore
         # 协议键整体替换);生命周期服务 singleton 但 P1 纯内部 API,不上
         # HTTP wire,collab_repo 同上由 TaskPersistenceModule 绑定。
         binder.bind(
@@ -448,6 +466,13 @@ class TaskModule(Module):
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
+
+    @provider
+    def collaboration_reader(
+        self, repository: ContextCollabRepositoryProtocol
+    ) -> CollaborationReader:
+        """Expose the same repository through L4's narrow read contract."""
+        return repository
 
     @singleton
     @provider

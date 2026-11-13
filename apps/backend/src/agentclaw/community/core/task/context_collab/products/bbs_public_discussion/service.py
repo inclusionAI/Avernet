@@ -21,11 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from injector import inject
-
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -40,20 +35,27 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
     validate_product_event,
 )
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
+    validate_event_body,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    MethodKind,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    _now,
+    current_axes,
+)
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_spec,
 )
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
-    validate_event_body,
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
@@ -81,11 +83,10 @@ from agentclaw.community.core.task.context_collab.products.service_api import (
     ReplyCreatedView,
     ReplyDiscussionCommand,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    _now,
-    current_axes,
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
     project_created_context,
 )
+from injector import inject
 
 # 与既有创建路径逐字(通用服务 CREATION_* 常量语义,产品自持同值)。
 _CREATION_EVENT_KIND = "task.created"

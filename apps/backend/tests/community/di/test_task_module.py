@@ -1,19 +1,80 @@
 from typing import Annotated
 
-from injector import Injector, Module, provider, singleton
-
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
-from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
+    StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
+    ColletLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+    SwarmMethodService,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    GroupMethodOpsServiceProtocol,
+    MethodLifecycleServiceProtocol,
+    OpenMethodOpsServiceProtocol,
+    SwarmMethodOpsServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    A2aTaskDispatch,
+    LoggingTaskDispatch,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service import (
+    TaskCommissionService,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskDispatchPort,
+    TaskMethodOpsPort,
+)
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
@@ -28,92 +89,34 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.service_protocol import (
     ForumServiceProtocol,
 )
-from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.plugin_api.notify_sender import (
-    QUALIFIER_BBS_DIGEST,
-    NotifySenderPlugin,
-)
-from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry,
-    InMemoryCallbackCorrelationRegistry,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
-    ContextCollabAuthorizerProtocol,
-)
-from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
-    MethodOpsAuthorizerProtocol,
-    StructuralMethodOpsAuthorizer,
-)
-from agentclaw.community.core.task.context_collab.method_service_api import (
-    GroupMethodOpsServiceProtocol,
-    MethodLifecycleServiceProtocol,
-    OpenMethodOpsServiceProtocol,
-    SwarmMethodOpsServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    MethodStoreProtocol,
-)
-from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
-    A2aDeliveryPort,
-    MockA2aDelivery,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
-    A2aTaskDispatch,
-    LoggingTaskDispatch,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.service import (
-    TaskCommissionService,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
-    TaskCommissionServiceProtocol,
-    TaskDispatchPort,
-    TaskMethodOpsPort,
-)
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
-    TaskCommissionOpenMethodAdapter,
-)
-from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
-    BbsPublicDiscussionService,
-)
-from agentclaw.community.core.task.context_collab.products.service_api import (
-    BbsPublicDiscussionServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
-    ColletLifecycleStore,
-    InMemoryColletLifecycleStore,
-)
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-)
-from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
-    ColletLifecycleService,
-)
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    MethodLifecycleService,
-)
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
-    OpenMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
-    SingleGroupMethodService,
-)
-from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
-    SwarmMethodService,
-)
-from agentclaw.community.core.task.task_discovery.frontend_url import (
-    ConfigFrontendUrlProvider,
+from agentclaw.community.core.task.task_runner.callback_correlation import (
+    CallbackCorrelationRegistry,
+    InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
-from agentclaw.community.di.modules.task_module import TaskModule
-
-from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,
 )
+from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
+)
+from agentclaw.community.di.modules.task_module import (
+    TaskModule,
+    _resolve_harness_enabled,
+)
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
+)
+from injector import Injector, Module, provider, singleton
 
 
 class _StubDiscoverModule(Module):
@@ -427,6 +430,12 @@ def test_task_module_binds_l5_method_services_and_authorizer_singletons():
     assert group._store is store  # noqa: SLF001
     assert swarm._store is store  # noqa: SLF001
     assert open_service._store is store  # noqa: SLF001
+    reader = inj.get(CollaborationReader)
+    assert reader is inj.get(ContextCollabRepositoryProtocol)
+    assert lifecycle._collab_repo is reader
+    assert group._collab_repo is reader
+    assert swarm._collab_repo is reader
+    assert open_service._collab_repo is reader
 
 
 def test_task_module_binds_collet_lifecycle_store_and_service_singletons():

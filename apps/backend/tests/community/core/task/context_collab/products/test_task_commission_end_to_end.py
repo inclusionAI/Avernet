@@ -7,23 +7,24 @@
 MockA2aDelivery,不声称验证真实通知接收、网关转发或 LLM 执行。
 """
 
+import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-import secrets
 from uuid import uuid4
 
 import jwt
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from fastapi_injector import attach_injector
-from injector import Binder, Injector
-
 from agentclaw.community.adapters.http.task import commission_a2a, commission_a2a_auth
 from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -31,11 +32,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
-    ContextCollabAuthorizerProtocol,
-)
-from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
-    A2aDeliveryPort,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
+    work as work_operations_module,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
@@ -58,9 +56,15 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Binder, Injector
 
 from tests.community.factories.task_commission import (
     BOT_ID as BOT_ASSIGNEE,
+)
+from tests.community.factories.task_commission import (
     OWNER,
     commission_report_request,
 )
@@ -183,6 +187,16 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         ),
         (
             commission_service_module,
+            "prepare_event_append",
+            "L4 Work 准备状态迁移与 Task 版本围栏",
+        ),
+        (
+            work_operations_module.PreparedEventAppend,
+            "commit",
+            "L4 提交已裁决事件,由仓储原子保存",
+        ),
+        (
+            work_operations_module,
             "resolve_workflow_status",
             "G4 状态机计算事件后的目标状态",
         ),

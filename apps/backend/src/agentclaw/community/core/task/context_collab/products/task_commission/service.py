@@ -15,15 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from injector import inject
-
-from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
-    ensure_expected_version,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    top_level_binding_id,
-)
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -35,26 +26,27 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     VISIBILITY_PUBLIC,
     ContextCollabAuthorizerProtocol,
 )
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
     validate_product_event,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
-    resolve_workflow_status,
-)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
+    prepare_event_append,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
-    TaskUpdate,
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    top_level_binding_id,
 )
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    creation_payload,
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    _now,
+    current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_spec,
@@ -63,11 +55,14 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_payload,
+)
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    TASK_COMMISSION_PROFILE_REF,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -82,29 +77,31 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.views import (
     DiscussionDetailBody,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.views import (
-    TaskCommissionDetailView,
-    TaskCommissionSummaryView,
-)
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
     LoggingTaskDispatch,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
+    TASK_COMMISSION_PROFILE_REF,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
     DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
-    TaskExecutionReportCommand,
-    TaskCommissionCreatedView,
     TaskAdvancedView,
+    TaskCommissionCreatedView,
     TaskDispatchPort,
+    TaskExecutionReportCommand,
     TaskMethodOpsPort,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
-    _now,
-    current_axes,
+from agentclaw.community.core.task.context_collab.products.task_commission.views import (
+    TaskCommissionDetailView,
+    TaskCommissionSummaryView,
+)
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
     project_created_context,
 )
+from injector import inject
 
 # 与通用创建路径逐字的初始事件形态。
 _CREATION_EVENT_KIND = "task.created"
@@ -416,21 +413,7 @@ class TaskCommissionService:
             raise ContextCollabValidationError(
                 "task commission requires a workflow machine"
             )
-        resolved = resolve_workflow_status(
-            workflow_kind=machine_ref.profile_id,
-            workflow_version=machine_ref.version,
-            task=task,
-            event_kind=event_kind,
-            payload=payload,
-            actor=context.actor,
-        )
-
-        if report is not None and report.deadline is not None:
-            if report.deadline.tzinfo is None or report.deadline <= datetime.now(
-                timezone.utc
-            ):
-                raise ContextCollabValidationError("report deadline has expired")
-        appended = self._repo.append_event(
+        prepared = prepare_event_append(
             command.collab_context_id,
             AppendEventRecordRequest(
                 expected_version=record.collet.version,
@@ -440,15 +423,27 @@ class TaskCommissionService:
                 parent_event=None,
                 visibility=VISIBILITY_PUBLIC,
                 payload=payload,
-                task_update=TaskUpdate(
-                    task.task_id, task.version, resolved or task.status
-                ),
             ),
+            task=task,
+            actor=context.actor,
+            workflow_kind=machine_ref.profile_id,
+            workflow_version=machine_ref.version,
         )
+
+        if report is not None and report.deadline is not None:
+            if report.deadline.tzinfo is None or report.deadline <= datetime.now(
+                timezone.utc
+            ):
+                raise ContextCollabValidationError("report deadline has expired")
+        appended = prepared.commit(self._repo)
         final_status = (
             appended.task.status
             if appended.task is not None
-            else (resolved or task.status)
+            else (
+                prepared.request.task_update.status
+                if prepared.request.task_update
+                else task.status
+            )
         )
         return TaskAdvancedView(
             collab_context_id=command.collab_context_id,

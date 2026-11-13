@@ -65,11 +65,13 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     ensure_top_level_binding,
 )
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
 )
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (

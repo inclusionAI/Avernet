@@ -96,7 +96,7 @@ def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapt
     assert spec.method_kind == profile.composition.method_kind
     assert spec.workflow_kind == profile.workflow.ref.profile_id
     assert spec.workflow_profile_version == profile.workflow.ref.version
-    from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
         current_axes,
     )
 

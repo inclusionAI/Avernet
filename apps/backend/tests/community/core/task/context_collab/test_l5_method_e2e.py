@@ -71,16 +71,20 @@ from agentclaw.community.core.task.context_collab.services.context_collab_servic
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
-from agentclaw.community.core.task.context_collab.services.open_method_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
 )
-from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
     SingleGroupMethodService,
 )
-from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
     SwarmMethodService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
