@@ -30,6 +30,9 @@ from agentclaw.community.core.task.repository.models import (
 from agentclaw.community.core.task.repository.task_intake_repository import TaskIntakeRepository
 from agentclaw.community.utils.app_utils import get_current_executor_app
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_center.task_service_relay import (
+    TaskServiceRelayMixin,
+)
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.task_intake import build_task_info_request
 from tests.community.repository.task.test_task_intake_repository import _result
@@ -126,6 +129,53 @@ def _plan_successor(graph_service: TaskGraphService) -> tuple[str, str]:
         if node.node_id == node_id
     )
     return node_id, successor.run_info.extend_props["relay_token"]
+
+
+class _RelayReportService(TaskServiceRelayMixin):
+    """TaskService.report seam with only report dependencies wired."""
+
+    def __init__(self, graph_service: TaskGraphService) -> None:
+        self._graph = graph_service
+        self._task_context_service = None
+        self._relay_adapter = None
+
+
+def test_plan_report_hydrates_search_receipt_from_another_instance() -> None:
+    db, writer, repo, task_info, result = _setup()
+    writer.initialize_intake_graph(task_info, result.session_id)
+    root = writer.query_task_dashboard("task-1").tasks[0]
+    relay_token = root.run_info.extend_props["relay_token"]
+    _record_search_receipt(writer, relay_token)
+    writer.apply_relay_report(TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="execution-cross-instance", relay_token=relay_token,
+        event_type=TaskReportEventType.EXECUTION_RESULT,
+        event=TaskNodePatch(
+            task_id="task-1", node_id="task-1", execution_decision="ACCEPTED",
+            actual_goal=Goal("完成首棒", []),
+            local_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+            output_patch={"result": "首棒事实"},
+        ),
+    ))
+
+    reader = TaskGraphService(graph_repo=TaskGraphRepository(db))
+    service = _RelayReportService(reader)
+    plan = TaskReportCommand(
+        task_id="task-1", node_id="task-1",
+        event_id="plan-cross-instance", relay_token=relay_token,
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=TaskNode(
+            node_id=None, task_id="task-1", status=None,
+            task_spec=TaskSpec(Context("下一棒", title="下一棒"), Goal("完成剩余目标", [])),
+            run_info=RuntimeInfo(run_mode="single_bot", assignee="bot-2"),
+            node_run_graph=None,
+        ),
+    )
+
+    planned = asyncio.run(service.report(plan))
+
+    assert planned.target_node_id is not None
+    assert repo.load_action_logs("task-1")["task-1"], "search receipt stays persisted"
 
 
 def test_intake_task_root_commits_without_delivery_intent() -> None:

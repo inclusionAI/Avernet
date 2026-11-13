@@ -175,15 +175,18 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         run: cargo llvm-cov --version
 
-      - name: Install system dependencies
+      - name: Install protoc
         if: steps.changes.outputs.skip != 'true'
-        # ubuntu-latest already ships gcc/make, curl, git, jq, libsqlite3-dev,
-        # libssl-dev, lsof, pkg-config, and procps; listing them here only
-        # pulled in package upgrades. protobuf-compiler (protoc, needed by
-        # the BCS build) is the one package the image lacks.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+        # BCS needs protoc. Install the same version previously supplied by
+        # Ubuntu without depending on the runner's apt mirror or DNS path.
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "21.12"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show protoc version
+        if: steps.changes.outputs.skip != 'true'
+        run: protoc --version
 
       - name: Install uv
         if: steps.changes.outputs.skip != 'true'

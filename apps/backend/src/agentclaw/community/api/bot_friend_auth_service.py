@@ -18,6 +18,9 @@ class FriendAuthSyncServiceProtocol(Protocol):
     ) -> dict[str, Any]:
         """Return ``{"synced": bool, "reason": str, "auth_id": int | None}``.
 
+        ``owner_work_no`` is the compatibility locator supplied by BCS and may
+        identify the current Owner or the Bot's stable entity.
+
         Raises ``BotNotFoundError`` / ``AgentCodeUnavailableError`` /
         ``AuthRelationshipSyncError`` (defined in the service module).
         """

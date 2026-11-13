@@ -1,11 +1,18 @@
 /**
  * 会话文件创建者信息展示纯函数（2026-11-09 契约）：
- * describeSessionFileCreator（来源+创建者合段）与 formatSessionUploadTime（UTC 锚时间）。
+ * describeSessionFileCreator（来源+创建者合段）与 formatSessionUploadTime（本地时区时间）。
  * 两者驱动单聊 BotSessionFilesRow 元数据行，文案/语义与老前端（oc-web）
  * add-session-file-creator-fields 逐字对齐——灰度切流下同一文件在两套 UI 展示一致。
  */
 import { describeSessionFileCreator, formatSessionUploadTime } from '@/services/workspace/sessionFileUtils';
 import { describe, expect, it } from '@jest/globals';
+
+/** 独立按运行进程的当前时区计算期望值，避免在 Jest 启动后修改 TZ。 */
+function expectedLocalTime(iso: string): string {
+  const date = new Date(iso);
+  const localTime = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localTime.toISOString().slice(0, 19).replace('T', ' ');
+}
 
 describe('describeSessionFileCreator - 创建者信息 → 元数据行来源合段', () => {
   it("bot 带名 → 'Bot 生成 · {名}'", () => {
@@ -31,22 +38,26 @@ describe('describeSessionFileCreator - 创建者信息 → 元数据行来源合
   });
 });
 
-describe('formatSessionUploadTime - created_at ISO 串 → UTC YYYY-MM-DD HH:mm:ss', () => {
-  it('ISO Z 串取 UTC 分量（与后端原值逐字对应，不随查看端时区漂移）', () => {
-    // 2026-11-09T02:15:30Z → 02:15:30；机器在 UTC+8 也不能显示成 10:15:30。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toBe('2026-11-09 02:15:30');
-    expect(formatSessionUploadTime('2026-11-09T02:15:30Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+describe('formatSessionUploadTime - created_at ISO 串 → 查看端本地时区 YYYY-MM-DD HH:mm:ss', () => {
+  it('ISO Z 串取当前查看端的本地时区分量', () => {
+    const createdAt = '2026-11-09T02:15:30Z';
+    expect(formatSessionUploadTime(createdAt)).toBe(expectedLocalTime(createdAt));
+    expect(formatSessionUploadTime(createdAt)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
 
   it('吃微秒精度 ISO（2026-11-09 契约 created_at 秒级截断展示）', () => {
-    // 后端 created_at 可能带 6 位微秒；new Date 按毫秒截断解析，格式化只取秒级分量。
-    expect(formatSessionUploadTime('2026-11-09T02:15:30.123456Z')).toBe('2026-11-09 02:15:30');
-    expect(formatSessionUploadTime('2026-11-09T02:10:00.999999Z')).toBe('2026-11-09 02:10:00');
+    // 后端 created_at 可能带 6 位微秒；Date 按毫秒解析，格式化只取秒级本地分量。
+    const firstCreatedAt = '2026-11-09T02:15:30.123456Z';
+    const secondCreatedAt = '2026-11-09T02:10:00.999999Z';
+    expect(formatSessionUploadTime(firstCreatedAt)).toBe(expectedLocalTime(firstCreatedAt));
+    expect(formatSessionUploadTime(secondCreatedAt)).toBe(expectedLocalTime(secondCreatedAt));
   });
 
-  it('带偏移的 ISO 串按其 UTC 瞬时取分量（回归：防 getHours 本地化偏移）', () => {
-    // 2026-11-09T10:15:30+08:00 与 02:15:30Z 同瞬时，UTC 展示恒为 02:15:30。
-    expect(formatSessionUploadTime('2026-11-09T10:15:30+08:00')).toBe('2026-11-09 02:15:30');
+  it('带偏移的 ISO 串按其 UTC 瞬时取本地分量（同瞬时不同写法显示一致）', () => {
+    const utcCreatedAt = '2026-11-09T02:15:30Z';
+    const offsetCreatedAt = '2026-11-09T10:15:30+08:00';
+    expect(formatSessionUploadTime(offsetCreatedAt)).toBe(expectedLocalTime(offsetCreatedAt));
+    expect(formatSessionUploadTime(offsetCreatedAt)).toBe(formatSessionUploadTime(utcCreatedAt));
   });
 
   it('null / undefined / 空串 / 非法日期 → null（legacy 缺 created_at，行内不渲染时间段）', () => {

@@ -103,18 +103,26 @@ export function BotManagementRuntimeItems({
               发起评测
             </Button>
           ) : null}
-          {isServiceBot && onOpenEvalHistory ? (
+          {isServiceBot && !isAgentCodingBot && onOpenEvalHistory ? (
             <Button
               variant="ghost"
               size="sm"
               className="w-full justify-start"
               leftIcon={<History className="size-4" />}
+              disabled={bot.canOpenEvalHistory !== true}
               onClick={() => {
+                if (bot.canOpenEvalHistory !== true) return;
                 onClose();
                 onOpenEvalHistory(bot);
               }}
             >
-              历史评测记录
+              {bot.canOpenEvalHistory === true ? (
+                '历史评测记录'
+              ) : (
+                <ActionHelp description="仅具有当前服务 Bot 编辑权限的人可查看历史评测记录">
+                  历史评测记录
+                </ActionHelp>
+              )}
             </Button>
           ) : null}
           {restartUnsupported || !isServiceBot || restartDeclared ? (

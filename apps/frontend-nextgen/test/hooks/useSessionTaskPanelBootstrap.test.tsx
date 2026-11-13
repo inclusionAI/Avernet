@@ -4,7 +4,7 @@ import {
   buildSessionTaskPanelTab,
   findLatestTaskForSession,
   resolveSessionOwnerUserId,
-  useSessionTaskPanelBootstrap,
+  useSessionTaskPanelBootstrap as bootstrap,
 } from '@/hooks/useSessionTaskPanelBootstrap';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
@@ -16,6 +16,64 @@ import { StrictMode } from 'react';
 
 const mockGetTaskBySession = jest.fn();
 const mockListMyTasks = jest.fn();
+let mockViewerUserId = 'u1';
+let mockController: any = null;
+const mockHistory = { readPage: async () => ({ messages: [], nextCursor: null }) };
+function useSessionTaskPanelBootstrap(options: Parameters<typeof bootstrap>[0]) {
+  mockViewerUserId = options.userId ?? 'u1';
+  return bootstrap({ ...options, history: mockHistory });
+}
+
+
+// The original hook scenarios now cross the shared controller seam. No network/source-selection logic is mocked.
+jest.mock('@/services/tasks/panel/taskPanelRuntime', () => {
+  const { createTaskPanelController } = require('../../assets/task-panel/src/controller/createTaskPanelController');
+  const { useTaskSidePanelStore: taskState } = require('@/stores/taskSidePanelStore');
+  const { useTaskSessionAssociationStore: associationState } = require('@/stores/taskSessionAssociationStore');
+  let conversation: any = null;
+  let present: any = () => {};
+  let history: any = null;
+  const host = {
+    taskApiBase: '/openapi/v1/collaboration/tasks',
+    getViewer: () => ({ userId: mockViewerUserId }), getConversation: () => conversation,
+    transport: { requestJson: async (path: string) => {
+      const url = new URL(path, 'http://localhost');
+      if (url.pathname.endsWith('/by_session')) {
+        const result = await mockGetTaskBySession(url.searchParams.get('session_id'));
+        return { code: 200000, data: { items: result?.data ?? [] } };
+      }
+      const result = await mockListMyTasks({ user_id: url.searchParams.get('user_id') });
+      if (result?.code !== 0) throw new Error('list unavailable');
+      return { code: 200000, data: result.data };
+    } },
+    history: { readPage: (...args: any[]) => history.readPage(...args) },
+    artifacts: {}, navigate: async () => ({ status: 'ready' }), captureOrigin: () => null,
+    restoreOrigin: async () => ({ status: 'ready' }), present: (...args: any[]) => present(...args),
+    preservePanel: () => {}, recordInteraction: () => {},
+  };
+  return {
+    configureTaskPanelSession: (ref: any, options: any) => { conversation = ref; present = options.present; history = options.history; },
+    getTaskPanelController: async () => {
+      if (!mockController) {
+        mockController = createTaskPanelController(host);
+        mockController.subscribe(() => {
+          const snapshot = mockController.getSnapshot();
+          taskState.setState({ activeTaskId: snapshot.activeTaskId });
+          if (snapshot.conversation) {
+            associationState.getState().setActiveSession(snapshot.conversation.sessionId);
+            associationState.getState().setActiveSessionTaskIds(snapshot.conversation.sessionId, [...snapshot.associatedTaskIds]);
+          } else associationState.getState().reset();
+        });
+      }
+      return mockController;
+    },
+    getPresentedTaskForConversation: () => null,
+    peekTaskPanelController: () => mockController,
+    getTaskPanelRuntimeGeneration: () => 0,
+    subscribeTaskPanelRuntime: () => () => {},
+    releaseTaskPanelSession: () => mockController?.leaveConversation(),
+  };
+});
 
 jest.mock('@/services/myTask', () => ({
   getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
@@ -76,6 +134,7 @@ it('历史未就绪时不请求任务，历史就绪后保留原恢复流程', a
 });
 
 beforeEach(() => {
+  mockController?.dispose(); mockController = null;
   jest.clearAllMocks();
   mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
   mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
@@ -175,7 +234,7 @@ describe('useSessionTaskPanelBootstrap', () => {
 
     useTaskSessionAssociationStore.getState().setActiveSession('sess-old');
     useTaskSessionAssociationStore.getState().setActiveSessionTaskIds('sess-old', ['task-old']);
-    useTaskSidePanelStore.getState().setActiveTask('task-old');
+    useTaskSidePanelStore.setState({ activeTaskId: 'task-old' });
 
     mockGetTaskBySession.mockResolvedValue({
       ok: true,
@@ -278,7 +337,7 @@ describe('useSessionTaskPanelBootstrap', () => {
 
   it('任务列表进入对话时优先打开用户点击的任务，而不是会话最新任务', async () => {
     const { ref, openTab } = makePanelRef();
-    useTaskSidePanelStore.getState().setActiveTask('task-current');
+    useTaskSidePanelStore.setState({ activeTaskId: 'task-current' });
     useTaskSidePanelStore.getState().markTaskPanelOpenIntent('task-old');
     mockGetTaskBySession.mockResolvedValue({
       ok: true,
@@ -316,7 +375,7 @@ describe('useSessionTaskPanelBootstrap', () => {
 
     await act(async () => Promise.resolve());
     act(() => {
-      useTaskSidePanelStore.getState().setActiveTask('task-aixui');
+      mockController.adoptPresentedTask({ id: 'task-task-aixui', type: 'taskPanel.TaskLoopView', title: '任务', closable: true, params: { taskId: 'task-aixui' } });
     });
     await act(async () => {
       resolveSessionTask({ ok: true, data: [sessionRef('task-relay')] });
@@ -377,7 +436,7 @@ describe('useSessionTaskPanelBootstrap', () => {
         useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef: ref }),
       { initialProps: { sessionId: 'sess-1' as string | null } },
     );
-    expect(mockGetTaskBySession).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockGetTaskBySession).toHaveBeenCalledTimes(1));
 
     rerender({ sessionId: null });
     // 旧请求即使返回也不能打开已离开的会话。
@@ -490,4 +549,19 @@ describe('useSessionTaskPanelBootstrap', () => {
     expect(openTab).not.toHaveBeenCalled();
     expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
   });
+});
+
+it('等待 PanelHandle 时旧恢复不得覆盖已展示的新任务', async () => {
+  jest.useFakeTimers();
+  try {
+    const panel = makePanelRef(); const deferred = { current: null as PanelHandle | null };
+    mockGetTaskBySession.mockResolvedValue({ ok: true, data: [sessionRef('task-recovery')] });
+    renderHook(() => useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: deferred }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    act(() => mockController.adoptPresentedTask({ id: 'task-task-chosen', type: 'taskPanel.TaskLoopView', title: '任务', closable: true, params: { taskId: 'task-chosen' } }));
+    deferred.current = panel.ref.current;
+    await act(async () => jest.advanceTimersByTimeAsync(200));
+    expect(panel.openTab).not.toHaveBeenCalled();
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-chosen');
+  } finally { jest.useRealTimers(); }
 });

@@ -93,6 +93,19 @@ def test_bcsfuse_change_runs_singlebox_coverage(tmp_path):
     assert output.read_text().strip() == "skip=false"
 
 
+def test_workflow_installs_pinned_protoc_without_apt():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    install_step = workflow.split("- name: Install protoc", 1)[1].split(
+        "- name: Show protoc version", 1
+    )[0]
+
+    assert "uses: arduino/setup-protoc@v3" in install_step
+    assert 'version: "21.12"' in install_step
+    assert "repo-token: ${{ secrets.GITHUB_TOKEN }}" in install_step
+    assert "apt-get" not in install_step
+    assert "run: protoc --version" in workflow
+
+
 def test_bcs_changed_line_threshold_has_no_branch_waiver():
     import yaml
 

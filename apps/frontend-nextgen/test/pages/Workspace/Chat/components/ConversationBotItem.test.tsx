@@ -406,6 +406,25 @@ describe('ConversationBotItem Bot 可用状态(FAILED/PENDING 整行禁用)', ()
     expect(document.querySelector('div[aria-disabled="true"]')).toBeTruthy();
   });
 
+  it.each([
+    ['managed', 'OFFLINE', '该 Bot 已下线，暂时无法发起会话'],
+    ['managed', 'RECYCLED', '该 Bot 已回收，暂时无法发起会话'],
+    ['managed', 'RELEASED', '该 Bot 已回收，暂时无法发起会话'],
+    ['team', 'OFFLINE', '该 Bot 已下线，暂时无法发起会话'],
+    ['team', 'RECYCLED', '该 Bot 已回收，暂时无法发起会话'],
+    ['team', 'RELEASED', '该 Bot 已回收，暂时无法发起会话'],
+  ] as const)('%s 分组的 %s Bot 整行置灰禁用并提示原因', async (section, status, reason) => {
+    const { onToggle } = renderBotItem({ section, bot: { status }, expanded: true });
+    const row = document.querySelector('div[aria-disabled="true"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    expect(row).toHaveClass('opacity-60');
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('会话列表：测试 Bot')).not.toBeInTheDocument();
+    fireEvent.pointerMove(row, { pointerType: 'mouse' });
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(reason));
+  });
+
   it('不可用 Bot 悬停显示原因 tooltip(FAILED 与 PENDING 文案区分)', async () => {
     const { unmount } = renderBotItem({ bot: { status: 'FAILED' } });
     const failedRow = document.querySelector('div[aria-disabled="true"]') as HTMLElement;

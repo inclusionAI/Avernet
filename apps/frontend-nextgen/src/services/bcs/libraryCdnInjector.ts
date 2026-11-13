@@ -65,7 +65,8 @@ function collectLibraryCdnConfigs(configs: LibraryCdnConfig[]): Map<string, stri
   const cdnMap = new Map<string, string>();
   for (const config of configs) {
     const cdnUrl = resolveCdnUrl(config);
-    if (!cdnUrl || !config.name) continue;
+    // Platform task panels always use the pinned local adapter, never a Bot CDN.
+    if (!cdnUrl || !config.name || config.name === 'taskPanel') continue;
     cdnMap.set(config.name, cdnUrl);
   }
   return cdnMap;

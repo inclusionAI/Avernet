@@ -39,15 +39,40 @@ export function selectBcsEndpoint({
   return endpoint?.trim() || null;
 }
 
+function browserSameOrigin(): string {
+  return typeof window === 'undefined' ? '' : window.location?.origin ?? '';
+}
+
+/**
+ * 运行时 endpoint 优先，但「键存在且为空串」是 bcs-only 部署的显式信号：
+ * 容器未配置 BCS_ENDPOINT_PRE/PROD 时回退浏览器同源，绝不能落回编译期常量
+ * （其缺省是 http://127.0.0.1:21000，会把 Bot 接入命令指向访问者本机）。
+ * 键不存在（本地 dev 未注入 runtime-config.js）时保持既有编译期回退。
+ */
+function resolveRuntimeEndpoint(
+  runtimeConfig: AvernetRuntimeConfig,
+  key: keyof AvernetRuntimeConfig,
+  buildTimeEndpoint: string,
+): string {
+  if (!Object.prototype.hasOwnProperty.call(runtimeConfig, key)) return buildTimeEndpoint;
+  return runtimeConfig[key]?.trim() || browserSameOrigin();
+}
+
 export function resolveBcsEndpoint(): string | null {
   const runtimeConfig =
     typeof window === 'undefined'
       ? {}
       : (window as { AVERNET_RUNTIME_CONFIG?: AvernetRuntimeConfig }).AVERNET_RUNTIME_CONFIG ?? {};
-  const preEndpoint =
-    runtimeConfig.BCS_ENDPOINT_PRE || (typeof BCS_ENDPOINT_PRE !== 'undefined' ? BCS_ENDPOINT_PRE : '');
-  const prodEndpoint =
-    runtimeConfig.BCS_ENDPOINT_PROD || (typeof BCS_ENDPOINT_PROD !== 'undefined' ? BCS_ENDPOINT_PROD : '');
+  const preEndpoint = resolveRuntimeEndpoint(
+    runtimeConfig,
+    'BCS_ENDPOINT_PRE',
+    typeof BCS_ENDPOINT_PRE !== 'undefined' ? BCS_ENDPOINT_PRE : '',
+  );
+  const prodEndpoint = resolveRuntimeEndpoint(
+    runtimeConfig,
+    'BCS_ENDPOINT_PROD',
+    typeof BCS_ENDPOINT_PROD !== 'undefined' ? BCS_ENDPOINT_PROD : '',
+  );
   return selectBcsEndpoint({ preEndpoint, prodEndpoint });
 }
 

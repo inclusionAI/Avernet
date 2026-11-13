@@ -1,5 +1,6 @@
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type {
+  BotCandidatePage,
   CollaborationSquarePage,
   CreateSessionResult,
   FriendRequestActor,
@@ -9,6 +10,7 @@ import type {
   OpenBotConversationResult,
   PublicBot,
   PublicBotDiscoveryQuery,
+  PublicBotDiscoveryResult,
   PublicBotProfile,
   PublicBotSearchQuery,
   PublicGroup,
@@ -20,18 +22,17 @@ import type {
 } from '@/domain/collaborationSquare/types';
 
 export interface CollaborationSquareGateway {
-  listBotPage(
-    query?: PublicBotSearchQuery,
-    context?: HumanBotActionContext,
-    signal?: AbortSignal,
-  ): Promise<CollaborationSquarePage<PublicBot>>;
+  /** 公开 Bot 普通列表：BCS 原始 offset 游标页（经可选 Backend metadata 过滤，不返回 total）。 */
+  listBotPage(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal): Promise<BotCandidatePage>;
   listBots(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal): Promise<PublicBot[]>;
+  /** 智能搜索：BCS 内部 candidates/search 的一次性批次；items 之外独立携带 wire 的 search_mode。 */
   discoverBots(
     query: PublicBotDiscoveryQuery,
     context?: HumanBotActionContext,
     signal?: AbortSignal,
-  ): Promise<PublicBot[]>;
-  getBotProfile(botId: string, signal?: AbortSignal): Promise<PublicBotProfile>;
+  ): Promise<PublicBotDiscoveryResult>;
+  /** 申请弹窗画像：从已点击的 `PublicBot` 摘要出发，Backend 增强存在才读旧 profile 端点。 */
+  getBotProfile(bot: PublicBot, signal?: AbortSignal): Promise<PublicBotProfile>;
   requestBotFriendship(
     botId: string,
     context: HumanBotActionContext,
