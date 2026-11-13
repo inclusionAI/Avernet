@@ -198,10 +198,14 @@ latency guarantee. Tests: `test_card_incremental.py` and `test_catalog_startup.p
 ### Optional document mapping contracts
 
 Hosts opt into `MappedCardManagement` and `MappedIndexBuildManagement` at HTTP
-composition. Ordinary services, request/response schemas and TC remain unchanged.
+composition. Alipay and TC v2 enable them; unconfigured business conversion remains unchanged.
 `config.document_mapping.DocumentMapping` validates templates and paths; it has no
-business imports. The host projects its Card, retains its operational metadata,
-and uses the existing document publication/recovery path.
+business imports. `catalog.mapping.map_projection` applies rules to a business-supplied
+projection. Partial mappings retain document keys and fragments; an explicit search
+template produces one expression. `CardUpdates` owns pre-save validation and mapping
+application, while the host owns default conversion and protected business filters.
+`MappedCardIndexBuildService` shares build validation and mapping inheritance.
+Hosts keep their source publisher and model selection in their composition roots.
 
 `CardStore.upsert` optionally accepts `document_mapping` and `validate_mapping`.
 The sentinel means preserve; null/empty clears; nonempty replaces that config key.
@@ -223,4 +227,6 @@ Existing text/model/vector validity checks continue to control reuse.
 Conformance: `test_document_mapping.py` covers syntax/rendering;
 `test_card_management.py` covers atomic rollback and CAS retry. The Alipay suite
 covers host opt-in, pre-save validation, global build/selection, mapping clearing,
-operational metadata retention, Qdrant filtering and replica recovery.
+operational metadata retention, Qdrant filtering and replica recovery. TC contracts
+also cover Worker/Profile defaults, isolated named builds, model/dimension selection,
+and restart/rollback without changing the original generation.

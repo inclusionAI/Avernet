@@ -9,16 +9,24 @@ import math
 import re
 from contextlib import nullcontext
 from dataclasses import replace
+from functools import partial
 from threading import Lock
 from time import monotonic, sleep, time
 from uuid import uuid4
 
-from search_core.api.cards import CatalogConflict, IndexTargetMismatch
+from search_core.api.cards import UNSET_MAPPING, CatalogConflict, IndexTargetMismatch
 from search_core.api.index_builds import IndexBuildConflict
-from search_core.catalog.cards import CardSnapshot, is_label_filter, label_filters
+from search_core.catalog.cards import (
+    CardSnapshot,
+    business_card,
+    is_label_filter,
+    label_filters,
+)
 from search_core.catalog.conversion import DefaultCardDocumentConverter
 from search_core.catalog.documents import build_documents, load_group, source_id
 from search_core.catalog.inspection import inspect_documents, inspect_index
+from search_core.catalog.mapping import map_projection
+from search_core.config.document_mapping import DocumentMapping, effective_mapping
 from search_core.config.index_sync import IndexSyncControl
 from search_core.core.card_management import CardManagementService
 from search_core.core.index_sync import apply_snapshot_pages
@@ -73,6 +81,8 @@ class CardUpdates(CardManagementService):
         sync_control: IndexSyncControl | None = None,
         index_key: str = "",
         conversion_version: str = "",
+        document_mapping=None,
+        protected_filter_fields=frozenset(),
     ):
         if not embedding_key.strip() or not instance_id.strip():
             raise ValueError("embedding_key and instance_id are required")
@@ -91,6 +101,8 @@ class CardUpdates(CardManagementService):
         self.embedding, self.index = embedding, index
         self.embedding_key, self.instance_id = embedding_key, instance_id
         self.filter_fields = filter_fields
+        self.document_mapping = document_mapping
+        self.protected_filter_fields = protected_filter_fields
         self.conversion_version = conversion_version or (
             document_converter.version if document_converter else CONVERSION_VERSION
         )
@@ -152,7 +164,66 @@ class CardUpdates(CardManagementService):
         except IndexBuildConflict as error:
             raise CatalogConflict(str(error)) from error
 
+    def upsert(
+        self,
+        agent_id,
+        fields,
+        resource_type,
+        search_config,
+        *,
+        labels=None,
+        document_mapping=UNSET_MAPPING,
+    ):
+        explicit = document_mapping is not UNSET_MAPPING
+        if explicit:
+            document_mapping = (
+                DocumentMapping.model_validate(document_mapping or {}).stored() or None
+            )
+        return self.repository.upsert(
+            agent_id,
+            fields,
+            resource_type,
+            search_config,
+            labels=labels,
+            document_mapping=document_mapping,
+            validate_mapping=partial(self._validate_mapping, validate_keys=explicit),
+        )
+
+    def _validate_mapping(self, card, config, *, validate_keys):
+        if self.document_mapping is None and not config.get("document_mapping"):
+            return ()
+        _, warnings = self._map_projection(
+            card,
+            config,
+            self.document_converter.convert(card),
+            validate_keys=validate_keys,
+        )
+        return warnings
+
+    def _map_projection(self, card, config, default, *, validate_keys=False):
+        mapping = effective_mapping(
+            self.document_mapping,
+            (config or {}).get("document_mapping"),
+            validate_keys=validate_keys,
+        )
+        return map_projection(
+            business_card(card),
+            mapping,
+            default,
+            protected_filter_fields=self.protected_filter_fields,
+        )
+
+    def _default_projection(self, row):
+        return self.document_converter.convert(row.card)
+
     def _prepare_documents(self, row, previous):
+        projection = None
+        if not row.card.deleted:
+            projection = self._default_projection(row)
+            if self.document_mapping is not None or (row.config or {}).get(
+                "document_mapping"
+            ):
+                projection, _ = self._map_projection(row.card, row.config, projection)
         return build_documents(
             row,
             self.embedding,
@@ -160,6 +231,7 @@ class CardUpdates(CardManagementService):
             self.filter_fields,
             self.document_converter,
             previous,
+            projection=projection,
         )
 
     def _previous_documents(self, key, previous):

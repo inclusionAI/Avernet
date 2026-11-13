@@ -107,7 +107,7 @@ can populate missing `default` Docs and reuse matching vectors from old generati
 there is no startup migration or automatic full-build job. A missing or invalid
 vector is regenerated in background preparation. Old Docs and collections remain
 intact. The legacy hash helper stays available only for older direct library
-callers; explicit version paths never call it. TC's composition is unchanged.
+callers and TC's existing default generation; explicit version paths never call it.
 
 HTTP creation requires model and dimension; optional `filter_fields` selects the
 version's filtering rules. Omission uses application defaults for a new version,
@@ -150,14 +150,60 @@ Card and embedding text; it cannot be a business filter field. It identifies
 ownership, not global activation: compare it with the responding instance's
 `/ready.index_key`. No per-point `active` flag is maintained.
 
-## TC compatibility
+## TC construction and explicit selection
 
-TC's current tables, recommend/Fuse entrypoints, model defaults and task lifecycle
-remain unchanged. To adopt this capability later, TC supplies its own source
-adapter and conversion/publisher rather than importing an Alipay implementation.
-The HTTP create/retry/status contract remains `PUT /api/v2/index-builds/{build_id}`
-and `GET /api/v2/index-builds/{build_id}`; it is mounted only by opting-in hosts.
+TC now mounts authenticated `PUT /api/v2/index-builds/{build_id}` and
+`GET /api/v2/index-builds/{build_id}`. Successful PUT wakes the shared on-demand
+runner. Idle/startup instances do not poll the build table or resume old jobs.
+TC supplies its Worker/Profile converter and publisher; mapping, validation,
+leases, retry and version selection use the shared implementation.
 
+The default TC path preserves its existing configuration hash, Doc rows and
+Qdrant collection names. It does not register or migrate to a literal `default`
+index. Build names `default` and 64-character lowercase hexadecimal hashes are
+reserved to prevent overwriting historical default generations. Use a distinct
+name such as `tc-v2`. Each named version has immutable settings and separate Docs.
+The existing business filter fields and labels cannot be replaced by mapping.
+
+For example, PUT `/api/v2/index-builds/tc-v2` with:
+
+```json
+{
+  "embedding_model": "your-existing-model",
+  "embedding_dimension": 1024,
+  "document_mapping": {
+    "search_text_template": "{name}\n{description}",
+    "rerank_text_template": "{name}\n{skills[].description}",
+    "filter_fields": {"topic": "domains[]"}
+  },
+  "validation_card_ids": ["your-existing-card"]
+}
+```
+
+Use the actual configured model/dimension. A build publishes only the named
+version's SQL Docs; it does not apply them to the currently serving Qdrant index.
+Changed text/model gets new vectors; unchanged text/model may reuse old vectors.
+A failed build leaves the current index selected and cannot be selected itself.
+
+After GET reports `completed`, explicitly set the existing host configuration
+(or internal DRM) `index_version` to `{"active_index":"tc-v2"}` and restart.
+Startup binds that version's model, filters and separate Qdrant collections,
+restores its Docs, and resumes normal incremental updates. `/ready` must succeed
+before sending traffic. `GET /api/v2/index-version` exposes `active_index`,
+`index_key`, `requested_index`, and `restart_required`. This is configuration
+selection at startup, not a live HTTP switch.
+
+Rollback sets `index_version` to `{}` or `{"active_index":"default"}` and
+restarts with the original model configuration. Existing default Docs and
+collections are retained; subsequent Card changes are reconciled by the ordinary
+background sync. No version is deleted automatically. Do not change existing
+model defaults merely to activate or roll back a named version.
+
+TC continues using its current Card/Doc tables. Build records use the existing
+`bcsfuse_index_builds` schema; SQLite initializes it locally. Internal deployments
+must provision this table before using builds or selecting named versions.
+Keeping the default selection does not require reading that table. No deployment
+migration or live configuration change is performed by these APIs.
 
 ## Optional mapping-enabled hosts
 

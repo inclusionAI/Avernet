@@ -36,7 +36,9 @@ def reusable_document(previous, key, embedding_key, text_hash, model):
     )
 
 
-def build_documents(row, model, embedding_key, filter_fields, converter, previous):
+def build_documents(
+    row, model, embedding_key, filter_fields, converter, previous, *, projection=None
+):
     """Project business text once, then materialize it without interpreting the Card."""
     if row.card.deleted:
         point = VectorPoint(
@@ -44,7 +46,8 @@ def build_documents(row, model, embedding_key, filter_fields, converter, previou
         )
         main = IndexDocument(point, row.revision, {}, True, filters={})
         return complete_document_group(main, (), previous, model, embedding_key)
-    projection = converter.convert(row.card)
+    if projection is None:
+        projection = converter.convert(row.card)
     if not isinstance(projection, CardProjection):
         raise TypeError("converter must return CardProjection")
     expressions = tuple(projection.documents)

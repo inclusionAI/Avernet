@@ -39,6 +39,7 @@ jobs:
         working-directory: apps/bcsfuse
         run: >-
           python -m pytest tests/contract/test_tc_catalog.py
+          tests/contract/test_tc_document_mapping.py
           tests/contract/test_tc_same_instance_migration.py
           tests/contract/test_tc_sync_contract.py
           tests/contract/test_tc_http_compat.py
