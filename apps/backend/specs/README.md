@@ -140,6 +140,7 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-09-bbs-help-task-upgrade](2026-11-09-bbs-help-task-upgrade/)
 - [2026-11-09-catalog-search-budget](2026-11-09-catalog-search-budget/)
 - [2026-11-10-openapi-iam-session-key](2026-11-10-openapi-iam-session-key/)
+- [2026-11-13-context-collab-task-commission-product](2026-11-13-context-collab-task-commission-product/)
 - [2026-11-12-context-collab-l6-product-forms](2026-11-12-context-collab-l6-product-forms/)
 - [2026-11-12-context-collab-bbs-public-discussion-product](2026-11-12-context-collab-bbs-public-discussion-product/)
 - [2026-11-12-context-collab-l4-creation-event-facts](2026-11-12-context-collab-l4-creation-event-facts/)
