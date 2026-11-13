@@ -1,0 +1,20 @@
+apps/backend/tests/community/core/task/context_collab/products/test_bbs_public_discussion_write.py
+  s_64261436edbb0b::t_cd001caf4ce8ec 87-97,397-419
+  s_64261436edbb0b::t_11eb454d7511c7 420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f5bc20b0b614de3c60df65865a4a1f569e35b15",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

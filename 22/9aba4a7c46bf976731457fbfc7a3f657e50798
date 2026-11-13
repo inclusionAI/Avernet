@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/a2a_wire.py
+  s_64261436edbb0b::t_a789bf6644d178 23
+  s_64261436edbb0b::t_d75f5e76ed6e33 1-22,24-273
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/envelope.py
+  s_64261436edbb0b::t_88349fc2904ff1 1-12,16,18-144
+  s_64261436edbb0b::t_d75f5e76ed6e33 13-15,17
+apps/backend/tests/community/core/task/context_collab/test_l1_delivery_mock.py
+  s_64261436edbb0b::t_d3ddbccac51619 1-143
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/common.py
+  s_64261436edbb0b::t_90c741510337f1 1-369
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/bridge.py
+  s_64261436edbb0b::t_d75f5e76ed6e33 1-84
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/delivery.py
+  s_64261436edbb0b::t_a789bf6644d178 1-277
+apps/backend/tests/community/core/task/context_collab/test_l1_wire_objects.py
+  s_64261436edbb0b::t_f4d7c9885910b1 1-221,223-311
+  s_64261436edbb0b::t_562734e2308e35 222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "229aba4a7c46bf976731457fbfc7a3f657e50798",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
