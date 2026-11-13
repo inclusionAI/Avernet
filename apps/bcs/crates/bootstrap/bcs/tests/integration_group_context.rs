@@ -670,9 +670,29 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     assert!(existing.created_from_preset);
     assert_eq!(existing.content, "event");
 
+    for (round, name, readers) in [
+        ("first", "public_summary", json!([])),
+        ("second", "guest_summary", json!(["张三"])),
+        ("third", "driver_summary", json!(["judge_bot"])),
+    ] {
+        let uri = format!(
+            "/groupcontext/add?groupId=preset-group&sessionId=preset-group:12345678&roundId=preset-group:12345678:{round}"
+        );
+        let (status, body) = post_json(&app, &uri, token_for("judge_bot"), json!({
+            "name": name,
+            "scope_level": "round",
+            "content": name,
+            "visible_to": {"userIds": readers},
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
     let shared = "/groupcontext/shared-info?groupId=preset-group&sessionId=preset-group:12345678";
     let (status, body) = post_json(&app, shared, token_for("张三"), json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let mut visible = names(&body, "items");
+    visible.sort();
+    assert_eq!(visible, ["guest_summary", "public_summary", "timeline"]);
     assert_eq!(body["items"][0]["content"], "event");
     assert_eq!(body["items"][0]["creator"], "judge_bot");
     assert_eq!(post_json(&app, shared, token_for("admin"), json!({})).await.0, StatusCode::FORBIDDEN);
