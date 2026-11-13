@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 工作流 YAML 编辑器 Demo</title>
+    <style>
+      :root {
+        --blue: #2563eb;
+        --blue-strong: #1d4ed8;
+        --blue-soft: #eff6ff;
+        --blue-wash: #f5f8ff;
+        --ink: #172033;
+        --ink-soft: #536176;
+        --muted: #8b97a9;
+        --line: #e5eaf2;
+        --line-strong: #d7dfeb;
+        --canvas: #f5f7fb;
+        --panel: #ffffff;
+        --green: #0f9f6e;
+        --green-soft: #ecfdf5;
+        --orange: #c97712;
+        --orange-soft: #fff7e8;
+        --red: #d14343;
+        --red-soft: #fff1f1;
+        --purple: #7757d9;
+        --purple-soft: #f4f1ff;
+        --shadow: 0 16px 48px rgba(37, 61, 108, 0.08);
+        --shadow-soft: 0 6px 20px rgba(35, 60, 107, 0.07);
+        --radius: 14px;
+        --mono: "SFMono-Regular", "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family: var(--sans);
+        font-size: 14px;
+        letter-spacing: 0.01em;
+      }
+      button, textarea { font: inherit; }
+      button { cursor: pointer; }
+      button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.2); outline-offset: 2px; }
+
+      .app {
+        display: grid;
+        grid-template-rows: 64px 1fr;
+        min-height: 100vh;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        background: rgba(255, 255, 255, 0.94);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(16px);
+        z-index: 5;
+      }
+      .brand { display: flex; align-items: center; gap: 10px; min-width: 240px; }
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        color: white;
+        font-size: 16px;
+        font-weight: 800;
+        border-radius: 9px;
+        background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+        box-shadow: 0 5px 12px rgba(37, 99, 235, 0.25);
+      }
+      .brand-name { font-size: 15px; font-weight: 760; letter-spacing: -0.02em; }
+      .breadcrumb { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+      .breadcrumb strong { color: var(--ink-soft); font-weight: 650; }
+      .top-actions { display: flex; align-items: center; gap: 10px; }
+      .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #1e3a8a; background: #dbeafe; font-size: 12px; font-weight: 700; }
+
+      .shell { display: grid; grid-template-columns: 232px minmax(640px, 1fr); min-height: 0; }
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        padding: 22px 14px 18px;
+        background: #fbfcfe;
+        border-right: 1px solid var(--line);
+      }
+      .sidebar-title { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; }
+      .sidebar-title h2 { margin: 0; font-size: 13px; font-weight: 760; }
+      .icon-btn { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; color: var(--ink-soft); background: transparent; }
+      .icon-btn:hover { color: var(--blue); background: var(--blue-soft); }
+      .workspace-label { display: flex; align-items: center; gap: 8px; padding: 0 8px 9px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+      .workspace-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 4px #dcfce7; }
+      .workflow-list { display: flex; flex-direction: column; gap: 5px; }
+      .workflow-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 11px 10px;
+        text-align: left;
+        border: 1px solid transparent;
+        border-radius: 11px;
+        color: var(--ink-soft);
+        background: transparent;
+      }
+      .workflow-item:hover { background: #f2f5fa; }
+      .workflow-item.active { color: var(--blue-strong); background: var(--blue-soft); border-color: #dbeafe; }
+      .workflow-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; color: var(--blue); border-radius: 8px; background: #e5efff; font-size: 14px; }
+      .workflow-item.active .workflow-icon { color: white; background: var(--blue); }
+      .workflow-copy { min-width: 0; flex: 1; }
+      .workflow-name { overflow: hidden; font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+      .workflow-meta { margin-top: 3px; color: var(--muted); font-size: 10px; }
+      .workflow-item.active .workflow-meta { color: #6b87c4; }
+      .side-callout { margin-top: auto; padding: 13px; border: 1px solid #e1e9f8; border-radius: 12px; background: linear-gradient(145deg, #f5f8ff, #ffffff); }
+      .side-callout-title { display: flex; align-items: center; gap: 7px; color: var(--blue-strong); font-size: 12px; font-weight: 700; }
+      .side-callout p { margin: 8px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+
+      .main { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+      .page-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 24px 16px; background: var(--canvas); }
+      .page-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
+      .page-title h1 { margin: 0; font-size: 18px; letter-spacing: -0.025em; }
+      .page-title p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+      .title-copy { min-width: 0; }
+      .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; color: var(--orange); background: var(--orange-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
+      .status-pill.saved { color: var(--green); background: var(--green-soft); }
+      .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .head-actions { display: flex; align-items: center; gap: 8px; }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        color: var(--ink-soft);
+        background: white;
+        font-size: 12px;
+        font-weight: 680;
+        transition: 160ms ease;
+      }
+      .btn:hover { border-color: var(--line-strong); background: #f9fbfe; }
+      .btn.primary { color: white; background: var(--blue); box-shadow: 0 5px 12px rgba(37, 99, 235, 0.18); }
+      .btn.primary:hover { background: var(--blue-strong); border-color: var(--blue-strong); }
+      .btn.secondary { color: var(--blue-strong); border-color: #cfe0ff; background: var(--blue-soft); }
+      .btn.secondary:hover { background: #e1edff; border-color: #b8d2ff; }
+      .btn.outline { border-color: var(--line); }
+      .btn.tiny { min-height: 28px; padding: 0 9px; border-radius: 8px; font-size: 11px; }
+      .btn[disabled] { cursor: not-allowed; opacity: 0.55; }
+      .sparkle { color: #f59e0b; }
+
+      .integration-strip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: -2px 24px 14px;
+        padding: 8px 10px;
+        border: 1px solid #dbe7fb;
+        border-radius: 10px;
+        color: #4b6287;
+        background: linear-gradient(90deg, #f7faff, #ffffff);
+        font-size: 10px;
+      }
+      .integration-strip strong { color: var(--blue-strong); }
+      .integration-chip {
+        padding: 4px 7px;
+        border-radius: 6px;
+        color: #4169ad;
+        background: #edf4ff;
+        font-weight: 700;
+      }
+      .integration-arrow { color: #9bb1d4; font-size: 14px; }
+      .assistant-close {
+        margin-left: 2px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .assistant-close:hover { color: var(--blue); }
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(460px, 1fr) 344px;
+        gap: 16px;
+        min-height: 0;
+        flex: 1;
+        padding: 0 24px 22px;
+      }
+      .workspace.ai-collapsed { grid-template-columns: minmax(0, 1fr); }
+      .workspace.ai-collapsed .assistant-card { display: none; }
+      .card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-soft); }
+      .editor-card { display: flex; min-height: 610px; flex-direction: column; overflow: hidden; }
+      .card-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+      .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; }
+      .file-tab { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: #f6f8fb; }
+      .file-icon { color: #cb8d18; font-size: 15px; }
+      .file-name { font-family: var(--mono); font-size: 11px; font-weight: 650; }
+      .file-note { color: var(--muted); font-size: 10px; }
+      .view-tabs { display: flex; padding: 4px; border-radius: 9px; background: #f4f6fa; }
+      .view-tab { padding: 6px 10px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 680; }
+      .view-tab.active { color: var(--ink); background: white; box-shadow: 0 2px 7px rgba(31, 50, 87, 0.08); }
+
+      .editor-body { display: flex; min-height: 0; flex: 1; flex-direction: column; background: #fcfdff; }
+      .editor-surface { display: flex; min-height: 330px; flex: 1; overflow: hidden; background: linear-gradient(90deg, #f7f9fc 0, #f7f9fc 55px, #fcfdff 55px); }
+      .line-numbers { width: 55px; flex: 0 0 55px; padding: 20px 12px 20px 0; color: #a8b4c5; font: 12px/1.72 var(--mono); text-align: right; user-select: none; overflow: hidden; }
+      .line-numbers span { display: block; height: 20.6px; }
+      #yamlEditor { min-width: 0; flex: 1; padding: 18px 18px 22px 14px; border: 0; outline: 0; resize: none; color: #334155; background: transparent; font: 12px/1.72 var(--mono); tab-size: 2; white-space: pre; overflow: auto; }
+      #yamlEditor::selection { background: #dbeafe; }
+      .editor-helper { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; color: var(--muted); border-top: 1px solid var(--line); font-size: 10px; }
+      .helper-ok { display: inline-flex; align-items: center; gap: 5px; color: var(--green); }
+      .helper-ok::before { content: "✓"; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: white; background: var(--green); font-size: 9px; font-weight: 800; }
+
+      .bottom-panel { border-top: 1px solid var(--line); background: white; }
+      .bottom-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 14px 0; }
+      .bottom-tab { position: relative; padding: 6px 8px 9px; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 700; }
+      .bottom-tab.active { color: var(--blue-strong); }
+      .bottom-tab.active::after { content: ""; position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; border-radius: 2px; background: var(--blue); }
+      .change-count { margin-left: 4px; padding: 2px 5px; border-radius: 999px; color: var(--blue-strong); background: var(--blue-soft); font-size: 9px; }
+      .preview { display: none; max-height: 205px; padding: 10px 14px 14px; overflow: auto; }
+      .preview.active { display: block; }
+      .diff-row { display: grid; grid-template-columns: 27px 1fr; gap: 7px; padding: 3px 8px; border-radius: 4px; font: 11px/1.6 var(--mono); white-space: pre-wrap; }
+      .diff-row.add { color: #147e5c; background: #f0fdf7; }
+      .diff-row.remove { color: #bd4040; background: #fff4f4; }
+      .diff-row.context { color: #64748b; }
+      .diff-sign { font-weight: 800; }
+      .graph-wrap { display: flex; flex-direction: column; gap: 10px; padding: 6px 14px 16px; }
+      .graph-note { color: var(--muted); font-size: 10px; }
+      .graph { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 105px; padding: 14px; border: 1px solid #e6ebf3; border-radius: 10px; background: radial-gradient(circle at 10% 10%, #f8fbff 0, #fff 62%); }
+      .graph-node { min-width: 88px; padding: 10px 7px; border: 1px solid #cfe0ff; border-radius: 9px; color: #2353a1; background: #f4f8ff; text-align: center; }
+      .graph-node strong { display: block; font-size: 10px; }
+      .graph-node span { display: block; margin-top: 4px; color: #7891b8; font-size: 9px; }
+      .graph-node.human { color: #a46519; border-color: #f3d9a8; background: #fffaf0; }
+      .graph-arrow { color: #9aacbf; font-size: 18px; }
+
+      .assistant-card { display: flex; min-height: 610px; flex-direction: column; overflow: hidden; }
+      .assistant-head { padding: 14px 15px 12px; border-bottom: 1px solid var(--line); }
+      .assistant-title { display: flex; align-items: center; justify-content: space-between; }
+      .assistant-title-main { display: flex; align-items: center; gap: 9px; }
+      .ai-orb { display: grid; place-items: center; width: 30px; height: 30px; color: white; border-radius: 10px; background: linear-gradient(145deg, #6f8df8, #5d47cc); box-shadow: 0 5px 15px rgba(93, 71, 204, 0.24); }
+      .assistant-title h2 { margin: 0; font-size: 14px; }
+      .assistant-title p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
+      .mode-switch { display: flex; gap: 4px; margin-top: 13px; padding: 4px; border-radius: 9px; background: #f4f6fb; }
+      .mode-btn { flex: 1; padding: 7px 5px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 700; }
+      .mode-btn.active { color: var(--blue-strong); background: white; box-shadow: 0 2px 7px rgba(31, 50, 87, 0.08); }
+      .assistant-body { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 14px 15px; overflow: auto; }
+      .context-card { padding: 10px; border: 1px solid #e1e9f7; border-radius: 10px; background: var(--blue-wash); }
+      .context-head { display: flex; align-items: center; justify-content: space-between; color: var(--blue-strong); font-size: 10px; font-weight: 750; }
+      .context-head span:last-child { color: #7190c5; font-weight: 600; }
+      .context-text { margin-top: 6px; color: var(--ink-soft); font: 10px/1.6 var(--mono); white-space: pre-wrap; }
+      .chat { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+      .message { max-width: 93%; padding: 10px 11px; border-radius: 11px; font-size: 11px; line-height: 1.65; }
+      .message.ai { align-self: flex-start; color: var(--ink-soft); border: 1px solid #e7eaf2; border-top-left-radius: 4px; background: #fafbfe; }
+      .message.user { align-self: flex-end; color: #21478e; border: 1px solid #d9e7ff; border-top-right-radius: 4px; background: var(--blue-soft); }
+      .message strong { color: var(--ink); }
+      .message.ai strong { color: var(--blue-strong); }
+      .message-list { margin: 7px 0 0; padding-left: 16px; }
+      .message-list li { margin: 3px 0; }
+      .prompt-label { display: flex; align-items: center; justify-content: space-between; margin: 17px 0 7px; color: var(--ink-soft); font-size: 10px; font-weight: 740; }
+      .prompt-hint { color: var(--muted); font-weight: 500; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .prompt-chip { padding: 6px 8px; border: 1px solid #e3e9f3; border-radius: 8px; color: var(--ink-soft); background: white; font-size: 10px; text-align: left; }
+      .prompt-chip:hover { color: var(--blue-strong); border-color: #bfd4f8; background: var(--blue-soft); }
+      .prompt-box { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid #dce5f2; border-radius: 11px; background: white; box-shadow: 0 3px 12px rgba(40, 68, 110, 0.05); }
+      #promptInput { min-height: 64px; padding: 0; border: 0; outline: 0; resize: vertical; color: var(--ink); background: transparent; font-size: 11px; line-height: 1.65; }
+      #promptInput::placeholder { color: #a4afbf; }
+      .prompt-footer { display: flex; align-items: center; justify-content: space-between; }
+      .kbd { padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: #f8fafc; font: 9px var(--mono); }
+      .assistant-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: auto; padding-top: 14px; }
+      .assistant-actions .btn { flex: 1; }
+      .draft-card { display: none; margin-top: 12px; padding: 10px; border: 1px solid #cdeadd; border-radius: 10px; background: var(--green-soft); }
+      .draft-card.show { display: block; }
+      .draft-head { display: flex; align-items: center; justify-content: space-between; color: #087c56; font-size: 10px; font-weight: 750; }
+      .draft-card p { margin: 7px 0 0; color: #397863; font-size: 10px; line-height: 1.5; }
+      .draft-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+      .draft-tag { padding: 4px 6px; border-radius: 6px; color: #087c56; background: rgba(255,255,255,0.7); font-size: 9px; }
+
+      .toast { position: fixed; right: 24px; bottom: 22px; z-index: 20; display: flex; align-items: center; gap: 8px; max-width: 340px; padding: 11px 14px; border: 1px solid #cdeadd; border-radius: 10px; color: #0b7b56; background: #f0fdf7; box-shadow: var(--shadow); font-size: 12px; font-weight: 650; transform: translateY(20px); opacity: 0; pointer-events: none; transition: 200ms ease; }
+      .toast.show { transform: translateY(0); opacity: 1; }
+      .toast.error { color: #ad3737; border-color: #f2cece; background: var(--red-soft); }
+      .loading { position: relative; pointer-events: none; }
+      .loading::after { content: ""; width: 12px; height: 12px; margin-left: 2px; border: 2px solid rgba(255,255,255,0.35); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .hidden { display: none !important; }
+      .muted-note { color: var(--muted); font-size: 10px; }
+
+      @media (max-width: 1120px) {
+        .workspace { grid-template-columns: minmax(460px, 1fr) 320px; padding-right: 16px; padding-left: 16px; }
+        .integration-strip { margin-right: 16px; margin-left: 16px; }
+        .page-head { padding-right: 16px; padding-left: 16px; }
+        .topbar { padding-right: 16px; padding-left: 16px; }
+      }
+      @media (max-width: 900px) {
+        .shell { grid-template-columns: 74px minmax(0, 1fr); }
+        .sidebar { padding: 18px 10px; }
+        .sidebar-title, .workspace-label, .workflow-copy, .side-callout { display: none; }
+        .workflow-item { justify-content: center; padding: 9px 7px; }
+        .workflow-icon { width: 34px; height: 34px; flex-basis: 34px; }
+        .workspace { grid-template-columns: 1fr; overflow: auto; }
+        .integration-strip { align-items: flex-start; flex-wrap: wrap; }
+        .assistant-card { min-height: 520px; }
+        .editor-card { min-height: 580px; }
+      }
+      @media (max-width: 620px) {
+        .app { grid-template-rows: 56px 1fr; }
+        .breadcrumb, .top-actions .btn.outline { display: none; }
+        .brand { min-width: auto; }
+        .page-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+        .head-actions { width: 100%; }
+        .head-actions .btn { flex: 1; }
+        .workspace { padding: 0 10px 12px; }
+        .card-toolbar { align-items: flex-start; flex-direction: column; }
+        .toolbar-right { width: 100%; justify-content: space-between; }
+        .editor-card, .assistant-card { min-height: 520px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">✦</div>
+          <div class="brand-name">clawweb</div>
+          <div class="breadcrumb"><span>/</span><strong>工作流编排</strong><span>/</span><span>YAML 编辑器</span></div>
+        </div>
+        <div class="top-actions">
+          <button class="btn outline" type="button" id="helpBtn">⌘ 快捷键</button>
+          <div class="avatar">F</div>
+        </div>
+      </header>
+
+      <div class="shell">
+        <aside class="sidebar" aria-label="工作流列表">
+          <div class="sidebar-title">
+            <h2>任务护航</h2>
+            <button class="icon-btn" id="newWorkflowBtn" type="button" aria-label="新建工作流">＋</button>
+          </div>
+          <div>
+            <div class="workspace-label"><span class="workspace-dot"></span> perception-ticket-realtime</div>
+            <div class="workflow-list">
+              <button class="workflow-item active" type="button">
+                <span class="workflow-icon">⌁</span>
+                <span class="workflow-copy"><span class="workflow-name">感知工单实时分析与处置</span><span class="workflow-meta">42163 次运行 · 运行中</span></span>
+              </button>
+              <button class="workflow-item" type="button">
+                <span class="workflow-icon">◈</span>
+                <span class="workflow-copy"><span class="workflow-name">告警解析与分析</span><span class="workflow-meta">昨天 · v12</span></span>
+              </button>
+              <button class="workflow-item" type="button">
+                <span class="workflow-icon">↗</span>
+                <span class="workflow-copy"><span class="workflow-name">S2/S3 处置分流</span><span class="workflow-meta">10 月 28 日 · v8</span></span>
+              </button>
+            </div>
+          </div>
+          <div class="side-callout">
+            <div class="side-callout-title"><span>✦</span> AI 生成助手已就绪</div>
+            <p>基于当前 41 个节点的流程，生成可审阅的局部 YAML 草稿，并展示影响范围。</p>
+          </div>
+        </aside>
+
+        <main class="main">
+          <section class="page-head">
+            <div class="page-title">
+              <div class="title-copy">
+                <h1>感知工单实时分析与处置 <span class="status-pill" id="saveStatus"><span class="status-dot"></span>未保存</span></h1>
+                <p>perception-ticket-realtime · 42163 次运行 · 运行中</p>
+              </div>
+            </div>
+            <div class="head-actions">
+              <button class="btn secondary" id="createBtn" type="button"><span class="sparkle">✦</span> AI 生成</button>
+              <button class="btn secondary" id="modifyBtn" type="button"><span class="sparkle">✦</span> AI 修改</button>
+              <button class="btn outline" id="validateBtn" type="button">✓ 校验 YAML</button>
+              <button class="btn primary" id="saveBtn" type="button">保存工作流</button>
+            </div>
+          </section>
+
+          <div class="integration-strip" role="note">
+            <span class="integration-chip">融合方案</span>
+            <strong>AI 侧栏 Drawer</strong>
+            <span class="integration-arrow">→</span>
+            <span>在现有画布 / 对照 / YAML 旁增加“AI 生成”，不替换原编辑器</span>
+            <span class="integration-chip">只生成草稿</span>
+          </div>
+
+          <section class="workspace" id="workspace">
+            <article class="card editor-card" aria-label="YAML 编辑器">
+              <div class="card-toolbar">
+                <div class="toolbar-left">
+                  <div class="file-tab"><span class="file-icon">◇</span><span class="file-name">workflow.yaml</span><span class="file-note">已连接</span></div>
+                </div>
+                <div class="toolbar-right">
+                  <div class="view-tabs">
+                    <button class="view-tab active" type="button" data-view="yaml">YAML</button>
+                    <button class="view-tab" type="button" data-view="visual">画布</button>
+                  </div>
+                  <button class="icon-btn" type="button" id="copyBtn" aria-label="复制 YAML">⧉</button>
+                  <button class="btn secondary tiny" type="button" id="openAiBtn"><span class="sparkle">✦</span> AI 助手</button>
+                </div>
+              </div>
+
+              <div class="editor-body" id="yamlView">
+                <div class="editor-surface">
+                  <div class="line-numbers" id="lineNumbers" aria-hidden="true"></div>
+                  <textarea id="yamlEditor" spellcheck="false" aria-label="Workflow YAML 编辑器"></textarea>
+                </div>
+                <div class="editor-helper">
+                  <span class="helper-ok" id="editorStatus">YAML 语法结构正常</span>
+                  <span>UTF-8 · YAML · Tab = 2 spaces</span>
+                </div>
+              </div>
+
+              <div class="editor-body hidden" id="visualView">
+                <div class="graph-wrap" style="padding: 22px 18px; flex: 1;">
+                  <div class="graph-note">实时预览 · 应用 AI 草稿后会自动刷新</div>
+                  <div class="graph" id="mainGraph" style="flex: 1; align-items: flex-start; padding-top: 38px; flex-wrap: wrap;"></div>
+                </div>
+                <div class="editor-helper"><span id="graphStats">节点 4 · 分支 0 · 人工审核 0</span><span>点击节点查看配置</span></div>
+              </div>
+
+              <div class="bottom-panel">
+                <div class="bottom-tabs">
+                  <button class="bottom-tab active" type="button" data-preview="diff">修改预览 <span class="change-count" id="changeCount">+8</span></button>
+                  <button class="bottom-tab" type="button" data-preview="graph">流程预览</button>
+                  <span class="muted-note" style="margin-left:auto; padding-right:4px;">AI 草稿不会自动保存</span>
+                </div>
+                <div class="preview active" id="diffPreview"></div>
+                <div class="preview" id="graphPreview">
+                  <div class="graph-wrap">
+                    <div class="graph-note">当前草稿的执行路径</div>
+                    <div class="graph" id="previewGraph"></div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <aside class="card assistant-card" aria-label="AI 工作流配置助手">
+              <div class="assistant-head">
+                <div class="assistant-title">
+                  <div class="assistant-title-main"><span class="ai-orb">✦</span><span><h2>AI 配置助手</h2><p>当前 Editor 内的 AI Drawer</p></span></div>
+                  <div class="toolbar-right">
+                    <button class="icon-btn" type="button" id="clearBtn" aria-label="清空对话">↺</button>
+                    <button class="icon-btn assistant-close" type="button" id="closeAiBtn" aria-label="收起 AI 助手">×</button>
+                  </div>
+                </div>
+                <div class="mode-switch" role="tablist" aria-label="AI 操作模式">
+                  <button class="mode-btn active" type="button" data-mode="create" aria-selected="true">AI 生成能力</button>
+                  <button class="mode-btn" type="button" data-mode="modify" aria-selected="false">AI 修改 YAML</button>
+                </div>
+              </div>
+
+              <div class="assistant-body">
+                <div class="context-card">
+                  <div class="context-head"><span>当前上下文</span><span>已读取</span></div>
+                  <div class="context-text" id="contextText">workflow.yaml · Editor / YAML
+41 个节点 · 67 条连线 · 含 HITL 路径
+可用 Bot：感知分析 Bot、处置 Bot、人工审核人</div>
+                </div>
+
+                <div class="chat" id="chat">
+                  <div class="message ai" id="introMessage">我会读取当前 <strong>perception-ticket-realtime</strong> 的节点与连线，只生成需要插入或调整的局部 YAML。你可以先描述想增加的能力。</div>
+                </div>
+
+                <div class="prompt-label"><span id="promptLabel">试试这样描述</span><span class="prompt-hint">点击示例快速填入</span></div>
+                <div class="chips" id="promptChips">
+                  <button class="prompt-chip" type="button">在感知工单流程中增加 AI 风险复核节点</button>
+                  <button class="prompt-chip" type="button">为 S2/S3 工单增加人工确认</button>
+                  <button class="prompt-chip" type="button">增加一个回写处置建议的步骤</button>
+                </div>
+
+                <div class="prompt-box">
+                  <textarea id="promptInput" placeholder="例如：在分流路由后增加 AI 风险复核，S2/S3 进入人工确认…"></textarea>
+                  <div class="prompt-footer"><span class="kbd">⌘ Enter 生成</span><button class="btn primary tiny" id="generateBtn" type="button">生成 YAML 草稿 <span>→</span></button></div>
+                </div>
+
+                <div class="draft-card" id="draftCard">
+                  <div class="draft-head"><span>✓ 已生成可审阅草稿</span><span id="draftTime">刚刚</span></div>
+                  <p id="draftSummary">已识别当前流程上下文，并生成一段可插入的 AI 风险复核子路径。</p>
+                  <div class="draft-tags" id="draftTags"><span class="draft-tag">新增 4 个节点</span><span class="draft-tag">依赖关系已检查</span><span class="draft-tag">无高风险操作</span></div>
+                </div>
+
+                <div class="assistant-actions">
+                  <button class="btn outline" id="applyBtn" type="button" disabled>应用到编辑器</button>
+                  <button class="btn outline" id="undoBtn" type="button">撤销上次应用</button>
+                </div>
+              </div>
+            </aside>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script>
+      const initialYaml = `id: perception-ticket-realtime
+version: "26"
+title: 感知工单实时分析与处置
+participants:
+  - id: perception-analysis
+    display_name: 感知分析 Bot
+  - id: disposal-owner
+    display_name: 处置 Bot
+runtime:
+  kind: dag
+  nodes:
+    - id: route-check
+      title: 前置路由检测
+      executor: embedded-agent
+      config:
+        prompt: 判断工单是否需要进入感知分析流程
+    - id: parse-alert
+      title: 解析告警参数
+      executor: cli-script
+      dependsOn: [route-check]
+      config:
+        command: python3 parse_alert.py
+    - id: llm-analysis
+      title: LLM 双层推理
+      executor: embedded-agent
+      dependsOn: [parse-alert]
+      config:
+        skill: extreme-experience-llm
+    - id: route-disposal
+      title: 分流路由
+      executor: embedded-agent
+      dependsOn: [llm-analysis]
+      config:
+        prompt: 根据风险等级与场景选择处置路径
+    - id: workflow-done
+      title: 流程完成
+      executor: done
+      dependsOn: [route-disposal]`;
+
+      const createYaml = `id: perception-ticket-realtime
+version: "27"
+title: 感知工单实时分析与处置
+participants:
+  - id: perception-analysis
+    display_name: 感知分析 Bot
+  - id: disposal-owner
+    display_name: 处置 Bot
+  - id: human-reviewer
+    display_name: 人工审核人
+runtime:
+  kind: dag
+  nodes:
+    - id: route-check
+      title: 前置路由检测
+      executor: embedded-agent
+      config:
+        prompt: 判断工单是否需要进入感知分析流程
+    - id: parse-alert
+      title: 解析告警参数
+      executor: cli-script
+      dependsOn: [route-check]
+      config:
+        command: python3 parse_alert.py
+    - id: llm-analysis
+      title: LLM 双层推理
+      executor: embedded-agent
+      dependsOn: [parse-alert]
+      config:
+        skill: extreme-experience-llm
+    - id: ai-risk-review
+      title: AI 风险复核
+      executor: embedded-agent
+      dependsOn: [llm-analysis]
+      config:
+        prompt: 复核风险等级、关键风险因素与建议处置路径
+    - id: hitl-confirm
+      title: HITL 人工确认
+      executor: approval
+      dependsOn: [ai-risk-review]
+      config:
+        assignee: human-reviewer
+        condition: risk_level in [S2, S3]
+    - id: route-disposal
+      title: 分流路由
+      executor: embedded-agent
+      dependsOn: [llm-analysis, ai-risk-review, hitl-confirm]
+      config:
+        prompt: 根据复核结果和人工确认选择处置路径
+    - id: workflow-done
+      title: 流程完成
+      executor: done
+      dependsOn: [route-disposal]`;
+
+      const modifyYaml = createYaml.replace('title: 感知工单实时分析与处置', 'title: 感知工单实时分析与处置（含人工审核）');
+      const editor = document.querySelector('#yamlEditor');
+      const lineNumbers = document.querySelector('#lineNumbers');
+      const editorStatus = document.querySelector('#editorStatus');
+      const saveStatus = document.querySelector('#saveStatus');
+      const promptInput = document.querySelector('#promptInput');
+      const generateBtn = document.querySelector('#generateBtn');
+      const draftCard = document.querySelector('#draftCard');
+      const applyBtn = document.querySelector('#applyBtn');
+      const toast = document.querySelector('#toast');
+      const workspace = document.querySelector('#workspace');
+      const assistantCard = document.querySelector('.assistant-card');
+      let mode = 'create';
+      let generatedYaml = '';
+      let lastAppliedYaml = '';
+      let toastTimer;
+
+      function lineCount(value) { return Math.max(1, value.split('\n').length); }
+      function renderLineNumbers() {
+        lineNumbers.innerHTML = Array.from({ length: lineCount(editor.value) }, (_, index) => `<span>${index + 1}</span>`).join('');
+      }
+      function syncEditorScroll() { lineNumbers.scrollTop = editor.scrollTop; }
+      function showToast(message, isError = false) {
+        clearTimeout(toastTimer);
+        toast.textContent = `${isError ? '!' : '✓'}  ${message}`;
+        toast.classList.toggle('error', isError);
+        toast.classList.add('show');
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+      }
+      function setUnsaved(unsaved = true) {
+        saveStatus.classList.toggle('saved', !unsaved);
+        saveStatus.innerHTML = `<span class="status-dot"></span>${unsaved ? '未保存' : '已保存'}`;
+      }
+      function updateContext() {
+        const hasHuman = editor.value.includes('human-review') || editor.value.includes('executor: human');
+        document.querySelector('#contextText').textContent = `workflow.yaml · Editor / YAML\n${hasHuman ? '44 个节点 · 67 条连线 · 含人工审核' : '41 个节点 · 67 条连线 · 含 HITL 路径'}\n可用 Bot：感知分析 Bot、处置 Bot、人工审核人`;
+        const graphStats = document.querySelector('#graphStats');
+        if (graphStats) graphStats.textContent = hasHuman ? '节点 44 · 分支 14 · 人工审核 2' : '节点 41 · 分支 12 · 人工审核 1';
+      }
+      function setEditor(value) {
+        editor.value = value;
+        renderLineNumbers();
+        updateContext();
+        setUnsaved(true);
+        renderGraph('#mainGraph');
+      }
+      function simpleValidate(value) {
+        const required = ['id:', 'version:', 'title:', 'runtime:', 'nodes:'];
+        return required.filter((token) => !value.includes(token));
+      }
+      function validateYaml(showMessage = true) {
+        const missing = simpleValidate(editor.value);
+        if (missing.length) {
+          editorStatus.textContent = `缺少必填字段：${missing.join('、')}`;
+          editorStatus.style.color = 'var(--red)';
+          if (showMessage) showToast('YAML 校验未通过，请检查必填字段', true);
+          return false;
+        }
+        editorStatus.textContent = 'YAML 语法结构正常';
+        editorStatus.style.color = 'var(--green)';
+        if (showMessage) showToast('YAML 校验通过，可以保存');
+        return true;
+      }
+      function escapeHtml(value) {
+        return value.replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+      }
+      function renderDiff() {
+        const diff = [
+          ['context', '  runtime:'],
+          ['context', '  - id: llm-analysis'],
+          ['add', '+   - id: ai-risk-review'],
+          ['add', '+     title: AI 风险复核'],
+          ['add', '+     executor: embedded-agent'],
+          ['add', '+   - id: hitl-confirm'],
+          ['add', '+     title: HITL 人工确认'],
+          ['add', '+     executor: approval'],
+          ['add', '+     dependsOn: [ai-risk-review]'],
+          ['add', '+     condition: risk_level in [S2, S3]'],
+          ['context', '  - id: route-disposal'],
+          ['context', '    dependsOn: [llm-analysis, ai-risk-review, hitl-confirm]'],
+        ];
+        document.querySelector('#diffPreview').innerHTML = diff.map(([kind, text]) => `<div class="diff-row ${kind}"><span class="diff-sign">${kind === 'add' ? '+' : kind === 'remove' ? '−' : '·'}</span><span>${escapeHtml(text)}</span></div>`).join('');
+        document.querySelector('#changeCount').textContent = mode === 'create' ? '+8' : '+5';
+      }
+      function renderGraph(selector) {
+        const target = document.querySelector(selector);
+        const hasHuman = editor.value.includes('human-review') || editor.value.includes('executor: human');
+        const nodes = hasHuman
+          ? [['route-check', '前置路由检测', 'agent'], ['parse-alert', '解析告警参数', 'tool'], ['llm-analysis', 'LLM 双层推理', 'agent'], ['ai-risk-review', 'AI 风险复核', 'agent'], ['hitl-confirm', 'HITL 人工确认', 'human'], ['route-disposal', '分流路由', 'agent'], ['workflow-done', '流程完成', 'done']]
+          : [['route-check', '前置路由检测', 'agent'], ['parse-alert', '解析告警参数', 'tool'], ['llm-analysis', 'LLM 双层推理', 'agent'], ['route-disposal', '分流路由', 'agent'], ['workflow-done', '流程完成', 'done']];
+        target.innerHTML = nodes.map(([id, label, type], index) => `${index ? '<span class="graph-arrow">→</span>' : ''}<div class="graph-node ${type === 'human' ? 'human' : ''}"><strong>${label}</strong><span>${id}</span></div>`).join('');
+      }
+      function openAssistant() {
+        workspace.classList.remove('ai-collapsed');
+        assistantCard.classList.remove('collapsed');
+        document.querySelector('#promptInput').focus();
+      }
+      function closeAssistant() {
+        workspace.classList.add('ai-collapsed');
+        assistantCard.classList.add('collapsed');
+      }
+      function updateMode(nextMode) {
+        mode = nextMode;
+        document.querySelectorAll('.mode-btn').forEach((button) => {
+          const active = button.dataset.mode === mode;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-selected', String(active));
+        });
+        document.querySelector('#promptLabel').textContent = mode === 'create' ? '试试这样描述' : '告诉我你想怎么改';
+        promptInput.placeholder = mode === 'create' ? '例如：在分流路由后增加 AI 风险复核，S2/S3 进入人工确认…' : '例如：让低置信度结果进入 HITL，确认后再写入处置结果…';
+        document.querySelector('#introMessage').innerHTML = mode === 'create'
+          ? '我会读取当前 <strong>perception-ticket-realtime</strong> 的节点与连线，只生成需要插入或调整的局部 YAML。你可以先描述想增加的能力。'
+          : '我会基于当前 41 个节点生成<strong>最小改动</strong>，保留已有节点和依赖，并把影响范围展示给你。';
+        const chips = mode === 'create'
+          ? ['在感知工单流程中增加 AI 风险复核节点', '为 S2/S3 工单增加人工确认', '增加一个回写处置建议的步骤']
+          : ['在分流路由后增加人工确认', '增加失败重试和告警', '把超时策略改为自动重试 3 次'];
+        document.querySelector('#promptChips').innerHTML = chips.map((text) => `<button class="prompt-chip" type="button">${text}</button>`).join('');
+        bindPromptChips();
+      }
+      function bindPromptChips() {
+        document.querySelectorAll('.prompt-chip').forEach((chip) => chip.addEventListener('click', () => { promptInput.value = chip.textContent; promptInput.focus(); }));
+      }
+      function appendMessage(kind, content) {
+        const message = document.createElement('div');
+        message.className = `message ${kind}`;
+        message.innerHTML = content;
+        document.querySelector('#chat').appendChild(message);
+        message.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      function generateDraft() {
+        const prompt = promptInput.value.trim();
+        if (!prompt) { showToast('先描述你想创建或修改的能力', true); promptInput.focus(); return; }
+        generatedYaml = mode === 'create' ? createYaml : modifyYaml;
+        appendMessage('user', escapeHtml(prompt));
+        generateBtn.disabled = true;
+        generateBtn.classList.add('loading');
+        generateBtn.innerHTML = '正在生成';
+        setTimeout(() => {
+          generateBtn.disabled = false;
+          generateBtn.classList.remove('loading');
+          generateBtn.innerHTML = '生成 YAML 草稿 <span>→</span>';
+          appendMessage('ai', mode === 'create'
+            ? '<strong>我已完成当前流程的局部生成。</strong><ul class="message-list"><li>在 LLM 双层推理后插入 AI 风险复核节点</li><li>为 S2/S3 路径增加 HITL 人工确认，并接回分流路由</li><li>未改动原有脚本节点和外部写入节点</li></ul>'
+            : '<strong>我已按最小改动生成修改草稿。</strong><ul class="message-list"><li>保留现有 41 个节点，只增加一个 AI 复核子路径</li><li>新增人工确认节点，并调整分流路由依赖</li><li>修改前后均可在下方 Diff 和流程预览中检查</li></ul>');
+          draftCard.classList.add('show');
+          applyBtn.disabled = false;
+          document.querySelector('#draftSummary').textContent = mode === 'create' ? '已在当前流程中生成 AI 风险复核与 HITL 人工确认子路径。' : '已在现有分流路由前加入 AI 复核，S2/S3 需人工确认后继续。';
+          document.querySelector('#draftTags').innerHTML = mode === 'create'
+            ? '<span class="draft-tag">新增 2 个节点</span><span class="draft-tag">影响 3 条连线</span><span class="draft-tag">原写入节点不变</span>'
+            : '<span class="draft-tag">新增 1 个节点</span><span class="draft-tag">调整 2 条依赖</span><span class="draft-tag">局部修改</span>';
+          renderDiff();
+          showToast('AI 草稿已生成，请先查看修改预览');
+        }, 850);
+      }
+      function applyDraft() {
+        if (!generatedYaml) { showToast('请先生成 AI 草稿', true); return; }
+        lastAppliedYaml = editor.value;
+        setEditor(generatedYaml);
+        validateYaml(false);
+        showToast('已应用到编辑器，确认无误后再保存');
+      }
+      function undoApply() {
+        if (!lastAppliedYaml) { showToast('暂无可撤销的应用记录', true); return; }
+        setEditor(lastAppliedYaml);
+        lastAppliedYaml = '';
+        showToast('已撤销上次应用');
+      }
+
+      editor.value = initialYaml;
+      renderLineNumbers();
+      renderDiff();
+      renderGraph('#mainGraph');
+      renderGraph('#previewGraph');
+      bindPromptChips();
+      editor.addEventListener('input', () => { renderLineNumbers(); updateContext(); setUnsaved(true); editorStatus.textContent = '内容已修改，请重新校验'; editorStatus.style.color = 'var(--orange)'; renderGraph('#mainGraph'); });
+      editor.addEventListener('scroll', syncEditorScroll);
+      document.querySelector('#validateBtn').addEventListener('click', () => validateYaml(true));
+      document.querySelector('#saveBtn').addEventListener('click', () => {
+        if (!validateYaml(false)) { showToast('请先通过 YAML 校验，再保存工作流', true); return; }
+        setUnsaved(false);
+        showToast('工作流已保存为 v27');
+      });
+      document.querySelector('#copyBtn').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(editor.value); showToast('YAML 已复制到剪贴板'); }
+        catch { showToast('当前浏览器不允许访问剪贴板，请手动复制', true); }
+      });
+      document.querySelector('#createBtn').addEventListener('click', () => { openAssistant(); updateMode('create'); showToast('已打开当前 Editor 内的 AI 生成侧栏'); });
+      document.querySelector('#modifyBtn').addEventListener('click', () => { openAssistant(); updateMode('modify'); showToast('已打开当前 Editor 内的 AI 修改侧栏'); });
+      document.querySelector('#openAiBtn').addEventListener('click', () => { openAssistant(); showToast('AI 助手已嵌入当前 Editor'); });
+      document.querySelector('#closeAiBtn').addEventListener('click', () => { closeAssistant(); showToast('已收起 AI 侧栏，YAML 编辑器保持不变'); });
+      document.querySelectorAll('.mode-btn').forEach((button) => button.addEventListener('click', () => updateMode(button.dataset.mode)));
+      generateBtn.addEventListener('click', generateDraft);
+      promptInput.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') generateDraft(); });
+      applyBtn.addEventListener('click', applyDraft);
+      document.querySelector('#undoBtn').addEventListener('click', undoApply);
+      document.querySelector('#clearBtn').addEventListener('click', () => { document.querySelector('#chat').innerHTML = ''; draftCard.classList.remove('show'); generatedYaml = ''; applyBtn.disabled = true; appendMessage('ai', '对话已清空。你可以重新描述想创建或修改的工作流。'); });
+      document.querySelector('#newWorkflowBtn').addEventListener('click', () => { updateMode('create'); setEditor(initialYaml); promptInput.value = ''; showToast('已准备新的工作流草稿'); });
+      document.querySelector('#helpBtn').addEventListener('click', () => showToast('快捷键：⌘ Enter 生成草稿；⌘/Ctrl + S 可在真实实现中保存'));
+
+      document.querySelectorAll('[data-preview]').forEach((button) => button.addEventListener('click', () => {
+        document.querySelectorAll('[data-preview]').forEach((item) => item.classList.toggle('active', item === button));
+        document.querySelector('#diffPreview').classList.toggle('active', button.dataset.preview === 'diff');
+        document.querySelector('#graphPreview').classList.toggle('active', button.dataset.preview === 'graph');
+        renderGraph('#previewGraph');
+      }));
+      document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => {
+        document.querySelectorAll('[data-view]').forEach((item) => item.classList.toggle('active', item === button));
+        document.querySelector('#yamlView').classList.toggle('hidden', button.dataset.view !== 'yaml');
+        document.querySelector('#visualView').classList.toggle('hidden', button.dataset.view !== 'visual');
+        if (button.dataset.view === 'visual') renderGraph('#mainGraph');
+      }));
+    </script>
+  </body>
+</html>
