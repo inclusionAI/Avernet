@@ -689,6 +689,13 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["status"], "invalid_param");
 
+    // A member's Bot credential cannot select a different Bot's perspective.
+    let (status, body) = post_json(
+        &app, &format!("{shared}&view_bot_id=judge_bot"), token_for("张三"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["status"], "permission_denied");
+
     let other = "/groupcontext/shared-info?groupId=preset-group&sessionId=other-group:12345678";
     assert_eq!(post_json(&app, other, token_for("张三"), json!({})).await.0, StatusCode::BAD_REQUEST);
 }
