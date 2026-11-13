@@ -494,3 +494,31 @@ async def test_readiness_wait_covers_fifteen_intervals(monkeypatch) -> None:
     assert result.status == PublishStatus.BUILT
     assert runner._baas_service.exec_command_on_bot.call_count == 16
     assert sleep.await_count == 15
+
+@pytest.mark.asyncio
+async def test_nonzero_readiness_probe_fails_before_projection() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._bot_service.get_bot_by_address.return_value = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 1}
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert "probe failed" in result.message
+    runner._runtime_projector.project.assert_not_awaited()
+    ext.commit_built_artifact.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_readiness_timeout_maps_to_failed_build() -> None:
+    runner, ext = _runner(_SimpleProducer())
+    runner._wait_for_draft_device = AsyncMock(side_effect=TimeoutError)
+    result = await runner.build(_record(status=PublishStatus.BUILDING.value), "operator")
+    assert result.status == PublishStatus.FAILED
+    assert "readiness timed out" in result.message
+    ext.update_status.assert_called_once()
+    ext.commit_built_artifact.assert_not_called()

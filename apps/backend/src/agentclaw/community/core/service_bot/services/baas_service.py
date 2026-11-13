@@ -1690,6 +1690,7 @@ class BaasService:  # pragma: no cover
             if e.response.status_code == 503 and _is_no_active_devices_response(e.response):
                 if safe_errors:
                     raise BaasNoActiveDevicesError(status_code=503) from None
+                logger.warning("[BaasService.exec_command_on_bot] no active device: bot_uuid=%s", bot_uuid)
                 raise BaasNoActiveDevicesError(status_code=503) from e
             if safe_errors:
                 raise BaasServiceError("BaaS command request failed") from None
