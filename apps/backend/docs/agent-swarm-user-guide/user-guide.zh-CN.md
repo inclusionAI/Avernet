@@ -19,6 +19,8 @@
 - `kind: "llm"` —— 进程内补全人格。快（秒级），不起容器。
 - `kind: "bot"` —— 真实装配出来的 Bot 人格：平台现场创建一个 Bot（可由你的 `config_manifest` 决定其配置），该 Agent 即以这个 Bot 运行；运行结束时平台会将其删除。
 
+  bot 类 Agent 运行在你通过 `identity_bot_id`（§5.1）指定的 Bot 的 AgentPass 身份之下 —— 它**继承**该 Bot 已签发的护照，而不是等待自己被审批，因此一次运行无需人工介入即可跑到 Agent 阶段。也正因如此，只要包含 bot 类 Agent，该字段就是**必填**。
+
 编排器对目标做分解，按轮次生成/执行 Agent（并行波次或前后依赖，由目标文本决定），最后产出 `final_answer`。运行终结于 §6 的某个终态；在那之前的一切都可以通过轮询或 SSE 实时流观察。
 
 首次调用前必须知道的规则：
@@ -69,6 +71,22 @@ curl -sS "$BASE/runs/$RUN_ID?tenant=teamclaw"
 
 想阻塞等待？加 `?wait=true`，同一次调用会等到运行终态后才返回完整摘要（`llm` 运行通常数秒内完成）。
 
+若要运行 **bot** 类 Agent，必须指定其继承身份的 Bot —— 这是最容易漏掉的字段：
+
+```bash
+curl -sS -X POST "$BASE/runs" -H 'Content-Type: application/json' -d '{
+  "tenant": "teamclaw",
+  "goal": "写一句关于海的句子",
+  "identity_bot_id": "<你拥有、且已签发护照的 Bot>",
+  "agents": [
+    {"name": "writer", "role": "prose", "kind": "bot",
+     "instructions": "只写一句话。"}
+  ]
+}'
+```
+
+该 Bot 必须属于你且持有已签发护照；否则提交会以 `422` 被拒，消息会说明属于两种情形中的哪一种（§5.1）。运行内的 bot 类 Agent 都继承它，因此没有哪一个需要等待审批。
+
 ## 4. 接口索引
 
 | # | 方法 | 路径 | 用途 |
@@ -97,7 +115,23 @@ curl -sS "$BASE/runs/$RUN_ID?tenant=teamclaw"
 | `provider` | enum | — | `default` \| `stub` \| `avernet` |
 | `model` | string | — | 运行级模型覆盖；**优先级高于** `options.model_name` |
 | `idempotency_key` | string | — | ≤ 190 字符；同键并入同一运行 |
+| `identity_bot_id` | string | — | ≤ 64 字符。本次运行的 bot 类 Agent 所继承身份的 Bot —— 见下 |
 | `options` | object | — | 运行参数覆盖（见下表） |
+
+**`identity_bot_id` —— 运行内 bot 类 Agent 继承的身份。** 只要包含 `bot` 类 Agent 就**必须**指定：bot 类 Agent 不会等待自身审批，而是运行在既有 Bot 的护照之下。纯 `llm` 运行不需要它，即便传了也会被忽略。
+
+| 情形 | 结果 |
+| --- | --- |
+| bot 类运行未提供该字段 | `400` —— 字段缺失 |
+| 指定的 Bot 不属于调用方（含根本不存在） | `422` —— 拒绝，且不会去查该 Bot 的护照 |
+| 指定的 Bot 没有已签发护照 | `422` —— 为该 Bot 签发护照，或改指其他 Bot |
+| 无法解析该 Bot 的护照 | `422` —— 重试；这**不是**对该 Bot 的判定 |
+
+这些都返回同样的 `{"error": …}` 信封和 `422`，但消息会说明属于哪一种，因为用户下一步动作不同。拒绝同时记入审计，原因为 `identity_source_invalid_<reason>`，其中 `<reason>` 为 `not_owned`、`no_passport` 或 `unverified`。
+
+只要 Bot 持有已签发护照即可，无论该记录写在 Bot 自身，还是只存在于护照提供方 —— 老 Bot 不会仅因为某次创建没有缓存这条记录而变得不可用。仍在审批中的护照会被拒绝：它此刻还不能作为身份使用。
+
+同一身份在每个 bot 类 Agent 真正创建时会**再次校验**，因此提交时被接受的身份，运行也确实能在其下完成装配。
 
 每个 `agents[]` 条目（`AgentSpecDTO`，严格模式）：
 
@@ -225,7 +259,28 @@ data: {"event":"terminal","run_id":"…","data":{"status":"COMPLETED"}}
 **Agent 状态**（明细与 SSE 中）：`QUEUED`、`RUNNING`、`COMPLETED`、`FAILED`、`KILLED`。
 
 **Bot 状态**（bot 类 Agent，明细的 `agents[].bot_state`）：
-`PROVISIONING`、`READY`、`AUTHORIZATION_REJECTED`、`AUTHORIZATION_EXPIRED`、`CREATE_FAILED`、`APPLY_FAILED` —— 即人格 Bot 自身的创建生命周期（见 §8.5）。
+`PROVISIONING`、`AWAITING_AUTHORIZATION`、`READY`、`AUTHORIZATION_REJECTED`、`AUTHORIZATION_EXPIRED`、`CREATE_FAILED`、`APPLY_FAILED` —— 即人格 Bot 自身的创建生命周期（见 §8.5）。
+
+通过 `identity_bot_id`（§5.1）运行的 bot 类 Agent **不经过**授权闸门：它继承那个 Bot 已签发的护照，不会再次申请，因此也没有属于它的授权页。所以 `AWAITING_AUTHORIZATION` 只会出现在自行申请护照的创建上。
+
+当某个 Bot 停在该闸门上时，它的 Agent 会在 `bot_state` 之外额外带上 `authorization` 描述，调用方仅凭运行读取就能定位到决策入口，无需再去拼接创建任务：
+
+```json
+{
+  "agent_id": "1d21ffaf…", "name": "hello_writer", "status": "RUNNING",
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {
+    "state": "AWAITING_AUTHORIZATION",
+    "iframe_url": "https://…/consent?app=passport",
+    "redirect_url": "https://…/done",
+    "deadline": "2026-11-20T10:10:00",
+    "application_id": "sim-passport-3d2f0a1b2c04"
+  }
+}
+```
+
+`iframe_url` / `redirect_url` 是授权页地址（两者哪个非空即指向该页；空字符串表示 payload 无法给出该事实），`deadline` 是窗口的 ISO-8601 截止时间，`application_id` 标识该护照申请。是否存在取决于护照提供方的**实时**申请状态，而非 Agent 行上缓存的 `bot_state`，因此并行波次中的 Agent 可能在供给池写入状态之前就已带上该闸门。
 
 **护栏 kinds**：`serial_collapse`、`spurious_parallelism`、`dedupe_reject`、`depth_exceeded`、`width_exceeded`、`timeout`、`kill`、`stuck`、`prompt_injection`。示例：提交 10 个 Agent 并设 `options.max_width = 3`，编排器每次尝试更宽的波次被压回时，事件流里就会出现 `width_exceeded` 护栏。
 
@@ -235,8 +290,9 @@ data: {"event":"terminal","run_id":"…","data":{"status":"COMPLETED"}}
 | --- | --- | --- |
 | 401 | — | 非探针路由上的匿名调用 |
 | 404 | `{"detail":"run not found"}` | 运行 ID 不存在**或**跨租户访问（设计上就是同一个回答） |
-| 400 | `{"error":"…"}` | 请求的模型/提供方缺少服务配置 |
+| 400 | `{"error":"…"}` | 请求的模型/提供方缺少服务配置；**或** bot 类运行未提供 `identity_bot_id` |
 | 422 | 校验错误明细 | 结构错误：未知字段、超限、租户留空 |
+| 422 | `{"error":"…"}` | 指定的 `identity_bot_id` 调用方不可用 —— 不是自己的 Bot、没有已签发护照、或护照无法解析（见 §5.1） |
 | 429 | `{"error":"tenant_run_limit_exceeded","tenant":…,"limit":…}` | 该租户并发运行过多 |
 | 429 | `{"error":"global_run_limit_exceeded","limit":…}` | 全局并发运行达到上限 |
 | 429 | `{"error":"queue_depth_exceeded","limit":…}` | 派发队列已满 |
@@ -338,7 +394,9 @@ script:                       # 命令式部分（与 manifest 平级，不在�
 
 ### 8.5 姊妹接口面：用清单创建单个 Bot
 
-swarm 的配置清单走的是单 Bot 创建接口面定义的同一套契约 —— 两边都值得了解，因为 `agents[].bot_state` 里的生命周期状态正是这里的词表：
+swarm 的配置清单走的是单 Bot 创建接口面定义的同一套契约 —— 两边都值得了解，因为 `agents[].bot_state` 里的生命周期状态正是这里的词表。
+
+这个差别很重要：独立创建会**为该 Bot 自己申请**护照，因此可能停在 `AWAITING_AUTHORIZATION` 等人处理。而 swarm 的 bot 类 Agent 继承 `identity_bot_id` 指定的护照，不会自行申请，所以 agentswarm 运行不会停在授权页上。如果你正在创建一个**将要作为**运行身份来源的 Bot，签发其护照的就是这个接口。
 
 **`POST /openapi/v1/bots/with-manifest`** —— 一次请求同时创建 Bot 及其配置。请求体：普通创建字段（`bot_name`、`bot_desc`、`engine`（如 `openclaw`）、`cluster_name`（如 `ACRA`）、`bot_type`（如 `personal`））加上 `config_manifest`。清单**在任何消耗发生之前**即被校验：非法文档得到逐条列出全部违规的 `422`，此时没有铸造任何 bot ID、没有存储任何东西。成功总是 `202` 响应封套：
 
@@ -458,6 +516,7 @@ BASE=http://<gateway-host>/openapi/v1/agentswarm
 curl -sS -X POST "$BASE/runs" -H 'Content-Type: application/json' -d '{
   "tenant": "teamclaw",
   "goal": "Greet the user politely and confirm the greeting was logged.",
+  "identity_bot_id": "<你拥有、且已签发护照的 Bot>",
   "agents": [
     {"name": "s1", "role": "greeting reviewer", "kind": "llm",
      "instructions": "Reply with exactly: greeting ok"},
@@ -483,7 +542,7 @@ curl -sS "$BASE/runs/$RUN_ID/detail?tenant=teamclaw"
 curl -sS "$BASE/runs/$RUN_ID/report?tenant=teamclaw"
 ```
 
-Bot Agent 的几点说明：其人格 Bot 经共享后台队列装配（按**分钟**而非秒计 —— 见 §8.1）；清单回执在提交应答的那一刻就已存在，装配慢不会使文档失效；运行结束时平台收尾会删除人格 Bot。
+Bot Agent 的几点说明：它运行在 `identity_bot_id` 指定的 Bot 的护照身份之下，因此自身不需要审批；其人格 Bot 经共享后台队列装配（按**分钟**而非秒计 —— 见 §8.1）；清单回执在提交应答的那一刻就已存在，装配慢不会使文档失效；运行结束时平台收尾会删除人格 Bot。
 
 ## 10. 相关文档
 
