@@ -679,6 +679,7 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
 
     for (uri, expected) in [
         ("/groupcontext/shared-info", StatusCode::BAD_REQUEST),
+        ("/groupcontext/shared-info?groupId=preset-group&roundId=unexpected", StatusCode::BAD_REQUEST),
         ("/groupcontext/shared-info?groupId=preset-group&groupId=other-group", StatusCode::BAD_REQUEST),
     ] {
         let (status, body) = post_json(&app, uri, token_for("张三"), json!({})).await;
@@ -695,6 +696,13 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     ).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["status"], "permission_denied");
+
+    let group_view = "/groupcontext/shared-info?groupId=preset-group";
+    let (status, body) = post_json(&app, group_view, token_for("judge_bot"), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"], json!([]), "group view excludes Session entries");
+    let (status, body) = post_json(&app, group_view, token_for("张三"), json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
     let other = "/groupcontext/shared-info?groupId=preset-group&sessionId=other-group:12345678";
     assert_eq!(post_json(&app, other, token_for("张三"), json!({})).await.0, StatusCode::BAD_REQUEST);
@@ -778,7 +786,7 @@ async fn mysql_human_preset_management_routes() {
 }
 
 async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) {
-    use bcs_service_api::{Group, GroupCoreService, Participant, ParticipantRole};
+    use bcs_service_api::{Group, GroupCoreService, NewSessionParams, Participant, ParticipantRole, SessionRepoPort};
 
     let authority = bcs_test_support::authority_edge_fixture();
     bcs_test_support::grant_owner_edge(&authority.repo, "preset-driver", "preset-owner").await;
@@ -786,10 +794,16 @@ async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) 
     groups.upsert(Group::new(
         "preset-group", "preset-driver", vec![Participant::bot("preset-driver", ParticipantRole::Driver)],
     )).await.unwrap();
+    let sessions = Arc::new(bcs_session_store::MemorySessionRepo::new());
+    sessions.create("preset-group", NewSessionParams {
+        id: Some("preset-group:12345678".into()),
+        participants: vec![Participant::bot("preset-driver", ParticipantRole::Driver)],
+        ..Default::default()
+    }).await.unwrap();
     let service = bcs_app_session::GroupContextAddAccessGuard::new(
         Arc::new(GroupContextApplicationServiceImpl::new(repo.clone())),
         groups,
-        Arc::new(bcs_session_store::MemorySessionRepo::new()),
+        sessions,
         authority.hook,
     );
     let services = Services::builder().group_context(Arc::new(service)).build_for_test();
@@ -799,6 +813,17 @@ async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) 
             .body(Body::from(body.to_string())).unwrap();
         app.clone().oneshot(request)
     };
+
+    let response = post(
+        "/groupcontext/shared-info?groupId=preset-group&sessionId=preset-group:12345678&view_bot_id=preset-driver",
+        json!({}),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["items"], json!([]));
+
+    let response = post("/groupcontext/manage/list-preset?groupId=missing", json!({})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(response).await["status"], "not_found");
 
     let list = "/groupcontext/manage/list-preset?groupId=preset-group";
     let response = post(list, json!({})).await.unwrap();

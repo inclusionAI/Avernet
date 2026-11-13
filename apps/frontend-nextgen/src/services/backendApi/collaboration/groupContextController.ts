@@ -23,7 +23,8 @@ export interface GroupContextView {
 }
 
 // Browser-facing routes use Gateway session authentication. Gateway must
-// authorize view_bot_id before resolving it to a Bot collaboration identity.
+// forward the authenticated Human identity. BCS checks view_bot_id against
+// that Human’s Bot authority and the requested Group or Session membership.
 const path = '/api/v1/collaboration/groupcontext';
 
 function request<T>(operation: string, view: GroupContextView, data: object, signal?: AbortSignal) {

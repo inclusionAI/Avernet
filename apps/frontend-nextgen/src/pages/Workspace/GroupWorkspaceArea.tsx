@@ -267,7 +267,7 @@ export function GroupWorkspaceArea({
           onRemoveSessionMember={sessionManage.removeMember}
           onShareSession={handleShareSession}
         />
-        {sessions.selectedSession && (
+        {(sessions.selectedSession || selectedGroup) && (
           <GroupSessionSidebars
             activePanel={activePanel}
             session={sessions.selectedSession}

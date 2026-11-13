@@ -130,11 +130,20 @@ pub(crate) async fn add(
     Ok(json_ok(result))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SharedInfoQuery {
+    group_id: Option<String>,
+    session_id: Option<String>,
+    #[serde(rename = "view_bot_id")]
+    view_bot_id: Option<String>,
+}
+
 pub(crate) async fn shared_info(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    query: Result<Query<GroupContextQuery>, QueryRejection>,
+    query: Result<Query<SharedInfoQuery>, QueryRejection>,
 ) -> Result<Response, GroupContextHttpError> {
     use super::group_messages::{application_caller, resolve_group_chat_caller};
 

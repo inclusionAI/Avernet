@@ -8,7 +8,7 @@ import { SessionFilesSidebar } from './GroupChatPane/SessionFilesSidebar';
 
 interface GroupSessionSidebarsProps extends Pick<GroupWorkspaceAreaProps, 'userIdentityId' | 'userIdentityName'> {
   activePanel: GroupPanelKind;
-  session: SessionView;
+  session: SessionView | null;
   group: GroupView | null;
   activeIdentity: IdentityView | null;
   search: UseGroupChatHeaderPanelsResult['historySearch'];
@@ -27,39 +27,44 @@ export function GroupSessionSidebars({
   onLocate,
   onClose,
 }: GroupSessionSidebarsProps) {
+  const groupId = session?.groupId ?? group?.groupId;
   return (
     <>
       {/* 资源管理/共享信息/历史消息：对话区内联副屏（open 开合、宽度记忆），与单聊侧同形。 */}
-      <SessionFilesSidebar
-        open={activePanel === 'resources'}
-        sessionId={session.sessionId}
-        participants={session.participants}
-        authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
-        onClose={onClose}
-      />
-      {activePanel === 'sharedInfo' && (
+      {session && (
+        <SessionFilesSidebar
+          open={activePanel === 'resources'}
+          sessionId={session.sessionId}
+          participants={session.participants}
+          authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
+          onClose={onClose}
+        />
+      )}
+      {activePanel === 'sharedInfo' && groupId && (
         <SharedInfoSidebar
           open
           view={{
-            groupId: session.groupId,
-            sessionId: session.sessionId,
+            groupId,
+            sessionId: session?.sessionId,
             view_bot_id: activeIdentity?.kind === 'bot' ? activeIdentity.id : undefined,
           }}
           viewerId={activeIdentity?.id ?? userIdentityId}
           names={new Map([
             ...(group?.participants ?? []).map(({ actorId, name }) => [actorId, name] as const),
-            ...session.participants.map(({ actorId, name }) => [actorId, name] as const),
+            ...(session?.participants ?? []).map(({ actorId, name }) => [actorId, name] as const),
             ...(userIdentityId && userIdentityName ? [[userIdentityId, userIdentityName] as const] : []),
           ])}
           onClose={onClose}
         />
       )}
-      <GroupHistorySidebar
-        open={activePanel === 'history'}
-        search={search}
-        onLocate={onLocate}
-        onClose={onClose}
-      />
+      {session && (
+        <GroupHistorySidebar
+          open={activePanel === 'history'}
+          search={search}
+          onLocate={onLocate}
+          onClose={onClose}
+        />
+      )}
     </>
   );
 }

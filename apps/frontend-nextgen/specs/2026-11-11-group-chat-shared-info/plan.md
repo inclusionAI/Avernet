@@ -6,7 +6,7 @@
 
 ## 交互
 
-- 在群聊会话顶栏的历史消息与资源管理之间增加「共享信息」图标，点击打开右侧只读面板。复用现有顶栏按钮和面板切换方式。
+- 在群聊会话顶栏的历史消息与资源管理之间增加「共享信息」图标，点击打开右侧只读面板。复用现有顶栏按钮和面板切换方式。只选中群组时，顶栏也提供入口，面板仅展示群组级条目。
 - 打开面板后加载可读条目，按「群级 → 会话级 → 轮次级」分组。分组标题保留截图中的可见条目数。每张卡片直接展示名称、正文和「xxx 更新于 xxx」。本期省略顶栏按钮数字角标和卡片右上角「只读」标签。
 - 群级使用当前 Group，会话级和轮次级使用当前 Session。轮次级展示当前 Session 所有轮次的可读条目，按轮次标识区分同名条目。面板处理加载、空列表和加载失败。
 - 切换会话或协作身份时，清理上一视角的卡片，并丢弃迟到响应。重新打开面板时重新请求数据。
@@ -75,9 +75,12 @@
 - 复用第一项的 BCS 专用只读查询和卡片响应。群管理页签只传 `groupId`，由服务端校验当前 Human 对该群的访问资格，限定 `scope_level = group` 并按本人身份过滤。群聊入口带 `sessionId`，沿用第一项的会话范围和权限规则。
 - 验证全员可见、Human 本人授权、仅受管 Bot 可读、仅可写、会话级和轮次级同名条目，以及切换群后旧请求返回的情况。
 
-## 浏览器接口联调草案
+## 浏览器接口发布验证
 
 前端客户端集中在 `src/services/backendApi/collaboration/groupContextController.ts`。暂按 Gateway 登录态与 `/api/v1/collaboration/groupcontext/<operation>` 接入。Bot 视角发送 `view_bot_id`，由服务端核验身份并据此解析调用者。群管理共享信息只传 `groupId`，使用当前登录 Human 的身份。
 
 - `shared-info` 返回 `items`。每项包含 `name`、`scope_level`、`scope`、`content`、`creator`、`gmt_modified`。
 - `list-preset` 返回 `presets`。Human 页面使用 `manage/list-preset` 获取 `can_manage`，据此显示写入入口。需要联调确认浏览器接口的路径、响应形态和该权限字段的提供方式。BCS 写接口继续校验群主 Bot 的 Owner 或 Manager 权限。
+
+
+直连本地 Gateway 的浏览器路径返回 HTTP 404。此前本地验收由前端代理直接转发到 BCS，仅覆盖 BCS 接口与页面。上线前需在目标 Gateway 配置浏览器路径，并验证登录用户的身份传递、受管成员 Bot 视角成功、未授权 Bot 视角被拒、Human 管理列表及写权限。BCS 根据已认证 Human 身份校验 `view_bot_id`，该参数只是选择读取视角。
