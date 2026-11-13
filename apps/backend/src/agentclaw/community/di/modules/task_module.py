@@ -15,6 +15,9 @@ from typing import Annotated
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
@@ -103,8 +106,62 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
+from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
+    StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    GroupMethodOpsServiceProtocol,
+    MethodLifecycleServiceProtocol,
+    OpenMethodOpsServiceProtocol,
+    SwarmMethodOpsServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    A2aTaskDispatch,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service import (
+    TaskCommissionService,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskDispatchPort,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.collet_lifecycle_service import (
+    ColletLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.services.open_method_service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.services.single_group_method_service import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.services.swarm_method_service import (
+    SwarmMethodService,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
@@ -148,12 +205,8 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
-from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
-)
-from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
-    ForumInteractionService,
 )
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
@@ -308,6 +361,78 @@ class TaskModule(Module):
             to=StructuralContextCollabAuthorizer,
             scope=singleton,
         )
+        # L5 method 内存存储(2026-11-12 L5 method objects spec §6):进程内
+        # singleton,``ContextCollabService`` 构造路径新增 method_store 依赖
+        # 后必须绑定;P2 持久化经同一 MethodStoreProtocol 键整体替换,服务层
+        # (method_lifecycle_service 等)零改动。
+        binder.bind(
+            MethodStoreProtocol, to=InMemoryMethodStore, scope=singleton
+        )
+        # L4 Collet 生命周期接线(2026-11-12 L4 对齐 spec §5.3):进程内
+        # store singleton(重启归零,P2 持久化经同一 ColletLifecycleStore
+        # 协议键整体替换);生命周期服务 singleton 但 P1 纯内部 API,不上
+        # HTTP wire,collab_repo 同上由 TaskPersistenceModule 绑定。
+        binder.bind(
+            ColletLifecycleStore, to=InMemoryColletLifecycleStore,
+            scope=singleton,
+        )
+        binder.bind(
+            ColletLifecycleService, to=ColletLifecycleService, scope=singleton
+        )
+        # BBS 公开讨论产品层(2026-11-12 bbs-public-discussion-product spec
+        # §3.4):模块级交付面(P1 无 HTTP),自持编排组合协议层;仓储/
+        # 作者器/MethodStore 均复用上面既有绑定,无新基建。
+        binder.bind(
+            BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService,
+            scope=singleton,
+        )
+        # 任务代办产品层(2026-11-13 task_commission spec §5):同款singleton,
+        # 顶层单值 Open 形态;复用既有仓储/作者器/MethodStore 绑定。
+        binder.bind(
+            TaskCommissionServiceProtocol, to=TaskCommissionService,
+            scope=singleton,
+        )
+        # 交办交付缝经 L1 mock 送达(2026-11-13 L1 interoperate-deliver spec
+        # 裁决 B):envelope+A2aMessage 承载;P2 真实 A2A 由交付侧经
+        # A2aDeliveryPort 同端口整体替换,产品编排零改动。LoggingTaskDispatch
+        # 保留为直接构造默认,DJ 不再绑它。
+        binder.bind(A2aDeliveryPort, to=MockA2aDelivery, scope=singleton)
+        binder.bind(TaskDispatchPort, to=A2aTaskDispatch, scope=singleton)
+        # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
+        # 授权器与四个服务协议全部显式 singleton 绑定——python-injector
+        # 不自动解析未绑定键;四服务共享上面同一 MethodStoreProtocol
+        # singleton(binding / edge / profile 对象切片互为同域),P2 的
+        # Membership/Grant/Policy 授权器与持久化 store 各经同一协议键
+        # 整体替换,服务层零改动。collab_repo 协议由
+        # TaskPersistenceModule 绑定(Collet/Event ORM 仓储)。
+        binder.bind(
+            MethodOpsAuthorizerProtocol,
+            to=StructuralMethodOpsAuthorizer,
+            scope=singleton,
+        )
+        binder.bind(
+            MethodLifecycleServiceProtocol, to=MethodLifecycleService,
+            scope=singleton,
+        )
+        binder.bind(
+            GroupMethodOpsServiceProtocol, to=SingleGroupMethodService,
+            scope=singleton,
+        )
+        binder.bind(
+            SwarmMethodOpsServiceProtocol, to=SwarmMethodService,
+            scope=singleton,
+        )
+        binder.bind(
+            OpenMethodOpsServiceProtocol, to=OpenMethodService,
+            scope=singleton,
+        )
+        # 方法编排缝(任务代办 spec §9):产品窄端口 → DI 适配器,发布即
+        # 驱动真 Open 方法生命周期;适配器 @inject 拉取上方 Open 方法服务
+        # singleton(交付缝 TaskDispatchPort 同款直接构造绑定)。
+        binder.bind(
+            TaskMethodOpsPort, to=TaskCommissionOpenMethodAdapter,
+            scope=singleton,
+        )
         binder.bind(
             ContextCollabServiceProtocol, to=ContextCollabService, scope=singleton
         )
@@ -323,6 +448,11 @@ class TaskModule(Module):
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
+
+    @singleton
+    @provider
+    def context_collab_product_catalog(self) -> ProductCatalog:
+        return build_product_catalog()
 
     @singleton
     @provider

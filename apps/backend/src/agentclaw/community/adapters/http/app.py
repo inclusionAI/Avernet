@@ -145,6 +145,7 @@ from agentclaw.community.adapters.http.service_bot.router_file_count import rout
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.task.context_collab import router as context_collab_router  # noqa: E402
+from agentclaw.community.adapters.http.task.context_collab_methods import router as context_collab_methods_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
@@ -895,7 +896,10 @@ app.include_router(bot_message_feedback_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
+from agentclaw.community.adapters.http.task.commission_a2a import router as commission_a2a_router  # noqa: E402
+app.include_router(commission_a2a_router)
 app.include_router(context_collab_router)  # /api/v1/collaboration/task/context_collab — BBS context collab (spec §6.1)
+app.include_router(context_collab_methods_router)  # /api/v1/collaboration/task/context_collab/{id}/method-bindings/… — L5 method ops (2026-11-12 spec §7)
 app.include_router(work_orders_http_router)
 app.include_router(agentswarm_router_module.router)
 agentswarm_router_module.register_exception_handlers(app)
