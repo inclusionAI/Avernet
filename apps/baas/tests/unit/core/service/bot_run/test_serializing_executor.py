@@ -190,14 +190,14 @@ async def test_inner_exception_releases_lock_and_propagates(queue):
     with pytest.raises(RuntimeError, match="inner boom"):
         await ex.execute(rec)
 
-    # S2: 异常路径显式调用 force_unlock，避免 DB 锁行残留。
-    assert lock.force_unlock_calls == ["botrun:session:bot-1:dev:s1"]
+    # Ordinary exception cleanup must not use the administrative force-unlock path.
+    assert lock.force_unlock_calls == []
     # 锁已释放：同 session 下一个能拿到
     assert "botrun:session:bot-1:dev:s1" not in lock._held
 
 
-async def test_inner_exception_force_unlock_before_propagation(queue):
-    """S2: 内层异常时 force_unlock 必须先于异常上抛执行，且异常仍透传。"""
+async def test_inner_exception_does_not_force_unlock(queue):
+    """Ordinary exception cleanup leaves administrative unlock unused."""
     lock = _FakeLockService()
     inner = _RecordingInner(queue, raise_exc=True)
     ex = SerializingExecutor(inner, lock)
@@ -206,17 +206,17 @@ async def test_inner_exception_force_unlock_before_propagation(queue):
     with pytest.raises(RuntimeError, match="inner boom"):
         await ex.execute(rec)
 
-    # force_unlock 被调用一次且锁名正确
-    assert len(lock.force_unlock_calls) == 1
-    assert lock.force_unlock_calls[0] == "botrun:session:bot-1:dev:s1"
+    assert lock.force_unlock_calls == []
     # 内层执行过一次
     assert inner.executed == [rec.run_id]
 
 
-async def test_inner_exception_force_unlock_failure_is_swallowed(queue):
-    """S2: force_unlock 自身抛异常时不应淹没内层原始异常。"""
+async def test_inner_exception_does_not_call_force_unlock(queue):
+    """Administrative force-unlock is not part of ordinary cleanup."""
     lock = _FakeLockService()
-    lock.force_unlock = lambda name: (_ for _ in ()).throw(RuntimeError("unlock boom"))
+    lock.force_unlock = lambda name: (_ for _ in ()).throw(
+        RuntimeError("must not call")
+    )
     inner = _RecordingInner(queue, raise_exc=True)
     ex = SerializingExecutor(inner, lock)
 

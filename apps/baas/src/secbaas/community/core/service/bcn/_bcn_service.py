@@ -35,7 +35,10 @@ from secbaas.community.api.bot_runtime import BotChatContext, BotRunner
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
-from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback, UplinkClient
+from secbaas.community.core.service.bcn.uplink import (
+    BcnUplinkCallback,
+    UplinkClient,
+)
 from secbaas.community.core.service.bot_run import (
     BotRunAbortSurface,
     build_caller_identity_metadata,
@@ -201,6 +204,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         run_repository: BotRunRepository,
         interaction_service: BotInteractionService,
         abort_surface: BotRunAbortSurface | None = None,
+        bcn_uplink_callback: BcnUplinkCallback | None = None,
     ):
         self._bot_runner = bot_runner
         self._api_key_repository = api_key_repository
@@ -209,7 +213,9 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         self._run_repository = run_repository
         self._interaction_service = interaction_service
         self._abort_surface = abort_surface
-        self._uplink_callback = BcnUplinkCallback(uplink_client, run_repository)
+        self._uplink_callback = bcn_uplink_callback or BcnUplinkCallback(
+            uplink_client, run_repository
+        )
 
     async def handle_interaction_resolve(
         self, resolve_input: BcnInteractionResolveInput

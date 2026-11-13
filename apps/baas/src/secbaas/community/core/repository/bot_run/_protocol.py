@@ -3,9 +3,10 @@
 定义 Bot Run 持久化存储的接口契约。
 """
 
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ._record import BotRunRecord
+from ._record import BcnCallbackClaim, BotRunRecord
 
 
 @runtime_checkable
@@ -23,6 +24,7 @@ class BotRunRepository(Protocol):
         api_key_prefix: str,
         message_long: str,
         metadata: dict[str, Any] | None,
+        callback_function: str | None = None,
     ) -> str:
         """插入运行记录
 
@@ -36,6 +38,63 @@ class BotRunRepository(Protocol):
         Returns:
             run_id
         """
+        ...
+
+    def claim_bcn_callback_attempt(
+        self,
+        run_id: str,
+        *,
+        now: datetime,
+        lease_seconds: int,
+        max_attempts: int,
+    ) -> BcnCallbackClaim | None:
+        """Atomically claim one eligible callback invocation with a fence."""
+        ...
+
+    def finish_bcn_callback_success(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        lease_generation: int,
+        status: str,
+    ) -> bool:
+        """Mark a matching in-flight lease as durably sent."""
+        ...
+
+    def finish_bcn_callback_retryable_failure(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        lease_generation: int,
+        next_retry_at: datetime,
+        status: str,
+        error_kind: str,
+        max_attempts: int,
+    ) -> bool:
+        """Persist retryable failure or transition to exhausted terminal failure."""
+        ...
+
+    def finish_bcn_callback_terminal_failure(
+        self,
+        run_id: str,
+        *,
+        lease_token: str,
+        lease_generation: int,
+        status: str,
+        error_kind: str,
+    ) -> bool:
+        """Persist a terminal callback failure and clear due state."""
+        ...
+
+    def scan_bcn_callback_pending(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> list[BotRunRecord]:
+        """Return bounded terminal rows that need callback recovery."""
         ...
 
     def get_by_run_id(self, run_id: str) -> BotRunRecord | None:

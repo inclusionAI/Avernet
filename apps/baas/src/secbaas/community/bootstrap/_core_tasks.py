@@ -53,11 +53,11 @@ class CoreTaskContainer(containers.DeclarativeContainer):
 
     # Provided by ApplicationContainer (cross-container wiring)
     distributed_lock_service = providers.Dependency()
-    distributed_lock_repository = providers.Dependency()
     device_repo = providers.Dependency()
     device_binding_repo = providers.Dependency()
     sandbox_device_router = providers.Dependency()
-    bot_run_queue_repository = providers.Dependency()
+    bot_run_repository = providers.Dependency()
+    bcn_uplink_callback = providers.Dependency()
     ticket_repository = providers.Dependency()
     paas_service_facade = providers.Dependency()
     file_transfer_backend = providers.Dependency()
@@ -101,14 +101,18 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         cron_interval_seconds=config.bot_run_recovery.cron_interval_seconds,
         stale_seconds=config.bot_run_recovery.stale_seconds,
         dry_run=config.bot_run_recovery.dry_run,
+        callback_batch_size=config.bot_run_recovery.callback_batch_size,
+        callback_max_attempts=config.bot_run_recovery.callback_max_attempts,
+        callback_lease_seconds=config.bot_run_recovery.callback_lease_seconds,
+        callback_budget_seconds=config.bot_run_recovery.callback_budget_seconds,
     )
 
     bot_run_recovery_task = providers.Singleton(
         BotRunRecoveryTask,
         config=bot_run_recovery_config,
         lock_service=distributed_lock_service,
-        queue_repo=bot_run_queue_repository,
-        lock_repo=distributed_lock_repository,
+        bot_run_repository=bot_run_repository,
+        bcn_uplink_callback=bcn_uplink_callback,
     )
 
     # ── PublishRetrySweep task ───────────────────────────────────────────────

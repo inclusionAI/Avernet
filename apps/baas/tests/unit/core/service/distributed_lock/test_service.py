@@ -290,7 +290,7 @@ class TestReleaseLock:
         result = lock_service.release_lock("mylock")
 
         assert result is True
-        repository.delete_lock.assert_called_once_with("mylock")
+        repository.delete_lock.assert_called_once_with("mylock", lock_holder="h1")
 
     def test_release_reentrant_decrements(self, lock_service, repository):
         import datetime
@@ -329,7 +329,7 @@ class TestReleaseLock:
 
         assert result is True
         assert "mylock" not in lock_service._lock_contexts
-        repository.delete_lock.assert_called_once_with("mylock")
+        repository.delete_lock.assert_called_once_with("mylock", lock_holder="h1")
 
     def test_release_lock_delete_lock_returns_false(self, lock_service, repository):
         import datetime
@@ -489,7 +489,7 @@ class TestAutoRenew:
 
         call_counter = [0]
 
-        def delayed_update_expire_time(*, lock_name, expire_time):
+        def delayed_update_expire_time(*, lock_name, lock_holder, expire_time, now):
             call_counter[0] += 1
             return 1
 
@@ -503,6 +503,26 @@ class TestAutoRenew:
         _stop_thread(ctx)
 
         assert call_counter[0] >= 1
+
+    def test_renew_uses_acquired_lease_duration(self, repository):
+        repository.try_acquire_lock.return_value = True
+        calls = []
+
+        def record_update(*, lock_name, lock_holder, expire_time, now):
+            calls.append(expire_time - now)
+            return 1
+
+        repository.update_expire_time.side_effect = record_update
+        service = DistributedLockService(
+            repository, default_expire_seconds=300, renew_interval_seconds=0.01
+        )
+        ctx = service.acquire_lock("mylock", lock_holder="h1", expire_seconds=17)
+        assert ctx.renew_thread is not None
+        time.sleep(0.05)
+        service.release_lock("mylock", lock_holder="h1")
+
+        assert calls
+        assert all(15 <= delta.total_seconds() <= 19 for delta in calls)
 
     def test_renew_thread_stops_on_release(self, lock_service, repository):
         repository.try_acquire_lock.return_value = True
@@ -585,6 +605,26 @@ class TestIsLockHeld:
         repository.get_by_lock_name.return_value = None
 
         assert lock_service.is_lock_held("mylock") is False
+
+    def test_remote_verification_ignores_stale_local_context(
+        self, lock_service, repository
+    ):
+        import datetime
+
+        ctx = LockContext(
+            lock_name="mylock",
+            lock_holder="h1",
+            expire_time=datetime.datetime.now() + datetime.timedelta(seconds=30),
+        )
+        with lock_service._local_lock:
+            lock_service._lock_contexts["mylock"] = ctx
+        repository.get_by_lock_name.return_value = None
+
+        assert (
+            lock_service.is_lock_held("mylock", lock_holder="h1", verify_remote=True)
+            is False
+        )
+        repository.get_by_lock_name.assert_called_once_with("mylock")
 
     def test_held_in_db_not_expired(self, lock_service, repository):
         import datetime
@@ -704,12 +744,12 @@ class TestRenewLock:
 
 class TestForceUnlock:
     def test_not_in_context(self, lock_service, repository):
-        repository.delete_lock.return_value = True
+        repository.force_delete_lock.return_value = True
 
         result = lock_service.force_unlock("mylock")
 
         assert result is True
-        repository.delete_lock.assert_called_once_with("mylock")
+        repository.force_delete_lock.assert_called_once_with("mylock")
 
     def test_in_context_stops_thread(self, lock_service, repository):
         import datetime
@@ -723,16 +763,16 @@ class TestForceUnlock:
         with lock_service._local_lock:
             lock_service._lock_contexts["mylock"] = ctx
 
-        repository.delete_lock.return_value = True
+        repository.force_delete_lock.return_value = True
 
         result = lock_service.force_unlock("mylock")
 
         assert result is True
         assert "mylock" not in lock_service._lock_contexts
-        repository.delete_lock.assert_called_once_with("mylock")
+        repository.force_delete_lock.assert_called_once_with("mylock")
 
     def test_delete_lock_returns_false(self, lock_service, repository):
-        repository.delete_lock.return_value = False
+        repository.force_delete_lock.return_value = False
 
         result = lock_service.force_unlock("mylock")
 
