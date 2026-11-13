@@ -377,9 +377,11 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
 });
 
 describe("diagnosis report -> allowlist -> durable recovery task", () => {
+  // Schema creation is fixture setup; keep the normal test timeout for the HTTP and persistence assertions.
+  beforeEach(async () => { await runMigrations(db, "sqlite"); }, 30000);
+
   async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
-    await runMigrations(db, "sqlite");
     const config = new AppConfigRepository(db);
     await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
       allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
