@@ -1,0 +1,74 @@
+apps/backend/specs/2026-11-13-context-collab-l6-product-contracts/spec.md
+  h_059e888e5e4e82 325-376
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  h_059e888e5e4e82 899-900
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a.py
+  h_059e888e5e4e82 1-144
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_auth.py
+  h_059e888e5e4e82 1-23
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 1-163
+apps/backend/src/agentclaw/community/api/task/task_commission_service.py
+  h_059e888e5e4e82 3-4
+apps/backend/src/agentclaw/community/core/gateway_principal/README.md
+  h_059e888e5e4e82 45,119-127
+apps/backend/src/agentclaw/community/core/gateway_principal/__init__.py
+  h_059e888e5e4e82 45,71
+apps/backend/src/agentclaw/community/core/gateway_principal/verifier.py
+  h_059e888e5e4e82 44-45,354-378
+apps/backend/src/agentclaw/community/core/task/README.md
+  h_059e888e5e4e82 18-20
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/actor_context.py
+  h_059e888e5e4e82 24
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/product_contract.py
+  h_059e888e5e4e82 82-101
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 145,208,210-230,235,238-241,244-247,261-280
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/catalog.py
+  h_059e888e5e4e82 59-63
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 84-85
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 1-203
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  h_059e888e5e4e82 89
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 30-32,83
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 16,20-26,95,257,264-273,307-308,376-390,430-432
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 6-7,15,63-80,100-101,180,186-189
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py
+  h_059e888e5e4e82 1-257
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  h_059e888e5e4e82 115,243
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 1,3-7,11,41-42,44-48,51-53,55-57,59-60,62-65,69-71,74-79,81-88,90-95,97-98,104,106,108-113,116,118-122,135
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py
+  h_059e888e5e4e82 1-470
+apps/backend/tests/community/core/task/context_collab/test_l6_contracts.py
+  h_059e888e5e4e82 270-277
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 583-606
+apps/backend/tests/community/endpoints/test_task_commission_a2a_endpoints.py
+  h_059e888e5e4e82 1-84
+apps/backend/tests/community/factories/task_commission.py
+  h_059e888e5e4e82 1-41
+apps/gateway/configs/application.yaml
+  h_059e888e5e4e82 198-200,540-546
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  h_059e888e5e4e82 642-655
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d415f373c3aabee2c57c16917709fac77e532ae",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
