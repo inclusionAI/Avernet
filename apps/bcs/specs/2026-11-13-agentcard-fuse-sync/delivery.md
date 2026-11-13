@@ -2,23 +2,22 @@
 
 ## Implementation status
 
-Implemented locally in two existing working areas, without commit/push/deploy:
+Implemented in the Avernet worktree and pushed for review:
 
-- Avernet implementation worktree:
-  `/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/agentcard-fuse-sync-spec`
-  branch `codex/agentcard-fuse-sync-spec`, based on fetched `origin/dev`.
-- OCB implementation worktree requested by the user:
-  `/Users/shenlifang/work/codes/datamarket/teamclaw/ocb/.worktree/bcs-sofa-rpc-rs-upgrade`
-  branch `codex/bcs-sofa-rpc-rs-upgrade`, existing unrelated dirty files preserved.
+- Repository: `git@github.com:inclusionAI/Avernet.git`
+- Worktree: `/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/agentcard-fuse-sync-spec`
+- Branch: `codex/agentcard-fuse-sync-spec`
+- Target: `dev`
+- Implementation commit: `74f3e8baa8cbc27762a8981df20a8cd5f32bcbc9`
 
-The OCB public submodule received the same public production source patch locally
-for integration testing; its gitlink was not committed or updated. The OCB branch
-advanced during the work from `06408dc5...` to `da768d9076...` through an existing
-branch commit; no reset or history rewrite was performed.
+The OCB implementation remains in the separately requested worktree:
+`/Users/shenlifang/work/codes/datamarket/teamclaw/ocb/.worktree/bcs-sofa-rpc-rs-upgrade`.
+Its unrelated dirty files were preserved, and its `submodules/avernet` gitlink was
+not committed or updated as part of this Avernet change.
 
 ## Changes delivered
 
-- A2A registration and mutation Cores accept optional existing `CatalogChangePort`.
+- A2A registration and mutation Cores accept an optional existing `CatalogChangePort`.
 - Registration, replacement and successful CAS commit notify once after persistence;
   failed validation, fetch, transaction and CAS paths do not notify.
 - Core call-site observation logs use available Bot/provider/ref/revision fields and
@@ -48,11 +47,13 @@ PASS:
 - Public bootstrap queue-selection unit test: 1 passed.
 - Public observation routing unit test: 1 passed; the existing INFO file target
   includes `bcs_observation`.
-- OCB Triple suite: 9 tests passed, including all existing tests and the new real
-  Triple -> public Core/SQLite -> shared queue -> Fuse stub integration.
-- OCB `bcs-internal` `cargo check` passed with the Rustup stable 1.98 toolchain.
+- OCB Triple suite: 9 tests passed, including the real Triple -> public Core/SQLite
+  -> shared queue -> Fuse stub integration.
+- OCB `bcs-internal` `cargo check` passed with the Rustup stable toolchain.
 - Changed Rust source files were checked for the 1,000-line limit; none exceeded it.
 - `git diff --check` passed in public, OCB and the pinned public submodule.
+- Avernet pre-push hook passed in lint-only mode; the plaintext-secret scan passed.
+- Focused post-fix Fuse observation test passed: 2 tests.
 
 NOT_PASS / NOT_RUN:
 
@@ -60,16 +61,11 @@ NOT_PASS / NOT_RUN:
   many pre-existing dependency/import/trait/conformance violations unrelated to
   this change. Its R25 workspace discovery then started a large full-workspace
   build; it was stopped to bound disk growth. This is not a clean architecture gate.
-- No full workspace Cargo test, no OCB `check-p4.sh`, no pre-push hook, no commit,
-  no push, no deployment and no live Fuse/Observ validation were performed.
-- One duplicate default-profile architecture build was stopped; no user worktree or
-  cache was deleted. Disk was rechecked throughout; final observed free space was
-  approximately 29 GiB.
+- No full workspace Cargo test, no OCB `check-p4.sh`, no deployment and no live
+  Fuse/Observ validation were performed.
 
 ## Remaining integration step
 
-Before delivery to a branch/PR, commit the public Avernet changes first, make the
-public commit reachable from the configured OCB integration source, update the OCB
-`submodules/avernet` gitlink to that exact commit, then run the OCB focused suite
-again. Keep public commit, OCB commit, gitlink availability, deployment and live
-Fuse evidence as separate facts.
+OCB integration should consume the pushed Avernet commit and update its
+`submodules/avernet` gitlink in a separate OCB change. This Avernet PR does not
+include OCB changes, deployment, or live Fuse evidence.
