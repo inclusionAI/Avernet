@@ -26,7 +26,8 @@ class ExpiryAwareCallerRuntimeUpdater:
     ) -> None:
         kwargs = dict(
             bot_id=bot_id, owner_user_id=owner_user_id, caller_user_id=caller_user_id,
-            caller_token=caller_token, stage=stage, publish_id=publish_id,
+            caller_token=caller_token,
+            stage=stage, publish_id=publish_id,
             entity_id=entity_id, binding_id=binding_id,
             is_test_exchange=is_test_exchange, session_key=session_key,
         )

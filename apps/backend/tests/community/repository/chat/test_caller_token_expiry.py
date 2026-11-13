@@ -59,14 +59,15 @@ def test_runtime_updater_preserves_longer_token(repo, hours, caplog):
         pass
     delegate = Mock()
     updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
-    token = CallerToken("credential-secret", "u1", now + timedelta(hours=hours), "fingerprint")
+    issued_expiry = now + timedelta(hours=hours)
+    token = CallerToken("test-token", "u1", issued_expiry, "fingerprint")
     updater.update_caller_identity(
         bot_id="b1", owner_user_id="o1", caller_user_id="u1", caller_token=token,
         stage="online", publish_id=None, binding_id=7,
     )
     assert delegate.update_caller_identity.call_count == int(hours > 48)
     assert expiry(repo) == (now + timedelta(hours=max(hours, 48))).isoformat()
-    assert "credential-secret" not in caplog.text
+    assert "test-token" not in caplog.text
     event = "caller_token_expiry_preserved" if hours <= 48 else "caller_token_expiry_recorded"
     assert event in caplog.text
 
@@ -153,10 +154,11 @@ def test_updater_install_failure_does_not_advance_expiry(repo):
     delegate = Mock()
     delegate.update_caller_identity.side_effect = RuntimeError("private-failure")
     updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
+    issued_expiry = old + timedelta(days=2)
     with pytest.raises(RuntimeError):
         updater.update_caller_identity(
             bot_id="b1", owner_user_id="o1", caller_user_id="u1",
-            caller_token=CallerToken("private-token", "u1", old + timedelta(days=2), "fp"),
+            caller_token=CallerToken("test-token", "u1", issued_expiry, "fp"),
             stage="online", publish_id=None, binding_id=7,
         )
     assert expiry(repo) == old.isoformat()
@@ -172,9 +174,10 @@ def test_service_or_test_targets_keep_existing_update_behavior(repo, test_exchan
     bindings = updater_bindings()
     bindings.get_by_id.return_value.apply_reason = "service"
     updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=bindings)
+    issued_expiry = datetime.now(UTC) + timedelta(hours=1)
     updater.update_caller_identity(
         bot_id="b1", owner_user_id="o1", caller_user_id="u1",
-        caller_token=CallerToken("private-token", "u1", datetime.now(UTC) + timedelta(hours=1), "fp"),
+        caller_token=CallerToken("test-token", "u1", issued_expiry, "fp"),
         stage="online", publish_id=None, binding_id=binding_id,
         is_test_exchange=test_exchange, session_key="business-session",
     )
@@ -308,10 +311,12 @@ def test_preserving_expiry_cannot_bypass_target_checks(repo, change):
         repo.update_instance("u1", "b1", "o1", ext={"binding_id": 8})
     delegate = Mock()
     updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=bindings)
+    issued_subject = "other" if change == "subject" else "u1"
+    issued_expiry = end - timedelta(days=1)
     with pytest.raises((ValueError, CallerCredentialError)):
         updater.update_caller_identity(
             bot_id="b1", owner_user_id="o1", caller_user_id="u1",
-            caller_token=CallerToken("secret", "other" if change == "subject" else "u1", end - timedelta(days=1), "fp"),
+            caller_token=CallerToken("test-token", issued_subject, issued_expiry, "fp"),
             stage="online", publish_id=None, binding_id=7,
         )
     delegate.update_caller_identity.assert_not_called()
