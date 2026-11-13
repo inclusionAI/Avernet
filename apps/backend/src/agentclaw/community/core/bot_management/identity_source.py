@@ -6,18 +6,30 @@ and what happens instead of a passport application when one does.
 
 Everything that validates a source runs **before** anything is written, so an
 invalid source leaves no stored manifest and never reaches Passport.
+
+The passport decision itself is not made here: both functions below delegate it
+to ``core.agentswarm.identity_rule.resolve_agent_code``, the same rule the
+agentswarm submit seam applies. Splitting it was the defect this module now
+avoids — a cache-only check here accepted a submit and then failed the spawn.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
+from agentclaw.community.core.agentswarm.identity_rule import resolve_agent_code
+from agentclaw.community.core.agentswarm.service.protocols import (
+    IdentitySourceRefusal,
+    IDENTITY_SOURCE_NO_PASSPORT,
+)
 from agentclaw.community.core.bot_management.create_context import BotCreateSpec
 from agentclaw.community.core.bot_management.errors import IdentitySourceInvalidError
 from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_codes_from_entries,
 )
-from agentclaw.community.plugin_api.passport import extract_cli_items
+from agentclaw.community.plugin_api.passport import (
+    PassportPlugin, extract_cli_items,
+)
 
 if TYPE_CHECKING:  # bot_service imports this module's consumers; avoid a cycle.
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -27,12 +39,19 @@ def resolve_identity_source(
     *,
     spec: BotCreateSpec,
     bot_service: "BotService",
+    passport_plugin: PassportPlugin | None = None,
 ) -> dict[str, Any] | None:
     """Validate and return the Bot this creation inherits identity from.
 
     ``None`` for an ordinary creation — every check below is skipped, so the
     ordinary path is byte-for-byte what it was. Raises
     :class:`IdentitySourceInvalidError` naming the reason otherwise.
+
+    The passport decision is :func:`resolve_agent_code`, the same rule the
+    agentswarm submit seam applies: the Bot row's cached copy answers where it
+    can, and ``passport_plugin`` is the fallback for the older Bots that predate
+    it. Without the fallback here, a Bot accepted by the submit check fails as
+    the run spawns its agents.
     """
     source_id = (spec.identity_bot_id or "").strip()
     if not source_id:
@@ -54,19 +73,21 @@ def resolve_identity_source(
             f"{spec.entity_id!r}"
         )
 
-    passport = (source.get("ext") or {}).get("passport") or {}
-    # An issued, usable passport is one that carries an agent code. The
-    # ``status`` field is plugin-specific -- the self-issued plugin writes
-    # ``ISSUED``, the prod plugin writes no status at all -- so requiring it
-    # would reject every source a real deployment issues. Only a pending
-    # status is refused: the code exists but the passport is not usable yet.
-    if (
-        passport.get("status") == "PENDING"
-        or not str(passport.get("agent_code") or "").strip()
-    ):
+    answer = resolve_agent_code(
+        passport=(source.get("ext") or {}).get("passport") or {},
+        passport_plugin=passport_plugin,
+        bot_id=source_id,
+        owner_id=str(source.get("entity_id") or spec.entity_id),
+    )
+    if isinstance(answer, IdentitySourceRefusal):
+        # The caller-facing wording stays the creation surface's own; the
+        # resolution rule only decides whether it is a pass.
         raise IdentitySourceInvalidError(
             f"identity source {source_id!r} holds no issued passport; "
             "it cannot supply an agent code"
+            if answer.code == IDENTITY_SOURCE_NO_PASSPORT
+            else f"identity source {source_id!r} could not be verified: "
+            "the passport provider did not answer"
         )
 
     return source
@@ -104,12 +125,18 @@ def inherited_agent_code(
     *,
     spec: BotCreateSpec,
     bot_service: "BotService",
+    passport_plugin: PassportPlugin | None = None,
 ) -> str:
     """The identity source's agent code, read at creation time.
 
     Never the inheriting Bot's own id: nothing was ever issued under it. Raises
     rather than returning empty, so a missing identity is loud at creation
     instead of surfacing later as opaque failures at the gateway.
+
+    Resolved by :func:`resolve_agent_code`, so a Bot whose cached copy is absent
+    but whose passport the provider still holds yields that code here too — this
+    runs at authorization completion, where returning a fabricated or empty
+    identity would be worse than refusing.
     """
     source_id = (spec.identity_bot_id or "").strip()
     source = bot_service.get_identity_source_row(source_id, entity_id=spec.entity_id)
@@ -117,13 +144,22 @@ def inherited_agent_code(
         raise IdentitySourceInvalidError(
             f"identity source {source_id!r} is no longer available"
         )
-    passport = (source.get("ext") or {}).get("passport") or {}
-    agent_code = str(passport.get("agent_code") or "").strip()
-    if not agent_code:
+    answer = resolve_agent_code(
+        passport=(source.get("ext") or {}).get("passport") or {},
+        passport_plugin=passport_plugin,
+        bot_id=source_id,
+        owner_id=str(source.get("entity_id") or spec.entity_id),
+    )
+    if isinstance(answer, IdentitySourceRefusal):
+        if answer.code == IDENTITY_SOURCE_NO_PASSPORT:
+            raise IdentitySourceInvalidError(
+                f"identity source {source_id!r} has no agent code"
+            )
         raise IdentitySourceInvalidError(
-            f"identity source {source_id!r} has no agent code"
+            f"identity source {source_id!r} could not be verified: the "
+            "passport provider did not answer"
         )
-    return agent_code
+    return answer
 
 
 def _passport_mcps(passport: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:

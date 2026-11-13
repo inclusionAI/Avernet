@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind,
@@ -64,6 +64,34 @@ class BotAuthorizationDescriptor:
     application_id: str
 
 
+@dataclass(frozen=True)
+class IdentitySourceRefusal:
+    """Why a named Bot cannot serve as a run's identity source.
+
+    ``code`` is one of the three refusal reasons a caller can act on
+    differently: :data:`IDENTITY_SOURCE_NOT_OWNED` (name a Bot of your own),
+    :data:`IDENTITY_SOURCE_NO_PASSPORT` (issue a passport, or name another
+    Bot), :data:`IDENTITY_SOURCE_UNVERIFIED` (the passport could not be
+    resolved; retry). Every code carries a populated ``message``; a code
+    answered with an empty one reads as the generic invalid-source
+    refusal, so a seam in another tree can still raise ``code`` alone.
+    """
+
+    code: str
+    message: str = ""
+
+
+#: The Bot is absent from the caller's rows -- it does not exist, or it
+#: belongs to someone else (the two are deliberately indistinguishable).
+IDENTITY_SOURCE_NOT_OWNED: Final = "not_owned"
+#: Neither the Bot's cached passport nor the provider establishes an issued
+#: AgentPass, so the Bot genuinely holds no usable identity.
+IDENTITY_SOURCE_NO_PASSPORT: Final = "no_passport"
+#: The passport could not be resolved (provider failure, no seam bound).
+#: Never means "has no passport" -- that is ``no_passport``.
+IDENTITY_SOURCE_UNVERIFIED: Final = "unverified"
+
+
 @runtime_checkable
 class BotAuthorizationSource(Protocol):
     """Read-only seam over a bot's durable creation job (manifest seam).
@@ -80,13 +108,17 @@ class BotAuthorizationSource(Protocol):
     """
 
     @abstractmethod
-    def identity_source(self, *, owner_id: str, bot_id: str) -> str | None:
+    def identity_source(
+        self, *, owner_id: str, bot_id: str,
+    ) -> str | IdentitySourceRefusal:
         """The agent code of a Bot that may serve as an identity source.
 
-        ``None`` when the Bot does not exist, is not owned by ``owner_id``, or
-        holds no issued passport. The service uses this to refuse a submit
-        before any agent row is written, without importing the bot repository
-        itself (D17/D35).
+        An :class:`IdentitySourceRefusal` when it may not, naming which of
+        the three cases applied: the Bot is absent or not owned by
+        ``owner_id``, it holds no issued passport, or its passport could not
+        be resolved. The service uses this to refuse a submit before any
+        agent row is written, without importing the bot repository itself
+        (D17/D35).
         """
 
     @abstractmethod
@@ -289,15 +321,22 @@ class IdentitySourceRequired(Exception):
 class IdentitySourceInvalid(Exception):
     """A named identity source cannot supply identity (422-class).
 
-    The Bot does not exist, is not owned by the run's owner, or holds no
-    issued passport. Distinct from :class:`IdentitySourceRequired`, which is
-    about the field being absent rather than wrong.
+    ``reason`` is one of :data:`IDENTITY_SOURCE_NOT_OWNED`,
+    :data:`IDENTITY_SOURCE_NO_PASSPORT`, :data:`IDENTITY_SOURCE_UNVERIFIED`
+    and ``message`` says what the caller should do about it -- the three
+    cases need different actions, so the text differs per case. Distinct
+    from :class:`IdentitySourceRequired`, which is about the field being
+    absent rather than wrong.
     """
 
-    def __init__(self, bot_id: str, reason: str) -> None:
+    def __init__(self, bot_id: str, reason: str, *, message: str = "") -> None:
         self.bot_id = bot_id
         self.reason = reason
-        super().__init__(f"identity source {bot_id!r} {reason}")
+        self.message = message
+        # The generic text names the id; a per-case caller (the HTTP adapter)
+        # supplies the actionable wording from ``reason`` when none came with
+        # the refusal.
+        super().__init__(message or f"identity source {bot_id!r} is not usable")
 
 
 class TenantRunLimitExceeded(Exception):
