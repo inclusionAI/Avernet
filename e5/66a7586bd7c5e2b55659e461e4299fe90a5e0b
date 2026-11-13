@@ -1,0 +1,19 @@
+src/bcs/scripts/e2e-runner/session-checkpoint-20261029.md
+  s_56dc8660fa70f2::t_5da8c5a6463175 1-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e566a7586bd7c5e2b55659e461e4299fe90a5e0b",
+  "prompts": {},
+  "sessions": {
+    "s_56dc8660fa70f2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0bcc6-3771-79e0-8219-6d7c16f1d598",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

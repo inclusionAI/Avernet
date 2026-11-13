@@ -1,0 +1,27 @@
+apps/backend/tests/community/core/config_compose/test_mcporter_composer.py
+  s_3856feb75a1d9b::t_d0caca507bc693 507,521
+  s_3856feb75a1d9b::t_409b94734d8a54 489-490,506,508-509,511-520,522,524-525,545-550
+  s_3856feb75a1d9b::t_383d85333c6885 491-497
+  s_3856feb75a1d9b::t_730fc86060dc54 498-499
+  s_3856feb75a1d9b::t_3994b45b056328 500-505,510
+  s_3856feb75a1d9b::t_1e5c056f6c476c 523,526-544
+apps/backend/src/agentclaw/community/core/config_compose/services/mcporter_composer.py
+  s_3856feb75a1d9b::t_84960055c8ea3e 162-171
+  s_3856feb75a1d9b::t_cd8705df04ab44 286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a158f3ef71e3724f090dafeca86d37d978f1696",
+  "prompts": {},
+  "sessions": {
+    "s_3856feb75a1d9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-7d48-7320-a48b-85835c0b8107",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

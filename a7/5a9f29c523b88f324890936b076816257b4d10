@@ -1,0 +1,76 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  h_43af82e14600e4 41-53
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-editor-draft-boundary.md
+  h_43af82e14600e4 1-118
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-save-first-draft.test.ts
+  h_43af82e14600e4 1-166
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal.ts
+  h_43af82e14600e4 60,62,72-83,108
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db-first-draft.test.ts
+  h_43af82e14600e4 1-365
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-save-service.ts
+  h_43af82e14600e4 16,18,23,30-32,56,58,74-122
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/editorWorkflowSource.test.tsx
+  h_43af82e14600e4 1-127
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflowDocument.test.tsx
+  h_43af82e14600e4 8,166
+apps/evolverun/clawweb/public/modules/workflow/web/api/editorWorkflowSource.ts
+  h_43af82e14600e4 1-75
+apps/evolverun/clawweb/public/modules/workflow/web/api/useEditorWorkflowDocument.ts
+  h_43af82e14600e4 2,4,6-7
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 9-10,12,14,53,103
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlEditor.tsx
+  h_43af82e14600e4 22,39,70,86-91,99,131,152,189
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditor.test.tsx
+  h_43af82e14600e4 3,6-7,121-214
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.enabled.test.tsx
+  h_43af82e14600e4 1-29
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.moves.test.tsx
+  h_43af82e14600e4 140
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowDocumentSave.test.ts
+  h_43af82e14600e4 1-186
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/workflowTransition.database.test.ts
+  h_43af82e14600e4 1-84
+apps/evolverun/clawweb/public/modules/workflow/web/editor/store.ts
+  h_43af82e14600e4 29-30,57-60,96,98-100,164,167-174,181,183,186-190,193,340,349-351
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  h_43af82e14600e4 1,9,16,30-31,34,38,49,55,58,70-71,95-97,120-123,127,183
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowDocumentSave.ts
+  h_43af82e14600e4 1-101
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowTransition.ts
+  h_43af82e14600e4 28,30
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 3-4,11,17,32,80-86,89,91,108,118,120,132,134,140,144,158,169-170,176,180,187-188,193,231-233,239-241,264-272,283-284,286,309,345,362-363,371,379,409,420,422-423,455-463,465,467,472-474,481,493,517,532,586,589,609-611,614-616,668
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  h_43af82e14600e4 1,98-99,158,190,200,291,296,323,333
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  h_43af82e14600e4 267-271,275
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPackSafety.test.tsx
+  h_43af82e14600e4 62,78,126-127
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  h_43af82e14600e4 42,103-104,252-261,273
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowIsolation.test.tsx
+  h_43af82e14600e4 1-340
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowTransition.test.tsx
+  h_43af82e14600e4 7,12,70,89,188,191-201
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  h_43af82e14600e4 7,15,249-258
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  h_43af82e14600e4 7,15,84,162-171
+apps/evolverun/clawweb/public/shared/server/repositories/__tests__/bot-workflow-permission-repository.test.ts
+  h_43af82e14600e4 2,28-68
+apps/evolverun/clawweb/public/shared/server/repositories/bot-workflow-permission-repository.ts
+  h_43af82e14600e4 44-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a75a9f29c523b88f324890936b076816257b4d10",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

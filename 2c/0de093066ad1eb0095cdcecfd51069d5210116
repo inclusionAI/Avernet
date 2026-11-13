@@ -1,0 +1,51 @@
+apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
+  s_7bf7edeb41f354::t_d20a18d7f92808 164,176,186,195,209,218-247,251-264,267,276
+  s_7bf7edeb41f354::t_159d544996519f 305
+  s_7bf7edeb41f354::t_ae2dc57e9a7b6a 298-304,306
+  s_7bf7edeb41f354::t_a77b4f464fa29d 285-297
+  s_7bf7edeb41f354::t_2322525269fe1a 45-104,106-145,147-161,166-167,178,182-183,188,192,197,204-205,211,214-217,269,273,279,281-282,284
+  s_7bf7edeb41f354::t_aad5f73d572ae3 1-20,24-44
+  s_7bf7edeb41f354::t_05293a0d1f037c 21-23,105,146,162-163,165,168-175,177,179-181,184-185,187,189-191,193-194,196,198-203,206-208,210,212-213,248-250,265-266,268,270-272,274-275,277-278,280,283
+apps/backend/src/agentclaw/community/core/bot_management/engines/default.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 95-97
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_7bf7edeb41f354::t_8afa52edfe2eea 88-92
+  s_7bf7edeb41f354::t_13dee957024299 84-87,93-99
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 62,86
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 51-56
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 221-224
+apps/backend/specs/caller-cron-sessions/001-spec-output.md
+  s_7bf7edeb41f354::t_8afa52edfe2eea 11,13
+  s_7bf7edeb41f354::t_aad5f73d572ae3 1-10,12,14-17
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_cron_sessions.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 51-54
+  s_7bf7edeb41f354::t_ca9c34aefc52c8 1-50,55-116
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_7bf7edeb41f354::t_05cda99ffe67fe 477
+  s_7bf7edeb41f354::t_23d949e7e2088d 50,114,455-456,474,478-491,520,524,543-548
+apps/backend/specs/caller-cron-sessions/002-code-report.md
+  s_7bf7edeb41f354::t_a77b4f464fa29d 12,24
+  s_7bf7edeb41f354::t_ae56c6315d7f30 1-7,9,13-15,17-18,20-23
+  s_7bf7edeb41f354::t_8afa52edfe2eea 8,10-11,16,19
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_7bf7edeb41f354::t_be0b3f10c059db 253-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2c0de093066ad1eb0095cdcecfd51069d5210116",
+  "prompts": {},
+  "sessions": {
+    "s_7bf7edeb41f354": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda2-fe95-7ee3-8d2f-a9fa07b666f5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

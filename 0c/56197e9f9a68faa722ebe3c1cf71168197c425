@@ -1,0 +1,14 @@
+apps/bcsfuse/src/app/application/services/query_intent_policy.py
+  h_5686002b4ce7b9 26,43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0c56197e9f9a68faa722ebe3c1cf71168197c425",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

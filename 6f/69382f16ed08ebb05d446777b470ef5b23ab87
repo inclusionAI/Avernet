@@ -1,0 +1,31 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_76479bb65cc5cc 108,158
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/density.py
+  s_cecdc98e721f4b::t_683cc30b3195d5 1-513
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/density_run.py
+  s_cecdc98e721f4b::t_5923b7a295db9b 1-689
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/registration_proposal.py
+  s_cecdc98e721f4b::t_5ddc97212a0a20 1-376
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_4f995a97866718 83-85
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_b03f46b9c30f85 799-808
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_density.py
+  s_cecdc98e721f4b::t_3b3ff2d08f8c00 1-854
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f69382f16ed08ebb05d446777b470ef5b23ab87",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

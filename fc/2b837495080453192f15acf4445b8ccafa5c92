@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/task/context_collab/test_spec_acceptance.py
+  s_e0cb98366a65ad::t_da95097db52929 341
+  s_e0cb98366a65ad::t_a358f51b9d4274 1-239,241-306,308-340,342-413,416-417
+  s_e0cb98366a65ad::t_74933d2b66245d 240
+  s_e0cb98366a65ad::t_7930fb0fe9b2e2 307
+  s_e0cb98366a65ad::t_d151bae3c43cd1 414-415,418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fc2b837495080453192f15acf4445b8ccafa5c92",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
