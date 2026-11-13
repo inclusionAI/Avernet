@@ -831,7 +831,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
     def _present_bot_collaborator_item(self, item):
         """Refresh historical Bot-editor copy so aged rows gain a nickname.
 
-        The guard is the notification *species* (BOT_COLLABORATOR_APPLIED`),
+        The guard is the notification *species* (`BOT_COLLABORATOR_APPLIED`),
         never the work-order status: APPROVED/REJECTED rows whose inbox copy is
         the applicant-facing applied text re-render with today's nickname, the
         same read-time refresh contract as Skill rows. The persisted row is
@@ -851,6 +851,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
             return item
         bot_name = str(_business_data(work_order.biz_data).get("bot_name") or "")
         if not bot_name:
+            return item
+        if _content_text(notification.content) is not None:
+            # Envelope-shaped applied copies have no writer today (creation
+            # always writes plain text); rebuilding them as plain text would
+            # change the persisted shape in the presentation. Keep them
+            # verbatim, mirroring the guard `_refresh_detail_applied_copy`
+            # applies on the detail side.
             return item
         applicant_user_id = work_order.applicant_user_id
         applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
@@ -987,6 +994,12 @@ class WorkOrderService(WorkOrderServiceProtocol):
             stored_text = _content_text(detail.content)
             if stored_text is None:
                 return None
+            # Accepted divergence from the list path (which resolves the
+            # space name solely through `_lookup_space_name`): get_detail's
+            # joined space row predates this feature and ignores soft-delete,
+            # so a soft-deleted space can surface its name here while the
+            # list keeps the stored copy. For live spaces both sources
+            # produce the identical name.
             return self._rebuild_space_join_pending_copy(
                 applicant_user_id=work_order.applicant_user_id,
                 space_name=detail.space_name
