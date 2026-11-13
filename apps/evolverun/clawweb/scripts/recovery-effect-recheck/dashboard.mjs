@@ -4,7 +4,7 @@ const effects = { recovered: "已恢复", not_recovered: "确认未恢复", unkn
 const callbacks = { pending: "等待回传", accepted: "诊断已接收", exhausted: "回传重试已用尽" };
 const reasons = { online_resume_available: "在线仍可续接", online_task: "在线流程处理中", execution_pending: "尚有在途执行或工具",
   effect_already_known: "效果已有结论", not_a_live_intervention: "未实际干预", source_unavailable: "读取失败，待重扫",
-  wait_history_unverified: "缺少等待时间证据", eligible: "已确认干预", intervention_needs_evidence: "待从原会话补证",
+  diagnosis_missing: "缺少关联诊断，待核实", wait_history_unverified: "缺少等待时间证据", eligible: "已确认干预", intervention_needs_evidence: "待从原会话补证",
   result_delivery_only: "仅补传现有结论", result_delivery_pending: "已有结论待回传", original_target_changed: "原运行目标已变化" };
 const cell = value => `<td>${escape(value)}</td>`;
 export function render(scans, counts, rows, page) {
