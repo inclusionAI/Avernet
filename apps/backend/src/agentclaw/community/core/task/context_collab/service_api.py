@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,  # 兼容再导出:权威居所在 G1(2026-11-13 归位),本模块
+)  # 的既有 import 零破坏;新代码请从 G1 新家 import。
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
     PrincipalRef,
@@ -19,14 +22,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-
-
-@dataclass(frozen=True)
-class ActorContext:
-    """已认证调用者上下文;由 delivery 从 auth 信息构造,核心不解析 HTTP。"""
-
-    actor: PrincipalRef
-    source: str  # "api" | "openapi" | "todo"
 
 
 @dataclass
@@ -44,7 +39,6 @@ class ContextCreateCommand:
     executor_ref: AgentRef | None
     objective: str
     resource_refs: list[ResourceRef]
-    executor_owner_id: str | None = None
 
 
 @dataclass
@@ -70,7 +64,7 @@ class ContextCollabCreatedResult:
     collab_context_id: str
     context_version: int
     current_snapshot: dict  # CurrentSnapshot 派生的 §6.2 响应投影
-    current_event: dict  # 初始事件基础字段投影
+    current_event: dict      # 初始事件基础字段投影
 
 
 @dataclass
@@ -88,26 +82,12 @@ class EventAcceptedResult:
     current_status: str | None
 
 
-@dataclass(frozen=True)
-class ContextCollabRunResultDTO:
-    """Result of starting the executor bound to a collaboration Context."""
-
-    collab_context_id: str
-    run_id: str | None
-    session_id: str | None
-    context_version: int
-    current_status: str
-    group_id: str | None = None
-
-
 @dataclass
 class TaskProgressProjectionDTO:
     """GET 查询的任务进度投影(spec §6.4 ``task_progress``)。"""
 
     total_events: int
-    events: list[
-        dict
-    ]  # 每项含 event_id,parent_event,event_kind,primitive_type,status,summary,content
+    events: list[dict]  # 每项含 event_id,parent_event,event_kind,primitive_type,status,summary,content
 
 
 @dataclass
@@ -129,41 +109,9 @@ class ContextCollabStatusProjection:
 class ContextCollabServiceProtocol(Protocol):
     """三个北向用例的服务协议;delivery 依赖本协议,不依赖实现类。"""
 
-    def create_context(
-        self, command: ContextCreateCommand, context: ActorContext
-    ) -> ContextCollabCreatedResult: ...
-    def append_event(
-        self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
-    ) -> EventAcceptedResult: ...
-    async def run_context(
-        self,
-        collab_context_id: str,
-        context: ActorContext,
-        *,
-        todo_execution_id: str | None = None,
-        todo_execution_token: str | None = None,
-        todo_runner_skill_md_path: str | None = None,
-    ) -> ContextCollabRunResultDTO: ...
-    async def resume_context(
-        self,
-        collab_context_id: str,
-        *,
-        triggered_by_event_id: str,
-        context: ActorContext,
-        todo_execution_id: str | None = None,
-        todo_execution_token: str | None = None,
-        todo_runner_skill_md_path: str | None = None,
-    ) -> ContextCollabRunResultDTO: ...
-    async def refresh_run(
-        self,
-        collab_context_id: str,
-        context: ActorContext,
-    ) -> ContextCollabStatusProjection: ...
-    def get_status(
-        self,
-        collab_context_id: str,
-        *,
-        trunk_events: bool,
-        context: ActorContext,
-        include_event_payload: bool = False,
-    ) -> ContextCollabStatusProjection: ...
+    def create_context(self, command: ContextCreateCommand,
+                       context: ActorContext) -> ContextCollabCreatedResult: ...
+    def append_event(self, collab_context_id: str, command: EventAppendCommand,
+                     context: ActorContext) -> EventAcceptedResult: ...
+    def get_status(self, collab_context_id: str, *, trunk_events: bool,
+                   context: ActorContext) -> ContextCollabStatusProjection: ...

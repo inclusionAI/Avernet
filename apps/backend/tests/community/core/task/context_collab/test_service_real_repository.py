@@ -9,7 +9,7 @@
 - A02 追加 user_interaction.posted:事件 +1、payload 原生 JSON 直存、
   collet.context_version=2;
 - A03 task.started( actor=principal)→ 落库 snapshot status=in_progress;
-- A04 task.completed 接纳成功并推进到 done,事件行数 +1;
+- A04 task.completed 接纳成功但状态不越迁(无规则),事件行数 +1;
 - A06 started → submitted(artifacts 非空)→ reviewing → accepted
   (actor=principal)→ done;
 - A07/08 分支事件(parent=更早事件)在 trunk_events=True/False 两视角间
@@ -29,6 +29,19 @@ import pytest
 from injector import Injector
 from sqlalchemy import func, insert as sql_insert, select, update as sql_update
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskMethodOpsPort,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    MethodLifecycleServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabVersionConflict,
 )
@@ -47,6 +60,9 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
     ContextCollabRepositoryProtocol,
@@ -60,9 +76,6 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from tests.community.core.task.context_collab.executor_fakes import (
-    RecordingContextCollabExecutor,
-)
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import (
@@ -71,6 +84,7 @@ from agentclaw.community.di.modules.task_persistence_module import (
 from agentclaw.community.di.modules.testing_database_module import (
     TestingDatabaseModule,
 )
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -122,8 +136,9 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-        repository=ContextCollabRepository(db),
-        executor=RecordingContextCollabExecutor(),
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -295,7 +310,7 @@ class TestAcceptanceFlows:
         snapshot = _collet_snapshot(engine, created.collab_context_id)
         assert snapshot["status"] == "in_progress"
 
-    def test_a04_task_completed_moves_snapshot_to_done(self, service, engine):
+    def test_a04_task_completed_accepted_but_status_unchanged(self, service, engine):
         ctx_id, _, started_version = _create_started(service)
 
         result = service.append_event(
@@ -307,12 +322,12 @@ class TestAcceptanceFlows:
             make_actor(),
         )
 
-        # 接纳成功(事件 +1、版本 CAS)并按运行时完成事实推进到 done。
+        # 接纳成功(事件 +1、版本 CAS)但状态机无规则 → status 不越迁。
         assert result.accepted is True
-        assert result.current_status == "done"
+        assert result.current_status == "in_progress"
         assert _count(engine, ContextCollabEventModel) == 3
         snapshot = _collet_snapshot(engine, ctx_id)
-        assert snapshot["status"] == "done"
+        assert snapshot["status"] == "in_progress"
 
     def test_a06_submitted_then_accepted_reaches_done(self, service, engine):
         created = service.create_context(make_create_command(), make_actor())
@@ -533,6 +548,21 @@ class TestDiWiring:
         assert isinstance(service, ContextCollabServiceProtocol)
         assert injector.get(ContextCollabServiceProtocol) is service
         assert isinstance(service._authorizer, StructuralContextCollabAuthorizer)
+        catalog = injector.get(ProductCatalog)
+        assert injector.get(ProductCatalog) is catalog
+        for consumer in (
+            repository,
+            service,
+            injector.get(TaskCommissionServiceProtocol),
+            injector.get(BbsPublicDiscussionServiceProtocol),
+            injector.get(TaskMethodOpsPort),
+            injector.get(MethodLifecycleServiceProtocol),
+        ):
+            assert consumer._product_catalog is catalog
+        other = Injector(
+            [TestingDatabaseModule(), TaskPersistenceModule(), TaskModule()]
+        )
+        assert other.get(ProductCatalog) is not catalog
 
     def test_test_profile_injector_serves_context_collab_service(self):
         """完整测试 profile 组合根也能装配出 ContextCollabService 单例。"""

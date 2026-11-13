@@ -40,6 +40,9 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
+)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
@@ -51,9 +54,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from tests.community.core.task.context_collab.executor_fakes import (
-    RecordingContextCollabExecutor,
-)
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -63,19 +64,12 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 _EVENT_ENTRY_FIELDS = frozenset(
     {
         "event_id",
-        "event_seq",
         "parent_event",
         "event_kind",
         "primitive_type",
-        "actor_id",
-        "actor_type",
-        "execution_id",
-        "context_version",
         "status",
         "summary",
         "content",
-        "artifacts",
-        "created_at",
     }
 )
 
@@ -126,8 +120,9 @@ def make_append_command(event_kind: str, **overrides) -> EventAppendCommand:
 def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
-        repository=ContextCollabRepository(db),
-        executor=RecordingContextCollabExecutor(),
+        method_store=InMemoryMethodStore(),
+        repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
+        product_catalog=PRODUCT_CATALOG,
     )
 
 
@@ -360,7 +355,7 @@ class TestSpecAcceptance:
             "current_event",
             "task_progress",
         }
-        # task_progress 顶层恰好两键,事件列表字段集恰为完整运行事件投影。
+        # task_progress 顶层恰好两键,事件列表字段集恰为 7 字段投影。
         assert {field.name for field in dataclasses.fields(status.task_progress)} == {
             "total_events",
             "events",

@@ -8,6 +8,7 @@ JSON / 事件事实保存。两者都没有独立生命周期,不建表。
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -60,11 +61,13 @@ class Participant:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Participant":
-        principal_ref = _optional_ref(data, "principal_ref", "Participant", PrincipalRef)
+        principal_ref = _optional_ref(
+            data, "principal_ref", "Participant", PrincipalRef
+        )
         agent_ref = _optional_ref(data, "agent_ref", "Participant", AgentRef)
-        if principal_ref is None and agent_ref is None:
+        if (principal_ref is None) == (agent_ref is None):
             raise ContextCollabValidationError(
-                "Participant must reference a PrincipalRef or an AgentRef"
+                "Participant must reference exactly one PrincipalRef or AgentRef"
             )
         return cls(
             participant_id=_required_str(data, "participant_id", "Participant"),
@@ -98,3 +101,15 @@ class RoleBinding:
 
     def to_dict(self) -> dict:
         return {"role": self.role, "participant_id": self.participant_id}
+
+
+def role_binding_ref(collet_id: str, binding: RoleBinding) -> str:
+    """Stable local reference to the existing (Collet, role, participant) fact."""
+    return "/".join(
+        (
+            quote(collet_id, safe=""),
+            "role-bindings",
+            quote(binding.role, safe=""),
+            quote(binding.participant_id, safe=""),
+        )
+    )

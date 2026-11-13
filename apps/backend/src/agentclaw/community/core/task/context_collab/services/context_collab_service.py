@@ -13,14 +13,22 @@ from typing import Sequence
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
-    ContextCollabVersionConflict,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profiles import (
+    WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.observation import (
     EventProjection,
@@ -28,22 +36,26 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.obs
     build_progress,
     project_events,
 )
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
+    validate_product_event,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_spec,
+    product_definition,
+)
+from agentclaw.community.core.task.context_collab.g4_contracts_consistency.workflow_resolution import (
+    resolve_workflow_status,
+)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
-)
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
-    GUARD_REGISTRY,
-    GuardEvaluationInput,
-    MACHINE_REGISTRY,
-    resolve_transition,
-)
-from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ContextSpec,
     CurrentSnapshot,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.creation_facts import (
+    creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -51,21 +63,18 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
 )
-from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
-    WorkflowKind,
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
-    ContextStatusRecord,
     CreateContextRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabCreatedResult,
-    ContextCollabRunResultDTO,
     ContextCollabServiceProtocol,
     ContextCollabStatusProjection,
     ContextCreateCommand,
@@ -73,14 +82,11 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.core.task.context_collab.executor import (
-    ContextCollabExecutor,
-    ContextCollabResumeRequest,
-    ContextCollabRunRequest,
+from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
+    _now,
+    current_axes,
+    project_created_context,
 )
-from agentclaw.community.log import get_logger
-
-logger = get_logger(__name__)
 
 CREATION_EVENT_KIND = "task.created"
 CREATION_PRIMITIVE_TYPE = "Task"
@@ -91,24 +97,6 @@ def _required_str(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ContextCollabValidationError(
             f"{field} must be a non-empty string, got: {value!r}"
-        )
-    return value
-
-
-def _optional_str(value: object, field: str) -> str | None:
-    """Validate an optional identifier without inventing a fallback value."""
-    if value is None:
-        return None
-    return _required_str(value, field)
-
-
-def _optional_enum_value(value: object, allowed: set[str], field: str) -> str | None:
-    """可空枚举校验;非 None 时必须命中已注册 wire 值。"""
-    if value is None:
-        return None
-    if not isinstance(value, str) or value not in allowed:
-        raise ContextCollabValidationError(
-            f"unknown {field} value: {value!r}, allowed: {sorted(allowed)}"
         )
     return value
 
@@ -139,34 +127,21 @@ def _created_event_projection(event: EventRecord) -> dict:
 
 _EVENT_PROJECTION_FIELDS = (
     "event_id",
-    "event_seq",
     "parent_event",
     "event_kind",
     "primitive_type",
-    "actor_id",
-    "actor_type",
-    "execution_id",
-    "context_version",
     "status",
     "summary",
     "content",
-    "artifacts",
-    "created_at",
 )
 
 
-def _event_projection_dict(
-    projection: EventProjection, *, include_payload: bool = False
-) -> dict:
+def _event_projection_dict(projection: EventProjection) -> dict:
     """投影事件 → ``task_progress.events[]`` 条目(spec §6.4)。
 
     字段集合不含 ``steps``(§12.2 #5);值全部取自 G3 投影,不回读仓储。
-    ``payload`` 仅供同进程内部消费者显式请求,不改变默认北向契约。
     """
-    result = {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
-    if include_payload:
-        result["payload"] = dict(projection.payload)
-    return result
+    return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
 
 
 def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
@@ -189,93 +164,28 @@ def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
 
 
 def _resolve_event_status(
-    collet: Collet, command: EventAppendCommand, context: ActorContext
+    collet: Collet,
+    spec: ContextSpec,
+    snapshot: CurrentSnapshot | None,
+    command: EventAppendCommand,
+    context: ActorContext,
+    catalog: ProductCatalog,
 ) -> "str | None":
-    """G4 状态机裁决(spec §4):返回事件接纳后的新 status。
-
-    collet 的 ``workflow_kind`` 未命中 ``MACHINE_REGISTRY``,或当前状态
-    对该事件无规则命中 → status 不变(事件仍接纳)。守卫输入按
-    Controller Ruling R4 用值语义构造:actor 取已认证调用者,responsible
-    取 collet 快照 principal,executor 取创建参数 executor。guard
-    FAIL / BLOCKED 由 ``resolve_transition`` 抛 ``ContextCollabValidationError``
-    自然向外传。
-    """
-    if collet.current_snapshot is None:
-        # 可空快照(外部部分行):无状态可裁决,事件照常接纳。
-        return None
-    current_status = collet.current_snapshot.status
-    machine = MACHINE_REGISTRY.get(collet.context_spec.workflow_kind)
-    if machine is None:
-        return current_status
-    matched_rules = [
-        rule
-        for rule in machine.transitions
-        if rule.event_name == command.event_kind and current_status in rule.from_states
-    ]
-    if not matched_rules:
-        return current_status
-    guard_input = GuardEvaluationInput(
-        actor=context.actor,
-        responsible=collet.current_snapshot.principal_ref,
-        executor=collet.context_spec.executor_ref,
+    """G4 状态机裁决的薄包装:权威实现已提升至
+    ``g4_contracts_consistency.workflow_resolution.resolve_workflow_status``
+    (task_commission spec §4.2/裁决 G,与产品层共用同源);``collet``
+    参数保留以稳住调用面,裁决不消费聚合根。"""
+    profile = product_definition(spec, catalog)
+    machine_ref = profile.workflow.state_machine_ref if profile is not None else None
+    return resolve_workflow_status(
+        workflow_kind=machine_ref.profile_id if machine_ref else spec.workflow_kind,
+        executor_ref=spec.executor_ref,
+        snapshot=snapshot,
+        event_kind=command.event_kind,
         payload=command.payload,
+        actor=context.actor,
+        workflow_version=machine_ref.version if machine_ref else None,
     )
-    guard_results = {
-        guard_ref: GUARD_REGISTRY[guard_ref](guard_input)
-        for rule in matched_rules
-        for guard_ref in rule.guard_refs
-    }
-    new_status = resolve_transition(
-        machine, current_status, command.event_kind, guard_results
-    )
-    return current_status if new_status is None else new_status
-
-
-def _previous_runtime_handles(
-    events: Sequence[EventRecord],
-) -> tuple[str | None, str | None, str | None]:
-    """Find the latest real executor handles from a previous run.
-
-    Returns ``(run_id, group_id, session_id)``. Direct Bot executions carry a
-    run id, while BCS manager-worker executions carry a group and session. The
-    two handle kinds stay distinct so a group id is never persisted as a fake
-    run id.
-    """
-    for event in reversed(events):
-        if event.event_kind not in {"task.started", "task.completed"}:
-            continue
-        if not isinstance(event.payload, dict):
-            continue
-        run_id = _payload_identifier(event.payload, "run_id")
-        group_id = _payload_identifier(event.payload, "group_id")
-        session_id = _payload_identifier(event.payload, "session_id")
-        if run_id or group_id or session_id:
-            return run_id, group_id, session_id
-    return None, None, None
-
-
-def _payload_identifier(payload: dict, field: str) -> str | None:
-    value = payload.get(field)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def _runtime_handle_payload(
-    *,
-    run_id: str | None,
-    group_id: str | None,
-    session_id: str | None,
-) -> dict[str, object]:
-    """Build an event payload from real, non-empty runtime handles."""
-    payload: dict[str, object] = {}
-    if run_id:
-        payload["run_id"] = run_id
-    if group_id:
-        payload["group_id"] = group_id
-    if session_id:
-        payload["session_id"] = session_id
-    return payload
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
@@ -285,21 +195,26 @@ class ContextCollabService(ContextCollabServiceProtocol):
     def __init__(
         self,
         repository: ContextCollabRepositoryProtocol,
-        executor: ContextCollabExecutor,
+        method_store: MethodStoreProtocol,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
+        *,
+        product_catalog: ProductCatalog,
     ) -> None:
+        self._product_catalog = product_catalog
         self._repository = repository
-        self._executor = executor
+        self._method_store = method_store
         self._authorizer = authorizer
 
     def create_context(
         self, command: ContextCreateCommand, context: ActorContext
     ) -> ContextCollabCreatedResult:
-        """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → 组装结果。
+        """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
+        → 组装结果。
 
-        枚举校验(method_kind / product_kind / workflow_kind)与必填字符串
-        校验(objective)在本层完成;Single 必须有 executor 由结构授权器
-        完成。创建不设幂等键(spec 作者裁决):重复调用即重复创建。
+        method/wire 与 objective 校验后走 G1 结构授权;L6 校验产品、工作流、
+        方法组合并钉住版本/RoleBinding,无产品的 L4 创建保留原合同。
+        Single executor 与顶层 method 白名单由 G1 校验。创建不设幂等键
+        (spec 作者裁决):重复调用即重复创建。
         """
         objective = _required_str(command.objective, "objective")
         spec = ContextSpec(
@@ -309,22 +224,16 @@ class ContextCollabService(ContextCollabServiceProtocol):
             executor_ref=command.executor_ref,
             objective=objective,
             resource_refs=tuple(command.resource_refs),
-            product_kind=_optional_enum_value(
-                command.product_kind,
-                {profile.value for profile in ProductProfile},
-                "product_kind",
-            ),
-            workflow_kind=_optional_enum_value(
-                command.workflow_kind,
-                {kind.value for kind in WorkflowKind},
-                "workflow_kind",
-            ),
-            executor_owner_id=_optional_str(
-                command.executor_owner_id,
-                "executor_owner_id",
-            ),
+            product_kind=command.product_kind,
+            workflow_kind=command.workflow_kind,
         )
         self._authorizer.check_create(spec, context)
+        if spec.product_kind is None and spec.workflow_kind is not None:
+            if spec.workflow_kind not in {item.value for item in WorkflowKind}:
+                raise ContextCollabValidationError(
+                    f"unknown workflow_kind value: {spec.workflow_kind!r}"
+                )
+        spec = prepare_product_spec(spec, self._product_catalog)
 
         record = self._repository.create_context(
             CreateContextRecordRequest(
@@ -333,18 +242,37 @@ class ContextCollabService(ContextCollabServiceProtocol):
                     event_kind=CREATION_EVENT_KIND,
                     primitive_type=CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    payload={"objective": objective},
+                    # 创建事实全量入初始事件 payload(事件承载,spec
+                    # 2026-11-12-context-collab-l4-creation-event-facts):
+                    # 唯一装配点在 L4 ``creation_facts.creation_payload``,
+                    # 与产品层(products/)共用防漂移。恒带全部 key,None 也
+                    # 写 null——新行与存量行判别有据。
+                    payload=creation_payload(spec, objective),
                 ),
             )
         )
 
+        # L5 顶层投影(2026-11-12 L5 method objects spec §3.2/§9.2):Collet
+        # 落库成功后同步落顶层 ACTIVE MethodBinding——由上面的 ``spec`` 单向
+        # 派生,不回写 ``context_spec``;store 写失败如实上抛,绝不让
+        # "有 Collet 无 binding"的响应伪装成功。同上下文重复投影幂等。
+        project_created_context(
+            self._method_store,
+            current_axes(),
+            record.collet.collet_id,
+            spec,
+            context,
+            now=_now(),
+            catalog=self._product_catalog,
+        )
+
         # 用初始事件的 event_id 回填结果快照的进度引用(仓储初始快照
         # progress.current_event_id 为 None,权威事件指针在 Event record)。
-        snapshot = _created_snapshot_projection(record.collet.current_snapshot)
+        snapshot = _created_snapshot_projection(record.current_snapshot)
         snapshot["progress"]["current_event_id"] = record.initial_event.event_id
         return ContextCollabCreatedResult(
-            collab_context_id=record.collet.collab_context_id,
-            context_version=record.collet.context_version,
+            collab_context_id=record.collet.collet_id,
+            context_version=record.collet.version,
             current_snapshot=snapshot,
             current_event=_created_event_projection(record.initial_event),
         )
@@ -357,7 +285,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         涉及聚合状态的并发语义由仓储把守:``parent_event`` 存在性与
         ``expected_version`` 乐观并发都在仓储持锁事务内裁决,相关错误
-        (VersionConflict / ParentEventError 等)原样上抛,本层不预查、
+        (VersionConflict / ParentEventError 等)原样上抛。本层先拒绝已陈旧版本、
         不吞。追加不设幂等键(spec 作者裁决):重复提交即重复事件,
         防重由调用方保证。``snapshot_updater`` 是只替换 status 的纯函数,
         由仓储在其行锁内求值,避免陈旧写。
@@ -374,9 +302,31 @@ class ContextCollabService(ContextCollabServiceProtocol):
             visibility=command.visibility,
             payload=command.payload,
         )
-        self._authorizer.check_append(collet, command, context)
+        self._authorizer.check_append(collet, status.context_spec, command, context)
 
-        new_status = _resolve_event_status(collet, command, context)
+        # Fast stale-request rejection precedes sequence checks; repository CAS
+        # remains authoritative for a writer racing after this read.
+        ensure_expected_version(command.expected_version, collet.version)
+        validate_product_event(
+            catalog=self._product_catalog,
+            spec=status.context_spec,
+            snapshot=status.current_snapshot,
+            event_kind=command.event_kind,
+            primitive_type=command.primitive_type,
+            visibility=command.visibility,
+            payload=command.payload,
+            actor=context.actor,
+            parent_event=command.parent_event,
+            events=status.events,
+        )
+        new_status = _resolve_event_status(
+            collet,
+            status.context_spec,
+            status.current_snapshot,
+            command,
+            context,
+            self._product_catalog,
+        )
 
         def _update_status(
             snapshot: CurrentSnapshot,
@@ -405,460 +355,37 @@ class ContextCollabService(ContextCollabServiceProtocol):
             parent_event=record.event.parent_event,
             event_kind=record.event.event_kind,
             primitive_type=record.event.primitive_type,
-            context_version=record.collet.context_version,
+            context_version=record.collet.version,
             current_status=(
-                record.collet.current_snapshot.status
-                if record.collet.current_snapshot is not None
+                record.current_snapshot.status
+                if record.current_snapshot is not None
                 else None
             ),
         )
 
-    async def run_context(
-        self,
-        collab_context_id: str,
-        context: ActorContext,
-        *,
-        todo_execution_id: str | None = None,
-        todo_execution_token: str | None = None,
-        todo_runner_skill_md_path: str | None = None,
-    ) -> ContextCollabRunResultDTO:
-        """Start the bound executor, then append the authoritative start event.
-
-        Runtime invocation and event persistence intentionally remain two
-        independent operations in this phase. A concurrent append after the
-        pre-read is rejected by the repository's expected-version check rather
-        than overwriting the newer Context state.
-        """
-        status = self._repository.get_current_status(collab_context_id)
-        if status is None:
-            raise ContextCollabNotFoundError(
-                f"collaboration context {collab_context_id!r} not found"
-            )
-        collet = status.collet
-        snapshot = collet.current_snapshot
-        if snapshot is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot run without a current snapshot"
-            )
-        if snapshot.status != "created":
-            raise ContextCollabValidationError(
-                "collaboration context can run only from status 'created', "
-                f"got {snapshot.status!r}"
-            )
-        executor = collet.context_spec.executor_ref
-        if executor is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot run without an executor_ref"
-            )
-        todo_refs = [
-            ref
-            for ref in collet.context_spec.resource_refs
-            if ref.resource_type == "todo"
-        ]
-        if len(todo_refs) != 1:
-            raise ContextCollabValidationError(
-                "collaboration context run requires exactly one todo resource_ref"
-            )
-
-        runtime_result = await self._executor.run(
-            ContextCollabRunRequest(
-                collab_context_id=collab_context_id,
-                executor_id=executor.agent_id,
-                principal_id=collet.context_spec.principal_ref.principal_id,
-                objective=collet.context_spec.objective,
-                todo_id=todo_refs[0].resource_id,
-                executor_owner_id=collet.context_spec.executor_owner_id,
-                todo_execution_id=todo_execution_id,
-                todo_execution_token=todo_execution_token,
-                todo_runner_skill_md_path=todo_runner_skill_md_path,
-            )
-        )
-        if bool(runtime_result.run_id) == bool(runtime_result.group_id):
-            raise ContextCollabValidationError(
-                "Context executor must return exactly one of run_id or group_id"
-            )
-        if runtime_result.group_id and not runtime_result.session_id:
-            raise ContextCollabValidationError(
-                "BCS Context executor must return session_id with group_id"
-            )
-        payload = _runtime_handle_payload(
-            run_id=runtime_result.run_id,
-            group_id=runtime_result.group_id,
-            session_id=runtime_result.session_id,
-        )
-        executor_actor = PrincipalRef("bot", executor.agent_id)
-        accepted = self.append_event(
-            collab_context_id,
-            EventAppendCommand(
-                expected_version=collet.context_version,
-                event_kind="task.started",
-                primitive_type="Task",
-                actor_ref=executor_actor,
-                parent_event=collet.current_event_id,
-                visibility="workspace",
-                payload=payload,
-            ),
-            ActorContext(actor=executor_actor, source=context.source),
-        )
-        if accepted.current_status is None:
-            raise ContextCollabValidationError(
-                "collaboration context run did not produce a current status"
-            )
-        return ContextCollabRunResultDTO(
-            collab_context_id=collab_context_id,
-            run_id=runtime_result.run_id,
-            session_id=runtime_result.session_id,
-            context_version=accepted.context_version,
-            current_status=accepted.current_status,
-            group_id=runtime_result.group_id,
-        )
-
-    async def resume_context(
-        self,
-        collab_context_id: str,
-        *,
-        triggered_by_event_id: str,
-        context: ActorContext,
-        todo_execution_id: str | None = None,
-        todo_execution_token: str | None = None,
-        todo_runner_skill_md_path: str | None = None,
-    ) -> ContextCollabRunResultDTO:
-        """Continue the previous executor session from durable Human work.
-
-        ``user_interaction.posted`` and ``task.rejected`` are durable input
-        facts. This use case starts a new executor run in the previous session
-        and appends ``task.started``, moving the Context from ``done`` back to
-        ``in_progress``.
-        """
-        normalized_trigger_id = _required_str(
-            triggered_by_event_id, "triggered_by_event_id"
-        )
-        status = self._repository.get_current_status(collab_context_id)
-        if status is None:
-            raise ContextCollabNotFoundError(
-                f"collaboration context {collab_context_id!r} not found"
-            )
-        collet = status.collet
-        snapshot = collet.current_snapshot
-        if snapshot is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot resume without a current snapshot"
-            )
-        if snapshot.status != "done":
-            raise ContextCollabValidationError(
-                "collaboration context can resume only from status 'done', "
-                f"got {snapshot.status!r}"
-            )
-        trigger_index = next(
-            (
-                index
-                for index, event in enumerate(status.events)
-                if event.event_id == normalized_trigger_id
-            ),
-            None,
-        )
-        if trigger_index is None:
-            raise ContextCollabValidationError(
-                "collaboration context resume requires an existing Human-work event"
-            )
-        trigger = status.events[trigger_index]
-        if trigger.event_kind not in {"user_interaction.posted", "task.rejected"}:
-            raise ContextCollabValidationError(
-                "collaboration context can resume only from "
-                "user_interaction.posted or task.rejected"
-            )
-        message = (
-            trigger.payload.get("content")
-            if isinstance(trigger.payload, dict)
-            else None
-        )
-        if not isinstance(message, str) or not message.strip():
-            raise ContextCollabValidationError(
-                "collaboration context resume requires a non-empty Human-work message"
-            )
-        previous_run_id, group_id, session_id = _previous_runtime_handles(
-            status.events[:trigger_index]
-        )
-        if session_id is None:
-            raise ContextCollabValidationError(
-                "collaboration context resume requires the previous executor session_id"
-            )
-        executor = collet.context_spec.executor_ref
-        if executor is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot resume without an executor_ref"
-            )
-        todo_ref = next(
-            (
-                ref
-                for ref in collet.context_spec.resource_refs
-                if ref.resource_type == "todo"
-            ),
-            None,
-        )
-        if todo_ref is None:
-            raise ContextCollabValidationError(
-                "collaboration context resume requires one todo resource_ref"
-            )
-
-        runtime_result = await self._executor.resume(
-            ContextCollabResumeRequest(
-                collab_context_id=collab_context_id,
-                executor_id=executor.agent_id,
-                principal_id=collet.context_spec.principal_ref.principal_id,
-                todo_id=todo_ref.resource_id,
-                session_id=session_id,
-                message=message,
-                interaction_event_id=trigger.event_id,
-                executor_owner_id=collet.context_spec.executor_owner_id,
-                todo_execution_id=todo_execution_id,
-                todo_execution_token=todo_execution_token,
-                todo_runner_skill_md_path=todo_runner_skill_md_path,
-                group_id=group_id,
-            )
-        )
-        runtime_session_id = runtime_result.session_id or session_id
-        if runtime_session_id != session_id:
-            raise ContextCollabValidationError(
-                "Context executor returned a different session; refusing to resume"
-            )
-        runtime_group_id = runtime_result.group_id or group_id
-        if runtime_group_id != group_id:
-            raise ContextCollabValidationError(
-                "Context executor returned a different group; refusing to resume"
-            )
-        if group_id is None:
-            if previous_run_id is None:
-                raise ContextCollabValidationError(
-                    "collaboration context resume requires a previous runtime handle"
-                )
-            if not runtime_result.run_id:
-                raise ContextCollabValidationError(
-                    "direct Context resume returned no new run_id"
-                )
-            if runtime_result.run_id == previous_run_id:
-                raise ContextCollabValidationError(
-                    "direct Context resume returned the previous run_id"
-                )
-        elif runtime_result.run_id is not None:
-            raise ContextCollabValidationError(
-                "BCS Context resume returned an unexpected direct run_id"
-            )
-        executor_actor = PrincipalRef("bot", executor.agent_id)
-        started_payload = _runtime_handle_payload(
-            run_id=runtime_result.run_id,
-            group_id=runtime_group_id,
-            session_id=session_id,
-        )
-        started_payload.update(
-            {
-                "resumed": True,
-                "triggered_by_event_id": trigger.event_id,
-            }
-        )
-        accepted = self.append_event(
-            collab_context_id,
-            EventAppendCommand(
-                expected_version=collet.context_version,
-                event_kind="task.started",
-                primitive_type="Task",
-                actor_ref=executor_actor,
-                parent_event=collet.current_event_id,
-                visibility="workspace",
-                payload=started_payload,
-            ),
-            ActorContext(actor=executor_actor, source=context.source),
-        )
-        if accepted.current_status is None:
-            raise ContextCollabValidationError(
-                "collaboration context resume did not produce a current status"
-            )
-        if accepted.current_status != "in_progress":
-            raise ContextCollabValidationError(
-                "collaboration context resume did not produce status "
-                f"'in_progress', got {accepted.current_status!r}"
-            )
-        return ContextCollabRunResultDTO(
-            collab_context_id=collab_context_id,
-            run_id=runtime_result.run_id,
-            session_id=session_id,
-            context_version=accepted.context_version,
-            current_status=accepted.current_status,
-            group_id=runtime_group_id,
-        )
-
-    async def refresh_run(
-        self,
-        collab_context_id: str,
-        context: ActorContext,
-    ) -> ContextCollabStatusProjection:
-        """Project the executor's real run state into the Context lifecycle.
-
-        Runtime reads are side-effect free. Only a confirmed ``COMPLETED`` run
-        appends ``task.completed``; non-terminal and failed terminal states leave
-        the Context ``in_progress`` for later inspection or recovery.
-        """
-        status = self._repository.get_current_status(collab_context_id)
-        if status is None:
-            raise ContextCollabNotFoundError(
-                f"collaboration context {collab_context_id!r} not found"
-            )
-        collet = status.collet
-        snapshot = collet.current_snapshot
-        if snapshot is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot refresh without a current snapshot"
-            )
-        if snapshot.status == "done":
-            return self._project_status_record(
-                status, trunk_events=False, context=context
-            )
-        if snapshot.status != "in_progress":
-            raise ContextCollabValidationError(
-                "collaboration context can refresh only from status "
-                f"'in_progress', got {snapshot.status!r}"
-            )
-
-        started_event = next(
-            (
-                event
-                for event in reversed(status.events)
-                if event.event_kind == "task.started"
-            ),
-            None,
-        )
-        payload = started_event.payload if started_event is not None else None
-        run_id = (
-            _payload_identifier(payload, "run_id")
-            if isinstance(payload, dict)
-            else None
-        )
-        group_id = (
-            _payload_identifier(payload, "group_id")
-            if isinstance(payload, dict)
-            else None
-        )
-        session_id = (
-            _payload_identifier(payload, "session_id")
-            if isinstance(payload, dict)
-            else None
-        )
-        if bool(run_id) == bool(group_id):
-            raise ContextCollabValidationError(
-                "in_progress collaboration context requires a task.started event "
-                "with exactly one non-empty run_id or group_id"
-            )
-        if group_id and not session_id:
-            raise ContextCollabValidationError(
-                "in_progress BCS collaboration context requires task.started session_id"
-            )
-
-        runtime_status = await self._executor.get_run(
-            run_id,
-            group_id=group_id,
-            session_id=session_id,
-        )
-        if runtime_status.status in {"PENDING", "RUNNING"}:
-            return self._project_status_record(
-                status, trunk_events=False, context=context
-            )
-        if runtime_status.status != "COMPLETED":
-            logger.warning(
-                "Context executor run did not complete successfully: "
-                "collab_context_id=%s run_id=%s group_id=%s status=%s error=%r",
-                collab_context_id,
-                run_id,
-                group_id,
-                runtime_status.status,
-                runtime_status.error,
-            )
-            return self._project_status_record(
-                status, trunk_events=False, context=context
-            )
-
-        executor = collet.context_spec.executor_ref
-        if executor is None:
-            raise ContextCollabValidationError(
-                "collaboration context cannot complete without an executor_ref"
-            )
-        completion_payload = _runtime_handle_payload(
-            run_id=run_id,
-            group_id=group_id,
-            session_id=runtime_status.session_id or session_id,
-        )
-        if runtime_status.result is not None:
-            completion_payload["result"] = runtime_status.result
-        if runtime_status.completed_at is not None:
-            completion_payload["completed_at"] = runtime_status.completed_at
-        executor_actor = PrincipalRef("bot", executor.agent_id)
-        try:
-            self.append_event(
-                collab_context_id,
-                EventAppendCommand(
-                    expected_version=collet.context_version,
-                    event_kind="task.completed",
-                    primitive_type="Task",
-                    actor_ref=executor_actor,
-                    parent_event=collet.current_event_id,
-                    visibility="workspace",
-                    payload=completion_payload,
-                ),
-                ActorContext(actor=executor_actor, source=context.source),
-            )
-        except ContextCollabVersionConflict:
-            concurrent = self._repository.get_current_status(collab_context_id)
-            if (
-                concurrent is not None
-                and concurrent.collet.current_snapshot is not None
-                and concurrent.collet.current_snapshot.status == "done"
-            ):
-                return self._project_status_record(
-                    concurrent, trunk_events=False, context=context
-                )
-            raise
-
-        completed = self._repository.get_current_status(collab_context_id)
-        if completed is None:
-            raise ContextCollabNotFoundError(
-                f"collaboration context {collab_context_id!r} not found"
-            )
-        return self._project_status_record(
-            completed, trunk_events=False, context=context
-        )
-
     def get_status(
-        self,
-        collab_context_id: str,
-        *,
-        trunk_events: bool,
-        context: ActorContext,
-        include_event_payload: bool = False,
+        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
     ) -> ContextCollabStatusProjection:
-        """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。"""
+        """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。
+
+        Ruling R6/R9 / spec §12.2 #4:仓储全量返回事件(顺序即接纳
+        顺序),percent / 统计 / current_event 一律从完整可见事件推导;
+        ``trunk_events=True`` 只过滤返回的 ``task_progress.events[]``
+        条目 —— 主干链由 ``active_chain_ids``(current 沿 parent 回溯)
+        推导,过滤不改 current_snapshot / current_event / 统计。
+        visibility 过滤(G1)先于推导,统计与列表都只反映 actor 可见的
+        事件。返回的 ``current_snapshot`` 用 ``build_progress`` 的实时
+        投影替换落库 progress;``current_event`` 按 collet 行指针取投影
+        条目,指针事件不可见时为 ``None``。
+        """
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
-        return self._project_status_record(
-            status,
-            trunk_events=trunk_events,
-            context=context,
-            include_event_payload=include_event_payload,
-        )
-
-    def _project_status_record(
-        self,
-        status: ContextStatusRecord,
-        *,
-        trunk_events: bool,
-        context: ActorContext,
-        include_event_payload: bool = False,
-    ) -> ContextCollabStatusProjection:
-        """Build the read projection from one already-loaded aggregate record."""
         collet = status.collet
         visible_events = self._authorizer.filter_visible_events(
-            collet, status.events, context
+            collet, status.context_spec, status.events, context
         )
         # 投影始终基于全量可见事件,不因 trunk 开关退化;
         # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。
@@ -883,28 +410,26 @@ class ContextCollabService(ContextCollabServiceProtocol):
         # to_dict 返回全新嵌套 dict,替换 progress 不会写回 collet 行。
         snapshot = (
             None
-            if collet.current_snapshot is None
-            else collet.current_snapshot.to_dict()
+            if status.current_snapshot is None
+            else status.current_snapshot.to_dict()
         )
         if snapshot is not None:
             snapshot["progress"] = progress.to_dict()
         current_event = None
         for entry in projection:
             if entry.event_id == collet.current_event_id:
-                current_event = _event_projection_dict(
-                    entry, include_payload=include_event_payload
-                )
+                current_event = {
+                    **_event_projection_dict(entry),
+                    "occurred_at": entry.occurred_at,
+                }
                 break
         return ContextCollabStatusProjection(
-            collab_context_id=collet.collab_context_id,
-            context_version=collet.context_version,
+            collab_context_id=collet.collet_id,
+            context_version=collet.version,
             current_snapshot=snapshot,
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(
                 total_events=len(listed_projection),
-                events=[
-                    _event_projection_dict(entry, include_payload=include_event_payload)
-                    for entry in listed_projection
-                ],
+                events=[_event_projection_dict(entry) for entry in listed_projection],
             ),
         )
