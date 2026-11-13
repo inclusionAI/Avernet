@@ -184,7 +184,11 @@ claims, cross-tenant input, stale replay and invalid state.
 [Endpoint framework cases](../../../../../../../../tests/community/endpoints/test_task_commission_a2a_endpoints.py)
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-remains a service-level user journey, not a live Bot test.
+uses the product service for owner actions and a simulated working Bot through
+signed A2A HTTP for start/progress/submit. The Bot reports during local file
+generation and auto-submits only after successful execution; a failure case
+checks that no result is submitted. Open handles participation/admission; result
+submission is L4 Work. This is not a live Bot, gateway or artifact-upload test.
 
 Run from `apps/backend/`:
 

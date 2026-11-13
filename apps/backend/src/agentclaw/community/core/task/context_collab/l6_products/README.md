@@ -208,17 +208,21 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule` assembly and installed
 product catalog. Infrastructure wiring stays in its fixture; the test body
-receives only `TaskCommissionServiceProtocol`, supplies business commands and
-asserts product responses, list/detail views and the exposed activity history.
-It does not inspect ProductInstance/MethodStore, parse delivery envelopes or
-query SQL.
+uses `TaskCommissionServiceProtocol` for owner business commands and observations,
+and a simulated working Bot for execution. Product assertions use responses,
+list/detail views and the exposed activity history, not ProductInstance,
+MethodStore or SQL. The Bot harness constructs authenticated A2A requests.
 
 The journey is owner publication and discovery, simulated assignee start,
-progress and submission, then owner review and acceptance. The harness passes
-the published task ID to the simulated Bot; it does not claim that the Bot
-received an actual notification. Real product/repository services, the Open
-adapter and G1/G4 execute behind the API, using isolated SQLite and the default
-local `MockA2aDelivery`.
+proactive progress during local file generation, automatic result submission
+on successful return, then owner review and acceptance. A failed execution
+regression verifies that failure does not auto-submit. Bot reports traverse the
+real signed HTTP ingress and L4 Work actions; Open handles participation and
+admission, not result submission. The harness passes the published task to the
+simulated Bot and signs a local principal; it does not verify actual outbound
+notification receipt or gateway forwarding. Real product/repository services,
+the Open adapter and G1/G4 execute using isolated SQLite and the default local
+`MockA2aDelivery`.
 
 The separate [protocol/persistence integration suite](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py)
 retains pinned ProductInstance/role checks, the single Open binding,
@@ -241,10 +245,11 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
   tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py -q
 ```
 
-Both suites provide local service-level integration evidence, not HTTP
-authentication, live remote A2A, autonomous Bot/LLM execution, artifact upload,
-production-database behavior or durable MethodStore restart evidence. Artifact
-URIs are recorded references; the tests do not create or transfer files.
+The journey adds local HTTP/signature verification for simulated Bot reports;
+the protocol suite remains service-level integration. Neither verifies live
+remote A2A, autonomous Bot/LLM execution, artifact upload, production-database
+behavior or durable MethodStore restart. The journey creates a temporary local
+report file; its URI is submitted as a reference, not transferred or uploaded.
 
 Verification owners:
 
@@ -263,7 +268,7 @@ Verification owners:
 
 The [commission product boundary](../products/task_commission/README.md) now owns
 the bounded signed-Bot A2A ingress and its wire/example/operational limits. It
-adds HTTP authentication evidence beyond the two service-only suites above;
+adds broader HTTP authentication evidence alongside the simulated Bot journey;
 outbound delivery is still mock, not live remote execution.
 
 `WorkflowAction.required_role` is an optional additional L4 role restriction;
