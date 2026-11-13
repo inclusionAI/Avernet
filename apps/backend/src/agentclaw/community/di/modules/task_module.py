@@ -111,8 +111,12 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
     SwarmMethodOpsServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
-    LoggingTaskDispatch,
+    A2aTaskDispatch,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
@@ -386,8 +390,12 @@ class TaskModule(Module):
             TaskCommissionServiceProtocol, to=TaskCommissionService,
             scope=singleton,
         )
-        # 交办交付缝(P1 日志送达;P2 真实通道 L1/A2A 经同端口整体替换)。
-        binder.bind(TaskDispatchPort, to=LoggingTaskDispatch, scope=singleton)
+        # 交办交付缝经 L1 mock 送达(2026-11-13 L1 interoperate-deliver spec
+        # 裁决 B):envelope+A2aMessage 承载;P2 真实 A2A 由交付侧经
+        # A2aDeliveryPort 同端口整体替换,产品编排零改动。LoggingTaskDispatch
+        # 保留为直接构造默认,DJ 不再绑它。
+        binder.bind(A2aDeliveryPort, to=MockA2aDelivery, scope=singleton)
+        binder.bind(TaskDispatchPort, to=A2aTaskDispatch, scope=singleton)
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
         # 授权器与四个服务协议全部显式 singleton 绑定——python-injector
         # 不自动解析未绑定键;四服务共享上面同一 MethodStoreProtocol

@@ -97,6 +97,7 @@ def test_end_to_end_commission_flow():
     assert sent.title == "生成季度安全报告"
     assert sent.body == "汇总 Q3 安全事件,输出 Markdown 报告文件。"
     assert sent.assignee_agent_id == BOT_ASSIGNEE
+    assert sent.publisher_principal_id == "u_owner_001"
 
     # ── 3. bot(凭送达的信息)执行任务:开工 → 汇报进度 → 提交产物文件 ──
     started = service.start_task(_advance(collet_id), BOT)

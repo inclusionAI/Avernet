@@ -67,8 +67,12 @@ class DispatchedTaskInfo:
     title: str
     body: str
     assignee_agent_id: str
+    # 发起人身份链(裁决 G,ACCS-001 §5 规则 1):经 L1 桥出域时作为
+    # OperationContext.accountable_principal_ref 源。
+    publisher_principal_id: str
 
 
+@runtime_checkable
 class TaskDispatchPort(Protocol):
     """交办交付缝:真实通道 P2 经 L1/A2A 接管,同端口整体替换。"""
 

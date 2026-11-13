@@ -18,6 +18,7 @@ assert _PRODUCTS_SRC.is_dir(), f"products src tree missing: {_PRODUCTS_SRC}"
 _CC = "agentclaw.community.core.task.context_collab"
 # 层模块 + errors + 三处基建端口(spec §3.1 逐字)。
 _ALLOWED_CONTEXT_COLLAB_PARTS = {
+    "l1_interoperate_deliver",
     "l2_agent_network",
     "l3_spaces_resources",
     "l4_context_primitives",
@@ -51,6 +52,7 @@ def _violating_modules(modules: list[str]) -> list[str]:
     不覆盖 importlib/__import__ 动态导入(documented limitation)。
     """
     _layer_dirs = {
+        "l1_interoperate_deliver",
         "l2_agent_network", "l3_spaces_resources", "l4_context_primitives",
         "l5_methods", "l6_products", "g1_secure_govern",
         "g2_keep_reliable_live", "g3_observe_evaluate_evolve",

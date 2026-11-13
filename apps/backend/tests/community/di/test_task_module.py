@@ -57,11 +57,20 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    A2aTaskDispatch,
+    LoggingTaskDispatch,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskCommissionServiceProtocol,
+    TaskDispatchPort,
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
@@ -449,6 +458,21 @@ def test_task_module_binds_bbs_public_discussion_service_singleton():
     # 复用既有 singleton 依赖。
     assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
     assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_bridges_dispatch_to_l1_mock():
+    """L1 桥接(2026-11-13 L1 spec §5):TaskDispatchPort→A2aTaskDispatch,
+    共享 MockA2aDelivery singleton;真实 A2A P2 经同端口整体替换。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    delivery = inj.get(A2aDeliveryPort)
+    assert isinstance(delivery, MockA2aDelivery)
+    assert inj.get(A2aDeliveryPort) is delivery
+    dispatch = inj.get(TaskDispatchPort)
+    assert isinstance(dispatch, A2aTaskDispatch)
+    assert dispatch is inj.get(TaskDispatchPort)
+    assert dispatch is not LoggingTaskDispatch  # noqa: F632  # 退位仅存构造默认
 
 
 def test_task_module_binds_task_commission_service_singleton():

@@ -213,6 +213,7 @@ class TaskCommissionService:
                 title=title,
                 body=body,
                 assignee_agent_id=assignee,
+                publisher_principal_id=context.actor.principal_id,
             )
         )
         return view
