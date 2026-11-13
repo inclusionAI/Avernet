@@ -522,3 +522,27 @@ async def test_readiness_timeout_maps_to_failed_build() -> None:
     assert "readiness timed out" in result.message
     ext.update_status.assert_called_once()
     ext.commit_built_artifact.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_readiness_reads_inherit_external_tenant() -> None:
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope, get_current_avernet_tenant
+
+    runner, ext = _runner(_SimpleProducer())
+    bot = {
+        "id": 11, "bot_id": "b1", "owner_id": "u1", "binding_id": 12,
+        "active_engine": "claude_code", "device_binding": {
+            "device_id": "bot-uuid", "device_provider": "baas", "status": "ACTIVE", "device_props": {},
+        },
+    }
+    seen = []
+
+    def lookup(**kwargs):
+        seen.append(get_current_avernet_tenant())
+        return bot
+
+    runner._bot_service.get_bot_by_address.side_effect = lookup
+    ext.get_record.return_value = _record(status=PublishStatus.BUILDING.value)
+    runner._baas_service.exec_command_on_bot.return_value = {"exit_code": 0}
+    with avernet_tenant_scope("external-tenant"):
+        assert await runner._wait_for_draft_device(_record(status=PublishStatus.BUILDING.value), bot) == bot
+    assert seen == ["external-tenant"]

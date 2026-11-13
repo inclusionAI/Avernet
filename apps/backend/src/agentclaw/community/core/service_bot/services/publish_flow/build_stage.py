@@ -67,6 +67,7 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -102,7 +103,7 @@ async def _readiness_read(fn, *args, **kwargs):
             pass  # The timed-out request's event loop has already closed.
 
     try:
-        threading.Thread(target=run, name="draft-readiness", daemon=True).start()
+        threading.Thread(target=bind_current_avernet_tenant(run), name="draft-readiness", daemon=True).start()
     except Exception:
         _READINESS_SLOTS.release()
         raise
