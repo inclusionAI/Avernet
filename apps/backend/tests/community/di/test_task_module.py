@@ -472,7 +472,10 @@ def test_task_module_bridges_dispatch_to_l1_mock():
     dispatch = inj.get(TaskDispatchPort)
     assert isinstance(dispatch, A2aTaskDispatch)
     assert dispatch is inj.get(TaskDispatchPort)
-    assert dispatch is not LoggingTaskDispatch  # noqa: F632  # 退位仅存构造默认
+    # 退位的日志实现不再被解析(DI 换绑生效,而非恒真否定)。
+    assert not isinstance(dispatch, LoggingTaskDispatch)
+    # 桥实现共享同一个 L1 mock singleton。
+    assert dispatch._delivery is delivery  # noqa: SLF001
 
 
 def test_task_module_binds_task_commission_service_singleton():

@@ -13,6 +13,9 @@ import logging
 
 from injector import inject
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.a2a_wire import (
     A2aMessage,
 )
@@ -113,10 +116,16 @@ class A2aTaskDispatch(TaskDispatchPort):
             }
         )
         result = self._delivery.send_message(card, message, envelope)
-        if result.error is not None:
+        # 失败如实上抛:status 语义位(REJECTED/FAILED)与 error 任一出现
+        # 即拒——协议严格面允许"无 error 的 REJECTED",不得静默吞。
+        if result.status in {"REJECTED", "FAILED"} or result.error is not None:
+            detail = (
+                f"{result.error.code} ({result.error.category})"
+                if result.error is not None
+                else "no error attached"
+            )
             raise ContextCollabValidationError(
-                f"task dispatch rejected: {result.error.code} "
-                f"({result.error.category})"
+                f"task dispatch rejected: {result.status} — {detail}"
             )
 
 

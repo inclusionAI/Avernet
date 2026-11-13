@@ -141,3 +141,17 @@ class TestIdempotencyAndAudit:
         assert isinstance(snapshot, tuple)
         delivery.send_message(_card(), _message("msg_2"), _envelope("op_2"))
         assert len(snapshot) == 1  # 快照不随后续写入变化
+
+
+class TestPayloadlessEnvelope:
+    def test_payloadless_envelope_write_path_survives(self):
+        """payload 可选(ACCS-001 §6);None 是合法输入,写路径不得崩
+        (评审 Critical#1)。"""
+        delivery = MockA2aDelivery()
+        envelope = _envelope()  # 默认 payload {content}
+        stripped = AccsOperationEnvelope.from_dict(
+            {**envelope.to_dict(), "payload": None}
+        )
+        result = delivery.send_message(_card(), _message("msg_pl"), stripped)
+        assert result.status == "ACCEPTED"
+        assert delivery.bridge_records()[-1].content_digest is None

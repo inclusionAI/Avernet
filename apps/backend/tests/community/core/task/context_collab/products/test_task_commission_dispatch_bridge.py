@@ -9,6 +9,8 @@
 - DI 全链:TaskDispatchPort 解析为 A2aTaskDispatch 且共享 mock singleton。
 """
 
+import pytest
+
 from injector import Injector
 
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
@@ -113,3 +115,111 @@ def test_a2a_task_dispatch_implements_port():
 
 def test_local_issuer_constant_is_stable():
     assert isinstance(LOCAL_ISSUER, str) and LOCAL_ISSUER.strip()
+
+
+class _RejectingDelivery(MockA2aDelivery):
+    """拒绝型交付:回执 REJECTED 且不带 error(协议严格面允许的组合)。"""
+
+    def send_message(self, card, message, envelope):
+        from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.envelope import (
+            AccsOperationResult,
+        )
+
+        return AccsOperationResult.from_dict(
+            {
+                "operation_ref": {
+                    "object_type": "Operation",
+                    "object_id": envelope.operation_id,
+                    "version": None,
+                    "issuer": None,
+                },
+                "status": "REJECTED",
+                "result_refs": [],
+                "event_refs": [],
+                "error": None,
+            }
+        )
+
+
+class _CapturingDelivery(MockA2aDelivery):
+    """捕获型:messenger 原样在案,供身份链断言还原 envelope。"""
+
+    def __init__(self):
+        super().__init__()
+        self.sent: list[tuple] = []
+
+    def send_message(self, card, message, envelope):
+        self.sent.append((card, message, envelope))
+        return super().send_message(card, message, envelope)
+
+
+class TestDispatchFailurePropagation:
+    def test_rejected_result_raises_semantic_error(self):
+        """spec §5 失败如实上抛:REJECTED 无 error 也必须以
+        ContextCollabValidationError 冒出(评审 Critical#2+Important#4;
+        NameError/静默吞都是违约)。"""
+        from agentclaw.community.core.task.context_collab.errors import (
+            ContextCollabValidationError,
+        )
+
+        service = TaskCommissionService(
+            collab_repo=_FakeRepo(),
+            authorizer=StructuralContextCollabAuthorizer(),
+            method_store=InMemoryMethodStore(),
+            dispatch_port=A2aTaskDispatch(a2a_delivery=_RejectingDelivery()),
+        )
+        with pytest.raises(ContextCollabValidationError, match="dispatch"):
+            _publish(service)
+
+
+class TestEnvelopeIdentityChainAsserted:
+    """还原 ENVELOPE part 并断言身份链与形态——补齐名实不符的
+    Review Focus 断言面(评审 Important#3)。"""
+
+    def test_bridge_envelope_identity_chain_and_shape(self):
+        from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.envelope import (
+            AccsOperationEnvelope,
+        )
+
+        mock = _CapturingDelivery()
+        service = TaskCommissionService(
+            collab_repo=_FakeRepo(),
+            authorizer=StructuralContextCollabAuthorizer(),
+            method_store=InMemoryMethodStore(),
+            dispatch_port=A2aTaskDispatch(a2a_delivery=mock),
+        )
+        created = _publish(service)
+
+        assert len(mock.sent) == 1
+        card, message, envelope = mock.sent[0]
+        assert card.agent_id == "bot_writer_001"
+        # wire 侧 envelope 与消息内 part 承载逐字一致。
+        part = message.parts[0]
+        assert part.part_kind == "ENVELOPE"
+        restored = AccsOperationEnvelope.from_dict(part.body)
+        assert restored == envelope
+        # 身份链(裁决 G,ACCS-001 §5 规则 1)。
+        assert envelope.context.caller.identity_type == "AGENT"
+        assert envelope.context.caller.identity_id.startswith(
+            "avernet-task-commission-dispatcher"
+        )
+        assert (
+            envelope.context.accountable_principal_ref.identity_type
+            == "PRINCIPAL"
+        )
+        assert (
+            envelope.context.accountable_principal_ref.identity_id
+            == "u_owner_001"
+        )
+        # 形态(spec §7):L4/message/publish/EVENT、target=Collet、payload 三件。
+        assert envelope.layer == "L4"
+        assert envelope.operation_family == "message"
+        assert envelope.action == "publish"
+        assert envelope.mode == "EVENT"
+        assert envelope.target_ref.object_type == "Collet"
+        assert envelope.target_ref.object_id == created.collet_id
+        assert envelope.payload == {
+            "title": "生成报告",
+            "body": "任务正文。",
+            "assignee_agent_id": "bot_writer_001",
+        }

@@ -309,3 +309,20 @@ class TestBridge:
             A2ABridgeRecord.from_dict({**body, "a2a_object_type": "TELEGRAM"})
         with pytest.raises(ContextCollabValidationError):
             A2ABridgeRecord.from_dict({**body, "direction": "SIDEWAYS"})
+
+
+class TestAccsErrorDetails:
+    def test_details_optional_field_roundtrip(self):
+        """ACCS-001 §9 逐字含 details 可选字段(评审 Important#5)。"""
+        body = {
+            "code": "E1",
+            "message": "x",
+            "retryable": False,
+            "category": "INTERNAL",
+            "trace_id": "t1",
+            "object_ref": None,
+            "details": {"hint": "boom"},
+        }
+        err = AccsError.from_dict(body)
+        assert err.details == {"hint": "boom"}
+        assert AccsError.from_dict(err.to_dict()) == err

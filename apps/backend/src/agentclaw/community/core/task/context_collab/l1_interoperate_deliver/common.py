@@ -314,9 +314,11 @@ class AccsError:
     code: str
     message: str
     retryable: bool
-    category: str  # 九值闭包,见 _CATEGORIES
+    category: str  # 九值闭包,见 _ERROR_CATEGORIES
     trace_id: str
     object_ref: ObjectRef | None
+    # 可选细节(ACCS-001 §9 逐字):真实 wire 错误常携带的结构化补充。
+    details: dict[str, Any] | None
 
     _CATEGORIES = frozenset({
         "VALIDATION", "AUTHENTICATION", "AUTHORIZATION", "CONFLICT",
@@ -327,7 +329,7 @@ class AccsError:
     def from_dict(cls, data: dict) -> "AccsError":
         _required_keys(data, "AccsError", frozenset({
             "code", "message", "retryable", "category", "trace_id",
-            "object_ref",
+            "object_ref", "details",
         }))
         retryable = data.get("retryable")
         if not isinstance(retryable, bool):
@@ -335,6 +337,11 @@ class AccsError:
                 f"AccsError.retryable must be a boolean, got: {retryable!r}"
             )
         object_ref = data.get("object_ref")
+        details = data.get("details")
+        if details is not None and not isinstance(details, dict):
+            raise ContextCollabValidationError(
+                f"AccsError.details must be an object or null, got: {details!r}"
+            )
         return cls(
             code=_required_str(data, "code", "AccsError"),
             message=_required_str(data, "message", "AccsError"),
@@ -349,6 +356,9 @@ class AccsError:
                 if object_ref is not None
                 else None
             ),
+            details=(
+                dict(details) if details is not None else None
+            ),
         )
 
     def to_dict(self) -> dict:
@@ -362,6 +372,9 @@ class AccsError:
                 self.object_ref.to_dict()
                 if self.object_ref is not None
                 else None
+            ),
+            "details": (
+                dict(self.details) if self.details is not None else None
             ),
         }
 

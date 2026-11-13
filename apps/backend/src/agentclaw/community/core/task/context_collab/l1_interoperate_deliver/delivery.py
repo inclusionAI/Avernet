@@ -76,9 +76,11 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _content_digest(payload) -> str:
+def _content_digest(payload) -> str | None:
+    """payload 可选(ACCS-001 §6):``None`` 是合法输入,digest 亦为 None
+    (桥记录的可空字段),不得以空串喂给严格解码桥。"""
     if payload is None:
-        return ""
+        return None
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
