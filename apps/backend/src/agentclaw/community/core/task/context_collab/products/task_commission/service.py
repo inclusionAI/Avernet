@@ -333,6 +333,11 @@ class TaskCommissionService:
             visibility=intent.visibility,
             payload=intent.payload,
         )
+        # G1 先于机器守卫(spec §5.2 权威管线,与通用服务同序):授权话术
+        # 不把 rule_id/守卫内幕泄露给本应最先拒掉的陌生 actor。
+        self._authorizer.check_append(
+            record.collet, record.context_spec, intent, context
+        )
         # 机器是唯一 status 裁决者:守卫 FAIL 在此响亮冒出(如无 artifacts
         # 提交);快照推进非恒等(区别于公开讨论的 J' 恒等)。
         resolved = resolve_workflow_status(
@@ -342,9 +347,6 @@ class TaskCommissionService:
             event_kind=event_kind,
             payload=payload,
             actor=context.actor,
-        )
-        self._authorizer.check_append(
-            record.collet, record.context_spec, intent, context
         )
 
         def _advance_snapshot(
