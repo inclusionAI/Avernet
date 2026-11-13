@@ -5,6 +5,8 @@ from typing import Literal
 from agentclaw.community.adapters.http.knowledge_management.content_schemas import (
     AutoSync,
     YuqueImport,
+    YuqueBookImport,
+    YuqueBookCancel,
 )
 from agentclaw.community.adapters.http.knowledge_management.dependencies import (
     context,
@@ -121,6 +123,68 @@ async def yuque_docs(
 @router.post("/yuque/import")
 async def yuque_import(body: YuqueImport, ctx=Depends(context)):
     return await ctx.call("import_yuque", body=body.model_dump(exclude_none=True))
+
+
+@router.get("/yuque/books")
+async def yuque_books(
+    q: str = Query("", max_length=256),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ctx=Depends(context),
+):
+    return await ctx.call("yuque_books", query=q, offset=offset, limit=limit)
+
+
+@router.get("/yuque/book-imports")
+async def book_imports(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ctx=Depends(context),
+):
+    return await ctx.call("book_imports", offset=offset, limit=limit)
+
+
+@router.post("/yuque/book-imports")
+async def import_book(body: YuqueBookImport, ctx=Depends(context)):
+    return await ctx.call("import_book", body=body.model_dump())
+
+
+@router.get("/yuque/book-imports/{source_id}")
+async def book_import(source_id: str, ctx=Depends(context)):
+    return await ctx.call("book_import", source_id=segment(source_id))
+
+
+@router.post("/yuque/book-imports/{source_id}/cancel")
+async def cancel_book_import(
+    source_id: str, body: YuqueBookCancel, ctx=Depends(context)
+):
+    return await ctx.call(
+        "cancel_book_import", source_id=segment(source_id), body=body.model_dump()
+    )
+
+
+@router.post("/yuque/book-imports/{source_id}/sync")
+async def sync_book(source_id: str, ctx=Depends(context)):
+    return await ctx.call("sync_book", source_id=segment(source_id))
+
+
+@router.get("/yuque/book-imports/{source_id}/sync-runs/{run_id}")
+async def book_sync_run(source_id: str, run_id: str, ctx=Depends(context)):
+    return await ctx.call(
+        "book_sync_run", source_id=segment(source_id), run_id=segment(run_id)
+    )
+
+
+@router.get("/yuque/book-imports/{source_id}/auto-sync")
+async def get_book_schedule(source_id: str, ctx=Depends(context)):
+    return await ctx.call("get_book_schedule", source_id=segment(source_id))
+
+
+@router.put("/yuque/book-imports/{source_id}/auto-sync")
+async def put_book_schedule(source_id: str, body: AutoSync, ctx=Depends(context)):
+    return await ctx.call(
+        "put_book_schedule", source_id=segment(source_id), body=body.model_dump()
+    )
 
 
 @router.post("/sources/{source_id}/sync")

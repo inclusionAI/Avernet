@@ -134,6 +134,89 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
             body={**body, "kb_id": kb_id},
         )
 
+    async def yuque_books(
+        self, *, kb_id: str, access: ContentAccess, query: str, offset: int, limit: int
+    ):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, "/yuque/books"),
+            headers=access.credentials,
+            params={"q": query, "offset": offset, "limit": limit},
+        )
+
+    async def book_imports(
+        self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
+    ):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, "/yuque/book-imports"),
+            headers=access.credentials,
+            params={"offset": offset, "limit": limit},
+        )
+
+    async def import_book(self, *, kb_id: str, access: ContentAccess, body: dict):
+        return await self.client.call(
+            "POST",
+            self.path(kb_id, "/yuque/book-imports"),
+            headers=access.credentials,
+            body=body,
+        )
+
+    async def book_import(self, *, kb_id: str, access: ContentAccess, source_id: str):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}"),
+            headers=access.credentials,
+        )
+
+    async def cancel_book_import(
+        self, *, kb_id: str, access: ContentAccess, source_id: str, body: dict
+    ):
+        return await self.client.call(
+            "POST",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}/cancel"),
+            headers=access.credentials,
+            body=body,
+        )
+
+    async def sync_book(self, *, kb_id: str, access: ContentAccess, source_id: str):
+        return await self.client.call(
+            "POST",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}/sync"),
+            headers=access.credentials,
+        )
+
+    async def book_sync_run(
+        self, *, kb_id: str, access: ContentAccess, source_id: str, run_id: str
+    ):
+        return await self.client.call(
+            "GET",
+            self.path(
+                kb_id,
+                f"/yuque/book-imports/{segment(source_id)}/sync-runs/{segment(run_id)}",
+            ),
+            headers=access.credentials,
+        )
+
+    async def get_book_schedule(
+        self, *, kb_id: str, access: ContentAccess, source_id: str
+    ):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}/auto-sync"),
+            headers=access.credentials,
+        )
+
+    async def put_book_schedule(
+        self, *, kb_id: str, access: ContentAccess, source_id: str, body: dict
+    ):
+        return await self.client.call(
+            "PUT",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}/auto-sync"),
+            headers=access.credentials,
+            body=body,
+        )
+
     async def sync(self, *, kb_id: str, source_id: str, access: ContentAccess):
         metadata = await self.source(kb_id=kb_id, source_id=source_id, access=access)
         if metadata.status != 200:

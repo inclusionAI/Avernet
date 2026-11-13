@@ -3,7 +3,7 @@
 from typing import Literal
 
 from agentclaw.community.adapters.http.knowledge_management.schemas import StrictBody
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 
 
 class YuqueItem(StrictBody):
@@ -35,3 +35,11 @@ class AutoSync(StrictBody):
     enabled: bool
     expected_version: int = Field(ge=0)
     schedule: Calendar | None = None
+
+
+class YuqueBookImport(StrictBody):
+    book_id: StrictInt = Field(gt=0)
+
+
+class YuqueBookCancel(StrictBody):
+    task_id: StrictInt = Field(gt=0)

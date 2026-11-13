@@ -75,7 +75,7 @@ class EcbKnowledgeClient:
                     headers={"Accept-Encoding": "identity"},
                     timeout=min(3, remaining),
                 ) as response:
-                    if response.status_code in {400, 403, 404, 409, 410}:
+                    if response.status_code in {400, 403, 404, 409, 410, 412, 422}:
                         raise KnowledgeError(
                             "KNOWLEDGE_REMOTE_REJECTED", response.status_code
                         )
@@ -204,6 +204,8 @@ class RemoteKnowledgeCatalog:
                 404: "KNOWLEDGE_REMOTE_NOT_FOUND",
                 409: "KNOWLEDGE_REMOTE_CONFLICT",
                 410: "KNOWLEDGE_REMOTE_RETIRED",
+                412: "KNOWLEDGE_REMOTE_PRECONDITION",
+                422: "KNOWLEDGE_REMOTE_INVALID_INPUT",
             }
             code = (
                 codes.get(exc.status, exc.code)
