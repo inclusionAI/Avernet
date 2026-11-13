@@ -7,7 +7,7 @@ import math
 from time import monotonic
 from uuid import uuid4
 
-from search_core.api.index_builds import IndexBuildConflict
+from search_core.api.index_builds import UNSET_MAPPING, IndexBuildConflict
 from search_core.config.index_builds import IndexBuildConfig
 from search_core.plugin_api.index_builds import IndexBuildRepository, IndexBuildSource
 
@@ -38,14 +38,25 @@ class IndexBuildService:
         self.conversion_version = conversion_version
 
     def create(
-        self, build_id, model, dimension, *, filter_fields=None, document_mapping=None
+        self,
+        build_id,
+        model,
+        dimension,
+        *,
+        filter_fields=None,
+        document_mapping=UNSET_MAPPING,
     ):
         # Retrying an existing version must not pick up changed deployment defaults.
-        if filter_fields is None:
+        if filter_fields is None or document_mapping is UNSET_MAPPING:
             previous = self.builds.get(build_id)
-            filter_fields = (
-                previous.config.filter_fields if previous else self.filter_fields
-            )
+            if filter_fields is None:
+                filter_fields = (
+                    previous.config.filter_fields if previous else self.filter_fields
+                )
+            if document_mapping is UNSET_MAPPING:
+                document_mapping = (
+                    previous.config.document_mapping if previous else None
+                )
         return self.builds.create(
             IndexBuildConfig(
                 build_id=build_id,
