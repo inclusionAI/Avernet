@@ -1,0 +1,506 @@
+docs/specs/2026-11-11-task-panel-shared-asset/research.md
+  s_2b26d456bc46f8::t_db77530dd5745a 69
+  s_2b26d456bc46f8::t_69e59c40d63c5b 77-81
+  s_2b26d456bc46f8::t_b2c40f1b05b507 1-68,70-76
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAssetBoundary.tsx
+  s_2b26d456bc46f8::t_c8347bb36be780 5-14,16-21,23-61
+  s_2b26d456bc46f8::t_576ccfe7fcba3e 2-4,15,22,62
+  s_2b26d456bc46f8::t_b6d7092f2c54fb 1,63-65
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupTaskRecoveryEntry.test.tsx
+  s_2b26d456bc46f8::t_a736c78784c0f8 1-6,8-23
+  s_2b26d456bc46f8::t_65ddfbb4cd5e6f 7
+apps/frontend-nextgen/src/components/Workspace/TaskPanelHost.tsx
+  s_2b26d456bc46f8::t_2dca04bd03c5e1 6,16,22,35
+  s_2b26d456bc46f8::t_c8347bb36be780 2-3,5,7-15,17-21,23-34
+  s_2b26d456bc46f8::t_2e203a4d34ecfb 1,4,36
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/ExpertDetails.tsx
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1
+apps/frontend-nextgen/src/pages/Lab/Tasks/TaskArtifactsDrawer.tsx
+  s_2b26d456bc46f8::t_576ccfe7fcba3e 1
+  s_2b26d456bc46f8::t_927f9c61dccc95 35-43
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 111
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelConversationAdapter.ts
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 7-23,25-31,42-44,48-49,55
+  s_10bf1e6587c582::t_12ebc162086faf 24,45
+  s_2b26d456bc46f8::t_90ea4c483b4a61 2-3,6,32-41,46,50,53-54,56-59
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  s_2b26d456bc46f8::t_657fc270023fe5 12-15
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetLoader.ts
+  s_2b26d456bc46f8::t_84d7c9e6de9ba7 5
+  s_2b26d456bc46f8::t_2dca04bd03c5e1 1-2,19-24,26-27,29,33,35,68-70
+  s_2b26d456bc46f8::t_8228416d8cff1d 28,30-32,34,36-44,46-67
+  s_2b26d456bc46f8::t_7489bade2da099 3-4,6-18,25,45
+apps/frontend-nextgen/assets/task-panel/scripts/check-boundaries.mjs
+  s_2b26d456bc46f8::t_efd14206f365c6 1-50
+apps/frontend-nextgen/src/domain/tasks/taskSession.ts
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1-6
+apps/frontend-nextgen/src/components/Workspace/TaskLinkedSession.tsx
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 2
+  s_2b26d456bc46f8::t_576ccfe7fcba3e 1,51,60
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  s_2b26d456bc46f8::t_2bd577f0534d4e 1-3,5-7,9-13,16-20,23-42
+  s_2b26d456bc46f8::t_84d7c9e6de9ba7 4,8,14-15
+  s_2b26d456bc46f8::t_e17fae4d6c137c 21-22
+apps/frontend-nextgen/jest.config.cjs
+  s_2b26d456bc46f8::t_db77530dd5745a 13
+  s_2b26d456bc46f8::t_fd34fbed8ff6f4 10-12
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHandleAdapter.ts
+  s_2b26d456bc46f8::t_0e9bbf564a1880 60
+  s_2b26d456bc46f8::t_f98308cac8ea06 1-2,4-5,7-11,14-18,20-42,44-52,54-59,61,63-64
+apps/frontend-nextgen/src/components/Common/RichContent/SafeHtml.tsx
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1-164
+apps/frontend-nextgen/src/hooks/useSharedTaskPanelRecovery.ts
+  s_2b26d456bc46f8::t_b68dfb96ca3a6f 2,6-20,24,29,32,43-44,69
+  s_10bf1e6587c582::t_12ebc162086faf 28,33-34,37,48
+  s_2b26d456bc46f8::t_18c329640ebfe5 38-39,41,52,54-55
+  s_2b26d456bc46f8::t_9528ba5aa65b9a 25-27,53
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 35,40,42
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 4-5
+  s_2b26d456bc46f8::t_c178503842471a 30-31
+  s_2b26d456bc46f8::t_9a7bcbb02358ff 1,3,21-23,36,45-47,49-51,56-68
+apps/frontend-nextgen/test/helpers/taskPanelHost.tsx
+  s_2b26d456bc46f8::t_e47d405ccfe031 2,9
+  s_2b26d456bc46f8::t_657fc270023fe5 7-8,10-12
+  s_2b26d456bc46f8::t_54d8b25ab54141 1,3-6
+apps/frontend-nextgen/src/extensions/empty.ts
+  s_2b26d456bc46f8::t_e778fb47282c85 24,45,61
+  s_10bf1e6587c582::t_dcbaec647627cd 1-2
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  s_2b26d456bc46f8::t_4af822d7c4af14 31,59-60,66
+  s_2b26d456bc46f8::t_e47d405ccfe031 30
+  s_2b26d456bc46f8::t_accf678b2de13d 44,56-58,67-70,378,439,553-561
+  s_2b26d456bc46f8::t_0e9bbf564a1880 61,237,340
+  s_2b26d456bc46f8::t_e6bf1e7e8e19e6 7,19-29,32-43,45-55,62-65,71-76,137,562-567
+.github/workflows/frontend-nextgen.yml
+  s_2b26d456bc46f8::t_db77530dd5745a 54,57-62,66
+  s_2b26d456bc46f8::t_7b41614e9415b8 52-53,63-65,67-68
+apps/frontend-nextgen/assets/task-panel/scripts/check-release-ref.mjs
+  s_2b26d456bc46f8::t_40e9daed6b268a 1-11
+  s_2b26d456bc46f8::t_e3167d32970473 12
+apps/frontend-nextgen/test/components/Workspace/ChatLayoutPanelSlot.test.tsx
+  s_2b26d456bc46f8::t_0e9bbf564a1880 268,287,290,319,405
+  s_2b26d456bc46f8::t_657fc270023fe5 26-31,36,652
+  s_2b26d456bc46f8::t_a953e756e9b58a 634-651
+apps/frontend-nextgen/test/pages/Lab/TaskArtifactsDrawer.test.tsx
+  s_2b26d456bc46f8::t_064059691af46b 1-40
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  s_2b26d456bc46f8::t_e490256432c489 7,92,99
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 2
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 6,90,96-98,100-102
+apps/frontend-nextgen/src/components/Common/RichContent/index.ts
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1-2
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.switcher.test.ts
+  s_2b26d456bc46f8::t_efd14206f365c6 9
+  s_2b26d456bc46f8::t_951413ea6d5072 1-8,10-28
+apps/frontend-nextgen/test/components/Workspace/TaskLinkedSession.test.tsx
+  s_2b26d456bc46f8::t_657fc270023fe5 13-16
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHistoryAdapter.ts
+  s_2b26d456bc46f8::t_b68dfb96ca3a6f 1-2,4-29
+  s_2b26d456bc46f8::t_ae7ab75bb5ed4f 3
+apps/frontend-nextgen/test/components/ui/SafeHtml.test.tsx
+  s_2b26d456bc46f8::t_658eb3bdc711f0 2
+  s_2b26d456bc46f8::t_f16213a6b86b00 108-124
+  s_2b26d456bc46f8::t_86c7e42ba1b6cb 125
+docs/specs/2026-11-11-task-panel-shared-asset/test-migration-map.json
+  s_2b26d456bc46f8::t_3b1b92a7b4eb7a 1-4,6-25,27-32,34-39,41-46,48-74,76-81,83-88,90-95,97-102,104-109,111-116,118-123,125-130,132-137,139-144,146-158,160-165,167-172,174-179,181-186,188-193,195-200,203-208,210-229,231-236,238-243,245-257,259-264,266-278,280-292,294-306,308-313,315-320,322-325
+  s_2b26d456bc46f8::t_db77530dd5745a 5,26,33,40,47,75,82,89,96,103,110,117,124,131,138,145,159,166,173,180,187,194,201-202,209,230,237,244,258,265,279,293,307,314,321
+apps/frontend-nextgen/test/helpers/taskPanelRuntime.ts
+  s_2b26d456bc46f8::t_accf678b2de13d 3,22-23,30,34-35
+  s_2b26d456bc46f8::t_e47d405ccfe031 1,4
+  s_2b26d456bc46f8::t_657fc270023fe5 5-21,31-33,38-41
+  s_2b26d456bc46f8::t_0e9bbf564a1880 24
+  s_2b26d456bc46f8::t_fe5e9c2e3362a0 2,25-29,36-37
+apps/frontend-nextgen/test/components/Workspace/TaskPanelHost.test.tsx
+  s_2b26d456bc46f8::t_62a02a6136af51 26,101,137
+  s_2b26d456bc46f8::t_cc54848bc10ea7 42-100,110,125,147
+  s_2b26d456bc46f8::t_7af621f74a8005 1-25,27-41,102-109,111-124,126-136,138-146,148-160
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelShell.css
+  s_2b26d456bc46f8::t_ed9863322d74b7 1-8
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityDetailDrawer.tsx
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1-2
+apps/frontend-nextgen/src/stores/taskSidePanelStoreTypes.ts
+  s_2b26d456bc46f8::t_0e9bbf564a1880 1
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAssetBoundary.test.tsx
+  s_2b26d456bc46f8::t_8d87b5e3372a92 12-13
+  s_2b26d456bc46f8::t_7ae063f85a1280 59
+  s_2b26d456bc46f8::t_126612c9ccf6a0 1-11,14-58,60-161
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.test.ts
+  s_2b26d456bc46f8::t_688b70ab269703 127-135
+apps/frontend-nextgen/config/config.local.ts
+  s_2b26d456bc46f8::t_84d7c9e6de9ba7 38-39,66
+apps/frontend-nextgen/assets/task-panel/test/release.test.ts
+  s_2b26d456bc46f8::t_db77530dd5745a 1-26
+apps/frontend-nextgen/assets/task-panel/test/release-ref.test.ts
+  s_2b26d456bc46f8::t_40e9daed6b268a 27-29
+  s_2b26d456bc46f8::t_c777b77708d291 1-26,30-44
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/sessionFileMarkdown.ts
+  s_2b26d456bc46f8::t_e778fb47282c85 1
+  s_2b26d456bc46f8::t_607f3bc8d68f3f 3
+apps/frontend-nextgen/assets/task-panel/test/umd-contract.mjs
+  s_2b26d456bc46f8::t_f28f2c98db634d 1-35
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelArtifactAdapter.ts
+  s_2b26d456bc46f8::t_2dca04bd03c5e1 4,6,11-18,20,25-28,39-40,42-43
+  s_2b26d456bc46f8::t_ad7822311e164f 1,7-10,21-24,29-34,36-38
+  s_2b26d456bc46f8::t_59caee207c1065 2-3,5,19,35,41
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 1-2,50,102-104,174-175
+  s_2b26d456bc46f8::t_e490256432c489 105
+  s_2b26d456bc46f8::t_7977368396c6df 180,193
+docs/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_2b26d456bc46f8::t_ed6d7de97829fd 10,371-387
+  s_2b26d456bc46f8::t_3637c93d96f0f5 47,330-333
+  s_2b26d456bc46f8::t_db77530dd5745a 25,71-241,302-315
+  s_2b26d456bc46f8::t_3f53f27dcc6b35 362-370
+  s_2b26d456bc46f8::t_2905b0b8b1efca 388-396
+  s_2b26d456bc46f8::t_5152c224b83036 17,66
+  s_2b26d456bc46f8::t_9f012949509432 334-354
+  s_2b26d456bc46f8::t_4e919f4b84228c 355-361
+  s_2b26d456bc46f8::t_f278333402c416 258-264
+  s_2b26d456bc46f8::t_58e4d975b6e26f 1-9,11-16,18-24,26-46,48-65,67-70,242-257,265-301,316-329
+apps/frontend-nextgen/test/userFacingTerminology.test.ts
+  s_2b26d456bc46f8::t_e778fb47282c85 9
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  s_2b26d456bc46f8::t_0e9bbf564a1880 2,4,6,8-10,12,37
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_2b26d456bc46f8::t_ed9863322d74b7 66,72-73,119-120,276-277,280
+  s_2b26d456bc46f8::t_e581e5d1f0f26c 1-3
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  s_10bf1e6587c582::t_4e9909eac7bb76 2-4
+  s_2b26d456bc46f8::t_0e9bbf564a1880 172,175-184
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  s_2b26d456bc46f8::t_e490256432c489 111
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 1,110,149
+  s_2b26d456bc46f8::t_8d87b5e3372a92 148
+  s_2b26d456bc46f8::t_b9fb25cb773639 153,166
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  s_2b26d456bc46f8::t_0e9bbf564a1880 250
+apps/frontend-nextgen/test/integration/taskPanel/useTaskExecution.presentation.test.tsx
+  s_2b26d456bc46f8::t_e47d405ccfe031 8-16
+  s_2b26d456bc46f8::t_67781199acc2f0 1-7,17-64
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_2b26d456bc46f8::t_db77530dd5745a 8-13
+apps/frontend-nextgen/src/components/Common/RichContent/sanitizeHtml.ts
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 1,3-5,7,9-52,55-56,58-63
+  s_2b26d456bc46f8::t_0274192b9ff10c 2,6,8,53-54,57,64
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAdapter.tsx
+  s_2b26d456bc46f8::t_cf3e8d93f90fd9 59
+  s_2b26d456bc46f8::t_8d87b5e3372a92 15,44
+  s_2b26d456bc46f8::t_a64d8a0768ae7c 13,16
+  s_2b26d456bc46f8::t_a5191e34d968cb 12,14,57,66
+.github/workflows/publish-task-panel.yml
+  s_2b26d456bc46f8::t_40e9daed6b268a 38
+  s_2b26d456bc46f8::t_db77530dd5745a 23
+  s_2b26d456bc46f8::t_232c1ccb39597e 1-22,24-37,39-59
+docs/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_2b26d456bc46f8::t_3f53f27dcc6b35 208,210-213,215
+  s_2b26d456bc46f8::t_94569fc0d3f678 236-245
+  s_2b26d456bc46f8::t_222d92d38ac268 209,214
+  s_2b26d456bc46f8::t_d6d518802da200 229,234
+  s_2b26d456bc46f8::t_69e59c40d63c5b 10,44-133
+  s_2b26d456bc46f8::t_b2c40f1b05b507 12,19-25,30-37,157
+  s_2b26d456bc46f8::t_4e919f4b84228c 136-139,196-207
+  s_2b26d456bc46f8::t_42e923151b38f5 176-184
+  s_2b26d456bc46f8::t_3b1b92a7b4eb7a 160,164-173
+  s_2b26d456bc46f8::t_05ae6ebf489a89 158-159,161-163
+  s_2b26d456bc46f8::t_d28451339f6a4e 185-189,194-195
+  s_2b26d456bc46f8::t_9f012949509432 190-193
+  s_2b26d456bc46f8::t_db77530dd5745a 18,28,40
+  s_2b26d456bc46f8::t_ed6d7de97829fd 216-217,219-224,226
+  s_2b26d456bc46f8::t_2905b0b8b1efca 218,225,227-228,230-233,235
+  s_2b26d456bc46f8::t_7a2cf695c56f09 1-9,11,13-17,26-27,29,38-39,41-43,134-135,140-156,174-175
+apps/frontend-nextgen/test/integration/taskPanel/nodeSelection.noSend.test.tsx
+  s_2b26d456bc46f8::t_d44c1928e6bf20 1-56
+docs/specs/2026-11-11-task-panel-shared-asset/migration-map.json
+  s_2b26d456bc46f8::t_db77530dd5745a 4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68,72,76,80,84,88,92,96,100,104,108,112,116,120,124,128,132,136,140,144,148,152,156,160,164
+  s_2b26d456bc46f8::t_b2c40f1b05b507 165-167,170-172
+  s_2b26d456bc46f8::t_ed9863322d74b7 1-3,5-7,9-11,13-15,17-19,21-23,25-27,29-31,33-35,37-39,41-43,45-47,49-51,53-55,57-59,61-63,65-67,69-71,73-75,77-79,81-83,85-87,89-91,93-95,97-99,101-103,105-107,109-111,113-115,117-119,121-123,125-127,129-131,133-135,137-139,141-143,145-147,149-151,153-155,157-159,161-163,175-176
+  s_2b26d456bc46f8::t_3b1b92a7b4eb7a 168-169,173-174
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.test.tsx
+  s_2b26d456bc46f8::t_efd14206f365c6 21
+  s_2b26d456bc46f8::t_5d0cdbe01b4e0f 1-20,22-176
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  s_2b26d456bc46f8::t_657fc270023fe5 23-28,76
+docs/specs/2026-11-11-task-panel-shared-asset/verification.md
+  s_2b26d456bc46f8::t_f278333402c416 53-55
+  s_2b26d456bc46f8::t_69e59c40d63c5b 1-52,56
+  s_2b26d456bc46f8::t_d6d518802da200 175-193
+  s_2b26d456bc46f8::t_4e919f4b84228c 124-136
+  s_2b26d456bc46f8::t_163e46dd2f2088 119-123
+  s_2b26d456bc46f8::t_3b1b92a7b4eb7a 57-79
+  s_2b26d456bc46f8::t_222d92d38ac268 137-145
+  s_2b26d456bc46f8::t_94569fc0d3f678 194-214
+  s_2b26d456bc46f8::t_2905b0b8b1efca 146-174
+  s_2b26d456bc46f8::t_05ad5477e68e53 80-118
+apps/frontend-nextgen/test/stores/taskSidePanelStore.test.ts
+  s_2b26d456bc46f8::t_ebb8ae88c99566 3,5,7-33
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelHandleAdapter.test.ts
+  s_2b26d456bc46f8::t_efd14206f365c6 10
+  s_2b26d456bc46f8::t_0b0f2e6d720d05 2-5,7,9,11-23,25-39,41-47,49-53,55-57,59-62,64-68,70-77
+apps/frontend-nextgen/tsconfig.json
+  s_2b26d456bc46f8::t_db77530dd5745a 24-27
+  s_2b26d456bc46f8::t_16528cfb77d373 8-23,28,31-36
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.origin-regression.test.ts
+  s_2b26d456bc46f8::t_210311239482e0 1-7,9-12,14-41
+  s_2b26d456bc46f8::t_efd14206f365c6 13
+  s_2b26d456bc46f8::t_bcc1275c63282f 8
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRuntime.ts
+  s_2b26d456bc46f8::t_2a0a098ea5ab25 33,36
+  s_2b26d456bc46f8::t_8d87b5e3372a92 8-11,14-21,24-32,39-40,42,53,60-62,64-68,70-74,88-90,93,95-113,115-123,131-136,151,153
+  s_2b26d456bc46f8::t_18c329640ebfe5 34-35,152
+  s_2b26d456bc46f8::t_2dca04bd03c5e1 2-7,12-13,22-23,41,43-47,49-52,55,59,85,87,92,114,137-148,154
+  s_2b26d456bc46f8::t_b9478c43af4795 1,37-38,48,54,56-58,63,69,75-84,86,91,94,124-130,149-150
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  s_2b26d456bc46f8::t_db77530dd5745a 1-75,79-87,89,95,102-109,112-152,156-158,161-169
+  s_2b26d456bc46f8::t_40e9daed6b268a 77,90,96-99,111,154,159-160
+  s_2b26d456bc46f8::t_9020b5d965e49a 76,78,88,91-94,100-101,110,153,155
+apps/frontend-nextgen/assets/task-panel/package.json
+  s_2b26d456bc46f8::t_db77530dd5745a 1-63
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelArchitecture.test.ts
+  s_2b26d456bc46f8::t_efd14206f365c6 14,19,22,30,33-70,95
+  s_2b26d456bc46f8::t_c0dd6aac555589 1-13,15-18,20-21,23-29,31-32,71-94
+.dockerignore
+  s_2b26d456bc46f8::t_a40754d3a22ea1 71-73
+apps/frontend-nextgen/assets/task-panel/.gitignore
+  s_2b26d456bc46f8::t_db167a1f5fadb3 1-3
+apps/frontend-nextgen/assets/task-panel/LICENSE
+  s_2b26d456bc46f8::t_96c2f912d14b60 1-176
+apps/frontend-nextgen/assets/task-panel/README.md
+  s_2b26d456bc46f8::t_6a9a9499503a39 1-172
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  s_2b26d456bc46f8::t_674c3dba328d18 1-3053
+apps/frontend-nextgen/assets/task-panel/scripts/serve-assets.mjs
+  s_2b26d456bc46f8::t_d96bec3468b85d 1-27
+apps/frontend-nextgen/assets/task-panel/scripts/serve-smoke.mjs
+  s_2b26d456bc46f8::t_a54b225a663411 1-12
+apps/frontend-nextgen/assets/task-panel/scripts/verify-independent.mjs
+  s_2b26d456bc46f8::t_e0e4931fc37bcc 1-25
+apps/frontend-nextgen/assets/task-panel/src/contracts/index.ts
+  s_2b26d456bc46f8::t_8fe6ad937d4797 1-47
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  s_2b26d456bc46f8::t_3a2218481e5c2b 1-203
+apps/frontend-nextgen/assets/task-panel/src/history/parseTaskPanelDeclarations.ts
+  s_2b26d456bc46f8::t_99b52be2801b92 1-38
+apps/frontend-nextgen/assets/task-panel/src/index.ts
+  s_2b26d456bc46f8::t_468b9aea0c15c0 1-12
+apps/frontend-nextgen/assets/task-panel/src/panel/GroupDrillDown.tsx
+  s_2b26d456bc46f8::t_313172e634b441 14-16,35,40-41,103,130,477,528,557,576,614
+apps/frontend-nextgen/assets/task-panel/src/panel/MarkdownCell.tsx
+  s_2b26d456bc46f8::t_5ad370060974b4 7-8
+apps/frontend-nextgen/assets/task-panel/src/panel/PanelMarkdown.tsx
+  s_2b26d456bc46f8::t_05670cf825e861 1-10
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskArtifactsView.tsx
+  s_2b26d456bc46f8::t_47218df15b7dd4 1-50
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskLoopView.tsx
+  s_2b26d456bc46f8::t_8031f98eda84f0 1-85
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanelFetcher.tsx
+  s_2b26d456bc46f8::t_6e85a0d5f5fae2 11-12,54,75,82,121,123,146-147,167
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useGroupMemberNames.ts
+  s_2b26d456bc46f8::t_d4965fdcee7125 1,18,36,50
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useTaskArtifactPreview.ts
+  s_2b26d456bc46f8::t_bc9a32a9ac1811 2-4,6,10,12-14,16-17,22,24,27-28,31-33,35-38,40-44,46-49,51,53-54,56-62,65,67-69,72,74-78
+apps/frontend-nextgen/assets/task-panel/src/panel/hostContext.tsx
+  s_2b26d456bc46f8::t_d375bf63567712 1-11
+apps/frontend-nextgen/assets/task-panel/src/panel/taskPanelMapper.ts
+  s_2b26d456bc46f8::t_ac0751b8763818 9
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/ArtifactsSection.tsx
+  s_2b26d456bc46f8::t_7be398945fc8f2 1,53,63
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactPreviewDrawer.tsx
+  s_2b26d456bc46f8::t_5ef59122a9ac69 1,4,16-17,88,130
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactsList.tsx
+  s_2b26d456bc46f8::t_c68ac606755926 6-7,9
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.css
+  s_2b26d456bc46f8::t_80a4110b0e58c7 1-11
+apps/frontend-nextgen/assets/task-panel/src/public-api.ts
+  s_2b26d456bc46f8::t_3ceeee2cb1eef2 1-10
+apps/frontend-nextgen/assets/task-panel/src/rich-content/SafeHtml.tsx
+  s_2b26d456bc46f8::t_c0065f312bb9ae 163
+apps/frontend-nextgen/assets/task-panel/test/asset-delivery.mjs
+  s_2b26d456bc46f8::t_6c33a2317c47c8 1-16
+apps/frontend-nextgen/assets/task-panel/test/boundaries.test.ts
+  s_2b26d456bc46f8::t_f7856124ca3203 1-25
+apps/frontend-nextgen/assets/task-panel/test/browser-smoke.html
+  s_2b26d456bc46f8::t_ede36116d82add 1-16
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  s_2b26d456bc46f8::t_65d5abe6e99c2d 1-248
+apps/frontend-nextgen/assets/task-panel/test/controllerHostMigration.test.ts
+  s_2b26d456bc46f8::t_e9899ced20429e 1-98
+apps/frontend-nextgen/assets/task-panel/test/declarations.test.ts
+  s_2b26d456bc46f8::t_66badc50585c77 1-28
+apps/frontend-nextgen/assets/task-panel/test/panel/DagViewInteractive.test.tsx
+  s_2b26d456bc46f8::t_0f9a32f95433fb 1,4-7,9,57,63,103,204,211,225,237,246,307-308
+apps/frontend-nextgen/assets/task-panel/test/panel/MarkdownCell.coverage.test.tsx
+  s_2b26d456bc46f8::t_7170e5b56767ba 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskArtifactsView.test.tsx
+  s_2b26d456bc46f8::t_6e5e5cfe4c440f 1-86
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskInfoTab.coverage.test.tsx
+  s_2b26d456bc46f8::t_e06b1934e6ffd0 1-5
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskLoopView.switcher.test.tsx
+  s_2b26d456bc46f8::t_f1f31c1ae9e7cb 1-34,36-39,41,43-44,46-47,49,51-60,62-67,69-73,75-87,89-90,92-98,100,102-113,115-126,128-135,137-148,150,153-158
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskPanel.includeActionLog.test.tsx
+  s_2b26d456bc46f8::t_1da3eb25baace5 1,4,6,42-43,54,56-57,62
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskProgress.test.tsx
+  s_2b26d456bc46f8::t_831fda0d537d8c 1-5,7-8
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.coverage.test.tsx
+  s_2b26d456bc46f8::t_bbc34d0515378a 1-4,38
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.test.tsx
+  s_2b26d456bc46f8::t_62ee8ba3bc5191 1-4,28
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.coverage.test.ts
+  s_2b26d456bc46f8::t_8b84eb7da71823 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.test.ts
+  s_2b26d456bc46f8::t_a50ac88fe739a8 1-2,12,17-18
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactTime.test.ts
+  s_2b26d456bc46f8::t_a78d0e7050fc8b 2-3
+apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.coverage.test.ts
+  s_2b26d456bc46f8::t_f78833d6c7bedb 1-5
+apps/frontend-nextgen/assets/task-panel/test/panel/hooks/useGroupMemberNames.coverage.test.tsx
+  s_2b26d456bc46f8::t_aafe6178e25eb6 1-3,14,48
+apps/frontend-nextgen/assets/task-panel/test/panel/icons.test.tsx
+  s_2b26d456bc46f8::t_475f8a39bba9c8 1,3,22,24
+apps/frontend-nextgen/assets/task-panel/test/panel/messageWindowLocate.test.ts
+  s_2b26d456bc46f8::t_c2581659bcf9b5 1,6-7,52,67-68
+apps/frontend-nextgen/assets/task-panel/test/panel/outputEnvelope.coverage.test.ts
+  s_2b26d456bc46f8::t_7f0ee3217fd491 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.coverage.test.ts
+  s_2b26d456bc46f8::t_d18cb4a5604f90 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.test.ts
+  s_2b26d456bc46f8::t_5e742efd65f59f 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.coverage.test.ts
+  s_2b26d456bc46f8::t_49815f091f4939 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.test.ts
+  s_2b26d456bc46f8::t_c92f5f83d58e1c 1-2,7
+apps/frontend-nextgen/assets/task-panel/test/panel/taskArtifactStage.test.ts
+  s_2b26d456bc46f8::t_d8d505dad1fd00 2-6
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.coverage.test.ts
+  s_2b26d456bc46f8::t_a48f7838d52189 1-4
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.execution.test.ts
+  s_2b26d456bc46f8::t_01ef05f332f612 1-3
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.test.ts
+  s_2b26d456bc46f8::t_5f92b4240269b9 1-3,5-17,20-53,55-56,58,60,62-93,95-96,98,100,102-159,161-168,171-231,233,235-241,243,245-284,286-289,291,293-341,343-347,350-352,354,358-359,361-362,364,371-372,376,380-381,383-395,399,401-434,436-460,462-466,469-503,506-508,510-512,515-577,579-589
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcher.navigation.test.ts
+  s_2b26d456bc46f8::t_d63e557417c6e0 1-50
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcherFixtures.ts
+  s_2b26d456bc46f8::t_ac1946abc4eac2 1-35
+apps/frontend-nextgen/assets/task-panel/test/panel/theme.test.tsx
+  s_2b26d456bc46f8::t_8e99ccb4a8fa46 1,3,13,15,97
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.coverage.test.tsx
+  s_2b26d456bc46f8::t_3e06d5f99ce5c9 1-3,6-10,13-15,36,40,45,51
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.test.tsx
+  s_2b26d456bc46f8::t_9f34633aa39099 1,3-6
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  s_2b26d456bc46f8::t_2e542ba6588ea7 1,3-6,8,179
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskArtifactPreviewDrawer.test.tsx
+  s_2b26d456bc46f8::t_d5a3e67588fb67 1-8,11-13,16,69,93,108,156,195
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskInfoSection.coverage.test.tsx
+  s_2b26d456bc46f8::t_8f28f5bf275928 1,3-5,7
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskOutputSection.test.tsx
+  s_2b26d456bc46f8::t_fa5cdc86ad2b61 1,3-4,6
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskPanelV2.coverage.test.tsx
+  s_2b26d456bc46f8::t_2228431caaa068 1-2,4-8,10-11,13-14,17,54-55,59,92
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherBar.test.tsx
+  s_2b26d456bc46f8::t_407f6c328085c7 1,3-5,23,49,64,142,153
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherControl.coverage.test.tsx
+  s_2b26d456bc46f8::t_5f28cfe5c197ae 1-2,5-7,9,35
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/taskPanelNav.coverage.test.ts
+  s_2b26d456bc46f8::t_365e86774c1126 1,3-5,7
+apps/frontend-nextgen/assets/task-panel/test/rich-content/SafeHtml.asset.test.tsx
+  s_2b26d456bc46f8::t_b5eef08f776ab2 1-3,9-10
+apps/frontend-nextgen/assets/task-panel/test/setup.ts
+  s_2b26d456bc46f8::t_96a01a76b40176 1-7
+apps/frontend-nextgen/assets/task-panel/test/taskSwitcher.migration.md
+  s_2b26d456bc46f8::t_4afa0df3d501cb 1-225
+apps/frontend-nextgen/assets/task-panel/tsconfig.json
+  s_2b26d456bc46f8::t_e2887b2985079d 1-8
+apps/frontend-nextgen/assets/task-panel/tsconfig.test.json
+  s_2b26d456bc46f8::t_6071e684488023 1-9
+apps/frontend-nextgen/assets/task-panel/vite.config.ts
+  s_2b26d456bc46f8::t_9b9095388eed4f 1-13
+apps/frontend-nextgen/assets/task-panel/vitest.config.ts
+  s_2b26d456bc46f8::t_6d2a3056199554 1-5
+apps/frontend-nextgen/config/config.ts
+  s_2b26d456bc46f8::t_5a1cc092414403 36
+apps/frontend-nextgen/deploy/docker-entrypoint.sh
+  s_2b26d456bc46f8::t_4ad5f562c7c8a1 23-24,27
+apps/frontend-nextgen/scripts/ci-guardrails.mjs
+  s_2b26d456bc46f8::t_57ba19fcd0529d 103-106,120-125
+apps/frontend-nextgen/src/components/ScheduledTasks/RoutineRunConversation.tsx
+  s_2b26d456bc46f8::t_1fd596e9b9b070 6-7
+apps/frontend-nextgen/src/components/Workspace/ChatLayoutPanelSlot.tsx
+  s_2b26d456bc46f8::t_4a01f7a875f196 30-31,98-101,116,121
+apps/frontend-nextgen/src/components/Workspace/persistentTaskPanelStaleRelease.ts
+  s_2b26d456bc46f8::t_b5fbce0687bcea 4,19
+apps/frontend-nextgen/src/pages/EvolutionFactory/OutputPrimitives.tsx
+  s_2b26d456bc46f8::t_1455e406d8480b 1-2
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskDrawers.tsx
+  s_2b26d456bc46f8::t_d1b5c4e9c576ba 1,95
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.tsx
+  s_2b26d456bc46f8::t_2f3cf215d1b4ea 1
+apps/frontend-nextgen/src/services/bcs/UmdPanel.tsx
+  s_2b26d456bc46f8::t_670236cfca5ba1 1,76,172-182
+apps/frontend-nextgen/src/services/bcs/libraryCdnInjector.ts
+  s_2b26d456bc46f8::t_c9339ac9443b70 68-69
+apps/frontend-nextgen/src/services/tasks/panel/messageWindowLocate.ts
+  s_2b26d456bc46f8::t_ef9770209c467d 1-71
+apps/frontend-nextgen/src/services/tasks/panel/registerTaskPanel.ts
+  s_2b26d456bc46f8::t_2f0a10e7384f41 2-3,5-6
+apps/frontend-nextgen/src/services/workspace/filePreview.ts
+  s_2b26d456bc46f8::t_6d693a0c6c46a5 1-86
+apps/frontend-nextgen/src/shell/ReleaseNotesModal.tsx
+  s_2b26d456bc46f8::t_3506ad997142f3 5-6
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAdapter.test.tsx
+  s_2b26d456bc46f8::t_825305dfb84d4e 7,9-10
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  s_10bf1e6587c582::t_736afa88fcf0f4 6,68,238,263,271
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.coverage.test.tsx
+  s_2b26d456bc46f8::t_5eb711a7c5d7e5 2-3,5-6,8-11
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.test.tsx
+  s_2b26d456bc46f8::t_b61e4fda7526b2 11
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.aceLogin.test.tsx
+  s_2b26d456bc46f8::t_16dfdbff5fde53 2,5-10
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.coverage.test.tsx
+  s_2b26d456bc46f8::t_038f82c3fd806b 4-5,10,12-15
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.coverage.test.tsx
+  s_2b26d456bc46f8::t_494fe8e250e7e5 4-5,30-31,35-38,46
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.objectFile.test.tsx
+  s_2b26d456bc46f8::t_906395aacdfc14 5-6,8,10-14,37
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx
+  s_2b26d456bc46f8::t_7c46d89531f7c7 8-10,13,17-21,33,41
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskNodePanelV2.test.tsx
+  s_2b26d456bc46f8::t_c26097f4c8b8ea 3-6,8,10-14
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx
+  s_2b26d456bc46f8::t_6c0749e3718ee3 7-12,14-18
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskPanelV2.test.tsx
+  s_2b26d456bc46f8::t_694dcc005d09cb 3-7,9,11-18,225
+apps/frontend-nextgen/test/services/tasks/panel/registerTaskPanel.test.ts
+  s_2b26d456bc46f8::t_db0307e1e8a13f 3,10,13-14
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelConversationAdapter.test.ts
+  s_2b26d456bc46f8::t_dc7e12a4568da3 2-5,8-16,18-39,41,43,45-47,49-54,56-60,62-69,71-88,91-95,97,99-106,108-139,142-146
+apps/frontend-nextgen/test/sidePanel/UmdPanel.groupLaunch.test.tsx
+  s_2b26d456bc46f8::t_d0402b2c96c546 56-66
+docs/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_2b26d456bc46f8::t_0a1fd76d94aca5 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "406a8583a3cbb96807238c0dbb05395a17b1636a",
+  "prompts": {},
+  "sessions": {
+    "s_10bf1e6587c582": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cae1-4fcb-78d0-8da3-b8728836a6c9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    },
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

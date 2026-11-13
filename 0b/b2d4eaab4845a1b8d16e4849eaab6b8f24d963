@@ -1,0 +1,46 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/bot_publish_service.py
+  s_fc3a680bb7551e::t_f7db53dbd5ae39 27,739
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_exceptions.py
+  s_fc3a680bb7551e::t_460cd676baecb4 18-25
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_publish.py
+  s_fc3a680bb7551e::t_f7db53dbd5ae39 71-74,308-312
+  s_fc3a680bb7551e::t_2357aaac62ad5e 313-314
+apps/backend/src/agentclaw/community/core/service_bot/services/__init__.py
+  s_fc3a680bb7551e::t_f7db53dbd5ae39 6,47
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py
+  s_03f4dc99aee256::t_3ed2d700352dad 25,153-158
+apps/backend/tests/community/core/service_bot/services/test_bot_publish_service.py
+  s_3856feb75a1d9b::t_0e545c4f275c45 13,2743,2766,2971,2994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0bb2d4eaab4845a1b8d16e4849eaab6b8f24d963",
+  "prompts": {},
+  "sessions": {
+    "s_03f4dc99aee256": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce5-6aef-7903-8e88-a8117778e186",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_3856feb75a1d9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-7d48-7320-a48b-85835c0b8107",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_fc3a680bb7551e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce4-838a-71c0-b9ea-433fab774118",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

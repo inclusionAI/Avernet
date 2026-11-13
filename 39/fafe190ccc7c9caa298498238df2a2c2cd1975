@@ -1,0 +1,22 @@
+apps/gateway/README.md
+  h_7f0891028af589 78-123
+apps/gateway/configs/application.yaml
+  h_7f0891028af589 254-257,445-454
+apps/gateway/configs/schemas/README.md
+  h_7f0891028af589 5-7,16
+apps/gateway/configs/schemas/acmng-diagnosis.openapi.json
+  h_7f0891028af589 1-174
+apps/gateway/tests/test_diagnosis_ping_config.py
+  h_7f0891028af589 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "39fafe190ccc7c9caa298498238df2a2c2cd1975",
+  "prompts": {},
+  "humans": {
+    "h_7f0891028af589": {
+      "author": "chaozai <chaozai.wc@antgroup.com>"
+    }
+  }
+}

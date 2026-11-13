@@ -1,0 +1,21 @@
+engine/adapter/scripts/session-files/README.md
+  s_f364df1c07a1e6::t_b875500177165c 3-18
+engine/adapter/src/engine/community/api/session_files/tests/test_registration.py
+  s_f364df1c07a1e6::t_002c85853fef29 2,387-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "37c9100ff406d1c7ac2156fa946db6ab17fddd8b",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

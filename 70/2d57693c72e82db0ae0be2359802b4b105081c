@@ -1,0 +1,94 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_approval_service.py
+  s_7c6be7001ef8fd::t_679a20df625302 743
+apps/backend/src/agentclaw/community/kernel/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_eb951c4b6b6d33 1-120
+apps/backend/tests/community/core/service_bot/services/test_bot_publish_service.py
+  s_7c6be7001ef8fd::t_9998eb6a7b1e89 438
+  s_7c6be7001ef8fd::t_28ac1d5f160d52 3983
+  s_7c6be7001ef8fd::t_b9aa6c261d6eb1 3955-3982,3984-4002
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/release_audit.py
+  s_7c6be7001ef8fd::t_75b1b4d5e90a8c 94-128
+  s_7c6be7001ef8fd::t_0e7182e6549016 1-93,129-131
+apps/backend/sql/2026_11_13_service_bot_release_audit.sql
+  s_7c6be7001ef8fd::t_c1ce8ffbd1af7a 1-52
+apps/backend/tests/community/repository/publishing/test_release_audit_production.py
+  s_7c6be7001ef8fd::t_26ff18cdc7c7b5 70-71,95-96,117-118,131-132,139-140,156-157,160-177,205-207,235,247-249
+  s_7c6be7001ef8fd::t_50181b9e2940e7 1-66,83,187
+  s_7c6be7001ef8fd::t_9ab9a42c92ac83 67-69,72-82,84-94,97-116,119-130,133-138,141-155,158-159,178-186,188-204,208-234,236-246,250-274
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py
+  s_7c6be7001ef8fd::t_75b1b4d5e90a8c 694-695,698-705,708-709
+apps/backend/tests/community/plugins/test_service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_f2e93755f5bc25 152-194
+  s_7c6be7001ef8fd::t_50181b9e2940e7 1-135,137-139,141-143,145-151
+  s_7c6be7001ef8fd::t_5c724657ce788f 136,140,144
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  s_7c6be7001ef8fd::t_93433b3bef191c 706
+  s_7c6be7001ef8fd::t_8ed14296dc78d1 989
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py
+  s_7c6be7001ef8fd::t_9998eb6a7b1e89 564-566,634
+  s_7c6be7001ef8fd::t_83452e4e5ef906 351,632-633
+apps/backend/specs/service-bot-release-audit/001-spec-output.md
+  s_7c6be7001ef8fd::t_188c7f683445d6 1-32
+apps/backend/src/agentclaw/community/plugin_api/release_audit_models.py
+  s_7c6be7001ef8fd::t_eb951c4b6b6d33 1-77
+apps/backend/src/agentclaw/community/plugins/local/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_50181b9e2940e7 1-9
+apps/backend/src/agentclaw/community/plugins/community/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_50181b9e2940e7 1-103
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/retry_ops_mixin.py
+  s_7c6be7001ef8fd::t_75b1b4d5e90a8c 206,233-239,241
+  s_7c6be7001ef8fd::t_93433b3bef191c 104-105
+  s_7c6be7001ef8fd::t_2b6635c1178914 74-75,158
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_7c6be7001ef8fd::t_9998eb6a7b1e89 3853-3854,3887-3888,5155-5174
+apps/backend/src/agentclaw/community/plugin_api/service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_eb951c4b6b6d33 1-21
+apps/backend/src/agentclaw/community/core/service_bot/services/bot_publish_service.py
+  s_7c6be7001ef8fd::t_b6bb89c7e7019e 221,1499
+  s_7c6be7001ef8fd::t_93433b3bef191c 316
+  s_7c6be7001ef8fd::t_8dd384177ad46f 210-211,314,354-355,370-373,389-390,412,916,1012,1258-1259,1332-1334,1391-1392,1453,1495-1496,1593
+apps/backend/tests/community/core/service_bot/services/test_publish_approval_service.py
+  s_7c6be7001ef8fd::t_679a20df625302 800
+apps/backend/tests/community/core/service_bot/services/test_release_audit_delivery.py
+  s_7c6be7001ef8fd::t_7826d41b0de4f8 1-35
+apps/backend/tests/community/contracts/test_service_bot_release_audit.py
+  s_7c6be7001ef8fd::t_fde17d53963568 1-88
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_publish.py
+  s_7c6be7001ef8fd::t_b94c66404749b2 825,1282,1423
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_7c6be7001ef8fd::t_cb114a627b1853 2134
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/bot_publish.py
+  s_7c6be7001ef8fd::t_e2a39f74d382d1 59-62,132,475-476,491-493,504-505,531-533,569-570,583,608-610
+apps/backend/src/agentclaw/community/core/repository/protocols/publishing.py
+  s_7c6be7001ef8fd::t_50e36efb87f590 346-347,369-370,410
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_7c6be7001ef8fd::t_17191aeb2ce574 353-390
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/ext_state.py
+  s_7c6be7001ef8fd::t_34ed0910f1cd95 98-99,107-108,121-122,136
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow_service.py
+  s_7c6be7001ef8fd::t_c58e7909f66489 372-373,398-399,420-421,428-431,772-773,781
+apps/backend/src/agentclaw/community/core/service_bot/services/release_audit_delivery.py
+  s_7c6be7001ef8fd::t_93924b91bdc080 1-128
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  s_7c6be7001ef8fd::t_922af7887a6b45 499,782,799
+apps/backend/src/agentclaw/community/di/modules/service_bot_module.py
+  s_7c6be7001ef8fd::t_76146ef3073909 124-128,281-283,750-759
+apps/backend/tests/community/repository/publishing/test_bot_publish_unified.py
+  s_7c6be7001ef8fd::t_99dc1b550b57bb 982-987
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "702d57693c72e82db0ae0be2359802b4b105081c",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

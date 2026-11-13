@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_connection_decision_contract.py
+  s_cecdc98e721f4b::t_75c726d8e8cc96 8,162,185-187,190-192,197-198
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_public_accept_contract.py
+  s_cecdc98e721f4b::t_550eea93d27663 8,162,188-190,194-195,200
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_file_core_contract.py
+  s_cecdc98e721f4b::t_eb91a9f8336aa8 12,567,594-596,600-601,606-607
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_group_lifecycle_contract.py
+  s_cecdc98e721f4b::t_ded20aacc4f888 9,223,259-261,265-266,272-273
+apps/bcs/scripts/e2e-runner/tests/test_blocked_error_detail_lens.py
+  s_cecdc98e721f4b::t_165fa636dcda4f 1-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ed2ee2fb47444334899e620363cbf59094c3840",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

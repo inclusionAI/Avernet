@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_e0cb98366a65ad::t_1c3961989b7f6e 122-131
+  s_e0cb98366a65ad::t_cd1759351b822c 1-121,132-371
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_e0cb98366a65ad::t_6884ed39b0ff62 847-850,852
+  s_e0cb98366a65ad::t_ca004900f1638b 846,851,853-856
+  s_e0cb98366a65ad::t_2cd7c8e602cc6b 80-85
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_e0cb98366a65ad::t_d2ef3e92907139 920
+  s_e0cb98366a65ad::t_33f4b1c8e87697 168
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  s_e0cb98366a65ad::t_aa793df76364d7 241,275,298,312,316,329,342,353
+  s_e0cb98366a65ad::t_d4bee0f2052842 111,179,186,195-196,225,229,238-239,258-259,262,272-273,279,296-297,300,310-311,326-327,339-340,350-351,364-365,376,380-381,383,386
+  s_e0cb98366a65ad::t_1cfab7883a95ef 52-58
+  s_e0cb98366a65ad::t_d616890230b610 1-37,59-110,112-176,178,180-183,185,187-194,197-224,226-228,230-237,240,242-257,260-261,263-271,274,276-278,280-295,299,301-309,313-315,317-325,328,330-338,341,343-349,352,354-363,366-375,377-379,382,384-385
+  s_e0cb98366a65ad::t_95dda5c0801184 177
+  s_e0cb98366a65ad::t_29904cf20288e1 184
+  s_e0cb98366a65ad::t_81882628832077 38-51
+  s_e0cb98366a65ad::t_7afd9a6920614a 387-475,477-522,524-646
+  s_e0cb98366a65ad::t_1464b0482ada8e 476,523
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab.py
+  s_e0cb98366a65ad::t_7af2d23790613f 72-74
+  s_e0cb98366a65ad::t_4070c507400ff1 1-71,75-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a82cbaad277949435d87552c9682992df7f85ad",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

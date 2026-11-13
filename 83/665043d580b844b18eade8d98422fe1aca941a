@@ -1,0 +1,38 @@
+apps/bcs/crates/adapters/http/bcn-api-http/README.md
+  h_f4a73db4ad12be 37-51,76-88
+apps/bcs/crates/adapters/http/bcn-api-http/src/jsonrpc.rs
+  h_f4a73db4ad12be 38-40,48,53,80-82,84-86,98-101
+apps/bcs/crates/adapters/http/bcn-api-http/src/lib.rs
+  h_f4a73db4ad12be 34
+apps/bcs/crates/adapters/http/bcn-api-http/src/sse.rs
+  h_f4a73db4ad12be 17,19-26,30,34,37,46-51,54,59,71
+apps/bcs/crates/adapters/http/bcn-api-http/tests/actual.rs
+  h_f4a73db4ad12be 96-143
+apps/bcs/crates/adapters/http/bcn-api-http/tests/protocol.rs
+  h_f4a73db4ad12be 66,70,72,77,115-144
+apps/bcs/crates/application/bcn-runtime-app/README.md
+  h_f4a73db4ad12be 138-144
+apps/bcs/crates/application/bcn-runtime-app/src/gateway.rs
+  h_f4a73db4ad12be 149-151,173-189
+apps/bcs/crates/application/bcn-runtime-app/tests/interactions.rs
+  h_f4a73db4ad12be 84-101
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 85-89
+apps/bcs/crates/contracts/bcn-runtime-model/src/task.rs
+  h_f4a73db4ad12be 23-25
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 77-84
+apps/bcs/crates/service-api/bcn-runtime-api/src/application.rs
+  h_f4a73db4ad12be 23-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "83665043d580b844b18eade8d98422fe1aca941a",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

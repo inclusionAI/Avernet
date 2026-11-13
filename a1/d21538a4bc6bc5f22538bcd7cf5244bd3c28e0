@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/task/context_collab/products/test_products_layering.py
+  s_64261436edbb0b::t_250bf76ab22714 79-91
+  s_64261436edbb0b::t_c629a70798ca20 11-12,14-16,46-58,61-64,67,72-73
+  s_64261436edbb0b::t_9cff876ebe1aaa 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1d21538a4bc6bc5f22538bcd7cf5244bd3c28e0",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

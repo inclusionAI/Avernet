@@ -1,0 +1,21 @@
+apps/frontend-nextgen/src/hooks/useLocalSkillUploadError.ts
+  s_79439ec6a1b301::t_d46ef5d162ca6f 15,17-19
+apps/frontend-nextgen/test/components/BotWorkshop/useLocalSkillUploadError.test.tsx
+  s_79439ec6a1b301::t_d38d674742d265 16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e173344ab329b7b2d6407926d6e185d1ee7c6fb2",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

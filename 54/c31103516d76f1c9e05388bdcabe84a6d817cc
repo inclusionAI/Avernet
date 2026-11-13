@@ -1,0 +1,19 @@
+.gitmodules
+  s_502dbf3f3ce405::t_cd4408d771231c 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "54c31103516d76f1c9e05388bdcabe84a6d817cc",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
