@@ -54,7 +54,7 @@ cd apps/undercover-spring-player
 `OPENAI_BASE_URL` 和 `OPENAI_MODEL` 即可：
 
 ```bash
-export OPENAI_API_KEY="replace-with-your-api-key"
+export OPENAI_API_KEY="<your-api-key>"
 
 export OPENAI_BASE_URL="https://api.openai.com"
 export SPRING_AI_OPENAI_BASE_URL="$OPENAI_BASE_URL"

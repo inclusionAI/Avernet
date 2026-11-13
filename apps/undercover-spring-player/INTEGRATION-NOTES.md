@@ -23,7 +23,7 @@ curl --noproxy '*' -fsS http://127.0.0.1:21000/health
 不要写进 `application.yml`、profile 或脚本：
 
 ```bash
-export OPENAI_API_KEY="replace-with-your-key"
+export OPENAI_API_KEY="<your-api-key>"
 export SPRING_AI_OPENAI_BASE_URL="https://api.openai.com"
 export OPENAI_MODEL="gpt-4o-mini"
 export BCN_URL="ws://127.0.0.1:21000/ws/bot"
@@ -54,7 +54,7 @@ cd /path/to/Avernet
 另开一个终端，**请务必重新执行一遍环境变量注入**，然后再启动：
 
 ```bash
-export OPENAI_API_KEY="replace-with-your-key"
+export OPENAI_API_KEY="<your-api-key>"
 export SPRING_AI_OPENAI_BASE_URL="https://api.openai.com"
 export OPENAI_MODEL="gpt-4o-mini"
 export BCN_URL="ws://127.0.0.1:21000/ws/bot"

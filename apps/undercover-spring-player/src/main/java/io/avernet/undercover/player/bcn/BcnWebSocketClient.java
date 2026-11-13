@@ -124,12 +124,12 @@ public class BcnWebSocketClient implements FrameSender {
             throw new HandshakeException("UNSUPPORTED_CAPABILITY",
                     "BCN did not enable canonical_session_id");
         }
-        String token = BcnFrames.text(payload, "token");
+        String sessionToken = BcnFrames.text(payload, "token");
         String botUuid = BcnFrames.text(payload, "bot_uuid");
-        if (token.isEmpty() || botUuid.isEmpty()) {
+        if (sessionToken.isEmpty() || botUuid.isEmpty()) {
             throw new HandshakeException("INVALID_RESPONSE", "bot.connect payload requires token and bot_uuid");
         }
-        return new Handshake(token, botUuid);
+        return new Handshake(sessionToken, botUuid);
     }
 
     private void connect() {
@@ -168,7 +168,7 @@ public class BcnWebSocketClient implements FrameSender {
     private void sendConnectFrame(WebSocket current, String requestId) {
         Optional<SessionStore.Session> saved = sessions.load();
         String configuredToken = properties.getToken() == null ? "" : properties.getToken().trim();
-        String token = configuredToken.isEmpty()
+        String sessionToken = configuredToken.isEmpty()
                 ? saved.map(SessionStore.Session::token).orElse("")
                 : configuredToken;
         String configuredBotId = properties.getBotId() == null ? "" : properties.getBotId().trim();
@@ -184,8 +184,8 @@ public class BcnWebSocketClient implements FrameSender {
         if (!botId.isEmpty()) {
             params.put("bot_id", botId);
         }
-        if (!token.isEmpty()) {
-            params.put("token", token);
+        if (!sessionToken.isEmpty()) {
+            params.put("token", sessionToken);
         }
         params.put("protocol_version", 3);
         params.put("client_kind", properties.getClientKind());

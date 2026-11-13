@@ -37,9 +37,9 @@ public class SessionStore {
         }
         try {
             JsonNode node = mapper.readTree(Files.readString(sessionFile));
-            String token = BcnFrames.text(node, "token");
+            String sessionToken = BcnFrames.text(node, "token");
             String botUuid = BcnFrames.text(node, "bot_uuid");
-            return token.isEmpty() ? Optional.empty() : Optional.of(new Session(token, botUuid));
+            return sessionToken.isEmpty() ? Optional.empty() : Optional.of(new Session(sessionToken, botUuid));
         } catch (IOException e) {
             throw new IllegalStateException("Cannot read BCN session file " + sessionFile, e);
         }
