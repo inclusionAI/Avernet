@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "real BCS disconnect and reconnect",
+  "observed_at": "2026-11-02",
+  "bcs": "local standalone BCS 0.1.4-beta.3",
+  "bot_uuid_sha256": "27bfe9dc615ea959",
+  "events": [
+    {
+      "at": "2026-11-02 01:22:06.374",
+      "event": "connected",
+      "is_new": true,
+      "protocol_version": 3
+    },
+    {
+      "at": "2026-11-02 01:22:07.378",
+      "event": "forced_close",
+      "description": "测试主动关闭客户端 WebSocket，触发真实 BCS 断线"
+    },
+    {
+      "at": "2026-11-02 01:22:07.378",
+      "event": "runs_cancelled",
+      "reason": "connection closed"
+    },
+    {
+      "at": "2026-11-02 01:22:07.379",
+      "event": "connection_error",
+      "error_type": "ConnectionClosedError"
+    },
+    {
+      "at": "2026-11-02 01:22:08.389",
+      "event": "reconnected",
+      "is_new": false,
+      "protocol_version": 3,
+      "same_identity": true
+    }
+  ],
+  "result": "客户端在真实 BCS 上被主动断开后，使用持久化 token 在约 1 秒内以同一 bot 身份重连（is_new=false）",
+  "limitations": [
+    "这是连接层验证，未绑定游戏 run；不等于游戏内断线恢复。",
+    "没有在真实游戏节点中途断线；主持人/其他玩家行为未参与。"
+  ],
+  "redaction": {
+    "omitted": [
+      "Bearer token / bot session token",
+      "本机路径",
+      "原始进程命令"
+    ],
+    "retained": [
+      "事件时间",
+      "连接结果",
+      "协议版本",
+      "bot_uuid 哈希"
+    ]
+  }
+}
