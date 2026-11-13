@@ -70,11 +70,16 @@ from agentclaw.community.core.task.context_collab.products.task_commission.views
     TaskCommissionDetailView,
     TaskCommissionSummaryView,
 )
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    LoggingTaskDispatch,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskAdvancedView,
+    TaskDispatchPort,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     _now,
@@ -130,10 +135,17 @@ class TaskCommissionService:
         collab_repo: ContextCollabRepositoryProtocol,
         authorizer: ContextCollabAuthorizerProtocol,
         method_store: MethodStoreProtocol,
+        # 交付缝默认日志送达(P2 经 L1/A2A 换真实现);python-injector 对
+        # 带默认值参数同样注入,DI 显式绑定见 task_module(bbs authorizer
+        # 先例同款注释)。
+        dispatch_port: "TaskDispatchPort" = None,
     ) -> None:
         self._repo = collab_repo
         self._authorizer = authorizer
         self._method_store = method_store
+        self._dispatch_port = (
+            dispatch_port if dispatch_port is not None else LoggingTaskDispatch()
+        )
 
     # ------------------------------------------------------------- 发布
 
@@ -184,7 +196,7 @@ class TaskCommissionService:
             expected_version=1,
             content=body,
         )
-        return TaskCommissionCreatedView(
+        view = TaskCommissionCreatedView(
             collet_id=record.collet.collet_id,
             title=title,
             body_event_id=appended.event.event_id,
@@ -193,6 +205,17 @@ class TaskCommissionService:
             else "created",
             context_version=appended.collet.version,
         )
+        # 发布成功后自动送达指定执行 bot(交付缝;失败如实上抛,任务已
+        # 持久不回滚——ACCS:送达不等于也不改写上层权威)。
+        self._dispatch_port.dispatch_task_info(
+            DispatchedTaskInfo(
+                collet_id=view.collet_id,
+                title=title,
+                body=body,
+                assignee_agent_id=assignee,
+            )
+        )
+        return view
 
     # ------------------------------------------------------- Work 六动作
 
@@ -276,6 +299,23 @@ class TaskCommissionService:
         payload: dict = {}
         if command.note:
             payload["note"] = command.note
+        if command.percent is not None:
+            # percent 是既存协议词汇(快照投影 `_last_payload_percent` 读
+            # 同名键);仅 progress 动作携带,0-100 整数。
+            if (
+                isinstance(command.percent, bool)
+                or not isinstance(command.percent, int)
+                or not 0 <= command.percent <= 100
+            ):
+                raise ContextCollabValidationError(
+                    "task percent must be an integer in [0, 100], got: "
+                    f"{command.percent!r}"
+                )
+            if event_kind != "task.progress.updated":
+                raise ContextCollabValidationError(
+                    "task percent is only reportable by report_progress"
+                )
+            payload["percent"] = command.percent
         if event_kind == "task.submitted":
             payload["artifacts"] = list(command.artifacts)
 
@@ -451,6 +491,8 @@ class TaskCommissionService:
                 else "",
                 "actor_id": self._principal_id(event.actor_ref),
                 "occurred_at": event.occurred_at,
+                # 公开事件的 payload 随投影可查(percent/note/artifacts)。
+                "payload": event.payload if isinstance(event.payload, dict) else {},
             }
             for event in record.events
             if event.visibility == VISIBILITY_PUBLIC

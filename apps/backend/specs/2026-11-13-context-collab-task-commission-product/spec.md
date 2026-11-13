@@ -141,6 +141,8 @@ list_tasks() -> list[TaskCommissionSummaryView>               # 复用仓储两�
 | J | 非法时序/终态推进 | ★ **产品时序门**（builder check Q1 揭洞：G4 通用合同"无规则命中=事件接纳、状态不变"会让 done/cancelled 后照样落事件）。六动作各钉允许前置状态集：start←created、progress←in_progress、submit←in_progress、accept/reject←reviewing、cancel←created/in_progress/reviewing/blocked；越轨 `ContextCollabValidationError`（错误词指明当前状态与动作）。机器仍是唯一 status 裁决者，提升函数零语义变化，通用路径零影响 |
 | K | 提交权 | ☀ **submit_task 仅指定 bot**（executor 值匹配断言，产品层）；发起人经 reject/cancel 主控，不代提交 |
 | L | 命名与测试预算 | ★ 协议名统一 `TaskCommissionServiceProtocol`（沿 BbsPublicDiscussionServiceProtocol 先例）；`test_builtin_machine_pinned`（注册表恰两键）与 `test_create_rejects_bare_group_open_swarm_top_level`（裸 Open 拒绝清单）两处按**改写**预算，非纯追加 |
+| M | 交办交付缝 | ★ 发布成功后经 `TaskDispatchPort` 自动送达任务信息给指定 bot（step-2 用户故事落点）：P1 默认 `LoggingTaskDispatch`，真实通道 P2 经 L1/A2A 同端口整体替换；失败如实上抛、任务已持久不回滚（ACCS"送达≠上层成功"解耦） |
+| I' | (微修裁决 I) | ★ `report_progress` 启用 `percent`（0-100 整数，仅 progress 可携带）——`percent` 是既存协议词汇（快照投影 `_last_payload_percent` 读同名键），非新造；详情公开事件投影随带 `payload`（percent/note/artifacts 可查） |
 
 **兼容与边界**：两张协议表/列/迁移/三个既有 wire 零改动；`bbs_help_request` 形态不动（新机器新键）；乙案依赖矩阵与架构测试原样执法；错误合同沿既有三类；文件 ≤1000 行；`T | None` 仅 `note`、`body_event_id` 类合法可空。
 

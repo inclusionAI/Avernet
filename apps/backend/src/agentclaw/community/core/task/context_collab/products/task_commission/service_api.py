@@ -46,11 +46,33 @@ class PublishTaskCommand:
 
 @dataclass
 class TaskAdvanceCommand:
-    """Work 六动作共用命令形;``note`` 可选备注,``artifacts`` 仅 submit 用。"""
+    """Work 六动作共用命令形;``note`` 可选备注,``percent`` 仅 progress 用
+    (0-100 整数,启用既存 percent 协议词汇),``artifacts`` 仅 submit 用。"""
 
     collab_context_id: str
     note: str | None = None
+    percent: int | None = None
     artifacts: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DispatchedTaskInfo:
+    """发布后送达指定执行 bot 的任务信息(L1 渡口 P1 占位承载形)。
+
+    ``title``/``body`` 即任务正文,``collet_id`` 供 bot 回查协作上下文,
+    ``assignee_agent_id`` 即被指派的执行者本体。
+    """
+
+    collet_id: str
+    title: str
+    body: str
+    assignee_agent_id: str
+
+
+class TaskDispatchPort(Protocol):
+    """交办交付缝:真实通道 P2 经 L1/A2A 接管,同端口整体替换。"""
+
+    def dispatch_task_info(self, info: DispatchedTaskInfo) -> None: ...
 
 
 @dataclass
