@@ -156,7 +156,8 @@ class Story:
         token = self.request(user, "GET", "/register/token")["token"]
         registered = self.request(
             user, "POST",
-            f"/register?token={segment(token)}&bot-name={segment(name)}", {},
+            "/register?" + urllib.parse.urlencode({"token": token, "bot-name": name}),
+            {},
         )
         bot, bot_token = registered["bot_uuid"], registered["bot_token"]
         self.request(user, "POST", "/bots/onboard", {
