@@ -95,7 +95,7 @@ class LocalRuntime:
                 item['evidence_complete'] = False
                 item.setdefault('missing', []).append('tool call evidence could not be read')
             per_member[alias] = item
-            self.output.progress(f"成员 {alias}: 日志完整={item['evidence_complete']}, Token={item['total_tokens']}")
+            self.output.progress(f"成员 {alias}: 日志完整={item['evidence_complete']}, 模型用量={item['total_tokens']}")
         def total(key):
             values = [v.get(key) for v in per_member.values()]
             return sum(values) if values and all(v is not None for v in values) else None

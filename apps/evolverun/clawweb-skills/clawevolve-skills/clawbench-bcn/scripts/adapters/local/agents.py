@@ -67,7 +67,10 @@ class LocalTeam:
                     'skills': csv(bot.get('skills', '')), 'scopes': csv(self.manifest.get('scopes', 'production'))},
                 'heartbeatIntervalMs': 60000, 'reconnectIntervalMs': 5000, 'connectionTimeoutMs': 30000}},
             'gateway': {'port': port, 'mode': 'local', 'bind': 'loopback',
-                        'auth': {'mode': 'token', 'token': secrets.token_urlsafe(32)}},
+                        'auth': {
+                            'mode': 'token',
+                            'token': secrets.token_urlsafe(32),
+                        }},
             'plugins': {'load': {'paths': [str(self.config['plugin_path'])]},
                         'entries': {'openclaw-channel-bcn': {'enabled': True}}},
         }
