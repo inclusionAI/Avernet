@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_c3ece772cfb1b0::t_55afe6976a935a 264-265
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_c3ece772cfb1b0::t_55afe6976a935a 3,85-86,88-89,108-115,138,149,167,172,180-181,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4fe22b5fec6c5a330b2487618936fe0436a3bf17",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
