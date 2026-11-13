@@ -1,0 +1,26 @@
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_f0f9eabb8f8a42::t_61d4cf6e17432a 28,32-33,37
+  s_f0f9eabb8f8a42::t_7a21c83aa12bc5 29
+autocoding/skills/teamclaw-plan/references/review.md
+  s_f0f9eabb8f8a42::t_61d4cf6e17432a 22-31
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_f0f9eabb8f8a42::t_61d4cf6e17432a 17
+autocoding/skills/teamclaw-plan/references/project-context.md
+  s_f0f9eabb8f8a42::t_742d90fa83b514 15,17,22,53,60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8532636723e78a10a2d175457d5e715a9b6447f7",
+  "prompts": {},
+  "sessions": {
+    "s_f0f9eabb8f8a42": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-e119-7743-aec9-42595bd43929",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

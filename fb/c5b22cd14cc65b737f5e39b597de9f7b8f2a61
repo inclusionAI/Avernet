@@ -1,0 +1,21 @@
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  s_2b26d456bc46f8::t_2eb679345e405c 32,36-38,67-73,172,174-179,181-184,196-199
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  s_2b26d456bc46f8::t_eba8c72e1fd181 61-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbc5b22cd14cc65b737f5e39b597de9f7b8f2a61",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

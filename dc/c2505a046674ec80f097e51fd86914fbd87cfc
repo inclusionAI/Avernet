@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  s_7739fafd4b71a4::t_d64ffc47c5a123 234,236-237
+  s_7739fafd4b71a4::t_85eb68fb8a31cb 215-233,235,238-240
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  s_7739fafd4b71a4::t_11ad2ccdf29431 86,89-90,98,101-103,105
+  s_7739fafd4b71a4::t_d64ffc47c5a123 88,99-100
+  s_7739fafd4b71a4::t_6588506afa9524 123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dcc2505a046674ec80f097e51fd86914fbd87cfc",
+  "prompts": {},
+  "sessions": {
+    "s_7739fafd4b71a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c960-a592-7063-aabe-97bec0c53df5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
