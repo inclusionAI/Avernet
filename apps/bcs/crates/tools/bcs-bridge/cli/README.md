@@ -120,6 +120,11 @@ after 5 seconds. Consecutive startup failures back off to 10, 20, 40 and at most
 running worker resets the backoff. `status` reports the supervisor PID and `status --json` adds
 `auto_restart` and `supervisor_pid`. While a replacement is pending, the JSON state is `restarting`.
 
+Foreground and daemon starts are rejected while the supervisor owns the runtime, including
+restart delays. Public starts also share a startup lock through the initial worker-to-supervisor
+handoff, so another configuration cannot take over that window. Stop the active instance before
+starting with a different configuration.
+
 `bcs-bridge stop` disables the supervisor before gracefully stopping the worker, so an intentional
 stop is not restarted. Registration and configuration replacement still require both the worker
 and supervisor to be stopped. Auto-restart restores the process and its connections; it does not

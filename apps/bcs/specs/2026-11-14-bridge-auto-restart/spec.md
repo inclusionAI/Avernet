@@ -29,6 +29,8 @@ A detached supervisor observes the existing worker instance. If the worker exits
 
 The initial worker uses the existing daemon launch path. After it becomes ready, the launcher detaches a supervisor with its own lock and instance record under the same private runtime directory.
 
+Public foreground and daemon starts share a separate startup lock. The daemon launcher holds it through worker initialization, supervisor startup and failure cleanup; its internal worker child does not reacquire it. Foreground startup checks the supervisor lock while holding the worker lock, so it cannot replace the selected configuration during restart backoff. The startup lock also closes the initial worker-to-supervisor handoff window.
+
 The supervisor polls the worker through the existing verified control path:
 
 - a verified running worker is left alone;

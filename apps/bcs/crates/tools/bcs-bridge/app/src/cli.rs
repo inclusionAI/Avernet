@@ -166,7 +166,7 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
                 let config_path = config_path.canonicalize().context("Cannot resolve bridge configuration path")?;
                 if args.daemon_supervisor { return crate::instance::run_supervisor(&config_path, &runtime_dir()?, args.cwd.as_deref()).await; }
                 if args.daemon { load_start(&config_path, app, args.cwd.as_deref()).await?; return crate::instance::start_daemon(&config_path, &runtime_dir()?, args.cwd.as_deref(), args.auto_restart).await; }
-                crate::instance::run(app, &config_path, &runtime_dir()?, args.cwd.as_deref()).await
+                crate::instance::run(app, &config_path, &runtime_dir()?, args.cwd.as_deref(), args.daemon_child).await
             }
             #[cfg(not(unix))] {
                 if args.daemon || args.daemon_child || args.daemon_supervisor { bail!("Background mode requires Unix"); }

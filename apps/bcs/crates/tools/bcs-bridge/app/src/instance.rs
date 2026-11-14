@@ -46,6 +46,9 @@ impl Paths {
         }
     }
     fn lock(&self, create: bool) -> anyhow::Result<Option<File>> { self.named_lock("bridge.lock", create) }
+    fn start_lock(&self) -> anyhow::Result<File> {
+        self.named_lock("bridge-start.lock", true)?.context("A bridge instance is already starting; use bcs-bridge status or stop")
+    }
     fn supervisor_lock(&self, create: bool) -> anyhow::Result<Option<File>> { self.named_lock("bridge-supervisor.lock", create) }
     fn named_is_locked(&self, name: &str) -> anyhow::Result<bool> {
         // Do not create files just to query an instance that has never run.
@@ -159,16 +162,23 @@ pub fn reserve_registration(runtime_dir: &Path) -> anyhow::Result<File> {
     paths.lock(true)?.context("A bridge instance is running; stop it with bcs-bridge stop before changing registered configuration")
 }
 
-pub async fn run(app: &crate::app::BridgeApp, config_path: &Path, runtime_dir: &Path, cwd_override: Option<&Path>) -> anyhow::Result<()> {
+pub async fn run(app: &crate::app::BridgeApp, config_path: &Path, runtime_dir: &Path, cwd_override: Option<&Path>, daemon_child: bool) -> anyhow::Result<()> {
     // Invalid configuration must not create lifecycle files. Fence the exact
     // validated snapshot after acquiring the registration/startup lock.
     let original = fs::read(config_path).context("Cannot read bridge configuration")?;
     let config = crate::cli::load_start(config_path, app, cwd_override).await?;
     let paths = Paths::new(runtime_dir);
     paths.create()?;
+    // A daemon launcher holds this lock until its worker and optional supervisor are ready.
+    // Its internal child must be able to acquire the worker lock without taking it again.
+    let startup = if daemon_child { None } else { Some(paths.start_lock()?) };
     let lock = paths.lock(true)?.context("A bridge instance is already starting or running; use bcs-bridge status or stop")?;
+    if !daemon_child && paths.supervisor_is_locked()? {
+        bail!("A bridge auto-restart supervisor is already running; use bcs-bridge status or stop");
+    }
     if fs::read(config_path)? != original { bail!("Configuration changed during startup validation; retry"); }
     let instance = Instance { paths, _lock: lock };
+    drop(startup);
     let socket = instance.paths.file("bridge.sock");
     match fs::remove_file(&socket) {
         Ok(()) => {},
@@ -448,6 +458,9 @@ async fn start_supervisor(config_path: &Path, runtime_dir: &Path, cwd: Option<&P
 
 pub async fn start_daemon(config_path: &Path, runtime_dir: &Path, cwd: Option<&Path>, auto_restart: bool) -> anyhow::Result<()> {
     let paths = Paths::new(runtime_dir);
+    paths.create()?;
+    // Keep public starts out of the worker-to-supervisor handoff, including failure cleanup.
+    let _startup = paths.start_lock()?;
     if paths.supervisor_is_locked()? { bail!("A bridge auto-restart supervisor is already running; use bcs-bridge status or stop"); }
     start_worker(config_path, runtime_dir, cwd).await?;
     if !auto_restart { return Ok(()); }

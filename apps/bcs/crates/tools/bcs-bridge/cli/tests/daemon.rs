@@ -205,6 +205,29 @@ async fn foreground_and_background_starts_share_one_lock_across_configurations()
 }
 
 #[tokio::test]
+async fn public_starts_are_fenced_until_the_initial_launch_completes() {
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.runtime("")).unwrap();
+    let startup_lock = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(fixture.runtime("bridge-start.lock")).unwrap();
+    startup_lock.try_lock().unwrap();
+    for background in [false, true] {
+        let mut command = fixture.command();
+        command.arg("start").arg("--config").arg(&fixture.config);
+        if background { command.arg("--daemon"); }
+        let output = timeout(Duration::from_secs(2), command.output()).await
+            .expect("a public start must reject an unfinished launch promptly").unwrap();
+        assert!(!output.status.success(), "{}", diagnostic(&output));
+        assert!(diagnostic(&output).contains("already"), "{}", diagnostic(&output));
+        assert!(!fixture.runtime("bridge.pid.json").exists());
+        assert!(!fixture.runtime("bridge-supervisor.pid.json").exists());
+    }
+    drop(startup_lock);
+    success(&fixture.daemon("--daemon").await);
+    success(&fixture.output(&["stop"]).await);
+}
+
+#[tokio::test]
 async fn concurrent_daemon_starts_allow_exactly_one_instance() {
     let fixture = Fixture::new();
     let (a, b) = tokio::join!(fixture.daemon("--daemon"), fixture.daemon("--daemon"));
@@ -286,11 +309,22 @@ async fn auto_restart_replaces_a_crashed_worker_and_stop_disables_the_supervisor
     let supervisor_pid = status["supervisor_pid"].as_u64().unwrap();
     assert_eq!(fixture.supervisor_record()["pid"].as_u64().unwrap(), supervisor_pid);
 
+    let supervisor = fixture.supervisor_record();
     let worker_pid = fixture.record()["pid"].as_u64().unwrap();
     assert!(Command::new("kill").args(["-KILL", &worker_pid.to_string()]).status().await.unwrap().success());
+    wait_for_restarting(&fixture).await;
+    let other = fixture.home.path().join("other.toml");
+    fs::copy(&fixture.config, &other).unwrap();
+    let duplicate = timeout(Duration::from_secs(2), fixture.command()
+        .arg("start").arg("--config").arg(&other).output()).await
+        .expect("foreground startup must reject the active supervisor promptly").unwrap();
+    assert!(!duplicate.status.success(), "{}", diagnostic(&duplicate));
+    assert!(diagnostic(&duplicate).contains("supervisor"), "{}", diagnostic(&duplicate));
+
     let replacement = wait_for_replacement(&fixture, worker_pid).await;
     assert_ne!(replacement, worker_pid);
-    assert_eq!(fixture.supervisor_record()["pid"].as_u64().unwrap(), supervisor_pid);
+    assert_eq!(fixture.supervisor_record(), supervisor);
+    assert_eq!(Path::new(fixture.record()["config"].as_str().unwrap()), fixture.config.canonicalize().unwrap());
 
     success(&fixture.output(&["stop"]).await);
     assert!(!fixture.runtime("bridge-supervisor.pid.json").exists());
