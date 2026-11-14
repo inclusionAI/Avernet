@@ -15,6 +15,10 @@ class DeviceServiceError(Exception):
         self.message = message
 
 
+class DeviceUnavailableError(DeviceServiceError):
+    """The provider confirmed that the requested connection target is unavailable."""
+
+
 class DeviceReleaseError(DeviceServiceError):
     """设备释放错误"""
 

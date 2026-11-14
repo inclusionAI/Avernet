@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
-from agentclaw.community.core.devices.errors import DeviceServiceError, InvalidDeviceStatusError
+from agentclaw.community.core.devices.errors import DeviceServiceError, DeviceUnavailableError, InvalidDeviceStatusError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceConnectionInfo,
@@ -78,9 +78,9 @@ def _generate_request_id(
 class BaasDeviceServiceError(DeviceServiceError):
     """BaaS 设备服务错误。"""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
+
+class BaasDeviceUnavailableError(BaasDeviceServiceError, DeviceUnavailableError):
+    """BaaS confirmed that no active device can serve the connection."""
 
 
 class TemplateConfigReader(Protocol):
@@ -849,6 +849,7 @@ class BaasDeviceService(DeviceService):
 
         # 延迟导入避免循环依赖
         from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+        from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 
         record = self._repo.get_by_id(binding_id)
         if record is not None and record.status == DeviceBindingStatus.RELEASED.value:
@@ -868,6 +869,8 @@ class BaasDeviceService(DeviceService):
                 # Only override when asked; None would blank get_ws_info's default.
                 **({"path": path} if path else {}),
             )
+        except BaasNoActiveDevicesError as e:
+            raise BaasDeviceUnavailableError(f"Failed to get device connection: {e}") from e
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")
             raise BaasDeviceServiceError(f"Failed to get device connection: {e}") from e
