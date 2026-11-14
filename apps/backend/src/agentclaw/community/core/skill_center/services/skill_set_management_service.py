@@ -26,6 +26,7 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
@@ -506,6 +507,11 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                     try:
                         result = mutation_for_skill(skill_id)
                     except SkillSetControlPlaneNotFoundError as error:
+                        outcomes.append(
+                            SkillSetSkillOutcome(skill_id=skill_id, error=error)
+                        )
+                        continue
+                    except SkillRuntimeNameConflictError as error:
                         outcomes.append(
                             SkillSetSkillOutcome(skill_id=skill_id, error=error)
                         )

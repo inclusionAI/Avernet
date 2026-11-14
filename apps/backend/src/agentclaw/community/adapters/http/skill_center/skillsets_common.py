@@ -17,6 +17,7 @@ from agentclaw.community.api.skill_set_management_service import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
@@ -42,13 +43,16 @@ _LEGACY_SKILL_SET_BATCH_ERROR_MESSAGES = {
     "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (
         "该 Skill 已由其他能力集管理，不能重复添加。"
     ),
+    "SKILL_RUNTIME_NAME_CONFLICT": (
+        "该 Skill 名称与已有激活 Skill 冲突，不能同时激活两个同名 Skill。"
+    ),
 }
 
 
 def _is_legacy_skill_set_batch_partial_failure(error: Exception) -> bool:
     """Whether the published BFF batch records this domain error per member."""
     return isinstance(
-        error, (LocalSkillNotFoundError, SkillSetControlPlaneNotFoundError)
+        error, (LocalSkillNotFoundError, SkillRuntimeNameConflictError, SkillSetControlPlaneNotFoundError)
     ) or (
         isinstance(error, SkillSetControlPlaneConflictError)
         and str(error) in _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS
