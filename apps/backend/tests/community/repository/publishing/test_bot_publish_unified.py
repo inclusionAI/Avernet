@@ -631,10 +631,18 @@ def test_large_artifact_offloaded_and_reinlined(repo_oss, oss):
         repo_oss.get_by_id(rec.id),
         repo_oss.get_by_publish_bot_id("src-bot.pub.1", "emp001", "dev"),
         repo_oss.list_by_owner("emp001", "dev")[0],
+        repo_oss.list_by_source_bot(1, "dev")[0],
     ):
         assert got.ext["config_artifact"] == art
         assert got.ext["keep"] == "me"
         assert ARTIFACT_OSS_MARKER not in got.ext
+
+
+def test_caller_publish_lookup_fails_if_offloaded_artifact_is_missing(repo_oss, oss):
+    rec = repo_oss.insert(_data(ext={"config_artifact": _big_artifact()}))
+    oss.store.clear()
+    with pytest.raises(RuntimeError, match="config_artifact fetch failed"):
+        repo_oss.list_by_source_bot(rec.source_bot_pk, "dev")
 
 
 def test_offload_via_update_status_with_ext(repo_oss, oss):
