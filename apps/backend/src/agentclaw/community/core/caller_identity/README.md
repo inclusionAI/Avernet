@@ -24,16 +24,14 @@ internal_dependencies:
 ### Change impact
 
 The existing IAM refresh endpoint accepts `token_type=dingtalk` for an opaque
-platform DeviceToken. This branch first authenticates the BaaS application
-signature and accepts its explicit `user_id` and `owner_id` assertions. The
-optional `DingTalkCallerTokenProvider.exchange_dingtalk` capability verifies the
-source token; its returned subject must equal the asserted caller before any
-runtime update. Only that caller's existing instance is eligible, and its binding
-is checked again after exchange. The default `iam` flow and its provider contract
-are unchanged. No DeviceToken path falls back to browser authentication.
-This endpoint capability adds no BCN/BaaS credential type or chat-entry wiring;
-existing authenticated application callers supply the required assertions.
-
+platform DeviceToken. It adds no caller or owner query parameters. This branch
+first authenticates the existing application signature, resolves the owner using
+the existing Bot locator, and invokes the optional
+`DingTalkCallerTokenProvider.exchange_dingtalk` capability. Only the verified
+upstream subject selects the existing Caller instance. Source credentials and
+query IDs are never decoded or used to infer caller identity. The service rejects
+invalid subject/token/expiry values and checks the exact binding before installing.
+The default `iam` flow and its provider contract remain unchanged.
 
 OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve
 their `OwnerIdDep` locator through `openapi_v1.bot_address` before passing an

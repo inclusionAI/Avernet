@@ -2,30 +2,25 @@
 agent: tc-code
 status: completed
 created: 2026-11-14
-iteration: 1
+iteration: 2
 ---
 
-# DeviceToken Caller credential implementation
+# DeviceToken exchange with existing HTTP locator parameters
 
-The existing GET `/api/v1/token/iam` now accepts the finite `token_type=iam|dingtalk` query, defaulting to IAM. The DeviceToken branch first verifies the existing BaaS signed application principal. Its explicit caller and owner assertions are required and must match the resolved Bot owner and upstream verified credential subject. DeviceToken validation never falls back to browser SSO.
+Only `token_type=iam|dingtalk` is added to the existing GET `/api/v1/token/iam` contract. The route has no new user or owner query parameters, and the service has no expected identity arguments. Existing application signature authentication is preserved.
 
-A separate optional `DingTalkCallerTokenProvider.exchange_dingtalk` capability preserves the existing IAM provider signature. The community provider explicitly reports unavailable. The service resolves only the exact Caller instance, validates its session, checks the issued credential subject and expiration, then resolves the binding again before reusing the existing runtime installation. Owner drafts, shared service targets and other caller instances are excluded.
+The service resolves Bot context with the existing locator and obtains its owner there. It invokes `exchange_dingtalk(device_token, bot_id, owner_user_id, task_metadata)` without an `auth_context`. The returned verified subject is used verbatim to select the exact Caller instance. The service does not decode or normalize source credentials or query identity values. Missing, blank or padded subjects/tokens and invalid or expired results fail before target installation. Existing session-key validation, exact Caller binding scope checks and binding recheck remain in place. IAM behavior is unchanged.
 
-The HTTP adapter and application service log safe request metadata, success and stable failure outcomes. No source credential, issued token, Cookie or signed principal is logged. Source tokens remain opaque and in memory.
+Diagnostics record safe derived owner/caller metadata, exact binding, stable error codes and elapsed time. Source/issued tokens, Cookie and signed application principals are excluded.
 
-Validation:
+Validation for this revision:
 
-- Final DeviceToken core/API tests: **28 passed**, including real signature verification with absent, invalid, expired and wrong-issuer principals; unknown source; exact target; subject mismatch; expired result; replaced/wrong target; context/provider/updater failure; missing fields; no SSO fallback; secret-free request/success/failure diagnostics.
-- Architecture, Caller identity, existing IAM API and OpenAPI regression: **680 passed**.
-- Ruff on all changed Backend Python files and `git diff --check`: passed.
-- Full Backend suite: **31,255 passed, 40 skipped, 6 subtests passed**; total line coverage **149,253/163,700 (91.17%)**.
-- Final independent DeviceToken tests: **28 passed**, with **59/59 changed executable source lines covered (100%)**. The full suite started before the final test additions; its standalone changed-line result is 51/59 (86.44%). The final focused run independently verifies those eight remaining changed lines.
-- Branch: `feat/dingtalk-caller-token-20261114`; freshly fetched base `origin/dev` remains `7711855bebd028c2231db58cefe045e2b330a7e2`.
+- TDD: five expected failures reproduced the old query/assertion contract before source changes.
+- IAM compatibility plus initial DeviceToken core/API regression: **71 passed**.
+- Final DeviceToken core/API tests: **36 passed**, including schema-only source selector, malicious extra query IDs, real principal signature checks, exact verified subject with leading zeros, invalid result values, target/session/upstream failures and secret-free diagnostics.
+- Ruff for changed Backend Python files and `git diff --check`: passed.
+- Broader architecture, Caller identity and IAM/OpenAPI regression: **689 passed**; measured source lines **759/780 (97.31%)**.
+- Final focused coverage includes the real context-permission projection; no new session-ownership enforcement is claimed. The existing validator checks required session keys; the exact Caller binding enforces caller scope.
+- The final permission-rejection test was added after the 689-case run and passed in the fresh 36-case run.
 
-Scope correction: the change adds only the Backend endpoint/provider capability. All task-added BCN/BaaS source, tests and report files are restored to the original base. Existing authenticated application callers invoke the endpoint with the required identity assertions. Backend signature validation, subject/target checks and diagnostic logs are retained. Earlier validation above is the original run; correction-run verification is recorded below.
-
-No live upstream exchange or deployment was performed. Production adapters consume the optional provider capability through dependency injection. Remote PR checks remain a separate gate.
-
-## Scope correction regression
-
-Current correction run: entire apps/baas tree is byte-identical to feature base7711855, with no untracked additions; Backend Python source/tests are byte-identical to the previous feature head. Independent Backend Caller/API/architecture regression:682/682 passed, affected five modules260/269=96.65%, changed executable lines59/59=100%, project checker passed at minline75/minchange90. Existing unchanged BCN/BaaS compatibility:1381 passed plus10 existing non-strict XPASS, zero failures/skips. Enterprise adapter compatibility is independently rerun; no Backend or BaaS production code is added by this correction. No new runtime logging is added while restoring baseline behavior; the out-of-scope dedicated DeviceToken refresh logs are removed with that path.
+This revision changes only Backend source/tests/spec/docs. No BaaS/BCN edits, deployment, live credential exchange or push were performed by this implementation step. The earlier full Backend run predates this API refinement and is not represented as a rerun of this revision.
