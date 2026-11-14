@@ -31,6 +31,8 @@ source token; its returned subject must equal the asserted caller before any
 runtime update. Only that caller's existing instance is eligible, and its binding
 is checked again after exchange. The default `iam` flow and its provider contract
 are unchanged. No DeviceToken path falls back to browser authentication.
+This endpoint capability adds no BCN/BaaS credential type or chat-entry wiring;
+existing authenticated application callers supply the required assertions.
 
 
 OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve

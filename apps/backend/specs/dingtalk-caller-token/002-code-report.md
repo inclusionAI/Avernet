@@ -22,6 +22,10 @@ Validation:
 - Final independent DeviceToken tests: **28 passed**, with **59/59 changed executable source lines covered (100%)**. The full suite started before the final test additions; its standalone changed-line result is 51/59 (86.44%). The final focused run independently verifies those eight remaining changed lines.
 - Branch: `feat/dingtalk-caller-token-20261114`; freshly fetched base `origin/dev` remains `7711855bebd028c2231db58cefe045e2b330a7e2`.
 
-BaaS propagation and its independent verification are described in `apps/baas/specs/dingtalk-caller-token/002-code-report.md`.
+Scope correction: the change adds only the Backend endpoint/provider capability. All task-added BCN/BaaS source, tests and report files are restored to the original base. Existing authenticated application callers invoke the endpoint with the required identity assertions. Backend signature validation, subject/target checks and diagnostic logs are retained. Earlier validation above is the original run; correction-run verification is recorded below.
 
 No live upstream exchange or deployment was performed. Production adapters consume the optional provider capability through dependency injection. Remote PR checks remain a separate gate.
+
+## Scope correction regression
+
+Current correction run: entire apps/baas tree is byte-identical to feature base7711855, with no untracked additions; Backend Python source/tests are byte-identical to the previous feature head. Independent Backend Caller/API/architecture regression:682/682 passed, affected five modules260/269=96.65%, changed executable lines59/59=100%, project checker passed at minline75/minchange90. Existing unchanged BCN/BaaS compatibility:1381 passed plus10 existing non-strict XPASS, zero failures/skips. Enterprise adapter compatibility is independently rerun; no Backend or BaaS production code is added by this correction. No new runtime logging is added while restoring baseline behavior; the out-of-scope dedicated DeviceToken refresh logs are removed with that path.

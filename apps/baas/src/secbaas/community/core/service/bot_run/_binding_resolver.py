@@ -117,11 +117,7 @@ class BotBindingResolver:
         credential = CallerExecutionCredential(
             type=credential_type, token=credential_value
         )
-        if not (
-            credential.is_iam_token
-            or credential.is_agentpass
-            or credential.is_dingtalk_token
-        ):
+        if not (credential.is_iam_token or credential.is_agentpass):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 f"caller binding requires a supported execution credential: "

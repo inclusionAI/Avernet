@@ -8,7 +8,6 @@ from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import (
     CALLER_CREDENTIAL_TYPE_AGENTPASS,
-    CALLER_CREDENTIAL_TYPE_DINGTALK_TOKEN,
     CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
     BotBindingData,
 )
@@ -246,7 +245,6 @@ def build_caller_identity_metadata(
     if token_type not in {
         CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
         CALLER_CREDENTIAL_TYPE_AGENTPASS,
-        CALLER_CREDENTIAL_TYPE_DINGTALK_TOKEN,
     }:
         raise ValueError(f"unsupported caller execution token type: {token_type}")
     return {
