@@ -71,7 +71,10 @@ async def test_runtime_addresses_bot_by_real_owner_not_todo_principal() -> None:
             "message": "Write the report",
             "metadata": {
                 "biz_task_id": "todo_1",
+                "todo_id": "todo_1",
                 "collab_context_id": "context_1",
+                "todo_report_path": "/api/v1/collaboration/todos/todo_1/report",
+                "todo_upload_path": "/api/v1/collaboration/todos/todo_1/artifacts/object-file",
             },
         }
     ]
@@ -118,8 +121,11 @@ async def test_runtime_resume_reuses_previous_session_and_interaction_id() -> No
             "metadata": {
                 "session_id": "session_previous",
                 "biz_task_id": "todo_1",
+                "todo_id": "todo_1",
                 "collab_context_id": "context_1",
                 "interaction_event_id": "interaction_1",
+                "todo_report_path": "/api/v1/collaboration/todos/todo_1/report",
+                "todo_upload_path": "/api/v1/collaboration/todos/todo_1/artifacts/object-file",
             },
             "message_id": "interaction_1",
         }
