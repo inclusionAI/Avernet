@@ -1,7 +1,7 @@
 /** Composition adapter: Editor uses the exact same effective Bot/transport as
  * AutoHeal, but sends a suggestion-only prompt, never a repair/run command. */
 import { resolveAutoHealConfig, resolveBaasConfig } from '@avernet/clawweb-shared/server/db';
-import { sendIntervention } from '@avernet/clawevolve/server/services/baas-intervention';
+import { buildBaasHeaders, sendIntervention } from '@avernet/clawevolve/server/services/baas-intervention';
 import { WorkflowAiDraftDispatchRejectedError, WorkflowAiDraftInvalidResultError,
   type WorkflowAiDraftExecutionPort, type WorkflowAiDraftExecutionRequest } from '@avernet/workflow/server/contracts/workflow-ai-draft';
 import { decodeWorkflowAiDraftBaasReply } from './workflow-ai-draft-baas-reply.js';
@@ -64,8 +64,7 @@ export function createWorkflowAiDraftBaasExecution(): WorkflowAiDraftExecutionPo
     },
     async poll(request) {
       const transport = transportConfiguration();
-      const headers: Record<string, string> = { Authorization: `Bearer ${transport.apiKey}` };
-      if (process.platform === 'darwin' && transport.iamtoken) headers.Cookie = `iam_token=${transport.iamtoken}`;
+      const headers = buildBaasHeaders(transport);
       const response = await fetch(`${transport.baseUrl.replace(/\/$/, '')}/openapi/v1/messages/${encodeURIComponent(request.jobId)}`,
         { headers, redirect: 'error', signal: AbortSignal.timeout(15_000) });
       if (response.status === 404) return { status: 'running' };

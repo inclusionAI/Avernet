@@ -153,7 +153,7 @@ function safeError(message: string, config: { apiKey: string; iamtoken: string }
  * On macOS (local dev): requires both apiKey + iamtoken from application.yaml.
  * On server (Linux etc.): apiKey only; iamtoken is not needed and ignored.
  */
-function buildBaasHeaders(config: { apiKey: string; iamtoken: string; baseUrl: string }): Record<string, string> {
+export function buildBaasHeaders(config: { apiKey: string; iamtoken: string; baseUrl: string }): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${config.apiKey}`,
