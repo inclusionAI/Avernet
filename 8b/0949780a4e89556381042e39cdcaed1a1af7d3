@@ -1,0 +1,21 @@
+apps/bcs/crates/bootstrap/bcs/src/server/catalog_wiring.rs
+  s_3390a382ab8b6f::t_d91deddc452764 51-63
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_3390a382ab8b6f::t_c4e31a0841eff5 872-889
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8b0949780a4e89556381042e39cdcaed1a1af7d3",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
