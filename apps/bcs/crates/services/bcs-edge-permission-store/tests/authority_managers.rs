@@ -182,3 +182,69 @@ async fn sync_rejects_stock_over_10000() {
         .expect("page after rejection");
     assert_eq!(page.total, 10_101, "no truncation, whole request rejected");
 }
+
+/// When a pending-add member already has a non-manager edge
+/// (grant_kind <> 'manager', grant_ref_id = 0), the sync must
+/// skip that member instead of failing with a duplicate-key
+/// INSERT. Regression test for the CDO NEW ONLINE_ERROR
+/// "manager sync kept conflicting; retry budget exhausted"
+/// (Dima 2026111300120603225).
+#[tokio::test]
+async fn sync_skips_pending_add_with_existing_non_manager_edge() {
+    let fixture = new_fixture().await;
+    let db = fixture.db.clone();
+
+    fixture.seed_bot(ENV, "bot_skip", 1).await;
+    fixture.seed_human(ENV, "own").await;
+    fixture.seed_human(ENV, "x").await;
+    fixture
+        .grant_edge(ENV, "bot_skip", "human_own", BotAccessRelation::Owner)
+        .await;
+
+    // Insert a non-manager edge for human_x — it sits at the
+    // same (from_id, to_id, env, grant_ref_id = 0) key space
+    // and would block a manager INSERT due to the unique
+    // constraint uk_edge_from_to_env_ref.
+    execute(
+        db.as_ref(),
+        "INSERT INTO edge_grants \
+         (env, from_id, to_id, grant_kind, grant_ref_id, rules, status, \
+          originator_policy_type, originator_policy_data) \
+         VALUES (?, ?, ?, 'custom_type', 0, NULL, 'approved', 'same_as_from', NULL)",
+        vec![
+            DbValue::from(ENV),
+            DbValue::from("human_x"),
+            DbValue::from("bot_skip"),
+        ],
+    )
+    .await;
+
+    // Include human_x in the sync input — the owner-excluded
+    // filter keeps it because human_x ≠ human_own, but
+    // pre_read_existing_edges should filter it out because a
+    // non-manager edge already exists at grant_ref_id = 0.
+    let sync = ManagerSync {
+        bot_id: "bot_skip".to_string(),
+        user_ids: vec!["x".to_string()],
+        mutation: AuthorityMutation {
+            mutation_id: "m-sync-skip".to_string(),
+            actor: AuthorityActor::Service {
+                app_id: 42,
+            },
+        },
+    };
+    let result = fixture
+        .authority_repo()
+        .sync_managers(sync)
+        .await;
+
+    // The sync must succeed — human_x is skipped, not inserted.
+    assert!(
+        result.is_ok(),
+        "sync must succeed when pending add has existing non-manager edge; got {result:?}"
+    );
+    let change = result.unwrap();
+    assert_eq!(change.added, 0, "human_x must be skipped, not added");
+    assert_eq!(change.removed, 0);
+    assert_eq!(change.total, 0, "valid remainder is empty after skipping");
+}
