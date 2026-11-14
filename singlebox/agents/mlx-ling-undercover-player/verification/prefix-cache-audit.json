@@ -1,0 +1,115 @@
+{
+  "mean_seconds": {
+    "first": 4.652323749653685,
+    "warm_hit": 4.900480597357576,
+    "shared_tail": 4.8703536946559325,
+    "cold_distinct": 5.171897694332681
+  },
+  "mean_cached_fraction": {
+    "first": 0.0,
+    "warm_hit": 0.0,
+    "shared_tail": 0.0,
+    "cold_distinct": 0.0
+  },
+  "checks": {
+    "warm_cache_hit": false,
+    "cold_prefix_is_distinct": true
+  },
+  "warm_vs_cold_speedup": 1.0553858119796369,
+  "shared_tail_vs_cold_speedup": 1.0619141891086108,
+  "raw": {
+    "first": [
+      {
+        "seconds": 4.605403415975161,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.706622499972582,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.644945333013311,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      }
+    ],
+    "warm_hit": [
+      {
+        "seconds": 5.200859125005081,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.727338750031777,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.77324391703587,
+        "prompt_tokens": 1800,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      }
+    ],
+    "shared_tail": [
+      {
+        "seconds": 4.896315874997526,
+        "prompt_tokens": 1803,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.840966083982494,
+        "prompt_tokens": 1803,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 4.873779124987777,
+        "prompt_tokens": 1803,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      }
+    ],
+    "cold_distinct": [
+      {
+        "seconds": 4.951101833023131,
+        "prompt_tokens": 1884,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 5.418404041964095,
+        "prompt_tokens": 1887,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      },
+      {
+        "seconds": 5.146187208010815,
+        "prompt_tokens": 1898,
+        "cached_tokens": 0,
+        "completion_tokens": 8,
+        "finish_reason": "length"
+      }
+    ]
+  },
+  "scope": "Local serial prefill-oriented test with 8 generated tokens; not game latency or quality."
+}
