@@ -1,0 +1,23 @@
+apps/backend/tests/community/adapters/http/task/test_read_event_loop.py
+  s_5c173f6b8a3b51::t_79b9b5b3390483 57-58,64-67,69-70,75,83,85-98,101-104,245-260,263,265-266,268-269,273-276
+  s_5c173f6b8a3b51::t_42dab22a82c49f 206-244,270
+  s_5c173f6b8a3b51::t_e50db3677cef57 261-262,264,267,271-272
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_052afedc471c27 27-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "321bacad1b8d8bab0fead8d650c8a74a7434628d",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
