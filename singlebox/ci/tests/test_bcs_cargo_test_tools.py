@@ -39,7 +39,7 @@ printf '%s\\n' "$url" >> "$TEST_ROOT/downloads"
 [ "${TEST_DOWNLOAD_FAIL:-0}" = 0 ] || exit 22
 cp "$TEST_ROOT/releases/${url##*/}" "$output"
 ''')
-        self.script('cargo', 'printf "%s\\n" "$*" >> "$TEST_ROOT/cargo-calls"')
+        self.script('cargo', 'printf "%s\\n" "$*" >> "$TEST_ROOT/cargo-calls"\npwd > "$TEST_ROOT/cargo-cwd"')
         self.checksums: list[str] = []
         for target in ['x86_64-unknown-linux-musl', 'universal-apple-darwin']:
             self.archive('cargo-nextest', '0.9.150', target)
@@ -108,6 +108,8 @@ cp "$TEST_ROOT/releases/${url##*/}" "$output"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('install cargo-nextest --locked --version 0.9.150',
                       (self.root / 'cargo-calls').read_text())
+        self.assertEqual(Path((self.root / 'cargo-cwd').read_text().strip()).resolve(),
+                         self.root.parent.resolve())
 
     def test_checksum_mismatch_fails_closed_before_installation(self) -> None:
         for archive in self.releases.iterdir():

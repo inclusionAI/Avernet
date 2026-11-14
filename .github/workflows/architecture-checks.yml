@@ -23,6 +23,7 @@ jobs:
     env:
       BCS_BASE_REF: origin/${{ github.base_ref || 'main' }}
       CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: 1.94.0
       PR_BODY_FILE: /tmp/pr_body.txt
     defaults:
       run:
@@ -40,8 +41,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
           rustc --version
           cargo --version
 
@@ -52,9 +53,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/bcs/target
-          key: ${{ runner.os }}-cargo-arch-${{ hashFiles('apps/bcs/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-arch-${{ env.RUSTUP_TOOLCHAIN }}-${{ hashFiles('rust-toolchain.toml', 'apps/bcs/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-arch-${{ env.RUSTUP_TOOLCHAIN }}-
 
       - name: Install architecture check tools
         run: cargo install cargo-machete cargo-public-api --locked

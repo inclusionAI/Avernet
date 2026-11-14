@@ -35,13 +35,199 @@ log_error() { :; }
 check_rust_installed() { return 1; }
 check_protobuf_installed() { return 1; }
 
-unset REQUIRED_RUST_TOOLCHAIN
+REQUIRED_RUST_TOOLCHAIN="stable"
+RUSTUP_TOOLCHAIN="stable"
 # shellcheck source=/dev/null
 source "${ROOT}/singlebox/env/toolchain.sh"
 
 test_default_rust_toolchain() {
-  assert_eq "stable" "$REQUIRED_RUST_TOOLCHAIN" "default Rust toolchain"
+  assert_eq "1.94.0" "$REQUIRED_RUST_TOOLCHAIN" "pinned Rust toolchain"
+  assert_eq "1.94.0" "$RUSTUP_TOOLCHAIN" "selected Rust toolchain"
+  bash -c '[ "$RUSTUP_TOOLCHAIN" = "1.94.0" ]' || fail "Rust selection should reach child builds"
 }
+
+test_existing_required_rust_skips_install() (
+  check_rust_installed() { return 0; }
+  rustup() {
+    assert_eq "run 1.94.0 rustc --version" "$*" "installed toolchain probe"
+  }
+  rustc() { printf 'rustc 1.94.0 (4a4ef493e 2026-03-02)\n'; }
+  confirm_tool_install() { fail "matching Rust must not request installation"; }
+
+  setup_rust || fail "matching Rust should be accepted"
+)
+
+test_existing_rustup_installs_missing_required_rust() (
+  local installed=0 install_count=0
+  check_rust_installed() { return 0; }
+  load_existing_rust_from_home() { return 1; }
+  load_rust_environment() { :; }
+  _toolchain_require_shell_reload() { :; }
+  confirm_tool_install() { return 0; }
+  curl() { fail "existing rustup must not download another installer"; }
+  rustup() {
+    case "$*" in
+      "run 1.94.0 rustc --version") [ "$installed" = 1 ] ;;
+      "toolchain install 1.94.0 --profile minimal --component llvm-tools")
+        installed=1
+        install_count=$((install_count + 1))
+        ;;
+      *) fail "unexpected rustup command: $*" ;;
+    esac
+  }
+  rustc() {
+    if [ "$installed" = 1 ]; then
+      printf 'rustc 1.94.0 (4a4ef493e 2026-03-02)\n'
+    else
+      printf 'rustc 1.99.1 (other compiler)\n'
+    fi
+  }
+
+  setup_rust || fail "existing rustup should install the required release"
+  assert_eq 1 "$install_count" "required release installed once"
+  setup_rust || fail "repeated setup should accept the installed release"
+  assert_eq 1 "$install_count" "repeated setup should not reinstall"
+)
+
+test_fresh_rust_install_uses_required_release() (
+  local temp_dir installed=0
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  export PATH="/usr/bin:/bin" TEST_RUST_INSTALL_LOG="$temp_dir/install-args"
+  USE_CN_MIRROR=""
+  check_rust_installed() { [ "$installed" = 1 ]; }
+  load_existing_rust_from_home() { return 1; }
+  load_rust_environment() { installed=1; }
+  _toolchain_require_shell_reload() { :; }
+  confirm_tool_install() { return 0; }
+  rustc() { printf 'rustc 1.94.0 (4a4ef493e 2026-03-02)\n'; }
+  curl() {
+    local output_path=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then
+        output_path="$2"
+        break
+      fi
+      shift
+    done
+    [ -n "$output_path" ] || fail "Rust installer download must specify a destination"
+    cat > "$output_path" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" > "$TEST_RUST_INSTALL_LOG"
+EOF
+  }
+
+  setup_rust || fail "fresh Rust installation should succeed"
+  assert_eq "-y --profile minimal --default-toolchain 1.94.0 --component llvm-tools" \
+    "$(<"$TEST_RUST_INSTALL_LOG")" "fresh installer toolchain and components"
+)
+
+test_required_rust_install_failure_is_reported() (
+  check_rust_installed() { return 0; }
+  load_existing_rust_from_home() { return 1; }
+  confirm_tool_install() { return 0; }
+  rustup() { return 1; }
+  rustc() { printf 'rustc 1.99.1 (other compiler)\n'; }
+
+  if setup_rust; then
+    fail "failed toolchain installation must fail setup"
+  fi
+)
+
+test_wrong_rust_cannot_be_accepted_after_declining_install() (
+  check_rust_installed() { return 0; }
+  load_existing_rust_from_home() { return 1; }
+  confirm_tool_install() { return 1; }
+  rustup() { return 1; }
+  rustc() { printf 'rustc 1.99.1 (other compiler)\n'; }
+  install_rust_via_rustup() { fail "declined installation must not run"; }
+
+  if setup_rust; then
+    fail "a different Rust release must not satisfy the pinned toolchain"
+  fi
+)
+
+test_bcs_check_only_validates_required_rust_without_installing() (
+  local temp_dir tool output
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  mkdir -p "$temp_dir/bin" "$temp_dir/cargo"
+  printf '%s\n' 'replace-with = "aliyun"' > "$temp_dir/cargo/config.toml"
+  for tool in cargo cargo-nextest cargo-llvm-cov protoc; do
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$temp_dir/bin/$tool"
+  done
+  cat > "$temp_dir/bin/rustc" <<'EOF'
+#!/bin/sh
+if [ -f "$CARGO_HOME/installed-1.94.0" ]; then
+  printf 'rustc 1.94.0 (test compiler)\n'
+else
+  printf 'rustc %s (test compiler)\n' "$TEST_RUST_RELEASE"
+fi
+EOF
+  cat > "$temp_dir/bin/rustup" <<'EOF'
+#!/bin/sh
+[ "$RUSTUP_TOOLCHAIN" = 1.94.0 ] || exit 90
+case "$*" in
+  'run 1.94.0 rustc --version') exit 0 ;;
+  'component list --toolchain 1.94.0 --installed') printf 'llvm-tools-test-target\n' ;;
+  'toolchain install 1.94.0 --profile minimal')
+    [ "${TEST_RUST_ALLOW_INSTALL:-}" = 1 ] || exit 92
+    touch "$CARGO_HOME/installed-1.94.0"
+    ;;
+  *) printf 'unexpected mutation: %s\n' "$*" >&2; exit 91 ;;
+esac
+EOF
+  chmod +x "$temp_dir/bin/"*
+  export CARGO_HOME="$temp_dir/cargo" PATH="$temp_dir/bin:/usr/bin:/bin"
+  export TEST_RUST_RELEASE=1.94.0 RUSTUP_TOOLCHAIN=stable
+  bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check >/dev/null \
+    || fail "check-only should accept Rust 1.94.0"
+  export TEST_RUST_RELEASE=1.99.1
+  if output="$(bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check 2>&1)"; then
+    fail "check-only must reject a different Rust compiler"
+  fi
+  assert_contains "Rust/Cargo 1.94.0 is not active" "$output" "wrong compiler diagnostic"
+  [ ! -f "$CARGO_HOME/installed-1.94.0" ] || fail "check-only must not install Rust"
+  export TEST_RUST_ALLOW_INSTALL=1
+  bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" >/dev/null \
+    || fail "existing rustup without a Cargo env file should install the pinned release"
+  [ -f "$CARGO_HOME/installed-1.94.0" ] || fail "setup must install the pinned release"
+)
+
+test_singlebox_prereqs_do_not_install_missing_rust() (
+  local temp_dir output
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  LOG_DIR="$temp_dir" DEP_DIR="$temp_dir" BCS_DIR="$temp_dir" CYAN=""
+  # shellcheck source=/dev/null
+  source "${ROOT}/singlebox/modules/bcs.sh"
+  check_rust_installed() { return 0; }
+  rustup() {
+    if [ "$*" = "run 1.94.0 rustc --version" ]; then
+      touch "$temp_dir/probed"
+      return 1
+    fi
+    touch "$temp_dir/mutation"
+    return 1
+  }
+  rustc() {
+    touch "$temp_dir/rustc-invoked"
+    printf 'rustc 1.94.0 (test compiler)\n'
+  }
+  check_protobuf_installed() { return 0; }
+  get_protobuf_version() { printf 'test protoc\n'; }
+  check_port_available() { return 0; }
+  prereq_ok() { :; }
+  prereq_error() { printf '%s\n' "$*"; }
+
+  if output="$(bcs_prereqs 2>&1)"; then
+    fail "Singlebox prerequisites must reject a missing Rust 1.94.0 toolchain"
+  fi
+  assert_contains "Rust/Cargo 1.94.0 is not available" "$output" "missing toolchain diagnostic"
+  [ -f "$temp_dir/probed" ] || fail "prerequisites must probe the required toolchain"
+  [ ! -f "$temp_dir/rustc-invoked" ] || fail "missing toolchain must not invoke rustc and trigger automatic installation"
+  [ ! -f "$temp_dir/mutation" ] || fail "prerequisites must not install the missing toolchain"
+)
 
 test_command_package_mapping() {
   assert_eq "pkgconf-pkg-config" "$(system_command_package dnf pkg-config)" "Fedora pkg-config package"
@@ -266,6 +452,13 @@ test_shell_reload_hint_uses_detected_profile() (
 )
 
 test_default_rust_toolchain
+test_existing_required_rust_skips_install
+test_existing_rustup_installs_missing_required_rust
+test_fresh_rust_install_uses_required_release
+test_required_rust_install_failure_is_reported
+test_wrong_rust_cannot_be_accepted_after_declining_install
+test_bcs_check_only_validates_required_rust_without_installing
+test_singlebox_prereqs_do_not_install_missing_rust
 test_command_package_mapping
 test_library_package_mapping
 test_manual_install_hints

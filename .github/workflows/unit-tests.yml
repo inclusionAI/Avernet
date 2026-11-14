@@ -120,6 +120,7 @@ jobs:
           --health-retries 20
     env:
       CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: 1.94.0
       BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3306/bcs_contract
       # Pushes compare the whole event range, not the already-updated origin/dev.
       BCS_PUSH_BEFORE: ${{ github.event.before }}
@@ -166,9 +167,8 @@ jobs:
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip-bcs != 'true'
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup component add llvm-tools
+          rustup toolchain install 1.94.0 --profile minimal --component llvm-tools
+          rustup default 1.94.0
           rustc --version
           cargo --version
 

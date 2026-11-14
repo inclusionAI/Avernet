@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Owner: 章梧
 # Installs/configures prerequisites for building and testing the BCS Rust workspace:
-#   1. Rust/Cargo (via rustup, stable channel; BCS does not pin a version)
+#   1. Rust/Cargo 1.94.0 (via rustup, matching the repository toolchain)
 #   2. cargo-nextest (test runner)
 #   3. protoc (protobuf compiler; several build.rs depend on it)
 #   4. cargo-llvm-cov + llvm-tools (coverage, used by ci_test.sh --coverage)
@@ -20,6 +20,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bcs_dir="$(cd "$script_dir/.." && pwd)"
+required_rust_toolchain="1.94.0"
+export RUSTUP_TOOLCHAIN="$required_rust_toolchain"
 
 check_only=0
 while [[ "$#" -gt 0 ]]; do
@@ -51,20 +53,34 @@ date
 have() { command -v "$1" >/dev/null 2>&1; }
 missing=0
 
+rust_toolchain_ready() {
+  have cargo && have rustup \
+    && rustup run "$required_rust_toolchain" rustc --version >/dev/null 2>&1 \
+    && [[ "$(rustc --version 2>/dev/null)" == "rustc ${required_rust_toolchain} "* ]]
+}
+
 # ---- 1. Rust/Cargo ----
 echo ""
 echo "--- Rust/Cargo ---"
-if have cargo; then
-  echo "  ✓ cargo -> $(command -v cargo) ($(rustc --version 2>/dev/null || echo 'rustc ?'))"
+if rust_toolchain_ready; then
+  echo "  ✓ cargo -> $(command -v cargo) ($(rustc --version))"
 else
-  echo "  ✗ cargo not installed"
+  echo "  ✗ Rust/Cargo $required_rust_toolchain is not active"
   if [[ "$check_only" -eq 1 ]]; then
     missing=1
   else
-    echo "  → installing Rust stable via rustup..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-    source "${HOME}/.cargo/env"
-    have cargo && echo "  ✓ cargo installed ($(cargo --version))" || { echo "  ✗ rustup install failed" >&2; exit 1; }
+    echo "  → installing Rust $required_rust_toolchain via rustup..."
+    if have rustup; then
+      rustup toolchain install "$required_rust_toolchain" --profile minimal
+    else
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --no-modify-path --profile minimal --default-toolchain "$required_rust_toolchain"
+    fi
+    if [[ -f "${CARGO_HOME:-${HOME}/.cargo}/env" ]]; then
+      source "${CARGO_HOME:-${HOME}/.cargo}/env"
+    fi
+    rust_toolchain_ready && echo "  ✓ cargo installed ($(cargo --version))" \
+      || { echo "  ✗ Rust $required_rust_toolchain is not active; check PATH for a non-rustup compiler" >&2; exit 1; }
   fi
 fi
 
@@ -142,19 +158,19 @@ else
     have cargo-llvm-cov && echo "  ✓ cargo-llvm-cov installed" || { echo "  ✗ cargo-llvm-cov install failed" >&2; exit 1; }
   fi
 fi
-# llvm-cov requires the llvm-tools rustup component. rustup component list --installed
+# llvm-cov requires the llvm-tools rustup component. rustup component list --toolchain "$required_rust_toolchain" --installed
 # prints entries with a target suffix (e.g. llvm-tools-aarch64-apple-darwin), so match
 # with ^llvm-tools.
-if rustup component list --installed 2>/dev/null | grep -q '^llvm-tools'; then
+if rustup component list --toolchain "$required_rust_toolchain" --installed 2>/dev/null | grep -q '^llvm-tools'; then
   echo "  ✓ llvm-tools (rustup component)"
 else
   echo "  ✗ llvm-tools component not installed"
   if [[ "$check_only" -eq 1 ]]; then
     missing=1
   else
-    echo "  → rustup component add llvm-tools ..."
-    rustup component add llvm-tools
-    rustup component list --installed 2>/dev/null | grep -q '^llvm-tools' \
+    echo "  → rustup component add --toolchain $required_rust_toolchain llvm-tools ..."
+    rustup component add --toolchain "$required_rust_toolchain" llvm-tools
+    rustup component list --toolchain "$required_rust_toolchain" --installed 2>/dev/null | grep -q '^llvm-tools' \
       && echo "  ✓ llvm-tools installed" || { echo "  ✗ llvm-tools install failed" >&2; exit 1; }
   fi
 fi
