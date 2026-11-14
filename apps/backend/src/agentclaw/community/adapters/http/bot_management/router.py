@@ -2919,6 +2919,14 @@ async def delete_bot(
             error_code=500,
             data=None,
         )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.delete_bot] operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotServiceError as e:
         logger.error(f"[bot_router.delete_bot] Bot service error: {e}")
         return ApiResponse(
