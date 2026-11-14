@@ -106,6 +106,26 @@ alive. Check other bridge instances, the close timeout/failure logs, and remote
 connection expiry. Keep the saved identity and session database; deleting them
 or repeatedly restarting is not a connection-release mechanism.
 
+### Daemon auto-restart
+
+Use the opt-in supervisor when an unintended worker exit should start a replacement:
+
+```bash
+bcs-bridge start --daemon --auto-restart
+```
+
+Without `--auto-restart`, daemon behavior is unchanged. The supervisor retains the selected
+configuration and `--cwd`, observes the existing verified instance and restarts an exited worker
+after 5 seconds. Consecutive startup failures back off to 10, 20, 40 and at most 60 seconds; a
+running worker resets the backoff. `status` reports the supervisor PID and `status --json` adds
+`auto_restart` and `supervisor_pid`. While a replacement is pending, the JSON state is `restarting`.
+
+`bcs-bridge stop` disables the supervisor before gracefully stopping the worker, so an intentional
+stop is not restarted. Registration and configuration replacement still require both the worker
+and supervisor to be stopped. Auto-restart restores the process and its connections; it does not
+recover or replay in-flight runs. It also does not restart the supervisor itself after host or
+workspace reboot.
+
 Configuration written by `register` (gateway example):
 
 ```toml
