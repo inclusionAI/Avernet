@@ -44,16 +44,21 @@ function eventKey(item: TodoEvent): string {
   return item.eventId || `${item.executionId}-${item.eventSeq}`;
 }
 
-function payloadContent(item: TodoEvent): string {
-  return typeof item.payload.content === 'string' ? item.payload.content : '';
+function payloadText(item: TodoEvent, key: 'content' | 'objective'): string {
+  const value = item.payload[key];
+  return typeof value === 'string' ? value : '';
 }
 
 function interactionContent(item: TodoEvent): string {
   if (item.content) return item.content;
-  const content = payloadContent(item);
+  const content = payloadText(item, 'content');
   if (content) return content;
+  if (item.eventType === 'task.created') {
+    const objective = payloadText(item, 'objective');
+    if (objective) return objective;
+  }
   if (item.eventType === 'task.completed') return '本轮执行已完成，但未上报文本结果。';
-  return item.eventType;
+  return '该互动未包含文本内容。';
 }
 
 function rejectionTargetFloors(item: TodoEvent): number[] {

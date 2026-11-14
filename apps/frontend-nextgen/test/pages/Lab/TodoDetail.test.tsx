@@ -263,6 +263,34 @@ describe('TodoDetailPage', () => {
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
 
+  it('互动页从 task.created 的 objective 展示原始待办内容，不展示事件类型', async () => {
+    const objective = '帮我整理下三款产品的定价与功能矩阵，A/B/C 三个竞品。';
+    mockedService.loadTodoInteractions.mockResolvedValue([
+      event(1, {
+        eventType: 'task.created',
+        actorType: 'human',
+        content: '',
+        payload: { objective },
+      }),
+    ]);
+    mockedService.loadTodoEvents.mockResolvedValue([
+      event(1, {
+        eventType: 'task.created',
+        actorType: 'human',
+        content: '',
+        payload: { objective },
+      }),
+    ]);
+
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    expect(within(interactionView).getByText(objective)).toBeInTheDocument();
+    expect(within(interactionView).queryByText('task.created')).not.toBeInTheDocument();
+  });
+
   it('拒绝验收切到互动标记楼层，草稿跨页保留并提交完整决策', async () => {
     mockedService.acceptTodo.mockResolvedValue(todo);
     render(<TodoDetailPage />);

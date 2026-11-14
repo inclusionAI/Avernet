@@ -288,6 +288,30 @@ def test_get_context_uses_human_actor_and_maps_full_event_projection() -> None:
     }
 
 
+def test_get_context_maps_created_objective_to_interaction_content() -> None:
+    service = _RecordingContextService()
+    service.projection = _projection(
+        events=[
+            {
+                **_event_projection(),
+                "content": "",
+                "summary": None,
+                "payload": {"objective": "Write the report"},
+            }
+        ]
+    )
+    plugin = InProcessTodoCollaborationPlugin(service)
+
+    context = plugin.get_context(
+        collab_context_id=_CONTEXT_ID,
+        actor_id="viewer_1",
+    )
+
+    assert context.events[0].event_type == "task.created"
+    assert context.events[0].content == "Write the report"
+    assert context.events[0].payload == {"objective": "Write the report"}
+
+
 @pytest.mark.asyncio
 async def test_run_context_calls_service_then_refreshes_with_same_actor() -> None:
     service = _RecordingContextService()

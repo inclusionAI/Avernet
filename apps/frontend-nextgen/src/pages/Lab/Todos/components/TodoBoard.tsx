@@ -19,7 +19,7 @@ interface TodoBoardProps {
   onPageSizeChange: (pageSize: number) => void;
 }
 
-type TodoGroupKey = 'pending' | 'in_progress' | 'completed';
+type TodoGroupKey = TodoStatus;
 
 interface TodoGroup {
   key: TodoGroupKey;
@@ -33,7 +33,7 @@ const TODO_GROUPS: TodoGroup[] = [
   {
     key: 'pending',
     label: '待处理',
-    statuses: ['pending', 'pending_acceptance'],
+    statuses: ['pending'],
     labelClassName: 'font-semibold text-destructive',
     attentionDotClassName: 'bg-destructive',
   },
@@ -43,6 +43,13 @@ const TODO_GROUPS: TodoGroup[] = [
     statuses: ['in_progress'],
   },
   {
+    key: 'pending_acceptance',
+    label: '待验收',
+    statuses: ['pending_acceptance'],
+    labelClassName: 'font-semibold text-warning',
+    attentionDotClassName: 'bg-warning',
+  },
+  {
     key: 'completed',
     label: '已完成',
     statuses: ['completed'],
@@ -50,10 +57,11 @@ const TODO_GROUPS: TodoGroup[] = [
 ];
 
 function filteredGroup(status: TodoStatus): TodoGroup {
-  if (status === 'in_progress') return { key: 'in_progress', label: TODO_STATUS_LABEL[status], statuses: [status] };
-  if (status === 'completed') return { key: 'completed', label: TODO_STATUS_LABEL[status], statuses: [status] };
+  if (status === 'in_progress' || status === 'completed') {
+    return { key: status, label: TODO_STATUS_LABEL[status], statuses: [status] };
+  }
   return {
-    key: 'pending',
+    key: status,
     label: TODO_STATUS_LABEL[status],
     statuses: [status],
     labelClassName: status === 'pending' ? 'font-semibold text-destructive' : 'font-semibold text-warning',
@@ -133,6 +141,7 @@ export function TodoBoard({
   const [expanded, setExpanded] = useState<Record<TodoGroupKey, boolean>>({
     pending: true,
     in_progress: true,
+    pending_acceptance: true,
     completed: false,
   });
 

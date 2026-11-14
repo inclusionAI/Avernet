@@ -295,19 +295,26 @@ def _parse_event(record: dict) -> TodoCollaborationEvent:
     created_at = record.get("created_at")
     if isinstance(created_at, datetime):
         created_at = created_at.isoformat()
+    event_type = _required_string(record.get("event_kind"), "event_kind")
+    payload = dict(_dict(record.get("payload")))
+    content = _string(record.get("content") or record.get("summary"))
+    if not content:
+        content = _string(payload.get("content"))
+    if not content and event_type == "task.created":
+        content = _string(payload.get("objective"))
     return TodoCollaborationEvent(
         event_id=_required_string(record.get("event_id"), "event_id"),
         event_seq=_required_int(record.get("event_seq"), "event_seq"),
-        event_type=_required_string(record.get("event_kind"), "event_kind"),
+        event_type=event_type,
         actor_id=_string(record.get("actor_id")),
         actor_type=_string(record.get("actor_type")),
-        content=_string(record.get("content") or record.get("summary")),
+        content=content,
         execution_id=_string(record.get("execution_id")),
         context_version=_optional_int(record.get("context_version")),
         status=_optional_string(record.get("status")),
         artifacts=artifacts,
         created_at=_required_string(created_at, "created_at"),
-        payload=dict(_dict(record.get("payload"))),
+        payload=payload,
     )
 
 

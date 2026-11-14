@@ -238,7 +238,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(await screen.findByRole('article', { name: '编写实施方案' })).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: '整理会议纪要' })).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: '复盘上线结果' })).not.toBeInTheDocument();
-    expect(document.querySelector('#todo-group-pending')).toHaveTextContent('待验收');
+    expect(document.querySelector('#todo-group-pending_acceptance')).toHaveTextContent('待验收');
 
     fireEvent.click(within(statusGroup).getByRole('button', { name: '已完成' }));
     expect(await screen.findByRole('article', { name: '复盘上线结果' })).toBeInTheDocument();
@@ -335,8 +335,21 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     );
     expect(within(acceptanceCard).getByText('编写实施方案', { selector: 'span' })).toHaveClass('truncate', 'text-sm', 'font-medium');
     expect(within(acceptanceCard).getByText('整理需求并输出实施方案')).toHaveClass('line-clamp-2', 'text-xs', 'leading-[18px]');
-    expect(within(board).getByRole('button', { name: /^待处理 \(1\)$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^待处理 \(0\)$/ })).toHaveTextContent('0');
     expect(within(board).getByRole('button', { name: /^进行中 \(1\)$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^待验收 \(1\)$/ })).toHaveTextContent('1');
+    expect(
+      within(within(board).getByRole('button', { name: /^待处理 \(0\)$/ }).closest('section') as HTMLElement).queryByRole(
+        'article',
+        { name: '编写实施方案' },
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      within(within(board).getByRole('button', { name: /^待验收 \(1\)$/ }).closest('section') as HTMLElement).getByRole(
+        'article',
+        { name: '编写实施方案' },
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
   });
