@@ -51,7 +51,7 @@ const MAX_FILE_ATTACHMENTS = 5;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const FILE_DOWNLOAD_TIMEOUT_MS = 60_000;
 const FILE_READ_IDLE_TIMEOUT_MS = 15_000;
-const RUN_TERMINAL_TIMEOUT_MS = 15 * 60 * 1000;
+const RUN_TERMINAL_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const INJECT_ASSISTANT_ONLY_FIELDS = [ 'api', 'provider', 'model', 'stopReason', 'usage' ];
 
 /** Extract sender name from [from:botName] prefix. Returns stripped text and sender name. */
@@ -598,6 +598,9 @@ function armRunTerminalTimeout(
       log,
       `terminal lifecycle timeout after ${RUN_TERMINAL_TIMEOUT_MS}ms`,
     );
+    // Claim the error terminal before aborting: SDK abort callbacks may emit
+    // lifecycle events synchronously. Cancel before cleanup removes the controller.
+    activeStreams.get(runId)?.abort();
     void cleanupRunContext(runId, log);
   }, RUN_TERMINAL_TIMEOUT_MS);
   timer.unref?.();

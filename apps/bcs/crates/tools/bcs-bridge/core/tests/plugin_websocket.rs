@@ -506,11 +506,6 @@ async fn v3_interaction_round_trip_resolves_and_finishes_the_run() {
             "bcsRunId": "bcs-run-x", "runId": "run-permission"
         }
     })).await;
-    let ack = recv_application(&mut socket, |frame| frame["id"] == "resolve-1").await;
-    assert_eq!(ack["type"], "res");
-    assert_eq!(ack["ok"], true);
-    assert_eq!(ack["payload"]["ok"], true);
-
     // A duplicate resolve of the same interaction replies the same ack
     // without re-writing the engine control channel.
     send_json(&mut socket, json!({
@@ -520,22 +515,70 @@ async fn v3_interaction_round_trip_resolves_and_finishes_the_run() {
             "kind": "exec", "decision": "deny"
         }
     })).await;
-    let replay = recv_application(&mut socket, |frame| frame["id"] == "resolve-2").await;
+    let [ack, replay, resolved, final_frame] = recv_permission_resolution(&mut socket).await;
+    assert_eq!(ack["type"], "res");
+    assert_eq!(ack["ok"], true);
+    assert_eq!(ack["payload"]["ok"], true);
+    assert_eq!(replay["type"], "res");
     assert_eq!(replay["ok"], true);
     assert_eq!(replay["payload"]["ok"], true);
 
-    let resolved = recv_application(&mut socket, |frame|
-        frame["event"] == "interaction" && frame["payload"]["phase"] == "resolved").await;
     assert_eq!(resolved["payload"]["runId"], "run-permission");
     assert_eq!(resolved["payload"]["decision"], "deny");
     assert_eq!(resolved["seq"], resolved["payload"]["seq"]);
 
     // The driver mapped deny to the engine's control channel; the run finishes.
-    let final_frame = recv_application(&mut socket, is_final).await;
     assert_eq!(final_frame["event"], "chat");
     assert_eq!(final_frame["payload"]["runId"], "run-permission");
     assert!(final_frame.to_string().contains("REQUEST_PERMISSION"));
     stop(shutdown, task).await;
+}
+
+async fn recv_permission_resolution(socket: &mut Socket) -> [Value; 4] {
+    // ACKs and run events are produced independently. Retain each expected
+    // frame instead of discarding events while waiting for an ACK.
+    let mut frames: [Option<Value>; 4] = std::array::from_fn(|_| None);
+    while frames.iter().any(Option::is_none) {
+        let frame = recv_application(socket, |_| true).await;
+        let index = if frame["type"] == "res" && frame["id"] == "resolve-1" {
+            0
+        } else if frame["type"] == "res" && frame["id"] == "resolve-2" {
+            1
+        } else if frame["event"] == "interaction" && frame["payload"]["phase"] == "resolved" {
+            2
+        } else if is_final(&frame) {
+            3
+        } else {
+            continue;
+        };
+        assert!(frames[index].replace(frame).is_none(), "duplicate resolution frame {index}");
+    }
+    frames.map(|frame| frame.expect("all resolution frames received"))
+}
+
+#[tokio::test]
+async fn permission_resolution_keeps_events_interleaved_with_acks() {
+    let frames = [
+        json!({"type":"res", "id":"resolve-1", "ok":true, "payload":{"ok":true}}),
+        json!({"type":"res", "id":"resolve-2", "ok":true, "payload":{"ok":true}}),
+        json!({"type":"event", "event":"interaction", "payload":{"phase":"resolved"}}),
+        json!({"type":"event", "event":"chat", "payload":{"state":"final"}}),
+    ];
+    // Preserve ACK order and event order, but exercise every interleaving.
+    for order in [[0, 1, 2, 3], [0, 2, 1, 3], [0, 2, 3, 1],
+                  [2, 0, 1, 3], [2, 0, 3, 1], [2, 3, 0, 1]] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (mut sender, mut receiver) = tokio::join!(async {
+            let (stream, _) = listener.accept().await.unwrap();
+            accept_async(stream).await.unwrap()
+        }, async {
+            let stream = TcpStream::connect(addr).await.unwrap();
+            tokio_tungstenite::client_async(format!("ws://{addr}"), stream).await.unwrap().0
+        });
+        for index in order { send_json(&mut sender, frames[index].clone()).await; }
+        assert_eq!(recv_permission_resolution(&mut receiver).await, frames, "order={order:?}");
+    }
 }
 
 fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> ProviderConfig {
