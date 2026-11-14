@@ -369,6 +369,14 @@ class OpenClawCronAdapter(CronService):
             return None
         return _job_from_dict(raw)
 
+    async def get_job_for_detail(self, job_id: str) -> tuple[CronJob | None, bool]:
+        """Preserve confirmed missing separately from an inconclusive lookup."""
+        check = getattr(self._port, "cron_get_for_detail", None)
+        if check is None:
+            return await self.get_job(job_id), False
+        raw, missing = await check(job_id)
+        return (_job_from_dict(raw) if raw is not None else None), missing
+
     async def get_status(
         self, auth: AuthContext | None = None,
     ) -> CronStatus:
