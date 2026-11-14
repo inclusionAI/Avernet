@@ -1,0 +1,75 @@
+apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 46,112-115
+apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 164
+apps/baas/src/secbaas/community/core/service/bot_run/_binding_resolver.py
+  s_5c173f6b8a3b51::t_af998bc3d0cf6b 120-124
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_99a75ae5f86c41 1-18
+  s_5c173f6b8a3b51::t_17a22d5d1316a8 19-27
+apps/baas/tests/unit/plugins/bot_service/test_bot_service_plugin.py
+  s_5c173f6b8a3b51::t_20322c330619da 1474-1476,1480-1486,1492-1496,1509-1514,1525-1530,1543-1545
+  s_5c173f6b8a3b51::t_803429fbb02eb3 1472-1473,1477-1479,1487-1491,1497-1508,1515-1524,1531-1542,1546-1550
+apps/baas/src/secbaas/community/core/service/bot_run/_bot_run_utils.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 11,249
+apps/baas/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_6cb25b1d863443 1-26
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_5c173f6b8a3b51::t_df8eda94fc4933 15,26-34
+  s_5c173f6b8a3b51::t_6ddcaa932d4d60 35
+apps/baas/src/secbaas/community/plugins/bot_service/real/_plugin.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 488,528-532,619-625,854-888,891-898,900-910,912,915-916
+  s_5c173f6b8a3b51::t_af998bc3d0cf6b 535
+  s_5c173f6b8a3b51::t_d07f0332da5b9e 889-890,899,911,913-914
+apps/backend/specs/dingtalk-caller-token/implementation-plan.md
+  s_5c173f6b8a3b51::t_6611e242c39db6 1-6,10
+  s_5c173f6b8a3b51::t_99a75ae5f86c41 7-9
+apps/backend/specs/dingtalk-caller-token/001-spec-output.md
+  s_5c173f6b8a3b51::t_0bc0b74d0f938b 2,4-8
+  s_5c173f6b8a3b51::t_9d41819ae173c1 1,3,9
+apps/backend/tests/community/core/caller_identity/test_dingtalk_iam_token.py
+  s_5c173f6b8a3b51::t_6611e242c39db6 1-28,31-51,53-54,57-71,73-111
+  s_5c173f6b8a3b51::t_2150ba34e2f8ff 29-30,52,55-56,72,112-119
+apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
+  s_5c173f6b8a3b51::t_803429fbb02eb3 146-150,156
+apps/baas/src/secbaas/community/spi/bot_service/__init__.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 5,20
+apps/baas/tests/unit/core/service/bot_run/test_bot_run_utils.py
+  s_5c173f6b8a3b51::t_803429fbb02eb3 776-777,786,794
+apps/baas/src/secbaas/community/spi/bot_service/_models.py
+  s_5c173f6b8a3b51::t_80e4742c909f6a 44,59-60
+  s_5c173f6b8a3b51::t_e83aad40c77000 61-62
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_5c173f6b8a3b51::t_52c7f984569883 21,23,30,32,46,49,56-91
+  s_5c173f6b8a3b51::t_279947b7bec387 1-20,22,24-29,31,33-45,47-48,50-55
+apps/baas/tests/unit/core/service/bcn/test_bcn_service.py
+  s_5c173f6b8a3b51::t_803429fbb02eb3 518
+apps/baas/src/secbaas/community/spi/bot_service/_protocols.py
+  s_5c173f6b8a3b51::t_76250a18294072 60-62
+apps/backend/src/agentclaw/community/adapters/http/token_exchange/router.py
+  s_5c173f6b8a3b51::t_6ad8dae7d5b891 5,7,109-111,122-124,129-136
+apps/backend/src/agentclaw/community/api/caller_credential.py
+  s_5c173f6b8a3b51::t_b05a653ba17d9e 25,43
+apps/backend/src/agentclaw/community/core/caller_identity/caller_credential_protocol.py
+  s_5c173f6b8a3b51::t_25aedfd9a1ca50 45-56,72-78,116
+apps/backend/src/agentclaw/community/core/caller_identity/caller_iam_token_service_protocol.py
+  s_5c173f6b8a3b51::t_8689a04cfe1239 28-30
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_5c173f6b8a3b51::t_4d8ec58ec9e632 6,10-13,46-47,86-88,90-98,242-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "30392c8c7a00661e1620a81277ea8dd89d86abce",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
