@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/api/task/bbs_public_discussion_service.py
+  s_64261436edbb0b::t_d567172b58155f 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0ffca05f75b2aa097ce82e6669e1c1ae5b4048ad",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

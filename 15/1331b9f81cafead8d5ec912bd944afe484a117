@@ -1,0 +1,45 @@
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  s_edf09d9cb9f10c::t_05783c7811fc37 4-6,102-123
+  s_68438866e3020f::t_68420d968b255b 124-125
+apps/backend/src/agentclaw/community/adapters/http/expert_chat/router.py
+  s_edf09d9cb9f10c::t_908055abd2fe89 42,191-194
+  s_edf09d9cb9f10c::t_8c02fb7ef2bbeb 409-412
+  s_68438866e3020f::t_2a9bf3207ae1e3 413
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_edf09d9cb9f10c::t_4a0de8065fbcab 412,431-434
+  s_edf09d9cb9f10c::t_7e3dcb355c144d 12-13,388-408
+  s_edf09d9cb9f10c::t_1e627c426be8b5 3,409-411,413-430,435-459
+  s_3a96314c63bfb3::t_0a8381b2a5d540 460-461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "151331b9f81cafead8d5ec912bd944afe484a117",
+  "prompts": {},
+  "sessions": {
+    "s_3a96314c63bfb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-089d-74a3-be00-2785ae2ec0ff",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_68438866e3020f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-19d3-72f0-b004-25acfac2a3e5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_edf09d9cb9f10c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-046a-7441-bc8f-a1cf3118dc24",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

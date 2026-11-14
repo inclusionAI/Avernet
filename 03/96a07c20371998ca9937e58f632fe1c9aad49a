@@ -1,0 +1,25 @@
+apps/backend/specs/caller-instance-status/002-code-report.md
+  s_ccda8e611a6d06::t_f97862670d31d8 61-63
+apps/backend/specs/caller-instance-status/009-pr-report.md
+  s_ccda8e611a6d06::t_f97862670d31d8 46-51
+apps/backend/specs/caller-instance-status/001-spec-output.md
+  s_ccda8e611a6d06::t_f97862670d31d8 130-132
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_ccda8e611a6d06::t_0d488f0d0f4bf3 662,878-879
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0396a07c20371998ca9937e58f632fe1c9aad49a",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

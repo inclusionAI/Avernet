@@ -1,0 +1,40 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/session-recovery-trigger.ts
+  s_25c8d69584ee47::t_0845e717d49bb0 5,105
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_25c8d69584ee47::t_0845e717d49bb0 11
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/validation.ts
+  s_25c8d69584ee47::t_0845e717d49bb0 27-30,33,51-52,59
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_25c8d69584ee47::t_0845e717d49bb0 55
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_25c8d69584ee47::t_0845e717d49bb0 3,21-29,58,98,114,132,144-152,154-160,163-165,168-178
+  s_25c8d69584ee47::t_b99fc693c18c1c 161
+  s_25c8d69584ee47::t_395542fa1ab0cd 153,162,167
+  s_25c8d69584ee47::t_f2d1fb628100c9 166,179-180
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_25c8d69584ee47::t_62a872f10da16e 368-369,376-377,385
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/session-recovery-trigger.test.ts
+  s_25c8d69584ee47::t_62a872f10da16e 46-53
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_25c8d69584ee47::t_395542fa1ab0cd 60,96,105
+  s_25c8d69584ee47::t_32e89d7fd5711c 106
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_25c8d69584ee47::t_62a872f10da16e 45-56,60-87
+  s_25c8d69584ee47::t_b99fc693c18c1c 57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1ff62234e0b476d429d05b0b820cf64d6816f899",
+  "prompts": {},
+  "sessions": {
+    "s_25c8d69584ee47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c946-1fbb-7b62-8d1c-995aca01ed39",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

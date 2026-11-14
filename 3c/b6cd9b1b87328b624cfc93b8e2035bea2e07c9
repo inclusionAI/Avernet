@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_d12260d6dc4ad9::t_d0d5a29a94542a 17-19,414-417,425-428
+apps/backend/tests/community/core/resources/test_resource_file_service.py
+  s_d12260d6dc4ad9::t_6c079237a8d761 83-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3cb6cd9b1b87328b624cfc93b8e2035bea2e07c9",
+  "prompts": {},
+  "sessions": {
+    "s_d12260d6dc4ad9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b93a-ef54-7a43-be3f-dd8ca9104627",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  s_3487cf77f0393d::t_376d265e173d1a 90-91
+  s_3487cf77f0393d::t_a38b24f274ce60 110-112
+  s_3487cf77f0393d::t_63f1e04e499ddf 65-89,92-109,113-118,120-123
+  s_3487cf77f0393d::t_54c39628329d5e 119
+  s_3487cf77f0393d::t_b00cc2350dd5ea 124
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_3487cf77f0393d::t_57a2661ee0e11f 214-218,220,224-225
+  s_3487cf77f0393d::t_f5b2a5bcd0c12c 221-223
+  s_3487cf77f0393d::t_7a388c9b31d404 219
+  s_3487cf77f0393d::t_936e716cea7a34 209-213,226
+apps/frontend-nextgen/jest.config.cjs
+  s_3487cf77f0393d::t_d254bc2c7eb854 15-19
+apps/frontend-nextgen/tsconfig.json
+  s_3487cf77f0393d::t_a69151d0a568de 22-27
+submodules/avernet
+  s_95ef915ba70ad3::t_33bb02e35afc8e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e81d4ee7b2ebd934103b53ae3806546e8a97266c",
+  "prompts": {},
+  "sessions": {
+    "s_3487cf77f0393d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6e5ec3a0-e1fe-4634-acfe-8179993eb508",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_95ef915ba70ad3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_95ef915ba70ad3",
+        "model": "unknown"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
