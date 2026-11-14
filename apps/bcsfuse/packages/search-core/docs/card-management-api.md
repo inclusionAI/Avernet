@@ -236,7 +236,8 @@ Qdrant 同步失败仍会阻止就绪。首次选择 `default` 只保存配置�
 
 宿主显式启用 `allow_document_mapping=True` 并提供对应服务时，PUT 可在 `card`、
 `labels` 同级传 `document_mapping`；未启用的宿主维持原请求与响应协议。
-当前支付宝应用启用此能力，TC 的原有接口不启用。
+支付宝应用和 TC 的 v2 Card 接口启用此能力。TC 的旧 Worker 同步/配置入口保持原协议；
+旧配置入口保留已有映射，但修改映射必须通过 v2 Card 接口，以保证校验和版本更新。
 
 ```json
 {
@@ -274,3 +275,8 @@ Card labels 按原流程保留，不参与自定义映射。
 写入时先校验语法，再用合并后的实际 Card 渲染。映射错误返回 422，detail 中说明
 配置位置、实际 Card 路径和原因，任何字段均不落库。缺失可选路径但整体仍有效时
 允许保存，202 可附加 `warnings`。普通未配置请求的业务校验和错误码保持原样。
+
+TC 未配置映射时继续使用原有 Worker/Profile 转换及关键词别名。仅修改 rerank 或
+过滤映射时保留原有正文和分片；显式 search 模板生成一条 Doc。模板读取原始 Card，
+不把加工后的 Profile 回写进 Card。TC 的 availability、runtime_state、lifecycle_state
+等原有业务过滤字段受保护，labels 继续独立更新。

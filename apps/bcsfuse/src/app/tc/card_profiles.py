@@ -103,14 +103,17 @@ class TcCardUpdates(CardUpdates):
         super().__init__(*args, **kwargs)
         self.profile_gateway = profile_gateway
 
-    def _prepare_documents(self, row, previous):
-        summary = "" if row.card.deleted else self._prepare_profile(row)
+    def _default_projection(self, row):
+        summary = self._prepare_profile(row)
         if summary:
             # The derived text affects only Doc projection. The raw Card stays intact.
             card = row.card.model_copy(
                 update={"source_card": {**row.card.source_card, "description": summary}}
             )
             row = replace(row, card=card)
+        return super()._default_projection(row)
+
+    def _prepare_documents(self, row, previous):
         documents = super()._prepare_documents(row, previous)
         if row.card.deleted:
             return documents
