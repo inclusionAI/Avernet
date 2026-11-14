@@ -4,9 +4,9 @@ Provides polymorphic credentials types for different PaaS platforms,
 enabling type-safe credential passing and IDE autocompletion.
 """
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ._outbound_proxy_rule import K8sOutboundProxyRule
 
@@ -74,6 +74,21 @@ class ArcaCredentials(PaasCredentials):
     default_ttl_minutes: int = Field(
         default=1440,
         description="Default device lifetime in minutes",
+    )
+    arca_tenant_id: (
+        Annotated[
+            str,
+            StringConstraints(
+                strict=True,
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            ),
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description="Explicit ARCA platform routing tenant (not the BaaS tenant); None disables optional NAS recovery",
     )
     app_name: str = Field(
         default="secbaas",
