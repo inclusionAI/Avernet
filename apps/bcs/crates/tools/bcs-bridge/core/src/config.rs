@@ -70,6 +70,8 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub mode: ConnectionMode,
     pub listen: Option<SocketAddr>,
+    /// Optional A2A server on the gateway listener; disabled when absent.
+    pub a2a: Option<crate::a2a::config::A2aConfig>,
     pub bcs_to_provider_token: Option<String>,
     pub plugin: Option<PluginConfig>,
     pub bot_runtime_token: Option<String>,
@@ -136,6 +138,11 @@ impl ProviderConfig {
     fn validate(&self) -> Result<(), ConfigError> {
         if self.provider_id.trim().is_empty() {
             return Err(ConfigError::Invalid("provider_id must be nonempty"));
+        }
+        if let Some(a2a) = &self.a2a {
+            a2a.validate(self.mode)?;
+            crate::a2a::config::A2aConfig::validate_id(&self.provider_id)?;
+            for bot in &self.bots { crate::a2a::config::A2aConfig::validate_id(&bot.provider_bot_ref)?; }
         }
         let mut refs = HashSet::new();
         for bot in &self.bots {

@@ -16,15 +16,17 @@ impl IntoResponse for BridgeError {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new().route("/webhook", post(handle_webhook)).with_state(state)
+    let a2a = crate::a2a::router(vec![state.clone()]);
+    Router::new().route("/webhook", post(handle_webhook)).with_state(state).merge(a2a)
 }
 
 /// A listener may serve several Providers, but each request authenticates only
 /// against its target Provider. Never accept a bearer from another group.
 pub fn multi_router(states: Vec<Arc<AppState>>) -> Router {
+    let a2a = crate::a2a::router(states.clone());
     let states: std::collections::BTreeMap<_, _> = states.into_iter()
         .map(|state| (state.config.provider_id.clone(), state)).collect();
-    Router::new().route("/webhook", post(handle_multi_webhook)).with_state(Arc::new(states))
+    Router::new().route("/webhook", post(handle_multi_webhook)).with_state(Arc::new(states)).merge(a2a)
 }
 
 async fn handle_multi_webhook(
