@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -18,7 +20,8 @@ def _git(repository: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
+@pytest.mark.parametrize("changed_path", ["apps/bcs/feature.rs", "rust-toolchain.toml"])
+def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path, changed_path: str):
     repository = tmp_path / "repo"
     repository.mkdir()
     _git(repository, "init", "--initial-branch=dev")
@@ -36,8 +39,8 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
     _git(repository, "commit", "-m", "baseline")
     base = _git(repository, "rev-parse", "HEAD")
 
-    changed = repository / "apps/bcs/feature.rs"
-    changed.parent.mkdir(parents=True)
+    changed = repository / changed_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
     changed.write_text("// BCS change\n", encoding="utf-8")
     _git(repository, "add", ".")
     _git(repository, "commit", "-m", "change BCS")
