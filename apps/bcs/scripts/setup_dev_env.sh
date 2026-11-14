@@ -161,7 +161,9 @@ fi
 # llvm-cov requires the llvm-tools rustup component. rustup component list --toolchain "$required_rust_toolchain" --installed
 # prints entries with a target suffix (e.g. llvm-tools-aarch64-apple-darwin), so match
 # with ^llvm-tools.
-if rustup component list --toolchain "$required_rust_toolchain" --installed 2>/dev/null | grep -q '^llvm-tools'; then
+# Component queries auto-install missing toolchains; probe without installing first.
+if rustup run "$required_rust_toolchain" rustc --version >/dev/null 2>&1 \
+  && rustup component list --toolchain "$required_rust_toolchain" --installed 2>/dev/null | grep -q '^llvm-tools'; then
   echo "  ✓ llvm-tools (rustup component)"
 else
   echo "  ✗ llvm-tools component not installed"

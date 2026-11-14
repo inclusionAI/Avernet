@@ -167,9 +167,16 @@ EOF
   cat > "$temp_dir/bin/rustup" <<'EOF'
 #!/bin/sh
 [ "$RUSTUP_TOOLCHAIN" = 1.94.0 ] || exit 90
+printf '%s\n' "$*" >> "$CARGO_HOME/rustup-commands"
 case "$*" in
-  'run 1.94.0 rustc --version') exit 0 ;;
-  'component list --toolchain 1.94.0 --installed') printf 'llvm-tools-test-target\n' ;;
+  'run 1.94.0 rustc --version')
+    [ "${TEST_RUST_TOOLCHAIN_INSTALLED:-1}" = 1 ] || [ -f "$CARGO_HOME/installed-1.94.0" ]
+    ;;
+  'component list --toolchain 1.94.0 --installed')
+    if [ "${TEST_LLVM_TOOLS_INSTALLED:-1}" = 1 ]; then
+      printf 'llvm-tools-test-target\n'
+    fi
+    ;;
   'toolchain install 1.94.0 --profile minimal')
     [ "${TEST_RUST_ALLOW_INSTALL:-}" = 1 ] || exit 92
     touch "$CARGO_HOME/installed-1.94.0"
@@ -182,12 +189,31 @@ EOF
   export TEST_RUST_RELEASE=1.94.0 RUSTUP_TOOLCHAIN=stable
   bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check >/dev/null \
     || fail "check-only should accept Rust 1.94.0"
+  export TEST_LLVM_TOOLS_INSTALLED=0
+  if output="$(bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check 2>&1)"; then
+    fail "check-only must reject a missing llvm-tools component"
+  fi
+  assert_contains "llvm-tools component not installed" "$output" "missing component diagnostic"
+  if grep -q '^component add ' "$CARGO_HOME/rustup-commands"; then
+    fail "check-only must not install llvm-tools"
+  fi
+  export TEST_LLVM_TOOLS_INSTALLED=1
   export TEST_RUST_RELEASE=1.99.1
   if output="$(bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check 2>&1)"; then
     fail "check-only must reject a different Rust compiler"
   fi
   assert_contains "Rust/Cargo 1.94.0 is not active" "$output" "wrong compiler diagnostic"
   [ ! -f "$CARGO_HOME/installed-1.94.0" ] || fail "check-only must not install Rust"
+  export TEST_RUST_TOOLCHAIN_INSTALLED=0
+  : > "$CARGO_HOME/rustup-commands"
+  if output="$(bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" --check 2>&1)"; then
+    fail "check-only must reject a missing Rust 1.94.0 toolchain"
+  fi
+  assert_contains "Rust/Cargo 1.94.0 is not active" "$output" "missing toolchain diagnostic"
+  assert_contains "run 1.94.0 rustc --version" "$(<"$CARGO_HOME/rustup-commands")" "missing toolchain probe"
+  if grep -qv '^run 1\.94\.0 rustc --version$' "$CARGO_HOME/rustup-commands"; then
+    fail "missing toolchain check must not query components or install Rust"
+  fi
   export TEST_RUST_ALLOW_INSTALL=1
   bash "$ROOT/apps/bcs/scripts/setup_dev_env.sh" >/dev/null \
     || fail "existing rustup without a Cargo env file should install the pinned release"
