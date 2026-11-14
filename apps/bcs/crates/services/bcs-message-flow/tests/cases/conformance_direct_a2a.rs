@@ -15,9 +15,13 @@ use crate::flow_support as support;
 use bcs_db_migrations as migrations;
 #[path = "../support/direct_a2a_regressions.rs"]
 mod regressions;
+#[path = "../support/direct_a2a_empty_input.rs"]
+mod empty_input;
 
 struct Harness {
     db: Option<Arc<ObservedDb>>,
+    admission_events: Arc<empty_input::AdmissionEvents>,
+    contexts: Arc<MemoryBotRunContextStore>,
     flow: Arc<BcsMessageFlow>,
     direct: Arc<A2aChat>,
     service: Arc<ManagedMessageDelivery>,
@@ -65,16 +69,20 @@ impl Harness {
         }
         policy.scheduler_available.store(true, std::sync::atomic::Ordering::SeqCst);
         let service = Arc::new(ManagedMessageDelivery::new(deliveries).with_policy(policy.clone()));
-        let direct = Arc::new(A2aChat::new(support.bot_delivery.clone(), Arc::new(ChatRunStore::with_repo(runs)), 60_000,
-            support.registry.clone(), Arc::new(bcs_test_support::NoopFriendCoreService)).with_session_management(session_service.clone()));
+        let admission_events = Arc::new(empty_input::AdmissionEvents::default());
+        let contexts = Arc::new(MemoryBotRunContextStore::new());
+        let direct = Arc::new(A2aChat::new_with_run_ports(support.bot_delivery.clone(), Arc::new(ChatRunStore::with_repo(runs)), 60_000,
+            support.registry.clone(), Arc::new(bcs_test_support::NoopFriendCoreService),
+            admission_events.clone(), admission_events.clone())
+            .with_bot_run_context(contexts.clone()).with_session_management(session_service.clone()));
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
             .with_message_repo(messages.clone()).with_managed_deliveries(service.clone()).with_session_management(session_service)
-            .with_bot_run_context(Arc::new(MemoryBotRunContextStore::new())).with_direct_chat(direct.clone());
+            .with_bot_run_context(contexts.clone()).with_direct_chat(direct.clone());
         if let Some(observer) = observer { flow = flow.with_bot_terminal_observer(observer); }
         flow.delivery_policy = Some(policy.clone());
         let flow = Arc::new(flow);
         flow.retain_terminal_events();
-        Self { db: observed_db, flow, direct, service, policy, sessions, messages, support }
+        Self { db: observed_db, admission_events, contexts, flow, direct, service, policy, sessions, messages, support }
     }
 
     async fn submit(&self, id: &str, session: &str) -> ServiceResult<AsyncA2aChatAccepted> {
@@ -180,6 +188,7 @@ async fn scheduler_preserves_session_fifo_and_projects_scoped_terminal_without_g
 }
 
 struct ObservedDb {
+    calls: std::sync::atomic::AtomicUsize,
     inner: bcs_db_local::LocalSqliteDbPlugin,
     queries: std::sync::Mutex<Vec<(String, usize)>>,
     fail_checkpoint_once: std::sync::atomic::AtomicBool,
@@ -192,7 +201,7 @@ struct ObservedDb {
 }
 impl ObservedDb {
     fn new() -> Self {
-        Self { inner: bcs_db_local::LocalSqliteDbPlugin::new().unwrap(), queries: Default::default(),
+        Self { calls: Default::default(), inner: bcs_db_local::LocalSqliteDbPlugin::new().unwrap(), queries: Default::default(),
             fail_checkpoint_once: Default::default(), checkpoint_gate: Default::default(), delivery_read_gate: Default::default(),
             sequence_barrier: Default::default(), admission_attempts: Default::default(), admission_conflicts: Default::default(), fail_admissions: Default::default() }
     }
@@ -200,6 +209,7 @@ impl ObservedDb {
 #[async_trait::async_trait]
 impl DbPlugin for ObservedDb {
     async fn query(&self, stmt: DbStatement) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbRow>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let rows = self.inner.query(stmt.clone()).await?;
         self.queries.lock().unwrap().push((stmt.sql().into(), rows.len()));
         if stmt.sql().starts_with("SELECT * FROM bcs_message_deliveries WHERE env = ? AND delivery_id = ?") {
@@ -209,6 +219,7 @@ impl DbPlugin for ObservedDb {
         Ok(rows)
     }
     async fn execute(&self, stmt: DbStatement) -> bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if stmt.sql().starts_with("UPDATE bcs_chat_runs SET state")
             && self.fail_checkpoint_once.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Err(bcs_db_api::DbError::Backend("injected checkpoint outage".into()));
@@ -220,6 +231,7 @@ impl DbPlugin for ObservedDb {
         self.inner.execute(stmt).await
     }
     async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+        self.calls.fetch_add(1, SeqCst);
         use bcs_db_api::{DbTransactionStep as Step, DbError};
         use std::sync::atomic::Ordering::SeqCst;
         let sequence = matches!(steps.first(), Some(Step::Query(stmt)) if stmt.sql().starts_with("SELECT current_msg_seq FROM bcs_session_registry"));
