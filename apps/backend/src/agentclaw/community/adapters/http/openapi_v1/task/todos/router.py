@@ -210,7 +210,7 @@ async def list_todo_interactions(
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
 ) -> Envelope[list[TodoEventResponse]]:
-    """Return Human interaction events projected from B."""
+    """Return the Human and Bot conversation projection for one Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
     events = await run_in_threadpool(
         service.list_interactions,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from injector import inject
@@ -13,6 +15,13 @@ from agentclaw.community.core.repository.protocols.task.todos import (
 )
 from agentclaw.community.core.spaces.models import SpaceRecord
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoArtifactKind,
+    TodoArtifactRecord,
+)
+from agentclaw.community.core.task.todos.artifact_service_protocol import (
+    TodoArtifactServiceProtocol,
+)
 from agentclaw.community.core.task.todos.bot_scope import (
     require_todo_bot_owner_id,
     resolve_todo_bot,
@@ -48,6 +57,12 @@ from agentclaw.community.plugin_api.todo_collaboration import (
 )
 
 _HUMAN_INTERACTION_EVENT = "user_interaction.posted"
+_TASK_COMPLETED_EVENT = "task.completed"
+_INTERACTION_EVENT_TYPES = {
+    "task.created",
+    _HUMAN_INTERACTION_EVENT,
+    _TASK_COMPLETED_EVENT,
+}
 
 
 class TodoService(TodoServiceProtocol):
@@ -61,12 +76,14 @@ class TodoService(TodoServiceProtocol):
         bot_repository: BotRepository,
         collaboration: TodoCollaborationPlugin,
         execution: TodoExecutionServiceProtocol,
+        artifacts: TodoArtifactServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
         self._collaboration = collaboration
         self._execution = execution
+        self._artifacts = artifacts
 
     def list_todos(
         self,
@@ -178,11 +195,28 @@ class TodoService(TodoServiceProtocol):
     def list_interactions(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> tuple[TodoEventRecord, ...]:
-        return tuple(
-            event
-            for event in self.list_events(todo_id=todo_id, actor_id=actor_id, env=env)
-            if event.event_type == _HUMAN_INTERACTION_EVENT
+        todo, normalized_actor_id = self._load_todo(
+            todo_id=todo_id, actor_id=actor_id, env=env
         )
+        if not todo.collab_context_id:
+            return ()
+        context = self._collaboration.get_context(
+            collab_context_id=todo.collab_context_id,
+            actor_id=normalized_actor_id,
+        )
+        events = tuple(
+            event
+            for event in self._to_event_records(context.events)
+            if event.event_type in _INTERACTION_EVENT_TYPES
+        )
+        if not any(event.event_type == _TASK_COMPLETED_EVENT for event in events):
+            return events
+        artifacts = self._artifacts.list_artifacts(
+            todo_id=todo.todo_id,
+            actor_id=normalized_actor_id,
+            env=env,
+        )
+        return self._with_bot_text_artifacts(events, artifacts)
 
     async def create_interaction(
         self,
@@ -272,6 +306,54 @@ class TodoService(TodoServiceProtocol):
         todo = self._repository.get_todo(todo_id=normalized_todo_id)
         self._require_todo_space_member(todo, normalized_actor_id, env)
         return todo, normalized_actor_id
+
+    @classmethod
+    def _with_bot_text_artifacts(
+        cls,
+        events: tuple[TodoEventRecord, ...],
+        artifacts: tuple[TodoArtifactRecord, ...],
+    ) -> tuple[TodoEventRecord, ...]:
+        """Join Bot text outputs to the completion of the run that produced them.
+
+        Text is persisted as an A-side artifact, while the compact event stream
+        intentionally exposes only its artifact metadata. The interaction view,
+        in contrast, is a chat projection and must inline the text.
+        """
+
+        text_artifacts = tuple(
+            artifact
+            for artifact in artifacts
+            if artifact.artifact_kind is TodoArtifactKind.TEXT
+        )
+        if not text_artifacts:
+            return events
+
+        interactions: list[TodoEventRecord] = []
+        previous_completion: float | None = None
+        for event in events:
+            if event.event_type != _TASK_COMPLETED_EVENT:
+                interactions.append(event)
+                continue
+
+            completed_at = _event_timestamp(event.created_at)
+            bot_text = _format_text_artifacts(
+                tuple(
+                    artifact
+                    for artifact in text_artifacts
+                    if _produced_for_completion(
+                        artifact=artifact,
+                        previous_completion=previous_completion,
+                        completed_at=completed_at,
+                    )
+                )
+            )
+            content = event.content
+            if bot_text:
+                content = f"{event.content}\n\n{bot_text}".strip()
+            if completed_at is not None:
+                previous_completion = completed_at
+            interactions.append(replace(event, content=content))
+        return tuple(interactions)
 
     def _require_context(self, todo: TodoRecord) -> str:
         if not todo.collab_context_id:
@@ -392,3 +474,47 @@ class TodoService(TodoServiceProtocol):
             raise ValidationError("keyword must be a string")
         keyword = value.strip()
         return keyword or None
+
+
+def _format_text_artifacts(
+    artifacts: tuple[TodoArtifactRecord, ...],
+) -> str:
+    texts: list[str] = []
+    for artifact in artifacts:
+        text = artifact.content.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if len(artifacts) == 1:
+            texts.append(text)
+        else:
+            texts.append(f"{artifact.artifact_name}\n{text}")
+    return "\n\n".join(texts)
+
+
+def _event_timestamp(value: str) -> float | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _timestamp(parsed)
+
+
+def _produced_for_completion(
+    *,
+    artifact: TodoArtifactRecord,
+    previous_completion: float | None,
+    completed_at: float | None,
+) -> bool:
+    created_at = _timestamp(artifact.created_at)
+    if previous_completion is not None and created_at <= previous_completion:
+        return False
+    return completed_at is None or created_at <= completed_at
+
+
+def _timestamp(value: datetime) -> float:
+    normalized = (
+        value
+        if value.tzinfo is not None
+        else value.replace(tzinfo=timezone.utc)
+    )
+    return normalized.timestamp()

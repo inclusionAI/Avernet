@@ -17,7 +17,17 @@ Human approval advances the Todo to `completed`; rejection keeps it in
 A and B run in the same process in the production composition root, so the
 adapter calls `ContextCollabServiceProtocol` directly rather than making an
 internal HTTP self-call. The creator remains the Human principal while Bot
-runtime addressing uses the Bot record owner. OpenAPI delivery also sends
+runtime addressing uses the Bot record owner. The Events endpoint stays
+compact: it projects B event metadata and artifact links.
+The Interactions endpoint is the richer chat projection. It includes the Human
+objective in ``task.created``, each ``user_interaction.posted`` message, and each
+Bot ``task.completed``. If the corresponding run reported text artifacts, their
+full text is inlined into that Bot completion message; file, link, and code
+artifacts remain in the artifact view. This keeps Human instructions and Bot
+text answers in one chronologically ordered conversation without expanding the
+event stream itself.
+
+OpenAPI delivery also sends
 `sender_options.from` as the creator so the executor session is attributable to
 that principal. The public `/run` operation is a compensation/operator entry
 point; the ordinary frontend neither edits Todos nor exposes manual Run.
@@ -60,6 +70,7 @@ consumes:
   - BotRepository
   - CachePlugin
   - TodoCollaborationPlugin
+  - TodoArtifactServiceProtocol
 internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols

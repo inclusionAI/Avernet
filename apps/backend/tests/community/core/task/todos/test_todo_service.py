@@ -9,6 +9,10 @@ import pytest
 
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.spaces.models import SpaceType
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoArtifactKind,
+    TodoArtifactRecord,
+)
 from agentclaw.community.core.task.todos.errors import (
     TodoBotAmbiguousError,
     TodoBotScopeError,
@@ -205,6 +209,20 @@ class FakeExecution:
         return self.result
 
 
+class FakeArtifacts:
+    def __init__(self, artifacts: tuple[TodoArtifactRecord, ...] = ()) -> None:
+        self.artifacts = artifacts
+        self.calls: list[dict[str, Any]] = []
+
+    def list_artifacts(
+        self, *, todo_id: str, actor_id: str, env: str | None
+    ) -> tuple[TodoArtifactRecord, ...]:
+        self.calls.append(
+            {"todo_id": todo_id, "actor_id": actor_id, "env": env}
+        )
+        return self.artifacts
+
+
 class FakeCollaboration:
     def __init__(self, contexts: tuple[TodoCollaborationContext, ...] = ()) -> None:
         self.contexts = {context.collab_context_id: context for context in contexts}
@@ -249,6 +267,36 @@ class FakeCollaboration:
         return event
 
 
+def _artifact(
+    *,
+    artifact_id: str,
+    text: str | None,
+    created_at: datetime,
+) -> TodoArtifactRecord:
+    content: dict[str, object] = (
+        {"text": text, "is_final_artifact": True}
+        if text is not None
+        else {"url": "https://example.test", "is_final_artifact": True}
+    )
+    return TodoArtifactRecord(
+        artifact_id=artifact_id,
+        todo_id="todo_1",
+        collab_context_id="context_todo_1",
+        execution_id="execution_1",
+        artifact_name=f"artifact_{artifact_id}",
+        artifact_kind=(
+            TodoArtifactKind.TEXT
+            if text is not None
+            else TodoArtifactKind.URL_LINK
+        ),
+        content=content,
+        content_hash=artifact_id,
+        creator="bot_1",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
 def _service(
     *,
     rows: list[dict[str, Any]] | None = None,
@@ -256,14 +304,23 @@ def _service(
     todos: tuple[TodoRecord, ...] | None = None,
     contexts: tuple[TodoCollaborationContext, ...] = (),
     execution_result: TodoRecord | None = None,
+    artifacts: tuple[TodoArtifactRecord, ...] = (),
 ):
     repository = FakeTodos(todos or (_todo(),))
     access = FakeSpaceAccess(space)
     bots = FakeBots(rows or [])
     collaboration = FakeCollaboration(contexts)
     execution = FakeExecution(execution_result)
-    service = TodoService(repository, access, bots, collaboration, execution)
-    return service, repository, access, bots, collaboration
+    artifact_service = FakeArtifacts(artifacts)
+    service = TodoService(
+        repository,
+        access,
+        bots,
+        collaboration,
+        execution,
+        artifact_service,
+    )
+    return service, repository, access, bots, collaboration, artifact_service
 
 
 def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
@@ -276,7 +333,7 @@ def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
 
 
 def test_create_todo_persists_pending_without_creating_or_running_context():
-    service, repository, access, bots, collaboration = _service(rows=[_team_bot()])
+    service, repository, access, bots, collaboration, _ = _service(rows=[_team_bot()])
 
     created = service.create_todo(
         space_id=7,
@@ -317,7 +374,7 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
     ],
 )
 def test_create_todo_rejects_bot_outside_space_scope(space, rows):
-    service, repository, _, _, collaboration = _service(space=space, rows=rows)
+    service, repository, _, _, collaboration, _ = _service(space=space, rows=rows)
 
     with pytest.raises(TodoBotScopeError):
         service.create_todo(
@@ -339,7 +396,7 @@ def test_create_todo_rejects_team_bot_without_owner_identity(owner_id):
         bot.pop("owner_id")
     else:
         bot["owner_id"] = owner_id
-    service, repository, _, _, collaboration = _service(rows=[bot])
+    service, repository, _, _, collaboration, _ = _service(rows=[bot])
 
     with pytest.raises(TodoBotScopeError, match="owner identity"):
         service.create_todo(
@@ -355,7 +412,7 @@ def test_create_todo_rejects_team_bot_without_owner_identity(owner_id):
 
 
 def test_create_todo_rejects_ambiguous_bot_after_scope_filter():
-    service, _, _, _, _ = _service(rows=[_team_bot("One"), _team_bot("Two")])
+    service, _, _, _, _, _ = _service(rows=[_team_bot("One"), _team_bot("Two")])
 
     with pytest.raises(TodoBotAmbiguousError):
         service.create_todo(
@@ -376,7 +433,7 @@ def test_create_todo_rejects_ambiguous_bot_after_scope_filter():
     ],
 )
 def test_create_todo_rejects_invalid_text(kwargs):
-    service, _, _, _, _ = _service()
+    service, _, _, _, _, _ = _service()
 
     with pytest.raises(ValidationError):
         service.create_todo(space_id=7, actor_id="user_1", **kwargs)
@@ -387,7 +444,7 @@ def test_list_todos_uses_persisted_status_filter_and_database_pagination():
         total=2,
         items=(_todo(todo_id="todo_2", status=TodoStatus.PENDING_ACCEPTANCE),),
     )
-    service, repository, access, _, collaboration = _service()
+    service, repository, access, _, collaboration, _ = _service()
     repository.list_todos = lambda **kwargs: (
         repository._record("list_todos", **kwargs) or persisted
     )
@@ -423,7 +480,7 @@ def test_get_todo_returns_persisted_status_without_reading_context():
         status=TodoStatus.IN_PROGRESS,
         collab_context_id="context_todo_1",
     )
-    service, _, _, _, collaboration = _service(todos=(todo,))
+    service, _, _, _, collaboration, _ = _service(todos=(todo,))
 
     result = service.get_todo(todo_id="todo_1", actor_id="user_1")
 
@@ -432,7 +489,7 @@ def test_get_todo_returns_persisted_status_without_reading_context():
 
 
 def test_list_events_without_context_is_empty():
-    service, repository, _, _, collaboration = _service(todos=(_todo(),))
+    service, repository, _, _, collaboration, _ = _service(todos=(_todo(),))
 
     assert service.list_events(todo_id="todo_1", actor_id="user_1") == ()
     assert [call["operation"] for call in repository.calls] == ["get_todo"]
@@ -456,7 +513,7 @@ def test_list_events_maps_context_artifacts():
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, _, _, _, collaboration = _service(
+    service, _, _, _, collaboration, _ = _service(
         todos=(todo,),
         contexts=(_context(events=(event,)),),
     )
@@ -469,13 +526,101 @@ def test_list_events_maps_context_artifacts():
     assert collaboration.get_calls == [("context_todo_1", "user_1")]
 
 
+def test_list_interactions_builds_chat_projection_with_human_and_bot_text():
+    events = (
+        _event(1, "task.created", content="original request"),
+        _event(2, "task.started", actor_type="bot", content=""),
+        _event(
+            3,
+            "task.completed",
+            actor_type="bot",
+            content="",
+            created_at="2026-11-10T08:00:03Z",
+        ),
+        _event(4, "user_interaction.posted", content="please revise"),
+        _event(
+            5,
+            "task.completed",
+            actor_type="bot",
+            content="",
+            created_at="2026-11-10T08:00:06Z",
+        ),
+    )
+    todo = _todo(
+        status=TodoStatus.IN_PROGRESS,
+        collab_context_id="context_todo_1",
+    )
+    artifacts = (
+        _artifact(artifact_id="text_1", text="first result", created_at=NOW),
+        _artifact(
+            artifact_id="text_2",
+            text="second result",
+            created_at=datetime(2026, 11, 10, 8, 0, 5, tzinfo=timezone.utc),
+        ),
+        _artifact(
+            artifact_id="link_1",
+            text=None,
+            created_at=datetime(2026, 11, 10, 8, 0, 5, tzinfo=timezone.utc),
+        ),
+    )
+    service, _, _, _, collaboration, artifact_service = _service(
+        todos=(todo,),
+        contexts=(_context(events=events),),
+        artifacts=artifacts,
+    )
+
+    result = service.list_interactions(todo_id="todo_1", actor_id="user_1", env="pre")
+
+    assert [item.event_type for item in result] == [
+        "task.created",
+        "task.completed",
+        "user_interaction.posted",
+        "task.completed",
+    ]
+    assert [item.content for item in result] == [
+        "original request",
+        "first result",
+        "please revise",
+        "second result",
+    ]
+    assert collaboration.get_calls == [("context_todo_1", "user_1")]
+    assert artifact_service.calls == [
+        {"todo_id": "todo_1", "actor_id": "user_1", "env": "pre"}
+    ]
+
+
+def test_list_interactions_returns_durable_human_events_before_completion_text():
+    events = (
+        _event(1, "task.created", content="original request"),
+        _event(2, "user_interaction.posted", content="please revise"),
+    )
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, _, _, _, collaboration, artifact_service = _service(
+        todos=(todo,),
+        contexts=(_context(events=events),),
+    )
+
+    result = service.list_interactions(todo_id="todo_1", actor_id="user_1")
+
+    assert [item.event_type for item in result] == [
+        "task.created",
+        "user_interaction.posted",
+    ]
+    assert [item.content for item in result] == ["original request", "please revise"]
+    assert collaboration.get_calls == [("context_todo_1", "user_1")]
+    assert artifact_service.calls == []
+
+
 @pytest.mark.asyncio
 async def test_create_interaction_persists_event_and_claim_without_execution():
     todo = _todo(
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, repository, _, execution, collaboration = _service(
+    service, repository, _, execution, collaboration, _ = _service(
         todos=(todo,),
         contexts=(_context(),),
     )
@@ -505,7 +650,7 @@ async def test_create_interaction_rejects_non_pending_acceptance_without_reading
         status=TodoStatus.IN_PROGRESS,
         collab_context_id="context_todo_1",
     )
-    service, _, _, _, collaboration = _service(todos=(todo,))
+    service, _, _, _, collaboration, _ = _service(todos=(todo,))
 
     with pytest.raises(TodoStateConflictError):
         await service.create_interaction(
@@ -533,7 +678,7 @@ def test_submit_acceptance_checks_persisted_state_and_writes_only_a_side(
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, repository, _, _, collaboration = _service(todos=(todo,))
+    service, repository, _, _, collaboration, _ = _service(todos=(todo,))
 
     updated = service.submit_acceptance(
         todo_id="todo_1",
@@ -555,7 +700,7 @@ def test_submit_acceptance_checks_persisted_state_and_writes_only_a_side(
 
 
 def test_submit_acceptance_rejects_non_pending_acceptance():
-    service, repository, _, _, _ = _service(
+    service, repository, _, _, _, _ = _service(
         todos=(_todo(status=TodoStatus.IN_PROGRESS),)
     )
 
@@ -573,7 +718,7 @@ def test_submit_acceptance_rejects_non_pending_acceptance():
 @pytest.mark.asyncio
 async def test_start_todo_delegates_to_execution_after_actor_space_check():
     started = _todo(status=TodoStatus.IN_PROGRESS, collab_context_id="context_1")
-    service, _, access, _, collaboration = _service(execution_result=started)
+    service, _, access, _, collaboration, _ = _service(execution_result=started)
 
     result = await service.start_todo(
         todo_id="todo_1",
@@ -589,7 +734,7 @@ async def test_start_todo_delegates_to_execution_after_actor_space_check():
 
 @pytest.mark.asyncio
 async def test_start_todo_rejects_non_pending_before_execution_dispatch():
-    service, _, _, _, _ = _service(
+    service, _, _, _, _, _ = _service(
         todos=(_todo(status=TodoStatus.IN_PROGRESS),),
     )
 
