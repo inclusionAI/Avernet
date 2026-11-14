@@ -39,6 +39,29 @@ node_id: vote_2
         player = GamePlayer(lambda prompt: '我投2号')
         self.assertEqual(asyncio.run(player.on_task('local', task)), '我投3号')
 
+    def test_eulogy_never_exposes_reasoning(self):
+        task = "你在第2轮被投出局，可以留一句遗言。"
+        for raw, expected in [
+            ("<think>内部分析</think>注意3号。", "注意3号。"),
+            ("内部分析</think>注意3号。<|role_end|>", "注意3号。"),
+            ("<think>尚未完成", "我没什么好说的。"),
+        ]:
+            with self.subTest(raw=raw):
+                self.assertEqual(asyncio.run(GamePlayer(lambda p: raw).on_task("local", task)), expected)
+
+    def test_pk_fallback_rejects_out_of_range_candidates(self):
+        template = """[State Machine Task]
+node_id: vote_2
+[Input]
+{"history": []}
+[Instruction]
+你是2号，你的词是【苹果】。第2轮PK投票。可以投：%s；"""
+        for candidates, expected in [("0号、99号、2号", ABSTAIN),
+                                     ("99号、2号、3号", "我投3号")]:
+            with self.subTest(candidates=candidates):
+                self.assertEqual(asyncio.run(GamePlayer(lambda p: ABSTAIN).on_task(
+                    "local", template % candidates)), expected)
+
     def test_regular_vote_cannot_target_dead_player(self):
         task = '''[State Machine Task]
 node_id: vote_2

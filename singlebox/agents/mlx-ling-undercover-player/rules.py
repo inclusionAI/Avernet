@@ -24,6 +24,12 @@ def _strip_tags(text):
     return TAG_RE.sub("", text.split("<|role_end|>")[0])
 
 
+def clean_eulogy(text):
+    """遗言同样只保留思考结束后的正文，最多35字。"""
+    visible = _strip_tags(text)
+    return re.sub(r"\s+", "", visible)[:35] or "我没什么好说的。"
+
+
 def clamp_clue(text, banned_chars=()):
     """清洗发言：取首行、去模板残渣/markdown/引号、限 25 字、去泄词。"""
     cleaned = _strip_tags(text).strip()

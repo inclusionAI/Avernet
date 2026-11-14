@@ -24,7 +24,7 @@ import asyncio
 import json
 import re
 
-from rules import clamp_clue, parse_vote, ABSTAIN
+from rules import clamp_clue, clean_eulogy, parse_vote, ABSTAIN
 
 # 训练时的提示词格式（与 data/prompting.py 同构；此处内嵌以保持 Bot 独立可分发）
 RULES_SPEAK = (
@@ -205,8 +205,7 @@ class GamePlayer:
                 "只输出这一句遗言，不超过35个字，不要解释、不要前缀："
             )
             raw = await asyncio.to_thread(self.infer_fn, prompt)
-            line = re.sub(r"\s+", "", raw)[:35]
-            return line or "我没什么好说的。"
+            return clean_eulogy(raw)
 
         role = "卧底" if task["word"] in self.undercover_words else "平民"
         prompt = build_prompt(task, role, task["word"])
@@ -215,6 +214,8 @@ class GamePlayer:
 
         if task["kind"] == "vote":
             allowed = task["candidates"] or task.get("alive")
+            if allowed is not None:
+                allowed = [s for s in allowed if type(s) is int and 1 <= s <= 6]
             if task.get("alive") is not None and allowed is not None:
                 allowed = [s for s in allowed if s in task["alive"]]
             vote = parse_vote(raw, own_seat=task["seat"], allowed_seats=allowed)
