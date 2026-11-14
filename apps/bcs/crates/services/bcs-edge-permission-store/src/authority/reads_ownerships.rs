@@ -112,9 +112,12 @@ impl DbBotAuthorityStore {
             }
             match owners.get(bot_id).map_or(0, Vec::len) {
                 0 => {
-                    return Err(owner_integrity_error(format!(
-                        "bot {bot_id} has no approved owner edge"
-                    )));
+                    // Orphaned ownership: project None instead of
+                    // erroring the batch. The in-memory store's
+                    // created_by fallback handles the same case;
+                    // the SQL store leaves it to bcs-admin.
+                    results.push(None);
+                    continue;
                 }
                 1 => {
                     let owner = owners.get(bot_id).and_then(|v| v.first()).expect("one owner").clone();
