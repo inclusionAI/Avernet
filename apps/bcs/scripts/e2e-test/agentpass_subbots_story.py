@@ -475,27 +475,18 @@ class Story:
             path + "/bots/" + urllib.parse.quote(a["ref"], safe=""),
             token=admin,
         )
-        scoped_reactivated, _ = self.request(
-            "scoped registration reactivates a deleted slug",
+        self.request(
+            "scoped path cannot reclaim deleted slug",
             "POST",
             "/register?"
             + urllib.parse.urlencode(
                 {
                     **query,
-                    "bot-name": "E2E Reviewer Plugin",
                     "provider_bot_ref": a["ref"],
                 }
             ),
+            409,
         )
-        plugin_token = scoped_reactivated["bot_token"]
-        self.check(
-            scoped_reactivated["bot_uuid"] == a["id"]
-            and plugin_token != gateway_token,
-            "Plugin reactivation preserves the Bot UUID and rotates its token",
-        )
-        self.self_view(a, parent, status=401)
-        a["token"] = plugin_token
-        self.self_view(a, parent)
         self.request(
             "delete coder",
             "DELETE",
