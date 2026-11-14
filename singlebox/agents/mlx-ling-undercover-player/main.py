@@ -1,10 +1,11 @@
 """「谁是卧底」MLX 玩家 Bot 入口。
 
 启动本地模型服务后运行本进程接入牌桌：
-    python3 -m mlx_lm.server --model ~/models/Ling-3.0-tiny-4bit \
+    python3 serve.py --model ~/models/Ling-3.0-tiny-4bit \
         --adapter-path adapters/ --host 127.0.0.1 --port 8080 --trust-remote-code
 
-    python3 main.py --bcs-port 8081 --base-url http://127.0.0.1:8080/v1
+    python3 main.py --bcs-port 21000 --base-url http://127.0.0.1:8080/v1 \
+        --adapter-path adapters/
 
 环境变量 BCS_PORT / BASE_URL 可替代命令行参数。
 """
@@ -29,7 +30,7 @@ BOT_DOMAINS = "undercover-game,social-deduction,edge-inference"
 
 
 def make_infer_fn(base_url, model_id="ling-3.0-tiny", adapter_path=None):
-    """OpenAI 兼容推理后端（mlx_lm.server / vLLM 均可）。
+    """本项目 serve.py 推理后端；其他服务需核验扩展字段兼容性。
 
     adapter_path 非空时随请求带 `"adapters"` 字段，命中 serve.py 的请求级
     LoRA 开关（单实例底座/微调双角色）；为空则走底座档。
@@ -41,8 +42,11 @@ def make_infer_fn(base_url, model_id="ling-3.0-tiny", adapter_path=None):
     # 永远不该走代理：trust_env=False + 显式超时。（与 bcn_client 的 proxy=None
     # 同一类坑，见 README 调试沉淀 #2。）
     client = OpenAI(base_url=base_url, api_key="EMPTY",
-                    http_client=httpx.Client(trust_env=False, timeout=300.0))
-    extra = {"adapters": adapter_path} if adapter_path else {}
+                    max_retries=0,
+                    http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(120.0, connect=5.0)))
+    extra = {"chat_template_kwargs": {"enable_thinking": True}}
+    if adapter_path:
+        extra["adapters"] = adapter_path
 
     def infer(prompt):
         # Ling-3.0-tiny 是推理模型：max_tokens 太小时 reasoning 吃掉预算、content 为
@@ -54,13 +58,15 @@ def make_infer_fn(base_url, model_id="ling-3.0-tiny", adapter_path=None):
                 resp = client.chat.completions.create(
                     model=model_id,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,  # 贪心：格式稳定，保证 100% 可解析
+                    temperature=0.7, top_p=0.9, seed=42,  # 与 recipe 采样配置一致
                     max_tokens=budget,
                     extra_body=extra or None,
                 )
             except Exception:
                 log.exception("model call failed (budget=%d) -> fallback", budget)
                 return "过"
+            if resp.choices[0].finish_reason == "length":
+                continue
             text = (resp.choices[0].message.content or "").strip()
             if text:
                 return text
@@ -99,7 +105,12 @@ def main():
                     help="bcs-cli 可执行文件路径（onboard 用）")
     ap.add_argument("--adapter-path", default=os.environ.get("ADAPTER_PATH"),
                     help="QLoRA adapter 目录；非空时随请求带 adapters 字段走微调档")
+    ap.add_argument("--base-model", action="store_true", help="Explicitly opt into base-model inference")
     args = ap.parse_args()
+    if args.adapter_path and args.base_model:
+        ap.error("choose --adapter-path or --base-model, not both (also check ADAPTER_PATH)")
+    if not args.adapter_path and not args.base_model:
+        ap.error("pass --adapter-path for the tuned player, or --base-model explicitly")
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")

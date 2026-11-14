@@ -1,0 +1,33 @@
+{
+  "rows": [
+    {
+      "label": "short",
+      "seconds": 2.2193048339686356,
+      "process_rss_bytes": 5833129984,
+      "usage": {
+        "prompt_tokens": 35,
+        "completion_tokens": 6,
+        "total_tokens": 41,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    },
+    {
+      "label": "long",
+      "seconds": 11.056239207973704,
+      "process_rss_bytes": 5831655424,
+      "usage": {
+        "prompt_tokens": 4420,
+        "completion_tokens": 5,
+        "total_tokens": 4425,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    }
+  ],
+  "child_peak_rss_bytes": 5835603968,
+  "server_stopped": true,
+  "scope": "Process RSS and child high-water mark; not total machine or total GPU memory."
+}

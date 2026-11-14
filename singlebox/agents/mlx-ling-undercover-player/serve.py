@@ -20,13 +20,13 @@ scale=0 时输出与底座逐位一致（`y + scale*z`），模型只加载一�
 环境变量：
 - MLX_CPU=1  把整个服务放到 CPU 后端（16G 内存双模型共存：CPU 权重可被系统换页，
   Metal 缓冲不行；适合输出极短的玩家 Bot）。
-- MLX_THINKING=1  保留模型的 reasoning 模式。默认关闭：Ling-3.0-tiny 是推理模型，
-  thinking 开启时裁判一个回合能烧 6 分钟 reasoning，被 OpenClaw 的停滞检测
-  中途 abort（content 迟迟不来）。聊天模板支持 enable_thinking，本 shim 对未
-  显式传 chat_template_kwargs 的请求统一注入 enable_thinking=False。
+- MLX_THINKING=0 显式关闭思考；默认保留 Ling 思考模式。请求可用
+  chat_template_kwargs.enable_thinking 显式覆盖。
+
 """
 
 import os
+import threading
 
 from mlx_lm import server as mlx_server
 
@@ -35,17 +35,35 @@ if os.environ.get("MLX_CPU") == "1":
 
     mx.set_default_device(mx.cpu)
 
+# The serial generation worker owns both the model mode and cache namespace.
+_ROUTE = threading.local()
+_OriginalPromptCache = mlx_server.LRUPromptCache
+
+
+class RoutedPromptCache(_OriginalPromptCache):
+    def fetch_nearest_cache(self, model, tokens):
+        key = (model, getattr(_ROUTE, "adapter", False))
+        return super().fetch_nearest_cache(key, tokens)
+
+    def insert_cache(self, model, tokens, prompt_cache, **kwargs):
+        key = (model, getattr(_ROUTE, "adapter", False))
+        return super().insert_cache(key, tokens, prompt_cache, **kwargs)
+
+
+mlx_server.LRUPromptCache = RoutedPromptCache
+
+
 # ---- 请求级 LoRA 开关：scale 置零 = 底座，恢复原值 = 微调 ----
 _LORA_SCALES = {}  # id(model) -> [(module, 原 scale), ...]
 
 
 def _set_lora_mode(model, enabled):
-    from mlx_lm.tuner.lora import LoRALinear
+    from mlx_lm.tuner.lora import LoRALinear, LoRASwitchLinear, LoRAEmbedding
 
     key = id(model)
     if key not in _LORA_SCALES:
         _LORA_SCALES[key] = [
-            (m, m.scale) for m in model.modules() if isinstance(m, LoRALinear)
+            (m, m.scale) for m in model.modules() if isinstance(m, (LoRALinear, LoRASwitchLinear, LoRAEmbedding))
         ]
     for m, orig in _LORA_SCALES[key]:
         m.scale = orig if enabled else 0.0
@@ -56,14 +74,12 @@ _orig_handle_completion = mlx_server.APIHandler.handle_completion
 
 def _handle_completion_routed(self, request, stop_words):
     # do_POST 已解析 body：self.adapter = body.get("adapters")（见 mlx_lm server）
-    _set_lora_mode(self.response_generator.model_provider.model,
-                   bool(getattr(self, "adapter", None)))
-    if os.environ.get("MLX_THINKING") != "1":
-        kwargs = getattr(self, "chat_template_kwargs", None)
-        if not isinstance(kwargs, dict):
-            kwargs = {}
-            self.chat_template_kwargs = kwargs
-        kwargs.setdefault("enable_thinking", False)
+    # Model state is changed only by the serial generation worker in load().
+    kwargs = getattr(self, "chat_template_kwargs", None)
+    if not isinstance(kwargs, dict):
+        kwargs = {}
+        self.chat_template_kwargs = kwargs
+    kwargs.setdefault("enable_thinking", os.environ.get("MLX_THINKING", "1") != "0")
     return _orig_handle_completion(self, request, stop_words)
 
 
@@ -108,9 +124,17 @@ _orig_load = mlx_server.ModelProvider.load
 
 
 def _load_with_alias(self, model_path, adapter_path=None, draft_model_path=None):
+    requested_adapter = adapter_path
+    if requested_adapter:
+        expected = self._adapter_map.get("default_model")
+        normalize = lambda p: os.path.realpath(os.path.expanduser(p))
+        if expected is None or normalize(requested_adapter) != normalize(expected):
+            raise ValueError("Requested adapter differs from the configured adapter")
     if model_path not in self._model_map:
         model_path = "default_model"
     out = _orig_load(self, model_path, adapter_path, draft_model_path)
+    _set_lora_mode(self.model, bool(requested_adapter))
+    _ROUTE.adapter = bool(requested_adapter)
     # 混档请求（底座/LoRA）不能进同一个 batch（scale 是模型级状态），
     # 强制走串行 serve_single；节点任务本就链式派发，吞吐不受影响。
     self.is_batchable = False

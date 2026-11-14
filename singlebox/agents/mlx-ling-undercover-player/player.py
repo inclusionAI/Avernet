@@ -117,10 +117,15 @@ def parse_task(text):
 
     # [Input] 的 run_input JSON（含公开发言史）
     rounds = []
+    alive = None
     m = re.search(r"\[Input\]\s*\n", text)
     if m:
         try:
             obj, _ = json.JSONDecoder().raw_decode(text[m.end():])
+            if isinstance(obj.get("alive"), list):
+                alive = [x.get("seat") if isinstance(x, dict) else x for x in obj["alive"]]
+                if not all(type(x) is int and 1 <= x <= 6 for x in alive):
+                    alive = None
             for entry in obj.get("history", []):
                 rounds.append({
                     "round": entry["round"],
@@ -145,7 +150,7 @@ def parse_task(text):
         candidates = [int(x) for x in re.findall(r"(\d+)号", m.group(1))]
 
     return {"kind": kind, "seat": seat, "word": word, "round": rnd,
-            "rounds": rounds, "pk": pk, "candidates": candidates}
+            "rounds": rounds, "pk": pk, "candidates": candidates, "alive": alive}
 
 
 def build_prompt(task, role, word):
@@ -209,11 +214,16 @@ class GamePlayer:
         raw = await asyncio.to_thread(self.infer_fn, prompt)
 
         if task["kind"] == "vote":
-            vote = parse_vote(raw)
-            if vote == ABSTAIN and task["pk"] and task["candidates"]:
-                # PK 禁止弃权：兜底选一个非自己的候选（等价随机弃权替代）
-                seat = task["candidates"][0]
-                vote = f"我投{seat}号"
+            allowed = task["candidates"] or task.get("alive")
+            if task.get("alive") is not None and allowed is not None:
+                allowed = [s for s in allowed if s in task["alive"]]
+            vote = parse_vote(raw, own_seat=task["seat"], allowed_seats=allowed)
+            if task["seat"] is None:
+                return ABSTAIN
+            if vote == ABSTAIN and task["pk"] and allowed:
+                candidates = [s for s in allowed if s != task["seat"]]
+                if candidates:
+                    vote = f"我投{candidates[0]}号"
             return vote
 
         return clamp_clue(raw, banned_chars=set(task["word"]))

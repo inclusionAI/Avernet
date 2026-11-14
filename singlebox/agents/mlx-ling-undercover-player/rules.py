@@ -17,6 +17,10 @@ TAG_RE = re.compile(r"</?[a-zA-Z|][^>]*>")
 
 
 def _strip_tags(text):
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    elif "<think>" in text:
+        return ""
     return TAG_RE.sub("", text.split("<|role_end|>")[0])
 
 
@@ -35,12 +39,20 @@ def clamp_clue(text, banned_chars=()):
     # 泄词兜底：删掉自己词语里的字（极端情况下宁可少说）
     for ch in banned_chars:
         out = out.replace(ch, "")
-    return out if out else "和大家说的差不多"
+    fallback = "和大家说的差不多"
+    for ch in banned_chars:
+        fallback = fallback.replace(ch, "")
+    return out or fallback or "…"
 
 
-def parse_vote(text):
+def parse_vote(text, own_seat=None, allowed_seats=None):
     """提取投票：优先「我投N号」，其次「我弃权」，否则强制弃权。"""
-    m = VOTE_RE.search(_strip_tags(text))
+    m = VOTE_RE.fullmatch(_strip_tags(text).strip())
     if m:
-        return f"我投{m.group(1)}号"
+        seat = int(m.group(1))
+        if not 1 <= seat <= 6 or seat == own_seat:
+            return ABSTAIN
+        if allowed_seats is not None and seat not in allowed_seats:
+            return ABSTAIN
+        return f"我投{seat}号"
     return ABSTAIN

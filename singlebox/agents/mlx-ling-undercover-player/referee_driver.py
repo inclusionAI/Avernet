@@ -695,10 +695,9 @@ class Driver:
 def main():
     ap = argparse.ArgumentParser(description="谁是卧底 · 脚本裁判（阶段机驱动）")
     ap.add_argument("--bcs-port", default=os.environ.get("BCS_PORT", "21000"))
-    ap.add_argument("--bcs-cli", default="/Users/lipeilin/代码库/python/Avernet/apps/bcs/target/debug/bcs-cli")
-    ap.add_argument("--uc", default=("/Users/lipeilin/代码库/python/Avernet/singlebox/agents/"
-                                     "6bots_undercover_game_profile/referee/skills/"
-                                     "undercover-game-referee/scripts/undercover.py"))
+    ap.add_argument("--bcs-cli", default=os.environ.get("BCS_CLI", "bcs-cli"))
+    ap.add_argument("--uc", default=os.environ.get("UC_SCRIPT"),
+                    help="官方 undercover.py 路径，也可设置 UC_SCRIPT")
     ap.add_argument("--player", action="append", required=True,
                     help="玩家 名称=UUID，可多次（不含裁判自己）")
     ap.add_argument("--games", type=int, default=1)
@@ -718,6 +717,8 @@ def main():
     ap.add_argument("--preflight-adapter", default=None,
                     help="探针的 adapter 目录（与玩家微调档一致时做底座/LoRA 判别）")
     args = ap.parse_args()
+    if not args.uc:
+        ap.error("请通过 --uc 或 UC_SCRIPT 指定官方 undercover.py")
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")

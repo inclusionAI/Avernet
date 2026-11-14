@@ -12,7 +12,7 @@
 
 - 支持 BCN V3 协议全部必需链路（握手/心跳/ACK/final/inject/abort/history）；
 - 训练同款提示词调用本地微调模型，输出前规则清洗（≤25 字、泄词字删除、
-  票面格式强制）——**主持人脚本 100% 可解析**，模型偶发跑偏也不会违规；
+  票面格式强制）——提升主持人脚本的解析可靠性；不替代合法动作校验；
 - 可选：脚本裁判 `referee_driver.py`（全 Bot 对局不需要 LLM 裁判时用）。
 
 ## 1.（10 分钟）起模型服务 + 玩家 Bot
@@ -28,9 +28,12 @@ undercover-player/README.md` 一步复现）：
 | BCS | 本机 Avernet singlebox 已起（`bcs-cli` 在 PATH 或传 `--bcs-cli`） |
 
 ```bash
-# 终端 1：模型服务（OpenAI 兼容，QLoRA 挂载；serve.py 是防思考前缀的薄壳，可换 mlx_lm.server）
-MLX_CPU=1 python serve.py --model ~/models/Ling-3.0-tiny-4bit \
-    --adapter-path <recipe>/adapters/ --host 127.0.0.1 --port 8080 --trust-remote-code
+# 两个终端均先设置为本机 recipe 路径
+RECIPE=/path/to/ling-cookbook/guide/finetuning/ling-3.0-tiny/undercover-player
+
+# 终端 1：模型服务（OpenAI 兼容，QLoRA 挂载；serve.py 提供已验证的别名、adapter 路由和缓存隔离）
+python serve.py --model ~/models/Ling-3.0-tiny-4bit \
+    --adapter-path "$RECIPE/adapters-v2-run3" --host 127.0.0.1 --port 8080 --trust-remote-code
 
 # 终端 2：玩家 Bot（启动即自动 onboard 注册进 BCS 网络，token 落盘 ~/.mlx-ling-player.token）
 python main.py --bcs-port <你的BCS端口，singlebox 默认 21000> \
@@ -75,7 +78,7 @@ bcs-cli session create --group <group_id> --title 第1局 --input '"开始"'
 ```bash
 python test_loopback.py   # 不起 Avernet 的协议自测：握手/ACK/final/inject/history/abort 六链路
 python probe.py           # 单条提示词打模型服务，确认清洗层输出形态
-python preflight.py --base-url http://127.0.0.1:8081/v1 --adapter-path <recipe>/adapters/
+python preflight.py --base-url http://127.0.0.1:8081/v1 --adapter-path "$RECIPE/adapters-v2-run3"
                           # 开局前探针：长提示词冒烟（踩量化 KV 崩溃点）+ 底座/LoRA 判别 + 时延预算
 ```
 
@@ -105,13 +108,13 @@ python preflight.py --base-url http://127.0.0.1:8081/v1 --adapter-path <recipe>/
   （`bcs-cli session chat` 只有人类参会者能用，Bot 调用会被 403）。
 
 把 `player.py` 的提示词格式（与训练同款）翻译成你的语言即可，规则清洗层
-（25 字截断/泄词删字/票面正则）必须保留——这是「100% 可解析」的来源。
+（25 字截断/泄词删字/票面正则）必须保留——用于稳定格式，但不能替代候选集合与自身座位校验。
 
 ## 时间预算参考
 
 M4 Air 16GB、4-bit 底座 + QLoRA、CPU 推理（`MLX_CPU=1`）：单次发言/投票约
 **30~90 秒**。节点超时预算建议 ≥7 分钟。GPU/M 系列加速（不设 MLX_CPU）可到
-~10 秒级。本 Bot 的提示词经历史窗口化后恒定有界（≤420 字符 ≈ 数百 token）；
+~10 秒级。本 Bot 的提示词经历史窗口化后经窗口化限制保留轮数（任意上游文本仍可能超出历史观测长度）；
 但共享模型服务里对手引擎每条请求自带 2 万字框架提示词（实测 15k~20k token），
 投票链并行扇出时队列拥堵，节点预算 420s 不够用（坑 #9）——能改裁判配置就给
 900s+。
@@ -122,8 +125,8 @@ M4 Air 16GB、4-bit 底座 + QLoRA、CPU 推理（`MLX_CPU=1`）：单次发言/
    `websockets.connect(url, proxy=None)`。
 2. **同步推理阻塞事件循环** → 心跳超时、abort 不及时；推理务必丢线程池
    （`asyncio.to_thread`）。
-3. **Ling 模板的思考块**：直接推理会吐 `</thinking>` 前缀污染输出 →
-   渲染时 `thinking_option="off"`（`serve.py` 已注入），解析再剥模板残渣。
+3. **Ling 模板的思考块**：默认保留思考模式；模型服务分离思考与正文，规则层再剥离完整思考段。
+   原始 `</think>` 不证明训练器存在偏移错误。
 4. **贪心解码坍缩**（全弃权/万能句）→ 用固定种子采样（temp=0.7, top_p=0.9）。
 5. **final 事件凭空消失、节点 420s 超时**：事件的 `runId` 用自生成的
    `run-uuid` 而不是 chat.send 请求帧 id → 服务端 run scope 校验直接拒绝，
@@ -173,6 +176,22 @@ M4 Air 16GB、4-bit 底座 + QLoRA、CPU 推理（`MLX_CPU=1`）：单次发言/
      时 driver 不会自己开下一轮（真实计票节点的回复落在会话 chat 里才会被 ECHO 唤醒）。
      AWAIT_NEXT_ROUND 下的「卡住了」走 `sx_recover` 的 else 分支直接 `on_phase_wake`
      → 开下一轮，是合法路径。
-   治本要压的是**对手框架的 2 万字提示词**（己方上下文已窗口化到 ≤420 字符）；
+   治本要压的是**对手框架的 2 万字提示词**（己方上下文已窗口化；420字符只是历史观测而非硬上限）；
    你的桌能改裁判配置的话，把 `node_timeout_ms` 提到 900s+ 也能兜住（我们这轮的
    验收边界是不改主持人脚本和对手框架，所以做了回灌 + 己方窗口化）。
+
+
+## 2026-11-14 运行契约更新
+
+- `serve.py` 默认思考开启；`MLX_THINKING=0` 显式关闭，请求的 `chat_template_kwargs.enable_thinking` 可覆盖。
+- 调用微调玩家必须显式传 `main.py --adapter-path`，并与服务启动配置一致；只有明确使用 `--base-model` 才允许不传。模型别名本身不选择 adapter。
+- LoRA 开关只在串行生成线程切换；底座与微调缓存命名空间分离；不匹配的 adapter 路径被拒绝。
+- Bot 请求用 temperature=0.7、top_p=0.9、seed=42，显式开启思考；禁用 SDK 隐式重试，单请求超时120秒，最多两种输出预算256/512。
+- 规则层剥离思考正文，非法、自票及已知出局票转弃权；PK只选择已知合法非本人候选。若上游未给出合法候选，无法保证产生合法PK动作。
+- BCN abort 已验证会丢弃迟到 final；不等于远程模型计算被立即取消。
+- 已完成三局隔离真实 BCS 接入验收：一席真实 MLX v2 加五席脚本控制，均经官方裁判进入 FINISHED 并结束成功；摘要见 [verification/real-table-acceptance.json](verification/real-table-acceptance.json)。这不是多模型竞技或胜率基准。
+- 真实牌桌不提供隐藏身份；当前入口默认平民提示是旧模型的兼容假设，不能声称等同离线有真实身份的评测条件。
+- 前缀缓存收益必须由 cached_tokens 证实；旧“只改后缀”的冷请求测法不成立，不应直接引用其加速比。
+
+影响范围：只修改此独立玩家的本地模型客户端、服务启动包装与输出规则；不改变BCN帧契约或Avernet核心实现。
+迁移：旧启动命令补齐adapter路径；如果确实需要底座，添加--base-model。测试覆盖test_runtime.py与test_loopback.py。
