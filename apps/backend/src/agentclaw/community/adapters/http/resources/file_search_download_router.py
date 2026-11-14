@@ -256,12 +256,21 @@ def _device_fs_for_bot(
     )
 
 
+class _DeviceWalkError(Exception):
+    """A device directory could not be enumerated completely."""
+
+
+class _DeviceWalkLimitError(Exception):
+    """A device walk exceeded the entry limit."""
+
+
 async def _walk_device_fs(
     device_fs,
     base_rel: str,
     should_descend,
     max_entries: int = 20000,
     max_files: int | None = None,
+    strict: bool = False,
 ) -> list[dict]:
     """Client-side recursive walk over a device-fs, mirroring ``_walk_arca``.
 
@@ -294,12 +303,21 @@ async def _walk_device_fs(
         logical = f"{WORKSPACE_NS}/{current_rel}" if current_rel else WORKSPACE_NS
         try:
             entries = await device_fs.list_dir(logical)
-        except Exception as e:
+        except HTTPException as e:
+            if strict:
+                raise
             logger.warning("[_walk_device_fs] list_dir failed rel=%s: %s", current_rel, e)
             entries = None
+        except Exception as e:
+            logger.warning("[_walk_device_fs] list_dir failed rel=%s: %s", current_rel, e)
+            if strict:
+                raise _DeviceWalkError from e
+            entries = None
         if entries is None:
-            if not current_rel:
+            if (strict and current_rel == base_rel) or (not strict and not current_rel):
                 root_failed = True
+            elif strict:
+                raise _DeviceWalkError
             return
         for e in entries:
             name = e.get("name", "")
@@ -307,6 +325,8 @@ async def _walk_device_fs(
                 continue
             rel = f"{current_rel}/{name}" if current_rel else name
             is_dir = e.get("is_dir", False)
+            if strict and len(out) >= max_entries:
+                raise _DeviceWalkLimitError
             out.append({
                 "name": name,
                 "rel": rel,
@@ -319,11 +339,11 @@ async def _walk_device_fs(
                 file_count += 1
                 if _file_budget_reached():
                     return
-            if len(out) >= max_entries:
+            if not strict and len(out) >= max_entries:
                 return
             if is_dir and (should_descend is None or should_descend(rel)):
                 await walk(rel)
-                if len(out) >= max_entries or _file_budget_reached():
+                if (not strict and len(out) >= max_entries) or _file_budget_reached():
                     return
 
     await walk(base_rel)
@@ -569,9 +589,15 @@ async def download_directory(
     # arca + baas-service + teclaw + published-stage devices all walk + read uniformly via
     # the device-fs (workspace/<rel> namespace); local/unbound → local-FS below.
     if device_fs is not None:
-        entries = await _walk_device_fs(
-            device_fs, path, should_descend=None, max_files=_ZIP_DOWNLOAD_MAX_FILES + 1,
-        )
+        try:
+            entries = await _walk_device_fs(
+                device_fs, path, should_descend=None, max_files=_ZIP_DOWNLOAD_MAX_FILES + 1,
+                strict=True,
+            )
+        except _DeviceWalkLimitError as exc:
+            raise HTTPException(status_code=413, detail="Too many entries to download") from exc
+        except _DeviceWalkError as exc:
+            raise HTTPException(status_code=502, detail="Directory download failed while reading the device") from exc
         if entries is None:
             raise HTTPException(status_code=404, detail="Directory not found on device")
         files = [e for e in entries if not e.get("is_dir")]
@@ -592,11 +618,13 @@ async def download_directory(
                     logical = _download_logical(f["rel"])
                     try:
                         data = await device_fs.read_file(logical)
+                    except HTTPException:
+                        raise
                     except Exception as e:
-                        logger.warning("[download_directory] device-fs read failed, skipping %s: %s", f["rel"], e)
-                        continue
+                        logger.warning("[download_directory] device-fs read failed %s: %s", f["rel"], e)
+                        raise HTTPException(status_code=502, detail="Directory download failed while reading the device") from e
                     if data is None:
-                        continue
+                        raise HTTPException(status_code=502, detail="Directory download failed while reading the device")
                     zf.writestr(
                         _zip_file_entry(f"{folder_name}/{_download_arcname(f['rel'], path)}"),
                         data,
