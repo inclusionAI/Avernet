@@ -33,3 +33,22 @@ Result: **215 passed**, 17 pre-existing Pydantic deprecation warnings, 7.08 seco
 ## Limits
 
 No live deployment or real provider UPDATE was executed; this review proves local control-flow behavior and preserved downstream routing. Remote PR/CI and coverage gates are independent and must be reported from the actual PR head, not inferred from these tests. The general `FAILED` policy intentionally attempts UPDATE without a new provider existence probe, as specified by the user and task acceptance criteria.
+
+
+## Review revision: provider-owned FAILED policy (2026-11-14)
+
+**Current decision: PASS.** This section supersedes the earlier production-condition and generic-FAILED conclusions above. The first review covered built-in ARCA/Teclaw behavior but did not protect a custom provider with recovery capability False; the user correctly identified that extension-boundary gap.
+
+The revised common decision only dispatches to `behavior.should_upgrade_not_live_bot(status)` for FAILED/STOPPED. It does not force either status to upgrade. The new base method is concrete, not abstract, and returns the pre-existing `upgrade_recovers_not_live_bot` property. Existing subclasses therefore retain their capability without implementing another abstract member. Teclaw alone overrides FAILED to True; its STOPPED result remains False. The existing property remains available, preserving callers and subclass definitions.
+
+A real custom behavior subclass with capability False is registered through the existing router in a regression. Both FAILED and STOPPED still select RETIRE_THEN_FIRST_RELEASE, demonstrating that the original cross-provider expansion is removed. Separate provider-policy tests verify Default/ARCA returns True for both statuses and Teclaw returns True/False for FAILED/STOPPED. The public orchestration code contains no Teclaw-specific status override.
+
+Online retry and online restart regressions still exercise the real workflow runners and SQLite ledger, preserve target UUID/binding, and assert that retirement, replacement creation and binding creation are not called. Existing build-service tests independently prove the Teclaw upgrade route calls `update_teclaw_bot`. Explicit BOT_NOT_FOUND/DEVICE_NOT_FOUND fallback, STOPPING wait and unknown/missing-status behavior are unchanged. Diagnostic fields remain target UUID, BaaS status, provider and decision; no external credential logging was added.
+
+Independently executed in `apps/backend/`:
+
+```bash
+.venv/bin/python -m pytest tests/community/core/service_bot/services/test_teclaw_failed_retry_update.py tests/community/core/service_bot/services/test_provider_behavior.py tests/community/core/service_bot/services/test_publish_flow_service.py tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py -q
+```
+
+Result: **235 passed**, 17 existing Pydantic deprecation warnings, 8.25 seconds. `git diff --check` passed. No blocking correctness or compatibility findings in this revision. Scope remains Avernet only, with no OCB/gitlink edits. Real provider execution and remote CI are separate verification gates and are not inferred from this result.

@@ -5,6 +5,11 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
+    DefaultProviderBehavior,
+    ProviderBehaviorRouter,
+)
+from agentclaw.community.core.service_bot.types import OnlineDeployDecision
 from tests.community.core.service_bot.services.test_publish_flow_service import (
     _arca_router,
     _make_publish_record,
@@ -90,3 +95,28 @@ async def test_failed_teclaw_online_restart_updates_without_retirement_or_recrea
     build_service.release_async.assert_not_awaited()
     svc._release_binding.assert_not_called()
     publish_service.create_device_binding.assert_not_called()
+
+
+class _NonRecoveringProviderBehavior(DefaultProviderBehavior):
+    @property
+    def upgrade_recovers_not_live_bot(self) -> bool:
+        return False
+
+
+@pytest.mark.parametrize("status", ["FAILED", "STOPPED"])
+def test_custom_provider_keeps_its_non_recovering_policy(status):
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": status}
+    baas_service.resolve_container_provider.return_value = "custom"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    svc._provider_behaviors = ProviderBehaviorRouter(
+        {"custom": _NonRecoveringProviderBehavior()}, default_provider_key="custom"
+    )
+    record = _make_publish_record(ext={"binding": {"online": 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-custom")
+
+    assert svc._decide_online_deploy(record, {"bot_id": "custom-bot"}) is (
+        OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
+    )

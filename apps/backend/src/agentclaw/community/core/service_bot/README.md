@@ -12,11 +12,14 @@ Service-bot domain — bot publication facade, BAAS service binding, sub-resourc
 
 ## Online retry and restart recovery
 
-Online publication retry and restart share the same candidate decision. A BaaS
-candidate in `FAILED` is reused through UPGRADE (Teclaw UPDATE), preserving its
-binding: operation failure alone does not establish that the instance is gone.
-Teclaw `STOPPED` still retires the candidate before creating a replacement; ARCA
-recovers it through UPDATE. `RELEASED`/`DESTROYING` or no candidate select creation,
+Online publication retry and restart share the same candidate decision and
+ask the selected provider's `should_upgrade_not_live_bot(status)` policy for
+FAILED/STOPPED recovery. Its default preserves the provider's existing recovery
+capability, including custom providers that cannot recover either status.
+Teclaw alone specializes `FAILED` to reuse UPGRADE/UPDATE and preserve the binding:
+operation failure alone does not establish that its instance is gone. Teclaw
+`STOPPED` still retires the candidate before creating a replacement; ARCA recovers
+both statuses through UPDATE. `RELEASED`/`DESTROYING` or no candidate select creation,
 while `STOPPING`, missing status and failed status reads wait through the existing
 retry/error path. Explicit `BOT_NOT_FOUND`/`DEVICE_NOT_FOUND` during UPDATE retain
 the existing recreation fallback. Issuing UPDATE does not declare publication

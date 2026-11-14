@@ -117,11 +117,15 @@ class ProviderBehavior(ABC):
     @abstractmethod
     def upgrade_recovers_not_live_bot(self) -> bool:
         """Whether an upgrade can revive a candidate BaaS bot that is no longer
-        live after ``STOPPED``. ``True`` when the provider's UPDATE destroys
-        and recreates the device in place; ``False`` when it cannot rebuild a
-        gone container. ``FAILED`` retries always attempt UPDATE because failure
-        alone does not establish that the provider instance is gone."""
+        live (``FAILED`` / ``STOPPED``). ``True`` when the provider's UPDATE
+        destroys and recreates the device in place; ``False`` when it cannot
+        rebuild a gone container. The status-aware recovery method preserves
+        this capability by default and allows provider-specific retry policy."""
         ...
+
+    def should_upgrade_not_live_bot(self, status: str) -> bool:
+        """Preserve the provider's recovery capability unless it specializes a status."""
+        return self.upgrade_recovers_not_live_bot
 
     @property
     @abstractmethod
@@ -325,6 +329,11 @@ class TeclawProviderBehavior(ProviderBehavior):
         # A teclaw UPDATE cannot rebuild a stopped container. This capability
         # controls STOPPED recovery; FAILED retries still reuse UPDATE.
         return False
+
+    def should_upgrade_not_live_bot(self, status: str) -> bool:
+        # A failed operation does not prove this Teclaw instance is gone.
+        # STOPPED still follows the non-recovering capability above.
+        return status == "FAILED" or super().should_upgrade_not_live_bot(status)
 
     @property
     def destroys_verify_bot_on_online(self) -> bool:

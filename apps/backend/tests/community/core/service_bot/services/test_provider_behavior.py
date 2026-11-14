@@ -236,3 +236,15 @@ def test_teclaw_draft_restore_rejects_non_teclaw_artifact():
     )
 
     assert reason == "上一版本的 config_artifact 不是 teclaw 构造物"
+
+
+@pytest.mark.parametrize("status", ["FAILED", "STOPPED"])
+def test_default_provider_reuses_recoverable_candidates(status):
+    assert DefaultProviderBehavior().should_upgrade_not_live_bot(status) is True
+
+
+@pytest.mark.parametrize("status,expected", [("FAILED", True), ("STOPPED", False)])
+def test_teclaw_recovery_policy_is_status_specific(status, expected):
+    behavior = _teclaw_behavior()
+    assert behavior.upgrade_recovers_not_live_bot is False
+    assert behavior.should_upgrade_not_live_bot(status) is expected

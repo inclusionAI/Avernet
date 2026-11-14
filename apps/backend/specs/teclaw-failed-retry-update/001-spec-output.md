@@ -15,10 +15,14 @@ Allowed changes: the shared decision, matching provider capability documentation
 ## Plan and validation
 
 1. Change the existing decision matrix expectation and add orchestration regressions; observe failure before implementation.
-2. Make FAILED select UPGRADE independently of stopped-container recovery capability; keep stable diagnostic fields (candidate UUID, status, provider, decision).
+2. Delegate FAILED/STOPPED recovery decisions to the selected ProviderBehavior. A backward-compatible default method follows the existing recovery capability; only Teclaw overrides FAILED to UPDATE. Keep stable diagnostic fields (candidate UUID, status, provider, decision).
 3. Verify actual online retry and online restart reuse, preserve binding and avoid retire/create. Cover STOPPED/RELEASED/DESTROYING/STOPPING, missing status and ARCA behavior with existing tests.
 4. Run focused service-bot tests, lint, diff/credential checks and independent review. Fetch and rebase onto latest GitHub dev, then create the GitHub source PR and inspect actual CI/reviews.
 
 ## Review and QA
 
 Reject any path that changes STOPPED to UPDATE or treats transport errors as missing instances. Diagnostics must expose FAILED/teclaw/upgrade and candidate UUID without credentials. UPDATE acceptance is not final publish success: existing progress polling/callbacks remain authoritative. Live deployment is outside this task; tests use synthetic services and an in-memory operation ledger.
+
+## Review revision: provider-owned policy (2026-11-14)
+
+The common decision must not force every provider's FAILED state to UPGRADE. Add a non-abstract status-aware method on ProviderBehavior whose default preserves `upgrade_recovers_not_live_bot`. Override the method in Teclaw only: FAILED reuses UPDATE and STOPPED retains False. Third-party providers inheriting the base method keep their existing capability, including False+FAILED retiring rather than being silently upgraded. The old property remains compatible. Add a custom non-recovering provider regression before implementation and provider contract tests for FAILED/STOPPED.
