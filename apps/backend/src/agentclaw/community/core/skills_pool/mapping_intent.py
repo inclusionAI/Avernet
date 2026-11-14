@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+from agentclaw.community.kernel.skill_mapping_identity import mapping_source, source_tail
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     RegisteredSkillAsset,
@@ -30,25 +31,10 @@ def mapping_contract_for(
     return MAPPING_CONTRACT_V3
 
 
-def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
-    raw = git_path[len(prefix) :]
-    path = PurePosixPath(raw)
-    if (
-        not raw
-        or raw.strip() != raw
-        or (prefix == "git://" and path.is_absolute())
-        or path.name in {"", ".", ".."}
-        or ".." in path.parts
-        or path.as_posix() != raw
-    ):
-        raise ValueError(f"invalid skill locator: {git_path}")
-    return path
-
-
 def local_skill_name(asset: RegisteredSkillAsset) -> str:
     if not asset.git_path.startswith("local://"):
         raise ValueError(f"skill {asset.skill_id} is not local")
-    return _source_tail(asset.git_path, "local://").name
+    return source_tail(asset.git_path, "local://").name
 
 
 def build_logical_skill_mappings(
@@ -57,34 +43,11 @@ def build_logical_skill_mappings(
     mappings: list[PoolSkillMapping] = []
     targets: dict[str, str] = {}
     for asset in assets:
-        if asset.git_path.startswith("local://"):
-            relative = PurePosixPath(local_skill_name(asset))
-            corpus = "local"
-        elif asset.git_path.startswith("git://"):
-            relative = _source_tail(asset.git_path, "git://")
-            corpus = "repo"
-        elif asset.git_path.startswith("center://"):
-            if not asset.skill_uuid or not asset.sc_version_number:
-                raise ValueError("center mapping requires structured identity")
-            relative = None
-            corpus = "center"
-        else:
-            # A complete projection is fail-closed.  Silently ignoring a
-            # selected asset would make the database desired state and the
-            # delivered runtime disagree.
-            raise ValueError(f"unsupported skill source: {asset.git_path}")
-        # ``ac_skill.name`` is the single runtime-name policy for every shared
-        # asset.  Repo paths are locators, not user-visible link identities:
-        # two different directories can legitimately share the same tail.
-        # ``ac_skill.name`` is the only RuntimeNamePolicy input for every
-        # corpus.  ``local://`` and ``git://`` tails are locators, never the
-        # runtime identity exposed to an Engine.
-        link_name = asset.name
-        identity = (
-            f"center:{asset.skill_uuid}:{asset.sc_version_number}"
-            if corpus == "center"
-            else f"{corpus}:{relative.as_posix()}"
+        corpus, relative, identity = mapping_source(
+            asset.git_path, asset.skill_uuid, asset.sc_version_number
         )
+        # ac_skill.name is the runtime target; the locator identifies its source.
+        link_name = asset.name
         if targets.get(link_name) == identity:
             continue
         if link_name in targets:

@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPConfig
 from agentclaw.community.core.models.skill import SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
@@ -21,6 +22,9 @@ class _Database:
         self.engine = create_engine(f"sqlite:///{path}")
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        with self.sessions.begin() as session:
+            if session.query(BotModel).filter_by(bot_id="bot", entity_id="owner", env="dev").first() is None:
+                session.add(BotModel(bot_id="bot", entity_id="owner", owner_id="owner", entity_type="staff", creator_id="owner", env="dev"))
 
     @contextmanager
     def orm_session(self):

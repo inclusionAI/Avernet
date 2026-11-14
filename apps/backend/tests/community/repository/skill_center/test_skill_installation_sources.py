@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.skill import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
@@ -18,6 +19,11 @@ class Database:
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        with self.sessions.begin() as session:
+            for env in ("dev", "pre"):
+                for entity_id in ("owner", "other"):
+                    session.add(BotModel(bot_id="default", entity_id=entity_id, owner_id=entity_id,
+                                         entity_type="staff", creator_id=entity_id, env=env))
 
     @contextmanager
     def transactional_orm_session(self):
