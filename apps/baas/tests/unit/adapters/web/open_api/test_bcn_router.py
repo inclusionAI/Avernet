@@ -143,14 +143,17 @@ def _chat_send_body():
     }
 
 
-def test_chat_send_request_parses_caller_identity_extensions() -> None:
-    request = ChatSendRequest.model_validate(_chat_send_body())
+@pytest.mark.parametrize("token_type", ["agentpass", "iam-token", "dingtalk-token"])
+def test_chat_send_request_parses_caller_identity_extensions(token_type) -> None:
+    body = _chat_send_body()
+    body["extensions"]["caller_execution_token"]["type"] = token_type
+    request = ChatSendRequest.model_validate(body)
 
     assert request.extensions is not None
     assert request.extensions.caller_context is not None
     assert request.extensions.caller_context.subject.ref == "workno-agent"
     assert request.extensions.caller_execution_token is not None
-    assert request.extensions.caller_execution_token.type == "agentpass"
+    assert request.extensions.caller_execution_token.type == token_type
     assert request.extensions.caller_execution_token.version == "1.0"
     assert request.extensions.caller_execution_token.expires_at_ms == 1_800_000_000_000
 

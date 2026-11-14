@@ -22,6 +22,7 @@ from agentclaw.community.core.caller_identity.caller_credential_protocol import 
     CallerRuntimeUpdater,
     CallerToken,
     CallerTokenProvider,
+    DingTalkCallerTokenProvider,
     UnavailableCallerTokenProvider,
 )
 
@@ -39,5 +40,6 @@ __all__ = [
     "CallerRuntimeUpdater",
     "CallerToken",
     "CallerTokenProvider",
+    "DingTalkCallerTokenProvider",
     "UnavailableCallerTokenProvider",
 ]

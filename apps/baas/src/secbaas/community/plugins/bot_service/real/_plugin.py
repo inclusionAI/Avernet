@@ -485,6 +485,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         runs exactly once and is never retried on failure:
 
         - ``iam-token``: GET /api/v1/token/iam with the IAM-token cookie;
+        - ``dingtalk-token``: signed app refresh with explicit caller and owner;
         - ``agentpass``: append an outbound ``x-caller-token`` rule
           to the ready sandbox through the BaaS PaasServiceFacade. The operator
           must provide the immutable domain allowlist in deployment config;
@@ -524,10 +525,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a non-empty execution credential",
             )
-        if not (credential.is_iam_token or credential.is_agentpass):
+        if not (
+            credential.is_iam_token
+            or credential.is_agentpass
+            or credential.is_dingtalk_token
+        ):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                f"caller-connection received an unsupported credential type: {credential.type}",
+                "caller-connection received an unsupported credential type",
             )
         if credential.is_agentpass and self._paas_service_facade is None:
             raise PaasError(
@@ -610,6 +615,13 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         await self._refresh_caller_iam_token(
                             bot_id=bot_id,
                             cookie=f"IAM_TOKEN={credential.token}",
+                        )
+                    elif credential.is_dingtalk_token:
+                        await self._refresh_caller_dingtalk_token(
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            user_id=user_id,
+                            device_token=credential.token,
                         )
                     else:
                         await self._append_agentpass_caller_token(
@@ -838,4 +850,67 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             "[bot-service] caller IAM credentials refreshed: request_id=%s bot_id=%s",
             request_id,
             bot_id,
+        )
+
+    async def _refresh_caller_dingtalk_token(
+        self, *, bot_id: str, owner_id: str, user_id: str, device_token: str
+    ) -> None:
+        """Exchange an opaque DeviceToken for the authenticated caller instance.
+
+        Mint a fresh app principal for this separate request. Backend verifies the
+        returned subject against user_id before installing any credential.
+        """
+        assert self._principal_signer is not None
+        request_id = str(uuid.uuid4())
+        started = time.monotonic()
+        params = {
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "user_id": user_id,
+            "token_type": "dingtalk",
+            "is_test_exchange": "false",
+        }
+        headers = {
+            "Accept": "application/json",
+            "Cookie": f"IAM_TOKEN={device_token}",
+            "X-Avernet-Principal": self._principal_signer.mint(),
+            "X-Request-ID": request_id,
+        }
+        logger.info(
+            "[bot-service] caller DeviceToken refresh started: request_id=%s params=%s",
+            request_id,
+            params,
+        )
+        status = None
+        try:
+            session = await self._get_session()
+            url = f"{self._base_url.rstrip('/')}/api/v1/token/iam"
+            async with session.get(url, params=params, headers=headers) as resp:
+                status = resp.status
+                if status >= 400:
+                    raise ValueError("refresh HTTP failure")
+                data = IamTokenData.model_validate(await resp.json())
+            if not data.success:
+                raise ValueError("refresh rejected")
+        except (TimeoutError, aiohttp.ClientError, ValueError):
+            # Upstream error bodies and validation inputs can echo credentials.
+            logger.warning(
+                "[bot-service] caller DeviceToken refresh failed: "
+                "request_id=%s bot_id=%s status=%s elapsed_ms=%s",
+                request_id,
+                bot_id,
+                status,
+                round((time.monotonic() - started) * 1000),
+            )
+            raise PaasError(
+                ErrorCode.PLATFORM_UNAVAILABLE,
+                f"caller DeviceToken credential refresh failed: bot_id={bot_id}",
+            ) from None
+        logger.info(
+            "[bot-service] caller DeviceToken refreshed: "
+            "request_id=%s bot_id=%s status=%s elapsed_ms=%s",
+            request_id,
+            bot_id,
+            status,
+            round((time.monotonic() - started) * 1000),
         )

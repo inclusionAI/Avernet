@@ -161,7 +161,7 @@ class CallerExecutionToken(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: Literal["iam-token", "agentpass"]
+    type: Literal["iam-token", "agentpass", "dingtalk-token"]
     token: str
     version: str | None = None
     format: str | None = None
