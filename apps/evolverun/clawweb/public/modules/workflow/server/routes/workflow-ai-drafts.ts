@@ -2,10 +2,12 @@ import { Router, type Request, type Response, type RequestHandler } from 'expres
 import { WorkflowAiDraftError, type WorkflowAiDraftService } from '../contracts/workflow-ai-draft.js';
 
 /** Existing Pack CSRF contract, applied to this router's own routes only. */
-const guard = (publicOrigin?: string): RequestHandler => (req, res, next) => {
+const guard = (publicOrigins?: ReadonlySet<string>): RequestHandler => (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   const origin = req.get('origin');
-  if ((origin && origin !== (publicOrigin ?? `${req.protocol}://${req.get('host')}`)) || req.get('sec-fetch-site') === 'cross-site'
+  const allowedOrigin = publicOrigins ? (!origin || publicOrigins.has(origin))
+    : (!origin || origin === `${req.protocol}://${req.get('host')}`);
+  if ((!allowedOrigin) || req.get('sec-fetch-site') === 'cross-site'
     || (req.method !== 'GET' && req.method !== 'HEAD' && req.get('x-pack-version-csrf') !== '1')) {
     res.status(403).json({ code: 'CSRF_REJECTED', error: 'Forbidden' }); return;
   }
@@ -13,20 +15,25 @@ const guard = (publicOrigin?: string): RequestHandler => (req, res, next) => {
 };
 export function createWorkflowAiDraftRouter(options: {
   service: WorkflowAiDraftService; principal(request: Request): Promise<{ actorId: string } | null>;
-  /** Host-owned canonical public origin for TLS-terminating ingress. Never a forwarded header. */
+  /** Host-owned exact public origins for TLS-terminating ingress. Never use forwarded headers. */
   publicOrigin?: string;
+  publicOrigins?: readonly string[];
 }): Router {
-  let publicOrigin: string | undefined;
-  if (options.publicOrigin !== undefined) {
+  const configuredOrigins = options.publicOrigins ?? (options.publicOrigin === undefined ? undefined : [options.publicOrigin]);
+  let publicOrigins: Set<string> | undefined;
+  if (configuredOrigins !== undefined) {
     try {
-      const configured = new URL(options.publicOrigin);
-      if (!['https:', 'http:'].includes(configured.protocol) || configured.username || configured.password
-        || configured.pathname !== '/' || configured.search || configured.hash
-        || ![configured.origin, configured.origin + '/'].includes(options.publicOrigin)) throw new Error('invalid');
-      publicOrigin = configured.origin;
-    } catch { throw new Error('AI_DRAFT_PUBLIC_ORIGIN_INVALID'); }
+      publicOrigins = new Set(configuredOrigins.map(value => {
+        const configured = new URL(value);
+        if (!['https:', 'http:'].includes(configured.protocol) || configured.username || configured.password
+          || configured.pathname !== '/' || configured.search || configured.hash
+          || ![configured.origin, configured.origin + '/'].includes(value)) throw new Error('invalid');
+        return configured.origin;
+      }));
+      if (!publicOrigins.size) throw new Error('empty');
+    } catch { throw new Error('AI_DRAFT_PUBLIC_ORIGINS_INVALID'); }
   }
-  const csrf = guard(publicOrigin);
+  const csrf = guard(publicOrigins);
   const router = Router();
   const handle = (run: (actorId: string, req: Request, res: Response) => Promise<void>): RequestHandler => async (req, res) => {
     try {

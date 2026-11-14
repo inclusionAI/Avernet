@@ -9,6 +9,7 @@ import type { WorkflowAiDraftExecutionPort, WorkflowAiDraftService } from '@aver
 export function createWorkflowAiDraftRuntime(db: IDatabase, options: {
   principal(request: Request): Promise<{ actorId: string } | null>;
   publicOrigin?: string;
+  publicOrigins?: readonly string[];
   canEdit?(workflowId: string, actorId: string): Promise<boolean>;
   execution?: WorkflowAiDraftExecutionPort; unavailableReason?: string;
 }): { service: WorkflowAiDraftService; router: Router; monitor: { reconcile(limit?: number): Promise<number> } } {
@@ -16,6 +17,6 @@ export function createWorkflowAiDraftRuntime(db: IDatabase, options: {
   const service = createWorkflowAiDraftService({ db,
     canEdit: options.canEdit ?? ((workflowId, actorId) => permissions.hasEditPermission(workflowId, actorId)),
     execution: options.execution, unavailableReason: options.unavailableReason });
-  return { service, router: createWorkflowAiDraftRouter({ service, principal: options.principal, publicOrigin: options.publicOrigin }),
+  return { service, router: createWorkflowAiDraftRouter({ service, principal: options.principal, publicOrigin: options.publicOrigin, publicOrigins: options.publicOrigins }),
     monitor: { reconcile: limit => service.reconcile(limit) } };
 }
