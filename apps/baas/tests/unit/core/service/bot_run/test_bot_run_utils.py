@@ -773,7 +773,8 @@ class TestResolveCallerBinding:
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"
 
-    async def test_resolves_sandbox_via_agentpass_credential(self):
+    @pytest.mark.parametrize("token_type", ["agentpass", "dingtalk-token"])
+    async def test_resolves_sandbox_via_agentpass_credential(self, token_type):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-agent")
         resolver = BotBindingResolver(plugin)
@@ -782,7 +783,7 @@ class TestResolveCallerBinding:
             metadata={
                 "user_id": "workno-agent",
                 "caller_token": "test-token",
-                "type": "agentpass",
+                "type": token_type,
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
@@ -790,7 +791,7 @@ class TestResolveCallerBinding:
             owner_id=ENTITY_ID,
             user_id="workno-agent",
             credential=CallerExecutionCredential(
-                type="agentpass",
+                type=token_type,
                 token="test-token",
             ),
         )

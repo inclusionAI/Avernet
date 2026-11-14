@@ -57,7 +57,9 @@ class BotServicePlugin(Protocol):
         """caller 模式：按 (bot_id, owner_id, user_id) 拉起容器并安装调用方凭据。
 
         沙箱拉起/轮询是公共逻辑。就绪后按 credential.type 分支：
-        ``iam-token`` 继续单次调用 /api/v1/token/iam；``agentpass``
+        ``iam-token`` 继续单次调用 /api/v1/token/iam；
+        ``dingtalk-token`` 使用独立签发的 app Principal 与显式 caller/owner 换签；
+        ``agentpass``
         通过 BaaS outbound-rule append 安装 ``x-caller-token``。
 
         Args:
