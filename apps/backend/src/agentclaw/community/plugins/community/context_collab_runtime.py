@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotError,
@@ -90,11 +92,14 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         )
 
 
-def _runtime_metadata(request: ContextCollabRunRequest | ContextCollabResumeRequest) -> dict[str, str]:
+def _runtime_metadata(
+    request: ContextCollabRunRequest | ContextCollabResumeRequest,
+) -> dict[str, Any]:
     metadata = {
         "biz_task_id": request.todo_id,
         "todo_id": request.todo_id,
         "collab_context_id": request.collab_context_id,
+        "sender_options": {"from": request.principal_id},
         "todo_report_path": f"/api/v1/collaboration/todos/{request.todo_id}/report",
         "todo_upload_path": f"/api/v1/collaboration/todos/{request.todo_id}/artifacts/object-file",
     }

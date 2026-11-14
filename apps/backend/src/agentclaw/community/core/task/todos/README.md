@@ -17,9 +17,10 @@ Human approval advances the Todo to `completed`; rejection keeps it in
 A and B run in the same process in the production composition root, so the
 adapter calls `ContextCollabServiceProtocol` directly rather than making an
 internal HTTP self-call. The creator remains the Human principal while Bot
-runtime addressing uses the Bot record owner. The public `/run` operation is a
-compensation/operator entry point; the ordinary frontend neither edits Todos
-nor exposes manual Run.
+runtime addressing uses the Bot record owner. OpenAPI delivery also sends
+`sender_options.from` as the creator so the executor session is attributable to
+that principal. The public `/run` operation is a compensation/operator entry
+point; the ordinary frontend neither edits Todos nor exposes manual Run.
 
 While a Todo is `pending_acceptance`, posting one Human interaction atomically
 claims A as `pending_acceptance -> in_progress`, then append-only records
