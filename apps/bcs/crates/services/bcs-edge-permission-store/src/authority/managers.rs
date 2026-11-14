@@ -1635,7 +1635,7 @@ impl DbBotAuthorityStore {
             // the unique constraint uk_edge_from_to_env_ref
             // spans all grant_kinds and a non-manager row
             // would cause a duplicate-key INSERT.
-            let (pending_adds, _skipped_pending) = if !pending_adds.is_empty() {
+            let (pending_adds, skipped_pending) = if !pending_adds.is_empty() {
                 let existing = self
                     .pre_read_existing_edges(
                         &command.bot_id,
@@ -1682,10 +1682,11 @@ impl DbBotAuthorityStore {
                     }
                 }
             }
+            let final_count = valid_input.len() - skipped_pending.len();
             let change = ManagerSetChange {
                 added: added.len() as u64,
                 removed: removed.len() as u64,
-                total: valid_input.len() as u64,
+                total: final_count as u64,
             };
             let sequences = assign_sequences(&removed, &added);
 
@@ -1763,7 +1764,7 @@ impl DbBotAuthorityStore {
             // with exactly that set (possibly empty).
             self.post_state_guard_step(
                 &mut builder,
-                valid_input.len() as u64,
+                final_count as u64,
             );
             let steps = builder.finish();
 
