@@ -1,17 +1,14 @@
 import { Button } from '@/components/ui/Button';
-import { Textarea } from '@/components/ui/Textarea';
 import type { TodoAcceptanceTarget } from '@/domain/todos/models';
 import { Check, Flag } from 'lucide-react';
 
 interface TodoAcceptanceActionsProps {
   loading: boolean;
   rejecting: boolean;
-  message: string;
   targets: TodoAcceptanceTarget[];
   onBeginReject: () => void;
-  onMessageChange: (message: string) => void;
+  onContinueReject: () => void;
   onCancelReject: () => void;
-  onSubmitReject: () => Promise<void> | void;
   onApprove: () => Promise<void> | void;
 }
 
@@ -25,12 +22,10 @@ function selectedFloors(targets: TodoAcceptanceTarget[]): string {
 export function TodoAcceptanceActions({
   loading,
   rejecting,
-  message,
   targets,
   onBeginReject,
-  onMessageChange,
+  onContinueReject,
   onCancelReject,
-  onSubmitReject,
   onApprove,
 }: TodoAcceptanceActionsProps) {
   const floors = selectedFloors(targets);
@@ -44,16 +39,10 @@ export function TodoAcceptanceActions({
 
       {rejecting ? (
         <div className="mt-3 space-y-3">
+          <p className="m-0 text-xs font-medium text-foreground">返工要求正在互动页编辑</p>
           <p className="m-0 text-xs text-muted-foreground">
-            {floors ? `已选中问题楼层：${floors}` : '请到互动页标记有问题的楼层'}
+            {floors ? `已选中问题楼层：${floors}` : '请到互动页标记问题楼层并填写返工要求'}
           </p>
-          <Textarea
-            value={message}
-            onChange={(event) => onMessageChange(event.target.value)}
-            placeholder="填写完整返工要求"
-            rows={3}
-            disabled={loading}
-          />
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="ghost" className="h-8 rounded-lg px-4 text-xs" onClick={onCancelReject} disabled={loading}>
               取消
@@ -61,11 +50,10 @@ export function TodoAcceptanceActions({
             <Button
               variant="outline"
               className="h-8 rounded-lg px-4 text-xs"
-              onClick={() => void onSubmitReject()}
-              loading={loading}
-              disabled={!message.trim() || targets.length === 0}
+              onClick={onContinueReject}
+              disabled={loading}
             >
-              提交并退回返工
+              返回互动继续填写
             </Button>
           </div>
         </div>

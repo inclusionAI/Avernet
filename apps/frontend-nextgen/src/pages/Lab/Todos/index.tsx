@@ -82,6 +82,7 @@ export default function LabTodosPage() {
 
         <TodoBoard
           todos={todos.todos}
+          status={todos.status}
           total={todos.total}
           page={todos.page}
           pageSize={todos.pageSize}

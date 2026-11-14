@@ -196,7 +196,7 @@ function QuestionMarker({
       disabled={!enabled}
       className={cn(
         'h-full min-h-12 w-1 rounded-full border-0 p-0 transition-colors',
-        active ? 'bg-destructive' : enabled ? 'bg-transparent hover:bg-destructive/35' : 'bg-transparent',
+        active ? 'bg-destructive' : enabled ? 'bg-border hover:bg-destructive/45' : 'bg-transparent',
       )}
       onClick={onClick}
     />

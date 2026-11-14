@@ -244,12 +244,10 @@ export default function TodoDetailPage() {
                           <TodoAcceptanceActions
                             loading={detail.mutationLoading}
                             rejecting={rejectionMode}
-                            message={rejectionMessage}
                             targets={selectedTargets}
                             onBeginReject={beginRejection}
-                            onMessageChange={setRejectionMessage}
+                            onContinueReject={() => setView('interactions')}
                             onCancelReject={cancelRejection}
-                            onSubmitReject={submitRejection}
                             onApprove={approve}
                           />
                         </div>

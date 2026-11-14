@@ -288,8 +288,22 @@ describe('TodoDetailPage', () => {
 
     const acceptance = screen.getByRole('region', { name: '待办验收' });
     expect(within(acceptance).getByText('已选中问题楼层：f8')).toBeInTheDocument();
-    expect(within(acceptance).getByPlaceholderText('填写完整返工要求')).toHaveValue(' 请修正产品 B 的企业版价格 ');
-    fireEvent.click(within(acceptance).getByRole('button', { name: '提交并退回返工' }));
+    expect(within(acceptance).getByText('返工要求正在互动页编辑')).toBeInTheDocument();
+    expect(within(acceptance).queryByPlaceholderText('填写完整返工要求')).not.toBeInTheDocument();
+    expect(within(acceptance).queryByRole('button', { name: '提交并退回返工' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(acceptance).getByRole('button', { name: '返回互动继续填写' }));
+    const resumedInteractionView = screen.getByRole('region', { name: '待办互动' });
+    expect(within(resumedInteractionView).getByPlaceholderText('填写完整返工要求')).toHaveValue(
+      ' 请修正产品 B 的企业版价格 ',
+    );
+    expect(
+      within(within(resumedInteractionView).getByText('请补充价格来源').closest('li') as HTMLElement).getByRole(
+        'button',
+        { name: '取消 f8 问题点标记' },
+      ),
+    ).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(resumedInteractionView).getByRole('button', { name: '提交并退回返工' }));
 
     await waitFor(() => expect(mockedService.acceptTodo).toHaveBeenCalledTimes(1));
     const input = mockedService.acceptTodo.mock.calls[0][1];
@@ -503,6 +517,8 @@ describe('TodoDetailPage', () => {
     expect(feedback).toHaveClass('text-sm', 'leading-6');
     expect(feedbackFloor).toHaveClass('grid', 'grid-cols-[4px_minmax(0,1fr)]', 'gap-4');
     expect(marker).toHaveAttribute('aria-pressed', 'false');
+    expect(marker).toHaveClass('bg-border');
+    expect(marker).not.toHaveClass('bg-transparent');
     fireEvent.click(marker);
     expect(marker).toHaveAttribute('aria-pressed', 'true');
     expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');

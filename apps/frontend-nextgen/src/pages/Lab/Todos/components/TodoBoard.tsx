@@ -7,6 +7,7 @@ import { useState } from 'react';
 
 interface TodoBoardProps {
   todos: TodoRecord[];
+  status?: TodoStatus;
   total: number;
   page: number;
   pageSize: number;
@@ -47,6 +48,18 @@ const TODO_GROUPS: TodoGroup[] = [
     statuses: ['completed'],
   },
 ];
+
+function filteredGroup(status: TodoStatus): TodoGroup {
+  if (status === 'in_progress') return { key: 'in_progress', label: TODO_STATUS_LABEL[status], statuses: [status] };
+  if (status === 'completed') return { key: 'completed', label: TODO_STATUS_LABEL[status], statuses: [status] };
+  return {
+    key: 'pending',
+    label: TODO_STATUS_LABEL[status],
+    statuses: [status],
+    labelClassName: status === 'pending' ? 'font-semibold text-destructive' : 'font-semibold text-warning',
+    attentionDotClassName: status === 'pending' ? 'bg-destructive' : 'bg-warning',
+  };
+}
 
 const TODO_DOT_CLASS: Record<TodoStatus, string> = {
   pending: 'bg-warning',
@@ -106,6 +119,7 @@ function TodoCard({ todo, onSelect }: { todo: TodoRecord; onSelect: (todoId: str
 
 export function TodoBoard({
   todos,
+  status,
   total,
   page,
   pageSize,
@@ -122,6 +136,11 @@ export function TodoBoard({
     completed: false,
   });
 
+  const visibleTodos = status ? todos.filter((todo) => todo.status === status) : todos;
+  const groups = status ? [filteredGroup(status)] : TODO_GROUPS;
+  const responseContainsOtherStatuses = Boolean(status && todos.some((todo) => todo.status !== status));
+  const visibleTotal = responseContainsOtherStatuses ? visibleTodos.length : total;
+
   if (loading) return <Spin tip="加载待办中…" className="py-16" />;
   if (error) {
     return (
@@ -136,36 +155,48 @@ export function TodoBoard({
       />
     );
   }
-  if (todos.length === 0) {
+  if (visibleTodos.length === 0) {
     return <Empty title="暂无待办" description="创建一个待办，让当前空间的 Bot 开始处理。" />;
   }
 
   return (
     <section role="region" aria-label="待办分组" className="space-y-3">
-      {TODO_GROUPS.map((group) => {
-        const items = todos.filter((todo) => group.statuses.includes(todo.status));
-        const isExpanded = expanded[group.key];
+      {groups.map((group) => {
+        const items = visibleTodos.filter((todo) => group.statuses.includes(todo.status));
+        const isExpanded = status ? true : expanded[group.key];
         return (
           <section key={group.key} aria-labelledby={`todo-group-${group.key}`} className="space-y-4">
-            <Button
-              variant="ghost"
-              className="h-auto w-fit justify-start gap-2 rounded-md border-0 px-0 py-1 text-sm hover:bg-transparent"
-              aria-expanded={isExpanded}
-              onClick={() => setExpanded((current) => ({ ...current, [group.key]: !current[group.key] }))}
-            >
-              {isExpanded ? (
-                <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
-              ) : (
-                <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
-              )}
-              <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
-                {group.label}
-              </span>
-              <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
-              {group.attentionDotClassName && items.length > 0 ? (
-                <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
-              ) : null}
-            </Button>
+            {status ? (
+              <div className="flex w-fit items-center gap-2 py-1 text-sm">
+                <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
+                  {group.label}
+                </span>
+                <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
+                {group.attentionDotClassName && items.length > 0 ? (
+                  <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
+                ) : null}
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                className="h-auto w-fit justify-start gap-2 rounded-md border-0 px-0 py-1 text-sm hover:bg-transparent"
+                aria-expanded={isExpanded}
+                onClick={() => setExpanded((current) => ({ ...current, [group.key]: !current[group.key] }))}
+              >
+                {isExpanded ? (
+                  <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
+                ) : (
+                  <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
+                )}
+                <span id={`todo-group-${group.key}`} className={cn('text-sm font-medium', group.labelClassName)}>
+                  {group.label}
+                </span>
+                <span className="text-xs tabular-nums text-muted-foreground">({items.length})</span>
+                {group.attentionDotClassName && items.length > 0 ? (
+                  <span className={cn('ml-1 size-2.5 rounded-full', group.attentionDotClassName)} aria-hidden />
+                ) : null}
+              </Button>
+            )}
 
             {isExpanded ? (
               items.length > 0 ? (
@@ -187,7 +218,7 @@ export function TodoBoard({
       <Pagination
         current={page}
         pageSize={pageSize}
-        total={total}
+        total={visibleTotal}
         onChange={onPageChange}
         onPageSizeChange={onPageSizeChange}
         layout="between"

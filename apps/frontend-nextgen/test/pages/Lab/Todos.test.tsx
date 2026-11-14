@@ -109,6 +109,21 @@ const createdTodo: TodoRecord = {
   collabContextId: undefined,
 };
 
+const pendingTodo: TodoRecord = {
+  ...awaitingAcceptanceTodo,
+  todoId: 'todo-pending',
+  title: '准备发布说明',
+  status: 'pending',
+  collabContextId: undefined,
+};
+
+const completedTodo: TodoRecord = {
+  ...awaitingAcceptanceTodo,
+  todoId: 'todo-completed',
+  title: '复盘上线结果',
+  status: 'completed',
+};
+
 function resetTodoStore() {
   useTodoStore.setState({
     todos: [],
@@ -198,6 +213,38 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     await waitFor(() =>
       expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ botId: 'bot-owned:u-1' })),
     );
+  });
+
+  it('状态筛选只展示对应状态的待办和分组', async () => {
+    mockedService.loadTodos.mockResolvedValue({
+      items: [pendingTodo, runningTodo, awaitingAcceptanceTodo, completedTodo],
+      total: 4,
+      page: 1,
+      pageSize: 10,
+    });
+    render(<LabTodosPage />);
+    const toolbar = await screen.findByRole('region', { name: '待办筛选' });
+    const statusGroup = within(toolbar).getByRole('group', { name: '待办状态' });
+
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '进行中' }));
+    expect(await screen.findByRole('article', { name: '整理会议纪要' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '准备发布说明' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '编写实施方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '复盘上线结果' })).not.toBeInTheDocument();
+    expect(document.querySelector('#todo-group-in_progress')).toHaveTextContent('进行中');
+    expect(within(screen.getByRole('region', { name: '待办分组' })).queryByText('待处理')).not.toBeInTheDocument();
+
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '待验收' }));
+    expect(await screen.findByRole('article', { name: '编写实施方案' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '整理会议纪要' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '复盘上线结果' })).not.toBeInTheDocument();
+    expect(document.querySelector('#todo-group-pending')).toHaveTextContent('待验收');
+
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '已完成' }));
+    expect(await screen.findByRole('article', { name: '复盘上线结果' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '编写实施方案' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '整理会议纪要' })).not.toBeInTheDocument();
+    expect(document.querySelector('#todo-group-completed')).toHaveTextContent('已完成');
   });
 
   it('待处理切换回全部时保留条件且不携带状态键', async () => {
