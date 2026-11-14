@@ -12,6 +12,7 @@ provides:
   - NoopScheduledCallerRefresh
 consumes:
   - CallerTokenProviderProtocol
+  - DingTalkCallerTokenProvider
   - CallerRuntimeUpdaterProtocol
 internal_dependencies:
   - agentclaw.community.core
@@ -21,6 +22,16 @@ internal_dependencies:
 ```
 
 ### Change impact
+
+The existing IAM refresh endpoint accepts `token_type=dingtalk` for an opaque
+platform DeviceToken. It adds no caller or owner query parameters. This branch
+first authenticates the existing application signature, resolves the owner using
+the existing Bot locator, and invokes the optional
+`DingTalkCallerTokenProvider.exchange_dingtalk` capability. Only the verified
+upstream subject selects the existing Caller instance. Source credentials and
+query IDs are never decoded or used to infer caller identity. The service rejects
+invalid subject/token/expiry values and checks the exact binding before installing.
+The default `iam` flow and its provider contract remain unchanged.
 
 OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve
 their `OwnerIdDep` locator through `openapi_v1.bot_address` before passing an

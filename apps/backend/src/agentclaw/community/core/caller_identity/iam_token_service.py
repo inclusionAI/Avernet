@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import datetime
 
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
+    CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
+    CALLER_OUTBOUND_INVALID,
+    CALLER_CHAT_TASK,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CALLER_TARGET_NOT_FOUND,
     CallerCredentialError,
@@ -37,6 +42,8 @@ from agentclaw.community.core.caller_identity.protocols import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
 from agentclaw.community.core.caller_identity.caller_iam_token_service_protocol import CallerIamTokenServiceProtocol
+
+from agentclaw.community.core.caller_identity.caller_credential_protocol import DingTalkCallerTokenProvider
 
 
 logger = get_logger()
@@ -76,7 +83,16 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         is_test_exchange: bool,
         session_key: str | None = None,
         friend_user_id: str | None = None,
+        token_type: str = "iam",
     ) -> CallerIamTokenOutcome:
+        if token_type == "dingtalk":
+            return await self._refresh_dingtalk(
+                device_token=iam_token, bot_id=bot_id, stage=stage,
+                publish_id=publish_id, entity_id=entity_id,
+                is_test_exchange=is_test_exchange, session_key=session_key,
+            )
+        if token_type != "iam":
+            return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID)
         if not iam_token:
             return CallerIamTokenOutcome(iam_token="", error="IAM_TOKEN cookie not found")
         if is_test_exchange and not bot_id:
@@ -219,6 +235,85 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             return CallerIamTokenOutcome(iam_token="", error=CALLER_OUTBOUND_UPDATE_FAILED)
         logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
         return CallerIamTokenOutcome(iam_token=iam_token)
+
+    async def _refresh_dingtalk(
+        self, *, device_token: str, bot_id: str | None, stage: CallerIdentityStage,
+        publish_id: int | None, entity_id: str | None, is_test_exchange: bool,
+        session_key: str | None,
+    ) -> CallerIamTokenOutcome:
+        fields = {"system": "backend", "operation": "caller_dingtalk",
+                  "token_type": "dingtalk", "bot_id": bot_id,
+                  "stage": stage.value, "session_key": session_key}
+        started = time.monotonic()
+        logger.info("caller_dingtalk_request fields=%s", fields)
+        try:
+            if not device_token.strip() or not bot_id or not bot_id.strip() or is_test_exchange:
+                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+            context = await asyncio.to_thread(
+                self._caller_identity.get_iam_token_context, bot_id=bot_id, stage=stage,
+                publish_id=publish_id, entity_id=entity_id, is_test_exchange=False,
+            )
+            owner_id = context.owner_id
+            if not owner_id or not owner_id.strip() or not context.should_exchange_caller_token:
+                raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+            fields["owner_id"] = owner_id
+            if not isinstance(self._token_provider, DingTalkCallerTokenProvider):
+                raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
+            caller_token = await asyncio.to_thread(
+                self._token_provider.exchange_dingtalk, device_token=device_token,
+                bot_id=bot_id, owner_user_id=owner_id, task_metadata=CALLER_CHAT_TASK,
+            )
+            user_id = caller_token.subject_user_id
+            # COSEC: only the verified upstream subject selects the caller. Do not
+            # normalize or infer an identity from the source token or query fields.
+            if not isinstance(user_id, str) or not user_id or user_id != user_id.strip():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            token = caller_token.access_token
+            if not isinstance(token, str) or not token or token != token.strip():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            if not isinstance(caller_token.expires_at, datetime) or caller_token.expires_at.timestamp() <= time.time():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            fields["user_id"] = user_id
+            request = RuntimeBindingRequest(
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id,
+                stage=stage.value, target=RuntimeBindingTarget.CALLER_INSTANCE,
+            )
+            target = await asyncio.to_thread(self._runtime_bindings.resolve, request)
+            # COSEC: the DeviceToken capability is limited to a caller instance.
+            if target.source is not RuntimeBindingSource.CALLER_INSTANCE:
+                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+            fields.update(binding_id=target.binding_id, source=target.source.value)
+            await asyncio.to_thread(
+                self._session_validator.validate, bot_id=bot_id, owner_id=owner_id,
+                caller_user_id=user_id, binding_id=target.binding_id,
+                stage=stage.value, session_key=session_key,
+            )
+            current = await asyncio.to_thread(self._runtime_bindings.resolve, request)
+            # COSEC: reject a replaced binding while the exchange was in flight.
+            if current != target:
+                raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+            await self._exchange_target(
+                iam_token=device_token, caller_user_id=user_id, bot_id=bot_id,
+                owner_id=owner_id, stage=stage, publish_id=publish_id,
+                entity_id=context.entity_id, binding_id=target.binding_id,
+                is_test_exchange=False, caller_token=caller_token, session_key=session_key,
+            )
+        except (CallerIdentityPermissionError, CallerIdentityAmbiguousError) as exc:
+            error = exc.detail
+        except CallerCredentialError as exc:
+            error = exc.code
+        except RuntimeBindingResolutionError:
+            error = CALLER_TARGET_NOT_FOUND
+        except Exception as exc:
+            logger.warning("caller_dingtalk_exception fields=%s error_type=%s", fields, type(exc).__name__)
+            error = CALLER_OUTBOUND_UPDATE_FAILED
+        else:
+            logger.info("caller_dingtalk_succeeded fields=%s duration_ms=%.1f", fields,
+                        (time.monotonic() - started) * 1000)
+            return CallerIamTokenOutcome(iam_token=device_token)
+        logger.warning("caller_dingtalk_failed fields=%s error_code=%s duration_ms=%.1f",
+                       fields, error, (time.monotonic() - started) * 1000)
+        return CallerIamTokenOutcome(iam_token="", error=error)
 
     async def _refresh_shared_teclaw(
         self,

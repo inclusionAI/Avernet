@@ -2,7 +2,9 @@
 
 import time
 import uuid
+from typing import Literal
 
+from agentclaw.community.adapters.http.org.dependencies import require_baas_caller
 from agentclaw.community.log import get_logger
 
 from fastapi import APIRouter, Query, Request, Response
@@ -104,6 +106,7 @@ async def get_iam_token(
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
     session_key: str | None = Query(default=None),
     legacy_session_key: str | None = Query(default=None, alias="sessionKey"),
+    token_type: Literal["iam", "dingtalk"] = "iam",
 ) -> Response:
     # Query defaults are also used by direct adapter tests; only strings are data.
     session_key = session_key if isinstance(session_key, str) else (
@@ -114,11 +117,15 @@ async def get_iam_token(
               "request_id": request.headers.get("x-request-id"), "bot_id": bot_id,
               "stage": stage.value, "publish_id": publish_id, "entity_id": entity_id,
               "is_test_exchange": is_test_exchange,
-              "session_key": session_key}
+              "session_key": session_key, "token_type": token_type}
     started_at = time.monotonic()
     logger.info("caller_iam_request_received fields=%s", fields)
     try:
         session_kwargs = {"session_key": session_key} if session_key is not None else {}
+        if token_type == "dingtalk":
+            # COSEC: the DeviceToken capability requires the signed application.
+            await require_baas_caller(request)
+            session_kwargs["token_type"] = "dingtalk"
         result = await service.get_iam_token(
             iam_token=request.cookies.get("IAM_TOKEN") or "",
             auth_request=_auth_request(request),
