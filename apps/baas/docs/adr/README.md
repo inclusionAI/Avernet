@@ -9,7 +9,7 @@ Scope rules:
 - Decisions here are **BaaS-app-level** and govern the community platform
   (including its side of the two-edition relationship). Hard-to-reverse,
   system-level decisions for the whole Avernet monorepo live in the repo-root
-  [`docs/adr/`](../../../docs/adr/) — see `CONTEXT-MAP.md` and
+  [`docs/adr/`](../../../../docs/adr/) — see `CONTEXT-MAP.md` and
   `docs/agents/domain.md` for that numbering and lifecycle. No repo-root ADR
   concerns BaaS topics today, so the app-level numbering here starts at 0001.
 - The internal OCB monorepo keeps its **own, separate** enterprise-focused ADR
