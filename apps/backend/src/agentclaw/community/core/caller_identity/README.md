@@ -5,6 +5,7 @@
 ```yaml
 purpose: Resolve and install authenticated Caller identity without changing Owner policy.
 provides:
+  - ExpiryAwareCallerRuntimeUpdater
   - CallerIdentityService
   - CallerIamTokenService
   - CallerSessionValidator
@@ -157,3 +158,25 @@ For direct legacy `BotService` construction, omission of the optional refresh
 port means no scheduled-credential capability is installed. Production DI always
 provides an explicit no-op or enterprise implementation; errors from an installed
 implementation are never treated as an unconfigured capability.
+
+
+### Installed Caller expiry
+
+`ExpiryAwareCallerRuntimeUpdater` coordinates dedicated Caller-instance installs
+with the enterprise ASC refresh consumer through
+`ExpertChatInstanceRepository.caller_token_update`. The nullable UTC
+`ac_expert_chat_instance.caller_token_expires_at` records a successfully installed
+credential, not merely a successful token exchange. Under a real transaction row
+lock, a later or equal installed expiry skips both outbound replacement and the
+expiry write. A skipped installation remains a successful interactive IAM result.
+Shared service and test targets retain their existing installation behavior.
+
+The transaction stays open across the bounded outbound call and expiry write.
+A failed installation or database commit propagates; it cannot advance the
+recorded expiry. External installation and SQL commit are not an atomic pair: if
+the install succeeds but the commit fails, the ledger retains an earlier/unknown
+expiry, so later refresh may run again. Container replacement, a new instance
+publish or a non-serving lifecycle transition clears the stored expiry. Deploy
+`core/expert_chat/sql/2026_11_13_caller_token_expiry.sql` before this application
+change on an existing MySQL/OceanBase store. Existing records remain NULL until
+an installation succeeds. This change adds no independent refresh scheduler.

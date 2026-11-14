@@ -42,6 +42,8 @@ from agentclaw.community.core.repository.protocols.identity import CallerIdentit
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
 )
@@ -219,19 +221,19 @@ class CallerIdentityModule(Module):
     def caller_runtime_updater(
         self,
         baas_service: BaasService,
+        instances: ExpertChatInstanceRepository,
+        bindings: DeviceBindingRepository,
     ) -> CallerRuntimeUpdater:
-        """Use the existing BaaS singleton for the Caller outbound PUT."""
-        return baas_service
+        return ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=baas_service, bindings=bindings)
 
     @singleton
     @provider
     @inject
     def caller_runtime_updater_protocol(
         self,
-        baas_service: BaasService,
+        updater: CallerRuntimeUpdater,
     ) -> CallerRuntimeUpdaterProtocol:
-        """Bind BaasService to core layer protocol."""
-        return baas_service
+        return updater
 
     @singleton
     @provider
