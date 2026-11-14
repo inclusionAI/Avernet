@@ -113,6 +113,19 @@ describe('Workflow AI draft route security and browser contract', () => {
     expect(await (await f.post('', request)).json()).toEqual(task);
     expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
   });
+  it('accepts multiple host-owned HTTPS aliases without trusting forwarded headers', async () => {
+    const f = await fixture();
+    const router = createWorkflowAiDraftRouter({ service: { capabilities: async () => ({ available: true }) } as never, principal: async () => ({ actorId: 'owner' }),
+      publicOrigins: ['https://clawweb-pre.alipay.com', 'https://clawweb-pre.antgroup-inc.cn'] });
+    const app = express(); app.use(express.json()); app.use('/api/workflows', router);
+    const server: Server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    closing.push(() => new Promise((resolve, reject) => server.close(e => e ? reject(e) : resolve())));
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/workflows/flow/ai-drafts/capabilities`, { headers: { origin: 'https://clawweb-pre.antgroup-inc.cn' } });
+    expect(response.status).toBe(200);
+    const rejected = await fetch(`http://127.0.0.1:${port}/api/workflows/flow/ai-drafts/capabilities`, { headers: { origin: 'https://evil.example' } });
+    expect(rejected.status).toBe(403);
+  });
   it('supports an explicit HTTPS canonical origin behind HTTP ingress without trusting forwarded headers', async () => {
     const f = await fixture('https://workflow.example.invalid/');
     expect((await f.post('', draftRequest(), { origin: 'https://workflow.example.invalid' })).status).toBe(202);
@@ -122,7 +135,7 @@ describe('Workflow AI draft route security and browser contract', () => {
     expect((await fetch(f.url, { method: 'POST', headers: { origin: 'https://workflow.example.invalid', 'content-type': 'application/json' }, body: JSON.stringify(draftRequest()) })).status).toBe(403);
   });
   it.each(['https://user:password@example.invalid', 'https://example.invalid/path', 'https://example.invalid/?secret=1', 'https://example.invalid/#hash', 'file:///private'])('rejects invalid host canonical origin: %s', publicOrigin => {
-    expect(() => createWorkflowAiDraftRouter({ service: {} as never, principal: async () => null, publicOrigin })).toThrow('PUBLIC_ORIGIN_INVALID');
+    expect(() => createWorkflowAiDraftRouter({ service: {} as never, principal: async () => null, publicOrigin })).toThrow('AI_DRAFT_PUBLIC_ORIGINS_INVALID');
   });
 
 });
