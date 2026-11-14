@@ -24,7 +24,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 from secbaas.community.spi.secret import SecretStorePlugin
 
-from ._arca_paas_service import ArcaPaasService
+from ._creation_scoped_arca import ArcaPaasService
 from ._k8s_paas_service import K8sPaasService
 from ._local_paas_service import LocalPaasService
 from ._mock_paas_service import MockPaasService

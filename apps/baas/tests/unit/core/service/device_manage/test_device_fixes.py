@@ -54,7 +54,7 @@ class TestNoHookFastPath:
         # We check that the code logic is correct by reading the source.
         import inspect
 
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             DefaultDeviceService,
         )
 
@@ -72,7 +72,7 @@ class TestPaasCreationFailure:
 
         import inspect
 
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             DefaultDeviceService,
         )
 

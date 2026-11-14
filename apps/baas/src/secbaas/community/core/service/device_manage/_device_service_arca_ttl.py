@@ -34,8 +34,8 @@ from secbaas.community.core.utils.time_utils import (
 )
 from secbaas.community.logger import get_logger
 
-from ._device_service import (
-    DefaultDeviceService,
+from ._creation_scoped_service import (
+    CreationScopedDeviceService as DefaultDeviceService,
 )
 
 log = get_logger("core-scheduler")
