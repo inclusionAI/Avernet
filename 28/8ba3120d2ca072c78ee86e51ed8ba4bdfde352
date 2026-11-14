@@ -1,0 +1,42 @@
+apps/evolverun/clawweb/internal/modules/archive/server/services/smart-onboarding-service.ts
+  h_bb3ca6fb13c5df 7-9,52-55,210,225,233-235,238-248,251,256-257,261-264,272,274,278-285,288-289,294-323,339-344,367,383-385,431,438,500-597
+apps/evolverun/clawweb/internal/modules/archive/server/services/llm-errors.ts
+  h_bb3ca6fb13c5df 1-20
+apps/evolverun/clawweb/internal/modules/archive/server/services/auto-heal-config.ts
+  h_bb3ca6fb13c5df 1-74
+apps/evolverun/clawweb/internal/modules/archive/server/routes/dev-workflows.ts
+  h_bb3ca6fb13c5df 10,21,991-992
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_bb3ca6fb13c5df 44,102,328,567,813,836,870
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auto-heal.ts
+  h_bb3ca6fb13c5df 13-14,72-75,77,133,221,529,545,617
+apps/evolverun/clawweb/internal/modules/archive/server/services/auto-heal-service.ts
+  h_bb3ca6fb13c5df 8-10,142-146,157,270,273-276,317,464-465,557,559,562,586,660,682,684,705-707,789,796,919-920,925,931,938-952
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/legacy-development-runtime.ts
+  h_bb3ca6fb13c5df 3,55-58,278
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/smart-onboarding-config.test.ts
+  h_bb3ca6fb13c5df 1-83
+apps/evolverun/clawweb/internal/modules/archive/server/services/__tests__/auto-heal-smart-fallback.test.ts
+  h_bb3ca6fb13c5df 1-205
+apps/evolverun/clawweb/internal/modules/archive/server/services/__tests__/auto-heal-config.test.ts
+  h_bb3ca6fb13c5df 1-103
+apps/evolverun/clawweb/internal/modules/archive/server/routes/smart-onboarding.ts
+  h_bb3ca6fb13c5df 12,60,89-90,92,102,111,145,220
+apps/evolverun/clawweb/internal/configs/application-default.yaml
+  h_bb3ca6fb13c5df 308-329
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/app-config-security.test.ts
+  h_bb3ca6fb13c5df 1-64
+apps/evolverun/clawweb/internal/modules/archive/server/routes/app-config.ts
+  h_bb3ca6fb13c5df 9,23,37,61,80,105,109,118-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "288ba3120d2ca072c78ee86e51ed8ba4bdfde352",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

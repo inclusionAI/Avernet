@@ -1,0 +1,130 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-editor.md
+  h_bb3ca6fb13c5df 1-8,9-11,12-23,24-27,28-54,55,56-67,68-148
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-validation.md
+  h_bb3ca6fb13c5df 1-4,5-10,11-98,99-136
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflow-ai.ts
+  h_bb3ca6fb13c5df 1,2,3,4-18,19,20-25,26-27,28-32,33-39
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDraftPreview.tsx
+  h_bb3ca6fb13c5df 1-144
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDrawer.tsx
+  h_bb3ca6fb13c5df 1-4,5-6,7-12,13,14-25,26-29,30-72,73,74-95,96-104,105-124,125,126-130,131,132,133,134,135-136,137-148
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDraftPreview.test.tsx
+  h_bb3ca6fb13c5df 1-124
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  h_bb3ca6fb13c5df 1-8,9-10,11-47,48,49-51,52-56,57-110,111,112-113,114,115-193,194,195-254
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.test.tsx
+  h_bb3ca6fb13c5df 1-142,143-217
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useWorkflowAiDraft.ts
+  h_bb3ca6fb13c5df 1-4,5,6-10,11-12,13-16,17,18-20,21,22-26,27-29,30-36,37-38,39,40-41,42-48,49,50-64,65,66,67,68-82,83-85,86-89,90,91-96,97-100,101-102,103,104,105-106,107-108,109-115,116-126,127,128-129,130,131-133
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAi.test.tsx
+  h_bb3ca6fb13c5df 1-6,7,8-15,16,17-27,28,29,30-33,34-43,44,45-54,55-56,57-84,85-187
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAiMode.test.tsx
+  h_bb3ca6fb13c5df 1-45,46-47,48-140,141,142-151,152,153-168,169,170-188,189,190-193
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.test.ts
+  h_bb3ca6fb13c5df 1,2,3-8,9-16,17-30,31-34,35-37,38-49,50-55,56-57,58,59-65,66-94,95,96-98,99-100,101-119,120-122,123-130,131,132-142,143-144,145-156,157-158,159,160,161-174,175-176,177-184,185-186,187-193,194-196,197-205,206-207,208-211,212,213-214,215,216-224,225-226,227-241,242-243,244,245,246-248,249,250,251,252-261,262,263,264,265-266,267,268-271,272,273-275,276-277,278-281,282,283-284,285,286-291,292,293-298,299,300-301
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.ts
+  h_bb3ca6fb13c5df 1,2,3-6,7-10,11-13,14-15,16-27,28-41,42-43,44,45-46,47,48,49-50,51,52-53,54,55-61,62-64,65,66,67-68,69-70,71-74,75,76,77,78-92,93,94-120,121-123,124,125,126,127-129,130,131,132,133-134,135,136-137,138-147,148,149,150-151,152,153-155
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-spec.ts
+  h_bb3ca6fb13c5df 1-62,63,64-76,77,78-142
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-workflow-ai-draft.test.ts
+  h_bb3ca6fb13c5df 1-73
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-browser-contract.test.ts
+  h_bb3ca6fb13c5df 1-49
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas.test.ts
+  h_bb3ca6fb13c5df 1-116
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-db-fixture.ts
+  h_bb3ca6fb13c5df 1-26
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-runtime.test.ts
+  h_bb3ca6fb13c5df 1-49
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  h_bb3ca6fb13c5df 70-71,116,231-249,406,408
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-execution.ts
+  h_bb3ca6fb13c5df 1-77
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-reply.ts
+  h_bb3ca6fb13c5df 1-53
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-runtime.ts
+  h_bb3ca6fb13c5df 1-21
+apps/evolverun/clawweb/public/app/clawweb/vitest.workflow-ai-draft.config.ts
+  h_bb3ca6fb13c5df 1-11
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/__tests__/baas-intervention.test.ts
+  h_bb3ca6fb13c5df 313-353
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/baas-intervention.ts
+  h_bb3ca6fb13c5df 43-44,55-56,181,191,203,227,240,272,276-283,297,327
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-ai-drafts.md
+  h_bb3ca6fb13c5df 1-255
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-editor-draft-boundary.md
+  h_bb3ca6fb13c5df 119-130
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/workflow-ai-draft.ts
+  h_bb3ca6fb13c5df 1-47
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/ordinary-run-request-migration.integration.test.ts
+  h_bb3ca6fb13c5df 1,55,78
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/workflow-ai-draft-repository.ts
+  h_bb3ca6fb13c5df 1-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-ai-drafts.test.ts
+  h_bb3ca6fb13c5df 1-128
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-ai-drafts.ts
+  h_bb3ca6fb13c5df 1-58
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-concurrency.test.ts
+  h_bb3ca6fb13c5df 1-214
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-fixtures.ts
+  h_bb3ca6fb13c5df 1-27
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-service.test.ts
+  h_bb3ca6fb13c5df 1-224
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-validation.test.ts
+  h_bb3ca6fb13c5df 1-61
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-ai-draft-service.ts
+  h_bb3ca6fb13c5df 1-196
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-ai-draft-validation.ts
+  h_bb3ca6fb13c5df 1-86
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.route.integration.test.ts
+  h_bb3ca6fb13c5df 1-89
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.test.ts
+  h_bb3ca6fb13c5df 1-55
+apps/evolverun/clawweb/public/modules/workflow/web/components/EditorAiControls.tsx
+  h_bb3ca6fb13c5df 1-18
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.capabilities.test.tsx
+  h_bb3ca6fb13c5df 1-78
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiCapabilities.test.tsx
+  h_bb3ca6fb13c5df 1-64
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.integration.test.tsx
+  h_bb3ca6fb13c5df 1-163
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useWorkflowAiCapabilities.ts
+  h_bb3ca6fb13c5df 1-28
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_bb3ca6fb13c5df 40,251-253,738,863,880
+apps/evolverun/clawweb/public/modules/workflow/web/pages/useEditorAiIntegration.tsx
+  h_bb3ca6fb13c5df 1-92
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.test.ts
+  h_bb3ca6fb13c5df 1-370
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.ts
+  h_bb3ca6fb13c5df 1-92
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  h_bb3ca6fb13c5df 1,10-11,44,66,130
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-markers-migration.test.ts
+  h_bb3ca6fb13c5df 1,12-13,21-22,85
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-concurrent-defer.test.ts
+  h_bb3ca6fb13c5df 1,8-9,18,53
+apps/evolverun/clawweb/public/shared/server/__tests__/ordinary-run-request-migration.test.ts
+  h_bb3ca6fb13c5df 1,11-12,281,316,390,445,491,537,549,576,610,648,701,734
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-incompatible-init.test.ts
+  h_bb3ca6fb13c5df 1,9-10,41
+apps/evolverun/clawweb/public/shared/server/__tests__/sqlite-trigger-lock.test.ts
+  h_bb3ca6fb13c5df 1,10-11,91,124,208
+apps/evolverun/clawweb/public/shared/server/__tests__/workflow-ai-draft-migration.test.ts
+  h_bb3ca6fb13c5df 1-30
+apps/evolverun/clawweb/public/shared/server/schema-workflow-ai-draft.ts
+  h_bb3ca6fb13c5df 1-26
+apps/evolverun/clawweb/public/shared/server/schema.ts
+  h_bb3ca6fb13c5df 30,113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7bef3d95147dc35e0785df047f47b8c7a67c0fb3",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
