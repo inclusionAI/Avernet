@@ -43,7 +43,6 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import (
     CALLER_CREDENTIAL_TYPE_AGENTPASS,
-    CALLER_CREDENTIAL_TYPE_DINGTALK_TOKEN,
     CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
 )
 
@@ -109,10 +108,7 @@ def _extract_caller_identity_metadata(
             token=token_value,
             token_type=token_type,
         )
-    if token_type in {
-        CALLER_CREDENTIAL_TYPE_AGENTPASS,
-        CALLER_CREDENTIAL_TYPE_DINGTALK_TOKEN,
-    }:
+    if token_type == CALLER_CREDENTIAL_TYPE_AGENTPASS:
         return build_caller_identity_metadata(
             user_id=user_id,
             token=token_value,
