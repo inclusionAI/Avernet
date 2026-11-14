@@ -47,7 +47,7 @@ class DingTalkCallerTokenProvider(Protocol):
     """Optional DeviceToken capability; the IAM provider contract is unchanged."""
 
     def exchange_dingtalk(
-        self, *, auth_context: AuthContext, device_token: str, bot_id: str,
+        self, *, device_token: str, bot_id: str,
         owner_user_id: str, task_metadata: Mapping[str, str],
     ) -> CallerToken:
         """Verify an opaque DeviceToken and issue one Caller credential."""
@@ -70,10 +70,10 @@ class UnavailableCallerTokenProvider:
         raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
 
     def exchange_dingtalk(
-        self, *, auth_context: AuthContext, device_token: str, bot_id: str,
+        self, *, device_token: str, bot_id: str,
         owner_user_id: str, task_metadata: Mapping[str, str],
     ) -> CallerToken:
-        del auth_context, device_token, bot_id, owner_user_id, task_metadata
+        del device_token, bot_id, owner_user_id, task_metadata
         raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
 
 

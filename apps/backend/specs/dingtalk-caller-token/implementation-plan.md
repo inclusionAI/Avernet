@@ -1,12 +1,8 @@
-# DingTalk CallerToken Implementation Plan
+# DeviceToken exchange without new identity query parameters
 
-Goal: add an explicitly authenticated DeviceToken exchange branch while preserving IAM behavior.
-Architecture: the HTTP adapter verifies the existing BaaS application principal; the application service resolves only the asserted caller instance and validates the verified upstream subject before reusing installation. A separate neutral provider capability leaves IAM implementations unchanged.
-Spec: 001-spec-output.md
+The existing locator arguments (`bot_id`, optional `entity_id`, `stage`, `publish_id`, session keys) remain the HTTP contract. Only `token_type` is added. Application signature authentication stays in place. The owner comes from the existing Bot context; the optional provider returns the verified Caller subject, which selects the exact Caller instance.
 
-- [x] Add failing service tests for successful exchange, subject mismatch, missing identity, owner mismatch, target failure and upstream failure.
-- [x] Add the neutral optional provider capability and implement service branch with no SSO fallback.
-- [x] Add failing HTTP authentication/type/forwarding tests and implement HTTP dispatch.
-- [x] Run affected API/core tests and architecture gates; record results.
-
-Scope correction: remove all task-added BCN/BaaS wiring and related tests/report. Keep the Backend endpoint capability and existing signed application authentication. Verify an empty apps/baas PR diff and rerun unchanged caller-credential compatibility tests plus Backend/enterprise adapter regressions.
+- [x] Write failing schema and adapter tests proving no new caller/owner query parameters and extra query IDs cannot influence the service.
+- [x] Write failing service tests requiring upstream exchange without caller assertion, using the verified subject verbatim, and rejecting invalid subjects, tokens, expiry and targets.
+- [x] Remove identity assertion arguments; update optional provider capability and service orchestration while preserving IAM behavior.
+- [x] Run focused security, compatibility and architecture checks with coverage. Record new evidence without repeating the prior full suite.

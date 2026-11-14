@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE,
     CALLER_OUTBOUND_INVALID,
     CALLER_CHAT_TASK,
-    AuthContext,
     CALLER_OUTBOUND_UPDATE_FAILED,
     CALLER_TARGET_NOT_FOUND,
     CallerCredentialError,
@@ -84,15 +84,12 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         session_key: str | None = None,
         friend_user_id: str | None = None,
         token_type: str = "iam",
-        expected_user_id: str | None = None,
-        expected_owner_id: str | None = None,
     ) -> CallerIamTokenOutcome:
         if token_type == "dingtalk":
             return await self._refresh_dingtalk(
                 device_token=iam_token, bot_id=bot_id, stage=stage,
                 publish_id=publish_id, entity_id=entity_id,
-                is_test_exchange=is_test_exchange, user_id=expected_user_id,
-                owner_id=expected_owner_id, session_key=session_key,
+                is_test_exchange=is_test_exchange, session_key=session_key,
             )
         if token_type != "iam":
             return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID)
@@ -242,25 +239,41 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
     async def _refresh_dingtalk(
         self, *, device_token: str, bot_id: str | None, stage: CallerIdentityStage,
         publish_id: int | None, entity_id: str | None, is_test_exchange: bool,
-        user_id: str | None, owner_id: str | None, session_key: str | None,
+        session_key: str | None,
     ) -> CallerIamTokenOutcome:
         fields = {"system": "backend", "operation": "caller_dingtalk",
-                  "token_type": "dingtalk", "bot_id": bot_id, "owner_id": owner_id,
-                  "user_id": user_id, "stage": stage.value, "session_key": session_key}
+                  "token_type": "dingtalk", "bot_id": bot_id,
+                  "stage": stage.value, "session_key": session_key}
         started = time.monotonic()
         logger.info("caller_dingtalk_request fields=%s", fields)
         try:
-            if not all(value and value.strip() for value in (device_token, bot_id, user_id, owner_id)) or is_test_exchange:
+            if not device_token.strip() or not bot_id or not bot_id.strip() or is_test_exchange:
                 raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
             context = await asyncio.to_thread(
                 self._caller_identity.get_iam_token_context, bot_id=bot_id, stage=stage,
                 publish_id=publish_id, entity_id=entity_id, is_test_exchange=False,
             )
-            # COSEC: application assertions cannot widen the resolved Bot owner.
-            if context.owner_id != owner_id:
-                raise CallerIdentityPermissionError
-            if not context.should_exchange_caller_token:
+            owner_id = context.owner_id
+            if not owner_id or not owner_id.strip() or not context.should_exchange_caller_token:
                 raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+            fields["owner_id"] = owner_id
+            if not isinstance(self._token_provider, DingTalkCallerTokenProvider):
+                raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
+            caller_token = await asyncio.to_thread(
+                self._token_provider.exchange_dingtalk, device_token=device_token,
+                bot_id=bot_id, owner_user_id=owner_id, task_metadata=CALLER_CHAT_TASK,
+            )
+            user_id = caller_token.subject_user_id
+            # COSEC: only the verified upstream subject selects the caller. Do not
+            # normalize or infer an identity from the source token or query fields.
+            if not isinstance(user_id, str) or not user_id or user_id != user_id.strip():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            token = caller_token.access_token
+            if not isinstance(token, str) or not token or token != token.strip():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            if not isinstance(caller_token.expires_at, datetime) or caller_token.expires_at.timestamp() <= time.time():
+                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
+            fields["user_id"] = user_id
             request = RuntimeBindingRequest(
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id,
                 stage=stage.value, target=RuntimeBindingTarget.CALLER_INSTANCE,
@@ -275,18 +288,6 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 caller_user_id=user_id, binding_id=target.binding_id,
                 stage=stage.value, session_key=session_key,
             )
-            if not isinstance(self._token_provider, DingTalkCallerTokenProvider):
-                raise CallerCredentialError(CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
-            caller_token = await asyncio.to_thread(
-                self._token_provider.exchange_dingtalk,
-                auth_context=AuthContext(user_id=user_id), device_token=device_token,
-                bot_id=bot_id, owner_user_id=owner_id, task_metadata=CALLER_CHAT_TASK,
-            )
-            # COSEC: only the upstream verified subject may authorize installation.
-            if caller_token.subject_user_id != user_id:
-                raise CallerIdentityPermissionError
-            if not caller_token.access_token or caller_token.expires_at.timestamp() <= time.time():
-                raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
             current = await asyncio.to_thread(self._runtime_bindings.resolve, request)
             # COSEC: reject a replaced binding while the exchange was in flight.
             if current != target:
