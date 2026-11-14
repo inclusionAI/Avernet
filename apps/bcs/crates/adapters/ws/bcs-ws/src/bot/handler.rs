@@ -12,6 +12,7 @@ use bcs_service_api::{
     WsErrorKind, WsPeer,
 };
 use futures::{SinkExt, StreamExt};
+use crate::shared::is_transport_close_error;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -224,7 +225,7 @@ pub async fn handle_connection(
                     .as_deref()
                     .or(registered_bot_id.as_deref());
                 let registered = registered_bot_id.is_some();
-                if is_connection_reset_without_closing_handshake(&e) {
+                if is_transport_close_error(&e) {
                     close_reason = WsCloseReason::ClientClose;
                     debug!(
                         bot_uuid = bot_uuid.unwrap_or("unknown"),
@@ -421,17 +422,11 @@ mod log_tests {
     }
 }
 
-fn is_connection_reset_without_closing_handshake(error: &impl std::fmt::Display) -> bool {
-    error
-        .to_string()
-        .contains("Connection reset without closing handshake")
-}
+
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        is_connection_reset_without_closing_handshake, should_close_after_sending_bot_frame,
-    };
+    use super::should_close_after_sending_bot_frame;
 
     #[test]
     fn closes_after_bot_kicked_event_frame() {
@@ -454,6 +449,6 @@ mod tests {
     #[test]
     fn treats_connection_reset_without_close_frame_as_client_disconnect() {
         let error = "WebSocket protocol error: Connection reset without closing handshake";
-        assert!(is_connection_reset_without_closing_handshake(&error));
+        assert!(crate::shared::is_transport_close_error(&error));
     }
 }

@@ -12,7 +12,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::shared::OutboundFrame;
+use crate::shared::{is_transport_close_error, OutboundFrame};
 use crate::web::{
     dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
     WebWsDispatchError, WorkbenchConnectionAuth,
@@ -235,15 +235,20 @@ pub async fn handle_client_connection(
                         break;
                     }
                     Err(e) => {
-                        close_reason = WsCloseReason::ProtocolError;
-                        error!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, error = %e, "WebSocket error");
-                        metrics_hook
-                            .error(
-                                WsPeer::Frontend,
-                                crate::web::FRONTEND_WS_ENDPOINT,
-                                WsErrorKind::ProtocolError,
-                            )
-                            .await;
+                        if is_transport_close_error(&e) {
+                            close_reason = WsCloseReason::ClientClose;
+                            info!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, error = %e, "WebSocket transport close (client disconnected)");
+                        } else {
+                            close_reason = WsCloseReason::ProtocolError;
+                            error!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, error = %e, "WebSocket error");
+                            metrics_hook
+                                .error(
+                                    WsPeer::Frontend,
+                                    crate::web::FRONTEND_WS_ENDPOINT,
+                                    WsErrorKind::ProtocolError,
+                                )
+                                .await;
+                        }
                         break;
                     }
                 }
