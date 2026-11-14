@@ -1260,8 +1260,11 @@ def cmd_init(args: argparse.Namespace) -> None:
             die("NO_BOTS", "至少要有一个 Bot 玩家。")
 
         human, roster = session_roster(args.session, referee_uuid)
-        if human is None or not human["present"] or human["actor_id"] != args.human:
+        # 全 Bot 对局（human is None）跳过人类校验；有人类则维持原约束。
+        if human is not None and (not human["present"] or human["actor_id"] != args.human):
             die("ROSTER_MISMATCH", "发牌人类必须是当前会话中已 Present 的人类成员。停止，不发牌。")
+        if human is None and args.human:
+            die("ROSTER_MISMATCH", "会话里没有人类成员，但 init 传了 --human。停止，不发牌。")
         if len(bots) != len(roster) or {uuid for _, uuid in bots} != {uuid for _, uuid in roster}:
             die("ROSTER_MISMATCH", "玩家名单必须与当前 session 的 worker ID 完全一致，且不包含主持人或重复 ID。停止，重新核对 begin。")
         bots = roster
@@ -1271,7 +1274,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         cfg["difficulty"] = args.difficulty
         cfg["undercover"] = args.undercover
         cfg["max_rounds"] = args.max_rounds
-        cfg["players"] = len(bots) + 1
+        cfg["players"] = len(bots) + (1 if human is not None else 0)
         if cfg["undercover"] >= cfg["players"]:
             die("BAD_CONFIG", "卧底人数必须小于总人数。")
 
@@ -1281,7 +1284,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         if rng.randint(0, 1):
             civ, und = und, civ
 
-        order = [(name, uuid) for name, uuid in bots] + [("你", args.human)]
+        order = [(name, uuid) for name, uuid in bots] + ([("你", args.human)] if human is not None else [])
         rng.shuffle(order)
 
         seats = []
@@ -1350,8 +1353,8 @@ def cmd_init(args: argparse.Namespace) -> None:
             "seating": [
                 {"seat": s["seat"], "player": s["display"], "kind": s["kind"]} for s in seats
             ],
-            "human_seat": next(s["seat"] for s in seats if s["kind"] == "human"),
-            "human_word": next(s["word"] for s in seats if s["kind"] == "human"),
+            "human_seat": next((s["seat"] for s in seats if s["kind"] == "human"), None),
+            "human_word": next((s["word"] for s in seats if s["kind"] == "human"), None),
             "referee_uuid": referee_uuid,
             "next_action": NEXT_ACTION["AWAIT_START"],
             "note": "human_word 是**人类玩家自己**那个词，也是全场唯一一个可以说出口的词——"
@@ -1937,11 +1940,29 @@ def cmd_begin(args: argparse.Namespace) -> None:
     human, bots = session_roster(args.session, referee_uuid)
 
     if human is None:
+        # 全 Bot 对局（多引擎同桌，Avernet #2611）：会话里没有人类成员也可以开，
+        # 发牌走 init_command（不带 --human）。唤醒消息已明确要求开始时直接发牌；
+        # 否则按常规说开场白，收到「开始」后执行。
+        init_cmd = " ".join(
+            [
+                "uc init",
+                "--referee-uuid", shlex.quote(referee_uuid),
+                "--session", shlex.quote(args.session),
+                "--group", shlex.quote(args.group),
+            ]
+            + [x for name, uuid in bots for x in ("--bot", shlex.quote(f"{name}={uuid}"))]
+            + ["--difficulty", args.difficulty, "--undercover", str(args.undercover),
+               "--max-rounds", str(args.max_rounds)]
+        )
         emit(
             {
                 "human_present": False,
-                "reason": "这个会话里还没有人类参与者。",
-                "next_action": "说「加入提示」那段，结束激活。人类加入后会发消息过来，届时重跑 begin。",
+                "all_bot_table": True,
+                "bots": [name for name, _ in bots],
+                "referee_uuid": referee_uuid,
+                "init_command": init_cmd,
+                "next_action": "全 Bot 对局：唤醒消息已要求开始就直接执行 init_command 发牌；"
+                "否则说开场规则，收到「开始」后执行。没有人类座位和 human_word，跳过相关告知。",
             },
             compact=True,
         )
@@ -2235,7 +2256,8 @@ def main() -> None:
 
     p = with_session(sub.add_parser("init", help="开一局：抽词、排座位、抽卧底"))
     p.add_argument("--group", default=None)
-    p.add_argument("--human", required=True)
+    p.add_argument("--human", default=None,
+                   help="Present 的人类玩家 ID；全 Bot 对局（无人类）时省略")
     p.add_argument(
         "--referee-uuid",
         required=True,

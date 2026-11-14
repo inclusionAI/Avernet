@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-14",
+  "scope": "isolated real BCS with official referee script, real local MLX v2 thinking on, five scripted controls; not a mixed-LLM benchmark",
+  "setup": "fresh temporary SQLite, formal onboard and friend request/accept flows, distinct actor homes, no authorization bypass",
+  "games": [
+    {
+      "game": "game-01",
+      "terminal_phase": "FINISHED",
+      "official_finish_ok": true,
+      "collected_speeches": 15,
+      "collected_ballots": 15,
+      "collection_batches": 3,
+      "private_log_sha256": "aa284e1c4c843a41c7541dd4359262095b7a365ba3baed9d22c10ae4e606a682"
+    },
+    {
+      "game": "game-02",
+      "terminal_phase": "FINISHED",
+      "official_finish_ok": true,
+      "collected_speeches": 27,
+      "collected_ballots": 31,
+      "collection_batches": 7,
+      "private_log_sha256": "1781b2259db34cf3981e7fff37dc6039e000a79e4b417934ac4f4abbd1638c22"
+    },
+    {
+      "game": "game-03",
+      "terminal_phase": "FINISHED",
+      "official_finish_ok": true,
+      "collected_speeches": 18,
+      "collected_ballots": 18,
+      "collection_batches": 4,
+      "private_log_sha256": "c68df62ebf71afed85798dfff6b29e1dde58e87fb028f0b9691569c8b63e4a3c"
+    }
+  ],
+  "mlx_http_successes": 25,
+  "all_owned_processes_stopped": true,
+  "limitations": [
+    "Format and transport acceptance only; no decision-quality or win-rate improvement claim.",
+    "Raw runtime logs, database, identities, and credentials are private and not published."
+  ]
+}

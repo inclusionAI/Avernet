@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "label": "base-long",
+      "passed": true,
+      "seconds": 11.809498040995095,
+      "prompt_tokens": 4420,
+      "finish_reason": "length",
+      "content_chars": 0,
+      "reasoning_present": true,
+      "within_node_quarter": true
+    },
+    {
+      "label": "base-short",
+      "passed": true,
+      "seconds": 1.740943167009391,
+      "prompt_tokens": 35,
+      "finish_reason": "length",
+      "content_chars": 0,
+      "reasoning_present": true,
+      "within_node_quarter": true
+    },
+    {
+      "label": "adapter-short",
+      "passed": true,
+      "seconds": 0.5783204169711098,
+      "prompt_tokens": 35,
+      "finish_reason": "stop",
+      "content_chars": 4,
+      "reasoning_present": false,
+      "within_node_quarter": true
+    }
+  ],
+  "scope": "Backend only. Base reasoning is not a playable answer; no real BCS/game validation."
+}
