@@ -340,9 +340,17 @@ class QueueTaskMessageDispatcher:
                     run = self._run_repository.get_by_run_id(run_id)
                     if run and run.status in ("FAILED", "TIME_OUT", "ABORTED"):
                         chunk_type = "aborted" if run.status == "ABORTED" else "error"
+                        error = run.error
+                        content = (
+                            error
+                            if chunk_type == "error"
+                            and isinstance(error, str)
+                            and error.strip()
+                            else f"run terminated with status {run.status}"
+                        )
                         yield StreamChunk(
                             type=chunk_type,
-                            content=f"run terminated with status {run.status}",
+                            content=content,
                         )
                         return
 
