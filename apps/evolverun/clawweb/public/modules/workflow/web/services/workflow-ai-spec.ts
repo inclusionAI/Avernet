@@ -60,7 +60,7 @@ export function restoreLayout(spec: WorkflowSpec, source: WorkflowSpec): Workflo
 /** Parse untrusted model output, not a markdown extraction or a guessed template. */
 export function parseWorkflowAiYaml(yaml: string, source: WorkflowSpec): WorkflowSpec {
   if (typeof yaml !== 'string' || !yaml.trim()) throw new Error('生成结果没有 YAML，请重新描述需求')
-  if (yaml.length > 100_000) throw new Error('生成的 YAML 超过 100000 字符限制')
+  if (new TextEncoder().encode(yaml).byteLength > 100_000) throw new Error('生成的 YAML 超过 100000 UTF-8 字节限制')
   const document = parseDocument(yaml, { uniqueKeys: true })
   if (document.errors.length) throw new Error(`YAML 解析失败：${document.errors[0].message}`)
   const value: unknown = document.toJS({ maxAliasCount: 100 })
@@ -74,7 +74,7 @@ export function assertWorkflowAiSpec(value: unknown, source: WorkflowSpec): asse
     throw new Error('AI YAML 结构必须包含 id、version、title 和 nodes 数组')
   }
   if (value.id !== source.id) throw new Error('AI 不得修改当前工作流 ID，请在新建工作流中创建独立流程')
-  if (String(value.version) !== String(source.version)) throw new Error('AI 不得自动修改工作流版本')
+  if (value.version !== source.version) throw new Error('AI 不得自动修改工作流版本')
   if (!value.nodes.length) throw new Error('AI YAML 至少需要一个节点')
   const ids = new Set<string>()
   for (const node of value.nodes) {

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef } from 'react'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import type { WorkflowAiDraft, WorkflowAiMode } from '../services/workflow-ai-draft'
 import { useWorkflowAiDraft } from '../hooks/useWorkflowAiDraft'
+import { useWorkflowAiCapabilities } from '../hooks/useWorkflowAiCapabilities'
+import { describeWorkflowAiUnavailable } from '../services/workflow-ai-lifecycle'
 import WorkflowAiDraftPreview from './WorkflowAiDraftPreview'
 
 interface WorkflowAiDrawerProps {
   open: boolean
   mode: WorkflowAiMode
   spec: WorkflowSpec | null
+  contextKey?: string
   blockedReason?: string
   onClose: () => void
   onApply: (draft: WorkflowAiDraft) => void
@@ -20,8 +23,10 @@ const examples = {
 const secondaryButton = 'rounded-md border border-input bg-background px-3 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 /** Nonmodal editor sibling: it never obscures or traps focus in the canvas. */
-export default function WorkflowAiDrawer({ open, mode, spec, blockedReason, onClose, onApply }: WorkflowAiDrawerProps) {
-  const ai = useWorkflowAiDraft(open, mode, spec)
+export default function WorkflowAiDrawer({ open, mode, spec, contextKey, blockedReason, onClose, onApply }: WorkflowAiDrawerProps) {
+  const ai = useWorkflowAiDraft(open, mode, spec, contextKey)
+  const capability = useWorkflowAiCapabilities(open, spec?.id)
+  const canGenerate = !blockedReason && !capability.loading && capability.value?.available === true
   const titleId = useId()
   const promptId = useId()
   const helpId = useId()
@@ -65,7 +70,7 @@ export default function WorkflowAiDrawer({ open, mode, spec, blockedReason, onCl
       <header className="flex items-start justify-between gap-3 border-b border-input px-5 py-4">
         <div>
           <h2 id={titleId} className="text-base font-semibold"><span aria-hidden="true" className="mr-2 text-primary">✦</span>AI 工作流助手</h2>
-          <p className="mt-1 text-xs text-muted-foreground">沿用智能接入生成服务</p>
+          <p className="mt-1 text-xs text-muted-foreground">通过服务器 AutoHeal Bot / BaaS 生成待审阅草稿</p>
         </div>
         <button type="button" aria-label="关闭 AI 助手" onClick={close} className={secondaryButton}>×</button>
       </header>
@@ -88,7 +93,15 @@ export default function WorkflowAiDrawer({ open, mode, spec, blockedReason, onCl
             {blockedReason}
           </p>
         )}
-        <form onSubmit={(event) => { event.preventDefault(); if (!blockedReason) void ai.generate() }} className="space-y-3">
+        <section aria-label="AI 草稿服务能力" className="space-y-2 text-xs">
+          {capability.loading ? <p role="status">正在检查服务器 effective autoHeal.botId / BaaS 能力…</p>
+            : capability.error ? <p role="alert">{capability.error}</p>
+            : capability.value?.available ? <p>AI 草稿服务已就绪：使用服务器 effective autoHeal.botId 通过 BaaS 生成。</p>
+            : <p role="status">{describeWorkflowAiUnavailable(capability.value?.reason)}</p>}
+          {!capability.loading && (capability.error || !capability.value?.available) &&
+            <button type="button" onClick={capability.retry} className={secondaryButton}>重试能力检查</button>}
+        </section>
+        <form onSubmit={(event) => { event.preventDefault(); if (canGenerate || (!blockedReason && ai.recoverable)) void ai.generate() }} className="space-y-3">
           <div>
             <label htmlFor={promptId} className="block text-xs font-semibold">
               {ai.mode === 'create' ? '描述想增加的能力' : '描述对现有流程的修改'}
@@ -109,17 +122,18 @@ export default function WorkflowAiDrawer({ open, mode, spec, blockedReason, onCl
             placeholder="说明目标、要保留的配置，以及允许调整的节点…"
             className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-xs leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           <p id={disclosureId} className="rounded-md border border-input bg-muted p-3 text-xs leading-5 text-muted-foreground">
-            生成时会将当前工作流的完整 YAML 和需求描述发送到已配置的智能接入生成服务。生成和应用草稿均不会自动保存或部署，需另行操作。
+            生成时会将当前工作流的完整 YAML 和需求描述提交到服务器：服务器将 effective autoHeal.botId 原样用于 BaaS；浏览器不会选择或覆盖 Bot。生成和应用草稿均不会自动保存或部署，需另行操作。
           </p>
           <div aria-live="polite" aria-atomic="true">
             {ai.error ? <p id={errorId} role="alert" className="text-xs text-destructive">{ai.error}</p>
               : <p className="text-xs text-muted-foreground">{ai.busy ? '正在生成草稿，可取消。' : ai.result ? '草稿已生成，请审阅变更后应用。' : '只生成待审阅草稿，不会自动保存或部署。'}</p>}
           </div>
-          <button type="submit" aria-describedby={`${disclosureId}${blockedReason ? ` ${blockedId}` : ''}`} disabled={Boolean(blockedReason) || !spec || !ai.prompt.trim() || ai.busy}
+          <button type="submit" aria-describedby={`${disclosureId}${blockedReason ? ` ${blockedId}` : ''}`} disabled={Boolean(blockedReason) || (!canGenerate && !ai.recoverable) || !spec || !ai.prompt.trim() || ai.busy}
             className="w-full rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40">
-            {ai.busy ? '生成中…' : ai.error ? '重试生成' : ai.stale ? '重新生成草稿' : '生成 YAML 草稿'}
+            {ai.busy ? '生成中…' : ai.recoverable ? '恢复查询本次请求' : ai.error ? '重试生成' : ai.stale ? '重新生成草稿' : '生成 YAML 草稿'}
           </button>
-          {ai.busy && <button type="button" onClick={ai.cancel} className={`${secondaryButton} w-full`}>取消生成</button>}
+          {(ai.busy || ai.recoverable) && <button type="button" onClick={ai.cancel} className={`${secondaryButton} w-full`}>取消生成</button>}
+          <p className="text-xs text-muted-foreground">取消或关闭会停止本地等待并阻止应用，同时尽力向服务器记录取消。BaaS 没有已支持的停止接口，远程任务可能继续；不能承诺停止，迟到结果不会应用。</p>
         </form>
         {ai.result && (
           <WorkflowAiDraftPreview key={ai.result.requestId} draft={ai.result.draft} baseSpec={ai.result.baseSpec} stale={ai.stale} busy={ai.busy} blockedReason={blockedReason}

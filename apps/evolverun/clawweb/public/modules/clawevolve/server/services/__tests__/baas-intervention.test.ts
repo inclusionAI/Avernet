@@ -310,3 +310,44 @@ describe("sendIntervention request metadata", () => {
     });
   });
 });
+
+describe('durably fenced single-attempt submissions', () => {
+  it.each(['network', 'gateway'])('reports an unknown outcome without POST retry (%s)', async failure => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (failure === 'network') throw new Error('connection reset');
+      return new Response('{}', { status: 502 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await sendIntervention({ ...params, retryTransientErrors: false })).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it('distinguishes positive rejection from unknown delivery', async () => {
+    const fetchMock = mockResponse({ message: 'Bot binding not found' }, 400);
+    expect(await sendIntervention({ ...params, retryTransientErrors: false })).toMatchObject({ ok: false, failureKind: 'rejected' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+it('rejects HTTP-200 business errors for fenced callers even when data exists', async () => {
+  const fetchMock = mockResponse({ code: 60001, message: 'Bot binding not found', data: { message_id: 'not-accepted' } }, 200);
+  expect(await sendIntervention({ ...params, retryTransientErrors: false })).toMatchObject({ ok: false, failureKind: 'rejected' });
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it.each([307, 308])('never follows HTTP %s redirects with private draft input', async status => {
+  const { createServer } = await import('node:http');
+  const { once } = await import('node:events');
+  const received: string[] = [];
+  const sink = createServer((request, response) => { request.on('data', chunk => received.push(String(chunk))); request.on('end', () => { response.end(JSON.stringify({ data: { message_id: 'leak' } })); }); });
+  const source = createServer((_request, response) => { response.writeHead(status, { location: `http://127.0.0.1:${(sink.address() as { port: number }).port}/redirected` }); response.end(); });
+  sink.listen(0, '127.0.0.1'); await once(sink, 'listening');
+  source.listen(0, '127.0.0.1'); await once(source, 'listening');
+  try {
+    const result = await sendIntervention({ ...params, retryTransientErrors: false, message: 'private-editor-yaml',
+      transportConfig: { ...params.transportConfig!, baseUrl: `http://127.0.0.1:${(source.address() as { port: number }).port}` } });
+    expect(result).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(received).toEqual([]);
+  } finally {
+    await Promise.all([source, sink].map(server => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))));
+  }
+});

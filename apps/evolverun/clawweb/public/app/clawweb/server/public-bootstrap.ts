@@ -67,6 +67,8 @@ import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
+import { createWorkflowAiDraftRuntime } from "./workflow-ai-draft-runtime.js";
+import { createWorkflowAiDraftBaasExecution } from "./workflow-ai-draft-baas-execution.js";
 import { createInternalEngineAuth } from "./internal-engine-auth.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
 
@@ -111,6 +113,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const aisConfig = resolveAistudioConfig();
       const repairConfig = await resolveRepairAisConfiguration(aisConfig.token,
         process.env.CLAWWEB_REPAIR_AIS_SNAPSHOT_ID, process.env.CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR);
+      const aiDraftExecution = createWorkflowAiDraftBaasExecution();
       const { db } = await initDatabase();
       if (db.dbType === "noop") throw new Error("Public ClawWeb requires an available database");
       const insight = createInsightRuntime(db);
@@ -225,6 +228,25 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         },
       });
       app.use("/api/workflow-repairs", repairRuntime.router);
+      const aiDraftRuntime = createWorkflowAiDraftRuntime(db, {
+        ...(publicBaseUrl ? { publicOrigin: publicBaseUrl } : {}),
+        canEdit: (workflowId, actorId) => actorId === "dev_local" && context.environment === "dev"
+          ? Promise.resolve(true) : botPermRepo.hasEditPermission(workflowId, actorId),
+        principal: async request => {
+          const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+          return identity?.userId === "dev_local" ? { actorId: "dev_local" } : null;
+        },
+        ...(aiDraftExecution ? { execution: aiDraftExecution } : { unavailableReason: "AUTO_HEAL_BAAS_NOT_CONFIGURED" }),
+      });
+      app.use("/api/workflows", aiDraftRuntime.router);
+      let aiDraftPollPending: Promise<void> | null = null;
+      const aiDraftPoll = aiDraftExecution ? setInterval(() => {
+        if (aiDraftPollPending) return;
+        aiDraftPollPending = aiDraftRuntime.monitor.reconcile().then(() => undefined).catch(() => {
+          console.warn('[clawweb] AI draft reconciliation failed; will retry');
+        }).finally(() => { aiDraftPollPending = null; });
+      }, 15_000) : undefined;
+      aiDraftPoll?.unref();
       let repairPollBusy = false;
       const repairPoll = setInterval(() => {
         if (repairPollBusy) return;
@@ -381,7 +403,9 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       return {
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
+          if (aiDraftPoll) clearInterval(aiDraftPoll);
           await closeHttpServer(server);
+          await aiDraftPollPending;
           await clawevolve.stop();
           await closeDatabase();
         },

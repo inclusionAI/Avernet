@@ -1,3 +1,4 @@
+import { migrations as currentMigrations } from '../schema.js';
 import { expect, it, vi } from 'vitest';
 import { ordinaryRunRequestMigrations } from '../schema-ordinary-run-request.js';
 import type { IDatabase } from '../db.js';
@@ -6,6 +7,8 @@ import { SqliteDatabase } from '../db/sqlite-database.js';
 import { sqliteDialect } from '../db/dialect.js';
 import { runMigrations } from '../db.js';
 import { sqliteTriggers } from '../schema.js';
+
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 function seedBaseTriggers(db: Database.Database) {
   for (const sql of sqliteTriggers.filter(ddl => /trg_(flow_runs|schema_version)_update\b/.test(ddl))) db.exec(sql);
@@ -275,7 +278,7 @@ it('retries SQLite migration after a non-text marker is repaired', async () => {
     expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 150 });
     raw.exec('ALTER TABLE flow_runs DROP COLUMN ordinary_run_marker; ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker TEXT');
     await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
     expect(raw.prepare('SELECT flow_id FROM flow_runs').all()).toEqual([{ flow_id: 'existing' }]);
   } finally { await db.close(); }
 });
@@ -310,7 +313,7 @@ it.each([
         child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);
       INSERT INTO ordinary_run_requests SELECT request_key_hash,parent_flow_id,child_flow_id,${defect === 'child_workflow_id' ? "'workflow'" : 'child_workflow_id'},request_fingerprint FROM old_requests; DROP TABLE old_requests;`);
     await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
     expect(raw.prepare('SELECT request_key_hash,parent_flow_id,child_flow_id,child_workflow_id,request_fingerprint FROM ordinary_run_requests').all())
       .toEqual([{ request_key_hash: 'key', parent_flow_id: 'parent', child_flow_id: 'child', child_workflow_id: 'workflow', request_fingerprint: 'hash' }]);
   } finally { await db.close(); }
@@ -384,7 +387,7 @@ it('accepts a SQLite unique index whose name contains a quote', async () => {
       child_flow_id TEXT NOT NULL, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);
     CREATE UNIQUE INDEX "child""index" ON ordinary_run_requests(child_flow_id);`);
   const db = new SqliteDatabase(raw);
-  try { await runMigrations(db, 'sqlite'); expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 }); }
+  try { await runMigrations(db, 'sqlite'); expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion }); }
   finally { await db.close(); }
 });
 
@@ -439,7 +442,7 @@ it.each(['SQLITE_BUSY', 'SQLITE_READONLY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_READO
       expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 149 });
       expect(await real.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
       fail = false; await runMigrations(db, 'sqlite');
-      expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+      expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
     } finally { await db.close(); }
   });
 
@@ -485,7 +488,7 @@ it.each(['ALTER', 'ledger'])('defers SQLite v151 on READONLY during %s and retri
     expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 150 });
     expect(await db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
     fail = false; await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
   } finally { await db.close(); }
 });
 
@@ -531,7 +534,7 @@ it('rejects initDatabase on SQLite v150 READONLY and retries without a close', a
     spy.mockRestore();
     const repaired = await initDatabase();
     expect(repaired.db.dbType).toBe('sqlite');
-    expect(await repaired.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await repaired.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: latestSchemaVersion }]);
     expect(await repaired.db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
   } finally { spy.mockRestore(); await closeDatabase(); vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -543,7 +546,7 @@ it('permits a SQLite extra required column with a usable default', async () => {
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL, extra TEXT NOT NULL DEFAULT 'ok');`);
   const db = new SqliteDatabase(raw);
-  try { await runMigrations(db, 'sqlite'); expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 }); }
+  try { await runMigrations(db, 'sqlite'); expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion }); }
   finally { await db.close(); }
 });
 
@@ -570,7 +573,7 @@ it('defers a real SQLite lock encountered by v150 and resumes after release', as
     expect(await real.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
     expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 149 });
     peer.exec('ROLLBACK'); await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
   } finally { if (peer.inTransaction) peer.exec('ROLLBACK'); await db.close(); peer.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -604,7 +607,7 @@ it('rejects SQLite initialization when a peer records v150 before a busy ledger 
     expect(peer.prepare('PRAGMA table_xinfo(flow_runs)').all()).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'ordinary_run_marker' })]));
     spy.mockRestore(); peer.exec('ROLLBACK');
     const retried = await initDatabase();
-    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: latestSchemaVersion }]);
   } finally { spy.mockRestore(); if (peer.inTransaction) peer.exec('ROLLBACK'); await closeDatabase(); peer.close(); vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -642,7 +645,7 @@ it.each(['wrong description', 'missing version', 'schema incompatible', 'metadat
 
 it('stops after a confirmed concurrent v151 ledger write without executing v152', async () => {
   const { migrations } = await import('../schema.js');
-  const later = { version: 153, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
+  const later = { version: latestSchemaVersion + 1, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
   migrations.push(later);
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
@@ -695,7 +698,7 @@ it('rejects SQLite initialization when a peer completes v151 before a busy marke
   const { join } = await import('node:path');
   const { initDatabase, closeDatabase } = await import('../db.js');
   const { migrations } = await import('../schema.js');
-  const later = { version: 153, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
+  const later = { version: latestSchemaVersion + 1, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
   migrations.push(later);
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-ddl-ledger-race-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
@@ -728,7 +731,7 @@ it('rejects SQLite initialization when a peer completes v151 before a busy marke
     expect(peer.prepare('SELECT * FROM future_probe').all()).toEqual([]);
     spy.mockRestore(); peer.exec('ROLLBACK');
     const retried = await initDatabase();
-    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 153 }]);
+    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: later.version }]);
     expect(await retried.db.query('SELECT * FROM future_probe')).toEqual([{ value: 1 }]);
   } finally { migrations.pop(); spy.mockRestore(); if (peer.inTransaction) peer.exec('ROLLBACK'); await closeDatabase(); peer.close(); vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); }
 });

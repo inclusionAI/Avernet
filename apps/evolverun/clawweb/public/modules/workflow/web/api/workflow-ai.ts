@@ -1,23 +1,35 @@
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
-import type {
-  SmartOnboardingGenerateRequest,
-  SmartOnboardingGenerateResult,
-  SmartOnboardingGenerationStatus,
-  WorkflowSpec,
-  WorkflowValidationResult,
-} from '@avernet/clawweb-shared/web/types'
+import type { WorkflowSpec, WorkflowValidationResult } from '@avernet/clawweb-shared/web/types'
 
-/** Reuses the intelligent onboarding wire contract and shared auth/gzip transport. */
+export type WorkflowAiMode = 'create' | 'modify'
+export type WorkflowAiStatus = 'pending' | 'running' | 'dispatch_uncertain' | 'completed' | 'failed' | 'cancelled'
+export type WorkflowAiCapabilities = { available: boolean; reason?: string }
+export type WorkflowAiInput = { requestId: string; mode: WorkflowAiMode; prompt: string; currentYaml: string }
+export type WorkflowAiSubmission = { draftId: string; status: WorkflowAiStatus }
+export type WorkflowAiTask = WorkflowAiSubmission & {
+  workflowId: string
+  inputSpecDigest: string
+  error?: string
+  result?: { yaml: string; summary: string }
+}
+const draftsPath = (workflowId: string) => `/api/workflows/${encodeURIComponent(workflowId)}/ai-drafts`
+const taskPath = (workflowId: string, draftId: string) => `${draftsPath(workflowId)}/${encodeURIComponent(draftId)}`
+
+/** Dedicated workflow AI draft contract; the browser supplies no provider target. */
 export const workflowAiApi = {
-  generate(input: SmartOnboardingGenerateRequest, signal: AbortSignal) {
-    return fetchJson<SmartOnboardingGenerateResult>('/api/smart-onboarding/generate', {
-      method: 'POST', body: JSON.stringify(input), signal,
+  capabilities(workflowId: string, signal: AbortSignal) {
+    return fetchJson<WorkflowAiCapabilities>(`${draftsPath(workflowId)}/capabilities`, { signal })
+  },
+  generate(workflowId: string, input: WorkflowAiInput, signal: AbortSignal) {
+    return fetchJson<WorkflowAiSubmission>(draftsPath(workflowId), {
+      method: 'POST', headers: { 'X-Pack-Version-CSRF': '1' }, body: JSON.stringify(input), signal,
     })
   },
-  poll(generationId: string, signal: AbortSignal) {
-    return fetchJson<SmartOnboardingGenerationStatus>(
-      `/api/smart-onboarding/generations/${encodeURIComponent(generationId)}`, { signal },
-    )
+  poll(workflowId: string, draftId: string, signal: AbortSignal) {
+    return fetchJson<WorkflowAiTask>(taskPath(workflowId, draftId), { signal })
+  },
+  cancel(workflowId: string, draftId: string, signal: AbortSignal) {
+    return fetchJson<WorkflowAiTask>(`${taskPath(workflowId, draftId)}/cancel`, { method: 'POST', headers: { 'X-Pack-Version-CSRF': '1' }, signal })
   },
   validate(spec: WorkflowSpec, signal: AbortSignal) {
     return fetchJson<WorkflowValidationResult>('/api/workflows/validate', {

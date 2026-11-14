@@ -40,6 +40,8 @@ export type InterventionParams = {
   message: string;
   /** Explicit Bot lifecycle target; ClawEvolve control messages use draft. */
   lifecycleStage?: "draft" | "verify" | "online";
+  /** Disable unsafe POST retries for callers with durable dispatch fencing. Defaults to true. */
+  retryTransientErrors?: boolean;
   /** Optional environment-specific transport selected by the owning workflow. */
   transportConfig?: { apiKey: string; iamtoken: string; baseUrl: string };
 };
@@ -50,6 +52,8 @@ export type InterventionResult = {
   sessionId?: string;
   error?: string;
   tokenExpired?: boolean;
+  /** Rejected means positively not accepted; uncertain must never be blindly reposted. */
+  failureKind?: "rejected" | "uncertain";
 };
 
 type BaasMessageResponse = {
@@ -174,6 +178,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       ok: false,
       error: "BaaS apiKey 未配置。请在 application.yaml 中设置 baas.apiKey",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
 
@@ -183,6 +188,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       ok: false,
       error: "BaaS iamtoken 未配置。请在 application.yaml 中设置 baas.iamtoken (macOS 本地开发需要)",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
 
@@ -194,6 +200,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       error: `BaaS bot_id 格式非法: "${botId}"。Open API 要求 "bot_id:owner_staff_no"（示例 default:151614），`
         + "且目标 Bot 必须处于 ACTIVE 且有有效绑定",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
 
@@ -217,7 +224,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
   };
 
   // Retry up to 3 times on transient failures
-  const maxRetries = 3;
+  const maxRetries = params.retryTransientErrors === false ? 1 : 3;
   let lastError: string | undefined;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -230,6 +237,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
+        ...(params.retryTransientErrors === false ? { redirect: "error" as const } : {}),
       });
 
       // Read once as text so a non-JSON body can still be described below.
@@ -261,7 +269,16 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
           ok: false,
           error: safeError(`IAM Token 已过期或无效 (HTTP ${statusDetail})`, config),
           tokenExpired: true,
+          ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
         };
+      }
+
+      // Single-attempt callers need a positive business acknowledgement, not
+      // merely HTTP 200 with a diagnostic envelope. Legacy behavior is unchanged.
+      const hasBusinessError = [responseJson.code, responseJson.buserviceErrorCode]
+        .some(code => code != null && String(code).trim() !== "" && String(code) !== "0");
+      if (params.retryTransientErrors === false && hasBusinessError) {
+        return { ok: false, error: safeError(`BaaS API 错误: ${statusDetail}`, config), failureKind: "rejected" };
       }
 
       if (res.ok && responseJson.data) {
@@ -277,6 +294,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
         return {
           ok: false,
           error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+          ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
         };
       }
 
@@ -306,5 +324,6 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
   return {
     ok: false,
     error: safeError(lastError ?? "BaaS 服务暂时不可用，请稍后重试", config),
+    ...(params.retryTransientErrors === false ? { failureKind: "uncertain" as const } : {}),
   };
 }

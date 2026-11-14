@@ -1,3 +1,4 @@
+import { migrations as currentMigrations } from '../schema.js';
 import { describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase, runMigrations, type IDatabase } from '../db.js';
@@ -5,6 +6,8 @@ import { dialectFor } from '../db/dialect.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
 import { FlowRunLinkRepository } from '../repositories/flow-run-link-repository.js';
+
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 const migration = workflowSnapshotMigrations.find(item => item.version === 147)!;
 const upgrade = workflowSnapshotMigrations.find(item => item.version === 148)!;
@@ -38,7 +41,7 @@ describe('independent flow run links', () => {
     await runMigrations(db, 'sqlite');
     await new FlowRunLinkRepository(db).insert(link);
     expect(await new FlowRunLinkRepository(db).findByChild('child')).toEqual(link);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: latestSchemaVersion });
     await db.close();
   });
 
@@ -60,7 +63,7 @@ describe('independent flow run links', () => {
     await runMigrations(db, 'sqlite'); await runMigrations(db, 'sqlite');
     expect(raw.prepare('SELECT * FROM flow_run_links WHERE child_flow_id = ?').get('old')).toEqual(before);
     expect(raw.prepare('SELECT description FROM schema_version WHERE version = ?').get(version)).toEqual({ description: 'existing' });
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: latestSchemaVersion });
     const repo = new FlowRunLinkRepository(db);
     await repo.insert(link);
     expect(await repo.findByChild('old')).toEqual({ ...link, childFlowId: 'old' });
@@ -124,7 +127,7 @@ describe('independent flow run links', () => {
     const long = { ...link, childFlowId: 'c'.repeat(255), parentFlowId: 'p'.repeat(255),
       parentNodeId: 'n'.repeat(255), childWorkflowId: 'w'.repeat(255) };
     await repo.insert(long); expect(await repo.findByChild(long.childFlowId)).toEqual(long);
-    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({ version: latestSchemaVersion });
     await db.close();
   });
 

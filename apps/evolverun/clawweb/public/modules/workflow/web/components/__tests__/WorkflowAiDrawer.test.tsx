@@ -6,6 +6,8 @@ import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { generateWorkflowAiDraft, workflowSpecSignature, type WorkflowAiDraft } from '../../services/workflow-ai-draft'
 import WorkflowAiDrawer from '../WorkflowAiDrawer'
 
+vi.mock('../../hooks/useWorkflowAiCapabilities', () => ({ useWorkflowAiCapabilities: () => ({ value: { available: true }, loading: false, retry: vi.fn() }) }))
+
 vi.mock('../../services/workflow-ai-draft', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/workflow-ai-draft')>()
   return { ...actual, generateWorkflowAiDraft: vi.fn() }
@@ -43,10 +45,15 @@ describe('WorkflowAiDrawer', () => {
   it.each(['create', 'modify'] as const)('discloses service data sharing and manual save/deploy before generating in %s mode', (mode) => {
     const p = props()
     render(<WorkflowAiDrawer {...p} mode={mode} />)
-    const disclosure = screen.getByText('生成时会将当前工作流的完整 YAML 和需求描述发送到已配置的智能接入生成服务。生成和应用草稿均不会自动保存或部署，需另行操作。')
+    const disclosure = screen.getByText('生成时会将当前工作流的完整 YAML 和需求描述提交到服务器：服务器将 effective autoHeal.botId 原样用于 BaaS；浏览器不会选择或覆盖 Bot。生成和应用草稿均不会自动保存或部署，需另行操作。')
     expect(disclosure).toBeVisible()
     expect(disclosure.compareDocumentPosition(submit()) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     expect(submit()).toHaveAccessibleDescription(disclosure.textContent!)
+    const cancellation = screen.getByText(/取消或关闭会停止本地等待/)
+    expect(cancellation).toHaveTextContent('尽力向服务器记录取消')
+    expect(cancellation).toHaveTextContent('BaaS 没有已支持的停止接口')
+    expect(cancellation).toHaveTextContent('远程任务可能继续')
+    expect(cancellation).toHaveTextContent('不能承诺停止')
     expect(prompt()).toHaveAccessibleDescription(expect.stringContaining(disclosure.textContent!))
     expect(generate).not.toHaveBeenCalled()
     expect(p.onApply).not.toHaveBeenCalled()
@@ -101,10 +108,10 @@ describe('WorkflowAiDrawer', () => {
     render(<WorkflowAiDrawer {...p} />)
     expect(screen.getByRole('region', { name: 'AI 工作流助手' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByText('沿用智能接入生成服务')).toBeInTheDocument()
+    expect(screen.getByText('通过服务器 AutoHeal Bot / BaaS 生成待审阅草稿')).toBeInTheDocument()
     expect(prompt()).toHaveFocus()
     await generatePreview()
-    expect(generate).toHaveBeenCalledWith('modify', '调整复核提示词', source, expect.any(AbortSignal))
+    expect(generate).toHaveBeenCalledWith('modify', '调整复核提示词', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
     expect(p.onApply).not.toHaveBeenCalled()
     expect(screen.getByText('已调整复核提示词')).toBeInTheDocument()
     expect(screen.getByText('按要求细化复核')).toBeInTheDocument()
@@ -184,7 +191,7 @@ describe('WorkflowAiDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新生成草稿' }))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: '应用草稿到当前 Editor' })).toBeEnabled()
-    expect(generate).toHaveBeenLastCalledWith('modify', '调整复核提示词', edited, expect.any(AbortSignal))
+    expect(generate).toHaveBeenLastCalledWith('modify', '调整复核提示词', edited, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
   })
 
   it.each(['removal', 'metadata'] as const)('requires explicit confirmation for %s changes', async (kind) => {
