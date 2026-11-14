@@ -54,18 +54,25 @@ def _app(service, artifact_service=None):
 class _SlowLookup:
     def __init__(self):
         self.loop = asyncio.get_running_loop()
+        self.loop_thread_id = threading.get_ident()
+        self.probe_ran = threading.Event()
         self.started = asyncio.Event()
         self.release = threading.Event()
         self.probe_completed_before_lookup = []
 
     def wait(self):
+        # Fail before blocking if a regression executes this on the event loop.
+        assert threading.get_ident() != self.loop_thread_id, (
+            "slow synchronous lookup ran on the event-loop thread"
+        )
         self.loop.call_soon_threadsafe(self.started.set)
-        # Bound the broken path too: it must fail instead of hanging the suite.
-        self.probe_completed_before_lookup.append(self.release.wait(timeout=0.5))
+        self.release.wait()
+        self.probe_completed_before_lookup.append(self.probe_ran.is_set())
 
     async def request(self, app, url, params):
         @app.get("/probe")
         async def probe():
+            self.probe_ran.set()
             self.release.set()
             return {"ok": True}
 
@@ -73,13 +80,28 @@ class _SlowLookup:
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             pending = asyncio.create_task(client.get(url, params=params))
+            started = asyncio.create_task(self.started.wait())
             try:
-                await asyncio.wait_for(self.started.wait(), timeout=2)
-                assert (await client.get("/probe")).status_code == 200
-                response = await pending
+                # Hang protection only: responsiveness is proved by the probe
+                # handshake, never by a worker or startup acceptance deadline.
+                async with asyncio.timeout(30):
+                    done, _ = await asyncio.wait(
+                        (started, pending), return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if pending in done:
+                        response = await pending  # Propagate an early HTTP error.
+                        pytest.fail(
+                            "lookup request completed before the probe handshake: "
+                            f"status={response.status_code}"
+                        )
+                    assert (await client.get("/probe")).status_code == 200
+                    response = await pending
             finally:
                 self.release.set()
-                await pending
+                for task in (pending, started):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(pending, started, return_exceptions=True)
         assert self.probe_completed_before_lookup == [True], (
             "slow synchronous lookup blocked unrelated HTTP requests"
         )
@@ -181,3 +203,74 @@ async def test_session_read_remains_responsive_and_preserves_errors(prefix, fail
         assert response.json()["code"] == 404000
     else:
         assert response.json()["data"]["session_id"] == "s1"
+
+
+@pytest.mark.asyncio
+async def test_lookup_fixture_accepts_offload_when_probe_is_delayed():
+    """A slow probe must not turn a correctly offloaded read into a failure."""
+    lookup = _SlowLookup()
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def delay_probe(request, call_next):
+        if request.url.path == "/probe":
+            await asyncio.sleep(0.6)
+        return await call_next(request)
+
+    @app.get("/slow")
+    async def slow():
+        await asyncio.to_thread(lookup.wait)
+        return {"ok": True}
+
+    response = await lookup.request(app, "/slow", {})
+    assert response.status_code == 200
+    assert lookup.probe_completed_before_lookup == [True]
+
+
+@pytest.mark.asyncio
+async def test_lookup_fixture_rejects_inline_sync_read_immediately():
+    """The negative control must fail before a sync wait can block the loop."""
+    lookup = _SlowLookup()
+    app = FastAPI()
+
+    @app.get("/slow")
+    async def slow():
+        lookup.wait()
+        return {"ok": True}
+
+    with pytest.raises(AssertionError, match="event-loop thread"):
+        await lookup.request(app, "/slow", {})
+    assert not lookup.started.is_set()
+    assert lookup.probe_completed_before_lookup == []
+
+
+@pytest.mark.asyncio
+async def test_lookup_fixture_propagates_request_errors_before_lookup_starts():
+    lookup = _SlowLookup()
+    app = FastAPI()
+
+    @app.get("/slow")
+    async def slow():
+        raise RuntimeError("read failed before lookup")
+
+    with pytest.raises(RuntimeError, match="read failed before lookup"):
+        await lookup.request(app, "/slow", {})
+    assert not lookup.started.is_set()
+    assert lookup.release.is_set()
+    assert not lookup.probe_ran.is_set()
+
+
+@pytest.mark.asyncio
+async def test_lookup_fixture_rejects_response_without_lookup_handshake():
+    lookup = _SlowLookup()
+    app = FastAPI()
+
+    @app.get("/slow")
+    async def slow():
+        return {"ok": True}
+
+    with pytest.raises(pytest.fail.Exception, match="completed before the probe handshake"):
+        await lookup.request(app, "/slow", {})
+    assert lookup.release.is_set()
+    assert not lookup.started.is_set()
+    assert not lookup.probe_ran.is_set()
