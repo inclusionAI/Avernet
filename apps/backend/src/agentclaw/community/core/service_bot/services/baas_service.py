@@ -1635,6 +1635,7 @@ class BaasService:  # pragma: no cover
         cmd: str,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
+        safe_errors: bool = False,
     ) -> dict[str, Any]:
         """Execute a shell command inside a BaaS bot container.
 
@@ -1677,6 +1678,8 @@ class BaasService:  # pragma: no cover
             response_data = response.json()
 
             if response_data.get("code") != 0:
+                if safe_errors:
+                    raise BaasServiceError("BaaS command request failed")
                 raise BaasServiceError(
                     f"BaaS exec_command error: {response_data.get('message', 'Unknown error')}"
                 )
@@ -1684,6 +1687,13 @@ class BaasService:  # pragma: no cover
             return response_data.get("data", {})
 
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 503 and _is_no_active_devices_response(e.response):
+                if safe_errors:
+                    raise BaasNoActiveDevicesError(status_code=503) from None
+                logger.warning("[BaasService.exec_command_on_bot] no active device: bot_uuid=%s", bot_uuid)
+                raise BaasNoActiveDevicesError(status_code=503) from e
+            if safe_errors:
+                raise BaasServiceError("BaaS command request failed") from None
             logger.error(
                 "[BaasService.exec_command_on_bot] HTTP error: %s - %s",
                 e.response.status_code, e.response.text,
@@ -1694,6 +1704,8 @@ class BaasService:  # pragma: no cover
         except BaasServiceError:
             raise
         except Exception as e:
+            if safe_errors:
+                raise BaasServiceError("BaaS command request failed") from None
             logger.error("[BaasService.exec_command_on_bot] Failed: %s", e)
             raise BaasServiceError(f"Failed to execute command on bot: {e}")
 

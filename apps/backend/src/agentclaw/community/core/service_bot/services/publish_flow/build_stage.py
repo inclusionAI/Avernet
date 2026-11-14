@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
+import threading
 from typing import TYPE_CHECKING
 
 from collections.abc import Callable
@@ -29,6 +31,8 @@ from agentclaw.community.core.service_bot.schemas.publish_schemas import (
     PublishFlowResult,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+from agentclaw.community.core.service_bot.services.bot_publish_service import PublishNotFoundError
 from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
     ArtifactBuildRequest,
     ServiceArtifactBuildError,
@@ -63,11 +67,52 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 logger = get_logger()
+_READINESS_SLOTS = threading.BoundedSemaphore(8)
+
+
+async def _readiness_read(fn, *args, **kwargs):
+    """Bound detached, read-only checks when the underlying client stalls."""
+    while not _READINESS_SLOTS.acquire(blocking=False):
+        await asyncio.sleep(0.05)
+    loop = asyncio.get_running_loop()
+    result = loop.create_future()
+
+    def finish(value, error):
+        if not result.done():
+            if error is None:
+                result.set_result(value)
+            else:
+                result.set_exception(error)
+
+    def run():
+        try:
+            value, error = partial(fn, *args, **kwargs)(), None
+        except Exception as exc:
+            value, error = None, exc
+        finally:
+            _READINESS_SLOTS.release()
+        try:
+            loop.call_soon_threadsafe(finish, value, error)
+        except RuntimeError:
+            pass  # The timed-out request's event loop has already closed.
+
+    try:
+        threading.Thread(target=bind_current_avernet_tenant(run), name="draft-readiness", daemon=True).start()
+    except Exception:
+        _READINESS_SLOTS.release()
+        raise
+    return await result
+
+
+class PublicationNoLongerBuilding(Exception):
+    def __init__(self, status: str) -> None:
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -113,9 +158,86 @@ class BuildStageRunner:
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
 
+    async def _wait_for_draft_device(self, record: BotPublishRecord, bot: dict) -> dict:
+        """Wait only for the known BaaS no-active-device restart window.
+
+        The probe is read-only and runs before any build snapshot is captured.
+        Each request has a one-second command timeout and BaaS adds ten seconds
+        of HTTP timeout; attempts and delay are bounded independently of the
+        queue's existing deadline.
+        """
+        owner = self._ext_state.owner_id(record)
+        read = _readiness_read
+
+        def lookup():
+            return self._bot_service.get_bot_by_address(
+                bot_id=record.source_bot_id, user_id=owner,
+                source_bot_pk=record.source_bot_pk,
+            )
+
+        binding = bot.get("device_binding") or {}
+        if bot.get("active_engine") not in ("aicoding", "claude_code"):
+            return bot
+        if not bot.get("binding_id") or not binding:
+            raise PublishFlowServiceError("Draft device binding is unavailable")
+        provider = binding.get("device_provider")
+        if provider not in ("baas", "arca", "local", "teclaw"):
+            raise PublishFlowServiceError("Draft device provider is unavailable")
+        if provider != "baas":
+            return bot
+        if binding.get("status") not in ("PENDING", "ACTIVE"):
+            raise PublishFlowServiceError("Draft device binding is not available")
+        target = (bot.get("id"), bot.get("owner_id"), bot.get("binding_id"), bot.get("active_engine"),
+                  binding.get("device_id"), binding.get("device_provider"))
+        if not all(target):
+            raise PublishFlowServiceError("Draft device identity is unavailable")
+        bot_uuid = (binding.get("device_props") or {}).get("bot_uuid") or binding.get("device_id")
+        for attempt in range(22):
+            current = await read(self._ext_state.get_record, record.id)
+            if current.status != PublishStatus.BUILDING.value:
+                raise PublicationNoLongerBuilding(current.status)
+            if attempt:
+                retry_bot = await read(lookup)
+                retry_binding = retry_bot.get("device_binding") or {}
+                retry_target = (retry_bot.get("id"), retry_bot.get("owner_id"),
+                                retry_bot.get("binding_id"), retry_bot.get("active_engine"), retry_binding.get("device_id"),
+                                retry_binding.get("device_provider"))
+                retry_uuid = (retry_binding.get("device_props") or {}).get("bot_uuid") or retry_binding.get("device_id")
+                if (retry_target != target or retry_uuid != bot_uuid
+                        or retry_binding.get("status") not in ("PENDING", "ACTIVE")
+                        or retry_bot.get("status") in ("FAILED", "RELEASED", "STOPPED")):
+                    raise PublishFlowServiceError("Draft device changed during readiness check")
+            try:
+                result = await read(
+                    self._baas_service.exec_command_on_bot,
+                    bot_uuid=bot_uuid, cmd="true", timeout_seconds=1, safe_errors=True,
+                )
+            except BaasNoActiveDevicesError:
+                if attempt == 21:
+                    raise
+                await asyncio.sleep(2)
+                continue
+            if result.get("exit_code") != 0:
+                raise PublishFlowServiceError("Draft device probe failed")
+            current_bot = await read(lookup)
+            current_binding = current_bot.get("device_binding") or {}
+            current_target = (current_bot.get("id"), current_bot.get("owner_id"),
+                              current_bot.get("binding_id"), current_bot.get("active_engine"), current_binding.get("device_id"),
+                              current_binding.get("device_provider"))
+            current_uuid = (current_binding.get("device_props") or {}).get("bot_uuid") or current_binding.get("device_id")
+            current = await read(self._ext_state.get_record, record.id)
+            if current.status != PublishStatus.BUILDING.value:
+                raise PublicationNoLongerBuilding(current.status)
+            if (current_target != target or current_uuid != bot_uuid
+                    or current_binding.get("status") not in ("PENDING", "ACTIVE")
+                    or current_bot.get("status") in ("FAILED", "RELEASED", "STOPPED")):
+                raise PublishFlowServiceError("Draft device or publication changed during readiness check")
+            return current_bot
+
     async def build_artifact_only(
         self,
         publish_record: BotPublishRecord,
+        *, verified_bot: dict | None = None,
     ) -> BuildArtifactOnlyResult:
         """执行构建步骤但不推进 ac_bot_publish 状态。
 
@@ -138,7 +260,7 @@ class BuildStageRunner:
             owner_id,
         )
 
-        bot = self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id, source_bot_pk=publish_record.source_bot_pk)
+        bot = verified_bot if verified_bot is not None else self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id, source_bot_pk=publish_record.source_bot_pk)
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
@@ -274,7 +396,17 @@ class BuildStageRunner:
                 self._ext_state.owner_id(publish_record),
             )
 
-            result = await self.build_artifact_only(publish_record)
+            try:
+                bot = self._bot_service.get_bot_by_address(
+                    bot_id=publish_record.source_bot_id, user_id=self._ext_state.owner_id(publish_record),
+                    source_bot_pk=publish_record.source_bot_pk,
+                )
+                verified_bot = await asyncio.wait_for(self._wait_for_draft_device(publish_record, bot), timeout=45)
+            except TimeoutError:
+                # Any outstanding thread performs read-only work. It cannot
+                # continue the build after its awaiting coroutine is cancelled.
+                raise PublishFlowServiceError("Draft device readiness timed out") from None
+            result = await self.build_artifact_only(publish_record, verified_bot=verified_bot)
 
             # 阶段 B：提交 / 状态推进（BUILDING → BUILT）
             # 数字员工快照校验 — 如果构建期间数字员工能力发生变化，拒绝发布
@@ -327,6 +459,11 @@ class BuildStageRunner:
                 action="process",
             )
 
+        except PublicationNoLongerBuilding as e:
+            return PublishFlowResult(
+                publish_id=publish_id, status=PublishStatus.FAILED,
+                message=f"Build stopped; publication is {e.status}", action="process",
+            )
         except Exception as e:
             logger.exception("[BuildStageRunner] Build failed: %s", e)
 
@@ -343,13 +480,22 @@ class BuildStageRunner:
                 error_message = str(e)
             ext["error_message"] = error_message
             ext["source_status"] = PublishStatus.BUILDING.value
-            self._ext_state.update_status(
-                publish_id=publish_id,
-                target_status=PublishStatus.FAILED,
-                source_status=PublishStatus.BUILDING,
-                ext=ext,
-                expected_ext=expected_ext,
-            )
+            try:
+                self._ext_state.update_status(
+                    publish_id=publish_id,
+                    target_status=PublishStatus.FAILED,
+                    source_status=PublishStatus.BUILDING,
+                    ext=ext,
+                    expected_ext=expected_ext,
+                )
+            except PublishNotFoundError:
+                current = self._ext_state.get_record(publish_id)
+                if current.status == PublishStatus.BUILDING.value:
+                    raise
+                return PublishFlowResult(
+                    publish_id=publish_id, status=PublishStatus.FAILED,
+                    message=f"Build stopped; publication is {current.status}", action="process",
+                )
 
             return PublishFlowResult(
                 publish_id=publish_id,

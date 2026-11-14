@@ -311,6 +311,13 @@ is not a non-fastdisk result. Fastdisk bots require schema-6
 `/home/admin/bin/service_publish.py`; missing/incompatible scripts fail with a
 logged error, without uploading a fallback implementation.
 
+For a coding draft with a BaaS binding, the publication build probes
+command execution before projecting or capturing its artifact. Only the
+structured `NO_ACTIVE_DEVICES` response is retried, with bounded attempts; a
+changed target, a stopped publication or exhausted attempts fails the build.
+The probe does not guarantee later availability or pin a BaaS replica. Other
+providers and the independent artifact-only flow retain their existing behavior.
+
 Publication passes the existing version prefix and per-bot dynamic exclusions
 for direct OSS upload. Fixed file selection and extra-root mappings are owned by
 the installed container policy, not expanded into Backend requests. Draft restore passes the identity/version-derived OSS prefix, logical artifact
