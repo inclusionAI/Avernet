@@ -1,0 +1,26 @@
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  s_438389d35bfb62::t_217f6a579e7105 191
+  s_438389d35bfb62::t_39f231edf55b1e 151-152,156-157
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelOrder.test.tsx
+  s_438389d35bfb62::t_217f6a579e7105 1,3-31
+  s_438389d35bfb62::t_a3d564bd0afd38 2
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  s_438389d35bfb62::t_217f6a579e7105 220-221,224
+  s_438389d35bfb62::t_face81657985a0 225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb5e04a7db80da2b00780a6aba8f6bf82d0e6254",
+  "prompts": {},
+  "sessions": {
+    "s_438389d35bfb62": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d373-8aba-7f81-b308-c9a33718926a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
