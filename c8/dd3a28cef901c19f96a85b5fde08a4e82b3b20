@@ -1,0 +1,19 @@
+apps/bcs/scripts/ci/reusable_coverage.sh
+  s_3390a382ab8b6f::t_37e758b2c3c9c3 21-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8dd3a28cef901c19f96a85b5fde08a4e82b3b20",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

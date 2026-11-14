@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_inline_policy_off_contract.rs
+  s_3bce8baaaba8df::t_6968672f2d6cb2 115-119,121
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery/service.rs
+  s_3bce8baaaba8df::t_74fa78e4fdefda 538-547
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "41d0d69034ecbed3cbc62f6d719c2915575148dd",
+  "prompts": {},
+  "sessions": {
+    "s_3bce8baaaba8df": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "c239fbe4-43c9-4f5b-a71b-b3954967dc51",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
