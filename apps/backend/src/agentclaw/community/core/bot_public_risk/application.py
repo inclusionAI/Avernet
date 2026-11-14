@@ -73,6 +73,39 @@ class RiskApplication:
                            input_json=_encode(input_value), input_hash=input_hash, approval_biz_id=f"risk-{risk_id}")
         return self._tasks.start(record)
 
+    def reapply_offline(self, *, bot: ResolvedBotContext, actor_id: str, risk_check_id: str,
+                        expected_version: int, client_request_id: str) -> tuple[RiskCheck, bool]:
+        if not actor_id or actor_id != bot.current_owner_id:
+            raise LookupError("Risk application unavailable")
+        env = str(bot.bot["env"])
+        prior = self._repository.get_by_request(
+            env=env, client_scope=f"legacy:{actor_id}", client_request_id=client_request_id,
+        )
+        if prior is not None:
+            if prior.bot_pk != bot.bot_pk:
+                raise RequestConflict("request ID reused with different intent")
+            return self._tasks.start_reapply(
+                prior, expected_risk_id=risk_check_id, expected_version=expected_version,
+            )
+        old = self._repository.get(env=env, risk_check_id=risk_check_id)
+        if old is None or old.bot_pk != bot.bot_pk or old.public_scope != "legacy":
+            raise LookupError("Risk application unavailable")
+        target = json.loads(old.target_json)
+        if (not isinstance(target, dict) or target.get("public_scope") != "legacy"
+                or target.get("permission_owner") != "owner"
+                or target.get("friend_approval") not in {"0", "1"}):
+            raise RequestConflict("legacy target unavailable")
+        input_value, input_hash = self._inputs.build(bot=bot.bot, target=target)
+        if not isinstance(input_value, dict) or not isinstance(input_value.get("agent_info"), dict) or not isinstance(input_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", input_hash):
+            raise ValueError("risk input or its digest is invalid")
+        risk_id = str(uuid4())
+        request_hash = sha256(_encode({"bot_pk": bot.bot_pk, "target": target}).encode()).hexdigest()
+        record = RiskCheck(risk_check_id=risk_id, env=env, bot_pk=bot.bot_pk, owner_id=bot.current_owner_id,
+                           operator_id=actor_id, client_scope=f"legacy:{actor_id}", client_request_id=client_request_id,
+                           public_scope="legacy", target_json=_encode(target), request_hash=request_hash,
+                           input_json=_encode(input_value), input_hash=input_hash, approval_biz_id=f"risk-{risk_id}")
+        return self._tasks.start_reapply(record, expected_risk_id=risk_check_id, expected_version=expected_version)
+
     def refresh(self, *, bot: ResolvedBotContext, actor_id: str, record: RiskCheck) -> tuple[str, RiskCheck]:
         """Poll the current record's original check; never create a new external check."""
         env = str(bot.bot["env"])
