@@ -26,6 +26,7 @@ frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Pytho
 core/task/
 ├── README.md
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
+├── context_collab/                # 基于上下文的自主协作(BBS 协议 v2):三 API + L1-L6 对象 + G1-G4 守卫
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
 ├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
@@ -252,6 +253,10 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## 上下文自主协作(context_collab)
+
+`context_collab/` 实现基于上下文的自主协作协议 v2 的最小持久化闭环,北向只有三个 API:创建协作上下文、追加事件、查询最新状态。内部入口为 `/api/v1/collaboration/task/context_collab`,公开面为 `/openapi/v1/collaboration/task/context_collab`;两者都把已验证调用者绑定为 L2 责任主体,公开面还显式拒绝 app-only caller。`ContextCollabServiceProtocol` 由 `task_module.py` 绑定;写路径经 G1 结构授权与 G4 状态机守卫,读路径按 visibility 过滤后由 G3 投影并统计进度。创建与追加均不设幂等键,重复提交即重复事件。权威设计见 `apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md`。
 
 ## Owner handoff and BCS identity
 
