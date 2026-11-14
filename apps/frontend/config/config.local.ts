@@ -160,7 +160,7 @@ const BCS_TARGET = process.env.BCS_PORT
 const BCSFUSE_TARGET = process.env.BCSFUSE_PORT
   ? `http://127.0.0.1:${process.env.BCSFUSE_PORT}`
   : preset.servers.BCNFUSE || 'http://127.0.0.1:8765';
-const LOCAL_BCN_PORT = presetName === 'local' ? new URL(BCS_TARGET).port : '';
+const LOCAL_BCN_PROXY = presetName === 'local';
 
 if (process.env.BCS_PORT || process.env.BCSFUSE_PORT) {
   console.log(
@@ -222,6 +222,9 @@ const internalQiankun =
 // ==================== Bigfish 配置 ====================
 
 export default defineConfig({
+  // 当前 Mako 的热更新代理接管全部 upgrade 请求，会使业务 WS 返回 404。
+  // local 使用 Webpack 的独立 WS 路由，让 /bcnproxy 与热更新共存。
+  ...(LOCAL_BCN_PROXY ? { mako: false, mfsu: false } : {}),
   // ⚠️ umi/max 迁移补偿（2026-06-12）：
   // bigfish appType:'console'/deployMode:'tern' 在 dev 时由 Tern 注入 window.__TERN__，
   // 其中 _localDev:true 驱动 isLocalDev()（src/utils/platform.ts）走 DevUserInput 本地登录流程。
@@ -293,6 +296,7 @@ export default defineConfig({
 
     // BCN 群聊服务 API
     '/bcnproxy': createProxyConfig(BCS_TARGET, {
+      ws: true,
       pathRewrite: { '^/bcnproxy': '' }, // 移除 /bcn 前缀
     }),
 
@@ -359,8 +363,8 @@ export default defineConfig({
     // 用于 UmdLoader 的副屏 CDN 同源代理：dev 下把 fetch(cdn) 改写到 /__umd_cdn
     // 走 dev server 转发，绕过 CDN 的 CORS 白名单（生产不注入，直连原始 CDN）。
     UMD_CDN_PROXY: true,
-    // local demo 中浏览器用「页面 hostname + BCS 端口」连接群聊 WS。
-    // 只注入端口，避免把 127.0.0.1 带到远程访问者的浏览器。
-    LOCAL_BCN_PORT,
+    // local demo 的 HTTP 和 WS 共用 /bcnproxy，只需转发前端端口。
+    // BCS 的实际地址与端口只由服务端代理读取。
+    LOCAL_BCN_PROXY,
   },
 });
