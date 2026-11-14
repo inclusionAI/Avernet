@@ -22,6 +22,13 @@ jest.mock('@/hooks/useSpaceContext', () => ({
     }),
 }));
 
+jest.mock('@/hooks/useHumanIdentity', () => ({
+  useHumanIdentity: () => ({
+    identity: { userId: 'user-1', displayName: '风太', avatarUrl: undefined, online: true },
+    status: 'ready',
+  }),
+}));
+
 jest.mock('@/services/todos/todoService', () => ({
   loadTodo: jest.fn(),
   acceptTodo: jest.fn(),
@@ -153,12 +160,19 @@ beforeEach(() => {
     event(4, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoEvents.mockResolvedValue([
-    event(1, { content: '开始采集竞品资料' }),
-    event(2, {
+    event(1, {
+      eventType: 'task.created',
+      actorType: 'human',
       content: '整理三款产品的定价与功能矩阵',
+    }),
+    event(2, { eventType: 'task.started', content: '开始采集竞品资料' }),
+    event(3, {
+      eventType: 'task.completed',
+      content: '三款产品的定价与功能矩阵已完成整理，数据来源已补充。',
       status: 'pending_acceptance',
       artifacts: [{ artifactId: 'event-artifact-1', name: '事件产物', url: 'https://example.test/event-artifact' }],
     }),
+    event(4, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
   mockedService.downloadTodoArtifactContent.mockResolvedValue(new Blob(['file']));
@@ -186,12 +200,15 @@ describe('TodoDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
     const interactionView = screen.getByRole('region', { name: '待办互动' });
-    expect(within(interactionView).getByText('数据分析助手')).toBeInTheDocument();
-    expect(within(interactionView).getByText('发起需求')).toBeInTheDocument();
-    expect(within(interactionView).getByText('完成结果')).toBeInTheDocument();
+    expect(within(interactionView).getAllByText('数据分析助手').length).toBeGreaterThan(0);
+    expect(within(interactionView).getAllByText('风太').length).toBeGreaterThan(0);
+    expect(within(interactionView).getByText('数据分析助手 开始处理')).toBeInTheDocument();
+    expect(within(interactionView).getByText('转为待处理，等待发起人验收')).toBeInTheDocument();
     expect(
       within(interactionView).getByText('三款产品的定价与功能矩阵已完成整理，数据来源已补充。'),
     ).toBeInTheDocument();
+    expect(within(interactionView).getByText('定价与功能矩阵.xlsx')).toBeInTheDocument();
+    expect(within(interactionView).getByText('产品官网')).toBeInTheDocument();
     expect(await within(interactionView).findByText('请补充价格来源')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
       target: { value: ' 补充价格来源 ' },
@@ -313,14 +330,18 @@ describe('TodoDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
     const interactionView = screen.getByRole('region', { name: '待办互动' });
-    const interactionTitle = within(interactionView).getByText('互动');
+    const interactionTitle = within(interactionView).getByRole('heading', { name: '互动' });
     const feedback = within(interactionView).getByText('请补充价格来源');
-    const interactionCard = feedback.closest('.rounded-xl');
+    const feedbackFloor = feedback.closest('li');
+    const marker = within(feedbackFloor as HTMLElement).getByRole('button', { name: '标记为问题点' });
     const sendButton = within(interactionView).getByRole('button', { name: '发送互动' });
 
-    expect(interactionTitle).toHaveClass('text-sm', 'font-semibold');
-    expect(feedback).toHaveClass('text-xs', 'leading-5');
-    expect(interactionCard).toHaveClass('rounded-xl', 'border', 'border-border', 'bg-card');
+    expect(interactionTitle).toHaveClass('text-lg', 'font-semibold');
+    expect(feedback).toHaveClass('text-sm', 'leading-6');
+    expect(feedbackFloor).toHaveClass('grid', 'grid-cols-[4px_minmax(0,1fr)]', 'gap-4');
+    expect(marker).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(marker);
+    expect(marker).toHaveAttribute('aria-pressed', 'true');
     expect(sendButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
   });
 

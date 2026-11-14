@@ -1,5 +1,6 @@
 import { Badge, Button, Card, Empty, Spin } from '@/components/ui';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
@@ -60,6 +61,7 @@ function DetailTab({ active, children, onClick }: DetailTabProps) {
 export default function TodoDetailPage() {
   const { todoId } = useParams<{ todoId: string }>();
   const currentSpace = useSpaceContext((state) => state.currentSpace);
+  const { identity: humanIdentity } = useHumanIdentity();
   const [view, setView] = useState<DetailView>('events');
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const detail = useTodoDetail(todoId || null);
@@ -192,9 +194,15 @@ export default function TodoDetailPage() {
                 {view === 'interactions' ? (
                   <TodoInteractionPanel
                     interactions={detail.interactions}
+                    events={detail.events}
+                    artifacts={detail.artifacts}
+                    botId={todo.botId}
                     botName={todo.botName || todo.botId}
+                    humanName={humanIdentity?.displayName || '我'}
+                    humanAvatarUrl={humanIdentity?.avatarUrl}
                     enabled={canInteractWithTodo(todo.status)}
                     loading={detail.mutationLoading}
+                    onReadArtifact={detail.readArtifactContent}
                     onSubmit={detail.interact}
                   />
                 ) : null}
