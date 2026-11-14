@@ -69,7 +69,7 @@ pub(crate) fn append_steps(
     params.push(DbValue::from(managers.len() as i64));
     let human_guard = steps_base + steps.len();
     steps.push(DbTransactionStep::Query(DbStatement::with_params(format!(
-        "SELECT COUNT(*) AS ok FROM bcs_bots WHERE env = ? AND {identity} IN ({placeholders}) AND actor_kind = 'human' AND COALESCE(is_deleted, 0) = 0 HAVING COUNT(*) = ?"), params)));
+        "SELECT t.c AS ok FROM (SELECT COUNT(*) AS c FROM bcs_bots WHERE env = ? AND {identity} IN ({placeholders}) AND actor_kind = 'human' AND COALESCE(is_deleted, 0) = 0) t WHERE t.c = ?"), params)));
     let edge_values = vec!["(?, ?, ?, 'manager', 0, NULL, 'approved', 'same_as_from')"; managers.len()].join(", ");
     let edge_conflict = match flavor {
         DbSqlFlavor::Mysql => " ON DUPLICATE KEY UPDATE status = 'approved', rules = NULL",
@@ -85,7 +85,7 @@ pub(crate) fn append_steps(
     params.push(DbValue::from(managers.len() as i64));
     let edge_guard = steps_base + steps.len();
     steps.push(DbTransactionStep::Query(DbStatement::with_params(format!(
-        "SELECT COUNT(*) AS ok FROM edge_grants WHERE env = ? AND to_id = ? AND {identity} IN ({placeholders}) AND grant_kind = 'manager' AND grant_ref_id = 0 AND rules IS NULL AND status = 'approved' HAVING COUNT(*) = ?"), params)));
+        "SELECT t.c AS ok FROM (SELECT COUNT(*) AS c FROM edge_grants WHERE env = ? AND to_id = ? AND {identity} IN ({placeholders}) AND grant_kind = 'manager' AND grant_ref_id = 0 AND rules IS NULL AND status = 'approved') t WHERE t.c = ?"), params)));
     steps.push(DbTransactionStep::Query(DbStatement::with_transaction_params(
         "SELECT ? AS humans_live, ? AS managers_live", vec![
             DbTransactionParam::query_result(human_guard, 0, "ok"),

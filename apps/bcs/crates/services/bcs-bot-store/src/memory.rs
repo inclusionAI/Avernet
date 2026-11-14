@@ -37,6 +37,9 @@ pub mod permission_profile;
 /// Trusted memory registration composites (Task 4).
 #[path = "memory_registration_ownership.rs"]
 pub(super) mod registration_ownership;
+/// Provider tombstone reactivation with a fresh authority snapshot.
+#[path = "memory_provider_reactivation.rs"]
+mod provider_reactivation;
 /// Memory projection of the atomic retirement
 /// (Task 4, spec §7.1) on the SAME shared state.
 #[path = "memory_retirement.rs"]

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
+use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue};
 use bcs_domain::{ActorKind, BotCapabilities, Organization, OrganizationMember};
 use bcs_service_api::port::repo::{
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
@@ -148,17 +148,27 @@ impl OrganizationRepoPort for DbOrganizationStore {
         assignments.push(self.flavor.set_modified_now());
         params.push(DbValue::from(input.env.as_str()));
         params.push(DbValue::from(input.code.as_str()));
-        self.execute(
-            "update_organization",
-            DbStatement::with_params(
-                format!(
-                    "UPDATE bcs_organizations SET {} WHERE env = ? AND code = ?",
-                    assignments.join(", ")
-                ),
-                params,
+        let mut steps = vec![DbTransactionStep::Execute(DbStatement::with_params(
+            format!(
+                "UPDATE bcs_organizations SET {} WHERE env = ? AND code = ?",
+                assignments.join(", ")
             ),
-        )
-        .await?;
+            params,
+        ))];
+        if input.disabled == Some(true) {
+            steps.push(DbTransactionStep::Execute(DbStatement::with_params(
+                format!(
+                    "UPDATE bcs_organization_members SET disabled = 1, {} \
+                     WHERE env = ? AND organization_code = ?",
+                    self.flavor.set_modified_now()
+                ),
+                vec![DbValue::from(input.env.as_str()), DbValue::from(input.code.as_str())],
+            )));
+        }
+        self.db
+            .transaction(steps)
+            .await
+            .map_err(|error| service_db_error("update_organization", error))?;
         self.get_organization(&input.env, &input.code).await
     }
 
@@ -223,6 +233,23 @@ impl OrganizationRepoPort for DbOrganizationStore {
             .ok_or_else(|| ServiceError::InternalError(
                 "organization db upsert_member: upserted row not found".to_string(),
             ))
+    }
+
+    async fn has_active_membership_by_bot(
+        &self,
+        env: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<bool> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT 1 AS active_member FROM bcs_organization_members \
+                 WHERE env = ? AND bot_uuid = ? AND disabled = 0 LIMIT 1",
+                vec![DbValue::from(env), DbValue::from(bot_uuid)],
+            ))
+            .await
+            .map_err(|error| service_db_error("has_active_membership_by_bot", error))?;
+        Ok(!rows.is_empty())
     }
 
     async fn get_member(

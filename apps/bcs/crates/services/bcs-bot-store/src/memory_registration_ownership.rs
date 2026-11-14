@@ -731,7 +731,7 @@ mod initial_manager_tests {
 #[path = "memory_registration_concurrency_tests.rs"]
 mod concurrency_tests;
 
-fn stage_initial_managers(
+pub(super) fn stage_initial_managers(
     bots: &std::collections::BTreeMap<String, RegisteredBotInner>,
     deleted: &std::collections::HashSet<String>, state: &mut MemoryAuthorityState,
     env: &str, bot_id: &str, initial_managers: &[String],
