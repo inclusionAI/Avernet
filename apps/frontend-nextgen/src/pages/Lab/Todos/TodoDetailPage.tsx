@@ -192,6 +192,7 @@ export default function TodoDetailPage() {
                 {view === 'interactions' ? (
                   <TodoInteractionPanel
                     interactions={detail.interactions}
+                    botName={todo.botName || todo.botId}
                     enabled={canInteractWithTodo(todo.status)}
                     loading={detail.mutationLoading}
                     onSubmit={detail.interact}

@@ -7,6 +7,7 @@ import { useState } from 'react';
 
 interface TodoInteractionPanelProps {
   interactions: TodoEvent[];
+  botName?: string;
   enabled: boolean;
   loading: boolean;
   onSubmit: (message: string) => Promise<boolean>;
@@ -18,7 +19,23 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
 }
 
-export function TodoInteractionPanel({ interactions, enabled, loading, onSubmit }: TodoInteractionPanelProps) {
+function actorLabel(item: TodoEvent, botName?: string): string {
+  if (item.actorType !== 'bot') return '我';
+  return botName?.trim() || item.actorId?.trim() || 'Bot';
+}
+
+function actionLabel(item: TodoEvent): string {
+  if (item.actorType === 'bot') return '完成结果';
+  return item.eventType === 'task.created' ? '发起需求' : '我的反馈';
+}
+
+function interactionContent(item: TodoEvent): string {
+  if (item.content) return item.content;
+  if (item.eventType === 'task.completed') return '本轮执行已完成，但未上报文本结果。';
+  return item.eventType;
+}
+
+export function TodoInteractionPanel({ interactions, botName, enabled, loading, onSubmit }: TodoInteractionPanelProps) {
   const [message, setMessage] = useState('');
   const submit = async () => {
     const success = await onSubmit(message);
@@ -34,11 +51,18 @@ export function TodoInteractionPanel({ interactions, enabled, loading, onSubmit 
               key={item.eventId || `${item.executionId}-${item.eventSeq}`}
               className="rounded-xl border border-border bg-card p-3"
             >
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{item.actorType === 'bot' ? 'Bot' : '我'}</span>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="max-w-56 truncate font-medium text-foreground">{actorLabel(item, botName)}</span>
+                  <span className="inline-flex shrink-0 rounded-md bg-muted/70 px-2 py-0.5">
+                    {actionLabel(item)}
+                  </span>
+                </span>
                 <span>{formatDateTime(item.createdAt)}</span>
               </div>
-              <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-5 text-foreground">{item.content}</p>
+              <p className="m-0 mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">
+                {interactionContent(item)}
+              </p>
             </Card>
           ))}
         </div>

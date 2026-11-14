@@ -144,6 +144,12 @@ beforeEach(() => {
   resetStore();
   mockedService.loadTodo.mockResolvedValue(todo);
   mockedService.loadTodoInteractions.mockResolvedValue([
+    event(1, { eventType: 'task.created', actorType: 'human', content: '整理三款产品的定价与功能矩阵' }),
+    event(3, {
+      eventType: 'task.completed',
+      actorType: 'bot',
+      content: '三款产品的定价与功能矩阵已完成整理，数据来源已补充。',
+    }),
     event(4, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoEvents.mockResolvedValue([
@@ -179,7 +185,14 @@ describe('TodoDetailPage', () => {
     await screen.findByText('开始采集竞品资料');
 
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
-    expect(await screen.findByText('请补充价格来源')).toBeInTheDocument();
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    expect(within(interactionView).getByText('数据分析助手')).toBeInTheDocument();
+    expect(within(interactionView).getByText('发起需求')).toBeInTheDocument();
+    expect(within(interactionView).getByText('完成结果')).toBeInTheDocument();
+    expect(
+      within(interactionView).getByText('三款产品的定价与功能矩阵已完成整理，数据来源已补充。'),
+    ).toBeInTheDocument();
+    expect(await within(interactionView).findByText('请补充价格来源')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('告诉 Bot 需要补充或修改的内容'), {
       target: { value: ' 补充价格来源 ' },
     });
