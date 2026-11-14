@@ -106,6 +106,16 @@ class TodoScheduler(LifecycleBase):
             processed += result[1]
 
             if not lease_lost.is_set():
+                pending_acceptance = await self._list(TodoStatus.PENDING_ACCEPTANCE)
+                result = await self._process(
+                    pending_acceptance,
+                    self._reconcile_acceptance,
+                    lease_lost,
+                )
+                errors += result[0]
+                processed += result[1]
+
+            if not lease_lost.is_set():
                 in_progress = await self._list(TodoStatus.IN_PROGRESS)
                 result = await self._process(
                     in_progress,
@@ -167,6 +177,11 @@ class TodoScheduler(LifecycleBase):
 
     async def _dispatch(self, todo: TodoRecord) -> TodoRecord:
         return await self._execution.dispatch_pending(todo_id=todo.todo_id)
+
+    async def _reconcile_acceptance(self, todo: TodoRecord) -> TodoRecord:
+        return await self._execution.reconcile_pending_acceptance(
+            todo_id=todo.todo_id
+        )
 
     async def _refresh(self, todo: TodoRecord) -> TodoRecord:
         result = await self._execution.refresh_in_progress(todo_id=todo.todo_id)

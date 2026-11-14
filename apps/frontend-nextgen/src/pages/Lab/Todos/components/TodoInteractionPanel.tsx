@@ -2,7 +2,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
 import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
-import type { TodoArtifact, TodoEvent } from '@/domain/todos/models';
+import type { TodoAcceptanceTarget, TodoArtifact, TodoEvent } from '@/domain/todos/models';
 import { cn } from '@/utils/cn';
 import { ArrowRight, Bot, Code2, FileText, Link2, MessageSquarePlus, Pause, Send } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -17,6 +17,13 @@ interface TodoInteractionPanelProps {
   humanAvatarUrl?: string;
   enabled: boolean;
   loading: boolean;
+  rejectionMode: boolean;
+  selectedTargets: TodoAcceptanceTarget[];
+  rejectionMessage: string;
+  onToggleTarget: (target: TodoAcceptanceTarget) => void;
+  onRejectionMessageChange: (message: string) => void;
+  onCancelRejection: () => void;
+  onSubmitRejection: () => Promise<void> | void;
   onReadArtifact: (artifactId: string, disposition: 'inline' | 'attachment') => Promise<Blob>;
   onSubmit: (message: string) => Promise<boolean>;
 }
@@ -37,10 +44,35 @@ function eventKey(item: TodoEvent): string {
   return item.eventId || `${item.executionId}-${item.eventSeq}`;
 }
 
+function payloadContent(item: TodoEvent): string {
+  return typeof item.payload.content === 'string' ? item.payload.content : '';
+}
+
 function interactionContent(item: TodoEvent): string {
   if (item.content) return item.content;
+  const content = payloadContent(item);
+  if (content) return content;
   if (item.eventType === 'task.completed') return '本轮执行已完成，但未上报文本结果。';
   return item.eventType;
+}
+
+function rejectionTargetFloors(item: TodoEvent): number[] {
+  if (item.eventType !== 'task.rejected' || !Array.isArray(item.payload.targets)) return [];
+  return item.payload.targets
+    .map((target) => {
+      if (!target || typeof target !== 'object') return null;
+      const floor = (target as Record<string, unknown>).floor;
+      return typeof floor === 'number' && Number.isInteger(floor) && floor > 0 ? floor : null;
+    })
+    .filter((floor): floor is number => floor !== null)
+    .sort((left, right) => left - right);
+}
+
+function selectedFloors(targets: TodoAcceptanceTarget[]): string {
+  return [...targets]
+    .sort((left, right) => left.floor - right.floor)
+    .map((target) => `f${target.floor}`)
+    .join('、');
 }
 
 function compareEvents(left: TodoEvent, right: TodoEvent): number {
@@ -67,7 +99,11 @@ function buildEntries(
 
   [...stream.values()].sort(compareEvents).forEach((item) => {
     const key = eventKey(item);
-    if (item.eventType === 'task.created' || item.eventType === 'user_interaction.posted') {
+    if (
+      item.eventType === 'task.created' ||
+      item.eventType === 'user_interaction.posted' ||
+      item.eventType === 'task.rejected'
+    ) {
       entries.push({ kind: 'message', id: `message-${key}`, event: item });
       return;
     }
@@ -141,15 +177,26 @@ function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'text' }>)
   };
 }
 
-function QuestionMarker({ active, onClick }: { active: boolean; onClick: () => void }) {
+function QuestionMarker({
+  active,
+  enabled,
+  floor,
+  onClick,
+}: {
+  active: boolean;
+  enabled: boolean;
+  floor: number;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
-      aria-label={active ? '取消问题点标记' : '标记为问题点'}
+      aria-label={active ? `取消 f${floor} 问题点标记` : `标记 f${floor} 为问题点`}
       aria-pressed={active}
+      disabled={!enabled}
       className={cn(
         'h-full min-h-12 w-1 rounded-full border-0 p-0 transition-colors',
-        active ? 'bg-warning' : 'bg-transparent hover:bg-muted-foreground/25',
+        active ? 'bg-destructive' : enabled ? 'bg-transparent hover:bg-destructive/35' : 'bg-transparent',
       )}
       onClick={onClick}
     />
@@ -211,11 +258,17 @@ export function TodoInteractionPanel({
   humanAvatarUrl,
   enabled,
   loading,
+  rejectionMode,
+  selectedTargets,
+  rejectionMessage,
+  onToggleTarget,
+  onRejectionMessageChange,
+  onCancelRejection,
+  onSubmitRejection,
   onReadArtifact,
   onSubmit,
 }: TodoInteractionPanelProps) {
   const [message, setMessage] = useState('');
-  const [questionPoints, setQuestionPoints] = useState<Set<string>>(() => new Set());
   const [busyArtifactId, setBusyArtifactId] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const resolvedBotName = botName?.trim() || botId || 'Bot';
@@ -223,18 +276,15 @@ export function TodoInteractionPanel({
     () => buildEntries(interactions, events, artifacts, resolvedBotName),
     [artifacts, events, interactions, resolvedBotName],
   );
+  const selectedTargetKeys = useMemo(
+    () => new Set(selectedTargets.map((target) => `${target.kind}:${target.id}`)),
+    [selectedTargets],
+  );
+  const floors = selectedFloors(selectedTargets);
 
   const submit = async () => {
     const success = await onSubmit(message);
     if (success) setMessage('');
-  };
-  const toggleQuestionPoint = (id: string) => {
-    setQuestionPoints((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
   const openFileArtifact = async (artifact: Extract<TodoArtifact, { kind: 'file' }>) => {
     setBusyArtifactId(artifact.artifactId);
@@ -263,16 +313,17 @@ export function TodoInteractionPanel({
         <MessageSquarePlus className="size-5 text-foreground" aria-hidden />
         <h2 className="m-0 text-lg font-semibold text-foreground">互动</h2>
         <span className="text-sm text-muted-foreground">({entries.length})</span>
-        <span className="ml-2 text-sm text-muted-foreground">· 点楼层左侧竖条标记为问题点</span>
+        {rejectionMode ? <span className="ml-2 text-sm text-destructive">· 点楼层左侧竖条标记问题点</span> : null}
       </div>
 
       {entries.length > 0 ? (
         <ol className="m-0 list-none p-0">
           {entries.map((entry, index) => {
+            const floor = index + 1;
             const divider = index < entries.length - 1 ? 'border-b border-divider' : '';
             if (entry.kind === 'notice') {
               return (
-                <li key={entry.id} className={cn('py-5', divider)}>
+                <li key={entry.id} className={cn('py-5', divider)} data-floor={floor}>
                   <NoticeRow entry={entry} />
                 </li>
               );
@@ -280,11 +331,19 @@ export function TodoInteractionPanel({
 
             if (entry.kind === 'message') {
               const actor = entry.event.actorType === 'bot' ? 'bot' : 'human';
+              const target: TodoAcceptanceTarget = { kind: 'event', id: entry.event.eventId, floor };
+              const rejectionFloors = rejectionTargetFloors(entry.event);
               return (
-                <li key={entry.id} className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}>
+                <li
+                  key={entry.id}
+                  className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}
+                  data-floor={floor}
+                >
                   <QuestionMarker
-                    active={questionPoints.has(entry.id)}
-                    onClick={() => toggleQuestionPoint(entry.id)}
+                    active={selectedTargetKeys.has(`event:${entry.event.eventId}`)}
+                    enabled={rejectionMode}
+                    floor={floor}
+                    onClick={() => onToggleTarget(target)}
                   />
                   <article className="min-w-0">
                     <ActorHeader
@@ -295,9 +354,19 @@ export function TodoInteractionPanel({
                       humanName={humanName}
                       humanAvatarUrl={humanAvatarUrl}
                     />
-                    <p className="m-0 mt-3 whitespace-pre-wrap break-words pl-[52px] text-sm leading-6 text-foreground">
-                      {interactionContent(entry.event)}
-                    </p>
+                    <div className="pl-[52px]">
+                      {entry.event.eventType === 'task.rejected' ? (
+                        <p className="m-0 mt-3 text-xs font-medium text-destructive">验收不通过</p>
+                      ) : null}
+                      <p className="m-0 mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                        {interactionContent(entry.event)}
+                      </p>
+                      {rejectionFloors.length > 0 ? (
+                        <p className="m-0 mt-2 text-xs text-muted-foreground">
+                          问题楼层：{rejectionFloors.map((item) => `f${item}`).join('、')}
+                        </p>
+                      ) : null}
+                    </div>
                   </article>
                 </li>
               );
@@ -305,6 +374,7 @@ export function TodoInteractionPanel({
 
             const presentation = artifactPresentation(entry.artifact);
             const fileArtifact = entry.artifact.kind === 'file' ? entry.artifact : null;
+            const target: TodoAcceptanceTarget = { kind: 'artifact', id: entry.artifact.artifactId, floor };
             const artifactCard = (
               <div className="group flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left text-foreground transition-colors hover:border-foreground/20 hover:bg-muted/20">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
@@ -314,14 +384,23 @@ export function TodoInteractionPanel({
                   <span className="block truncate text-sm font-semibold">{presentation.title}</span>
                   <span className="mt-0.5 block truncate text-xs text-muted-foreground">{presentation.meta}</span>
                 </span>
-                <ArrowRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+                <ArrowRight
+                  className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
               </div>
             );
             return (
-              <li key={entry.id} className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}>
+              <li
+                key={entry.id}
+                className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}
+                data-floor={floor}
+              >
                 <QuestionMarker
-                  active={questionPoints.has(entry.id)}
-                  onClick={() => toggleQuestionPoint(entry.id)}
+                  active={selectedTargetKeys.has(`artifact:${entry.artifact.artifactId}`)}
+                  enabled={rejectionMode}
+                  floor={floor}
+                  onClick={() => onToggleTarget(target)}
                 />
                 <article className="min-w-0">
                   <ActorHeader
@@ -344,7 +423,12 @@ export function TodoInteractionPanel({
                         {artifactCard}
                       </button>
                     ) : (
-                      <a href={presentation.href || '#'} target="_blank" rel="noreferrer" className="block no-underline">
+                      <a
+                        href={presentation.href || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block no-underline"
+                      >
                         {artifactCard}
                       </a>
                     )}
@@ -365,7 +449,39 @@ export function TodoInteractionPanel({
       ) : null}
 
       <div className="border-t border-divider pt-5">
-        {enabled ? (
+        {rejectionMode ? (
+          <div className="space-y-3 rounded-xl border border-destructive/35 bg-destructive/5 p-4">
+            <p className="m-0 text-xs text-muted-foreground">
+              {floors ? `已选中问题楼层：${floors}` : '请先标记有问题的互动楼层'}
+            </p>
+            <Textarea
+              value={rejectionMessage}
+              onChange={(event) => onRejectionMessageChange(event.target.value)}
+              placeholder="填写完整返工要求"
+              rows={4}
+              disabled={loading}
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="ghost"
+                className="h-8 rounded-lg px-4 text-xs"
+                onClick={onCancelRejection}
+                disabled={loading}
+              >
+                取消
+              </Button>
+              <Button
+                variant="outline"
+                className="h-8 rounded-lg px-4 text-xs"
+                onClick={() => void onSubmitRejection()}
+                loading={loading}
+                disabled={!rejectionMessage.trim() || selectedTargets.length === 0}
+              >
+                提交并退回返工
+              </Button>
+            </div>
+          </div>
+        ) : enabled ? (
           <div className="space-y-2">
             <Textarea
               value={message}

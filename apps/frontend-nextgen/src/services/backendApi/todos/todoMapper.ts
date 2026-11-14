@@ -70,6 +70,7 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
     status: status || undefined,
     createdAt: stringValue(dto.created_at),
     artifacts,
+    payload: recordValue(dto.payload),
   };
 }
 

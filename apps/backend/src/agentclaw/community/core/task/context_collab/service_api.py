@@ -157,5 +157,10 @@ class ContextCollabServiceProtocol(Protocol):
         context: ActorContext,
     ) -> ContextCollabStatusProjection: ...
     def get_status(
-        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
+        self,
+        collab_context_id: str,
+        *,
+        trunk_events: bool,
+        context: ActorContext,
+        include_event_payload: bool = False,
     ) -> ContextCollabStatusProjection: ...

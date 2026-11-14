@@ -122,6 +122,7 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     status: 'in_progress',
     createdAt: `2026-11-08T0${eventSeq}:12:00Z`,
     artifacts: [],
+    payload: {},
     ...overrides,
   };
 }
@@ -262,25 +263,147 @@ describe('TodoDetailPage', () => {
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
 
-  it('事件视图内完成验收，拒绝时不调用 Run', async () => {
+  it('拒绝验收切到互动标记楼层，草稿跨页保留并提交完整决策', async () => {
     mockedService.acceptTodo.mockResolvedValue(todo);
     render(<TodoDetailPage />);
     await screen.findByText('发起待办：Q3 竞品分析');
 
-    const acceptance = screen.getByRole('region', { name: '待办验收' });
-    fireEvent.click(within(acceptance).getByRole('button', { name: '验收不通过' }));
-    fireEvent.change(within(acceptance).getByPlaceholderText('填写需要 Bot 补充或修改的内容'), {
-      target: { value: ' 请修改 ' },
-    });
-    fireEvent.click(within(acceptance).getByRole('button', { name: '提交问题' }));
-
-    await waitFor(() =>
-      expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
-        verdict: 'rejected',
-        message: '请修改',
-      }),
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
     );
+
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const feedback = within(interactionView).getByText('请补充价格来源');
+    const feedbackFloor = feedback.closest('li') as HTMLElement;
+    expect(feedbackFloor).toHaveAttribute('data-floor', '8');
+    const marker = within(feedbackFloor).getByRole('button', { name: '标记 f8 为问题点' });
+    fireEvent.click(marker);
+    expect(marker).toHaveAttribute('aria-pressed', 'true');
+    expect(marker).toHaveClass('bg-destructive');
+
+    fireEvent.change(within(interactionView).getByPlaceholderText('填写完整返工要求'), {
+      target: { value: ' 请修正产品 B 的企业版价格 ' },
+    });
+    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+
+    const acceptance = screen.getByRole('region', { name: '待办验收' });
+    expect(within(acceptance).getByText('已选中问题楼层：f8')).toBeInTheDocument();
+    expect(within(acceptance).getByPlaceholderText('填写完整返工要求')).toHaveValue(' 请修正产品 B 的企业版价格 ');
+    fireEvent.click(within(acceptance).getByRole('button', { name: '提交并退回返工' }));
+
+    await waitFor(() => expect(mockedService.acceptTodo).toHaveBeenCalledTimes(1));
+    const input = mockedService.acceptTodo.mock.calls[0][1];
+    expect(input).toEqual({
+      decisionId: expect.stringMatching(/^decision_/),
+      verdict: 'rejected',
+      message: '请修正产品 B 的企业版价格',
+      targets: [{ kind: 'event', id: 'event-4', floor: 8 }],
+    });
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+  });
+
+  it('拒绝提交失败后保留草稿并复用同一个 decision id，取消时清空', async () => {
+    mockedService.acceptTodo.mockRejectedValueOnce(new Error('temporary')).mockResolvedValueOnce(todo);
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
+    );
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const feedbackFloor = within(interactionView).getByText('请补充价格来源').closest('li') as HTMLElement;
+    fireEvent.click(within(feedbackFloor).getByRole('button', { name: '标记 f8 为问题点' }));
+    fireEvent.change(within(interactionView).getByPlaceholderText('填写完整返工要求'), {
+      target: { value: '返工说明' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '提交并退回返工' }));
+    await waitFor(() => expect(mockedService.acceptTodo).toHaveBeenCalledTimes(1));
+    const firstDecisionId = mockedService.acceptTodo.mock.calls[0][1].decisionId;
+    expect(within(interactionView).getByPlaceholderText('填写完整返工要求')).toHaveValue('返工说明');
+
+    fireEvent.click(within(interactionView).getByRole('button', { name: '提交并退回返工' }));
+    await waitFor(() => expect(mockedService.acceptTodo).toHaveBeenCalledTimes(2));
+    expect(mockedService.acceptTodo.mock.calls[1][1].decisionId).toBe(firstDecisionId);
+    expect(within(interactionView).queryByPlaceholderText('填写完整返工要求')).not.toBeInTheDocument();
+    expect(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容')).toBeInTheDocument();
+  });
+
+  it('取消拒绝清空说明和问题目标', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
+    );
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    const feedbackFloor = within(interactionView).getByText('请补充价格来源').closest('li') as HTMLElement;
+    fireEvent.click(within(feedbackFloor).getByRole('button', { name: '标记 f8 为问题点' }));
+    fireEvent.change(within(interactionView).getByPlaceholderText('填写完整返工要求'), {
+      target: { value: '返工说明' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '取消' }));
+
+    expect(within(interactionView).queryByPlaceholderText('填写完整返工要求')).not.toBeInTheDocument();
+    expect(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
+    );
+    expect(screen.getByText('请先标记有问题的互动楼层')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('填写完整返工要求')).toHaveValue('');
+  });
+
+  it('验收通过提交无目标的稳定决策', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+
+    fireEvent.click(within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收通过' }));
+
+    await waitFor(() => expect(mockedService.acceptTodo).toHaveBeenCalledTimes(1));
+    expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
+      decisionId: expect.stringMatching(/^decision_/),
+      verdict: 'approved',
+      targets: [],
+      message: undefined,
+    });
+  });
+
+  it('事件页展示 20 字拒绝摘要，互动页展示完整返工说明和问题楼层', async () => {
+    const rejection = '请修正产品 B 的企业版价格，并补充官网来源、更新时间和无法确认项的风险说明。';
+    const preview = `${Array.from(rejection).slice(0, 20).join('')}…`;
+    const rejectedEvent = event(5, {
+      eventType: 'task.rejected',
+      actorType: 'human',
+      content: rejection,
+      payload: {
+        content: rejection,
+        targets: [
+          { kind: 'event', id: 'event-3', floor: 3 },
+          { kind: 'artifact', id: 'artifact-file', floor: 4 },
+        ],
+      },
+    });
+    mockedService.loadTodoEvents.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      rejectedEvent,
+      event(6, { eventType: 'task.accepted', actorType: 'human', content: '' }),
+    ]);
+    mockedService.loadTodoInteractions.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      rejectedEvent,
+    ]);
+
+    render(<TodoDetailPage />);
+
+    const eventView = await screen.findByRole('region', { name: '待办事件' });
+    expect(within(eventView).getByText(`验收不通过：${preview}`)).toBeInTheDocument();
+    expect(within(eventView).getByText('验收通过')).toBeInTheDocument();
+    expect(within(eventView).queryByText(rejection)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+    const interactionView = screen.getByRole('region', { name: '待办互动' });
+    expect(within(interactionView).getByText(rejection)).toBeInTheDocument();
+    expect(within(interactionView).getByText('问题楼层：f3、f4')).toBeInTheDocument();
   });
 
   it('产物视图使用独立产物接口展示四类产物，并支持文件下载', async () => {
@@ -308,11 +431,7 @@ describe('TodoDetailPage', () => {
 
     fireEvent.click(within(artifactView).getByRole('button', { name: '下载' }));
     await waitFor(() =>
-      expect(mockedService.downloadTodoArtifactContent).toHaveBeenCalledWith(
-        'todo-1',
-        'artifact-file',
-        'attachment',
-      ),
+      expect(mockedService.downloadTodoArtifactContent).toHaveBeenCalledWith('todo-1', 'artifact-file', 'attachment'),
     );
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(clickSpy).toHaveBeenCalled();
@@ -369,13 +488,16 @@ describe('TodoDetailPage', () => {
     expect(artifactCard).toHaveClass('rounded-xl', 'border', 'border-border', 'bg-card');
     expect(within(artifactView).getByText('已完成三款产品的定价对比。')).toHaveClass('text-xs', 'leading-5');
 
-    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+    fireEvent.click(
+      within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
+    );
     const interactionView = screen.getByRole('region', { name: '待办互动' });
     const interactionTitle = within(interactionView).getByRole('heading', { name: '互动' });
     const feedback = within(interactionView).getByText('请补充价格来源');
     const feedbackFloor = feedback.closest('li');
-    const marker = within(feedbackFloor as HTMLElement).getByRole('button', { name: '标记为问题点' });
-    const sendButton = within(interactionView).getByRole('button', { name: '发送互动' });
+    const marker = within(feedbackFloor as HTMLElement).getByRole('button', { name: '标记 f8 为问题点' });
+    const rejectButton = within(interactionView).getByRole('button', { name: '提交并退回返工' });
 
     expect(interactionTitle).toHaveClass('text-lg', 'font-semibold');
     expect(feedback).toHaveClass('text-sm', 'leading-6');
@@ -383,7 +505,7 @@ describe('TodoDetailPage', () => {
     expect(marker).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(marker);
     expect(marker).toHaveAttribute('aria-pressed', 'true');
-    expect(sendButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
+    expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
   });
 
   it('使用居中紧凑详情阅读列', async () => {

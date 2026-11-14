@@ -20,6 +20,8 @@ from agentclaw.community.core.task.todos.errors import (
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
+    TodoAcceptanceTarget,
+    TodoAcceptanceTargetKind,
     TodoPage,
     TodoRecord,
     TodoStatus,
@@ -177,7 +179,7 @@ class FakeTodos:
         target = (
             TodoStatus.COMPLETED
             if kwargs["verdict"] is AcceptanceVerdict.APPROVED
-            else TodoStatus.PENDING_ACCEPTANCE
+            else TodoStatus.IN_PROGRESS
         )
         todo = replace(todo, status=target)
         self.todos[todo.todo_id] = todo
@@ -217,9 +219,7 @@ class FakeArtifacts:
     def list_artifacts(
         self, *, todo_id: str, actor_id: str, env: str | None
     ) -> tuple[TodoArtifactRecord, ...]:
-        self.calls.append(
-            {"todo_id": todo_id, "actor_id": actor_id, "env": env}
-        )
+        self.calls.append({"todo_id": todo_id, "actor_id": actor_id, "env": env})
         return self.artifacts
 
 
@@ -257,6 +257,7 @@ class FakeCollaboration:
             actor_type=request.actor_type,
             content=str(request.payload.get("content") or ""),
             context_version=current.context_version + 1,
+            payload=dict(request.payload),
         )
         self.contexts[collab_context_id] = replace(
             current,
@@ -285,9 +286,7 @@ def _artifact(
         execution_id="execution_1",
         artifact_name=f"artifact_{artifact_id}",
         artifact_kind=(
-            TodoArtifactKind.TEXT
-            if text is not None
-            else TodoArtifactKind.URL_LINK
+            TodoArtifactKind.TEXT if text is not None else TodoArtifactKind.URL_LINK
         ),
         content=content,
         content_hash=artifact_id,
@@ -665,53 +664,296 @@ async def test_create_interaction_rejects_non_pending_acceptance_without_reading
 
 
 @pytest.mark.parametrize(
-    "verdict,target",
+    "verdict,target,message,targets,event_type",
     [
-        ("approved", TodoStatus.COMPLETED),
-        ("rejected", TodoStatus.PENDING_ACCEPTANCE),
+        ("approved", TodoStatus.COMPLETED, "looks good", (), "task.accepted"),
+        (
+            "rejected",
+            TodoStatus.IN_PROGRESS,
+            "please revise",
+            (
+                TodoAcceptanceTarget(
+                    kind=TodoAcceptanceTargetKind.EVENT,
+                    target_id="event_2",
+                    floor=2,
+                ),
+            ),
+            "task.rejected",
+        ),
     ],
 )
-def test_submit_acceptance_checks_persisted_state_and_writes_only_a_side(
-    verdict, target
+def test_submit_acceptance_appends_decision_event_before_projecting_todo(
+    verdict, target, message, targets, event_type
 ):
     todo = _todo(
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, repository, _, _, collaboration, _ = _service(todos=(todo,))
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        contexts=(_context(),),
+    )
 
     updated = service.submit_acceptance(
         todo_id="todo_1",
         actor_id="user_1",
         verdict=verdict,
-        message="looks good",
+        decision_id="decision_1",
+        message=message,
+        targets=targets,
     )
 
     assert updated.status is target
-    assert collaboration.get_calls == []
-    assert collaboration.append_calls == []
+    assert collaboration.get_calls == [("context_todo_1", "user_1")]
+    context_id, request = collaboration.append_calls[0]
+    assert context_id == "context_todo_1"
+    assert request.event_kind == event_type
+    assert request.actor_id == "user_1"
+    assert request.actor_type == "human"
+    assert request.payload == {
+        "decision_id": "decision_1",
+        "todo_id": "todo_1",
+        "verdict": verdict,
+        "content": message,
+        "author_id": "user_1",
+        "targets": [
+            {"kind": item.kind.value, "id": item.target_id, "floor": item.floor}
+            for item in targets
+        ],
+    }
     assert repository.calls[-1] == {
         "operation": "record_acceptance",
         "todo_id": "todo_1",
+        "acceptance_id": "decision_1",
         "verdict": AcceptanceVerdict(verdict),
-        "message": "looks good",
+        "message": message,
         "author_id": "user_1",
     }
 
 
-def test_submit_acceptance_rejects_non_pending_acceptance():
-    service, repository, _, _, _, _ = _service(
-        todos=(_todo(status=TodoStatus.IN_PROGRESS),)
+def test_submit_acceptance_same_decision_id_reuses_event_without_duplicate_append():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        contexts=(_context(),),
     )
 
-    with pytest.raises(TodoStateConflictError):
+    first = service.submit_acceptance(
+        todo_id="todo_1",
+        actor_id="user_1",
+        verdict="approved",
+        decision_id="decision_1",
+        message="looks good",
+    )
+    second = service.submit_acceptance(
+        todo_id="todo_1",
+        actor_id="user_1",
+        verdict="approved",
+        decision_id="decision_1",
+        message="looks good",
+    )
+
+    assert first.status is TodoStatus.COMPLETED
+    assert second.status is TodoStatus.COMPLETED
+    assert len(collaboration.append_calls) == 1
+    acceptance_calls = [
+        call for call in repository.calls if call["operation"] == "record_acceptance"
+    ]
+    assert len(acceptance_calls) == 2
+    assert acceptance_calls[0] == acceptance_calls[1]
+
+
+def test_submit_acceptance_rejects_changed_payload_for_existing_decision_id():
+    event = _event(
+        4,
+        "task.accepted",
+        payload={
+            "decision_id": "decision_1",
+            "todo_id": "todo_1",
+            "verdict": "approved",
+            "content": "original",
+            "author_id": "user_1",
+            "targets": [],
+        },
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(
+            _todo(
+                status=TodoStatus.COMPLETED,
+                collab_context_id="context_todo_1",
+            ),
+        ),
+        contexts=(_context(events=(event,)),),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="decision_id"):
         service.submit_acceptance(
             todo_id="todo_1",
             actor_id="user_1",
             verdict="approved",
+            decision_id="decision_1",
+            message="changed",
+        )
+
+    assert collaboration.append_calls == []
+    assert all(call["operation"] != "record_acceptance" for call in repository.calls)
+
+
+def test_submit_acceptance_rejects_second_decision_in_same_acceptance_round():
+    event = _event(
+        4,
+        "task.accepted",
+        payload={
+            "decision_id": "decision_1",
+            "todo_id": "todo_1",
+            "verdict": "approved",
+            "content": "looks good",
+            "author_id": "user_1",
+            "targets": [],
+        },
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(
+            _todo(
+                status=TodoStatus.PENDING_ACCEPTANCE,
+                collab_context_id="context_todo_1",
+            ),
+        ),
+        contexts=(_context(events=(event,)),),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="already has"):
+        service.submit_acceptance(
+            todo_id="todo_1",
+            actor_id="user_1",
+            verdict="approved",
+            decision_id="decision_2",
+            message="also looks good",
+        )
+
+    assert collaboration.append_calls == []
+    assert all(call["operation"] != "record_acceptance" for call in repository.calls)
+
+
+def test_submit_acceptance_rejects_decision_id_from_prior_acceptance_round():
+    rejection = _event(
+        2,
+        "task.rejected",
+        content="revise enterprise pricing",
+        payload={
+            "decision_id": "decision_old",
+            "todo_id": "todo_1",
+            "verdict": "rejected",
+            "content": "revise enterprise pricing",
+            "author_id": "user_1",
+            "targets": [{"kind": "event", "id": "event_1", "floor": 1}],
+        },
+    )
+    context = _context(
+        events=(
+            _event(1, "task.completed"),
+            rejection,
+            _event(3, "task.started", actor_id="bot_1", actor_type="bot"),
+            _event(4, "task.completed", actor_id="bot_1", actor_type="bot"),
+        ),
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(
+            _todo(
+                status=TodoStatus.PENDING_ACCEPTANCE,
+                collab_context_id=context.collab_context_id,
+            ),
+        ),
+        contexts=(context,),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="earlier acceptance round"):
+        service.submit_acceptance(
+            todo_id="todo_1",
+            actor_id="user_1",
+            verdict="rejected",
+            decision_id="decision_old",
+            message="revise enterprise pricing",
+            targets=(
+                TodoAcceptanceTarget(
+                    kind=TodoAcceptanceTargetKind.EVENT,
+                    target_id="event_1",
+                    floor=1,
+                ),
+            ),
+        )
+
+    assert collaboration.append_calls == []
+    assert all(call["operation"] != "record_acceptance" for call in repository.calls)
+
+
+def test_submit_acceptance_can_retry_a_projection_after_b_append_succeeds():
+    todo = _todo(
+        status=TodoStatus.PENDING_ACCEPTANCE,
+        collab_context_id="context_todo_1",
+    )
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(todo,),
+        contexts=(_context(),),
+    )
+    original_record = repository.record_acceptance
+    failed_once = False
+
+    def fail_first_projection(**kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise RuntimeError("database unavailable")
+        return original_record(**kwargs)
+
+    repository.record_acceptance = fail_first_projection
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.submit_acceptance(
+            todo_id="todo_1",
+            actor_id="user_1",
+            verdict="approved",
+            decision_id="decision_1",
             message=None,
         )
 
+    updated = service.submit_acceptance(
+        todo_id="todo_1",
+        actor_id="user_1",
+        verdict="approved",
+        decision_id="decision_1",
+        message=None,
+    )
+
+    assert updated.status is TodoStatus.COMPLETED
+    assert len(collaboration.append_calls) == 1
+
+
+def test_submit_acceptance_rejects_non_pending_acceptance_without_decision_event():
+    context = _context(status="in_progress")
+    service, repository, _, _, collaboration, _ = _service(
+        todos=(
+            _todo(
+                status=TodoStatus.IN_PROGRESS,
+                collab_context_id=context.collab_context_id,
+            ),
+        ),
+        contexts=(context,),
+    )
+
+    with pytest.raises(TodoStateConflictError, match="pending acceptance"):
+        service.submit_acceptance(
+            todo_id="todo_1",
+            actor_id="user_1",
+            verdict="approved",
+            decision_id="decision_1",
+            message=None,
+        )
+
+    assert collaboration.append_calls == []
     assert all(call["operation"] != "record_acceptance" for call in repository.calls)
 
 

@@ -1,4 +1,5 @@
 import { Badge, Button, Card, Empty, Spin } from '@/components/ui';
+import type { TodoAcceptanceTarget } from '@/domain/todos/models';
 import { TODO_STATUS_CLASS, TODO_STATUS_LABEL, canInteractWithTodo } from '@/domain/todos/status';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
@@ -6,13 +7,19 @@ import { useTodoDetail } from '@/hooks/useTodoDetail';
 import { cn } from '@/utils/cn';
 import { history, useParams } from '@umijs/max';
 import { ArrowLeft, Bot, CalendarClock, ChevronDown, ChevronRight, FileText, History } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TodoAcceptanceActions } from './components/TodoAcceptanceActions';
 import { TodoArtifactList } from './components/TodoArtifactList';
 import { TodoEventTimeline } from './components/TodoEventTimeline';
 import { TodoInteractionPanel } from './components/TodoInteractionPanel';
 
 type DetailView = 'events' | 'interactions' | 'artifacts';
+
+function createDecisionId(): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  if (randomUuid) return `decision_${randomUuid.replaceAll('-', '')}`;
+  return `decision_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
 
 function formatDateTime(value?: string): string {
   if (!value) return '—';
@@ -64,8 +71,57 @@ export default function TodoDetailPage() {
   const { identity: humanIdentity } = useHumanIdentity();
   const [view, setView] = useState<DetailView>('events');
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [rejectionMode, setRejectionMode] = useState(false);
+  const [rejectionMessage, setRejectionMessage] = useState('');
+  const [selectedTargets, setSelectedTargets] = useState<TodoAcceptanceTarget[]>([]);
+  const [rejectionDecisionId, setRejectionDecisionId] = useState<string | null>(null);
+  const approvalDecisionId = useRef<string | null>(null);
   const detail = useTodoDetail(todoId || null);
   const todo = detail.selectedTodo;
+
+  useEffect(() => {
+    setRejectionMode(false);
+    setRejectionMessage('');
+    setSelectedTargets([]);
+    setRejectionDecisionId(null);
+    approvalDecisionId.current = null;
+  }, [todoId]);
+
+  const beginRejection = () => {
+    setRejectionMode(true);
+    setRejectionDecisionId((current) => current || createDecisionId());
+    setView('interactions');
+  };
+  const cancelRejection = () => {
+    setRejectionMode(false);
+    setRejectionMessage('');
+    setSelectedTargets([]);
+    setRejectionDecisionId(null);
+  };
+  const toggleRejectionTarget = (target: TodoAcceptanceTarget) => {
+    setSelectedTargets((current) => {
+      const existing = current.findIndex((item) => item.kind === target.kind && item.id === target.id);
+      if (existing >= 0) return current.filter((_, index) => index !== existing);
+      return [...current, target];
+    });
+  };
+  const submitRejection = async () => {
+    const decisionId = rejectionDecisionId || createDecisionId();
+    if (!rejectionDecisionId) setRejectionDecisionId(decisionId);
+    const success = await detail.accept({
+      decisionId,
+      verdict: 'rejected',
+      message: rejectionMessage,
+      targets: selectedTargets,
+    });
+    if (success) cancelRejection();
+  };
+  const approve = async () => {
+    const decisionId = approvalDecisionId.current || createDecisionId();
+    approvalDecisionId.current = decisionId;
+    const success = await detail.accept({ decisionId, verdict: 'approved', targets: [] });
+    if (success) approvalDecisionId.current = null;
+  };
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto bg-background">
@@ -185,7 +241,17 @@ export default function TodoDetailPage() {
                           className="absolute bottom-0 left-[11.5px] top-[-2.5rem] w-px bg-warning/35 sm:left-[141.5px]"
                         />
                         <div className="relative z-10">
-                          <TodoAcceptanceActions loading={detail.mutationLoading} onAccept={detail.accept} />
+                          <TodoAcceptanceActions
+                            loading={detail.mutationLoading}
+                            rejecting={rejectionMode}
+                            message={rejectionMessage}
+                            targets={selectedTargets}
+                            onBeginReject={beginRejection}
+                            onMessageChange={setRejectionMessage}
+                            onCancelReject={cancelRejection}
+                            onSubmitReject={submitRejection}
+                            onApprove={approve}
+                          />
                         </div>
                       </div>
                     ) : null}
@@ -203,6 +269,13 @@ export default function TodoDetailPage() {
                     humanAvatarUrl={humanIdentity?.avatarUrl}
                     enabled={canInteractWithTodo(todo.status)}
                     loading={detail.mutationLoading}
+                    rejectionMode={rejectionMode}
+                    selectedTargets={selectedTargets}
+                    rejectionMessage={rejectionMessage}
+                    onToggleTarget={toggleRejectionTarget}
+                    onRejectionMessageChange={setRejectionMessage}
+                    onCancelRejection={cancelRejection}
+                    onSubmitRejection={submitRejection}
                     onReadArtifact={detail.readArtifactContent}
                     onSubmit={detail.interact}
                   />

@@ -20,14 +20,7 @@ interface PresentedEvent {
 
 const EVENT_CONTENT_PREVIEW_LENGTH = 20;
 
-const STATUS_ONLY_EVENT_TYPES = new Set([
-  'task.assigned',
-  'task.started',
-  'task.accepted',
-  'task.rejected',
-  'task.cancelled',
-  'execution.status',
-]);
+const STATUS_ONLY_EVENT_TYPES = new Set(['task.assigned', 'task.started', 'task.cancelled', 'execution.status']);
 
 function formatDateTime(value: string): string {
   if (!value) return '—';
@@ -69,13 +62,18 @@ function presentEvent(event: TodoEvent, todoTitle: string, todoDescription?: str
   if (event.eventType === 'task.completed') {
     return { event, title: content ? '输出：文本结果' : '输出执行结果' };
   }
+  if (event.eventType === 'task.accepted') {
+    return { event, title: '验收通过' };
+  }
+  if (event.eventType === 'task.rejected') {
+    return { event, title: preview ? `验收不通过：${preview}` : '验收不通过' };
+  }
   if (STATUS_ONLY_EVENT_TYPES.has(event.eventType) || !content) return null;
   return { event, title: preview };
 }
 
 function isExternalLink(artifact: TodoEventArtifact): boolean {
-  const fileLike =
-    /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.name) || /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.url);
+  const fileLike = /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.name) || /\.[a-z0-9]{2,6}(?:$|[?#])/i.test(artifact.url);
   return !fileLike;
 }
 
@@ -98,7 +96,10 @@ function EventArtifact({ artifact }: { artifact: TodoEventArtifact }) {
           {externalLink ? '外部链接' : '文件产物'}
         </span>
       </span>
-      <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+      <ArrowRight
+        className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        aria-hidden
+      />
     </a>
   );
 }

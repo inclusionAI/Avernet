@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -12,6 +12,7 @@ MAX_DESCRIPTION_LENGTH = 4_000
 MAX_BOT_ID_LENGTH = 256
 MAX_BOT_NAME_LENGTH = 256
 MAX_ACCEPTANCE_ID_LENGTH = 64
+MAX_ACCEPTANCE_TARGETS = 100
 MAX_MESSAGE_LENGTH = 4_000
 MAX_COLLAB_CONTEXT_ID_LENGTH = 256
 MAX_EVENT_ID_LENGTH = 256
@@ -33,6 +34,20 @@ class TodoStatus(StrEnum):
 class AcceptanceVerdict(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class TodoAcceptanceTargetKind(StrEnum):
+    EVENT = "event"
+    ARTIFACT = "artifact"
+
+
+@dataclass(frozen=True)
+class TodoAcceptanceTarget:
+    """Stable problem reference selected from the interaction projection."""
+
+    kind: TodoAcceptanceTargetKind
+    target_id: str
+    floor: int
 
 
 @dataclass(frozen=True)
@@ -80,3 +95,4 @@ class TodoEventRecord:
     status: str | None
     artifacts: tuple[TodoArtifactRecord, ...]
     created_at: str
+    payload: dict[str, object] = field(default_factory=dict)

@@ -58,6 +58,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             content=request.objective,
             context_version=1,
             status="active",
+            payload={"content": request.objective},
         )
         local = _LocalContext(
             request=request,
@@ -106,6 +107,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             context_version=local.version,
             status="active",
             execution_id=f"run_{collab_context_id}",
+            payload={"run_id": f"run_{collab_context_id}"},
         )
         local.events.append(event)
         local.current_event_id = event.event_id
@@ -147,8 +149,11 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             ),
             None,
         )
-        if trigger is None or trigger.event_type != "user_interaction.posted":
-            raise TodoCollaborationError("Context resume requires an interaction event")
+        if trigger is None or trigger.event_type not in {
+            "user_interaction.posted",
+            "task.rejected",
+        }:
+            raise TodoCollaborationError("Context resume requires Human work")
         next_version = local.version + 1
         self.append_event(
             collab_context_id=collab_context_id,
@@ -201,6 +206,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
                 or request.payload.get("execution_id")
                 or ""
             ),
+            payload=dict(request.payload),
         )
         local.events.append(event)
         local.current_event_id = event.event_id
@@ -221,6 +227,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             context_version=local.version,
             status="active",
             execution_id=f"run_{collab_context_id}",
+            payload={"run_id": f"run_{collab_context_id}"},
         )
         local.events.append(event)
         local.current_event_id = event.event_id
@@ -269,6 +276,7 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
         context_version: int,
         status: str,
         execution_id: str = "",
+        payload: dict[str, object] | None = None,
     ) -> TodoCollaborationEvent:
         return TodoCollaborationEvent(
             event_id=f"event_{next(self._ids)}",
@@ -282,4 +290,5 @@ class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
             status=status,
             artifacts=(),
             created_at="2026-11-10T00:00:00Z",
+            payload=dict(payload or {}),
         )

@@ -37,6 +37,8 @@ from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_TITLE_LENGTH,
+    TodoAcceptanceTarget,
+    TodoAcceptanceTargetKind,
 )
 from agentclaw.community.di import Injected
 
@@ -46,6 +48,7 @@ from .schemas import (
     SubmitTodoAcceptanceRequest,
     TodoArtifactRecordResponse,
     TodoEventResponse,
+    TodoInteractionResponse,
     TodoResponse,
     TodoStatusSchema,
 )
@@ -201,7 +204,10 @@ async def list_todo_events(
     return envelope([TodoEventResponse.from_record(item) for item in events], request)
 
 
-@router.get("/{todo_id}/interactions", response_model=Envelope[list[TodoEventResponse]])
+@router.get(
+    "/{todo_id}/interactions",
+    response_model=Envelope[list[TodoInteractionResponse]],
+)
 @envelope_errors
 async def list_todo_interactions(
     todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
@@ -209,7 +215,7 @@ async def list_todo_interactions(
     principal: PrincipalDep,
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
-) -> Envelope[list[TodoEventResponse]]:
+) -> Envelope[list[TodoInteractionResponse]]:
     """Return the Human and Bot conversation projection for one Todo."""
     actor_id = call_user(user_id=user_id, principal=principal)
     events = await run_in_threadpool(
@@ -217,10 +223,14 @@ async def list_todo_interactions(
         todo_id=todo_id,
         actor_id=actor_id,
     )
-    return envelope([TodoEventResponse.from_record(item) for item in events], request)
+    return envelope(
+        [TodoInteractionResponse.from_record(item) for item in events], request
+    )
 
 
-@router.post("/{todo_id}/interactions", response_model=Envelope[TodoEventResponse])
+@router.post(
+    "/{todo_id}/interactions", response_model=Envelope[TodoInteractionResponse]
+)
 @envelope_errors
 async def create_todo_interaction(
     todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
@@ -230,7 +240,7 @@ async def create_todo_interaction(
     principal: PrincipalDep,
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
     service: TodoServiceProtocol = Injected(TodoServiceProtocol),
-) -> Envelope[TodoEventResponse]:
+) -> Envelope[TodoInteractionResponse]:
     """Append one Human interaction event while the Todo awaits acceptance."""
     actor_id = call_user(user_id=user_id, principal=principal)
     event = await service.create_interaction(
@@ -240,7 +250,7 @@ async def create_todo_interaction(
         message=body.message,
     )
     response.status_code = 201
-    return created(TodoEventResponse.from_record(event), request)
+    return created(TodoInteractionResponse.from_record(event), request)
 
 
 @router.post("/{todo_id}/acceptance", response_model=Envelope[TodoResponse])
@@ -260,7 +270,16 @@ async def submit_todo_acceptance(
         todo_id=todo_id,
         actor_id=actor_id,
         verdict=body.verdict,
+        decision_id=body.decision_id,
         message=body.message,
+        targets=tuple(
+            TodoAcceptanceTarget(
+                kind=TodoAcceptanceTargetKind(target.kind),
+                target_id=target.id,
+                floor=target.floor,
+            )
+            for target in body.targets
+        ),
     )
     return envelope(TodoResponse.from_record(result), request)
 

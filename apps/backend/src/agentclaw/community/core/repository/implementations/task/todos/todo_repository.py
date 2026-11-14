@@ -186,16 +186,54 @@ class TodoRepository(TodoRepositoryProtocol):
         self,
         *,
         todo_id: str,
+        acceptance_id: str,
         verdict: AcceptanceVerdict,
         message: str,
         author_id: str,
     ) -> TodoRecord:
         with self._transaction() as db:
             todo = self._require_todo(db, todo_id=todo_id, lock=True)
+            decision = (
+                db.query(TodoAcceptanceModel)
+                .filter(
+                    TodoAcceptanceModel.acceptance_id == acceptance_id,
+                    TodoAcceptanceModel.env == get_current_env(),
+                    TodoAcceptanceModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            target_status = (
+                TodoStatus.COMPLETED
+                if verdict is AcceptanceVerdict.APPROVED
+                else TodoStatus.IN_PROGRESS
+            )
+            if decision is not None:
+                if (
+                    decision.todo_id != todo_id
+                    or decision.verdict != verdict.value
+                    or decision.message != message
+                    or decision.author_id != author_id
+                ):
+                    raise TodoStateConflictError(
+                        "acceptance_id already belongs to a different decision"
+                    )
+                if todo.status == target_status.value:
+                    return todo.to_record()
+                if todo.status != TodoStatus.PENDING_ACCEPTANCE.value:
+                    raise TodoStateConflictError(
+                        "Todo state conflicts with the recorded acceptance decision"
+                    )
+                todo.status = target_status.value
+                db.flush()
+                db.refresh(todo)
+                return todo.to_record()
+
             if todo.status != TodoStatus.PENDING_ACCEPTANCE.value:
                 raise TodoStateConflictError("Todo is not pending acceptance")
             decision = TodoAcceptanceModel(
-                acceptance_id=f"acceptance_{uuid.uuid4().hex}",
+                acceptance_id=acceptance_id,
                 todo_id=todo_id,
                 verdict=verdict.value,
                 message=message,
@@ -204,11 +242,7 @@ class TodoRepository(TodoRepositoryProtocol):
                 avernet_tenant=get_current_avernet_tenant(),
             )
             db.add(decision)
-            todo.status = (
-                TodoStatus.COMPLETED.value
-                if verdict is AcceptanceVerdict.APPROVED
-                else TodoStatus.PENDING_ACCEPTANCE.value
-            )
+            todo.status = target_status.value
             db.flush()
             db.refresh(todo)
             return todo.to_record()

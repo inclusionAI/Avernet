@@ -23,7 +23,18 @@ from agentclaw.community.core.task.todos.errors import (
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
-from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
+from agentclaw.community.core.task.todos.models import (
+    MAX_ACCEPTANCE_ID_LENGTH,
+    MAX_ACCEPTANCE_TARGETS,
+    MAX_ACTOR_ID_LENGTH,
+    MAX_ARTIFACT_ID_LENGTH,
+    MAX_EVENT_ID_LENGTH,
+    MAX_MESSAGE_LENGTH,
+    AcceptanceVerdict,
+    TodoAcceptanceTargetKind,
+    TodoRecord,
+    TodoStatus,
+)
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
@@ -35,19 +46,114 @@ _CONTEXT_CREATED = "created"
 _CONTEXT_IN_PROGRESS = "in_progress"
 _CONTEXT_DONE = "done"
 _TASK_STARTED_EVENT = "task.started"
+_TASK_COMPLETED_EVENT = "task.completed"
 _INTERACTION_EVENT = "user_interaction.posted"
+_TASK_ACCEPTED_EVENT = "task.accepted"
+_TASK_REJECTED_EVENT = "task.rejected"
+_HUMAN_WORK_EVENTS = {_INTERACTION_EVENT, _TASK_REJECTED_EVENT}
 
 
-def _unstarted_interaction(
+def _unstarted_human_work(
     context: TodoCollaborationContext,
 ) -> TodoCollaborationEvent | None:
-    """Return the durable interaction that is still awaiting a resumed run."""
+    """Return durable Human work that is still awaiting a resumed run."""
     for event in reversed(context.events):
         if event.event_type == _TASK_STARTED_EVENT:
             return None
-        if event.event_type == _INTERACTION_EVENT:
+        if event.event_type in _HUMAN_WORK_EVENTS:
             return event
     return None
+
+
+def _valid_acceptance_targets(
+    *,
+    verdict: AcceptanceVerdict,
+    targets: object,
+) -> bool:
+    if not isinstance(targets, list) or len(targets) > MAX_ACCEPTANCE_TARGETS:
+        return False
+    if verdict is AcceptanceVerdict.APPROVED:
+        return not targets
+    if not targets:
+        return False
+
+    seen: set[tuple[str, str]] = set()
+    for target in targets:
+        if not isinstance(target, dict) or set(target) != {"kind", "id", "floor"}:
+            return False
+        kind = target.get("kind")
+        target_id = target.get("id")
+        floor = target.get("floor")
+        if kind not in {
+            TodoAcceptanceTargetKind.EVENT.value,
+            TodoAcceptanceTargetKind.ARTIFACT.value,
+        }:
+            return False
+        max_length = (
+            MAX_EVENT_ID_LENGTH
+            if kind == TodoAcceptanceTargetKind.EVENT.value
+            else MAX_ARTIFACT_ID_LENGTH
+        )
+        if (
+            not isinstance(target_id, str)
+            or target_id != target_id.strip()
+            or not target_id
+            or len(target_id) > max_length
+            or isinstance(floor, bool)
+            or not isinstance(floor, int)
+            or floor < 1
+            or (kind, target_id) in seen
+        ):
+            return False
+        seen.add((kind, target_id))
+    return True
+
+
+def _acceptance_decision(
+    *,
+    todo_id: str,
+    responsible_actor_id: str,
+    event: TodoCollaborationEvent,
+) -> tuple[str, AcceptanceVerdict, str, str] | None:
+    if event.event_type not in {_TASK_ACCEPTED_EVENT, _TASK_REJECTED_EVENT}:
+        return None
+    payload = event.payload
+    decision_id = payload.get("decision_id")
+    event_todo_id = payload.get("todo_id")
+    verdict_raw = payload.get("verdict")
+    message = payload.get("content")
+    if (
+        event.actor_type != "human"
+        or event.actor_id != responsible_actor_id
+        or payload.get("author_id") != event.actor_id
+        or not isinstance(event.actor_id, str)
+        or not event.actor_id
+        or len(event.actor_id) > MAX_ACTOR_ID_LENGTH
+        or not isinstance(decision_id, str)
+        or decision_id != decision_id.strip()
+        or not decision_id
+        or len(decision_id) > MAX_ACCEPTANCE_ID_LENGTH
+        or event_todo_id != todo_id
+        or not isinstance(message, str)
+        or message != message.strip()
+        or len(message) > MAX_MESSAGE_LENGTH
+    ):
+        return None
+    expected_verdict = (
+        AcceptanceVerdict.APPROVED
+        if event.event_type == _TASK_ACCEPTED_EVENT
+        else AcceptanceVerdict.REJECTED
+    )
+    if verdict_raw != expected_verdict.value:
+        return None
+    if expected_verdict is AcceptanceVerdict.REJECTED and not message:
+        return None
+    if not _valid_acceptance_targets(
+        verdict=expected_verdict,
+        targets=payload.get("targets"),
+    ):
+        return None
+    return decision_id, expected_verdict, message, event.actor_id
 
 
 class TodoExecutionService(TodoExecutionServiceProtocol):
@@ -132,12 +238,12 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
 
     async def resume_claimed_interaction(self, *, todo_id: str) -> TodoRecord:
-        """Resume one claimed interaction when the scheduler finds it durable.
+        """Resume one claimed Human-work item when the scheduler finds it durable.
 
         A claim is represented by A as ``pending_acceptance -> in_progress`` and
-        by B as the latest ``user_interaction.posted`` event. A later
-        ``task.started`` event makes the operation a no-op, which makes retries
-        safe even if multiple scheduler ticks for the same row overlap.
+        by B as the latest ``user_interaction.posted`` or ``task.rejected``
+        event. A later ``task.started`` event makes the operation a no-op,
+        which makes retries safe even if scheduler ticks overlap.
         """
         todo = self._repository.get_todo(todo_id=todo_id)
         if todo.status is not TodoStatus.IN_PROGRESS:
@@ -148,7 +254,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             collab_context_id=todo.collab_context_id,
             actor_id=todo.created_by,
         )
-        trigger = _unstarted_interaction(context)
+        trigger = _unstarted_human_work(context)
         if trigger is None:
             if context.status != _CONTEXT_IN_PROGRESS:
                 raise TodoStateConflictError(
@@ -184,6 +290,43 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             )
         return self._repository.get_todo(todo_id=todo.todo_id)
 
+    async def reconcile_pending_acceptance(self, *, todo_id: str) -> TodoRecord:
+        """Repair a B-first acceptance whose A-side projection did not commit."""
+
+        todo = self._repository.get_todo(todo_id=todo_id)
+        if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
+            return todo
+        if not todo.collab_context_id:
+            raise TodoNotFoundError(
+                "Pending-acceptance Todo collaboration Context is missing"
+            )
+        context = self._collaboration.get_context(
+            collab_context_id=todo.collab_context_id,
+            actor_id=todo.created_by,
+        )
+        current_round: list[TodoCollaborationEvent] = []
+        for event in reversed(context.events):
+            if event.event_type == _TASK_COMPLETED_EVENT:
+                break
+            current_round.append(event)
+        for event in reversed(current_round):
+            decision = _acceptance_decision(
+                todo_id=todo.todo_id,
+                responsible_actor_id=todo.created_by,
+                event=event,
+            )
+            if decision is None:
+                continue
+            decision_id, verdict, message, author_id = decision
+            return self._repository.record_acceptance(
+                todo_id=todo.todo_id,
+                acceptance_id=decision_id,
+                verdict=verdict,
+                message=message,
+                author_id=author_id,
+            )
+        return todo
+
     async def refresh_in_progress(self, *, todo_id: str) -> TodoRecord:
         """Project a completed B Context into A's pending-acceptance state."""
 
@@ -198,7 +341,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             actor_id=todo.created_by,
         )
         if context.status == _CONTEXT_DONE:
-            if _unstarted_interaction(context) is not None:
+            if _unstarted_human_work(context) is not None:
                 return todo
             return self._mark_pending_acceptance(todo)
         if context.status != _CONTEXT_IN_PROGRESS:

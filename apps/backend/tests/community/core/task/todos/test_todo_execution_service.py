@@ -13,7 +13,11 @@ from agentclaw.community.core.task.todos.errors import (
     TodoBotScopeError,
     TodoStateConflictError,
 )
-from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
+from agentclaw.community.core.task.todos.models import (
+    AcceptanceVerdict,
+    TodoRecord,
+    TodoStatus,
+)
 from agentclaw.community.core.task.todos.services.todo_execution_service import (
     TodoExecutionService,
 )
@@ -65,20 +69,28 @@ def _context(context_id: str, status: str) -> TodoCollaborationContext:
     )
 
 
-def _event(event_id: str, event_seq: int, event_type: str) -> TodoCollaborationEvent:
-    return TodoCollaborationEvent(
-        event_id=event_id,
-        event_seq=event_seq,
-        event_type=event_type,
-        actor_id="user_1",
-        actor_type="human",
-        content="claimed message",
-        execution_id="run_1",
-        context_version=event_seq,
-        status="active",
-        artifacts=(),
-        created_at="2026-11-12T00:00:00Z",
-    )
+def _event(
+    event_id: str,
+    event_seq: int,
+    event_type: str,
+    **overrides: Any,
+) -> TodoCollaborationEvent:
+    values: dict[str, Any] = {
+        "event_id": event_id,
+        "event_seq": event_seq,
+        "event_type": event_type,
+        "actor_id": "user_1",
+        "actor_type": "human",
+        "content": "claimed message",
+        "execution_id": "run_1",
+        "context_version": event_seq,
+        "status": "active",
+        "artifacts": (),
+        "created_at": "2026-11-12T00:00:00Z",
+        "payload": {},
+    }
+    values.update(overrides)
+    return TodoCollaborationEvent(**values)
 
 
 class _Repository:
@@ -88,6 +100,7 @@ class _Repository:
         self.bind_race_context_id: str | None = None
         self.bind_error: Exception | None = None
         self.transition_conflict_status: TodoStatus | None = None
+        self.decisions: dict[str, tuple[str, AcceptanceVerdict, str, str]] = {}
 
     def get_todo(self, *, todo_id: str) -> TodoRecord:
         self.calls.append(("get", todo_id))
@@ -122,6 +135,38 @@ class _Repository:
         if self.todo.status is not expected_status:
             raise TodoStateConflictError("concurrent status transition")
         self.todo = replace(self.todo, status=new_status)
+        return self.todo
+
+    def record_acceptance(
+        self,
+        *,
+        todo_id: str,
+        acceptance_id: str,
+        verdict: AcceptanceVerdict,
+        message: str,
+        author_id: str,
+    ) -> TodoRecord:
+        self.calls.append(
+            (
+                "record_acceptance",
+                todo_id,
+                acceptance_id,
+                verdict,
+                message,
+                author_id,
+            )
+        )
+        decision = (todo_id, verdict, message, author_id)
+        previous = self.decisions.get(acceptance_id)
+        if previous is not None and previous != decision:
+            raise TodoStateConflictError("conflicting acceptance decision")
+        self.decisions[acceptance_id] = decision
+        target = (
+            TodoStatus.COMPLETED
+            if verdict is AcceptanceVerdict.APPROVED
+            else TodoStatus.IN_PROGRESS
+        )
+        self.todo = replace(self.todo, status=target)
         return self.todo
 
 
@@ -343,6 +388,51 @@ async def test_resume_claimed_interaction_resumes_latest_durable_event():
 
 
 @pytest.mark.asyncio
+async def test_resume_rejected_acceptance_resumes_original_bot_session():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event(
+                "event_rejected",
+                2,
+                "task.rejected",
+                content="revise enterprise pricing",
+                payload={
+                    "decision_id": "decision_1",
+                    "todo_id": "todo_1",
+                    "verdict": "rejected",
+                    "content": "revise enterprise pricing",
+                    "author_id": "user_1",
+                    "targets": [{"kind": "event", "id": "event_completed", "floor": 1}],
+                },
+            ),
+        ),
+    )
+    service, _, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    first = await service.resume_claimed_interaction(todo_id="todo_1")
+    collaboration.contexts["context_1"] = replace(
+        collaboration.contexts["context_1"],
+        events=(
+            *collaboration.contexts["context_1"].events,
+            _event("event_started", 3, "task.started"),
+        ),
+    )
+    second = await service.resume_claimed_interaction(todo_id="todo_1")
+
+    assert first.status is TodoStatus.IN_PROGRESS
+    assert second.status is TodoStatus.IN_PROGRESS
+    assert [call[2] for call in collaboration.resume_calls] == ["event_rejected"]
+
+
+@pytest.mark.asyncio
 async def test_resume_claimed_interaction_is_idempotent_across_scheduler_ticks():
     context = replace(
         _context("context_1", "in_progress"),
@@ -452,6 +542,220 @@ async def test_dispatch_is_idempotent_after_another_worker_advanced_todo():
     assert access.calls == []
     assert bots.calls == []
     assert collaboration.get_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type,verdict,target,message",
+    [
+        ("task.accepted", AcceptanceVerdict.APPROVED, TodoStatus.COMPLETED, ""),
+        (
+            "task.rejected",
+            AcceptanceVerdict.REJECTED,
+            TodoStatus.IN_PROGRESS,
+            "revise enterprise pricing",
+        ),
+    ],
+)
+async def test_reconcile_pending_acceptance_projects_b_decision_to_todo(
+    event_type, verdict, target, message
+):
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event(
+                "event_decision",
+                3,
+                event_type,
+                actor_id="creator_1",
+                content=message,
+                payload={
+                    "decision_id": "decision_1",
+                    "todo_id": "todo_1",
+                    "verdict": verdict.value,
+                    "content": message,
+                    "author_id": "creator_1",
+                    "targets": (
+                        []
+                        if verdict is AcceptanceVerdict.APPROVED
+                        else [
+                            {
+                                "kind": "event",
+                                "id": "event_completed",
+                                "floor": 1,
+                            }
+                        ]
+                    ),
+                },
+            ),
+        ),
+    )
+    service, repository, _, _, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.PENDING_ACCEPTANCE,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.reconcile_pending_acceptance(todo_id="todo_1")
+
+    assert result.status is target
+    assert collaboration.get_calls == [("context_1", "creator_1")]
+    assert repository.calls[-1] == (
+        "record_acceptance",
+        "todo_1",
+        "decision_1",
+        verdict,
+        message,
+        "creator_1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_pending_acceptance_uses_first_valid_decision_in_round():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event(
+                "event_accepted",
+                2,
+                "task.accepted",
+                actor_id="creator_1",
+                content="",
+                payload={
+                    "decision_id": "decision_first",
+                    "todo_id": "todo_1",
+                    "verdict": "approved",
+                    "content": "",
+                    "author_id": "creator_1",
+                    "targets": [],
+                },
+            ),
+            _event(
+                "event_rejected",
+                3,
+                "task.rejected",
+                actor_id="creator_1",
+                content="late conflicting decision",
+                payload={
+                    "decision_id": "decision_second",
+                    "todo_id": "todo_1",
+                    "verdict": "rejected",
+                    "content": "late conflicting decision",
+                    "author_id": "creator_1",
+                    "targets": [{"kind": "event", "id": "event_completed", "floor": 1}],
+                },
+            ),
+        ),
+    )
+    service, repository, _, _, _ = _service(
+        todo=_todo(
+            status=TodoStatus.PENDING_ACCEPTANCE,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.reconcile_pending_acceptance(todo_id="todo_1")
+
+    assert result.status is TodoStatus.COMPLETED
+    assert repository.calls[-1] == (
+        "record_acceptance",
+        "todo_1",
+        "decision_first",
+        AcceptanceVerdict.APPROVED,
+        "",
+        "creator_1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_pending_acceptance_ignores_prior_round_rejection():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed_1", 1, "task.completed"),
+            _event(
+                "event_rejected",
+                2,
+                "task.rejected",
+                actor_id="creator_1",
+                content="revise enterprise pricing",
+                payload={
+                    "decision_id": "decision_old",
+                    "todo_id": "todo_1",
+                    "verdict": "rejected",
+                    "content": "revise enterprise pricing",
+                    "author_id": "creator_1",
+                    "targets": [
+                        {"kind": "event", "id": "event_completed_1", "floor": 1}
+                    ],
+                },
+            ),
+            _event(
+                "event_started_2", 3, "task.started", actor_id="bot_1", actor_type="bot"
+            ),
+            _event(
+                "event_completed_2",
+                4,
+                "task.completed",
+                actor_id="bot_1",
+                actor_type="bot",
+            ),
+        ),
+    )
+    service, repository, _, _, _ = _service(
+        todo=_todo(
+            status=TodoStatus.PENDING_ACCEPTANCE,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.reconcile_pending_acceptance(todo_id="todo_1")
+
+    assert result.status is TodoStatus.PENDING_ACCEPTANCE
+    assert all(call[0] != "record_acceptance" for call in repository.calls)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_pending_acceptance_ignores_non_human_decision_event():
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event(
+                "event_rejected",
+                2,
+                "task.rejected",
+                actor_id="bot_1",
+                actor_type="bot",
+                content="malicious rework",
+                payload={
+                    "decision_id": "decision_bad",
+                    "todo_id": "todo_1",
+                    "verdict": "rejected",
+                    "content": "malicious rework",
+                    "author_id": "bot_1",
+                    "targets": [{"kind": "event", "id": "event_completed", "floor": 1}],
+                },
+            ),
+        ),
+    )
+    service, repository, _, _, _ = _service(
+        todo=_todo(
+            status=TodoStatus.PENDING_ACCEPTANCE,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+    )
+
+    result = await service.reconcile_pending_acceptance(todo_id="todo_1")
+
+    assert result.status is TodoStatus.PENDING_ACCEPTANCE
+    assert all(call[0] != "record_acceptance" for call in repository.calls)
 
 
 @pytest.mark.asyncio

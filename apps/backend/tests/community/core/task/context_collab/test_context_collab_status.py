@@ -307,6 +307,26 @@ class TestGetStatusHappyPath:
         assert task_progress.events[0]["parent_event"] is None
         assert task_progress.events[4]["parent_event"] == "evt_004"
 
+    def test_internal_projection_can_include_full_event_payload(self):
+        _, service = _make_service()
+
+        result = service.get_status(
+            COLLET_ID,
+            trunk_events=False,
+            context=make_actor(),
+            include_event_payload=True,
+        )
+
+        assert result.task_progress.events[1]["payload"] == {
+            "message_kind": "user_interaction",
+            "content": "上下文做一下补充xxx",
+        }
+        assert result.current_event is not None
+        assert result.current_event["payload"] == {
+            "summary": "开始整理协议设计",
+            "percent": 40,
+        }
+
     def test_unknown_collab_context_not_found(self):
         _, service = _make_service()
         with pytest.raises(ContextCollabNotFoundError):

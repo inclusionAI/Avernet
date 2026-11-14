@@ -11,7 +11,7 @@ Collet 快照(§12.2 #6),也不做任何 IO。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Sequence
 
@@ -50,6 +50,7 @@ class EventProjection:
     content: str | None  # payload.get("content")(Message)
     artifacts: tuple[object, ...]
     created_at: datetime
+    payload: dict[str, object] = field(default_factory=dict)
 
 
 def default_projected_status() -> str:
@@ -133,6 +134,7 @@ def project_events(
                 content=payload.get("content"),
                 artifacts=(tuple(artifacts) if isinstance(artifacts, list) else ()),
                 created_at=record.occurred_at,
+                payload=dict(payload),
             )
         )
     return projections

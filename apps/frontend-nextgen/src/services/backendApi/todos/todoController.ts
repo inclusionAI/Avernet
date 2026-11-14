@@ -38,6 +38,7 @@ export interface TodoEventDto extends BackendUnknownRecord {
   status?: string | null;
   created_at?: string;
   artifacts?: Array<BackendUnknownRecord>;
+  payload?: BackendUnknownRecord;
 }
 
 export interface TodoArtifactDto extends BackendUnknownRecord {
@@ -116,8 +117,14 @@ export function submitTodoAcceptance(todoId: string, input: TodoAcceptanceInput)
     method: 'POST',
     params: userScopedParams(),
     data: {
+      decision_id: input.decisionId,
       verdict: input.verdict,
       message: input.message || undefined,
+      targets: input.targets.map((target) => ({
+        kind: target.kind,
+        id: target.id,
+        floor: target.floor,
+      })),
     },
     operation: 'accept-todo',
   });

@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
+    TodoAcceptanceTarget,
     TodoEventRecord,
     TodoPage,
     TodoRecord,
@@ -80,6 +81,8 @@ class TodoServiceProtocol(Protocol):
         todo_id: str,
         actor_id: str,
         verdict: AcceptanceVerdict | str,
+        decision_id: str,
         message: str | None,
+        targets: tuple[TodoAcceptanceTarget, ...] = (),
         env: str | None = None,
     ) -> TodoRecord: ...

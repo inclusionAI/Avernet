@@ -40,6 +40,7 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
     status: 'in_progress',
     createdAt: `2026-11-10T02:0${eventSeq}:00Z`,
     artifacts: [],
+    payload: {},
     ...overrides,
   };
 }
@@ -111,17 +112,29 @@ test('待验收互动只提交 message，不再组装本快照事件', async () 
   expect(mockedService.startTodoRun).not.toHaveBeenCalled();
 });
 
-test('拒绝验收只提交 A 的验收决策，不再调用 Run 接口', async () => {
+test('拒绝验收提交稳定决策与问题目标，不再调用 Run 接口', async () => {
   mockedService.acceptTodo.mockResolvedValue(awaitingAcceptanceTodo);
 
   const { result } = renderHook(() => useTodoDetail('todo-1'));
   await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
 
   await act(async () => {
-    expect(await result.current.accept('rejected', ' 请修改 ')).toBe(true);
+    expect(
+      await result.current.accept({
+        decisionId: 'decision-1',
+        verdict: 'rejected',
+        message: ' 请修改 ',
+        targets: [{ kind: 'event', id: 'event-3', floor: 3 }],
+      }),
+    ).toBe(true);
   });
 
-  expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', { verdict: 'rejected', message: '请修改' });
+  expect(mockedService.acceptTodo).toHaveBeenCalledWith('todo-1', {
+    decisionId: 'decision-1',
+    verdict: 'rejected',
+    message: '请修改',
+    targets: [{ kind: 'event', id: 'event-3', floor: 3 }],
+  });
   expect(mockedService.startTodoRun).not.toHaveBeenCalled();
 });
 

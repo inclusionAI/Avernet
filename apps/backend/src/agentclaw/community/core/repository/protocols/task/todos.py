@@ -78,6 +78,7 @@ class TodoRepositoryProtocol(Protocol):
         self,
         *,
         todo_id: str,
+        acceptance_id: str,
         verdict: AcceptanceVerdict,
         message: str,
         author_id: str,

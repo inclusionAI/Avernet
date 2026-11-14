@@ -5,50 +5,30 @@ automatic dispatch, acceptance decisions, and the public event/interaction view.
 Todo state is persisted by A as `pending`, `in_progress`,
 `pending_acceptance`, or `completed`; it is not recomputed during reads from B.
 
-Creating a Todo only persists `pending`. `TodoScheduler` scans pending rows,
-creates and runs the B Context through `TodoCollaborationPlugin`, binds the
-Context id, and advances the Todo to `in_progress`. The same scheduler refreshes
-running Contexts: only a confirmed runtime `COMPLETED` result makes the Context
-`done` and advances the Todo to `pending_acceptance`. Runtime failure states stay
-visible in B and leave the Todo `in_progress` for inspection or recovery.
-Human approval advances the Todo to `completed`; rejection keeps it in
-`pending_acceptance`.
+Creating a Todo only persists `pending`. `TodoScheduler` periodically scans A-owned rows while holding a distributed lease. It processes `pending` first, then `pending_acceptance`, then `in_progress`:
 
-A and B run in the same process in the production composition root, so the
-adapter calls `ContextCollabServiceProtocol` directly rather than making an
-internal HTTP self-call. The creator remains the Human principal while Bot
-runtime addressing uses the Bot record owner. The Events endpoint stays
-compact: it projects B event metadata and artifact links.
-The Interactions endpoint is the richer chat projection. It includes the Human
-objective in ``task.created``, each ``user_interaction.posted`` message, and each
-Bot ``task.completed``. If the corresponding run reported text artifacts, their
-full text is inlined into that Bot completion message; file, link, and code
-artifacts remain in the artifact view. This keeps Human instructions and Bot
-text answers in one chronologically ordered conversation without expanding the
-event stream itself.
+1. `pending`: create, bind, and run the B Context, then advance A to `in_progress`.
+2. `pending_acceptance`: repair an acceptance decision that was durably appended in B but whose A-side projection failed.
+3. `in_progress`: refresh the B runtime; if durable Human work is waiting behind a completed Context, resume the original Bot session.
 
-OpenAPI delivery also sends
-`sender_options.from` as the creator so the executor session is attributable to
-that principal. The public `/run` operation is a compensation/operator entry
-point; the ordinary frontend neither edits Todos nor exposes manual Run.
+Only a confirmed runtime `COMPLETED` result makes the Context `done` and advances the Todo to `pending_acceptance`. Runtime failure states stay visible in B and leave the Todo `in_progress` for inspection or recovery.
 
-While a Todo is `pending_acceptance`, posting one Human interaction atomically
-claims A as `pending_acceptance -> in_progress`, then append-only records
-`user_interaction.posted` in B. The API returns that durable event; it does not
-require or trigger executor delivery. The normal scheduler scans `in_progress`
-rows. Status refresh recognizes the claim by keeping A `in_progress` while B is
-still `done` and the latest event is the Human interaction. The scheduler then
-resumes B from that event: B reuses the previous executor session, records a
-new `task.started` with the new run identity, and moves `done -> in_progress`.
-When B becomes `done` again after this run, A advances normally to
-`pending_acceptance`.
+Acceptance is event-first. The client supplies a stable `decision_id`; A first finds or appends one immutable Human `task.accepted` or `task.rejected` event in B, then persists the same decision in A. Each acceptance round permits exactly one decision: reusing the same ID and payload is idempotent within that round, while a second ID or a changed verdict, content, actor, Todo, or targets conflicts. Repair considers the first valid decision appended after the latest `task.completed`; an older rejection can never be replayed against a later completed round. This ordering lets the scheduler repair B-success/A-failure without inventing or replacing a decision.
 
-Scheduler retries are idempotent. Once B is `in_progress` or a later
-`task.started` exists, no additional resume is dispatched; the community
-runtime also sends the interaction event id as the executor message ID. A
-delivery failure leaves the claimed Todo `in_progress` and fails closed rather
-than immediately reopening the interactive state; reopening during uncertainty
-could forward the same human message to the executor twice.
+- Approval appends `task.accepted`, advances the Todo from `pending_acceptance` to `completed`, leaves the completed Context unchanged, and does not start another Bot run.
+- Rejection requires full Human rework content and at least one stable event/artifact target. It appends `task.rejected`, advances the Todo from `pending_acceptance` to `in_progress`, and initially leaves the Context `done`. On the next scheduler refresh, that rejection is recognized as unstarted Human work; B resumes the previous executor session, appends `task.started`, changes the Context to `in_progress`, and delivers the rework instruction to the original Bot. A later completed run returns the Todo to `pending_acceptance`.
+
+Target IDs are durable references. `floor` is presentation metadata captured from the interaction view and is not used as a domain identity. The event retains the full Human instruction and selected targets so the interaction timeline can reconstruct the rejection even after a refresh or retry.
+
+A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection.
+
+The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata, concise primary content, and artifact links, but not the complete event payload. The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and Bot `task.completed` messages. Text artifacts are inlined into the corresponding Bot completion message; file, link, and code artifacts remain separately renderable.
+
+OpenAPI delivery also sends `sender_options.from` as the creator so the executor session is attributable to that principal. The public `/run` operation is a compensation/operator entry point; the ordinary frontend neither edits Todos nor exposes manual Run.
+
+While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
+
+Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the community runtime uses the triggering event ID as the executor message ID. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
 
 
 ## Context Boundary

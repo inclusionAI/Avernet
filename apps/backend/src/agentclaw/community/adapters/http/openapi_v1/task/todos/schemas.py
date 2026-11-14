@@ -12,8 +12,12 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactRecord,
 )
 from agentclaw.community.core.task.todos.models import (
+    MAX_ACCEPTANCE_ID_LENGTH,
+    MAX_ACCEPTANCE_TARGETS,
+    MAX_ARTIFACT_ID_LENGTH,
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
+    MAX_EVENT_ID_LENGTH,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
     TodoEventRecord,
@@ -70,19 +74,40 @@ class CreateTodoInteractionRequest(BaseModel):
     )
 
 
+class TodoAcceptanceTargetRequest(BaseModel):
+    """Stable event or artifact selected as a rejection problem point."""
+
+    kind: Literal["event", "artifact"]
+    id: str = Field(
+        min_length=1,
+        max_length=max(MAX_EVENT_ID_LENGTH, MAX_ARTIFACT_ID_LENGTH),
+    )
+    floor: int = Field(gt=0, description="Presentation-only interaction floor.")
+
+
 class SubmitTodoAcceptanceRequest(BaseModel):
     """Approve or reject the execution currently pending acceptance."""
 
+    decision_id: str = Field(
+        min_length=1,
+        max_length=MAX_ACCEPTANCE_ID_LENGTH,
+        description="Client-stable idempotency identifier for this Human decision.",
+    )
     verdict: Literal["approved", "rejected"] = Field(
         description=(
             "Human decision for the pending execution: approve to complete it, "
-            "or reject while keeping it pending for further Human interaction."
+            "or reject and return it to the original Bot session for rework."
         )
     )
     message: str | None = Field(
         default=None,
         max_length=MAX_MESSAGE_LENGTH,
-        description="Optional note recorded with the acceptance decision.",
+        description="Full rejection instruction, or an optional approval note.",
+    )
+    targets: list[TodoAcceptanceTargetRequest] = Field(
+        default_factory=list,
+        max_length=MAX_ACCEPTANCE_TARGETS,
+        description="Stable interaction event/artifact references selected on rejection.",
     )
 
 
@@ -157,7 +182,6 @@ class TodoEventResponse(BaseModel):
     created_at: str = Field(
         description="B event creation timestamp in ISO-8601 format."
     )
-
     @classmethod
     def from_record(cls, record: TodoEventRecord) -> "TodoEventResponse":
         return cls(
@@ -180,6 +204,23 @@ class TodoEventResponse(BaseModel):
             ],
             created_at=record.created_at,
         )
+
+
+class TodoInteractionResponse(TodoEventResponse):
+    """Richer Human/Bot interaction event including its complete B payload."""
+
+    payload: dict[str, object] = Field(
+        default_factory=dict,
+        description=(
+            "Complete B event payload retained for interaction content and "
+            "rejection target presentation."
+        ),
+    )
+
+    @classmethod
+    def from_record(cls, record: TodoEventRecord) -> "TodoInteractionResponse":
+        compact = TodoEventResponse.from_record(record)
+        return cls(**compact.model_dump(), payload=dict(record.payload))
 
 
 class TodoResponse(BaseModel):

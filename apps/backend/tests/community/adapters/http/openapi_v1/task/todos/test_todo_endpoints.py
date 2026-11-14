@@ -67,6 +67,7 @@ def _event() -> TodoEventRecord:
         status="pending_acceptance",
         artifacts=(_artifact(),),
         created_at="2026-11-10T08:00:00Z",
+        payload={"content": "done", "result_kind": "text"},
     )
 
 
@@ -103,6 +104,7 @@ def _interaction_event() -> TodoEventRecord:
         status=None,
         artifacts=(),
         created_at="2026-11-10T07:55:00Z",
+        payload={"content": "Please revise section 2"},
     )
 
 
@@ -157,11 +159,17 @@ class _RecordedService:
             status="in_progress",
             artifacts=(),
             created_at="2026-11-10T08:05:00Z",
+            payload={"content": "Please include the rollback plan"},
         )
 
     def submit_acceptance(self, **kwargs):
         self._record("submit_acceptance", **kwargs)
-        return _todo(status=TodoStatus.COMPLETED)
+        status = (
+            TodoStatus.COMPLETED
+            if kwargs["verdict"] == AcceptanceVerdict.APPROVED
+            else TodoStatus.IN_PROGRESS
+        )
+        return _todo(status=status)
 
 
 @pytest.mark.asyncio
@@ -290,12 +298,14 @@ async def test_events_and_interactions_project_b_event_records():
     assert events.data[0].status == "pending_acceptance"
     assert events.data[0].artifacts[0].name == "report.docx"
     assert events.data[0].artifacts[0].url == "/files/report.docx"
+    assert "payload" not in events.data[0].model_dump()
     assert service.calls == [
         {"op": "list_events", "todo_id": "todo_1", "actor_id": "human_1"},
         {"op": "list_interactions", "todo_id": "todo_1", "actor_id": "human_1"},
     ]
     assert history.code == 200000
     assert history.data[0].event_type == "user_interaction.posted"
+    assert history.data[0].payload == {"content": "Please revise section 2"}
 
 
 @pytest.mark.asyncio
@@ -318,6 +328,7 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
     assert payload.data.event_id == "event_4"
     assert payload.data.event_type == "user_interaction.posted"
     assert payload.data.content == "Please include the rollback plan"
+    assert payload.data.payload == {"content": "Please include the rollback plan"}
     assert service.calls == [
         {
             "op": "create_interaction",
@@ -336,6 +347,7 @@ async def test_acceptance_returns_updated_todo_and_passes_verdict():
     payload = await submit_todo_acceptance(
         todo_id="todo_1",
         body=SubmitTodoAcceptanceRequest(
+            decision_id="decision_1",
             verdict=AcceptanceVerdict.APPROVED,
             message="Looks good",
         ),
@@ -353,8 +365,42 @@ async def test_acceptance_returns_updated_todo_and_passes_verdict():
             "todo_id": "todo_1",
             "actor_id": "human_1",
             "verdict": AcceptanceVerdict.APPROVED,
+            "decision_id": "decision_1",
             "message": "Looks good",
+            "targets": (),
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rejection_forwards_full_message_and_stable_targets():
+    service = _RecordedService()
+
+    payload = await submit_todo_acceptance(
+        todo_id="todo_1",
+        body=SubmitTodoAcceptanceRequest(
+            decision_id="decision_reject_1",
+            verdict=AcceptanceVerdict.REJECTED,
+            message="Please correct the enterprise price",
+            targets=[
+                {"kind": "event", "id": "event_2", "floor": 2},
+                {"kind": "artifact", "id": "artifact_1", "floor": 3},
+            ],
+        ),
+        request=_request("POST", "/openapi/v1/todos/todo_1/acceptance"),
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    assert payload.data.status == TodoStatus.IN_PROGRESS
+    call = service.calls[0]
+    assert call["op"] == "submit_acceptance"
+    assert call["decision_id"] == "decision_reject_1"
+    assert call["message"] == "Please correct the enterprise price"
+    assert [(target.kind.value, target.target_id, target.floor) for target in call["targets"]] == [
+        ("event", "event_2", 2),
+        ("artifact", "artifact_1", 3),
     ]
 
 

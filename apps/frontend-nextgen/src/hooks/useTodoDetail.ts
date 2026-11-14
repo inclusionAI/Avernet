@@ -1,5 +1,5 @@
 import { notifySuccess } from '@/components/ui/notify';
-import type { AcceptanceVerdict } from '@/domain/todos/models';
+import type { TodoAcceptanceInput } from '@/domain/todos/models';
 import { canInteractWithTodo } from '@/domain/todos/status';
 import {
   acceptTodo,
@@ -158,18 +158,20 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   );
 
   const accept = useCallback(
-    async (verdict: AcceptanceVerdict, message?: string) => {
+    async (input: TodoAcceptanceInput) => {
       if (!todoId || !selectedTodo || selectedTodo.status !== 'pending_acceptance') {
         safeReportError(new Error('当前状态不允许验收'), { title: '验收失败' });
         return false;
       }
+      const message = input.message?.trim() || undefined;
+      if (input.verdict === 'rejected' && (!message || input.targets.length === 0)) {
+        safeReportError(new Error('请标记问题楼层并填写返工要求'), { title: '验收失败' });
+        return false;
+      }
       setMutationLoading(true);
       try {
-        await acceptTodo(todoId, {
-          verdict,
-          message: message?.trim() || undefined,
-        });
-        notifySuccess(verdict === 'approved' ? '验收已通过' : '已记录验收意见');
+        await acceptTodo(todoId, { ...input, message });
+        notifySuccess(input.verdict === 'approved' ? '验收已通过' : '已退回 Bot 返工');
         await refresh();
         await onListRefresh?.();
         return true;

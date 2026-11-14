@@ -73,6 +73,7 @@ def _event_projection(
             }
         ],
         "created_at": "2026-11-10T08:00:00Z",
+        "payload": {"content": "Please revise", "decision_id": "decision_1"},
     }
 
 
@@ -119,8 +120,17 @@ class _RecordingContextService:
             current_event={"event_id": "event_1"},
         )
 
-    def get_status(self, collab_context_id, *, trunk_events, context):
-        self.get_calls.append((collab_context_id, trunk_events, context))
+    def get_status(
+        self,
+        collab_context_id,
+        *,
+        trunk_events,
+        context,
+        include_event_payload=False,
+    ):
+        self.get_calls.append(
+            (collab_context_id, trunk_events, context, include_event_payload)
+        )
         return self.projection
 
     async def run_context(
@@ -209,7 +219,13 @@ def test_get_context_translates_missing_context_to_todo_boundary() -> None:
     service = _RecordingContextService()
     failure = ContextCollabNotFoundError("missing context")
 
-    def fail_get(collab_context_id, *, trunk_events, context):
+    def fail_get(
+        collab_context_id,
+        *,
+        trunk_events,
+        context,
+        include_event_payload=False,
+    ):
         raise failure
 
     service.get_status = fail_get
@@ -227,7 +243,13 @@ def test_get_context_translates_missing_context_to_todo_boundary() -> None:
 def test_get_context_does_not_hide_unexpected_programming_error() -> None:
     service = _RecordingContextService()
 
-    def fail_get(collab_context_id, *, trunk_events, context):
+    def fail_get(
+        collab_context_id,
+        *,
+        trunk_events,
+        context,
+        include_event_payload=False,
+    ):
         raise AssertionError("programming bug")
 
     service.get_status = fail_get
@@ -249,9 +271,10 @@ def test_get_context_uses_human_actor_and_maps_full_event_projection() -> None:
         actor_id="viewer_1",
     )
 
-    collab_context_id, trunk_events, actor = service.get_calls[0]
+    collab_context_id, trunk_events, actor, include_event_payload = service.get_calls[0]
     assert collab_context_id == _CONTEXT_ID
     assert trunk_events is False
+    assert include_event_payload is True
     assert actor.actor.principal_id == "viewer_1"
     assert actor.actor.principal_type == "human"
     assert actor.source == "todo"
@@ -259,6 +282,10 @@ def test_get_context_uses_human_actor_and_maps_full_event_projection() -> None:
     assert context.events[0].event_type == "task.created"
     assert context.events[0].context_version == 2
     assert context.events[0].artifacts[0].url == "/files/report.md"
+    assert context.events[0].payload == {
+        "content": "Please revise",
+        "decision_id": "decision_1",
+    }
 
 
 @pytest.mark.asyncio

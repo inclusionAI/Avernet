@@ -108,16 +108,20 @@ describe('todoController', () => {
 
   it('提交验收时下发当前用户', async () => {
     await submitTodoAcceptance('todo/1', {
+      decisionId: 'decision-1',
       verdict: 'approved',
       message: '通过',
+      targets: [],
     });
 
     expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/acceptance', {
       method: 'POST',
       params: userParams,
       data: {
+        decision_id: 'decision-1',
         verdict: 'approved',
         message: '通过',
+        targets: [],
       },
       operation: 'accept-todo',
     });

@@ -155,12 +155,20 @@ _EVENT_PROJECTION_FIELDS = (
 )
 
 
-def _event_projection_dict(projection: EventProjection) -> dict:
+def _event_projection_dict(
+    projection: EventProjection, *, include_payload: bool = False
+) -> dict:
     """投影事件 → ``task_progress.events[]`` 条目(spec §6.4)。
 
     字段集合不含 ``steps``(§12.2 #5);值全部取自 G3 投影,不回读仓储。
+    ``payload`` 仅供同进程内部消费者显式请求,不改变默认北向契约。
     """
-    return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
+    result = {
+        field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS
+    }
+    if include_payload:
+        result["payload"] = dict(projection.payload)
+    return result
 
 
 def _last_payload_percent(events: Sequence[EventRecord]) -> int | None:
@@ -469,11 +477,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
     ) -> ContextCollabRunResultDTO:
-        """Continue the previous executor session from a Human interaction.
+        """Continue the previous executor session from durable Human work.
 
-        ``user_interaction.posted`` remains the durable input fact. This use case
-        then starts a new executor run in that session and appends the new
-        ``task.started`` fact that moves the Context from ``done`` back to
+        ``user_interaction.posted`` and ``task.rejected`` are durable input
+        facts. This use case starts a new executor run in the previous session
+        and appends ``task.started``, moving the Context from ``done`` back to
         ``in_progress``.
         """
         normalized_trigger_id = _required_str(
@@ -505,17 +513,22 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
         if trigger_index is None:
             raise ContextCollabValidationError(
-                "collaboration context resume requires an existing interaction event"
+                "collaboration context resume requires an existing Human-work event"
             )
         trigger = status.events[trigger_index]
-        if trigger.event_kind != "user_interaction.posted":
+        if trigger.event_kind not in {"user_interaction.posted", "task.rejected"}:
             raise ContextCollabValidationError(
-                "collaboration context can resume only from user_interaction.posted"
+                "collaboration context can resume only from "
+                "user_interaction.posted or task.rejected"
             )
-        message = trigger.payload.get("content") if isinstance(trigger.payload, dict) else None
+        message = (
+            trigger.payload.get("content")
+            if isinstance(trigger.payload, dict)
+            else None
+        )
         if not isinstance(message, str) or not message.strip():
             raise ContextCollabValidationError(
-                "collaboration context resume requires a non-empty interaction "
+                "collaboration context resume requires a non-empty Human-work "
                 "message"
             )
         session_id = _previous_session_id(status.events[:trigger_index])
@@ -712,7 +725,12 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
 
     def get_status(
-        self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
+        self,
+        collab_context_id: str,
+        *,
+        trunk_events: bool,
+        context: ActorContext,
+        include_event_payload: bool = False,
     ) -> ContextCollabStatusProjection:
         """查询用例(spec §6.4):纯读路径,不写任何行、不推进版本。"""
         status = self._repository.get_current_status(collab_context_id)
@@ -721,7 +739,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 f"collaboration context {collab_context_id!r} not found"
             )
         return self._project_status_record(
-            status, trunk_events=trunk_events, context=context
+            status,
+            trunk_events=trunk_events,
+            context=context,
+            include_event_payload=include_event_payload,
         )
 
     def _project_status_record(
@@ -730,6 +751,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         *,
         trunk_events: bool,
         context: ActorContext,
+        include_event_payload: bool = False,
     ) -> ContextCollabStatusProjection:
         """Build the read projection from one already-loaded aggregate record."""
         collet = status.collet
@@ -767,7 +789,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
         current_event = None
         for entry in projection:
             if entry.event_id == collet.current_event_id:
-                current_event = _event_projection_dict(entry)
+                current_event = _event_projection_dict(
+                    entry, include_payload=include_event_payload
+                )
                 break
         return ContextCollabStatusProjection(
             collab_context_id=collet.collab_context_id,
@@ -776,6 +800,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
             current_event=current_event,
             task_progress=TaskProgressProjectionDTO(
                 total_events=len(listed_projection),
-                events=[_event_projection_dict(entry) for entry in listed_projection],
+                events=[
+                    _event_projection_dict(
+                        entry, include_payload=include_event_payload
+                    )
+                    for entry in listed_projection
+                ],
             ),
         )

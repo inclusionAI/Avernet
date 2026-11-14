@@ -17,7 +17,7 @@ from agentclaw.community.core.spaces.models import SpaceRecord
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
-    TodoArtifactRecord,
+    TodoArtifactRecord as TodoPersistedArtifactRecord,
 )
 from agentclaw.community.core.task.todos.artifact_service_protocol import (
     TodoArtifactServiceProtocol,
@@ -37,13 +37,19 @@ from agentclaw.community.core.task.todos.execution_protocol import (
 from agentclaw.community.core.task.todos.models import (
     MAX_ACTOR_ID_LENGTH,
     MAX_ACTOR_NAME_LENGTH,
+    MAX_ACCEPTANCE_ID_LENGTH,
+    MAX_ACCEPTANCE_TARGETS,
+    MAX_ARTIFACT_ID_LENGTH,
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
+    MAX_EVENT_ID_LENGTH,
     MAX_MESSAGE_LENGTH,
     MAX_TITLE_LENGTH,
     MAX_TODO_ID_LENGTH,
     AcceptanceVerdict,
-    TodoArtifactRecord,
+    TodoAcceptanceTarget,
+    TodoAcceptanceTargetKind,
+    TodoArtifactRecord as TodoEventArtifactRecord,
     TodoEventRecord,
     TodoPage,
     TodoRecord,
@@ -53,15 +59,19 @@ from agentclaw.community.core.task.todos.service_protocol import TodoServiceProt
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
+    TodoCollaborationError,
     TodoCollaborationPlugin,
 )
 
 _HUMAN_INTERACTION_EVENT = "user_interaction.posted"
 _TASK_COMPLETED_EVENT = "task.completed"
+_TASK_ACCEPTED_EVENT = "task.accepted"
+_TASK_REJECTED_EVENT = "task.rejected"
 _INTERACTION_EVENT_TYPES = {
     "task.created",
     _HUMAN_INTERACTION_EVENT,
     _TASK_COMPLETED_EVENT,
+    _TASK_REJECTED_EVENT,
 }
 
 
@@ -275,22 +285,114 @@ class TodoService(TodoServiceProtocol):
         todo_id: str,
         actor_id: str,
         verdict: AcceptanceVerdict | str,
+        decision_id: str,
         message: str | None,
+        targets: tuple[TodoAcceptanceTarget, ...] = (),
         env: str | None = None,
     ) -> TodoRecord:
         todo, normalized_actor_id = self._load_todo(
             todo_id=todo_id, actor_id=actor_id, env=env
         )
         normalized_verdict = self._verdict(verdict)
-        normalized_message = (
-            ""
-            if message is None
-            else self._text_allow_empty(message, "message", MAX_MESSAGE_LENGTH)
+        normalized_decision_id = self._required_text(
+            decision_id,
+            "decision_id",
+            MAX_ACCEPTANCE_ID_LENGTH,
         )
-        if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
-            raise TodoStateConflictError("Todo is not pending acceptance")
+        normalized_message = self._acceptance_message(
+            verdict=normalized_verdict,
+            message=message,
+        )
+        normalized_targets = self._acceptance_targets(
+            verdict=normalized_verdict,
+            targets=targets,
+        )
+        context_id = self._require_context(todo)
+        context = self._collaboration.get_context(
+            collab_context_id=context_id,
+            actor_id=normalized_actor_id,
+        )
+        decision_events = context.events
+        decision_event = self._find_decision_event(
+            decision_events,
+            decision_id=normalized_decision_id,
+        )
+        if decision_event is None:
+            if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
+                raise TodoStateConflictError("Todo is not pending acceptance")
+            if self._find_current_acceptance_decision(decision_events) is not None:
+                raise TodoStateConflictError(
+                    "acceptance round already has a different decision"
+                )
+            event_type = (
+                _TASK_ACCEPTED_EVENT
+                if normalized_verdict is AcceptanceVerdict.APPROVED
+                else _TASK_REJECTED_EVENT
+            )
+            payload: dict[str, Any] = {
+                "decision_id": normalized_decision_id,
+                "todo_id": todo.todo_id,
+                "verdict": normalized_verdict.value,
+                "content": normalized_message,
+                "author_id": normalized_actor_id,
+                "targets": self._target_payloads(normalized_targets),
+            }
+            try:
+                decision_event = self._collaboration.append_event(
+                    collab_context_id=context_id,
+                    request=TodoCollaborationEventRequest(
+                        expected_version=context.context_version,
+                        event_kind=event_type,
+                        primitive_type="Task",
+                        actor_id=normalized_actor_id,
+                        actor_type="human",
+                        parent_event=context.current_event_id,
+                        visibility="workspace",
+                        payload=payload,
+                    ),
+                )
+                decision_events = (*decision_events, decision_event)
+            except TodoCollaborationError:
+                context = self._collaboration.get_context(
+                    collab_context_id=context_id,
+                    actor_id=normalized_actor_id,
+                )
+                decision_events = context.events
+                decision_event = self._find_decision_event(
+                    decision_events,
+                    decision_id=normalized_decision_id,
+                )
+                if decision_event is None:
+                    if (
+                        self._find_current_acceptance_decision(decision_events)
+                        is not None
+                    ):
+                        raise TodoStateConflictError(
+                            "acceptance round already has a different decision"
+                        )
+                    raise
+
+        self._validate_decision_event(
+            decision_event,
+            todo_id=todo.todo_id,
+            actor_id=normalized_actor_id,
+            verdict=normalized_verdict,
+            message=normalized_message,
+            targets=normalized_targets,
+        )
+        if (
+            todo.status is TodoStatus.PENDING_ACCEPTANCE
+            and not self._is_current_acceptance_decision(
+                decision_events,
+                decision_event=decision_event,
+            )
+        ):
+            raise TodoStateConflictError(
+                "decision_id belongs to an earlier acceptance round"
+            )
         return self._repository.record_acceptance(
             todo_id=todo.todo_id,
+            acceptance_id=normalized_decision_id,
             verdict=normalized_verdict,
             message=normalized_message,
             author_id=normalized_actor_id,
@@ -311,7 +413,7 @@ class TodoService(TodoServiceProtocol):
     def _with_bot_text_artifacts(
         cls,
         events: tuple[TodoEventRecord, ...],
-        artifacts: tuple[TodoArtifactRecord, ...],
+        artifacts: tuple[TodoPersistedArtifactRecord, ...],
     ) -> tuple[TodoEventRecord, ...]:
         """Join Bot text outputs to the completion of the run that produced them.
 
@@ -378,7 +480,7 @@ class TodoService(TodoServiceProtocol):
             context_version=event.context_version,
             status=event.status,
             artifacts=tuple(
-                TodoArtifactRecord(
+                TodoEventArtifactRecord(
                     artifact_id=artifact.artifact_id or None,
                     name=artifact.name,
                     url=artifact.url,
@@ -386,7 +488,147 @@ class TodoService(TodoServiceProtocol):
                 for artifact in event.artifacts
             ),
             created_at=event.created_at,
+            payload=dict(event.payload),
         )
+
+    @classmethod
+    def _acceptance_message(
+        cls,
+        *,
+        verdict: AcceptanceVerdict,
+        message: str | None,
+    ) -> str:
+        if verdict is AcceptanceVerdict.REJECTED:
+            return cls._required_text(message, "message", MAX_MESSAGE_LENGTH)
+        if message is None:
+            return ""
+        return cls._text_allow_empty(message, "message", MAX_MESSAGE_LENGTH)
+
+    @classmethod
+    def _acceptance_targets(
+        cls,
+        *,
+        verdict: AcceptanceVerdict,
+        targets: tuple[TodoAcceptanceTarget, ...],
+    ) -> tuple[TodoAcceptanceTarget, ...]:
+        if not isinstance(targets, tuple):
+            raise ValidationError("targets must be a tuple")
+        if len(targets) > MAX_ACCEPTANCE_TARGETS:
+            raise ValidationError("targets exceeds the maximum count")
+        if verdict is AcceptanceVerdict.APPROVED and targets:
+            raise ValidationError("approved acceptance must not contain targets")
+        if verdict is AcceptanceVerdict.REJECTED and not targets:
+            raise ValidationError("rejected acceptance requires at least one target")
+
+        normalized: list[TodoAcceptanceTarget] = []
+        seen: set[tuple[TodoAcceptanceTargetKind, str]] = set()
+        for target in targets:
+            if not isinstance(target, TodoAcceptanceTarget):
+                raise ValidationError("targets contains an invalid target")
+            try:
+                kind = TodoAcceptanceTargetKind(target.kind)
+            except ValueError as exc:
+                raise ValidationError("target kind is invalid") from exc
+            max_length = (
+                MAX_EVENT_ID_LENGTH
+                if kind is TodoAcceptanceTargetKind.EVENT
+                else MAX_ARTIFACT_ID_LENGTH
+            )
+            target_id = cls._required_text(target.target_id, "target id", max_length)
+            if (
+                isinstance(target.floor, bool)
+                or not isinstance(target.floor, int)
+                or target.floor < 1
+            ):
+                raise ValidationError("target floor must be a positive integer")
+            key = (kind, target_id)
+            if key in seen:
+                raise ValidationError("targets must be unique")
+            seen.add(key)
+            normalized.append(
+                TodoAcceptanceTarget(
+                    kind=kind,
+                    target_id=target_id,
+                    floor=target.floor,
+                )
+            )
+        return tuple(normalized)
+
+    @staticmethod
+    def _target_payloads(
+        targets: tuple[TodoAcceptanceTarget, ...],
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "kind": target.kind.value,
+                "id": target.target_id,
+                "floor": target.floor,
+            }
+            for target in targets
+        ]
+
+    @staticmethod
+    def _find_decision_event(
+        events: Iterable[TodoCollaborationEvent],
+        *,
+        decision_id: str,
+    ) -> TodoCollaborationEvent | None:
+        for event in reversed(tuple(events)):
+            if event.payload.get("decision_id") == decision_id:
+                return event
+        return None
+
+    @staticmethod
+    def _find_current_acceptance_decision(
+        events: Iterable[TodoCollaborationEvent],
+    ) -> TodoCollaborationEvent | None:
+        for event in reversed(tuple(events)):
+            if event.event_type == _TASK_COMPLETED_EVENT:
+                return None
+            if event.event_type in {_TASK_ACCEPTED_EVENT, _TASK_REJECTED_EVENT}:
+                return event
+        return None
+
+    @classmethod
+    def _is_current_acceptance_decision(
+        cls,
+        events: Iterable[TodoCollaborationEvent],
+        *,
+        decision_event: TodoCollaborationEvent,
+    ) -> bool:
+        current = cls._find_current_acceptance_decision(events)
+        return current is not None and current.event_id == decision_event.event_id
+
+    @classmethod
+    def _validate_decision_event(
+        cls,
+        event: TodoCollaborationEvent,
+        *,
+        todo_id: str,
+        actor_id: str,
+        verdict: AcceptanceVerdict,
+        message: str,
+        targets: tuple[TodoAcceptanceTarget, ...],
+    ) -> None:
+        expected_type = (
+            _TASK_ACCEPTED_EVENT
+            if verdict is AcceptanceVerdict.APPROVED
+            else _TASK_REJECTED_EVENT
+        )
+        payload = event.payload
+        if (
+            event.event_type != expected_type
+            or event.actor_id != actor_id
+            or event.actor_type != "human"
+            or payload.get("todo_id") != todo_id
+            or payload.get("verdict") != verdict.value
+            or payload.get("content") != message
+            or payload.get("author_id") != actor_id
+            or payload.get("targets") != cls._target_payloads(targets)
+        ):
+            raise TodoStateConflictError(
+                "decision_id already belongs to a different acceptance decision"
+            )
 
     def _require_todo_space_member(
         self, todo: TodoRecord, actor_id: str, env: str | None
@@ -477,7 +719,7 @@ class TodoService(TodoServiceProtocol):
 
 
 def _format_text_artifacts(
-    artifacts: tuple[TodoArtifactRecord, ...],
+    artifacts: tuple[TodoPersistedArtifactRecord, ...],
 ) -> str:
     texts: list[str] = []
     for artifact in artifacts:
@@ -501,7 +743,7 @@ def _event_timestamp(value: str) -> float | None:
 
 def _produced_for_completion(
     *,
-    artifact: TodoArtifactRecord,
+    artifact: TodoPersistedArtifactRecord,
     previous_completion: float | None,
     completed_at: float | None,
 ) -> bool:
@@ -513,8 +755,6 @@ def _produced_for_completion(
 
 def _timestamp(value: datetime) -> float:
     normalized = (
-        value
-        if value.tzinfo is not None
-        else value.replace(tzinfo=timezone.utc)
+        value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
     )
     return normalized.timestamp()

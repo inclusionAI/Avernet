@@ -59,6 +59,7 @@ class TodoCollaborationEvent:
     status: str | None
     artifacts: tuple[TodoCollaborationArtifact, ...]
     created_at: str
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

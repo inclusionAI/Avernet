@@ -188,7 +188,7 @@ def test_repository_isolates_environments(db, monkeypatch):
     "verdict,target_status",
     [
         (AcceptanceVerdict.APPROVED, TodoStatus.COMPLETED),
-        (AcceptanceVerdict.REJECTED, TodoStatus.PENDING_ACCEPTANCE),
+        (AcceptanceVerdict.REJECTED, TodoStatus.IN_PROGRESS),
     ],
 )
 def test_record_acceptance_requires_pending_acceptance_and_persists_decision(
@@ -206,6 +206,7 @@ def test_record_acceptance_requires_pending_acceptance_and_persists_decision(
 
     updated = repo.record_acceptance(
         todo_id=created.todo_id,
+        acceptance_id="decision_1",
         verdict=verdict,
         message="reviewed",
         author_id="user_1",
@@ -215,8 +216,70 @@ def test_record_acceptance_requires_pending_acceptance_and_persists_decision(
     with db.orm_session() as session:
         decisions = session.query(TodoAcceptanceModel).all()
         assert len(decisions) == 1
+        assert decisions[0].acceptance_id == "decision_1"
         assert decisions[0].todo_id == created.todo_id
         assert decisions[0].verdict == verdict.value
+
+
+def test_record_acceptance_replays_same_decision_idempotently(db):
+    repo = TodoRepository(db)
+    created = _create(repo)
+    _transition(repo, created.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    _transition(
+        repo,
+        created.todo_id,
+        TodoStatus.IN_PROGRESS,
+        TodoStatus.PENDING_ACCEPTANCE,
+    )
+
+    first = repo.record_acceptance(
+        todo_id=created.todo_id,
+        acceptance_id="decision_1",
+        verdict=AcceptanceVerdict.REJECTED,
+        message="revise section 2",
+        author_id="user_1",
+    )
+    second = repo.record_acceptance(
+        todo_id=created.todo_id,
+        acceptance_id="decision_1",
+        verdict=AcceptanceVerdict.REJECTED,
+        message="revise section 2",
+        author_id="user_1",
+    )
+
+    assert first.status is TodoStatus.IN_PROGRESS
+    assert second.status is TodoStatus.IN_PROGRESS
+    with db.orm_session() as session:
+        assert session.query(TodoAcceptanceModel).count() == 1
+
+
+def test_record_acceptance_rejects_conflicting_replay(db):
+    repo = TodoRepository(db)
+    created = _create(repo)
+    _transition(repo, created.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    _transition(
+        repo,
+        created.todo_id,
+        TodoStatus.IN_PROGRESS,
+        TodoStatus.PENDING_ACCEPTANCE,
+    )
+    repo.record_acceptance(
+        todo_id=created.todo_id,
+        acceptance_id="decision_1",
+        verdict=AcceptanceVerdict.APPROVED,
+        message="approved",
+        author_id="user_1",
+    )
+
+    with pytest.raises(TodoStateConflictError, match="different decision"):
+        repo.record_acceptance(
+            todo_id=created.todo_id,
+            acceptance_id="decision_1",
+            verdict=AcceptanceVerdict.APPROVED,
+            message="changed",
+            author_id="user_1",
+        )
+
 
 
 def test_record_acceptance_rejects_other_states_without_writing_history(db):
@@ -226,6 +289,7 @@ def test_record_acceptance_rejects_other_states_without_writing_history(db):
     with pytest.raises(TodoStateConflictError, match="pending acceptance"):
         repo.record_acceptance(
             todo_id=created.todo_id,
+            acceptance_id="decision_1",
             verdict=AcceptanceVerdict.APPROVED,
             message="ok",
             author_id="user_1",
@@ -254,6 +318,7 @@ def test_unknown_todo_raises_not_found_for_addressed_operations(db):
     with pytest.raises(TodoNotFoundError):
         repo.record_acceptance(
             todo_id="todo_missing",
+            acceptance_id="decision_missing",
             verdict=AcceptanceVerdict.APPROVED,
             message="",
             author_id="user_1",

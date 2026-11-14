@@ -46,10 +46,12 @@ class _Repository:
         self,
         *,
         pending: tuple[TodoRecord, ...] = (),
+        pending_acceptance: tuple[TodoRecord, ...] = (),
         in_progress: tuple[TodoRecord, ...] = (),
     ) -> None:
         self.rows = {
             TodoStatus.PENDING: pending,
+            TodoStatus.PENDING_ACCEPTANCE: pending_acceptance,
             TodoStatus.IN_PROGRESS: in_progress,
         }
         self.calls: list[tuple[TodoStatus, int]] = []
@@ -80,6 +82,17 @@ class _Execution:
             raise RuntimeError(f"dispatch {todo_id} failed")
         return replace(
             _todo(todo_id, TodoStatus.PENDING), status=TodoStatus.IN_PROGRESS
+        )
+
+    async def reconcile_pending_acceptance(self, *, todo_id: str):
+        self.calls.append(("reconcile", todo_id))
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if todo_id in self.failures:
+            raise RuntimeError(f"reconcile {todo_id} failed")
+        return replace(
+            _todo(todo_id, TodoStatus.PENDING_ACCEPTANCE),
+            status=TodoStatus.COMPLETED,
         )
 
     async def refresh_in_progress(self, *, todo_id: str):
@@ -147,6 +160,10 @@ async def test_lock_held_skips_repository_scan():
 async def test_tick_scans_each_status_with_independent_batch_limit_in_order():
     repository = _Repository(
         pending=tuple(_todo(f"p{index}", TodoStatus.PENDING) for index in range(1, 4)),
+        pending_acceptance=tuple(
+            _todo(f"a{index}", TodoStatus.PENDING_ACCEPTANCE)
+            for index in range(1, 4)
+        ),
         in_progress=tuple(
             _todo(f"i{index}", TodoStatus.IN_PROGRESS) for index in range(1, 4)
         ),
@@ -160,11 +177,14 @@ async def test_tick_scans_each_status_with_independent_batch_limit_in_order():
     assert result["status"] == "executed"
     assert repository.calls == [
         (TodoStatus.PENDING, 2),
+        (TodoStatus.PENDING_ACCEPTANCE, 2),
         (TodoStatus.IN_PROGRESS, 2),
     ]
     assert execution.calls == [
         ("dispatch", "p1"),
         ("dispatch", "p2"),
+        ("reconcile", "a1"),
+        ("reconcile", "a2"),
         ("refresh", "i1"),
         ("refresh", "i2"),
     ]

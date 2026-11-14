@@ -6,6 +6,7 @@ import pytest
 
 from agentclaw.community.plugin_api.todo_collaboration import (
     TodoCollaborationContextRequest,
+    TodoCollaborationEventRequest,
 )
 from agentclaw.community.plugins.local.todo_collaboration import (
     LocalTodoCollaborationPlugin,
@@ -77,3 +78,41 @@ async def test_refresh_context_run_does_not_complete_failed_runtime(
 
     assert refreshed.status == "in_progress"
     assert all(event.event_type != "task.completed" for event in refreshed.events)
+
+
+@pytest.mark.asyncio
+async def test_task_rejected_event_resumes_completed_context() -> None:
+    plugin = LocalTodoCollaborationPlugin()
+    created = plugin.create_context(_request())
+    started = await plugin.run_context(
+        collab_context_id=created.collab_context_id,
+        actor_id="user_1",
+    )
+    completed = plugin.complete_context(started.collab_context_id)
+    rejected = plugin.append_event(
+        collab_context_id=completed.collab_context_id,
+        request=TodoCollaborationEventRequest(
+            expected_version=completed.context_version,
+            event_kind="task.rejected",
+            primitive_type="Decision",
+            actor_id="user_1",
+            actor_type="human",
+            parent_event=completed.current_event_id,
+            visibility="workspace",
+            payload={
+                "content": "第二段结论缺少数据来源，请补充证据。",
+                "decision_id": "decision_reject_1",
+            },
+        ),
+    )
+
+    resumed = await plugin.resume_context(
+        collab_context_id=completed.collab_context_id,
+        actor_id="user_1",
+        triggered_by_event_id=rejected.event_id,
+    )
+
+    assert resumed.status == "in_progress"
+    assert resumed.events[-1].event_type == "task.started"
+    assert resumed.events[-1].payload["triggered_by_event_id"] == rejected.event_id
+    assert resumed.events[-1].payload["resumed"] is True

@@ -214,6 +214,7 @@ class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
                 collab_context_id,
                 trunk_events=False,
                 context=actor,
+                include_event_payload=True,
             )
         except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
             raise TodoCollaborationError(
@@ -306,6 +307,7 @@ def _parse_event(record: dict) -> TodoCollaborationEvent:
         status=_optional_string(record.get("status")),
         artifacts=artifacts,
         created_at=_required_string(created_at, "created_at"),
+        payload=dict(_dict(record.get("payload"))),
     )
 
 

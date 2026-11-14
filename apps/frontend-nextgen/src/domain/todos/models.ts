@@ -80,6 +80,7 @@ export interface TodoEvent {
   status?: string;
   createdAt: string;
   artifacts: TodoEventArtifact[];
+  payload: Record<string, unknown>;
 }
 
 export interface TodoListQuery {
@@ -102,9 +103,17 @@ export interface CreateTodoInteractionInput {
   message: string;
 }
 
+export interface TodoAcceptanceTarget {
+  kind: 'event' | 'artifact';
+  id: string;
+  floor: number;
+}
+
 export interface TodoAcceptanceInput {
+  decisionId: string;
   verdict: AcceptanceVerdict;
   message?: string;
+  targets: TodoAcceptanceTarget[];
 }
 
 export interface TodoBotOption {
