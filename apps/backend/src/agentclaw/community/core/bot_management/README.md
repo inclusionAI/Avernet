@@ -49,6 +49,9 @@ provides:
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
+  - "resolve_identity_source"
+  - "inherited_agent_code"
+  - "identity_scope_violations"
 consumes:
   - BotOwnershipSyncProtocol
   - OwnershipSyncReadRepository
@@ -200,6 +203,26 @@ Create-with-manifest freezes `nick_name` in the durable job's `spec` at submissi
 so background completion does not depend on request identity context. Jobs queued
 before this field was introduced remain readable and fall back to their `user_id`.
 This requires no database migration and does not backfill historical Bot rows.
+
+## Identity inheritance
+
+A manifest creation may name `identity_bot_id`, the Bot whose AgentPass identity
+the new Bot runs under. `identity_source.py` validates the source before any
+write: it must be a live Bot of the same entity and own a usable (non-`PENDING`)
+passport carrying an agent code. Declared MCP and CLI capabilities are compared
+with the source passport's scope; a violation rejects the creation.
+
+An inheriting Bot applies for no passport of its own. Creation copies the
+source's agent code into the child's `ext` and stores `identity_bot_id` on
+`ac_bots` (nullable; `NULL` means an ordinary Bot). Identity queries must resolve
+the stored source instead of the child id, because the passport service holds no
+entry for the child; the plugin boundary owns that resolution. The source is
+re-read when authorization completes, so a source that lost its issued passport
+in between fails loudly instead of creating a child with an empty identity.
+
+Deleting a child skips `destroyPassport` because the passport belongs to the
+source. Deleting a source is refused while any live child names it. Existing
+rows need no backfill.
 
 ## Ordinary coding restart
 
