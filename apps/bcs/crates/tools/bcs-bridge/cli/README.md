@@ -125,6 +125,11 @@ restart delays. Public starts also share a startup lock through the initial work
 handoff, so another configuration cannot take over that window. Stop the active instance before
 starting with a different configuration.
 
+`bcs-bridge stop` waits up to 10 seconds for an in-progress public launch to finish its startup
+handoff, then rechecks the active instance and keeps new public starts fenced until shutdown
+finishes. If startup does not finish in time, `stop` returns an error and must be retried; it does
+not report success. This startup wait is separate from the supervisor shutdown timeout.
+
 `bcs-bridge stop` disables the supervisor before gracefully stopping the worker, so an intentional
 stop is not restarted. Registration and configuration replacement still require both the worker
 and supervisor to be stopped. Auto-restart restores the process and its connections; it does not

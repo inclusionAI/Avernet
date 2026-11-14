@@ -31,6 +31,8 @@ The initial worker uses the existing daemon launch path. After it becomes ready,
 
 Public foreground and daemon starts share a separate startup lock. The daemon launcher holds it through worker initialization, supervisor startup and failure cleanup; its internal worker child does not reacquire it. Foreground startup checks the supervisor lock while holding the worker lock, so it cannot replace the selected configuration during restart backoff. The startup lock also closes the initial worker-to-supervisor handoff window.
 
+`stop` waits up to 10 seconds to acquire the startup lock before inspecting the supervisor or worker, then retains the lock through shutdown. This serializes stop with the complete startup handoff and prevents an unfinished launch from enabling auto-restart after a successful stop. A startup-wait timeout returns an error requiring a retry; it is separate from the supervisor shutdown timeout. A missing runtime directory is reported as stopped without creating it. In an existing runtime directory, stop creates the startup lock if needed, so first launches and older instances without that lock receive the same protection.
+
 The supervisor polls the worker through the existing verified control path:
 
 - a verified running worker is left alone;

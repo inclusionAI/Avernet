@@ -362,6 +362,20 @@ async fn stop_supervised_worker(paths: &Paths) -> anyhow::Result<()> {
 
 pub async fn stop(runtime_dir: &Path) -> anyhow::Result<()> {
     let paths = Paths::new(runtime_dir);
+    if !runtime_dir.try_exists().context("Cannot inspect bridge runtime directory")? {
+        println!("Bridge is stopped");
+        return Ok(());
+    }
+    // Wait for a public launch to finish publishing its worker and supervisor,
+    // then keep new launches fenced until shutdown has completed.
+    let deadline = Instant::now() + LIFECYCLE_TIMEOUT;
+    let _startup = loop {
+        if let Some(lock) = paths.named_lock("bridge-start.lock", true)? { break lock; }
+        if Instant::now() >= deadline {
+            bail!("Bridge startup is still in progress; stop timed out. Retry bcs-bridge stop");
+        }
+        sleep(Duration::from_millis(50)).await;
+    };
     if let Some(record) = active_supervisor(&paths)? {
         // The supervisor owns the complete stop sequence, including a worker that is still starting.
         request_supervisor_stop(&paths, &record)?;
@@ -549,5 +563,75 @@ mod tests {
         assert!(!supervisor.stop_requested().unwrap());
         request_supervisor_stop(&paths, &supervisor.record).unwrap();
         assert!(supervisor.stop_requested().unwrap());
+    }
+
+    #[tokio::test]
+    async fn stop_waits_for_supervisor_handoff_and_fences_starts_until_shutdown() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = Paths::new(directory.path());
+        paths.create().unwrap();
+        let startup = paths.start_lock().unwrap();
+        let runtime_dir = directory.path().to_owned();
+        let mut stopping = tokio::spawn(async move { stop(&runtime_dir).await });
+        assert!(timeout(Duration::from_millis(100), &mut stopping).await.is_err(),
+            "stop must wait for the launcher to finish publishing its supervisor");
+
+        let supervisor = SupervisorInstance::acquire(&paths, &directory.path().join("bridge.toml")).unwrap();
+        assert!(!supervisor.stop_requested().unwrap());
+        drop(startup);
+        timeout(Duration::from_secs(2), async {
+            while !supervisor.stop_requested().unwrap() { sleep(Duration::from_millis(10)).await; }
+        }).await.expect("stop must target the supervisor published during startup");
+        assert!(!stopping.is_finished(), "stop must wait for the supervisor to exit");
+        assert!(paths.start_lock().is_err(), "new starts must stay fenced during shutdown");
+
+        drop(supervisor);
+        timeout(Duration::from_secs(2), stopping).await
+            .expect("stop must finish after the supervisor exits").unwrap().unwrap();
+        assert!(paths.start_lock().is_ok(), "completed stop must release the startup fence");
+    }
+
+    #[tokio::test]
+    async fn stop_without_a_runtime_directory_does_not_create_lifecycle_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime_dir = directory.path().join("never-started");
+        stop(&runtime_dir).await.unwrap();
+        assert!(!runtime_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn stop_fences_starts_when_an_existing_runtime_has_no_startup_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = Paths::new(directory.path());
+        let supervisor = SupervisorInstance::acquire(&paths, &directory.path().join("bridge.toml")).unwrap();
+        assert!(!paths.file("bridge-start.lock").exists());
+        let runtime_dir = directory.path().to_owned();
+        let stopping = tokio::spawn(async move { stop(&runtime_dir).await });
+        timeout(Duration::from_secs(2), async {
+            while !supervisor.stop_requested().unwrap() { sleep(Duration::from_millis(10)).await; }
+        }).await.expect("stop must target the existing supervisor");
+        assert!(!stopping.is_finished(), "stop must wait for the supervisor to exit");
+        assert!(paths.start_lock().is_err(), "stop must fence starts even when the startup lock did not exist");
+
+        drop(supervisor);
+        timeout(Duration::from_secs(2), stopping).await
+            .expect("stop must finish after the supervisor exits").unwrap().unwrap();
+        assert!(paths.start_lock().is_ok(), "completed stop must release the startup fence");
+    }
+
+    #[tokio::test]
+    async fn stop_reports_a_timeout_when_startup_does_not_finish() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = Paths::new(directory.path());
+        paths.create().unwrap();
+        let startup = paths.start_lock().unwrap();
+        let started = Instant::now();
+        let error = timeout(LIFECYCLE_TIMEOUT + Duration::from_secs(2), stop(directory.path())).await
+            .expect("stop must bound its wait for startup").unwrap_err();
+        assert!(started.elapsed() >= LIFECYCLE_TIMEOUT);
+        let message = error.to_string();
+        assert!(message.contains("startup") && message.contains("timed out"), "{message}");
+        drop(startup);
+        stop(directory.path()).await.unwrap();
     }
 }
