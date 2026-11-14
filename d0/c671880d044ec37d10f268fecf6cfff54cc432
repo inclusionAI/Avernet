@@ -1,0 +1,28 @@
+apps/backend/specs/jit-token-best-effort/001-spec-output.md
+  s_8cab37de83b8f7::t_af8b564886d5a8 42-45
+  s_8cab37de83b8f7::t_35545eef286efc 46-47
+singlebox/ci/singlebox_composition_e2e.sh
+  s_8cab37de83b8f7::t_0aa53b74c81429 142-168,268-272
+  s_8cab37de83b8f7::t_74021a02d5d821 273
+singlebox/ci/test_singlebox_composition_e2e.py
+  s_8cab37de83b8f7::t_d2c319cd1efff8 23,102-103,125-126,139-140,151-152,164-165
+  s_8cab37de83b8f7::t_2172db74622436 9,90-91,111,120-121,129
+  s_8cab37de83b8f7::t_af8b564886d5a8 85-89,93-94,96-101,104-110,112,114-119,122-124,127-128,130-138,141-150,153-157,161-162,166,168,170
+  s_8cab37de83b8f7::t_fd3b4fa883d37d 10,92,95,113,158-160,163,167,169,171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d0c671880d044ec37d10f268fecf6cfff54cc432",
+  "prompts": {},
+  "sessions": {
+    "s_8cab37de83b8f7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf04-e630-70f0-9238-ea404406fbff",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/swarm_slice.py
+  h_059e888e5e4e82 1-436
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service.py
+  h_059e888e5e4e82 1-43
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_method_service_base.py
+  h_059e888e5e4e82 1-171
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_plan_ops.py
+  h_059e888e5e4e82 1-613
+apps/backend/src/agentclaw/community/core/task/context_collab/services/swarm_stage_ops.py
+  h_059e888e5e4e82 1-464
+apps/backend/tests/community/core/task/context_collab/swarm_profile_support.py
+  h_059e888e5e4e82 1-380
+apps/backend/tests/community/core/task/context_collab/test_swarm_guards.py
+  h_059e888e5e4e82 1-190
+apps/backend/tests/community/core/task/context_collab/test_swarm_lifecycle.py
+  h_059e888e5e4e82 1-552
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a59bd29cdcc6c098e3e7e709204cc79f5597b2e0",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

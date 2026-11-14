@@ -1,0 +1,175 @@
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/config.py
+  s_10bf1e6587c582::t_991ca693cb88c4 1-7,9-19,21-47,50-99,101-120
+  s_10bf1e6587c582::t_c3d4f0bda97ed4 48-49
+  s_10bf1e6587c582::t_594dd8fea22790 8,20,100
+src/ecb/docs/task_benchmark/2026-11-11-bot-session-monitor/tasks.md
+  s_10bf1e6587c582::t_3b808f7fb530ef 18,22,27,30-31,54-55,57,59-61,66,80,82
+  s_10bf1e6587c582::t_c32618897fd7ae 2,4-7,9,11,14-16,20-21,23-25,29,33-34,36,38-43,45,47-52,56,64,86-88,92
+  s_10bf1e6587c582::t_02e8382542c2ac 32
+  s_10bf1e6587c582::t_04e12f38315f65 3,8,17,26,35,44,53,75,94-99,101,103
+  s_10bf1e6587c582::t_bc2b2f6fcf5f1d 65,69-72,102
+  s_10bf1e6587c582::t_f3996c398bc586 67,77,93
+  s_10bf1e6587c582::t_4ca973da5a76f2 12
+  s_10bf1e6587c582::t_fdc2c7c5e5f0ba 1,10,19,28,37,46,100
+  s_10bf1e6587c582::t_accf06f74235ea 13
+  s_10bf1e6587c582::t_fb79b23950fd4f 58,62-63,68,73-74,76,78-79,81,83-85,89-91
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_migration.py
+  s_10bf1e6587c582::t_56f39d91d28ee0 1-12,21-22
+  s_10bf1e6587c582::t_1ede1e5b437e7d 13-20,23-24
+  s_10bf1e6587c582::t_be18b791ad96c1 57-60
+  s_10bf1e6587c582::t_371d38f0a2e4da 26-38
+  s_10bf1e6587c582::t_45aec51016c376 25,53,61
+  s_10bf1e6587c582::t_58c73e6d4c7918 39-52,54-56
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/dingtalk_sender.py
+  s_10bf1e6587c582::t_e986367eb0c4a0 6,52-55
+  s_10bf1e6587c582::t_05cdf152b7bd35 1-5,7-51,56-71,73,75-95
+  s_10bf1e6587c582::t_b0aebbd1d99e42 72,74
+src/ecb/docs/task_benchmark/2026-11-11-bot-session-monitor/product-design.md
+  s_10bf1e6587c582::t_6753552d8a1153 54
+  s_10bf1e6587c582::t_046aea8faf04ff 193-198
+  s_10bf1e6587c582::t_b4bd829061ea81 22
+  s_10bf1e6587c582::t_480c20900143a0 52-53
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 143
+  s_10bf1e6587c582::t_fdc2c7c5e5f0ba 123
+  s_10bf1e6587c582::t_fb79b23950fd4f 2-4,7,9,11,13,17,20,26,73,78,80,85-116,118,120,122,128-129,139-140,157,162,164,166,168,170,172-175,177-181
+  s_10bf1e6587c582::t_7a6411e22ee0e3 21
+  s_10bf1e6587c582::t_588c4afd15d347 1,6
+  s_10bf1e6587c582::t_adcfd741d97e6f 14-15,19,50,58
+  s_10bf1e6587c582::t_05a3599b63ab9f 24
+  s_10bf1e6587c582::t_7b43bf52fd9e16 5,8,10,12,16,18,23,25,27-49,51,55-57,59-72,74-77,79,81-84,117,119,121,124-127,130-138,141-142,144-156,158-161,163,165,167,169,171,176,182-192
+src/ecb/ecb/application/task_benchmark/task_monitor/service.py
+  s_10bf1e6587c582::t_fdc2c7c5e5f0ba 295
+  s_10bf1e6587c582::t_ea44618ddef194 269-278,294,296-303
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 3,36-37,153,195,206,219,239
+  s_10bf1e6587c582::t_890c8fa6453492 39-42,78-82,93-94,110-112,209-210,232,244-245,285,291,304-305,315
+  s_10bf1e6587c582::t_e986367eb0c4a0 9,337
+  s_10bf1e6587c582::t_1017fdf986b8b0 12,16,247-251
+  s_10bf1e6587c582::t_05cdf152b7bd35 1,4-8,10,13-15,17-35,38,43-59,61-77,83-92,95-108,113-119,121-152,154-183,185-192,194,196-205,207-208,211-216,218,221-222,227-228,230-231,233-238,240-243,246,252-265,267-268,279-284,286-290,292-293,306-314,316-336,338-339
+  s_10bf1e6587c582::t_e5675e1e285c1e 2,11,60,109,120,184,193,217,220,223-226,229,266
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/source.py
+  s_10bf1e6587c582::t_ea44618ddef194 71-81
+  s_10bf1e6587c582::t_17ab0b44f7ad6c 1,4,9-18,21-49,51-58,60-62,65-70,82-96,98-114,116-125,127-154,156-167,169-171,173-184
+  s_10bf1e6587c582::t_1017fdf986b8b0 50
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 3,5-6,8,19-20,59,63-64,126,168,172
+  s_10bf1e6587c582::t_c724f2fd7d75c2 2,7,97,115,155
+src/ecb/ecb/domain/task_benchmark/task_monitor/models.py
+  s_10bf1e6587c582::t_991ca693cb88c4 1-131
+src/ecb/docs/task_benchmark/2026-11-11-bot-session-monitor/implementation.md
+  s_10bf1e6587c582::t_a166017889c0bf 11,39
+  s_10bf1e6587c582::t_a8b32ae463610a 24-31
+  s_10bf1e6587c582::t_f3996c398bc586 55,57-58
+  s_10bf1e6587c582::t_be18b791ad96c1 41-44
+  s_10bf1e6587c582::t_bc2b2f6fcf5f1d 35,47-54,56
+  s_10bf1e6587c582::t_7d5e3fdbe14019 1-10,12-23,32-34,36-38,40
+  s_10bf1e6587c582::t_ef7e6b5558d3ec 45-46
+src/ecb/ecb/servers/web/task_monitor/wiring.py
+  s_10bf1e6587c582::t_890c8fa6453492 1-18,20-51
+  s_10bf1e6587c582::t_c3d4f0bda97ed4 19
+  s_10bf1e6587c582::t_6dbd154bd3c1cf 52-55
+src/ecb/ecb/infrastructure/database/migrations/V032__task_monitor_feedback.sql
+  s_10bf1e6587c582::t_17ab0b44f7ad6c 15-16,27-28
+  s_10bf1e6587c582::t_371d38f0a2e4da 11,23
+  s_10bf1e6587c582::t_be18b791ad96c1 12,24
+  s_10bf1e6587c582::t_ef7e6b5558d3ec 40
+  s_10bf1e6587c582::t_f15e1c7341ebb6 4
+  s_10bf1e6587c582::t_1ede1e5b437e7d 1-3,5-10,13-14,17-22,25-26,29-39,41-43
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/credentials.py
+  s_10bf1e6587c582::t_1017fdf986b8b0 16
+  s_10bf1e6587c582::t_890c8fa6453492 1-15
+src/ecb/tests/application/task_benchmark/task_monitor/test_task_monitor_service.py
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-9,11-163
+  s_10bf1e6587c582::t_075163f84aea6f 10,166-195,197-198,200-231,235-239,244-251
+  s_10bf1e6587c582::t_fdc2c7c5e5f0ba 196,199,232-234,240-243
+  s_10bf1e6587c582::t_f5d331ef9bc802 164-165,252-259
+src/ecb/ecb/interfaces/task_benchmark/task_monitor/router.py
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 3,5,15
+  s_10bf1e6587c582::t_ea44618ddef194 98
+  s_10bf1e6587c582::t_890c8fa6453492 1,4,6-14,16-65,68-71,73-90,92-97,99-117,119-132,134-168
+  s_10bf1e6587c582::t_00c1971a3902d0 2,66-67,72,91,118,133
+src/ecb/ecb/domain/task_benchmark/task_monitor/protocols.py
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 3,5-6,10,12
+  s_10bf1e6587c582::t_ea44618ddef194 30
+  s_10bf1e6587c582::t_991ca693cb88c4 1,4,7-9,11,13-29,31-37
+  s_10bf1e6587c582::t_6d14f12a3abf83 2
+src/ecb/ecb/infrastructure/task_benchmark/task_monitor/feedback_store.py
+  s_10bf1e6587c582::t_25a99e1740f640 7,124-125,127-145
+  s_10bf1e6587c582::t_c79f0b859a8b0d 5-6,23-38,156-177,179,182-186,188-190
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 3
+  s_10bf1e6587c582::t_189f1a14c55c32 81-116,126,148-153,180,196-210
+  s_10bf1e6587c582::t_17ab0b44f7ad6c 1,4,8-22,39-46,48-80,117-121,123,146-147,154-155,178,181,187,191-195
+  s_10bf1e6587c582::t_3373b183021097 2,47,122
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_dingtalk_sender.py
+  s_10bf1e6587c582::t_e986367eb0c4a0 1-90
+src/ecb/docs/task_benchmark/2026-11-11-bot-session-monitor/plan.md
+  s_10bf1e6587c582::t_accf06f74235ea 27-28,30,32,34,37-38,43-46,48-51,53-63,66,69,74-75,77,80,124,177,263,265
+  s_10bf1e6587c582::t_fb79b23950fd4f 257,300-305,312-313,315
+  s_10bf1e6587c582::t_02e8382542c2ac 65,67,76,82,85-86,179,181,264,275-276
+  s_10bf1e6587c582::t_04e12f38315f65 194,201,331-335
+  s_10bf1e6587c582::t_c32618897fd7ae 1-7,9,11-26,29,31,33,70,72-73,101-105,108-109,112-119,121-123,125-130,132-147,149-153,155-170,172-176,180,182-192,195-197,199-200,205-206,208-211,215,218-224,226-227,229-230,232,235-246,256,258-262,267-274,277-280,282-283,287-291,293-296,298-299
+  s_10bf1e6587c582::t_3b808f7fb530ef 10,36,39-42,52,64,68,78-79,81,83-84,87-100,110-111,178,198,203,207,284,286,297,311,316-322,324,326-330
+  s_10bf1e6587c582::t_eb9fd05ad74bb8 8,35,71,106-107,120,131,148,154,171,193,212,214,216-217,225,231,233-234,247-255,292,306-310,314,323,325
+  s_10bf1e6587c582::t_4ca973da5a76f2 47,213,228,266,281,285
+  s_10bf1e6587c582::t_046aea8faf04ff 202,204
+  s_10bf1e6587c582::t_ab0243eddd1c89 336-343
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_source.py
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-130
+  s_10bf1e6587c582::t_ea44618ddef194 131-143
+src/ecb/tests/interfaces/task_benchmark/task_monitor/test_task_monitor_router.py
+  s_10bf1e6587c582::t_ea44618ddef194 41
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-40,42-140
+src/ecb/ecb/configs/application.yaml
+  s_10bf1e6587c582::t_890c8fa6453492 132-151
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_wiring.py
+  s_10bf1e6587c582::t_c3d4f0bda97ed4 18-30,34,39
+  s_10bf1e6587c582::t_70605c2e26a1cf 1-17,31-33,35-38,40-42
+src/ecb/ecb/servers/web/app.py
+  s_10bf1e6587c582::t_890c8fa6453492 154,947-953,956
+  s_10bf1e6587c582::t_9248fa9da67ed0 174-178,1290-1292
+  s_10bf1e6587c582::t_3b09c87c3fb933 957
+src/ecb/ecb/servers/web/task_monitor/__init__.py
+  s_10bf1e6587c582::t_890c8fa6453492 1
+src/ecb/tests/domain/task_benchmark/task_monitor/test_task_monitor_models.py
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-42
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_config.py
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-23
+src/ecb/tests/infrastructure/task_benchmark/task_monitor/test_task_monitor_store.py
+  s_10bf1e6587c582::t_b8140bea543457 7,20-22,41-43,53,55-59,61-64,66,76-80,93-94,97-99,185-202,205-264
+  s_10bf1e6587c582::t_14ade71e8f2309 265-303,341
+  s_10bf1e6587c582::t_55c50a97caaf35 304-340
+  s_10bf1e6587c582::t_74131eafb5ebc9 1-6,8-19,23-40,44-52,54,60,65,67-75,81-92,95-96,100-184
+  s_10bf1e6587c582::t_189f1a14c55c32 203-204
+src/ecb/ecb/interfaces/task_benchmark/task_monitor/schemas.py
+  s_10bf1e6587c582::t_890c8fa6453492 1-36
+src/ecb/docs/task_benchmark/2026-11-11-bot-session-monitor/spec.md
+  s_10bf1e6587c582::t_c32618897fd7ae 2-5,7-16,22,28-31,43,45-46,48-49,51-52
+  s_10bf1e6587c582::t_adcfd741d97e6f 40
+  s_10bf1e6587c582::t_588c4afd15d347 1
+  s_10bf1e6587c582::t_4ca973da5a76f2 23,25,50,53
+  s_10bf1e6587c582::t_accf06f74235ea 17,26
+  s_10bf1e6587c582::t_fb79b23950fd4f 34,41-42
+  s_10bf1e6587c582::t_3b808f7fb530ef 6,18-21,24,27,32-33,35-39,44,47,54-55
+src/ecb/docs/task_benchmark/TASK_MONITOR.md
+  s_10bf1e6587c582::t_7b23e1432a2611 63
+  s_10bf1e6587c582::t_bc2b2f6fcf5f1d 88-92
+  s_10bf1e6587c582::t_a166017889c0bf 11,43,81,83
+  s_10bf1e6587c582::t_04e12f38315f65 1-10,12-17,19-33,35-42,44-62,64-80,82,84-87
+  s_10bf1e6587c582::t_fdc2c7c5e5f0ba 18,34
+src/ecb/scripts/task_benchmark/task_monitor_preflight.py
+  s_10bf1e6587c582::t_521c548770c3f3 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd60bcb75ecb3e6a1bb272c71d6a5147c89372ec",
+  "prompts": {},
+  "sessions": {
+    "s_10bf1e6587c582": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cae1-4fcb-78d0-8da3-b8728836a6c9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

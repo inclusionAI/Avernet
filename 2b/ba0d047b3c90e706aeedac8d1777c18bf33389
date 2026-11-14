@@ -1,0 +1,43 @@
+apps/frontend-nextgen/src/internal/agentCoding/aixcodingSessionActionRegistry.ts
+  s_e1efa534037cfc::t_2de96cc9393da6 12-18,44
+apps/frontend-nextgen/src/internal/knowledge/services/conversationKnowledge.ts
+  s_e1efa534037cfc::t_aeceb74dde23d2 10
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_e1efa534037cfc::t_c34e66d4c09b29 149
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_e1efa534037cfc::t_623b6ef23aa0f8 98
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityMembers.test.tsx
+  s_e1efa534037cfc::t_081c43824f235f 65-72,74-76
+apps/frontend-nextgen/test/components/CollaborationPrivacy/PermissionCard.test.tsx
+  s_e1efa534037cfc::t_e273e0f15b2a93 71,73,114
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  s_e1efa534037cfc::t_7819452600a81d 17,24,66,71,151
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  s_e1efa534037cfc::t_fa58c8a4fceb5e 50,64,82,153,156,164,172,179,185,189,196,208,217,228,361,366-367,372,397
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  s_e1efa534037cfc::t_a84ac684174acb 38,42,53,69,73-74
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.autoSelect.test.tsx
+  s_e1efa534037cfc::t_d6368f8b43d9ba 77-78,82,84-85,87-93,96-98,100,104-131,133-135,139-151,153,155-168,172-175,177,179,187,189,191-192,197,199-200,214,219,222,244-256,265-278
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupItem.createSessionScope.test.tsx
+  s_e1efa534037cfc::t_7d021b8c70886b 45,47
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupSidebar.groupListAndView.test.tsx
+  s_e1efa534037cfc::t_10abdb411f4c73 125
+apps/frontend-nextgen/test/pages/Workspace/components/GroupSidebar/GroupSidebar.sessionList.test.tsx
+  s_e1efa534037cfc::t_4884614b1ac910 104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2bba0d047b3c90e706aeedac8d1777c18bf33389",
+  "prompts": {},
+  "sessions": {
+    "s_e1efa534037cfc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a428-d84d-7fb0-a006-39539874601f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

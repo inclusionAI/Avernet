@@ -1,0 +1,32 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  h_b601d8706f5d44 27
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime/evidence_files.py
+  h_b601d8706f5d44 6-16,29-46
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/scripts/repair_runtime/session_files.py
+  h_b601d8706f5d44 91,101,141-143,170
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/tests/test_session_files.py
+  h_b601d8706f5d44 60-100
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/mcp_server.py
+  h_b601d8706f5d44 24,26,37
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  h_b601d8706f5d44 165
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_read_coverage_context.py
+  h_b601d8706f5d44 1-9
+apps/evolverun/clawweb/internal/modules/tclog/server/routes/tclog.ts
+  h_b601d8706f5d44 816-839
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  h_b601d8706f5d44 2,4,6-27,35,38,43,45-47,53-68,163-164
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  h_b601d8706f5d44 4,61-62,120,126-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "251faa33661a631a19f181dd395b7bb8896d8b02",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
