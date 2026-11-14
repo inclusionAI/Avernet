@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-runtime.ts
+  h_bb3ca6fb13c5df 12,20
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-ai-drafts.test.ts
+  h_bb3ca6fb13c5df 116-128,138
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-ai-drafts.ts
+  h_bb3ca6fb13c5df 5,8-10,18,20,22-24,26-34,36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f7aa2d4df75720abfc12e812bded66c2cfdb1611",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
