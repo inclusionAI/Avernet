@@ -721,3 +721,133 @@ def test_display_summary_unknown_event_falls_back_to_business_status():
 @pytest.mark.parametrize("status", [WorkOrderStatus.PROCESSING, WorkOrderStatus.FAILED])
 def test_openapi_work_order_status_accepts_auto_processing_states(status):
     assert WorkOrderStatus(status.value) is status
+
+
+# --- Wave 2: applicant display contracts at the OpenAPI VO layer (AC-6) ---
+
+
+def test_get_work_order_exposes_nickname_refreshed_join_content(
+    client, work_order_service
+):
+    """AC-4/AC-6 VO assertion: the service's read-time rebuilt copy surfaces
+    through detail content and the derived summary, nickname included."""
+    refreshed_text = "用户「张三」申请加入空间「Team」，请及时处理。"
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(WorkOrderStatus.PENDING),
+        event_type=WorkOrderEventType.SPACE_JOIN_APPLIED,
+        title="SPACE_JOIN_PENDING",
+        content=json.dumps({"text": refreshed_text}, ensure_ascii=False),
+        space_id=7,
+        space_name="Team",
+        applicant_name="200177",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["content"] == {"text": refreshed_text}
+    assert data["summary"] == refreshed_text
+    assert data["title"] == "空间加入申请待审批"
+    assert data["can_approve"] is True
+    work_order_service.get_detail.assert_called_once_with(
+        work_order_id=11, actor_id="owner-1"
+    )
+
+
+def test_get_work_order_exposes_nickname_refreshed_bot_editor_content(
+    client, work_order_service
+):
+    refreshed_text = "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(WorkOrderStatus.PENDING).model_copy(
+            update={
+                "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                "biz_id": "bot-17",
+                "applicant_user_id": "200177",
+                "biz_data": json.dumps({"bot_name": "Editor Bot"}),
+            }
+        ),
+        event_type=WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+        title="Bot 共同编辑申请待审批",
+        content=refreshed_text,
+        space_id=0,
+        space_name="",
+        applicant_name="200177",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["content"] == refreshed_text
+    assert data["summary"] == refreshed_text
+    assert data["title"] == "Bot 共同编辑申请待审批"
+    assert data["biz_id"] == "bot-17"
+
+
+def test_list_work_orders_renders_refreshed_applied_copies(
+    client, work_order_service
+):
+    """The list VO keeps carrying the refreshed copies: summaries and content
+    show the nickname text, and the raw applicant id stays the work number."""
+    refreshed_join_text = "用户「张三」申请加入空间「Team」，请及时处理。"
+    refreshed_bot_text = "用户「张三」申请共同编辑 Bot「Editor Bot」，请及时处理。"
+    join_item = WorkOrderListItem(
+        work_order=_work_order(WorkOrderStatus.PENDING).model_copy(
+            update={"applicant_user_id": "200177"}
+        ),
+        notification=_notification(NotificationCategory.APPROVAL).model_copy(
+            update={
+                "event_type": WorkOrderEventType.SPACE_JOIN_APPLIED,
+                "content": json.dumps(
+                    {"text": refreshed_join_text}, ensure_ascii=False
+                ),
+            }
+        ),
+        can_approve=True,
+    )
+    bot_item = WorkOrderListItem(
+        work_order=_work_order(WorkOrderStatus.APPROVED).model_copy(
+            update={
+                "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                "biz_id": "bot-17",
+                "applicant_user_id": "200177",
+                "biz_data": json.dumps({"bot_name": "Editor Bot"}),
+            }
+        ),
+        notification=_notification(NotificationCategory.APPROVAL).model_copy(
+            update={
+                "event_type": WorkOrderEventType.BOT_COLLABORATOR_APPLIED,
+                "biz_type": WorkOrderBizType.BOT_COLLABORATOR,
+                "biz_id": "bot-17",
+                "content": refreshed_bot_text,
+            }
+        ),
+        can_approve=False,
+    )
+    work_order_service.list_items.return_value = (2, [join_item, bot_item])
+
+    response = client.get(
+        "/openapi/v1/bots/work-orders",
+        params={
+            "query_type": "PENDING_FOR_ME",
+            "item_type": "APPROVAL",
+            "page_no": 1,
+            "page_size": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert items[0]["summary"] == refreshed_join_text
+    assert items[0]["content"] == {"text": refreshed_join_text}
+    assert items[0]["event_type"] == "SPACE_JOIN_APPLIED"
+    assert items[0]["applicant_user_id"] == "200177"
+    assert items[0]["title"] == "空间加入申请待审批"
+    assert items[1]["summary"] == refreshed_bot_text
+    assert items[1]["content"] == refreshed_bot_text
+    assert items[1]["event_type"] == "BOT_COLLABORATOR_APPLIED"
+    assert items[1]["title"] == "Bot 共同编辑申请待审批"

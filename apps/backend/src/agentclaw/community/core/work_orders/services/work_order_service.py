@@ -94,6 +94,11 @@ from agentclaw.community.core.work_orders.execution import (
 from agentclaw.community.kernel.bot_manager_sync import SpaceChange
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
+from agentclaw.community.core.work_orders.services.work_order_presentation import (
+    WorkOrderPresentationRefresher,
+    _business_data,
+)
+
 logger = get_logger()
 
 
@@ -126,6 +131,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
         self._skill_collaborator_approval_handler = skill_collaborator_approval_handler
         self._decision_callbacks = decision_callbacks
         self._manager_sync = bot_manager_sync
+        self._presentation = WorkOrderPresentationRefresher(
+            staff_dept=staff_dept,
+            spaces=spaces,
+        )
 
     @staticmethod
     def _required_text(value: str, *, limit: int, error: type[Exception]) -> str:
@@ -662,6 +671,12 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyEditorError(
                 "applicant already has Bot editor access"
             )
+        # Resolve the applicant's display nickname BEFORE entering the timed
+        # creation phase (same contract as the Space-join path above): the
+        # owner-facing pending copy then shows the flower name instead of the
+        # raw work number, falling back to the user id when the staff profile
+        # is unavailable.
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
         with execution_phase(
             "bot_request_create", work_order_id=None, bot_id=bot_id, owner_id=owner_id
         ):
@@ -672,7 +687,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 owner_id=str(bot["owner_id"]),
                 space_id=space.id,
                 applicant_user_id=applicant_user_id,
-                applicant_name=applicant_user_id,
+                applicant_name=applicant_name,
                 apply_reason=reason,
                 env=get_current_env(),
             )
@@ -728,38 +743,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
 
     def _get_applicant_name(self, *, applicant_user_id: str) -> str:
-        try:
-            profile = self._staff_dept.get_profile_by_work_no(
-                work_no=normalize_work_no_for_lookup(applicant_user_id)
-            )
-        except StaffProfileLookupError:
-            logger.warning(
-                "failed to resolve applicant nickname; falling back to user id",
-                extra={"user_id": applicant_user_id},
-                exc_info=True,
-            )
-            return applicant_user_id
-
-        nickname = (profile.nick_name or "").strip()
-        return nickname[:128] or applicant_user_id
+        return self._presentation.get_applicant_name(applicant_user_id=applicant_user_id)
 
     def _get_reviewer_name(self, *, reviewer_user_id: str | None) -> str | None:
-        if not reviewer_user_id:
-            return None
-        try:
-            profile = self._staff_dept.get_profile_by_work_no(
-                work_no=normalize_work_no_for_lookup(reviewer_user_id)
-            )
-        except StaffProfileLookupError:
-            logger.warning(
-                "failed to resolve reviewer nickname",
-                extra={"user_id": reviewer_user_id},
-                exc_info=True,
-            )
-            return None
-
-        nickname = (profile.nick_name or "").strip()
-        return nickname[:128] or None
+        return self._presentation.get_reviewer_name(reviewer_user_id=reviewer_user_id)
 
     def list_items(
         self,
@@ -782,38 +769,43 @@ class WorkOrderService(WorkOrderServiceProtocol):
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
-        return total, [self._present_skill_collaborator_item(item) for item in items]
+        return total, [
+            self._present_space_join_item(
+                self._present_bot_collaborator_item(
+                    self._present_skill_collaborator_item(item)
+                )
+            )
+            for item in items
+        ]
 
     def _present_skill_collaborator_item(self, item):
-        """Refresh pending Skill-request copy so historical rows gain a nickname."""
+        return self._presentation.present_skill_collaborator_item(item)
 
-        work_order = item.work_order
-        notification = item.notification
-        if (
-            work_order is None
-            or notification is None
-            or work_order.biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
-            or notification.event_type
-            != WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
-        ):
-            return item
-        skill_name = str(_business_data(work_order.biz_data).get("skill_name") or "")
-        if not skill_name:
-            return item
-        applicant_user_id = work_order.applicant_user_id
-        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
-        content = WorkOrderMessageContent.SKILL_COLLABORATOR_PENDING.value.format(
-            applicant_display=skill_collaborator_applicant_display(
-                applicant_user_id=applicant_user_id,
-                applicant_name=applicant_name,
-            ),
-            skill_name=skill_name,
+    def _present_bot_collaborator_item(self, item):
+        return self._presentation.present_bot_collaborator_item(item)
+
+    def _present_space_join_item(self, item):
+        return self._presentation.present_space_join_item(item)
+
+    def _rebuild_space_join_pending_copy(
+        self, *, applicant_user_id, space_name, stored_text
+    ):
+        return self._presentation.rebuild_space_join_pending_copy(
+            applicant_user_id=applicant_user_id, space_name=space_name, stored_text=stored_text
         )
-        return item.model_copy(
-            update={
-                "notification": notification.model_copy(update={"content": content})
-            }
+
+    def _rebuild_bot_editor_pending_copy(
+        self, *, applicant_user_id, biz_data, stored_text
+    ):
+        return self._presentation.rebuild_bot_editor_pending_copy(
+            applicant_user_id=applicant_user_id, biz_data=biz_data, stored_text=stored_text
         )
+
+    def _lookup_space_name(self, space_ref):
+        return self._presentation.lookup_space_name(space_ref)
+
+    def _refresh_detail_applied_copy(self, detail):
+        return self._presentation.refresh_detail_applied_copy(detail)
 
     def get_detail(self, *, work_order_id: int, actor_id: str):
         detail = self._repository.get_detail(
@@ -823,13 +815,15 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
         if detail is None:
             raise WorkOrderNotFoundError("work order not found")
-        return detail.model_copy(
-            update={
-                "reviewer_user_name": self._get_reviewer_name(
-                    reviewer_user_id=detail.work_order.reviewer_user_id
-                )
-            }
-        )
+        update = {
+            "reviewer_user_name": self._get_reviewer_name(
+                reviewer_user_id=detail.work_order.reviewer_user_id
+            )
+        }
+        refreshed_content = self._refresh_detail_applied_copy(detail)
+        if refreshed_content is not None:
+            update["content"] = refreshed_content
+        return detail.model_copy(update=update)
 
     def approve(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
         normalized_remark = (review_remark or "").strip() or None
@@ -948,13 +942,3 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 owner_id=owner_id,
             )
         return result
-
-
-def _business_data(raw: str | None) -> dict[str, object]:
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
