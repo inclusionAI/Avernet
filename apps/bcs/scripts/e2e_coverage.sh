@@ -401,6 +401,7 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
     bcs-bot-store/src/memory_registration_ownership.rs
+    bcs-bot-store/src/memory_provider_reactivation.rs
     bcs-bot-store/src/memory_retirement.rs
     # The collaboration-store split introduced memory_* module files; the four
     # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11

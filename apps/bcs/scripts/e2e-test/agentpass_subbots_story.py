@@ -452,20 +452,50 @@ class Story:
             401,
             headers=principal,
         )
-        self.request(
-            "deleted slug cannot be reclaimed",
+        reactivated, _ = self.request(
+            "Provider registration reactivates a deleted slug",
             "POST",
             path + "/bots",
-            409,
-            body=registration,
+            body={**registration, "name": "E2E Reviewer Reactivated"},
             token=admin,
         )
-        self.request(
-            "scoped path cannot reclaim deleted slug",
-            "POST",
-            "/register?" + urllib.parse.urlencode({**query, "provider_bot_ref": f"{parent}:reviewer"}),
-            409,
+        gateway_token = reactivated["bot_runtime_token"]
+        self.check(
+            reactivated["bot_uuid"] == a["id"]
+            and gateway_token != a["token"],
+            "Gateway reactivation preserves the Bot UUID and rotates its token",
         )
+        self.self_view(a, parent, status=401)
+        a["token"] = gateway_token
+        self.self_view(a, parent)
+
+        self.request(
+            "delete reactivated reviewer before scoped registration",
+            "DELETE",
+            path + "/bots/" + urllib.parse.quote(a["ref"], safe=""),
+            token=admin,
+        )
+        scoped_reactivated, _ = self.request(
+            "scoped registration reactivates a deleted slug",
+            "POST",
+            "/register?"
+            + urllib.parse.urlencode(
+                {
+                    **query,
+                    "bot-name": "E2E Reviewer Plugin",
+                    "provider_bot_ref": a["ref"],
+                }
+            ),
+        )
+        plugin_token = scoped_reactivated["bot_token"]
+        self.check(
+            scoped_reactivated["bot_uuid"] == a["id"]
+            and plugin_token != gateway_token,
+            "Plugin reactivation preserves the Bot UUID and rotates its token",
+        )
+        self.self_view(a, parent, status=401)
+        a["token"] = plugin_token
+        self.self_view(a, parent)
         self.request(
             "delete coder",
             "DELETE",
