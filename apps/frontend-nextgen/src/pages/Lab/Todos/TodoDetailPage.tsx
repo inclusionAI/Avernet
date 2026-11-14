@@ -172,7 +172,8 @@ export default function TodoDetailPage() {
                   <div className="space-y-1">
                     <TodoEventTimeline
                       events={detail.events}
-                      botName={todo.botName}
+                      todoTitle={todo.title}
+                      todoDescription={todo.description}
                       loading={detail.eventsLoading}
                       error={detail.eventsError}
                       onRetry={detail.refreshEvents}
