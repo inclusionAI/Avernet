@@ -27,6 +27,7 @@ import { migrationsV37To74 } from './schema-v37-74.js';
 import { migrationsV75To108 } from './schema-v75-108.js';
 import { migrationsV109To143 } from './schema-v109-143.js';
 import { repairDeployTagMigrations } from './schema-repair-deploy-tag.js';
+import { workflowAiDraftMigrations } from './schema-workflow-ai-draft.js';
 import { flowRunMarkersMigrations } from './schema-flow-run-markers.js';
 
 /**
@@ -109,4 +110,5 @@ export const migrations: readonly Migration[] = [
   ...migrationsV109To143,
   ...repairDeployTagMigrations,
   ...flowRunMarkersMigrations,
+  ...workflowAiDraftMigrations,
 ];

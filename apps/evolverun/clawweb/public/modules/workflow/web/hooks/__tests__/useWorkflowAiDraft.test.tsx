@@ -140,3 +140,78 @@ describe('useWorkflowAiDraft request lifetime', () => {
     expect(generate).not.toHaveBeenCalled()
   })
 })
+
+it('passes raw prompts and preserves an unknown/uncertain attempt identity when explicitly recovering', async () => {
+  const { WorkflowAiRecoveryError } = await import('../../services/workflow-ai-lifecycle')
+  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6', draftId: 'persisted-draft' }
+  generate.mockRejectedValueOnce(new WorkflowAiRecoveryError('派发结果不确定', attempt))
+  const { result } = setup()
+  act(() => result.current.changePrompt('  原始需求\n'))
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(true)
+  expect(result.current.result).toBeNull()
+  await act(async () => { await result.current.generate() })
+  expect(generate.mock.calls[0][1]).toBe('  原始需求\n')
+  expect(generate.mock.calls[1][4]).toBe(attempt)
+  expect(result.current.result?.draft).toEqual(draft)
+})
+
+it('keeps the same attempt through a generic operational readiness failure and completes with the same requestId', async () => {
+  const { WorkflowAiRecoveryError } = await import('../../services/workflow-ai-lifecycle')
+  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6' }
+  generate.mockRejectedValueOnce(new WorkflowAiRecoveryError('BaaS 提交结果不确定', attempt))
+    .mockRejectedValueOnce(new Error('无法确认 AI 草稿服务能力'))
+  const { result } = setup()
+  act(() => result.current.changePrompt(' 原始需求\n'))
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(true)
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(true)
+  expect(result.current.result).toBeNull()
+  await act(async () => { await result.current.generate() })
+  expect(generate).toHaveBeenCalledTimes(3)
+  expect(generate.mock.calls[0][1]).toBe(' 原始需求\n')
+  expect(generate.mock.calls[1][4]).toBe(attempt)
+  expect(generate.mock.calls[2][4]).toBe(attempt)
+  expect(result.current.result?.draft).toEqual(draft)
+})
+
+it('clears only explicitly deterministic candidate failures while preserving operational errors', async () => {
+  const { WorkflowAiCandidateError } = await import('../../services/workflow-ai-draft')
+  generate.mockRejectedValueOnce(new Error('operational failure after submission'))
+    .mockRejectedValueOnce(new WorkflowAiCandidateError('服务端返回 INVALID_GENERATION_RESULT'))
+  const { result } = setup()
+  act(() => result.current.changePrompt('需求'))
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(true)
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(false)
+  await act(async () => { await result.current.generate() })
+  expect(generate.mock.calls[0][4]).not.toBe(generate.mock.calls[2][4])
+  expect(result.current.result?.draft).toEqual(draft)
+})
+
+it('invalidates in-flight requests and completed previews on layout/source binding changes', async () => {
+  const pending = deferred()
+  generate.mockReturnValueOnce(pending.promise)
+  const view = renderHook(({ binding }) => useWorkflowAiDraft(true, 'modify', spec, binding), { initialProps: { binding: 'session-1:layout-1' } })
+  start(view.result)
+  const signal = generate.mock.calls[0][3]!
+  view.rerender({ binding: 'session-1:layout-2' })
+  expect(signal.aborted).toBe(true)
+  await act(async () => { pending.resolve(draft) })
+  expect(view.result.current.result).toBeNull()
+  await act(async () => { await view.result.current.generate() })
+  expect(view.result.current.stale).toBe(false)
+  view.rerender({ binding: 'session-2:layout-2' })
+  expect(view.result.current.stale).toBe(true)
+})
+
+it('assigns a fresh preview identity to every completed generation', async () => {
+  const { result } = setup()
+  act(() => result.current.changePrompt('需求'))
+  await act(async () => { await result.current.generate() })
+  const firstId = result.current.result!.requestId
+  await act(async () => { await result.current.generate() })
+  expect(result.current.result!.requestId).not.toBe(firstId)
+})

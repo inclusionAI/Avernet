@@ -37,8 +37,7 @@ import { compareGitDatabase, type BaselineComparison } from '../editor/workflowB
 import { WorkflowDocumentAcknowledgedError } from '../editor/workflowDocumentSave'
 import { assertEditorWorkflowReadable, editorWorkflowReadIsCurrent } from '../editor/workflowWriteGuard'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
-import WorkflowAiDrawer from '../components/WorkflowAiDrawer'
-import { workflowSpecSignature, type WorkflowAiDraft, type WorkflowAiMode } from '../services/workflow-ai-draft'
+import { useEditorAiIntegration } from './useEditorAiIntegration'
 import { formatCurrentSpecForDiff, formatSpecForDiff, historyComparisonUncertain, specsEqual } from '../components/WorkflowVersionDiff'
 import { api, fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
@@ -47,7 +46,6 @@ type ViewMode = 'visual' | 'yaml' | 'split'
 type SaveMessage = { type: 'success' | 'error'; text: string } | null
 // Bind a workflow operation to the marker it created, across Editor remounts.
 const deploymentTokens = new WeakMap<object, string>()
-
 
 function hasUnsafePackEdits(id: string): boolean {
   const versions = sessionFor(id).state.versions
@@ -104,11 +102,6 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [showWorkflowSettings, setShowWorkflowSettings] = useState(() =>
     Object.keys(useEditorStore.getState().pendingEdits ?? {}).some(key => key.startsWith('workflow:')))
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
-  const [showAiDrawer, setShowAiDrawer] = useState(false)
-  const [aiMode, setAiMode] = useState<WorkflowAiMode>('modify')
-  const [aiSession, setAiSession] = useState(0)
-
-
   const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
     sessionId: editorSessionId, _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
   const creation = spec ? sessionFor(spec.id).state.creation : undefined
@@ -255,42 +248,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const hasUndeployedChanges = Boolean(effectiveActiveHistoryText !== undefined && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
   const deploymentBaselineLabel = '生效'
 
-  const handleOpenAi = useCallback((mode: WorkflowAiMode) => {
-    if (!spec || workflowLoading || (workflowSaving || packCanvas.saving) || (selectedWorkflowId && selectedWorkflowId !== spec.id)) {
-      setSaveMessage({ type: 'error', text: '请先加载当前工作流。' })
-      return
-    }
-    if (hasPendingEdits) {
-      setSaveMessage({ type: 'error', text: '请先应用或放弃未完成的配置草稿，再使用 AI 助手。' })
-      return
-    }
-    setAiMode(mode)
-    setAiSession(session => session + 1)
-    setShowAiDrawer(true)
-  }, [spec, workflowLoading, workflowSaving, packCanvas.saving, selectedWorkflowId, hasPendingEdits])
-
-  const handleApplyAiDraft = useCallback((draft: WorkflowAiDraft) => {
-    const current = useEditorStore.getState().spec
-    if (!current || hasPendingEdits || (workflowSaving || packCanvas.saving) || workflowLoading || draft.workflowId !== current.id
-      || (selectedWorkflowId && selectedWorkflowId !== current.id)
-      || draft.baseSignature !== workflowSpecSignature(current)) {
-      setSaveMessage({ type: 'error', text: '编辑器内容已变更或存在未应用草稿，请重新生成 AI 草稿。' })
-      return
-    }
-    try {
-      importYaml(draft.spec)
-      setShowAiDrawer(false)
-      setViewMode('split')
-      setSaveMessage({ type: 'success', text: 'AI 草稿已通过校验并应用到编辑器，尚未保存或部署。' })
-    } catch (cause) {
-      setSaveMessage({ type: 'error', text: cause instanceof Error ? cause.message : 'AI 草稿应用失败' })
-    }
-  }, [importYaml, hasPendingEdits, workflowSaving, packCanvas.saving, workflowLoading, selectedWorkflowId])
-
-  useEffect(() => {
-    setShowAiDrawer(false)
-  }, [selectedWorkflowId, editorSessionId])
-
+  const ai = useEditorAiIntegration({ spec, selectedWorkflowId, targetWorkflowId: initialWorkflowId, editorSessionId, loading: workflowLoading,
+    saving: workflowSaving || packCanvas.saving, saveInFlight: workflowSaveInFlight, hasPendingEdits,
+    onMessage: setSaveMessage, onApplied: () => setViewMode('split') })
   const handleOpenSaveDialog = useCallback(async () => {
     if (!useEditorStore.getState().spec) return
     const sessionId = useEditorStore.getState().sessionId
@@ -775,25 +735,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           }} disabled={!spec} className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-40">流程设置</button>
           <button type="button" onClick={() => undo?.()} disabled={!canUndo || hasPendingEdits} aria-label="撤销" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↶</button>
           <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button></>}
-          <button
-            type="button"
-            onClick={() => handleOpenAi('create')}
-            disabled={!spec || workflowLoading || saving || hasPendingEdits || Boolean(selectedWorkflowId && selectedWorkflowId !== spec.id)}
-            title={hasPendingEdits ? '请先应用或放弃未完成草稿' : '使用智能接入生成服务新增工作流能力'}
-            className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-40"
-          >
-            ✦ AI 生成
-          </button>
-          <button
-            type="button"
-            onClick={() => handleOpenAi('modify')}
-            disabled={!spec || workflowLoading || saving || hasPendingEdits || Boolean(selectedWorkflowId && selectedWorkflowId !== spec.id)}
-            title={hasPendingEdits ? '请先应用或放弃未完成草稿' : '根据自然语言修改当前工作流'}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40"
-          >
-            AI 修改
-          </button>
-          <button
+          {ai.controls}<button
             type="button"
             onClick={() => setShowHistory(true)}
             disabled={!selectedWorkflowId}
@@ -918,7 +860,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           />
         )}
 
-        {viewMode === 'visual' && !showAiDrawer && <NodePalette />}
+        {viewMode === 'visual' && !ai.open && <NodePalette />}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {workflowLoading && !spec ? <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">加载工作流…</div> :
             <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -935,16 +877,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
               </div>
             </div>}
         </div>
-        {showAiDrawer ? <WorkflowAiDrawer
-          key={aiSession}
-          open={showAiDrawer}
-          mode={aiMode}
-          blockedReason={hasPendingEdits ? '请先应用或放弃未完成的配置草稿，再生成或应用 AI 草稿。'
-            : saving ? '工作流正在保存，请等待完成后再生成或应用 AI 草稿。' : undefined}
-          spec={workflowLoading || (selectedWorkflowId && spec?.id !== selectedWorkflowId) ? null : spec}
-          onClose={() => setShowAiDrawer(false)}
-          onApply={handleApplyAiDraft}
-        /> : showWorkflowSettings ? <WorkflowSettingsPanel onClose={() => setShowWorkflowSettings(false)} /> : selectedNodeId ? <NodePropertyPanel /> :
+        {ai.open ? ai.drawer : showWorkflowSettings ? <WorkflowSettingsPanel onClose={() => setShowWorkflowSettings(false)} /> : selectedNodeId ? <NodePropertyPanel /> :
           <aside className="w-72 shrink-0 border-l border-border bg-card p-5" aria-label="编辑指引">
             <h2 className="text-sm font-semibold text-foreground">让每一步都清晰</h2>
             <p className="mt-3 text-xs leading-6 text-muted-foreground">从左侧添加节点，连接输出与输入，再选择节点填写当前任务。只有需要时才展开高级配置。</p>

@@ -43,6 +43,8 @@ vi.mock('../../editor/usePackCanvasSession', () => ({ usePackCanvasSession: () =
 vi.mock('../useEditorMergeReview', () => ({ useEditorMergeReview: () => ({ mergeAdapter: null, visibleMerge: null, mergeCurrent: null, wantsReview: false, preparing: false, openMergeReview: vi.fn(), cancelMergeReview: vi.fn(), clearMergeReview: vi.fn() }) }))
 
 // Keep the real signature, drawer, preview and request-lifetime hook.
+vi.mock('../../hooks/useWorkflowAiCapabilities', () => ({ useWorkflowAiCapabilities: () => ({ value: { available: true }, loading: false, retry: vi.fn() }) }))
+
 vi.mock('../../services/workflow-ai-draft', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/workflow-ai-draft')>()
   return { ...actual, generateWorkflowAiDraft: vi.fn() }
@@ -136,7 +138,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     fireEvent.click(assistant().getByRole('button', { name: modeUi[paneMode].button, exact: true }))
     submitRequirement(paneMode, '上一会话的需求')
     expect(await screen.findByRole('region', { name: 'AI 草稿预览' })).toHaveTextContent(previousDraft.summary)
-    expect(generate).toHaveBeenNthCalledWith(1, paneMode, '上一会话的需求', source, expect.any(AbortSignal))
+    expect(generate).toHaveBeenNthCalledWith(1, paneMode, '上一会话的需求', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
 
     // The toolbar prop is unchanged even though the pane changed its local mode.
     fireEvent.click(toolbar)
@@ -147,7 +149,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     submitRequirement(mode, '本次工具栏会话的需求')
     expect(await screen.findByRole('region', { name: 'AI 草稿预览' })).toHaveTextContent(nextDraft.summary)
     expect(generate).toHaveBeenCalledTimes(2)
-    expect(generate).toHaveBeenNthCalledWith(2, mode, '本次工具栏会话的需求', source, expect.any(AbortSignal))
+    expect(generate).toHaveBeenNthCalledWith(2, mode, '本次工具栏会话的需求', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
     expect(useEditorStore.getState().spec).toEqual(source)
     expect(useEditorStore.getState().isDirty).toBe(false)
   })
@@ -164,7 +166,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
 
     fireEvent.click(toolbar)
     submitRequirement(mode, '仍在生成的旧需求')
-    expect(generate).toHaveBeenNthCalledWith(1, mode, '仍在生成的旧需求', source, expect.any(AbortSignal))
+    expect(generate).toHaveBeenNthCalledWith(1, mode, '仍在生成的旧需求', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
     const previousSignal = generate.mock.calls[0][3]!
     expect(previousSignal.aborted).toBe(false)
     expect(assistant().getByRole('button', { name: '生成中…' })).toBeDisabled()
@@ -184,7 +186,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     expect(screen.queryByText(previousDraft.summary)).not.toBeInTheDocument()
     expect(expectMode(mode)).toHaveValue('新会话的独立需求')
     expect(generate).toHaveBeenCalledTimes(2)
-    expect(generate).toHaveBeenNthCalledWith(2, mode, '新会话的独立需求', source, expect.any(AbortSignal))
+    expect(generate).toHaveBeenNthCalledWith(2, mode, '新会话的独立需求', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
     expect(useEditorStore.getState().spec).toEqual(source)
     expect(useEditorStore.getState().isDirty).toBe(false)
   })

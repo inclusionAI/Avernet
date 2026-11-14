@@ -1,3 +1,4 @@
+import { migrations as currentMigrations } from '../schema.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,8 @@ import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 import { SqliteDatabase, runMigrations } from '../db.js';
 import { sqliteTriggers } from '../schema.js';
+
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 const flowTrigger = sqliteTriggers.find(sql => sql.includes('trg_flow_runs_update'))!;
 
@@ -85,7 +88,7 @@ it('rejects locked missing triggers, closes the connection and repairs on the ne
     spy.mockRestore(); peer.exec('ROLLBACK');
     const { db } = await initDatabase();
     expect(db.dbType).toBe('sqlite');
-    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: latestSchemaVersion }]);
     await db.exec("UPDATE flow_runs SET flow_id = 'changed' WHERE id = 1");
     expect((await db.query<{ gmt_modified: number }>('SELECT gmt_modified FROM flow_runs'))[0].gmt_modified).toBeGreaterThan(0);
   } finally {
@@ -118,7 +121,7 @@ it('stops at the first trigger write failure even when no optional migration def
   const path = join(dir, 'test.sqlite');
   const peer = new Database(path);
   peer.pragma('journal_mode = WAL');
-  peer.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (152, 'current');
+  peer.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (${latestSchemaVersion}, 'current');
     CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '');`);
   const raw = new Database(path); raw.pragma('busy_timeout = 10');
   const db = new SqliteDatabase(raw); const exec = vi.spyOn(db, 'exec');
@@ -202,7 +205,7 @@ it('does not cache a ready SQLite connection after a real deferred migration and
     peer.exec('ROLLBACK');
     const retried = await initDatabase();
     expect(retried.db.dbType).toBe('sqlite');
-    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: latestSchemaVersion }]);
     expect(await retried.db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
   } finally {
     spy.mockRestore(); if (peer.inTransaction) peer.exec('ROLLBACK');
