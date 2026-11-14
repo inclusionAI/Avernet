@@ -34,4 +34,27 @@ impl ProviderCore {
             provider_bot_ref: record.provider_bot_ref, webhook_url: record.webhook_url,
             disabled: false, created_at: now, updated_at: now }, returned_token))
     }
+
+    pub(super) async fn restore_with_initial_authority(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities,
+        auth_mode: ProviderAuthMode, initialization: OwnershipInitialization,
+    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
+        let repo = self.bot_providers.as_ref().ok_or_else(|| ServiceError::InternalError(
+            "Provider Bot reactivation is not configured".into()))?;
+        let plugin_mock = record.connection_mode == BotConnectionMode::Plugin
+            && auth_mode != ProviderAuthMode::AgentPassSubbots;
+        let token = if plugin_mock { mock_token() } else { new_session_token() };
+        let returned_token = if plugin_mock || auth_mode == ProviderAuthMode::AgentPass {
+            None
+        } else {
+            Some(token.clone())
+        };
+        let now = now_ms();
+        let owner = initialization.owner_user_id.clone();
+        repo.restore_provider_bot_with_ownership(record.clone(), capabilities,
+            &owner, &token, initialization).await?;
+        Ok((ProviderBotBinding { bot_uuid: record.bot_uuid, provider_id: record.provider_id,
+            provider_bot_ref: record.provider_bot_ref, webhook_url: record.webhook_url,
+            disabled: false, created_at: now, updated_at: now }, returned_token))
+    }
 }

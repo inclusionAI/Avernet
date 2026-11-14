@@ -213,6 +213,15 @@ snapshots retain the legacy identity-plus-Registry initialization path. A2A's se
 entire snapshot because its store composite commits identity/Card/authority
 atomically. Re-registration never synchronizes existing manager/owner authority.
 
+Provider retirement refuses a Bot that still has an active organization membership;
+disabling an organization disables its memberships, so a disabled organization does
+not block retirement. Re-registering a retired Provider/ref is instead an explicit
+reactivation: it retains the original Bot UUID (ignoring any supplied replacement),
+replaces the registration snapshot and runtime credential, and initializes only the
+new owner/manager snapshot. Both metadata tombstones and legacy binding-only
+tombstones are supported. Active-Bot replay semantics, strict create-only methods,
+and the separate A2A registration flow are unchanged.
+
 The fresh multi-user path adds one indexed Bot lookup, not a scan. It reuses the
 bounded ownership transaction (maximum 100 managers, no network within it).
 Provider authentication, endpoint checks and Plugin MOCK/subbot credential rules

@@ -56,6 +56,15 @@ gateway binding projection, webhook updates and soft deletion use DB transaction
 upstream never writes a binding. Errors propagate; runtime credentials are not
 cached in a second journal. Memory metadata is process-local.
 
+`restore_provider_bot_with_ownership` is the only Provider tombstone reactivation
+write. It preserves the Bot UUID but replaces capabilities, credential, Provider
+identity and owner/manager authority, deletes old ownership transfers, and recreates
+the default profile and initialization audit. Gateway mode replaces the old binding;
+Plugin mode leaves no Gateway binding. Legacy binding-only tombstones are backfilled
+with Provider metadata by the same checked update. SQL commits these changes in one
+transaction; strict create operations still reject tombstones. Organization and
+channel memberships are not restored.
+
 ProviderBindingProjection selects legacy binding reads or strict Bot-mode reads,
 independently of gateway dual writes. Affiliation alone is not a delivery binding.
 SQLite 030 / MySQL 029 add nullable migration-state columns and a unique index.

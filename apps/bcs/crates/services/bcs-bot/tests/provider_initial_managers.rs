@@ -206,3 +206,126 @@ async fn atomic_authority_registration_does_not_write_retired_creator_relations(
         "atomic registration uses authority edges, like the trusted Human/A2A composites");
     assert_eq!(f.repo.role("human_alice", &bot.bot_uuid).await.unwrap(), Some(BotAccessRelation::Owner));
 }
+
+#[tokio::test]
+async fn provider_reactivation_replaces_snapshot_and_rotates_runtime_token() {
+    use bcs_bot_store::{MemoryAuthorityEdgeKind, MemoryTransferRow};
+    use bcs_service_api::{
+        BotRepoPort, DeleteProviderBotCommand, ProviderBotCoreService,
+        types::bot_authority::TransferStatus,
+    };
+
+    let f = Fixture::new().await;
+    let mut old = f.command(&["old-owner", "old-manager"]);
+    old.name = "Old Bot".into();
+    old.summary = Some("old summary".into());
+    old.domains = vec!["old-domain".into()];
+    old.skills = vec![bcs_service_api::Skill::new("old-skill")];
+    old.scopes = vec!["old-scope".into()];
+    old.bot_uuid = Some("stable-provider-bot".into());
+    old.webhook_url = Some("https://example.org/old".into());
+    let registered = f.management.register_provider_bot(old).await.unwrap();
+    let old_token = registered.bot_runtime_token.clone().unwrap();
+    assert_eq!(registered.bot_uuid, "stable-provider-bot");
+
+    let env = bcs_config::resolve_env_str();
+    f.repo.authority_state().write().await.transfers.insert(
+        (env, registered.bot_uuid.clone(), "human_transfer-target".into()),
+        MemoryTransferRow {
+            bot_id: registered.bot_uuid.clone(),
+            target_owner_actor_id: "human_transfer-target".into(),
+            from_owner_actor_id: "human_old-owner".into(),
+            expected_ownership_version: 1,
+            status: TransferStatus::Pending,
+            requested_at: 1,
+            expires_at: u64::MAX,
+            updated_at: 1,
+            decided_at: None,
+            decided_by_kind: None,
+            decided_by_id: None,
+            reason: None,
+            result_ownership_version: None,
+            bot_name_snapshot: None,
+        },
+    );
+    f.management.delete_provider_bot(DeleteProviderBotCommand {
+        provider_id: f.provider_id.clone(),
+        provider_admin_token: f.token.clone(),
+        provider_bot_ref: "managed-ref".into(),
+        allow_unbound_owner_suffixed_bot: false,
+    }).await.unwrap();
+    assert!(f.repo.find_bot_by_token(&old_token).await.is_none());
+
+    let mut restored = f.command(&["new-owner", "new-manager"]);
+    restored.name = "New Bot".into();
+    restored.summary = None;
+    restored.domains = vec![];
+    restored.skills = vec![];
+    restored.scopes = vec![];
+    restored.bot_uuid = Some("caller-supplied-id-is-ignored".into());
+    restored.webhook_url = Some("https://example.org/new".into());
+    let restored = f.management.register_provider_bot(restored).await.unwrap();
+    assert!(restored.created);
+    assert_eq!(restored.bot_uuid, "stable-provider-bot");
+    let new_token = restored.bot_runtime_token.clone().unwrap();
+    assert_ne!(new_token, old_token);
+    assert!(f.repo.find_bot_by_token(&old_token).await.is_none());
+    assert_eq!(f.repo.find_bot_by_token(&new_token).await.as_deref(), Some("stable-provider-bot"));
+
+    let bot = f.registry.get("stable-provider-bot").await.unwrap();
+    assert_eq!(bot.capabilities.name.as_deref(), Some("New Bot"));
+    assert_eq!(bot.capabilities.summary, None);
+    assert!(bot.capabilities.domains.is_empty());
+    assert!(bot.capabilities.skills.is_empty());
+    assert!(bot.capabilities.scopes.is_empty());
+    assert!(bot.capabilities.binding_channels.is_none());
+    assert_eq!(bot.created_by.as_deref(), Some("new-owner"));
+    let binding = f.core.get_provider_bot_binding_by_ref(&f.provider_id, "managed-ref").await.unwrap().unwrap();
+    assert!(!binding.disabled);
+    assert_eq!(binding.webhook_url.as_deref(), Some("https://example.org/new"));
+
+    for (user, expected) in [
+        ("old-owner", None),
+        ("old-manager", None),
+        ("new-owner", Some(BotAccessRelation::Owner)),
+        ("new-manager", Some(BotAccessRelation::Manager)),
+    ] {
+        assert_eq!(f.repo.role(&human_actor_id(user), "stable-provider-bot").await.unwrap(), expected);
+    }
+    let authority = f.repo.authority_state().read().await;
+    assert_eq!(authority.ownership_versions.get(&(bcs_config::resolve_env_str(), "stable-provider-bot".into())), Some(&1));
+    assert!(!authority.transfers.keys().any(|key| key.1 == "stable-provider-bot"));
+    assert!(authority.edges.keys().any(|key| {
+        key.1 == "stable-provider-bot" && key.2 == "human_new-owner" && key.3 == MemoryAuthorityEdgeKind::Owner
+    }));
+}
+
+#[tokio::test]
+async fn plugin_reactivation_does_not_restore_old_gateway_binding() {
+    use bcs_service_api::{BotRepoPort, DeleteProviderBotCommand, ProviderBotCoreService};
+
+    let f = Fixture::new().await;
+    let mut old = f.command(&["old-owner"]);
+    old.bot_uuid = Some("stable-plugin-bot".into());
+    old.webhook_url = Some("https://example.org/old".into());
+    let registered = f.management.register_provider_bot(old).await.unwrap();
+    let old_token = registered.bot_runtime_token.unwrap();
+    f.management.delete_provider_bot(DeleteProviderBotCommand {
+        provider_id: f.provider_id.clone(),
+        provider_admin_token: f.token.clone(),
+        provider_bot_ref: "managed-ref".into(),
+        allow_unbound_owner_suffixed_bot: false,
+    }).await.unwrap();
+
+    let mut restored = f.command(&["new-owner"]);
+    restored.bot_uuid = Some("ignored-new-id".into());
+    restored.connection_mode = ProviderBotConnectionMode::Plugin;
+    let restored = f.management.register_provider_bot(restored).await.unwrap();
+    assert!(restored.created);
+    assert_eq!(restored.bot_uuid, "stable-plugin-bot");
+    assert!(restored.bot_runtime_token.is_none());
+    assert!(f.core.get_provider_bot_binding_by_ref(&f.provider_id, "managed-ref").await.unwrap().is_none());
+    assert!(f.repo.find_bot_by_token(&old_token).await.is_none());
+    assert!(f.registry.try_get("stable-plugin-bot").await.unwrap().is_some());
+    assert!(f.registry.try_get("ignored-new-id").await.unwrap().is_none());
+}
