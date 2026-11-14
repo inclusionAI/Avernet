@@ -32,7 +32,10 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 - Enterprise hosts compose the public TC application with their own providers
 
 Documentation starts at the [BCSFuse document index](docs/README.md).
-The shared Card API is available as a library; TC does not enable it automatically.
+The shared Card API is available as a library. The TC application mounts it in its own composition:
+v2 always reads and writes the new Card/Doc tables, while v1 selects legacy or Card storage through
+`BCSFUSE_TC_V1_STORAGE` / `tc.v1_storage` (default `legacy`). See the
+[TC Card/Doc migration boundary](docs/architecture/tc-card-migration.md).
 
 ## Quick Start
 
