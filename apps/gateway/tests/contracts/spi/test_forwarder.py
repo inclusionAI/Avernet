@@ -485,3 +485,152 @@ async def test_bare_forwarder_creates_and_closes_own_client() -> None:
     client = forwarder._get_client()
     assert client is forwarder._get_client()  # reused
     await forwarder.aclose()
+
+
+# ── retry tests ──────────────────────────────────────────────────────────
+
+
+class _FlakyTransport(httpx.AsyncBaseTransport):
+    """Fails the first *failures* calls, then succeeds."""
+
+    def __init__(
+        self, failures: int, error: type[Exception] = httpx.ConnectError
+    ) -> None:
+        self._failures = failures
+        self._error = error
+        self.attempts = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise self._error(f"simulated failure {self.attempts}", request=request)
+        return httpx.Response(
+            200, request=request, stream=_RecordingResponseStream([b"ok"])
+        )
+
+
+class _AlwaysFailingTransport(httpx.AsyncBaseTransport):
+    """Always fails with a given error."""
+
+    def __init__(self, error: type[Exception] = httpx.ConnectError) -> None:
+        self._error = error
+        self.attempts = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.attempts += 1
+        try:
+            raise self._error("always failing", request=request)
+        except TypeError:
+            raise self._error("always failing") from None
+
+
+async def test_retry_succeeds_after_transient_error_on_get() -> None:
+    """GET requests are retried and succeed when the transport recovers."""
+    transport = _FlakyTransport(failures=1, error=httpx.ConnectError)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/api/test")
+        ) as response:
+            assert response.status_code == 200
+            body = b"".join([chunk async for chunk in response.body])
+    assert body == b"ok"
+    assert transport.attempts == 2  # initial + 1 retry
+
+
+async def test_retry_exhausted_raises_on_get() -> None:
+    """When all retries are exhausted, the last error propagates."""
+    transport = _AlwaysFailingTransport(error=httpx.ConnectError)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        with pytest.raises(httpx.ConnectError):
+            async with forwarder.forward(
+                ForwardRequest(method="GET", url="http://up/api/test")
+            ):
+                pass
+    assert transport.attempts == 3  # initial + 2 retries
+
+
+async def test_no_retry_for_post() -> None:
+    """POST requests are not retried — they carry a one-shot body."""
+    transport = _AlwaysFailingTransport(error=httpx.ConnectError)
+    body = _RecordingBody([b"payload"])
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        with pytest.raises(httpx.ConnectError):
+            async with forwarder.forward(
+                ForwardRequest(
+                    method="POST",
+                    url="http://up/api/test",
+                    headers={"content-length": "7"},
+                    body=body,
+                )
+            ):
+                pass
+    assert transport.attempts == 1  # no retry
+    assert body.closed
+
+
+async def test_no_retry_for_non_retryable_error() -> None:
+    """Non-retryable errors (like InvalidURL) are not retried even for GET."""
+    transport = _AlwaysFailingTransport(error=httpx.InvalidURL)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        with pytest.raises(httpx.InvalidURL):
+            async with forwarder.forward(
+                ForwardRequest(method="GET", url="http://up/api/test")
+            ):
+                pass
+    assert transport.attempts == 1  # no retry — InvalidURL is not retryable
+
+
+async def test_retry_on_read_timeout() -> None:
+    """ReadTimeout is retryable (subclass of TimeoutException)."""
+    transport = _FlakyTransport(failures=1, error=httpx.ReadTimeout)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/api/test")
+        ) as response:
+            assert response.status_code == 200
+            _ = [chunk async for chunk in response.body]
+    assert transport.attempts == 2
+
+
+async def test_retry_on_remote_protocol_error() -> None:
+    """RemoteProtocolError (connection reset) is retryable."""
+    transport = _FlakyTransport(failures=1, error=httpx.RemoteProtocolError)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/api/test")
+        ) as response:
+            assert response.status_code == 200
+            _ = [chunk async for chunk in response.body]
+    assert transport.attempts == 2
+
+
+async def test_head_request_is_retried() -> None:
+    """HEAD is idempotent and should be retried."""
+    transport = _FlakyTransport(failures=2, error=httpx.ConnectError)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="HEAD", url="http://up/api/test")
+        ) as response:
+            assert response.status_code == 200
+            _ = [chunk async for chunk in response.body]
+    assert transport.attempts == 3  # initial + 2 retries
+
+
+async def test_retry_preserves_status_code() -> None:
+    """A retried request that succeeds returns the correct status and body."""
+    transport = _FlakyTransport(failures=1, error=httpx.ReadTimeout)
+    async with httpx.AsyncClient(transport=transport) as client:
+        forwarder = HttpxForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/api/test")
+        ) as response:
+            assert response.status_code == 200
+            body = b"".join([chunk async for chunk in response.body])
+    assert body == b"ok"
