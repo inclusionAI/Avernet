@@ -30,6 +30,12 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_object_st
 from agentclaw.community.core.task.todos.artifact_service_protocol import (
     TodoArtifactServiceProtocol,
 )
+from agentclaw.community.core.task.todos.collaboration.in_process import (
+    InProcessTodoCollaborationAdapter,
+)
+from agentclaw.community.core.task.todos.collaboration.protocol import (
+    TodoCollaborationPort,
+)
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
@@ -45,12 +51,6 @@ from agentclaw.community.core.task.todos.services.todo_service import TodoServic
 from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _block
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.plugin_api.cache import CachePlugin
-from agentclaw.community.plugin_api.todo_collaboration import (
-    TodoCollaborationPlugin,
-)
-from agentclaw.community.plugins.community.todo_collaboration import (
-    InProcessTodoCollaborationPlugin,
-)
 
 _TODO_KEYS = frozenset({"scheduler"})
 _SCHEDULER_KEYS = frozenset(field.name for field in fields(TodoSchedulerConfig))
@@ -163,11 +163,11 @@ class TaskTodoBindings(Module):
     @singleton
     @provider
     @inject
-    def todo_collaboration_plugin(
+    def todo_collaboration_port(
         self,
         context_collab: ContextCollabServiceProtocol,
-    ) -> TodoCollaborationPlugin:
-        return InProcessTodoCollaborationPlugin(context_collab)
+    ) -> TodoCollaborationPort:
+        return InProcessTodoCollaborationAdapter(context_collab)
 
     @singleton
     @provider

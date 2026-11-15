@@ -32,13 +32,13 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContextRequest,
     TodoCollaborationEventRequest,
-    TodoCollaborationPlugin,
+    TodoCollaborationPort,
 )
-from agentclaw.community.plugins.local.todo_collaboration import (
-    LocalTodoCollaborationPlugin,
+from tests.community.core.task.todos.collaboration.fakes import (
+    FakeTodoCollaborationPort,
 )
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -241,15 +241,15 @@ def _bind_todo_world(
     context_id: str | None = None,
     seed_context: bool = False,
     seed_interaction: str | None = None,
-) -> tuple[_InMemoryTodos, LocalTodoCollaborationPlugin]:
+) -> tuple[_InMemoryTodos, FakeTodoCollaborationPort]:
     _enable_public_auth(world)
     repository = _InMemoryTodos(_todo(status=status, context_id=context_id))
-    collaboration = LocalTodoCollaborationPlugin()
+    collaboration = FakeTodoCollaborationPort()
     binder = world.injector.binder
     binder.bind(TodoRepositoryProtocol, to=repository, scope=singleton)
     binder.bind(SpaceAccessServiceProtocol, to=_FixedSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=_FixedBots(), scope=singleton)
-    binder.bind(TodoCollaborationPlugin, to=collaboration, scope=singleton)
+    binder.bind(TodoCollaborationPort, to=collaboration, scope=singleton)
 
     if seed_context:
         context = collaboration.create_context(

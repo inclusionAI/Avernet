@@ -56,11 +56,11 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
     TodoCollaborationError,
-    TodoCollaborationPlugin,
+    TodoCollaborationPort,
 )
 
 _HUMAN_INTERACTION_EVENT = "user_interaction.posted"
@@ -84,7 +84,7 @@ class TodoService(TodoServiceProtocol):
         repository: TodoRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
-        collaboration: TodoCollaborationPlugin,
+        collaboration: TodoCollaborationPort,
         execution: TodoExecutionServiceProtocol,
         artifacts: TodoArtifactServiceProtocol,
     ) -> None:

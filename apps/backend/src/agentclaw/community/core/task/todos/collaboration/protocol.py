@@ -1,4 +1,4 @@
-"""Plugin API through which Todo consumes B's collaboration Context runtime.
+"""Task/Todo port for consuming the collaboration Context runtime.
 
 Todo owns the product record and Human acceptance. B owns Context execution,
 its authoritative runtime status, and the append-only event stream. The
@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
-
-from agentclaw.community.plugin_api.base import Plugin
 
 
 class TodoCollaborationError(RuntimeError):
@@ -89,7 +87,7 @@ class TodoCollaborationEventRequest:
 
 
 @runtime_checkable
-class TodoCollaborationPlugin(Plugin, Protocol):
+class TodoCollaborationPort(Protocol):
     """B-side collaboration boundary used by Backend's Todo service."""
 
     def create_context(

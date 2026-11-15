@@ -21,7 +21,7 @@ from agentclaw.community.core.task.todos.models import (
 from agentclaw.community.core.task.todos.services.todo_execution_service import (
     TodoExecutionService,
 )
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEvent,
     TodoCollaborationContext,
 )

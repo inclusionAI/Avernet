@@ -26,18 +26,17 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ContextCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
-    ContextCollabRuntimeError,
-)
-from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
     TodoCollaborationError,
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
-    TodoCollaborationPlugin,
+    TodoCollaborationPort,
+)
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRuntimeError,
 )
 
 
@@ -49,11 +48,7 @@ _CONTEXT_COLLAB_DOMAIN_ERRORS = (
 )
 
 
-@plugin_impl(
-    mode=Mode.PROD,
-    rationale="adapt Todo directly to the in-process ContextCollab Service API",
-)
-class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
+class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
     """Translate Todo requests without routing an internal call through HTTP."""
 
     def __init__(self, service: ContextCollabServiceProtocol) -> None:
@@ -222,7 +217,9 @@ class InProcessTodoCollaborationPlugin(TodoCollaborationPlugin):
             ) from exc
 
 
-def _with_run_id(context: TodoCollaborationContext, run_id: str) -> TodoCollaborationContext:
+def _with_run_id(
+    context: TodoCollaborationContext, run_id: str
+) -> TodoCollaborationContext:
     return TodoCollaborationContext(
         collab_context_id=context.collab_context_id,
         status=context.status,

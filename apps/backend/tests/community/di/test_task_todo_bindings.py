@@ -8,15 +8,15 @@ import pytest
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
+from agentclaw.community.core.task.todos.collaboration.in_process import (
+    InProcessTodoCollaborationAdapter,
+)
 from agentclaw.community.di import todo_config
 from agentclaw.community.di.modules.task import todo_bindings
-from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.di.modules.task.todo_bindings import (
     TaskTodoBindings,
 )
-from agentclaw.community.plugins.community.todo_collaboration import (
-    InProcessTodoCollaborationPlugin,
-)
+from agentclaw.community.di.todo_config import TodoSchedulerConfig
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -108,7 +108,7 @@ def test_config_type_stays_in_dedicated_todo_config_module():
 def test_task_todo_bindings_wire_in_process_collaboration_adapter():
     context_collab = object.__new__(ContextCollabService)
 
-    plugin = TaskTodoBindings().todo_collaboration_plugin(context_collab)
+    adapter = TaskTodoBindings().todo_collaboration_port(context_collab)
 
-    assert isinstance(plugin, InProcessTodoCollaborationPlugin)
-    assert plugin._service is context_collab
+    assert isinstance(adapter, InProcessTodoCollaborationAdapter)
+    assert adapter._service is context_collab

@@ -200,9 +200,7 @@ def test_domain_services_are_not_extended_by_runtime_monkey_patch() -> None:
     )
 
 
-_COMMUNITY_SRC_ROOT = (
-    _BACKEND_ROOT / "src" / "agentclaw" / "community"
-)
+_COMMUNITY_SRC_ROOT = _BACKEND_ROOT / "src" / "agentclaw" / "community"
 _TASK_DOMAIN_REQUIRED_PATHS = (
     "api/task/forum_service.py",
     "api/task/feedback_service.py",
@@ -224,18 +222,22 @@ _LEGACY_TASK_DOMAIN_PATHS = (
     "di/modules/forum_module.py",
     "di/modules/feedback_module.py",
 )
-_LEGACY_TASK_DOMAIN_IMPORTS = frozenset({
-    "agentclaw.community.core.forum",
-    "agentclaw.community.core.feedback",
-    "agentclaw.community.core.repository.protocols.forum",
-    "agentclaw.community.core.repository.protocols.feedback",
-    "agentclaw.community.core.repository.implementations.forum",
-    "agentclaw.community.core.repository.implementations.feedback",
-})
+_LEGACY_TASK_DOMAIN_IMPORTS = frozenset(
+    {
+        "agentclaw.community.core.forum",
+        "agentclaw.community.core.feedback",
+        "agentclaw.community.core.repository.protocols.forum",
+        "agentclaw.community.core.repository.protocols.feedback",
+        "agentclaw.community.core.repository.implementations.forum",
+        "agentclaw.community.core.repository.implementations.feedback",
+    }
+)
 
 _TODO_TASK_DOMAIN_REQUIRED_PATHS = (
     "api/task/todo_service.py",
     "api/task/todo_artifact_service.py",
+    "core/task/todos/collaboration/protocol.py",
+    "core/task/todos/collaboration/in_process.py",
     "core/task/todos/service_protocol.py",
     "core/task/todos/artifact_service_protocol.py",
     "core/repository/protocols/task/todos.py",
@@ -257,16 +259,24 @@ _LEGACY_TODO_PARALLEL_PATHS = (
     "adapters/http/task/todo_artifact_routes.py",
     "adapters/http/openapi_v1/errors_todo.py",
     "di/modules/todo_module.py",
+    "plugin_api/todo_collaboration.py",
+    "plugins/community/todo_collaboration.py",
+    "plugins/local/todo_collaboration.py",
 )
-_LEGACY_TODO_PARALLEL_IMPORTS = frozenset({
-    "agentclaw.community.core.todos",
-    "agentclaw.community.core.repository.protocols.todos",
-    "agentclaw.community.core.repository.protocols.todo_artifacts",
-    "agentclaw.community.core.repository.implementations.todos",
-    "agentclaw.community.adapters.http.task.todo_artifact_routes",
-    "agentclaw.community.adapters.http.openapi_v1.errors_todo",
-    "agentclaw.community.di.modules.todo_module",
-})
+_LEGACY_TODO_PARALLEL_IMPORTS = frozenset(
+    {
+        "agentclaw.community.core.todos",
+        "agentclaw.community.core.repository.protocols.todos",
+        "agentclaw.community.core.repository.protocols.todo_artifacts",
+        "agentclaw.community.core.repository.implementations.todos",
+        "agentclaw.community.adapters.http.task.todo_artifact_routes",
+        "agentclaw.community.adapters.http.openapi_v1.errors_todo",
+        "agentclaw.community.di.modules.todo_module",
+        "agentclaw.community.plugin_api.todo_collaboration",
+        "agentclaw.community.plugins.community.todo_collaboration",
+        "agentclaw.community.plugins.local.todo_collaboration",
+    }
+)
 
 
 @pytest.mark.unit
@@ -305,7 +315,10 @@ def test_python_sources_do_not_import_legacy_bbs_feedback_modules() -> None:
                             f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
                             f"import {alias.name}"
                         )
-            elif isinstance(node, ast.ImportFrom) and node.module in _LEGACY_TASK_DOMAIN_IMPORTS:
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module in _LEGACY_TASK_DOMAIN_IMPORTS
+            ):
                 offenders.append(
                     f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
                     f"from {node.module} import"
@@ -357,6 +370,5 @@ def test_python_sources_do_not_import_parallel_todo_modules() -> None:
                     f"from {node.module} import"
                 )
     assert offenders == [], (
-        "Todo imports must use Task-owned module paths:\n  "
-        + "\n  ".join(offenders)
+        "Todo imports must use Task-owned module paths:\n  " + "\n  ".join(offenders)
     )

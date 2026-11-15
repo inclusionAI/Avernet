@@ -35,11 +35,11 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
     TodoCollaborationEvent,
-    TodoCollaborationPlugin,
+    TodoCollaborationPort,
 )
 
 _CONTEXT_CREATED = "created"
@@ -165,7 +165,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         repository: TodoRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
-        collaboration: TodoCollaborationPlugin,
+        collaboration: TodoCollaborationPort,
         artifacts: TodoArtifactServiceProtocol,
     ) -> None:
         self._repository = repository

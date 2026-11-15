@@ -22,6 +22,8 @@ Target IDs are durable references. `floor` is presentation metadata captured fro
 
 A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection.
 
+`TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
+
 The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata, concise primary content, and artifact links, but not the complete event payload. The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and Bot `task.completed` messages. Text artifacts are inlined into the corresponding Bot completion message; file, link, and code artifacts remain separately renderable.
 
 OpenAPI delivery also sends `sender_options.from` as the creator so the executor session is attributable to that principal. The public `/run` operation is a compensation/operator entry point; the ordinary frontend neither edits Todos nor exposes manual Run.
@@ -44,12 +46,14 @@ provides:
   - TodoRecord
   - TodoPage
   - TodoEventRecord
+  - TodoCollaborationPort
+  - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
   - CachePlugin
-  - TodoCollaborationPlugin
+  - TodoCollaborationPort
   - TodoArtifactServiceProtocol
 internal_dependencies:
   - agentclaw.community.core.errors

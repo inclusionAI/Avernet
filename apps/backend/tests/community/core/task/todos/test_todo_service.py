@@ -27,7 +27,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoStatus,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
     TodoCollaborationContext,
     TodoCollaborationEvent,

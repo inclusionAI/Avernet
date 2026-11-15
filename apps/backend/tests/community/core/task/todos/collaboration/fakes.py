@@ -1,18 +1,17 @@
-"""Local in-memory implementation of Todo's collaboration Plugin API."""
+"""Deterministic in-memory fake for Todo's collaboration port."""
 
 from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, replace
 
-from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContext,
     TodoCollaborationContextRequest,
     TodoCollaborationError,
     TodoCollaborationEvent,
     TodoCollaborationEventRequest,
-    TodoCollaborationPlugin,
+    TodoCollaborationPort,
 )
 
 
@@ -25,13 +24,8 @@ class _LocalContext:
     events: list[TodoCollaborationEvent]
 
 
-@plugin_impl(
-    mode=Mode.LOCAL,
-    flavor=Flavor.SIMULATOR,
-    rationale="simulates B Context lifecycle and append-only events",
-)
-class LocalTodoCollaborationPlugin(TodoCollaborationPlugin):
-    """Deterministic Context simulator for tests and offline development."""
+class FakeTodoCollaborationPort(TodoCollaborationPort):
+    """Deterministic Context simulator used only by Todo tests."""
 
     def __init__(self) -> None:
         self._contexts: dict[str, _LocalContext] = {}

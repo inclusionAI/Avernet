@@ -22,13 +22,13 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.plugin_api.context_collab_runtime import (
     ContextCollabRuntimeError,
 )
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContextRequest,
     TodoCollaborationError,
     TodoCollaborationEventRequest,
 )
-from agentclaw.community.plugins.community.todo_collaboration import (
-    InProcessTodoCollaborationPlugin,
+from agentclaw.community.core.task.todos.collaboration.in_process import (
+    InProcessTodoCollaborationAdapter,
 )
 
 _CONTEXT_ID = "context_todo_1"
@@ -180,19 +180,19 @@ def test_create_context_translates_context_domain_rejection() -> None:
         raise failure
 
     service.create_context = fail_create
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="context creation") as exc_info:
-        plugin.create_context(_context_request())
+        adapter.create_context(_context_request())
 
     assert exc_info.value.__cause__ is failure
 
 
 def test_create_context_adapts_todo_request_and_preserves_bot_owner() -> None:
     service = _RecordingContextService()
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
-    result = plugin.create_context(_context_request())
+    result = adapter.create_context(_context_request())
 
     assert result.collab_context_id == _CONTEXT_ID
     assert result.status == "created"
@@ -229,10 +229,10 @@ def test_get_context_translates_missing_context_to_todo_boundary() -> None:
         raise failure
 
     service.get_status = fail_get
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="could not project") as exc_info:
-        plugin.get_context(
+        adapter.get_context(
             collab_context_id=_CONTEXT_ID,
             actor_id="viewer_1",
         )
@@ -253,10 +253,10 @@ def test_get_context_does_not_hide_unexpected_programming_error() -> None:
         raise AssertionError("programming bug")
 
     service.get_status = fail_get
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(AssertionError, match="programming bug"):
-        plugin.get_context(
+        adapter.get_context(
             collab_context_id=_CONTEXT_ID,
             actor_id="viewer_1",
         )
@@ -264,9 +264,9 @@ def test_get_context_does_not_hide_unexpected_programming_error() -> None:
 
 def test_get_context_uses_human_actor_and_maps_full_event_projection() -> None:
     service = _RecordingContextService()
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
-    context = plugin.get_context(
+    context = adapter.get_context(
         collab_context_id=_CONTEXT_ID,
         actor_id="viewer_1",
     )
@@ -300,9 +300,9 @@ def test_get_context_maps_created_objective_to_interaction_content() -> None:
             }
         ]
     )
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
-    context = plugin.get_context(
+    context = adapter.get_context(
         collab_context_id=_CONTEXT_ID,
         actor_id="viewer_1",
     )
@@ -315,9 +315,9 @@ def test_get_context_maps_created_objective_to_interaction_content() -> None:
 @pytest.mark.asyncio
 async def test_run_context_calls_service_then_refreshes_with_same_actor() -> None:
     service = _RecordingContextService()
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
-    context = await plugin.run_context(
+    context = await adapter.run_context(
         collab_context_id=_CONTEXT_ID,
         actor_id="user_1",
     )
@@ -334,9 +334,9 @@ async def test_run_context_calls_service_then_refreshes_with_same_actor() -> Non
 @pytest.mark.asyncio
 async def test_refresh_context_run_calls_service_with_human_actor() -> None:
     service = _RecordingContextService()
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
-    context = await plugin.refresh_context_run(
+    context = await adapter.refresh_context_run(
         collab_context_id=_CONTEXT_ID,
         actor_id="user_1",
     )
@@ -358,10 +358,10 @@ async def test_refresh_context_run_translates_runtime_failure() -> None:
         raise failure
 
     service.refresh_run = fail_refresh
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="refresh") as exc_info:
-        await plugin.refresh_context_run(
+        await adapter.refresh_context_run(
             collab_context_id=_CONTEXT_ID,
             actor_id="user_1",
         )
@@ -384,10 +384,10 @@ async def test_run_context_translates_context_domain_rejection() -> None:
         raise failure
 
     service.run_context = fail_run
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="run request") as exc_info:
-        await plugin.run_context(
+        await adapter.run_context(
             collab_context_id=_CONTEXT_ID,
             actor_id="user_1",
         )
@@ -410,10 +410,10 @@ async def test_run_context_translates_runtime_failure_to_todo_boundary() -> None
         raise ContextCollabRuntimeError("runtime unavailable")
 
     service.run_context = fail_run
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="could not start"):
-        await plugin.run_context(
+        await adapter.run_context(
             collab_context_id=_CONTEXT_ID,
             actor_id="user_1",
         )
@@ -435,10 +435,10 @@ def test_append_event_translates_context_domain_rejection(failure) -> None:
         raise failure
 
     service.append_event = fail_append
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="Todo event") as exc_info:
-        plugin.append_event(
+        adapter.append_event(
             collab_context_id=_CONTEXT_ID,
             request=TodoCollaborationEventRequest(
                 expected_version=1,
@@ -462,7 +462,7 @@ def test_append_event_adapts_command_and_returns_accepted_projection() -> None:
         status="in_progress",
         events=[_event_projection(event_kind="user_interaction.posted")],
     )
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
     request = TodoCollaborationEventRequest(
         expected_version=1,
         event_kind="user_interaction.posted",
@@ -474,7 +474,7 @@ def test_append_event_adapts_command_and_returns_accepted_projection() -> None:
         payload={"content": "Please revise"},
     )
 
-    event = plugin.append_event(
+    event = adapter.append_event(
         collab_context_id=_CONTEXT_ID,
         request=request,
     )
@@ -495,10 +495,10 @@ def test_append_event_adapts_command_and_returns_accepted_projection() -> None:
 def test_append_event_rejects_missing_accepted_event_projection() -> None:
     service = _RecordingContextService()
     service.accepted_event_id = "event_missing"
-    plugin = InProcessTodoCollaborationPlugin(service)
+    adapter = InProcessTodoCollaborationAdapter(service)
 
     with pytest.raises(TodoCollaborationError, match="event_missing"):
-        plugin.append_event(
+        adapter.append_event(
             collab_context_id=_CONTEXT_ID,
             request=TodoCollaborationEventRequest(
                 expected_version=1,

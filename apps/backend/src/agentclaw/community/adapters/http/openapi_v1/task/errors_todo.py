@@ -13,7 +13,7 @@ from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
     TodoStateConflictError,
 )
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationError,
 )
 

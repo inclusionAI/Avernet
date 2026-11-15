@@ -1,4 +1,4 @@
-"""Consumer contract for Todo's B-side collaboration Plugin API."""
+"""Consumer contract for Todo's internal collaboration port."""
 
 from __future__ import annotations
 
@@ -26,10 +26,12 @@ from agentclaw.community.core.task.todos.errors import TodoStateConflictError
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
+from agentclaw.community.core.task.todos.collaboration.protocol import (
+    TodoCollaborationPort,
+)
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
-from agentclaw.community.plugin_api.todo_collaboration import TodoCollaborationPlugin
-from agentclaw.community.plugins.local.todo_collaboration import (
-    LocalTodoCollaborationPlugin,
+from tests.community.core.task.todos.collaboration.fakes import (
+    FakeTodoCollaborationPort,
 )
 
 NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
@@ -116,8 +118,8 @@ class FakeTodoArtifactService:
         return None
 
 
-class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
-    """Local plugin double with observable call history for the contract."""
+class RecordingCollaboration(FakeTodoCollaborationPort):
+    """Test fake with observable call history for the consumer contract."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -145,14 +147,14 @@ class RecordingLocalCollaboration(LocalTodoCollaborationPlugin):
 
 def bind_consumer_contract(
     world,
-) -> tuple[TodoServiceProtocol, FakeTodoRepository, RecordingLocalCollaboration]:
+) -> tuple[TodoServiceProtocol, FakeTodoRepository, RecordingCollaboration]:
     repository = FakeTodoRepository()
-    collaboration = RecordingLocalCollaboration()
+    collaboration = RecordingCollaboration()
     binder = world.injector.binder
     binder.bind(TodoRepositoryProtocol, to=repository, scope=singleton)
     binder.bind(SpaceAccessServiceProtocol, to=FakeSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=FakeBotRepository(), scope=singleton)
-    binder.bind(TodoCollaborationPlugin, to=collaboration, scope=singleton)
+    binder.bind(TodoCollaborationPort, to=collaboration, scope=singleton)
     binder.bind(
         TodoArtifactServiceProtocol,
         to=FakeTodoArtifactService(),
@@ -162,7 +164,7 @@ def bind_consumer_contract(
 
 
 @pytest.mark.asyncio
-async def test_todo_create_run_and_interaction_route_through_collaboration_plugin(
+async def test_todo_create_run_and_interaction_route_through_collaboration_port(
     world,
 ):
     service, repository, collaboration = bind_consumer_contract(world)
@@ -220,7 +222,7 @@ async def test_todo_create_run_and_interaction_route_through_collaboration_plugi
 
 
 @pytest.mark.asyncio
-async def test_todo_interaction_state_failure_does_not_reach_collaboration_plugin(
+async def test_todo_interaction_state_failure_does_not_reach_collaboration_port(
     world,
 ):
     service, _repository, collaboration = bind_consumer_contract(world)

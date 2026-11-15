@@ -1,15 +1,15 @@
-"""Local Todo collaboration runtime-refresh behavior."""
+"""Todo collaboration fake runtime-refresh behavior."""
 
 from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.plugin_api.todo_collaboration import (
+from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContextRequest,
     TodoCollaborationEventRequest,
 )
-from agentclaw.community.plugins.local.todo_collaboration import (
-    LocalTodoCollaborationPlugin,
+from tests.community.core.task.todos.collaboration.fakes import (
+    FakeTodoCollaborationPort,
 )
 
 
@@ -30,22 +30,22 @@ def _request() -> TodoCollaborationContextRequest:
 
 @pytest.mark.asyncio
 async def test_refresh_context_run_completes_only_confirmed_completed_runtime() -> None:
-    plugin = LocalTodoCollaborationPlugin()
-    created = plugin.create_context(_request())
-    started = await plugin.run_context(
+    fake = FakeTodoCollaborationPort()
+    created = fake.create_context(_request())
+    started = await fake.run_context(
         collab_context_id=created.collab_context_id,
         actor_id="user_1",
     )
 
-    running = await plugin.refresh_context_run(
+    running = await fake.refresh_context_run(
         collab_context_id=started.collab_context_id,
         actor_id="user_1",
     )
-    plugin.set_run_status_for_test(
+    fake.set_run_status_for_test(
         collab_context_id=started.collab_context_id,
         status="COMPLETED",
     )
-    completed = await plugin.refresh_context_run(
+    completed = await fake.refresh_context_run(
         collab_context_id=started.collab_context_id,
         actor_id="user_1",
     )
@@ -60,18 +60,18 @@ async def test_refresh_context_run_completes_only_confirmed_completed_runtime() 
 async def test_refresh_context_run_does_not_complete_failed_runtime(
     status: str,
 ) -> None:
-    plugin = LocalTodoCollaborationPlugin()
-    created = plugin.create_context(_request())
-    started = await plugin.run_context(
+    fake = FakeTodoCollaborationPort()
+    created = fake.create_context(_request())
+    started = await fake.run_context(
         collab_context_id=created.collab_context_id,
         actor_id="user_1",
     )
-    plugin.set_run_status_for_test(
+    fake.set_run_status_for_test(
         collab_context_id=started.collab_context_id,
         status=status,
     )
 
-    refreshed = await plugin.refresh_context_run(
+    refreshed = await fake.refresh_context_run(
         collab_context_id=started.collab_context_id,
         actor_id="user_1",
     )
@@ -82,14 +82,14 @@ async def test_refresh_context_run_does_not_complete_failed_runtime(
 
 @pytest.mark.asyncio
 async def test_task_rejected_event_resumes_completed_context() -> None:
-    plugin = LocalTodoCollaborationPlugin()
-    created = plugin.create_context(_request())
-    started = await plugin.run_context(
+    fake = FakeTodoCollaborationPort()
+    created = fake.create_context(_request())
+    started = await fake.run_context(
         collab_context_id=created.collab_context_id,
         actor_id="user_1",
     )
-    completed = plugin.complete_context(started.collab_context_id)
-    rejected = plugin.append_event(
+    completed = fake.complete_context(started.collab_context_id)
+    rejected = fake.append_event(
         collab_context_id=completed.collab_context_id,
         request=TodoCollaborationEventRequest(
             expected_version=completed.context_version,
@@ -106,7 +106,7 @@ async def test_task_rejected_event_resumes_completed_context() -> None:
         ),
     )
 
-    resumed = await plugin.resume_context(
+    resumed = await fake.resume_context(
         collab_context_id=completed.collab_context_id,
         actor_id="user_1",
         triggered_by_event_id=rejected.event_id,
