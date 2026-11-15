@@ -53,6 +53,20 @@ from agentclaw.community.plugins.community.notify_sender import (
 _DT = datetime.now().strftime("%Y-%m-%d")
 
 
+@pytest.fixture(autouse=True)
+def isolated_dingtalk_credentials(monkeypatch):
+    """Keep sender assertions independent of earlier DI and environment setup."""
+    monkeypatch.setattr(DingTalkCredentialHolder, "_creds", {})
+    monkeypatch.setattr(DingTalkYamlHolder, "_creds", {})
+    for name in (
+        "TASK_DISCOVERY_DINGTALK_AK_ID",
+        "TASK_DISCOVERY_DINGTALK_AK_SECRET",
+        "TASK_DISCOVERY_DINGTALK_ROBOT_CODE",
+        "TASK_DISCOVERY_CARD_TEMPLATE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _make_task(**overrides) -> DiscoveredTask:
     defaults = dict(
         task_id="t1",

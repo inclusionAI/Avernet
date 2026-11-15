@@ -28,6 +28,8 @@ def test_bound_delivery_registers_one_capability_writer(
         Category.CAPABILITIES,
         Category.IDENTITY,
         Category.RESOURCES,
+        Section.BOT_FILE_SYNC,
+        Category.BOT_CONFIG,
         Category.CLI_TOOLS,
     }
     assert isinstance(ports.skill_sets, delegate)
