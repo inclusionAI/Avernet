@@ -73,6 +73,7 @@ def _request(**overrides):
 
 @pytest.mark.asyncio
 async def test_authenticated_actor_is_separate_from_owner_resource_and_allowlist(caplog):
+    caplog.set_level("INFO")
     auth = _Auth("000-B")
     service, caller, pipeline = _service(auth)
     request = _request()
@@ -83,6 +84,9 @@ async def test_authenticated_actor_is_separate_from_owner_resource_and_allowlist
     assert context.entity_id == "resource-E"
     assert context.user_list_entity_id == "resource-E"
     assert auth.requests == [request["auth_request"]]
+    assert "token_plugin_context_built" in caplog.text
+    for field in ("entity_id=resource-E", "owner_user_id=owner-O", "actor_user_id=000-B"):
+        assert field in caplog.text
     assert "synthetic-input-secret" not in caplog.text
     assert "synthetic-cookie-secret" not in caplog.text
 
