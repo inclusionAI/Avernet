@@ -48,9 +48,10 @@ assert_only_allows 5 bcs-config-api
 
 # ─── DEP-6: bcs-protocol 不依赖任何 bcs-* ───
 assert_only_allows 6 bcs-protocol
+assert_only_allows 6 bcs-dist-model
 
 # ─── DEP-1 / DEP-7: bcs-service-api 仅可依赖协议/领域契约 ───
-assert_only_allows 1 bcs-service-api bcs-protocol bcs-domain
+assert_only_allows 1 bcs-service-api bcs-protocol bcs-domain bcs-dist-model
 
 # ─── DEP-3: services/* 不能 import bcs_service_api::application ───
 # （通过 LINT-1 实现，这里只校验 service crate 列表有效）

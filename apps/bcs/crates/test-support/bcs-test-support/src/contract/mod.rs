@@ -31,3 +31,4 @@ pub mod group_human_notify;
 pub mod group_card;
 pub mod a2a_bot;
 pub mod a2a_catalog_stack;
+pub mod distributed;
