@@ -34,6 +34,7 @@ from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.core.task.todos.artifact_models import TodoArtifactDownload
 from agentclaw.community.core.task.todos.models import (
     MAX_BOT_ID_LENGTH,
     MAX_TITLE_LENGTH,
@@ -54,6 +55,21 @@ from .schemas import (
 )
 
 OwnersDep = Annotated[str, Query(min_length=1, description=USER_ID_DESCRIPTION)]
+
+
+def _load_todo_artifact_file(
+    service: TodoArtifactServiceProtocol,
+    *,
+    todo_id: str,
+    artifact_id: str,
+    actor_id: str,
+) -> TodoArtifactDownload:
+    """Call the deliberately synchronous Todo artifact read contract."""
+    return service.read_file(
+        todo_id=todo_id,
+        artifact_id=artifact_id,
+        actor_id=actor_id,
+    )
 
 
 def call_user(*, user_id: str, principal: Principal) -> str:
@@ -325,7 +341,8 @@ async def read_todo_artifact_content(
     """Proxy one file artifact for browser preview or download."""
     actor_id = call_user(user_id=user_id, principal=principal)
     download = await run_in_threadpool(
-        service.read_file,
+        _load_todo_artifact_file,
+        service,
         todo_id=todo_id,
         artifact_id=artifact_id,
         actor_id=actor_id,

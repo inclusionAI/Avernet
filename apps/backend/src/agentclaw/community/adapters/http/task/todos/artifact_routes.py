@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
+from agentclaw.community.core.task.todos.artifact_models import TodoArtifactRecord
 from agentclaw.community.di import Injected
 
 router = APIRouter(
@@ -66,6 +67,31 @@ class ReportTodoArtifactRequest(BaseModel):
         if legacy_execution_id:
             return {**data, "todo_execution_id": legacy_execution_id}
         return data
+
+
+def _store_todo_artifact_file(
+    service: TodoArtifactServiceProtocol,
+    *,
+    todo_id: str,
+    todo_execution_id: str,
+    execution_token: str,
+    artifact_name: str | None,
+    file_name: str,
+    content_type: str | None,
+    payload: bytes,
+    is_final_artifact: bool,
+) -> TodoArtifactRecord:
+    """Call the deliberately synchronous Todo artifact storage contract."""
+    return service.upload_file(
+        todo_id=todo_id,
+        todo_execution_id=todo_execution_id,
+        execution_token=execution_token,
+        artifact_name=artifact_name,
+        file_name=file_name,
+        content_type=content_type,
+        payload=payload,
+        is_final_artifact=is_final_artifact,
+    )
 
 
 def _resolve_todo_execution_id(
@@ -134,7 +160,8 @@ async def upload_todo_artifact_file(
     )
     payload = await file.read()
     record = await run_in_threadpool(
-        service.upload_file,
+        _store_todo_artifact_file,
+        service,
         todo_id=todo_id,
         todo_execution_id=resolved_execution_id,
         execution_token=execution_token,
