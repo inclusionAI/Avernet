@@ -1,0 +1,41 @@
+apps/bcs/scripts/e2e-test/README.md
+  s_5dd69a92e820f8::t_920317e5323280 17,20-24,37-47
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/README.md
+  s_5dd69a92e820f8::t_920317e5323280 60-62,67-68,75
+apps/bcs/scripts/e2e-test/provider_sse_mock.py
+  s_5dd69a92e820f8::t_b8b6801fa86138 25-35
+apps/bcs/scripts/e2e-test/custom_binding_story.py
+  s_5dd69a92e820f8::t_c0680ca34da575 21,31,35-40,57,59-60,71-72,77-79,137-141
+  s_5dd69a92e820f8::t_0bca5d5ce145bf 102-111
+apps/bcs/scripts/e2e-test/provider_sse_cases.py
+  s_5dd69a92e820f8::t_b8b6801fa86138 14-17,63
+apps/bcs/crates/bootstrap/bcs/tests/a2a_grpc/runner.rs
+  s_5dd69a92e820f8::t_3a770bbb47bcd1 37-38,96-97,114-123,126
+  s_5dd69a92e820f8::t_f9d5dc5640ad8c 39-42,75-83
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_5dd69a92e820f8::t_b8b6801fa86138 265,271,372-374,376,412
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_5dd69a92e820f8::t_92d3dbe73b37e4 69,172,175-178,185-187,194
+apps/bcs/scripts/e2e-test/http_provider_judge_mock.py
+  s_5dd69a92e820f8::t_b8b6801fa86138 108
+apps/bcs/scripts/ci/companion_coverage.py
+  s_5dd69a92e820f8::t_c0680ca34da575 52
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_5dd69a92e820f8::t_c0680ca34da575 34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "31bf922a7c6eafaaa2a834df824babda1e65a6a3",
+  "prompts": {},
+  "sessions": {
+    "s_5dd69a92e820f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d575-7b41-71e2-9ec8-04a045f086d9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
