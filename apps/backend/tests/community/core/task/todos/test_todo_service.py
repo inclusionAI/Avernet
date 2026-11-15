@@ -9,10 +9,6 @@ import pytest
 
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.spaces.models import SpaceType
-from agentclaw.community.core.task.todos.artifact_models import (
-    TodoArtifactKind,
-    TodoArtifactRecord,
-)
 from agentclaw.community.core.task.todos.errors import (
     TodoBotAmbiguousError,
     TodoBotScopeError,
@@ -211,18 +207,6 @@ class FakeExecution:
         return self.result
 
 
-class FakeArtifacts:
-    def __init__(self, artifacts: tuple[TodoArtifactRecord, ...] = ()) -> None:
-        self.artifacts = artifacts
-        self.calls: list[dict[str, Any]] = []
-
-    def list_artifacts(
-        self, *, todo_id: str, actor_id: str, env: str | None
-    ) -> tuple[TodoArtifactRecord, ...]:
-        self.calls.append({"todo_id": todo_id, "actor_id": actor_id, "env": env})
-        return self.artifacts
-
-
 class FakeCollaboration:
     def __init__(self, contexts: tuple[TodoCollaborationContext, ...] = ()) -> None:
         self.contexts = {context.collab_context_id: context for context in contexts}
@@ -268,34 +252,6 @@ class FakeCollaboration:
         return event
 
 
-def _artifact(
-    *,
-    artifact_id: str,
-    text: str | None,
-    created_at: datetime,
-) -> TodoArtifactRecord:
-    content: dict[str, object] = (
-        {"text": text, "is_final_artifact": True}
-        if text is not None
-        else {"url": "https://example.test", "is_final_artifact": True}
-    )
-    return TodoArtifactRecord(
-        artifact_id=artifact_id,
-        todo_id="todo_1",
-        collab_context_id="context_todo_1",
-        execution_id="execution_1",
-        artifact_name=f"artifact_{artifact_id}",
-        artifact_kind=(
-            TodoArtifactKind.TEXT if text is not None else TodoArtifactKind.URL_LINK
-        ),
-        content=content,
-        content_hash=artifact_id,
-        creator="bot_1",
-        created_at=created_at,
-        updated_at=created_at,
-    )
-
-
 def _service(
     *,
     rows: list[dict[str, Any]] | None = None,
@@ -303,23 +259,20 @@ def _service(
     todos: tuple[TodoRecord, ...] | None = None,
     contexts: tuple[TodoCollaborationContext, ...] = (),
     execution_result: TodoRecord | None = None,
-    artifacts: tuple[TodoArtifactRecord, ...] = (),
 ):
     repository = FakeTodos(todos or (_todo(),))
     access = FakeSpaceAccess(space)
     bots = FakeBots(rows or [])
     collaboration = FakeCollaboration(contexts)
     execution = FakeExecution(execution_result)
-    artifact_service = FakeArtifacts(artifacts)
     service = TodoService(
         repository,
         access,
         bots,
         collaboration,
         execution,
-        artifact_service,
     )
-    return service, repository, access, bots, collaboration, artifact_service
+    return service, repository, access, bots, collaboration, None
 
 
 def _team_bot(name: str = "Team Bot") -> dict[str, Any]:
@@ -525,67 +478,66 @@ def test_list_events_maps_context_artifacts():
     assert collaboration.get_calls == [("context_todo_1", "user_1")]
 
 
-def test_list_interactions_builds_chat_projection_with_human_and_bot_text():
+def test_list_interactions_returns_durable_human_bot_and_artifact_events():
     events = (
         _event(1, "task.created", content="original request"),
         _event(2, "task.started", actor_type="bot", content=""),
         _event(
             3,
-            "task.completed",
+            "artifact.reported",
             actor_type="bot",
-            content="",
+            content="产出文本：first result",
             created_at="2026-11-10T08:00:03Z",
+            payload={
+                "artifact_id": "text_1",
+                "todo_execution_id": "todoexec_1",
+                "run_id": "run_1",
+            },
         ),
         _event(4, "user_interaction.posted", content="please revise"),
         _event(
             5,
-            "task.completed",
+            "artifact.reported",
             actor_type="bot",
-            content="",
+            content="产出文本：second result",
             created_at="2026-11-10T08:00:06Z",
+            payload={
+                "artifact_id": "text_2",
+                "todo_execution_id": "todoexec_2",
+                "run_id": "run_2",
+            },
         ),
+        _event(6, "task.completed", actor_type="bot", content=""),
     )
     todo = _todo(
         status=TodoStatus.IN_PROGRESS,
         collab_context_id="context_todo_1",
     )
-    artifacts = (
-        _artifact(artifact_id="text_1", text="first result", created_at=NOW),
-        _artifact(
-            artifact_id="text_2",
-            text="second result",
-            created_at=datetime(2026, 11, 10, 8, 0, 5, tzinfo=timezone.utc),
-        ),
-        _artifact(
-            artifact_id="link_1",
-            text=None,
-            created_at=datetime(2026, 11, 10, 8, 0, 5, tzinfo=timezone.utc),
-        ),
-    )
-    service, _, _, _, collaboration, artifact_service = _service(
+    service, _, _, _, collaboration, _ = _service(
         todos=(todo,),
         contexts=(_context(events=events),),
-        artifacts=artifacts,
     )
 
     result = service.list_interactions(todo_id="todo_1", actor_id="user_1", env="pre")
 
     assert [item.event_type for item in result] == [
         "task.created",
-        "task.completed",
+        "artifact.reported",
         "user_interaction.posted",
+        "artifact.reported",
         "task.completed",
     ]
     assert [item.content for item in result] == [
         "original request",
-        "first result",
+        "产出文本：first result",
         "please revise",
-        "second result",
+        "产出文本：second result",
+        "",
     ]
+    assert result[1].payload["artifact_id"] == "text_1"
+    assert result[3].payload["todo_execution_id"] == "todoexec_2"
+    assert result[3].payload["run_id"] == "run_2"
     assert collaboration.get_calls == [("context_todo_1", "user_1")]
-    assert artifact_service.calls == [
-        {"todo_id": "todo_1", "actor_id": "user_1", "env": "pre"}
-    ]
 
 
 def test_list_interactions_returns_durable_human_events_before_completion_text():
@@ -597,7 +549,7 @@ def test_list_interactions_returns_durable_human_events_before_completion_text()
         status=TodoStatus.PENDING_ACCEPTANCE,
         collab_context_id="context_todo_1",
     )
-    service, _, _, _, collaboration, artifact_service = _service(
+    service, _, _, _, collaboration, _ = _service(
         todos=(todo,),
         contexts=(_context(events=events),),
     )
@@ -610,7 +562,6 @@ def test_list_interactions_returns_durable_human_events_before_completion_text()
     ]
     assert [item.content for item in result] == ["original request", "please revise"]
     assert collaboration.get_calls == [("context_todo_1", "user_1")]
-    assert artifact_service.calls == []
 
 
 @pytest.mark.asyncio

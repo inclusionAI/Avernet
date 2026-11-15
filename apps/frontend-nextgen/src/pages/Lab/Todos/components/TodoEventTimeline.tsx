@@ -59,8 +59,11 @@ function presentEvent(event: TodoEvent, todoTitle: string, todoDescription?: str
   if (event.eventType === 'task.submitted') {
     return { event, title: '提交执行结果' };
   }
+  if (event.eventType === 'artifact.reported') {
+    return { event, title: content || '上报产物' };
+  }
   if (event.eventType === 'task.completed') {
-    return { event, title: content ? '输出：文本结果' : '输出执行结果' };
+    return { event, title: '本轮执行完成' };
   }
   if (event.eventType === 'task.accepted') {
     return { event, title: '验收通过' };

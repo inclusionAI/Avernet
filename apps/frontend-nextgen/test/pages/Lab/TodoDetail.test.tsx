@@ -127,6 +127,21 @@ function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent 
   };
 }
 
+function artifactEvent(eventSeq: number, artifact: TodoArtifact, content: string): TodoEvent {
+  return event(eventSeq, {
+    eventType: 'artifact.reported',
+    actorType: 'bot',
+    content,
+    payload: {
+      artifact_id: artifact.artifactId,
+      todo_execution_id: artifact.executionId,
+      run_id: 'run-1',
+      artifact_kind: artifact.kind,
+      artifact_name: artifact.artifactName,
+    },
+  });
+}
+
 function resetStore() {
   useTodoStore.setState({
     todos: [],
@@ -153,12 +168,12 @@ beforeEach(() => {
   mockedService.loadTodo.mockResolvedValue(todo);
   mockedService.loadTodoInteractions.mockResolvedValue([
     event(1, { eventType: 'task.created', actorType: 'human', content: '整理三款产品的定价与功能矩阵' }),
-    event(3, {
-      eventType: 'task.completed',
-      actorType: 'bot',
-      content: '三款产品的定价与功能矩阵已完成整理，数据来源已补充。',
-    }),
-    event(4, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
+    artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
+    artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
+    artifactEvent(5, artifacts[2], '产出链接：产品官网'),
+    artifactEvent(6, artifacts[3], '产出代码：pricing-analysis'),
+    event(7, { eventType: 'task.completed', actorType: 'bot', content: '' }),
+    event(8, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoEvents.mockResolvedValue([
     event(1, {
@@ -167,13 +182,12 @@ beforeEach(() => {
       content: '整理三款产品的定价与功能矩阵',
     }),
     event(2, { eventType: 'task.started', content: '开始采集竞品资料' }),
-    event(3, {
-      eventType: 'task.completed',
-      content: '三款产品的定价与功能矩阵已完成整理，数据来源已补充。',
-      status: 'pending_acceptance',
-      artifacts: [{ artifactId: 'event-artifact-1', name: '事件产物', url: 'https://example.test/event-artifact' }],
-    }),
-    event(4, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
+    artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
+    artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
+    artifactEvent(5, artifacts[2], '产出链接：产品官网'),
+    artifactEvent(6, artifacts[3], '产出代码：pricing-analysis'),
+    event(7, { eventType: 'task.completed', content: '', status: 'pending_acceptance' }),
+    event(8, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
   mockedService.downloadTodoArtifactContent.mockResolvedValue(new Blob(['file']));
@@ -194,10 +208,11 @@ describe('TodoDetailPage', () => {
     const eventView = await screen.findByRole('region', { name: '待办事件' });
     expect(within(eventView).getByText('发起待办：Q3 竞品分析')).toBeInTheDocument();
     expect(within(eventView).getByText('整理三款产品的定价与功能矩阵')).toBeInTheDocument();
-    expect(within(eventView).getByText('输出：文本结果')).toBeInTheDocument();
-    expect(
-      within(eventView).queryByText('三款产品的定价与功能矩阵已完成整理，数据来源已补充。'),
-    ).not.toBeInTheDocument();
+    expect(within(eventView).getByText('产出文本：已完成三款产品的定价对比。')).toBeInTheDocument();
+    expect(within(eventView).getByText('产出文件：定价与功能矩阵.xlsx')).toBeInTheDocument();
+    expect(within(eventView).getByText('产出链接：产品官网')).toBeInTheDocument();
+    expect(within(eventView).getByText('产出代码：pricing-analysis')).toBeInTheDocument();
+    expect(within(eventView).getByText('本轮执行完成')).toBeInTheDocument();
     expect(within(eventView).getByText('补充要求：请补充价格来源')).toBeInTheDocument();
     expect(within(eventView).queryByText('开始采集竞品资料')).not.toBeInTheDocument();
     expect(within(eventView).queryByText('等待中')).not.toBeInTheDocument();
@@ -236,6 +251,40 @@ describe('TodoDetailPage', () => {
     expect(within(screen.getByRole('region', { name: '待办互动' })).getByText(longMessage)).toBeInTheDocument();
   });
 
+  it('事件页展示文本产物摘要，互动页展示完整文本产物', async () => {
+    const fullText = '这是一个超过二十个字符的完整竞品分析文本，包含定价、功能矩阵、来源和风险说明。';
+    const summary = `${Array.from(fullText).slice(0, 20).join('')}…`;
+    const textArtifact: TodoArtifact = {
+      artifactId: 'artifact-text',
+      todoId: 'todo-1',
+      executionId: 'execution-1',
+      artifactName: '执行摘要',
+      kind: 'text',
+      content: { text: fullText, isFinalArtifact: true },
+      createdAt: '2026-11-08T06:00:00Z',
+    };
+    mockedService.loadTodoArtifacts.mockResolvedValue([textArtifact]);
+    mockedService.loadTodoEvents.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      artifactEvent(2, textArtifact, `产出文本：${summary}`),
+      event(3, { eventType: 'task.completed', content: '' }),
+    ]);
+    mockedService.loadTodoInteractions.mockResolvedValue([
+      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      artifactEvent(2, textArtifact, `产出文本：${summary}`),
+      event(3, { eventType: 'task.completed', content: '' }),
+    ]);
+
+    render(<TodoDetailPage />);
+
+    const eventView = await screen.findByRole('region', { name: '待办事件' });
+    expect(within(eventView).getByText(`产出文本：${summary}`)).toBeInTheDocument();
+    expect(within(eventView).queryByText(fullText)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+    expect(within(screen.getByRole('region', { name: '待办互动' })).getByText(fullText)).toBeInTheDocument();
+  });
+
   it('切换互动视图并提交互动', async () => {
     render(<TodoDetailPage />);
     await screen.findByText('发起待办：Q3 竞品分析');
@@ -247,7 +296,7 @@ describe('TodoDetailPage', () => {
     expect(within(interactionView).getByText('数据分析助手 开始处理')).toBeInTheDocument();
     expect(within(interactionView).getByText('转为待处理，等待发起人验收')).toBeInTheDocument();
     expect(
-      within(interactionView).getByText('三款产品的定价与功能矩阵已完成整理，数据来源已补充。'),
+      within(interactionView).getByText('已完成三款产品的定价对比。'),
     ).toBeInTheDocument();
     expect(within(interactionView).getByText('定价与功能矩阵.xlsx')).toBeInTheDocument();
     expect(within(interactionView).getByText('产品官网')).toBeInTheDocument();
@@ -339,7 +388,7 @@ describe('TodoDetailPage', () => {
       decisionId: expect.stringMatching(/^decision_/),
       verdict: 'rejected',
       message: '请修正产品 B 的企业版价格',
-      targets: [{ kind: 'event', id: 'event-4', floor: 8 }],
+      targets: [{ kind: 'event', id: 'event-8', floor: 8 }],
     });
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
@@ -420,23 +469,22 @@ describe('TodoDetailPage', () => {
       payload: {
         content: rejection,
         targets: [
-          { kind: 'event', id: 'event-3', floor: 3 },
-          { kind: 'artifact', id: 'artifact-file', floor: 4 },
+          { kind: 'artifact', id: 'artifact-text', floor: 2 },
+          { kind: 'artifact', id: 'artifact-file', floor: 3 },
         ],
       },
     });
     mockedService.loadTodoEvents.mockResolvedValue([
       event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
+      artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
       rejectedEvent,
       event(6, { eventType: 'task.accepted', actorType: 'human', content: '' }),
     ]);
     mockedService.loadTodoInteractions.mockResolvedValue([
       event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
-      event(3, {
-        eventType: 'task.completed',
-        actorType: 'bot',
-        content: '产品 B 企业版价格缺少官网来源，当前价格仍需核验。',
-      }),
+      artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
+      artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
       rejectedEvent,
     ]);
 
@@ -451,13 +499,13 @@ describe('TodoDetailPage', () => {
     const interactionView = screen.getByRole('region', { name: '待办互动' });
     expect(within(interactionView).getByText(rejection)).toBeInTheDocument();
     const quotes = within(interactionView).getByRole('group', { name: '问题引用' });
+    expect(within(quotes).getByText('f2')).toBeInTheDocument();
+    expect(within(quotes).getByText('文本产物')).toBeInTheDocument();
+    expect(within(quotes).getByText('已完成三款产品的定价对比。')).toBeInTheDocument();
     expect(within(quotes).getByText('f3')).toBeInTheDocument();
-    expect(within(quotes).getByText('数据分析助手')).toBeInTheDocument();
-    expect(within(quotes).getByText('产品 B 企业版价格缺少官网来源，当前价格仍需核验。')).toBeInTheDocument();
-    expect(within(quotes).getByText('f4')).toBeInTheDocument();
     expect(within(quotes).getByText('产物')).toBeInTheDocument();
     expect(within(quotes).getByText('定价与功能矩阵.xlsx · xlsx · 2 KB')).toBeInTheDocument();
-    expect(within(interactionView).queryByText('问题楼层：f3、f4')).not.toBeInTheDocument();
+    expect(within(interactionView).queryByText('问题楼层：f2、f3')).not.toBeInTheDocument();
   });
 
   it('产物视图使用独立产物接口展示四类产物，并支持文件下载', async () => {
@@ -504,7 +552,7 @@ describe('TodoDetailPage', () => {
     const eventView = await screen.findByRole('region', { name: '待办事件' });
 
     const eventName = within(eventView).getByText('发起待办：Q3 竞品分析');
-    const eventArtifact = within(eventView).getByText('事件产物');
+    const artifactEventName = within(eventView).getByText('产出文件：定价与功能矩阵.xlsx');
     const firstEvent = eventName.closest('li');
     const acceptanceHeading = screen.getByRole('heading', { name: '待你验收 · Bot 已完成处理' });
     const acceptance = screen.getByRole('region', { name: '待办验收' });
@@ -514,8 +562,8 @@ describe('TodoDetailPage', () => {
     expect(firstEvent).toHaveClass('pb-4');
     expect(within(eventView).queryByText('数据分析助手')).not.toBeInTheDocument();
     expect(within(eventView).queryByText('开始采集竞品资料')).not.toBeInTheDocument();
-    expect(eventArtifact).toHaveClass('text-sm', 'font-medium');
-    expect(within(eventView).getByText('外部链接')).toHaveClass('text-xs');
+    expect(artifactEventName).toHaveClass('text-sm', 'font-medium');
+    expect(within(eventView).getByText('产出链接：产品官网')).toHaveClass('text-sm', 'font-medium');
     expect(acceptanceHeading).toHaveClass('text-sm', 'font-semibold');
     expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
   });

@@ -67,7 +67,18 @@ class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
             session_id=request.session_id,
         )
 
-    async def get_run(self, run_id: str) -> ContextCollabRunStatus:
+    async def get_run(
+        self,
+        run_id: str | None = None,
+        *,
+        group_id: str | None = None,
+        session_id: str | None = None,
+    ) -> ContextCollabRunStatus:
+        del session_id
+        if group_id is not None or run_id is None:
+            raise ContextCollabRuntimeError(
+                "local Context runtime supports direct run_id lookup only"
+            )
         self.get_run_requests.append(run_id)
         try:
             return self._runs[run_id]

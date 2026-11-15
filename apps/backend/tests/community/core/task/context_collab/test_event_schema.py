@@ -30,6 +30,7 @@ def test_registry_constants_pinned():
             "task.rejected",
             "task.cancelled",
             "task.completed",
+            "artifact.reported",
             "user_interaction.posted",
         }
     )

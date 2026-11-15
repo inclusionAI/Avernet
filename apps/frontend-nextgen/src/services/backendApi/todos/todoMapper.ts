@@ -77,7 +77,7 @@ export function mapTodoEventDto(dto: TodoEventDto): TodoEvent {
 export function mapTodoArtifactDto(dto: TodoArtifactDto): TodoArtifact | null {
   const artifactId = stringValue(dto.artifact_id);
   const todoId = stringValue(dto.todo_id);
-  const executionId = stringValue(dto.execution_id);
+  const executionId = stringValue(dto.todo_execution_id ?? dto.execution_id);
   const artifactName = stringValue(dto.artifact_name, '未命名产物');
   const createdAt = stringValue(dto.created_at);
   const kind = stringValue(dto.kind).toLowerCase();

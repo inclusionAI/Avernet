@@ -44,6 +44,8 @@ export interface TodoEventDto extends BackendUnknownRecord {
 export interface TodoArtifactDto extends BackendUnknownRecord {
   artifact_id?: string;
   todo_id?: string;
+  todo_execution_id?: string;
+  /** @deprecated 兼容旧版响应；Todo 产物标准字段为 todo_execution_id。 */
   execution_id?: string;
   artifact_name?: string;
   kind?: string;

@@ -163,9 +163,7 @@ def _event_projection_dict(
     字段集合不含 ``steps``(§12.2 #5);值全部取自 G3 投影,不回读仓储。
     ``payload`` 仅供同进程内部消费者显式请求,不改变默认北向契约。
     """
-    result = {
-        field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS
-    }
+    result = {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
     if include_payload:
         result["payload"] = dict(projection.payload)
     return result
@@ -233,17 +231,51 @@ def _resolve_event_status(
     return current_status if new_status is None else new_status
 
 
-def _previous_session_id(events: Sequence[EventRecord]) -> str | None:
-    """Find the executor session left by the previous completed run."""
+def _previous_runtime_handles(
+    events: Sequence[EventRecord],
+) -> tuple[str | None, str | None, str | None]:
+    """Find the latest real executor handles from a previous run.
+
+    Returns ``(run_id, group_id, session_id)``. Direct Bot executions carry a
+    run id, while BCS manager-worker executions carry a group and session. The
+    two handle kinds stay distinct so a group id is never persisted as a fake
+    run id.
+    """
     for event in reversed(events):
         if event.event_kind not in {"task.started", "task.completed"}:
             continue
         if not isinstance(event.payload, dict):
             continue
-        session_id = event.payload.get("session_id")
-        if isinstance(session_id, str) and session_id.strip():
-            return session_id.strip()
+        run_id = _payload_identifier(event.payload, "run_id")
+        group_id = _payload_identifier(event.payload, "group_id")
+        session_id = _payload_identifier(event.payload, "session_id")
+        if run_id or group_id or session_id:
+            return run_id, group_id, session_id
+    return None, None, None
+
+
+def _payload_identifier(payload: dict, field: str) -> str | None:
+    value = payload.get(field)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None
+
+
+def _runtime_handle_payload(
+    *,
+    run_id: str | None,
+    group_id: str | None,
+    session_id: str | None,
+) -> dict[str, object]:
+    """Build an event payload from real, non-empty runtime handles."""
+    payload: dict[str, object] = {}
+    if run_id:
+        payload["run_id"] = run_id
+    if group_id:
+        payload["group_id"] = group_id
+    if session_id:
+        payload["session_id"] = session_id
+    return payload
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
@@ -439,9 +471,19 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 todo_execution_token=todo_execution_token,
             )
         )
-        payload = {"run_id": runtime_result.run_id}
-        if runtime_result.session_id is not None:
-            payload["session_id"] = runtime_result.session_id
+        if bool(runtime_result.run_id) == bool(runtime_result.group_id):
+            raise ContextCollabValidationError(
+                "Context executor must return exactly one of run_id or group_id"
+            )
+        if runtime_result.group_id and not runtime_result.session_id:
+            raise ContextCollabValidationError(
+                "BCS Context executor must return session_id with group_id"
+            )
+        payload = _runtime_handle_payload(
+            run_id=runtime_result.run_id,
+            group_id=runtime_result.group_id,
+            session_id=runtime_result.session_id,
+        )
         executor_actor = PrincipalRef("bot", executor.agent_id)
         accepted = self.append_event(
             collab_context_id,
@@ -466,6 +508,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             session_id=runtime_result.session_id,
             context_version=accepted.context_version,
             current_status=accepted.current_status,
+            group_id=runtime_result.group_id,
         )
 
     async def resume_context(
@@ -528,14 +571,14 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
         if not isinstance(message, str) or not message.strip():
             raise ContextCollabValidationError(
-                "collaboration context resume requires a non-empty Human-work "
-                "message"
+                "collaboration context resume requires a non-empty Human-work message"
             )
-        session_id = _previous_session_id(status.events[:trigger_index])
+        previous_run_id, group_id, session_id = _previous_runtime_handles(
+            status.events[:trigger_index]
+        )
         if session_id is None:
             raise ContextCollabValidationError(
-                "collaboration context resume requires the previous executor "
-                "session_id"
+                "collaboration context resume requires the previous executor session_id"
             )
         executor = collet.context_spec.executor_ref
         if executor is None:
@@ -567,6 +610,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 executor_owner_id=collet.context_spec.executor_owner_id,
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
+                group_id=group_id,
             )
         )
         runtime_session_id = runtime_result.session_id or session_id
@@ -574,7 +618,31 @@ class ContextCollabService(ContextCollabServiceProtocol):
             raise ContextCollabValidationError(
                 "Context executor returned a different session; refusing to resume"
             )
+        runtime_group_id = runtime_result.group_id or group_id
+        if runtime_group_id != group_id:
+            raise ContextCollabValidationError(
+                "Context executor returned a different group; refusing to resume"
+            )
+        if group_id is None and previous_run_id is None:
+            raise ContextCollabValidationError(
+                "collaboration context resume requires a previous runtime handle"
+            )
+        if group_id is not None and runtime_result.run_id is not None:
+            raise ContextCollabValidationError(
+                "BCS Context resume returned an unexpected direct run_id"
+            )
         executor_actor = PrincipalRef("bot", executor.agent_id)
+        started_payload = _runtime_handle_payload(
+            run_id=runtime_result.run_id,
+            group_id=runtime_group_id,
+            session_id=session_id,
+        )
+        started_payload.update(
+            {
+                "resumed": True,
+                "triggered_by_event_id": trigger.event_id,
+            }
+        )
         accepted = self.append_event(
             collab_context_id,
             EventAppendCommand(
@@ -584,12 +652,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 actor_ref=executor_actor,
                 parent_event=collet.current_event_id,
                 visibility="workspace",
-                payload={
-                    "run_id": runtime_result.run_id,
-                    "session_id": session_id,
-                    "resumed": True,
-                    "triggered_by_event_id": trigger.event_id,
-                },
+                payload=started_payload,
             ),
             ActorContext(actor=executor_actor, source=context.source),
         )
@@ -608,6 +671,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             session_id=session_id,
             context_version=accepted.context_version,
             current_status=accepted.current_status,
+            group_id=runtime_group_id,
         )
 
     async def refresh_run(
@@ -651,14 +715,36 @@ class ContextCollabService(ContextCollabServiceProtocol):
             None,
         )
         payload = started_event.payload if started_event is not None else None
-        run_id = payload.get("run_id") if isinstance(payload, dict) else None
-        if not isinstance(run_id, str) or not run_id.strip():
+        run_id = (
+            _payload_identifier(payload, "run_id")
+            if isinstance(payload, dict)
+            else None
+        )
+        group_id = (
+            _payload_identifier(payload, "group_id")
+            if isinstance(payload, dict)
+            else None
+        )
+        session_id = (
+            _payload_identifier(payload, "session_id")
+            if isinstance(payload, dict)
+            else None
+        )
+        if bool(run_id) == bool(group_id):
             raise ContextCollabValidationError(
                 "in_progress collaboration context requires a task.started event "
-                "with a non-empty run_id"
+                "with exactly one non-empty run_id or group_id"
+            )
+        if group_id and not session_id:
+            raise ContextCollabValidationError(
+                "in_progress BCS collaboration context requires task.started session_id"
             )
 
-        runtime_status = await self._runtime.get_run(run_id)
+        runtime_status = await self._runtime.get_run(
+            run_id,
+            group_id=group_id,
+            session_id=session_id,
+        )
         if runtime_status.status in {"PENDING", "RUNNING"}:
             return self._project_status_record(
                 status, trunk_events=False, context=context
@@ -666,9 +752,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
         if runtime_status.status != "COMPLETED":
             logger.warning(
                 "Context executor run did not complete successfully: "
-                "collab_context_id=%s run_id=%s status=%s error=%r",
+                "collab_context_id=%s run_id=%s group_id=%s status=%s error=%r",
                 collab_context_id,
                 run_id,
+                group_id,
                 runtime_status.status,
                 runtime_status.error,
             )
@@ -681,11 +768,13 @@ class ContextCollabService(ContextCollabServiceProtocol):
             raise ContextCollabValidationError(
                 "collaboration context cannot complete without an executor_ref"
             )
-        completion_payload: dict[str, object] = {"run_id": run_id}
+        completion_payload = _runtime_handle_payload(
+            run_id=run_id,
+            group_id=group_id,
+            session_id=runtime_status.session_id or session_id,
+        )
         if runtime_status.result is not None:
             completion_payload["result"] = runtime_status.result
-        if runtime_status.session_id is not None:
-            completion_payload["session_id"] = runtime_status.session_id
         if runtime_status.completed_at is not None:
             completion_payload["completed_at"] = runtime_status.completed_at
         executor_actor = PrincipalRef("bot", executor.agent_id)
@@ -801,9 +890,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             task_progress=TaskProgressProjectionDTO(
                 total_events=len(listed_projection),
                 events=[
-                    _event_projection_dict(
-                        entry, include_payload=include_event_payload
-                    )
+                    _event_projection_dict(entry, include_payload=include_event_payload)
                     for entry in listed_projection
                 ],
             ),

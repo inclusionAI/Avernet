@@ -29,13 +29,22 @@ A and B run in the same process in the production composition root, so the adapt
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
 
-The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata, concise primary content, and artifact links, but not the complete event payload. The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and Bot `task.completed` messages. Text artifacts are inlined into the corresponding Bot completion message; file, link, and code artifacts remain separately renderable.
+The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata and concise primary content, but not the complete event payload. Every successfully persisted product artifact appends one durable `artifact.reported` event, so this view can say what was produced in chronological order. Text uses a whitespace-normalized 20-character preview; file, link, and code events use their display name. `task.completed` remains a separate run-completion notice and never substitutes for the artifact events.
 
-OpenAPI delivery also sends `sender_options.from` as the creator so the executor session is attributable to that principal. The public `/run` operation is a compensation/operator entry point; the ordinary frontend neither edits Todos nor exposes manual Run.
+The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
+
+Todo delivery uses the same `singlebot_2_group` shape as Task: BCS creates one
+real `manager_worker` group whose only Bot participant is the selected executor
+with role `manager`; the Todo creator joins as a non-speaking Human `observer`.
+The selected Bot is both `driver_bot` and `master_bot`. No second Bot and no
+`default` Bot is added. Final delivery uses `inject_observers`, and later Human
+interaction resumes the same BCS group session rather than creating another
+group. The public `/run` operation is a compensation/operator entry point; the
+ordinary frontend neither edits Todos nor exposes manual Run.
 
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
-Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the community runtime uses the triggering event ID as the executor message ID. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
+Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the community runtime uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
 
 ## Bot execution and artifact reporting contract
 
@@ -44,6 +53,16 @@ the message body. The contract contains `todo_id`, `todo_execution_id`, the
 current-generation `todo_execution_token`, the Backend URL, and concrete report/upload
 examples. Runtime metadata may repeat these values for observability, but Bot
 behavior must not depend on metadata being propagated by a transport.
+
+That message is the authoritative and complete Todo execution protocol. Todo
+does not depend on a default-loaded Todo Skill, does not create Skill symlinks,
+and does not hardcode an engine filesystem path. If the business task needs an
+additional Skill, the Bot may use only the runtime's governed, authorized,
+currently discoverable on-demand activation mechanism; an inactive Skill must
+not be assumed available. This public checkout contains no Todo Default Skill
+registration. If a deployment has an old Default SkillSet row, operators must
+remove it through that deployment's governed Skill Center configuration rather
+than adding a repository-side path workaround.
 
 The identities form one hierarchy rather than three unrelated caller inputs:
 
@@ -67,6 +86,16 @@ be reused after the run reaches acceptance. The public request field is
 temporary compatibility alias. A legacy `collab_context_id` request field may
 be parsed during that window but is ignored and never used for authorization or
 artifact persistence.
+
+Artifact persistence and Context event storage are separate stores. The service
+therefore persists the artifact first and appends `artifact.reported` only after
+that succeeds. The event payload keeps `artifact_id`, `todo_id`,
+`todo_execution_id`, and `run_id` as separate fields, plus artifact kind, name,
+and concise summary. Retrying the same report reuses the content-deduplicated
+artifact row, checks for an existing event with that `artifact_id`, and appends
+only a missing event. Event append failure is returned to the caller so a retry
+can heal the partial write; failed artifact persistence never creates a false
+event.
 
 
 ## Context Boundary

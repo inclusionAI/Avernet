@@ -93,10 +93,11 @@ class ContextCollabRunResultDTO:
     """Result of starting the executor bound to a collaboration Context."""
 
     collab_context_id: str
-    run_id: str
+    run_id: str | None
     session_id: str | None
     context_version: int
     current_status: str
+    group_id: str | None = None
 
 
 @dataclass

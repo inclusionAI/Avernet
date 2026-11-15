@@ -1,48 +1,78 @@
-"""Tests for the production ContextCollab Bot runtime adapter."""
+"""Tests for the production BCS Context collaboration runtime adapter."""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
-from agentclaw.community.core.task.task_runner.client.ports import (
-    BotSendResult,
-    OpenApiBotError,
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+    BcsClientError,
+    BcsCreateGroupResult,
 )
 from agentclaw.community.plugin_api.context_collab_runtime import (
-    ContextCollabRuntimeError,
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
+    ContextCollabRuntimeError,
 )
 from agentclaw.community.plugins.community.context_collab_runtime import (
     CommunityContextCollabRuntimePlugin,
 )
 
 
-class _RecordingOpenApiBot:
+class _RecordingBcs:
     def __init__(
         self,
-        error: Exception | None = None,
         *,
-        run_payload: dict | None = None,
-        get_run_error: Exception | None = None,
+        create_error: Exception | None = None,
+        chat_error: Exception | None = None,
+        group_error: Exception | None = None,
+        create_result: BcsCreateGroupResult | None = None,
+        group_payload: dict | None = None,
+        chat_result: dict | None = None,
     ) -> None:
-        self.calls = []
-        self.error = error
-        self.run_payload = run_payload or {"status": "RUNNING"}
-        self.get_run_error = get_run_error
-        self.get_run_calls: list[str] = []
+        self.create_error = create_error
+        self.chat_error = chat_error
+        self.group_error = group_error
+        self.create_result = create_result or BcsCreateGroupResult(
+            group_id="group_1",
+            session_id="session_1",
+        )
+        self.group_payload = group_payload or {
+            "session": {"session_id": "session_1", "status": "running"}
+        }
+        self.chat_result = chat_result or {"session_id": "session_1"}
+        self.create_calls = []
+        self.chat_calls = []
+        self.get_group_calls: list[str] = []
 
-    async def send_message(self, **kwargs):
-        self.calls.append(kwargs)
-        if self.error is not None:
-            raise self.error
-        return BotSendResult(run_id="run_1", session_id="session_1")
+    async def create_group(self, request):
+        self.create_calls.append(request)
+        if self.create_error is not None:
+            raise self.create_error
+        return self.create_result
 
-    async def get_run(self, run_id: str):
-        self.get_run_calls.append(run_id)
-        if self.get_run_error is not None:
-            raise self.get_run_error
-        return self.run_payload
+    async def send_session_chat(self, session_id, **kwargs):
+        self.chat_calls.append((session_id, kwargs))
+        if self.chat_error is not None:
+            raise self.chat_error
+        return self.chat_result
+
+    async def get_group(self, group_id):
+        self.get_group_calls.append(group_id)
+        if self.group_error is not None:
+            raise self.group_error
+        return self.group_payload
+
+
+class _Tokens:
+    def __init__(self, token: str | None = "bot-token") -> None:
+        self.token = token
+        self.calls: list[str] = []
+
+    def get_token(self, bot_uuid: str) -> str | None:
+        self.calls.append(bot_uuid)
+        return self.token
 
 
 def _request(*, owner_id: str | None = "another_user") -> ContextCollabRunRequest:
@@ -58,78 +88,14 @@ def _request(*, owner_id: str | None = "another_user") -> ContextCollabRunReques
     )
 
 
-def _runtime(
-    openapi_bot: _RecordingOpenApiBot,
-    *,
-    backend_url: str = "https://backend.example/",
-) -> CommunityContextCollabRuntimePlugin:
-    return CommunityContextCollabRuntimePlugin(
-        openapi_bot,
-        backend_url=backend_url,
-    )
-
-
-@pytest.mark.asyncio
-async def test_runtime_addresses_bot_by_real_owner_not_todo_principal() -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot)
-
-    result = await runtime.run(_request())
-
-    assert result.run_id == "run_1"
-    assert result.session_id == "session_1"
-    assert len(openapi_bot.calls) == 1
-    call = openapi_bot.calls[0]
-    assert call["bot_id"] == "bot_1:another_user"
-    assert call["bot_id"] != "bot_1:user_1"
-    assert "[todo-execute]" in call["message"]
-    assert "todo_id=todo_1" in call["message"]
-    assert "todo_execution_id=todoexec_1" in call["message"]
-    assert "todo_execution_token=todo-token-1" in call["message"]
-    assert "backend_url=https://backend.example" in call["message"]
-    assert (
-        "POST https://backend.example/api/v1/collaboration/todos/todo_1/report"
-        in call["message"]
-    )
-    assert "X-Todo-Execution-Token: todo-token-1" in call["message"]
-    assert '"todo_execution_id": "todoexec_1"' in call["message"]
-    assert "collab_context_id" not in call["message"]
-    assert call["metadata"] == {
-        "biz_task_id": "todo_1",
-        "todo_id": "todo_1",
-        "collab_context_id": "context_1",
-        "sender_options": {"from": "user_1"},
-        "todo_report_path": "/api/v1/collaboration/todos/todo_1/report",
-        "todo_upload_path": "/api/v1/collaboration/todos/todo_1/artifacts/object-file",
-        "todo_execution_id": "todoexec_1",
-        "todo_execution_token": "todo-token-1",
-    }
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("owner_id", [None, ""])
-async def test_runtime_rejects_missing_owner_without_invoking_bot(
-    owner_id: str | None,
-) -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot)
-
-    with pytest.raises(ContextCollabRuntimeError, match="owner"):
-        await runtime.run(_request(owner_id=owner_id))
-
-    assert openapi_bot.calls == []
-
-
-@pytest.mark.asyncio
-async def test_runtime_resume_reuses_previous_session_and_interaction_id() -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot)
-    request = ContextCollabResumeRequest(
+def _resume_request(*, group_id: str | None = "group_1") -> ContextCollabResumeRequest:
+    return ContextCollabResumeRequest(
         collab_context_id="context_1",
         executor_id="bot_1",
         principal_id="user_1",
         todo_id="todo_1",
-        session_id="session_previous",
+        session_id="session_1",
+        group_id=group_id,
         message="Please revise the implementation",
         interaction_event_id="interaction_1",
         executor_owner_id="another_user",
@@ -137,152 +103,225 @@ async def test_runtime_resume_reuses_previous_session_and_interaction_id() -> No
         todo_execution_token="todo-token-2",
     )
 
-    result = await runtime.resume(request)
 
-    assert result.run_id == "run_1"
-    assert result.session_id == "session_1"
-    assert len(openapi_bot.calls) == 1
-    call = openapi_bot.calls[0]
-    assert call["bot_id"] == "bot_1:another_user"
-    assert "[todo-resume]" in call["message"]
-    assert "本轮修订要求：Please revise the implementation" in call["message"]
-    assert "todo_execution_id=todoexec_2" in call["message"]
-    assert "todo_execution_token=todo-token-2" in call["message"]
-    assert "之前执行代次已失效" in call["message"]
-    assert call["metadata"] == {
-        "session_id": "session_previous",
-        "biz_task_id": "todo_1",
-        "todo_id": "todo_1",
-        "collab_context_id": "context_1",
-        "interaction_event_id": "interaction_1",
-        "sender_options": {"from": "user_1"},
-        "todo_report_path": "/api/v1/collaboration/todos/todo_1/report",
-        "todo_upload_path": "/api/v1/collaboration/todos/todo_1/artifacts/object-file",
-        "todo_execution_id": "todoexec_2",
-        "todo_execution_token": "todo-token-2",
-    }
-    assert call["message_id"] == "interaction_1"
+def _runtime(
+    bcs: _RecordingBcs,
+    *,
+    tokens: _Tokens | None = None,
+    backend_url: str = "https://backend.example/",
+) -> CommunityContextCollabRuntimePlugin:
+    return CommunityContextCollabRuntimePlugin(
+        bcs,
+        bot_tokens=tokens,
+        backend_url=backend_url,
+    )
 
 
 @pytest.mark.asyncio
-async def test_runtime_fails_closed_when_credential_has_no_backend_url() -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot, backend_url="")
+async def test_run_creates_single_manager_bot_and_human_observer_group() -> None:
+    bcs = _RecordingBcs()
+    tokens = _Tokens()
+    runtime = _runtime(bcs, tokens=tokens)
 
-    with pytest.raises(ContextCollabRuntimeError, match="Backend URL"):
-        await runtime.run(_request())
+    result = await runtime.run(_request())
 
-    assert openapi_bot.calls == []
+    assert result.run_id is None
+    assert result.group_id == "group_1"
+    assert result.session_id == "session_1"
+    assert len(bcs.create_calls) == 1
+    request = bcs.create_calls[0]
+    assert request.group_strategy == "manager_worker"
+    assert request.driver_bot == "bot_1:another_user"
+    assert request.master_bot == "bot_1:another_user"
+    assert request.participants == [
+        {"bot_uuid": "bot_1:another_user", "role": "manager"},
+        {
+            "bot_uuid": "human_user_1",
+            "bot_name": "user_1",
+            "role": "observer",
+        },
+    ]
+    assert all(item["bot_uuid"] != "default" for item in request.participants)
+    assert request.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert request.caller_bot_token == "bot-token"
+    assert request.idempotency_key == str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "avernet-todo-context:context_1",
+        )
+    )
+    assert tokens.calls == ["bot_1:another_user"]
+
+
+@pytest.mark.asyncio
+async def test_run_context_contains_complete_protocol_without_default_skill_dependency() -> (
+    None
+):
+    bcs = _RecordingBcs()
+    runtime = _runtime(bcs, tokens=_Tokens())
+
+    await runtime.run(_request())
+
+    context = bcs.create_calls[0].context
+    assert "[todo-execute]" in context
+    assert "todo_id=todo_1" in context
+    assert "todo_execution_id=todoexec_1" in context
+    assert (
+        "POST https://backend.example/api/v1/collaboration/todos/todo_1/report"
+        in context
+    )
+    assert "不依赖、也不得假定已默认加载 Todo Skill" in context
+    assert "按需加载机制" in context
+    assert "软链接" in context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner_id", [None, ""])
+async def test_run_rejects_missing_executor_owner_before_bcs(
+    owner_id: str | None,
+) -> None:
+    bcs = _RecordingBcs()
+    runtime = _runtime(bcs, tokens=_Tokens())
+
+    with pytest.raises(ContextCollabRuntimeError, match="owner"):
+        await runtime.run(_request(owner_id=owner_id))
+
+    assert bcs.create_calls == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "todo_execution_id,todo_execution_token",
-    [("todoexec_1", None), (None, "todo-token-1")],
+    "create_result",
+    [
+        BcsCreateGroupResult(group_id="", session_id="session_1"),
+        BcsCreateGroupResult(group_id="group_1", session_id=None),
+    ],
 )
-async def test_runtime_fails_closed_for_partial_execution_credential(
-    todo_execution_id: str | None,
-    todo_execution_token: str | None,
+async def test_run_fails_closed_without_real_group_session_handle(
+    create_result: BcsCreateGroupResult,
 ) -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot)
-    request = ContextCollabRunRequest(
-        collab_context_id="context_1",
-        executor_id="bot_1",
-        principal_id="user_1",
-        executor_owner_id="another_user",
-        objective="Write the report",
-        todo_id="todo_1",
-        todo_execution_id=todo_execution_id,
-        todo_execution_token=todo_execution_token,
+    runtime = _runtime(
+        _RecordingBcs(create_result=create_result),
+        tokens=_Tokens(),
     )
 
-    with pytest.raises(ContextCollabRuntimeError, match="together"):
-        await runtime.run(request)
-
-    assert openapi_bot.calls == []
-
-
-@pytest.mark.asyncio
-async def test_runtime_keeps_plain_context_delivery_without_todo_credential() -> None:
-    openapi_bot = _RecordingOpenApiBot()
-    runtime = _runtime(openapi_bot, backend_url="")
-    request = ContextCollabRunRequest(
-        collab_context_id="context_1",
-        executor_id="bot_1",
-        principal_id="user_1",
-        executor_owner_id="another_user",
-        objective="Write the report",
-        todo_id="todo_1",
-    )
-
-    await runtime.run(request)
-
-    assert openapi_bot.calls[0]["message"] == "Write the report"
-
-
-@pytest.mark.asyncio
-async def test_runtime_translates_bot_port_failure() -> None:
-    delivery_error = OpenApiBotError("upstream unavailable")
-    openapi_bot = _RecordingOpenApiBot(delivery_error)
-    runtime = _runtime(openapi_bot)
-
-    with pytest.raises(ContextCollabRuntimeError, match="delivery") as exc_info:
-        await runtime.run(_request())
-
-    assert exc_info.value.__cause__ is delivery_error
-    assert len(openapi_bot.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_runtime_does_not_hide_unexpected_programming_error() -> None:
-    programming_error = AssertionError("unexpected adapter bug")
-    runtime = _runtime(_RecordingOpenApiBot(programming_error))
-
-    with pytest.raises(AssertionError, match="unexpected adapter bug"):
+    with pytest.raises(ContextCollabRuntimeError, match="group/session"):
         await runtime.run(_request())
 
 
 @pytest.mark.asyncio
-async def test_get_run_normalizes_bot_port_payload() -> None:
-    openapi_bot = _RecordingOpenApiBot(
-        run_payload={
-            "status": " completed ",
-            "result": {"content": "done"},
-            "error": None,
-            "completed_at": "2026-11-12T04:00:00Z",
-            "session_id": "session_1",
+async def test_run_translates_known_bcs_failure() -> None:
+    error = BcsClientError("unavailable")
+    runtime = _runtime(_RecordingBcs(create_error=error), tokens=_Tokens())
+
+    with pytest.raises(ContextCollabRuntimeError, match="creation") as exc_info:
+        await runtime.run(_request())
+
+    assert exc_info.value.__cause__ is error
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_hide_unexpected_programming_error() -> None:
+    runtime = _runtime(
+        _RecordingBcs(create_error=AssertionError("adapter bug")),
+        tokens=_Tokens(),
+    )
+
+    with pytest.raises(AssertionError, match="adapter bug"):
+        await runtime.run(_request())
+
+
+@pytest.mark.asyncio
+async def test_resume_uses_same_session_bot_bearer_and_event_id() -> None:
+    bcs = _RecordingBcs()
+    runtime = _runtime(bcs, tokens=_Tokens("session-token"))
+
+    result = await runtime.resume(_resume_request())
+
+    assert result.run_id is None
+    assert result.group_id == "group_1"
+    assert result.session_id == "session_1"
+    assert bcs.create_calls == []
+    assert len(bcs.chat_calls) == 1
+    session_id, call = bcs.chat_calls[0]
+    assert session_id == "session_1"
+    assert call["caller_bearer"] == "session-token"
+    assert call["idempotency_key"] == "interaction_1"
+    assert "[todo-resume]" in call["message"]
+    assert "本轮修订要求：Please revise the implementation" in call["message"]
+    assert "todo_execution_id=todoexec_2" in call["message"]
+
+
+@pytest.mark.asyncio
+async def test_resume_requires_existing_group_and_bot_token() -> None:
+    bcs = _RecordingBcs()
+    runtime = _runtime(bcs, tokens=_Tokens(None))
+
+    with pytest.raises(ContextCollabRuntimeError, match="Bot token"):
+        await runtime.resume(_resume_request())
+    with pytest.raises(ContextCollabRuntimeError, match="group_id"):
+        await runtime.resume(_resume_request(group_id=None))
+
+    assert bcs.chat_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_translates_known_bcs_failure() -> None:
+    error = BcsClientError("unavailable")
+    runtime = _runtime(
+        _RecordingBcs(chat_error=error),
+        tokens=_Tokens(),
+    )
+
+    with pytest.raises(ContextCollabRuntimeError, match="resume") as exc_info:
+        await runtime.resume(_resume_request())
+
+    assert exc_info.value.__cause__ is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "wire_status,expected",
+    [
+        ("active", "RUNNING"),
+        ("completed", "COMPLETED"),
+        ("aborted", "FAILED"),
+    ],
+)
+async def test_get_group_status_normalizes_session_state(
+    wire_status: str,
+    expected: str,
+) -> None:
+    bcs = _RecordingBcs(
+        group_payload={
+            "session": {
+                "session_id": "session_1",
+                "status": wire_status,
+                "output": {"content": "done"},
+                "error_message": "failed" if expected == "FAILED" else None,
+                "completed_at": "2026-11-12T04:00:00Z",
+            }
         }
     )
-    runtime = _runtime(openapi_bot)
+    runtime = _runtime(bcs)
 
-    result = await runtime.get_run("run_1")
-
-    assert result.run_id == "run_1"
-    assert result.status == "COMPLETED"
-    assert result.result == {"content": "done"}
-    assert result.error is None
-    assert result.completed_at == "2026-11-12T04:00:00Z"
-    assert result.session_id == "session_1"
-    assert openapi_bot.get_run_calls == ["run_1"]
-
-
-@pytest.mark.asyncio
-async def test_get_run_translates_bot_port_failure() -> None:
-    delivery_error = OpenApiBotError("upstream unavailable")
-    runtime = _runtime(_RecordingOpenApiBot(get_run_error=delivery_error))
-
-    with pytest.raises(ContextCollabRuntimeError, match="status") as exc_info:
-        await runtime.get_run("run_1")
-
-    assert exc_info.value.__cause__ is delivery_error
-
-
-@pytest.mark.asyncio
-async def test_get_run_does_not_hide_unexpected_programming_error() -> None:
-    runtime = _runtime(
-        _RecordingOpenApiBot(get_run_error=AssertionError("unexpected adapter bug"))
+    result = await runtime.get_run(
+        group_id="group_1",
+        session_id="session_1",
     )
 
-    with pytest.raises(AssertionError, match="unexpected adapter bug"):
+    assert result.run_id is None
+    assert result.group_id == "group_1"
+    assert result.session_id == "session_1"
+    assert result.status == expected
+    assert result.result == {"content": "done"}
+    assert result.completed_at == "2026-11-12T04:00:00Z"
+    assert bcs.get_group_calls == ["group_1"]
+
+
+@pytest.mark.asyncio
+async def test_get_group_status_rejects_direct_run_handle() -> None:
+    runtime = _runtime(_RecordingBcs())
+
+    with pytest.raises(ContextCollabRuntimeError, match="group_id"):
         await runtime.get_run("run_1")

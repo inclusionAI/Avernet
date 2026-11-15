@@ -29,6 +29,11 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoExecutionCredential,
     TodoExecutionStatus,
 )
+from agentclaw.community.core.task.todos.collaboration.protocol import (
+    TodoCollaborationError,
+    TodoCollaborationEventRequest,
+    TodoCollaborationPort,
+)
 from agentclaw.community.core.task.todos.errors import (
     TodoArtifactContentError,
     TodoArtifactObjectNotFoundError,
@@ -50,12 +55,14 @@ class TodoArtifactService:
         repository: TodoRepositoryProtocol,
         artifact_repository: TodoArtifactRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
+        collaboration: TodoCollaborationPort,
         storage: TaskArtifactObjectStoragePlugin | None,
         storage_config: TaskArtifactStorageConfig,
     ) -> None:
         self._repository = repository
         self._artifacts = artifact_repository
         self._space_access = space_access
+        self._collaboration = collaboration
         self._storage = storage
         self._config = storage_config
 
@@ -114,6 +121,7 @@ class TodoArtifactService:
             todo_id=todo_id,
             collab_context_id=execution.collab_context_id,
             execution_id=todo_execution_id,
+            run_id=execution.run_id,
             artifact_name=normalized_name,
             kind=kind,
             content=normalized,
@@ -177,6 +185,7 @@ class TodoArtifactService:
             todo_id=todo_id,
             collab_context_id=execution.collab_context_id,
             execution_id=todo_execution_id,
+            run_id=execution.run_id,
             artifact_name=display_name,
             kind=TodoArtifactKind.FILE,
             content=content,
@@ -250,6 +259,7 @@ class TodoArtifactService:
         todo_id: str,
         collab_context_id: str,
         execution_id: str,
+        run_id: str | None,
         artifact_name: str,
         kind: TodoArtifactKind,
         content: dict[str, object],
@@ -261,7 +271,7 @@ class TodoArtifactService:
             sort_keys=True,
             separators=(",", ":"),
         )
-        return self._artifacts.create_artifact(
+        record = self._artifacts.create_artifact(
             todo_id=todo_id,
             collab_context_id=collab_context_id,
             execution_id=execution_id,
@@ -271,6 +281,114 @@ class TodoArtifactService:
             content_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
             creator=creator,
         )
+        self._ensure_reported_event(record=record, run_id=run_id)
+        return record
+
+    def _ensure_reported_event(
+        self, *, record: TodoArtifactRecord, run_id: str | None
+    ) -> None:
+        """Append the durable artifact event, healing a prior partial write on retry.
+
+        Artifact rows and Context events live in separate stores. The artifact is
+        written first so a failed persistence never emits a false output event.
+        If the event append fails, the error is propagated; retrying the same
+        report reuses the artifact row and appends the missing event.
+        """
+
+        todo = self._repository.get_todo(todo_id=record.todo_id)
+        payload = self._artifact_event_payload(record=record, run_id=run_id)
+        last_error: TodoCollaborationError | None = None
+        for _attempt in range(3):
+            context = self._collaboration.get_context(
+                collab_context_id=record.collab_context_id,
+                actor_id=todo.created_by,
+            )
+            if any(
+                event.event_type == "artifact.reported"
+                and event.payload.get("artifact_id") == record.artifact_id
+                for event in context.events
+            ):
+                return
+            try:
+                self._collaboration.append_event(
+                    collab_context_id=record.collab_context_id,
+                    request=TodoCollaborationEventRequest(
+                        expected_version=context.context_version,
+                        event_kind="artifact.reported",
+                        primitive_type="Activity",
+                        actor_id=record.creator,
+                        actor_type="bot",
+                        parent_event=context.current_event_id,
+                        visibility="workspace",
+                        payload=payload,
+                    ),
+                )
+                return
+            except TodoCollaborationError as exc:
+                last_error = exc
+        context = self._collaboration.get_context(
+            collab_context_id=record.collab_context_id,
+            actor_id=todo.created_by,
+        )
+        if any(
+            event.event_type == "artifact.reported"
+            and event.payload.get("artifact_id") == record.artifact_id
+            for event in context.events
+        ):
+            return
+        assert last_error is not None
+        raise last_error
+
+    @classmethod
+    def _artifact_event_payload(
+        cls, *, record: TodoArtifactRecord, run_id: str | None
+    ) -> dict[str, object]:
+        concise = cls._artifact_summary(record)
+        label = {
+            TodoArtifactKind.TEXT: "产出文本",
+            TodoArtifactKind.FILE: "产出文件",
+            TodoArtifactKind.URL_LINK: "产出链接",
+            TodoArtifactKind.CODE: "产出代码",
+        }[record.artifact_kind]
+        return {
+            "artifact_id": record.artifact_id,
+            "todo_id": record.todo_id,
+            "todo_execution_id": record.execution_id,
+            "run_id": run_id or "",
+            "artifact_kind": record.artifact_kind.value,
+            "artifact_name": record.artifact_name,
+            "artifact_summary": concise,
+            "summary": f"{label}：{concise}",
+        }
+
+    @classmethod
+    def _artifact_summary(cls, record: TodoArtifactRecord) -> str:
+        content = record.content
+        if record.artifact_kind is TodoArtifactKind.TEXT:
+            text = content.get("text")
+            return cls._preview(text if isinstance(text, str) else record.artifact_name)
+        if record.artifact_kind is TodoArtifactKind.FILE:
+            file_name = content.get("file_name")
+            return (
+                file_name.strip()
+                if isinstance(file_name, str) and file_name.strip()
+                else record.artifact_name
+            )
+        if record.artifact_kind is TodoArtifactKind.URL_LINK:
+            return record.artifact_name or str(content.get("url") or "")
+        code_name = content.get("code_base_name")
+        return (
+            code_name.strip()
+            if isinstance(code_name, str) and code_name.strip()
+            else record.artifact_name
+        )
+
+    @staticmethod
+    def _preview(value: str, maximum: int = 20) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) <= maximum:
+            return normalized
+        return f"{normalized[:maximum]}…"
 
     @staticmethod
     def _token_hash(token: str) -> str:

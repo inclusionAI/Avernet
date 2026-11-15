@@ -2,7 +2,7 @@ import type { TodoAcceptanceTarget, TodoArtifact, TodoEvent } from '@/domain/tod
 
 export type InteractionEntry =
   | { kind: 'message'; id: string; event: TodoEvent }
-  | { kind: 'artifact'; id: string; artifact: Exclude<TodoArtifact, { kind: 'text' }> }
+  | { kind: 'artifact'; id: string; artifact: TodoArtifact; event?: TodoEvent }
   | { kind: 'notice'; id: string; content: string; createdAt: string; noticeType: 'started' | 'completed' };
 
 export type TargetEntry = Exclude<InteractionEntry, { kind: 'notice' }>;
@@ -11,6 +11,7 @@ export interface ArtifactPresentation {
   icon: 'file' | 'link' | 'code';
   title: string;
   meta: string;
+  details: string[];
   href: string | null;
 }
 
@@ -26,6 +27,11 @@ function eventKey(item: TodoEvent): string {
 }
 
 function payloadText(item: TodoEvent, key: 'content' | 'objective'): string {
+  const value = item.payload[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function payloadId(item: TodoEvent, key: string): string {
   const value = item.payload[key];
   return typeof value === 'string' ? value : '';
 }
@@ -88,9 +94,7 @@ export function buildInteractionEntries(
   events.forEach((item) => stream.set(eventKey(item), enrichedInteractions.get(eventKey(item)) ?? item));
   interactions.forEach((item) => stream.set(eventKey(item), item));
 
-  const nonTextArtifacts = artifacts.filter(
-    (artifact): artifact is Exclude<TodoArtifact, { kind: 'text' }> => artifact.kind !== 'text',
-  );
+  const artifactById = new Map(artifacts.map((artifact) => [artifact.artifactId, artifact]));
   const renderedArtifactIds = new Set<string>();
   const entries: InteractionEntry[] = [];
 
@@ -114,16 +118,19 @@ export function buildInteractionEntries(
       });
       return;
     }
+    if (item.eventType === 'artifact.reported') {
+      const artifactId = payloadId(item, 'artifact_id');
+      const artifact = artifactById.get(artifactId);
+      if (artifact && !renderedArtifactIds.has(artifact.artifactId)) {
+        renderedArtifactIds.add(artifact.artifactId);
+        entries.push({ kind: 'artifact', id: `artifact-${artifact.artifactId}`, artifact, event: item });
+      } else if (item.content) {
+        entries.push({ kind: 'message', id: `message-${key}`, event: item });
+      }
+      return;
+    }
     if (item.eventType !== 'task.completed') return;
 
-    entries.push({ kind: 'message', id: `message-${key}`, event: item });
-    nonTextArtifacts
-      .filter((artifact) => artifact.executionId === item.executionId)
-      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
-      .forEach((artifact) => {
-        renderedArtifactIds.add(artifact.artifactId);
-        entries.push({ kind: 'artifact', id: `artifact-${artifact.artifactId}`, artifact });
-      });
     entries.push({
       kind: 'notice',
       id: `notice-completed-${key}`,
@@ -133,7 +140,7 @@ export function buildInteractionEntries(
     });
   });
 
-  nonTextArtifacts
+  artifacts
     .filter((artifact) => !renderedArtifactIds.has(artifact.artifactId))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
     .forEach((artifact) => entries.push({ kind: 'artifact', id: `artifact-${artifact.artifactId}`, artifact }));
@@ -155,6 +162,7 @@ export function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'te
       icon: 'file',
       title: artifact.content.fileName || artifact.artifactName,
       meta: `${extension} · ${formatFileSize(artifact.content.size)}`,
+      details: [],
       href: null,
     };
   }
@@ -163,6 +171,7 @@ export function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'te
       icon: 'link',
       title: artifact.artifactName,
       meta: artifact.content.type || '外部链接',
+      details: [artifact.content.url],
       href: artifact.content.url,
     };
   }
@@ -170,6 +179,9 @@ export function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'te
     icon: 'code',
     title: artifact.content.codeBaseName || artifact.artifactName,
     meta: artifact.content.prLink ? 'Pull Request' : '代码产物',
+    details: [artifact.content.codeBaseAddress, artifact.content.prLink, artifact.content.prDesc].filter(
+      (value): value is string => Boolean(value),
+    ),
     href: artifact.content.prLink || artifact.content.codeBaseAddress,
   };
 }
@@ -204,6 +216,9 @@ export function rejectionQuote(
     return { label: target.kind === 'artifact' ? '产物' : '互动', content: '原内容暂不可用' };
   }
   if (referenced.kind === 'artifact') {
+    if (referenced.artifact.kind === 'text') {
+      return { label: '文本产物', content: previewText(referenced.artifact.content.text) };
+    }
     const presentation = artifactPresentation(referenced.artifact);
     return { label: '产物', content: previewText(`${presentation.title} · ${presentation.meta}`) };
   }

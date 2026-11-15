@@ -42,6 +42,10 @@ from agentclaw.community.core.task.context_collab.services.context_collab_servic
 from agentclaw.community.plugins.local.context_collab_runtime import (
     LocalContextCollabRuntimePlugin,
 )
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRunResult,
+    ContextCollabRunStatus,
+)
 
 
 class RecordingContextRepository:
@@ -140,6 +144,44 @@ class StaleConflictRepository(RecordingContextRepository):
         if request.event_kind == "task.completed":
             raise ContextCollabVersionConflict("stale writer")
         return super().append_event(collab_context_id, request)
+
+
+class RecordingGroupRuntime:
+    """BCS-shaped runtime with group/session handles and no fake run id."""
+
+    def __init__(self) -> None:
+        self.run_requests = []
+        self.resume_requests = []
+        self.get_requests = []
+        self.status = ContextCollabRunStatus(
+            run_id=None,
+            group_id="group_1",
+            session_id="session_1",
+            status="RUNNING",
+            result=None,
+            error=None,
+            completed_at=None,
+        )
+
+    async def run(self, request):
+        self.run_requests.append(request)
+        return ContextCollabRunResult(
+            run_id=None,
+            group_id="group_1",
+            session_id="session_1",
+        )
+
+    async def resume(self, request):
+        self.resume_requests.append(request)
+        return ContextCollabRunResult(
+            run_id=None,
+            group_id=request.group_id,
+            session_id=request.session_id,
+        )
+
+    async def get_run(self, run_id=None, *, group_id=None, session_id=None):
+        self.get_requests.append((run_id, group_id, session_id))
+        return self.status
 
 
 @pytest.mark.asyncio
@@ -317,7 +359,7 @@ async def test_refresh_failed_terminal_runtime_does_not_complete_context(
 
 
 @pytest.mark.asyncio
-async def test_refresh_rejects_in_progress_context_without_started_run_id():
+async def test_refresh_rejects_in_progress_context_without_runtime_handle():
     repository = RecordingContextRepository()
     repository.collet = replace(
         repository.collet,
@@ -329,7 +371,10 @@ async def test_refresh_rejects_in_progress_context_without_started_run_id():
     runtime = LocalContextCollabRuntimePlugin()
     service = ContextCollabService(repository=repository, runtime=runtime)
 
-    with pytest.raises(ContextCollabValidationError, match="task.started.*run_id"):
+    with pytest.raises(
+        ContextCollabValidationError,
+        match="task.started.*run_id or group_id",
+    ):
         await service.refresh_run(
             "context_1",
             ActorContext(actor=PrincipalRef("human", "user_1"), source="api"),
@@ -364,3 +409,73 @@ async def test_refresh_propagates_version_conflict_when_context_is_not_done():
 
     with pytest.raises(ContextCollabVersionConflict, match="stale writer"):
         await service.refresh_run("context_1", actor)
+
+
+@pytest.mark.asyncio
+async def test_group_runtime_persists_real_handles_refreshes_and_resumes_same_session():
+    repository = RecordingContextRepository()
+    runtime = RecordingGroupRuntime()
+    service = ContextCollabService(repository=repository, runtime=runtime)
+    actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
+
+    started = await service.run_context("context_1", actor)
+
+    assert started.run_id is None
+    assert started.group_id == "group_1"
+    assert started.session_id == "session_1"
+    assert repository.events[-1].payload == {
+        "group_id": "group_1",
+        "session_id": "session_1",
+    }
+
+    runtime.status = ContextCollabRunStatus(
+        run_id=None,
+        group_id="group_1",
+        session_id="session_1",
+        status="COMPLETED",
+        result={"content": "done"},
+        error=None,
+        completed_at="2026-11-12T04:00:00Z",
+    )
+    await service.refresh_run("context_1", actor)
+
+    assert runtime.get_requests == [(None, "group_1", "session_1")]
+    assert repository.events[-1].payload == {
+        "group_id": "group_1",
+        "session_id": "session_1",
+        "result": {"content": "done"},
+        "completed_at": "2026-11-12T04:00:00Z",
+    }
+
+    interaction = service.append_event(
+        "context_1",
+        EventAppendCommand(
+            expected_version=3,
+            event_kind="user_interaction.posted",
+            primitive_type="Message",
+            actor_ref=PrincipalRef("human", "user_1"),
+            parent_event="event_3",
+            visibility="workspace",
+            payload={"content": "Please revise section 2"},
+        ),
+        actor,
+    )
+    resumed = await service.resume_context(
+        "context_1",
+        triggered_by_event_id=interaction.event_id,
+        context=actor,
+    )
+
+    assert resumed.run_id is None
+    assert resumed.group_id == "group_1"
+    assert resumed.session_id == "session_1"
+    assert len(runtime.resume_requests) == 1
+    resume_request = runtime.resume_requests[0]
+    assert resume_request.group_id == "group_1"
+    assert resume_request.session_id == "session_1"
+    assert repository.events[-1].payload == {
+        "group_id": "group_1",
+        "session_id": "session_1",
+        "resumed": True,
+        "triggered_by_event_id": interaction.event_id,
+    }

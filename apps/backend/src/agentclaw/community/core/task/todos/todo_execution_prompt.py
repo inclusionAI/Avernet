@@ -17,9 +17,7 @@ def format_todo_execution_instruction(
     """Build the complete Todo execution and artifact-reporting instruction."""
     backend = backend_url.rstrip("/")
     report_url = f"{backend}/api/v1/collaboration/todos/{todo_id}/report"
-    upload_url = (
-        f"{backend}/api/v1/collaboration/todos/{todo_id}/artifacts/object-file"
-    )
+    upload_url = f"{backend}/api/v1/collaboration/todos/{todo_id}/artifacts/object-file"
     example = {
         "todo_execution_id": todo_execution_id,
         "artifact_name": "执行结果",
@@ -32,6 +30,9 @@ def format_todo_execution_instruction(
     parts = [
         opening,
         "【Todo 执行与上报协议】只执行本 Todo，并使用本次执行代次上报产物。",
+        "本指令已包含完整 Todo 执行与产物上报协议，不依赖、也不得假定已默认加载 "
+        "Todo Skill；不得搜索固定文件路径或创建 Skill 软链接。任务需要其他 Skill 时，"
+        "只能使用当前运行时已授权且可发现的按需加载机制，不得假定未激活 Skill 可用。",
         f"todo_id={todo_id}",
         f"todo_execution_id={todo_execution_id}",
         f"todo_execution_token={todo_execution_token}",

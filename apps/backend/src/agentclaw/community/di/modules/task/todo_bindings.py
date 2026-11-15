@@ -144,6 +144,7 @@ class TaskTodoBindings(Module):
         repository: TodoRepositoryProtocol,
         artifact_repository: TodoArtifactRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
+        collaboration: TodoCollaborationPort,
         storage_config: TaskArtifactStorageConfig,
         injector: Injector,
     ) -> TodoArtifactServiceProtocol:
@@ -156,6 +157,7 @@ class TaskTodoBindings(Module):
             repository=repository,
             artifact_repository=artifact_repository,
             space_access=space_access,
+            collaboration=collaboration,
             storage=storage,
             storage_config=storage_config,
         )

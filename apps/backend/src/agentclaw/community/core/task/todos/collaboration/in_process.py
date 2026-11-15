@@ -218,7 +218,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
 
 
 def _with_run_id(
-    context: TodoCollaborationContext, run_id: str
+    context: TodoCollaborationContext, run_id: str | None
 ) -> TodoCollaborationContext:
     return TodoCollaborationContext(
         collab_context_id=context.collab_context_id,

@@ -1,11 +1,10 @@
-import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import type { TodoAcceptanceTarget, TodoArtifact } from '@/domain/todos/models';
 import { cn } from '@/utils/cn';
-import { ArrowRight, Bot, Code2, FileText, Link2, Pause } from 'lucide-react';
+import { Bot, Pause } from 'lucide-react';
+import { TodoInteractionActorHeader } from './TodoInteractionActorHeader';
+import { TodoInteractionArtifactEntry } from './TodoInteractionArtifactEntry';
 import {
-  artifactPresentation,
   formatInteractionTime,
   interactionContent,
   rejectionQuote,
@@ -76,38 +75,6 @@ function QuestionMarker({
   );
 }
 
-function ActorHeader({
-  actor,
-  createdAt,
-  botId,
-  botName,
-  humanName,
-  humanAvatarUrl,
-}: {
-  actor: 'human' | 'bot';
-  createdAt: string;
-  botId: string;
-  botName: string;
-  humanName: string;
-  humanAvatarUrl?: string;
-}) {
-  const isBot = actor === 'bot';
-  return (
-    <div className="flex items-center gap-3">
-      {isBot ? (
-        <BotDisplayAvatar botId={botId} name={botName} size={40} />
-      ) : (
-        <Avatar name={humanName} src={humanAvatarUrl} size={40} />
-      )}
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="truncate text-sm font-semibold text-foreground">{isBot ? botName : humanName}</span>
-        {isBot ? <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">Bot</span> : null}
-        <time className="text-sm tabular-nums text-muted-foreground">{formatInteractionTime(createdAt)}</time>
-      </div>
-    </div>
-  );
-}
-
 function NoticeRow({ entry }: { entry: Extract<InteractionEntry, { kind: 'notice' }> }) {
   const Icon = entry.noticeType === 'started' ? Bot : Pause;
   return (
@@ -118,78 +85,6 @@ function NoticeRow({ entry }: { entry: Extract<InteractionEntry, { kind: 'notice
         <span>· {formatInteractionTime(entry.createdAt)}</span>
       </div>
     </div>
-  );
-}
-
-function ArtifactIcon({ kind }: { kind: 'file' | 'link' | 'code' }) {
-  if (kind === 'file') return <FileText className="size-5" aria-hidden />;
-  if (kind === 'link') return <Link2 className="size-5" aria-hidden />;
-  return <Code2 className="size-5" aria-hidden />;
-}
-
-function ArtifactCard({ artifact }: { artifact: Exclude<TodoArtifact, { kind: 'text' }> }) {
-  const presentation = artifactPresentation(artifact);
-  return (
-    <div className="group flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left text-foreground transition-colors hover:border-foreground/20 hover:bg-muted/20">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-        <ArtifactIcon kind={presentation.icon} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold">{presentation.title}</span>
-        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{presentation.meta}</span>
-      </span>
-      <ArrowRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
-    </div>
-  );
-}
-
-function ArtifactEntry({
-  entry,
-  botId,
-  botName,
-  humanName,
-  humanAvatarUrl,
-  busy,
-  onOpenFile,
-}: {
-  entry: Extract<InteractionEntry, { kind: 'artifact' }>;
-  botId: string;
-  botName: string;
-  humanName: string;
-  humanAvatarUrl?: string;
-  busy: boolean;
-  onOpenFile: (artifact: Extract<TodoArtifact, { kind: 'file' }>) => void;
-}) {
-  const presentation = artifactPresentation(entry.artifact);
-  const card = <ArtifactCard artifact={entry.artifact} />;
-  return (
-    <article className="min-w-0">
-      <ActorHeader
-        actor="bot"
-        createdAt={entry.artifact.createdAt}
-        botId={botId}
-        botName={botName}
-        humanName={humanName}
-        humanAvatarUrl={humanAvatarUrl}
-      />
-      <div className="mt-3 pl-[52px]">
-        {entry.artifact.kind === 'file' ? (
-          <Button
-            variant="ghost"
-            className="block h-auto w-full rounded-xl border-0 bg-transparent p-0 text-left hover:bg-transparent"
-            aria-label={`打开产物 ${presentation.title}`}
-            disabled={busy}
-            onClick={() => onOpenFile(entry.artifact as Extract<TodoArtifact, { kind: 'file' }>)}
-          >
-            {card}
-          </Button>
-        ) : (
-          <a href={presentation.href || '#'} target="_blank" rel="noreferrer" className="block no-underline">
-            {card}
-          </a>
-        )}
-      </div>
-    </article>
   );
 }
 
@@ -255,7 +150,7 @@ export function TodoInteractionStream({
             />
             {entry.kind === 'message' ? (
               <article className="min-w-0">
-                <ActorHeader
+                <TodoInteractionActorHeader
                   actor={entry.event.actorType === 'bot' ? 'bot' : 'human'}
                   createdAt={entry.event.createdAt}
                   botId={botId}
@@ -279,7 +174,7 @@ export function TodoInteractionStream({
                 </div>
               </article>
             ) : (
-              <ArtifactEntry
+              <TodoInteractionArtifactEntry
                 entry={entry}
                 botId={botId}
                 botName={botName}

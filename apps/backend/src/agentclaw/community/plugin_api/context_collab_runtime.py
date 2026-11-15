@@ -45,26 +45,35 @@ class ContextCollabResumeRequest:
     executor_owner_id: str | None = None
     todo_execution_id: str | None = None
     todo_execution_token: str | None = None
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
 class ContextCollabRunResult:
-    """External runtime handles recorded on the subsequent task.started event."""
+    """External runtime handles recorded on the subsequent ``task.started`` event.
 
-    run_id: str
+    A direct Bot transport has ``run_id``. A BCS manager-worker transport has
+    ``group_id`` plus ``session_id`` and may not expose a per-message run id.
+    Callers must preserve the real handle kind instead of encoding a group id as
+    a fake run id.
+    """
+
+    run_id: str | None
     session_id: str | None
+    group_id: str | None = None
 
 
 @dataclass(frozen=True)
 class ContextCollabRunStatus:
-    """Transport-neutral snapshot of one external executor run."""
+    """Transport-neutral snapshot of one external executor run or group session."""
 
-    run_id: str
+    run_id: str | None
     status: str
     result: object | None
     error: object | None
     completed_at: str | None
     session_id: str | None
+    group_id: str | None = None
 
 
 @runtime_checkable
@@ -81,6 +90,12 @@ class ContextCollabRuntimePlugin(Plugin, Protocol):
         """Continue the previous executor session without mutating Context state."""
         ...
 
-    async def get_run(self, run_id: str) -> ContextCollabRunStatus:
-        """Read the external executor's real run state without mutating Context."""
+    async def get_run(
+        self,
+        run_id: str | None = None,
+        *,
+        group_id: str | None = None,
+        session_id: str | None = None,
+    ) -> ContextCollabRunStatus:
+        """Read one real direct run or BCS group-session state without mutation."""
         ...

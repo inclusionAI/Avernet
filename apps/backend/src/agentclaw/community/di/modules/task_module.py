@@ -25,7 +25,9 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
-from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
+from agentclaw.community.core.task.task_panel.manifest_contract import (
+    TaskPanelManifestServiceProtocol,
+)
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
@@ -103,9 +105,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -172,6 +171,10 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_publish i
 )
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+    NullBcsBotTokenProvider,
 )
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
@@ -345,21 +348,31 @@ class TaskModule(Module):
         injector: Injector,
         task_dispatch: TaskDispatchConfig,
     ) -> ContextCollabRuntimePlugin:
-        """Select the deployment Bot runtime, failing closed when unbound."""
+        """Select the deployment BCS group runtime, failing closed when unbound."""
         try:
-            openapi_bot = injector.get(OpenApiBotPort)
+            bcs = injector.get(BcsClientPort)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
             logger.info(
-                "[task][context-collab] OpenApiBotPort unavailable: %s",
+                "[task][context-collab] BcsClientPort unavailable: %s",
                 exc,
             )
             return UnavailableContextCollabRuntimePlugin(str(exc))
-        if openapi_bot is None:
+        if bcs is None:
             return UnavailableContextCollabRuntimePlugin(
-                "OpenApiBotPort resolved to None"
+                "BcsClientPort resolved to None"
             )
+        try:
+            bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsBotTokenProvider unavailable; "
+                "using empty provider: %s",
+                exc,
+            )
+            bot_tokens = NullBcsBotTokenProvider()
         return CommunityContextCollabRuntimePlugin(
-            openapi_bot,
+            bcs,
+            bot_tokens=bot_tokens,
             backend_url=task_dispatch.backend_url,
         )
 
@@ -536,11 +549,6 @@ class TaskModule(Module):
                 exc,
             )
             task_settings = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
         try:
             bot_token_provider = injector.get(BcsBotTokenProvider)
         except Exception as exc:  # noqa: BLE101 未绑定时降级为无 token provider
@@ -738,7 +746,9 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
-    def task_panel_manifest_service(self, config: SystemConfigServiceProtocol) -> TaskPanelManifestServiceProtocol:
+    def task_panel_manifest_service(
+        self, config: SystemConfigServiceProtocol
+    ) -> TaskPanelManifestServiceProtocol:
         return TaskPanelManifestService(config)
 
     @singleton
