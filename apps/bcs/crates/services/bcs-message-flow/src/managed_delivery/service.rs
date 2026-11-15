@@ -535,7 +535,16 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                     && command.message.sender_id == "system" && command.message.sender_type == bcs_domain::SenderType::System
                     && command.message.client_msg_id.as_deref().is_some_and(|key| key.starts_with("task-rejected:") || key.starts_with("task-dispatch-unknown:") || key.starts_with("task-unknown:") || key.starts_with("task-timeout-unknown:"))
                     && target.semantic_projection_json.get("task_control_notice").and_then(|v| v.as_bool()) == Some(true);
-                if (!enabled && !drain && !task_notice)
+                // Forced caller admission (spec §7.5.1, 2026-11-11 prod
+                // incident): a caller_required projection is injected ONLY
+                // by the trusted caller_admission producer for a
+                // caller-enabled target, and such a target has no inline
+                // transport alternative — CallerConfigurationDeliveryGate
+                // refuses it closed there. The policy gate must not refuse
+                // what the gate itself made the only route; every other
+                // check (drain, policy_version drift) still applies.
+                let caller_required = target.semantic_projection_json.get("caller_required").and_then(|v| v.as_bool()) == Some(true);
+                if (!enabled && !drain && !task_notice && !caller_required)
                     || (drain && target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()) != Some(policy.version))
                     || target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()).is_some_and(|version| version != policy.version) {
                     return Err(ManagedDeliveryError::Conflict);
